@@ -3,7 +3,7 @@
 // Redesigned: clean section headers, consistent row styling, proper form controls.
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   patchKeeperConfig,
@@ -322,6 +322,9 @@ export type RuntimeDraft = {
   proactive_enabled: boolean
   // Keeper-level autonomous wake prompt; '' = inherit fleet (sent as null)
   autonomous_wake_prompt: string
+  skill_selection:
+    | { mode: 'all'; prior_names_text: string }
+    | { mode: 'names'; names_text: string }
 }
 
 export type KeeperConfigBooleanProjection =
@@ -417,8 +420,25 @@ export function parseAutonomousWakePromptDraft(raw: string): AutonomousWakePromp
   return { ok: true, value: trimmed }
 }
 
-const runtimeDraft = signal<RuntimeDraft | null>(null)
+type KeeperRuntimeDraftState = {
+  keeperName: string
+  draft: RuntimeDraft
+}
+
+type KeeperConfigPanelOwner = {
+  keeperName: string
+  epoch: symbol
+}
+
+type KeeperConfigSaveRequest = {
+  owner: KeeperConfigPanelOwner
+  request: symbol
+}
+
+const runtimeDraft = signal<KeeperRuntimeDraftState | null>(null)
+const activeKeeperConfigOwner = signal<KeeperConfigPanelOwner | null>(null)
 const runtimeSaving = signal(false)
+const runtimeSaveRequest = signal<KeeperConfigSaveRequest | null>(null)
 const runtimeDirectiveSaving = signal<'pause' | 'resume' | 'wakeup' | null>(null)
 function resetKeeperConfigPanelDrafts(): void {
   editMode.value = false
@@ -427,15 +447,21 @@ function resetKeeperConfigPanelDrafts(): void {
   lastSavedAt.value = null
   promptPreviewTab.value = 'blocks'
   runtimeDraft.value = null
+  activeKeeperConfigOwner.value = null
   runtimeSaving.value = false
+  runtimeSaveRequest.value = null
   runtimeDirectiveSaving.value = null
   hookFilterQuery.value = ''
   globalArchExpanded.value = false
   kcfTab.value = 'identity'
 }
 
-function syncRuntimeDraftFromConfig(_name: string, updated: KeeperConfig): void {
-  runtimeDraft.value = initRuntimeDraftFromConfig(updated)
+function syncRuntimeDraftFromConfig(name: string, updated: KeeperConfig): void {
+  if (activeKeeperConfigOwner.value?.keeperName !== name) return
+  runtimeDraft.value = {
+    keeperName: name,
+    draft: initRuntimeDraftFromConfig(updated),
+  }
 }
 
 let panelSubscriptionRefs = 0
@@ -479,6 +505,9 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: proactiveConfigValue(c),
     autonomous_wake_prompt: c.autonomous_wake_prompt ?? '',
+    skill_selection: c.skills.names === null
+      ? { mode: 'all', prior_names_text: '' }
+      : { mode: 'names', names_text: c.skills.names.join('\n') },
   }
 }
 
@@ -734,6 +763,16 @@ export function keeperConfigControlInventory(
             'prompt.unified_user_message_preview',
           ],
         ),
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-policy-skills',
+          'Keeper Skills',
+          `${configApiSource} skills.names`,
+          'PATCH /api/v1/keepers/:name/config skills',
+          'skills.names',
+          ['skills.names'],
+        ),
       ]
     case 'access':
       return [
@@ -908,6 +947,14 @@ export function buildRuntimePayloadResult(
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
   if (draft.proactive_enabled !== proactiveConfigValue(orig)) payload.proactive_enabled = draft.proactive_enabled
+  if (draft.skill_selection.mode === 'all') {
+    if (orig.skills.names !== null) payload.skills = {}
+  } else {
+    const names = listTextToStrings(draft.skill_selection.names_text)
+    if (orig.skills.names === null || !sameStringArray(names, orig.skills.names)) {
+      payload.skills = { names }
+    }
+  }
   return { ok: true, payload }
 }
 
@@ -918,16 +965,53 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
 }
 
 function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number | string) {
-  const d = runtimeDraft.value
-  if (!d) return
-  const next = { ...d, [field]: value } as RuntimeDraft
+  const state = runtimeDraft.value
+  if (!state) return
+  const next = { ...state.draft, [field]: value } as RuntimeDraft
   if (field === 'sandbox_profile' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
     next.network_mode = 'inherit'
   }
   if (field === 'network_mode' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
     next.network_mode = 'inherit'
   }
-  runtimeDraft.value = next
+  runtimeDraft.value = { ...state, draft: next }
+}
+
+function updateSkillSelectionMode(mode: 'all' | 'names') {
+  const state = runtimeDraft.value
+  if (!state) return
+  const selection = state.draft.skill_selection
+  runtimeDraft.value = {
+    ...state,
+    draft: {
+      ...state.draft,
+      skill_selection: mode === 'all'
+        ? {
+            mode: 'all',
+            prior_names_text: selection.mode === 'names'
+              ? selection.names_text
+              : selection.prior_names_text,
+          }
+        : {
+            mode: 'names',
+            names_text: selection.mode === 'names'
+              ? selection.names_text
+              : selection.prior_names_text,
+          },
+    },
+  }
+}
+
+function updateSkillNames(namesText: string) {
+  const state = runtimeDraft.value
+  if (!state || state.draft.skill_selection.mode !== 'names') return
+  runtimeDraft.value = {
+    ...state,
+    draft: {
+      ...state.draft,
+      skill_selection: { mode: 'names', names_text: namesText },
+    },
+  }
 }
 
 function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
@@ -956,6 +1040,7 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
+    skills: 'skills' in payload,
   }
 }
 
@@ -1488,6 +1573,12 @@ function runtimeTrustHealthRows(c: KeeperConfig): Array<[string, string, boolean
 
 export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string; onClose?: () => void }) {
   const state = configState.value
+  const panelEpoch = useRef(Symbol('keeper-config-panel'))
+  const panelOwner: KeeperConfigPanelOwner = {
+    keeperName,
+    epoch: panelEpoch.current,
+  }
+  activeKeeperConfigOwner.value = panelOwner
 
   useEffect(() => retainKeeperConfigPanelSubscriptions(), [])
 
@@ -1547,10 +1638,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const runtimeCanEdit = runtimeWriteUnsupportedReason === null
 
   // Initialize runtime draft if not yet set
-  if (!runtimeDraft.value && c.name === keeperName) {
-    runtimeDraft.value = initRuntimeDraftFromConfig(c)
+  if (runtimeDraft.value?.keeperName !== keeperName && c.name === keeperName) {
+    runtimeDraft.value = {
+      keeperName,
+      draft: initRuntimeDraftFromConfig(c),
+    }
   }
-  const rd = runtimeDraft.value
+  const rd = runtimeDraft.value?.keeperName === keeperName
+    ? runtimeDraft.value.draft
+    : null
   const dirtyFlags = rd ? computeRuntimeDirtyFlags(rd, c) : {}
   const runtimePayloadResult = rd ? buildRuntimePayloadResult(rd, c) : null
   const runtimeValidationError = runtimePayloadResult && !runtimePayloadResult.ok
@@ -1593,17 +1689,30 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     }
     const payload = result.payload
     if (Object.keys(payload).length === 0) return
+    const saveRequest: KeeperConfigSaveRequest = {
+      owner: panelOwner,
+      request: Symbol('keeper-config-save'),
+    }
+    runtimeSaveRequest.value = saveRequest
     runtimeSaving.value = true
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
+      const activeOwner = activeKeeperConfigOwner.value
+      if (
+        activeOwner?.keeperName !== saveRequest.owner.keeperName
+        || activeOwner.epoch !== saveRequest.owner.epoch
+      ) return
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
-      showToast('런타임 설정 저장 완료', 'success')
+      showToast('Keeper 설정 저장 완료', 'success')
     } catch (err) {
       const msg = err instanceof Error ? err.message : '저장 실패'
       showToast(msg, 'error')
     } finally {
-      runtimeSaving.value = false
+      if (runtimeSaveRequest.value?.request === saveRequest.request) {
+        runtimeSaveRequest.value = null
+        runtimeSaving.value = false
+      }
     }
   }
 
@@ -1632,7 +1741,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   }
 
   function resetRuntimeDraft() {
-    runtimeDraft.value = initRuntimeDraftFromConfig(c)
+    runtimeDraft.value = {
+      keeperName,
+      draft: initRuntimeDraftFromConfig(c),
+    }
   }
 
   function enterEditMode() {
@@ -1660,6 +1772,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     saveError.value = null
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
+      const activeOwner = activeKeeperConfigOwner.value
+      if (
+        activeOwner?.keeperName !== panelOwner.keeperName
+        || activeOwner.epoch !== panelOwner.epoch
+      ) return
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
       editMode.value = false
@@ -1916,6 +2033,50 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${ConfigRow} label="자율 턴 깨우기 프롬프트"
         value=${c.autonomous_wake_prompt ?? `(상속) ${c.prompt.unified_user_message_preview || 'Continue.'}`} />
     `}
+
+    <${KcfSec} title="Keeper Skills" desc="Keeper TOML의 [keeper.skills] 선택을 그대로 편집합니다. 이름 비교는 정확히 일치하며, 현재 카탈로그에 없는 이름도 저장 후 관측 화면에 남습니다.">
+      ${rd && runtimeCanEdit ? html`
+        <div class="kcf-field ${dirtyFlags.skills ? 'border-l-4 border-l-[var(--color-accent-fg)] pl-3' : ''}">
+          <div class="kcf-tf-h">
+            <label>Skill 선택</label>
+            <span class="kcf-tf-hint">전체 또는 정확한 이름 목록</span>
+          </div>
+          <select
+            class="kcf-input"
+            aria-label="Skill 선택 방식"
+            value=${rd.skill_selection.mode}
+            onChange=${(event: Event) => updateSkillSelectionMode(
+              (event.target as HTMLSelectElement).value === 'all' ? 'all' : 'names',
+            )}
+          >
+            <option value="all">모든 공개 Skill</option>
+            <option value="names">이름으로 선택</option>
+          </select>
+          ${rd.skill_selection.mode === 'names' ? html`
+            <textarea
+              class="kcf-text mono mt-2"
+              aria-label="Skill 이름"
+              rows=${4}
+              value=${rd.skill_selection.names_text}
+              placeholder="ocaml-coding"
+              onInput=${(event: Event) => updateSkillNames(
+                (event.target as HTMLTextAreaElement).value,
+              )}
+            ></textarea>
+            <span class="kcf-tf-hint">한 줄에 하나 · 빈 목록은 어떤 Skill도 선택하지 않음</span>
+          ` : null}
+        </div>
+      ` : html`
+        <${ConfigRow}
+          label="Skill 선택"
+          value=${c.skills.names === null
+            ? '모든 공개 Skill'
+            : c.skills.names.length === 0
+              ? '선택하지 않음'
+              : c.skills.names.join(', ')}
+        />
+      `}
+    </${KcfSec}>
 
   `
 
@@ -2205,18 +2366,18 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           <div class="kcf-foot-spacer"></div>
           ${runtimeHasChanges ? html`
             <span class="text-xs font-semibold ${runtimeValidationError ? 'text-[var(--color-status-err)]' : 'text-accent-fg'} mr-1">
-              ${runtimeValidationError ?? '변경된 런타임 설정'}
+              ${runtimeValidationError ?? '변경된 Keeper 설정'}
             </span>
             <button type="button"
               class="kcf-btn ghost v2-monitoring-action"
-              title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
+              title="초기화: 변경한 Keeper 설정을 서버 값으로 되돌립니다"
               onClick=${resetRuntimeDraft}
             >초기화하기</button>
             <button type="button"
               class="kcf-btn save v2-monitoring-action"
               onClick=${saveRuntimeConfig}
               disabled=${runtimeSaving.value || runtimeValidationError !== null}
-            >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
+            >${runtimeSaving.value ? '저장 중...' : 'Keeper 설정 저장'}</button>
           ` : null}
           ${onClose ? html`
             <button type="button" class="kcf-btn ghost v2-monitoring-action" onClick=${onClose}>닫기</button>

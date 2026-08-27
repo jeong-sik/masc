@@ -677,10 +677,37 @@ def capture_dashboard_page(
         row_ids.count(skill_tool_use_id) == 1,
         "Dashboard does not contain exactly one exact Skill invocation row",
     )
-    page.screenshot(path=str(screenshot), full_page=True)
+    matching_rows = [
+        row
+        for row in rows.element_handles()
+        if row.get_attribute("data-skill-tool-use-id") == skill_tool_use_id
+    ]
+    require(
+        len(matching_rows) == 1,
+        "Dashboard exact Skill invocation row became ambiguous",
+    )
+    exact_row = matching_rows[0]
+    exact_row.scroll_into_view_if_needed()
+    require(
+        exact_row.is_visible(),
+        "Dashboard exact Skill invocation row is not visible for capture",
+    )
+    require(
+        panel.get_attribute("data-ledger-revision") == ledger_revision,
+        "Dashboard ledger revision changed before taking the screenshot",
+    )
+    require(
+        exact_row.get_attribute("data-skill-tool-use-id") == skill_tool_use_id,
+        "Dashboard exact Skill invocation row changed before capture",
+    )
+    panel.screenshot(path=str(screenshot))
     require(
         panel.get_attribute("data-ledger-revision") == ledger_revision,
         "Dashboard ledger revision changed while taking the screenshot",
+    )
+    require(
+        exact_row.get_attribute("data-skill-tool-use-id") == skill_tool_use_id,
+        "Dashboard exact Skill invocation row changed while taking the screenshot",
     )
     after_row_ids = rows.evaluate_all(
         "rows => rows.map(row => row.getAttribute('data-skill-tool-use-id'))"

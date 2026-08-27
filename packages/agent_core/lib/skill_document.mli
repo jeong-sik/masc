@@ -34,6 +34,11 @@ type name_violation =
 
 type diagnostic =
   | Missing_frontmatter
+  | Byte_order_mark
+      (** A UTF-8 byte-order mark preceded the frontmatter. The mark is
+          stripped before parsing, so the document still loads; the deviation
+          stays observable, and content revisions elsewhere keep hashing the
+          raw bytes. *)
   | Unterminated_frontmatter
   | Malformed_yaml of string
   | Frontmatter_not_mapping

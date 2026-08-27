@@ -502,6 +502,41 @@ let test_malformed_composition_is_diagnostic_only () =
     failf "expected one projection diagnostic, got %d" (List.length diagnostics)
 ;;
 
+(* The fence info string is an exact contract; before this diagnostic a typo
+   like "TOML composition" silently produced an instruction skill and the
+   author had no way to learn why no composition tool appeared. *)
+let test_fence_info_near_miss_is_advisory () =
+  let document =
+    "---\nname: nearly\ndescription: The fence info only normalizes to the contract.\n---\n\n```TOML  composition\n[[compositions]]\n```\n"
+  in
+  let snapshot = snapshot_of_document ~directory:"nearly" document in
+  let catalog, diagnostics = Skill_catalog.of_snapshot snapshot in
+  (match Skill_catalog.skills catalog with
+   | [ skill ] ->
+     (match skill.Skill_catalog.surface with
+      | Skill_catalog.Instruction -> ()
+      | Skill_catalog.Composition _ ->
+        fail "a near-miss fence must not promote the skill")
+   | skills -> failf "expected one instruction skill, got %d" (List.length skills));
+  (match diagnostics with
+   | [ diagnostic ] ->
+     (match diagnostic.Skill_catalog.error with
+      | Skill_catalog.Composition_info_near_miss { skill; info } ->
+        check string "skill" "nearly" skill;
+        check string "raw info survives for the operator" "TOML  composition" info
+      | error ->
+        fail ("unexpected diagnostic: " ^ Skill_catalog.error_to_string error))
+   | diagnostics ->
+     failf "expected one advisory diagnostic, got %d" (List.length diagnostics));
+  let plain =
+    "---\nname: plain\ndescription: An ordinary fenced example.\n---\n\n```json\n{}\n```\n"
+  in
+  let snapshot = snapshot_of_document ~directory:"plain" plain in
+  let _catalog, diagnostics = Skill_catalog.of_snapshot snapshot in
+  check int "an unrelated info string stays undiagnosed" 0
+    (List.length diagnostics)
+;;
+
 let test_operator_projection_keeps_shadowed_exact_entries () =
   let snapshot = shadowed_snapshot () in
   let effective, effective_diagnostics = Skill_catalog.of_snapshot snapshot in
@@ -787,6 +822,10 @@ let () =
             test_invocation_policy_fields_are_rejected
         ; test_case "allowed-tools is discarded" `Quick
             test_allowed_tools_is_discarded
+        ; test_case
+            "fence info near-miss is an advisory diagnostic"
+            `Quick
+            test_fence_info_near_miss_is_advisory
         ; test_case
             "composition skill joins the model projection"
             `Quick

@@ -78,6 +78,14 @@ type error =
       { skill : string
       ; declared : string
       }
+  | Composition_info_near_miss of
+      { skill : string
+      ; info : string
+      }
+      (** Advisory: a fence info string that normalizes to the composition
+          contract (case, tabs, doubled spaces) but does not match it exactly.
+          The entry stays a projected instruction skill; the diagnostic tells
+          the author why no composition tool appeared. *)
   | Removed_invocation_policy of
       { skill : string
       ; field : string
@@ -149,7 +157,9 @@ val of_snapshot :
     composition projection failure keeps the frozen document as an instruction
     Skill and returns a diagnostic. Removed invocation-policy fields still omit
     that entry; neither failure rejects the snapshot or an unrelated Keeper
-    turn. *)
+    turn. An instruction skill whose body carries a fence info near-miss also
+    returns an advisory {!Composition_info_near_miss} diagnostic while staying
+    projected. *)
 
 val all_entries_of_snapshot :
   Skill_catalog_snapshot.t -> t * projection_diagnostic list

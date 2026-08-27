@@ -2829,6 +2829,25 @@ let check_otel_health_shape label json =
   ignore (otel |> member "consecutive_failures" |> to_int)
 ;;
 
+let rec check_unique_object_keys path = function
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    Alcotest.(check int)
+      (Printf.sprintf "%s has unique object keys" path)
+      (List.length keys)
+      (List.length (List.sort_uniq String.compare keys));
+    List.iter
+      (fun (key, value) ->
+        check_unique_object_keys (Printf.sprintf "%s.%s" path key) value)
+      fields
+  | `List values ->
+    List.iteri
+      (fun index value ->
+        check_unique_object_keys (Printf.sprintf "%s[%d]" path index) value)
+      values
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> ()
+;;
+
 let test_health_response_default_is_light_probe () =
   let request = Httpun.Request.create `GET "/health" in
   let json = Server_routes_http_runtime.make_health_response_json request in
@@ -2898,6 +2917,7 @@ let test_health_response_full_query_uses_snapshot_cache () =
           let refreshed =
             Server_routes_http_runtime.make_health_response_json request
           in
+          check_unique_object_keys "$" refreshed;
           Alcotest.(check string) "refreshed snapshot is ready" "ready"
             (refreshed |> member "full_health_snapshot" |> member "status"
            |> to_string);

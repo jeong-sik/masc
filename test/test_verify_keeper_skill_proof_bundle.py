@@ -599,6 +599,18 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             ):
                 verify(bundle)
 
+    def test_current_join_observation_tamper_is_rejected(self):
+        for field in ("current_surface", "current_projection"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                bundle = make_bundle(Path(raw))
+                bundle["join"][field]["before"]["status"] = "tampered"
+
+                with self.assertRaisesRegex(
+                    verifier.VerificationError,
+                    f"join manifest {field} differs from raw authority",
+                ):
+                    verify(bundle)
+
     def test_artifact_symlink_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))

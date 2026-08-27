@@ -527,7 +527,14 @@ def validate_join_authorities(
         )
     except ledger_join.JoinError as error:
         raise VerificationError(f"join raw authority is invalid: {error}") from error
-    for field in ("producer", "server", "ledger", "result"):
+    for field in (
+        "producer",
+        "server",
+        "ledger",
+        "current_surface",
+        "current_projection",
+        "result",
+    ):
         require(
             join.get(field) == recomputed[field],
             f"join manifest {field} differs from raw authority",

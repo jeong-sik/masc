@@ -2759,6 +2759,87 @@ let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
   | Ok _ -> Alcotest.fail "a row with no call id decoded"
   | Error _ -> ()
 
+let keeper_turns_json =
+  `Assoc
+    [ ("schema", `String "masc.keeper_turns.v1")
+    ; ( "keepers"
+      , `List
+          [ `Assoc
+              [ ("keeper_name", `String "kidsnote")
+              ; ("status", `String "ok")
+              ; ( "turn"
+                , `Assoc
+                    [ ("lane", `String "autonomous")
+                    ; ("started_at_unix", `Float 1787828193.5)
+                    ] )
+              ]
+          ; `Assoc
+              [ ("keeper_name", `String "analyst")
+              ; ("status", `String "ok")
+              ; ("turn", `Null)
+              ]
+          ; `Assoc
+              [ ("keeper_name", `String "rondo")
+              ; ("status", `String "unavailable")
+              ; ("detail", `String "owner_not_found")
+              ; ("turn", `Null)
+              ]
+          ] )
+    ]
+
+let test_decode_keeper_turns () =
+  match Tui_decode.decode_keeper_turns keeper_turns_json with
+  | Error err -> Alcotest.fail err
+  | Ok [ running; idle; unavailable ] ->
+      Alcotest.(check string) "running keeper" "kidsnote"
+        running.Tui_decode.ktr_keeper_name;
+      (match running.ktr_state with
+       | Tui_decode.Keeper_turn_running { lane; started_at_unix } ->
+           Alcotest.(check bool) "autonomous lane" true
+             (lane = Tui_decode.Turn_lane_autonomous);
+           Alcotest.(check (float 0.001)) "started at" 1787828193.5
+             started_at_unix
+       | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _ ->
+           Alcotest.fail "running keeper decoded as not running");
+      Alcotest.(check bool) "idle keeper" true
+        (idle.Tui_decode.ktr_state = Tui_decode.Keeper_turn_idle);
+      (match unavailable.Tui_decode.ktr_state with
+       | Tui_decode.Keeper_turn_unavailable detail ->
+           Alcotest.(check string) "unavailable detail" "owner_not_found" detail
+       | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_running _ ->
+           Alcotest.fail "an owner lookup failure decoded as a turn state")
+  | Ok rows -> Alcotest.failf "expected three rows, got %d" (List.length rows)
+
+let test_decode_keeper_turns_rejects_unknown_lane () =
+  let unknown_lane =
+    `Assoc
+      [ ("schema", `String "masc.keeper_turns.v1")
+      ; ( "keepers"
+        , `List
+            [ `Assoc
+                [ ("keeper_name", `String "kidsnote")
+                ; ("status", `String "ok")
+                ; ( "turn"
+                  , `Assoc
+                      [ ("lane", `String "warp")
+                      ; ("started_at_unix", `Float 1.0)
+                      ] )
+                ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_keeper_turns unknown_lane with
+  | Ok _ -> Alcotest.fail "an unknown lane decoded instead of erroring"
+  | Error _ -> ()
+
+let test_decode_keeper_turns_rejects_unknown_schema () =
+  let unknown_schema =
+    `Assoc [ ("schema", `String "masc.keeper_turns.v2"); ("keepers", `List []) ]
+  in
+  match Tui_decode.decode_keeper_turns unknown_schema with
+  | Ok _ -> Alcotest.fail "an unknown schema decoded instead of erroring"
+  | Error _ -> ()
+
 (* GET /api/v1/runtime/resolved, the picker's comprehensive shared document. *)
 let picker_default_runtime =
   `Assoc
@@ -3549,6 +3630,14 @@ let () =
           test_decode_keeper_tool_approvals_accepts_legacy_row
       ; Alcotest.test_case "rejects a thin row" `Quick
           test_decode_keeper_tool_approvals_rejects_a_thin_row
+      ] );
+    ( "decode_keeper_turns",
+      [ Alcotest.test_case "running, idle, and unavailable rows" `Quick
+          test_decode_keeper_turns
+      ; Alcotest.test_case "rejects an unknown lane" `Quick
+          test_decode_keeper_turns_rejects_unknown_lane
+      ; Alcotest.test_case "rejects an unknown schema" `Quick
+          test_decode_keeper_turns_rejects_unknown_schema
       ] );
     ( "decode_tools",
       [

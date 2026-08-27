@@ -523,8 +523,28 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     | Masc_tui_types.Workspace_identity_unread
     | Masc_tui_types.Workspace_identity_match -> []
   in
-  Masc_tui_footer.line ~status:(status @ identity @ conflict) ~dim:Ansi.dim
-    ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
+  (* Keepers mid-turn, the one this pane last messaged first: that is the
+     answer the operator who walked away is waiting on. *)
+  let answering =
+    let running =
+      List.filter_map
+        (fun (row : Tui_decode.keeper_turn_row) ->
+          match row.ktr_state with
+          | Tui_decode.Keeper_turn_running _ -> Some row.ktr_keeper_name
+          | Tui_decode.Keeper_turn_idle
+          | Tui_decode.Keeper_turn_unavailable _ -> None)
+        state.keeper_turns
+    in
+    let running =
+      match state.msg_target_keeper_name with
+      | Some target when List.mem target running ->
+          target :: List.filter (fun name -> name <> target) running
+      | Some _ | None -> running
+    in
+    match running with [] -> [] | _ -> [ Masc_tui_footer.Keeper_answering running ]
+  in
+  Masc_tui_footer.line ~status:(status @ identity @ conflict @ answering)
+    ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
   let composer = Composer_projection.of_state state in
@@ -3247,9 +3267,21 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
    name cannot push the columns to its right out of the frame and the style
    bytes never count toward the width. *)
 let keeper_row_content ~(columns : Render_schedule.keeper_columns)
-    ~yolo ~paused ~health ~next_action ~keeper ~runtime =
+    ~yolo ~paused ~health ~turn ~next_action ~keeper ~runtime =
   let status_color = keeper_action_color next_action in
   let glyph = keeper_state_glyph ~paused ~health in
+  (* A running turn takes the status word: "answering" is the fact the
+     operator scans this table for, and health returns the cell the moment
+     the turn ends. Idle and unavailable rows keep the health word —
+     unavailable is the owner lookup failing, which the health column
+     already describes better than a blank would. *)
+  let status_word, status_color =
+    match (turn : Tui_decode.keeper_turn_state option) with
+    | Some (Tui_decode.Keeper_turn_running _) -> ("answering", Ansi.cyan)
+    | Some Tui_decode.Keeper_turn_idle
+    | Some (Tui_decode.Keeper_turn_unavailable _)
+    | None -> (keeper_health_word health, status_color)
+  in
   (* Selection is the full-row band the caller draws (box_line_selected over
      a strip_sgr'd copy of this row), so the row itself carries no marker.
      The caret's three gutter cells stay as spaces so columns do not shift
@@ -3270,8 +3302,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
   String.concat ""
     [ "   "
     ; status_color ^ glyph ^ " "
-      ^ fit_width (keeper_health_word health)
-          (Render_schedule.keeper_status_width - 2)
+      ^ fit_width status_word (Render_schedule.keeper_status_width - 2)
       ^ Ansi.reset
     ; " "
     ; (* A keeper whose gate runs every call unasked wears its name in
@@ -3559,11 +3590,20 @@ let render_keeper_list (state : state) =
             | Keeper_control.Present row -> Some row
             | Keeper_control.Absent | Keeper_control.Unobserved -> None
           in
+          let turn =
+            List.find_map
+              (fun (row : Tui_decode.keeper_turn_row) ->
+                if String.equal row.ktr_keeper_name keeper.k_name then
+                  Some row.ktr_state
+                else None)
+              state.keeper_turns
+          in
           let row =
             keeper_row_content ~columns
               ~yolo:(List.mem keeper.k_name state.keeper_yolo_names)
               ~paused:reading.Keeper_control.paused
               ~health:(Keeper_control.health reading)
+              ~turn
               ~next_action:(Keeper_control.next_action reading)
               ~keeper ~runtime
           in

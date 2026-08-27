@@ -275,6 +275,44 @@ let test_a_workspace_mismatch_outlives_the_port () =
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ())
 
+let test_answering_names_the_first_keeper () =
+  check_string "one keeper answering reads by name"
+    "<dim>  q:quit  | \xe2\x97\x8c answering kidsnote | Port: 8935<reset>\n"
+    (Masc_tui_footer.line
+       ~status:[ Masc_tui_footer.Keeper_answering [ "kidsnote" ] ]
+       ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
+       ~hints:"q:quit" ());
+  check_string "more keepers ride as a count behind the first"
+    "<dim>  q:quit  | \xe2\x97\x8c answering kidsnote +2 | Port: 8935<reset>\n"
+    (Masc_tui_footer.line
+       ~status:
+         [ Masc_tui_footer.Keeper_answering [ "kidsnote"; "analyst"; "rondo" ] ]
+       ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
+       ~hints:"q:quit" ());
+  check_string "nobody answering says nothing"
+    "<dim>  q:quit  | Port: 8935<reset>\n"
+    (Masc_tui_footer.line
+       ~status:[ Masc_tui_footer.Keeper_answering [] ]
+       ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
+       ~hints:"q:quit" ())
+
+let test_answering_outlives_the_build_fact () =
+  (* At a width with no room for everything, the live-activity fact stays on
+     the row after refresh and build have been dropped. *)
+  let narrow =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Refresh_interval 2.0
+        ; Masc_tui_footer.Server_build
+            { version = "9.9.9"; commit = "abcdef0123456" }
+        ; Masc_tui_footer.Keeper_answering [ "kidsnote" ]
+        ]
+      ~dim:"" ~reset:"" ~max_cells:46 ~port:8935 ~hints:"q:quit" ()
+  in
+  check_at_most_cells "narrow footer fits" 46 narrow;
+  check_bool "the build fact went first" false (contains ~needle:"9.9.9" narrow);
+  check_bool "answering stayed" true (contains ~needle:"answering" narrow)
+
 let tests =
   [ ( "tui-footer-status-items"
     , [ Alcotest.test_case "port closes every footer" `Quick
@@ -303,6 +341,10 @@ let tests =
           test_ansi_korean_hint_truncates_by_cells
       ; Alcotest.test_case "a workspace mismatch outlives the port" `Quick
           test_a_workspace_mismatch_outlives_the_port
+      ; Alcotest.test_case "answering names the first keeper" `Quick
+          test_answering_names_the_first_keeper
+      ; Alcotest.test_case "answering outlives the build fact" `Quick
+          test_answering_outlives_the_build_fact
       ] )
   ]
 

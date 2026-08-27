@@ -134,6 +134,16 @@ val handle_keeper_tool_approval :
     success, so an operator is not told a call was approved when nothing was
     listening for it. *)
 
+val handle_keeper_turns_list :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [GET /api/v1/keepers/turns].
+
+    One row per registered keeper naming whether a turn is running right now
+    ([turn] is [null] or [{lane; started_at_unix}]). Live Owner projection,
+    not a store read: the durable keeper meta cannot answer this, which is
+    why the TUI keeper list polls this route for its "answering now" badge.
+    A failed keeper-name census is a 500, never an empty fleet. *)
+
 val handle_keeper_tool_approvals_list :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [GET /api/v1/keepers/tool-approvals].

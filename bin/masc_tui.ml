@@ -1315,6 +1315,9 @@ type async_msg =
       Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_tool_approvals_loaded of
       (Tui_decode.keeper_tool_approval list, string) result
+  | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
+      (** Which keepers are mid-turn right now, for the "answering now"
+          badge drawn from every surface. *)
   | Gate_snapshot_loaded of (Tui_decode.gate_snapshot, string) result
       (** The durable Gate beside the held calls: pending approvals that
           survive nobody watching, and both lane modes. *)
@@ -1614,6 +1617,26 @@ let launch_keeper_tool_approvals_load state ~mailbox =
   | None ->
       enqueue_async mailbox
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
+
+let launch_keeper_turns_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_keeper_turns ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_turns_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_turns_loaded (Error "Eio switch is unavailable"))
 
 let launch_gate_snapshot_load state ~mailbox =
   let host = server_peer_host in
@@ -4984,6 +5007,10 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        badge is how an operator finds out. The server caches the snapshot. *)
     launch_keeper_tool_approvals_load state ~mailbox;
     launch_gate_snapshot_load state ~mailbox;
+    (* The "answering now" badge rides every tick for the same reason as the
+       approvals above: it is drawn from every surface, and its whole point
+       is the operator who walked away from the chat pane. *)
+    launch_keeper_turns_load state ~mailbox;
     (* The schedule list rides for the same reason, now that the agenda strip
        names the next wake from every surface. Fetched only on the Schedules
        surface it was empty everywhere else, and a strip that says nothing is
@@ -6772,6 +6799,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Keeper_turns_loaded result ->
+      (match result with
+       | Ok rows ->
+           state.keeper_turns <- rows;
+           state.keeper_turns_error <- None
+       | Error detail ->
+           (* Keep the last known rows: a fetch that failed says nothing
+              about the turns themselves, and blanking every badge on one
+              lost poll would flicker. The error shows on the keeper list. *)
+           state.keeper_turns_error <- Some detail)
   | Gate_snapshot_loaded result ->
       (match result with
        | Ok snapshot ->

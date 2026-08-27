@@ -3560,6 +3560,84 @@ let decode_keeper_tool_approvals json =
   in
   loop [] items
 
+type keeper_turn_lane =
+  | Turn_lane_autonomous
+  | Turn_lane_chat_operation
+  | Turn_lane_maintenance
+
+let keeper_turn_lane_of_string = function
+  | "autonomous" -> Some Turn_lane_autonomous
+  | "chat_operation" -> Some Turn_lane_chat_operation
+  | "maintenance" -> Some Turn_lane_maintenance
+  | _ -> None
+
+type keeper_turn_state =
+  | Keeper_turn_idle
+  | Keeper_turn_running of { lane : keeper_turn_lane; started_at_unix : float }
+  | Keeper_turn_unavailable of string
+
+type keeper_turn_row = {
+  ktr_keeper_name : string;
+  ktr_state : keeper_turn_state;
+}
+
+let decode_keeper_turn_row json =
+  let* ktr_keeper_name = required_string_field json "keeper_name" in
+  let* status = required_string_field json "status" in
+  match status with
+  | "unavailable" ->
+      let* detail = required_string_field json "detail" in
+      Ok { ktr_keeper_name; ktr_state = Keeper_turn_unavailable detail }
+  | "ok" -> (
+      match Json_util.assoc_member_opt "turn" json with
+      | None -> Error "keeper turn row is missing required field 'turn'"
+      | Some `Null -> Ok { ktr_keeper_name; ktr_state = Keeper_turn_idle }
+      | Some (`Assoc _ as turn_json) ->
+          let* lane_raw = required_string_field turn_json "lane" in
+          let* lane =
+            match keeper_turn_lane_of_string lane_raw with
+            | Some lane -> Ok lane
+            | None ->
+                Error (Printf.sprintf "unknown keeper turn lane %S" lane_raw)
+          in
+          let* started_at_unix =
+            match Json_util.assoc_member_opt "started_at_unix" turn_json with
+            | Some (`Float value) -> Ok value
+            | Some (`Int value) -> Ok (Float.of_int value)
+            | Some other ->
+                Error
+                  (Printf.sprintf
+                     "turn field 'started_at_unix' must be a number (received \
+                      %s)"
+                     (Json_util.kind_name other))
+            | None -> Error "turn is missing required field 'started_at_unix'"
+          in
+          Ok
+            {
+              ktr_keeper_name;
+              ktr_state = Keeper_turn_running { lane; started_at_unix };
+            }
+      | Some other ->
+          Error
+            (Printf.sprintf "field 'turn' must be an object or null (received %s)"
+               (Json_util.kind_name other)))
+  | value -> Error (Printf.sprintf "unknown keeper turn row status %S" value)
+
+let decode_keeper_turns json =
+  let* schema = required_string_field json "schema" in
+  let* () =
+    if String.equal schema "masc.keeper_turns.v1" then Ok ()
+    else Error (Printf.sprintf "unknown keeper turns schema %S" schema)
+  in
+  let* items = required_list_field json "keepers" in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+        let* decoded = decode_keeper_turn_row item in
+        loop (decoded :: acc) rest
+  in
+  loop [] items
+
 type runtime_assignment = {
   ra_keeper : string;
   ra_source : string;  (* "default" | "explicit" *)

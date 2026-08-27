@@ -187,6 +187,22 @@ function runField(run: Record<string, unknown>, name: string): string {
   return ''
 }
 
+function runDuration(run: Record<string, unknown>): string {
+  const value = run.duration_ms
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${Math.round(value)}ms`
+    : '?ms'
+}
+
+function runOutput(value: unknown): string {
+  if (typeof value !== 'string') return JSON.stringify(value, null, 2)
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2)
+  } catch {
+    return value
+  }
+}
+
 function SkillRunView({ result }: { result: SkillRunResponse | null }) {
   if (!result) return html`<div class="ss-muted">Load the latest exact-revision result.</div>`
   if (result.status === 'never_observed') {
@@ -197,11 +213,11 @@ function SkillRunView({ result }: { result: SkillRunResponse | null }) {
     <div data-testid="skill-latest-run">
       <div class="font-semibold">
         ${runField(result.run, 'success') === 'true' ? '✓ completed' : '✗ failed'}
-        · ${runField(result.run, 'duration_ms')}ms
+        · ${runDuration(result.run)}
         · ${runField(result.run, 'keeper')}
       </div>
       <div class="ss-muted mono">${runField(result.run, 'composition_run_id')} · ${result.nodes.length} node rows</div>
-      <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-raised)] p-2 text-3xs">${typeof output === 'string' ? output : JSON.stringify(output, null, 2)}</pre>
+      <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-raised)] p-2 text-3xs">${runOutput(output)}</pre>
     </div>
   `
 }

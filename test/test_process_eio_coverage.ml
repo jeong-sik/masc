@@ -161,6 +161,39 @@ let test_run_argv_with_status_fallback_observes_timeout () =
         [ ("sleep", 0.02, "command") ]
         (List.rev !seen))
 
+(* Sub-second budgets must render with their decimals. The old %.0fs format
+   printed "Timeout after 0s" for the 0.4s budgets a drained git-inspection
+   deadline had left (2026-08-27 audit), which reads as a zero-timeout
+   spawn instead of an exhausted one. The timeout WARN comes from the
+   Eio-native paths, so this test initializes the Eio runtime first. *)
+let test_timeout_log_keeps_subsecond_precision () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let before =
+    match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> 0
+  in
+  let status, _output =
+    Process_eio.run_argv_with_status ~timeout_sec:0.02 [ "/bin/sleep"; "5" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+  check int "eio timeout exit code" 124 code;
+  let timeout_rows =
+    Log.Ring.recent ~since_seq:before ()
+    |> List.filter (fun (row : Log.Ring.entry) ->
+           contains row.message "[Process_eio] Timeout after ")
+  in
+  check bool "timeout warning was logged" true (timeout_rows <> []);
+  check bool "sub-second budget renders with decimals"
+    true
+    (List.exists
+       (fun (row : Log.Ring.entry) -> contains row.message "Timeout after 0.02s")
+       timeout_rows)
+
 let test_init_exposes_complete_runtime () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -621,6 +654,8 @@ let () =
             test_run_argv_with_status_fallback_enforces_timeout;
           test_case "argv-with-status-fallback-observes-timeout" `Quick
             test_run_argv_with_status_fallback_observes_timeout;
+          test_case "timeout-log-keeps-subsecond-precision" `Quick
+            test_timeout_log_keeps_subsecond_precision;
           test_case "init-exposes-complete-runtime" `Quick
             test_init_exposes_complete_runtime;
         ] );

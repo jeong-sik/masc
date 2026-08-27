@@ -297,7 +297,10 @@ let store_error_to_string = function
   | Lock_failed detail -> "lock failed: " ^ detail
   | Read_failed error ->
     "read failed: " ^ Fs_compat.owned_regular_file_read_error_to_string error
-  | Decode_failed _ -> "decode failed"
+  (* Keep the category in the human string too: the ledger write path is
+     read-modify-write, so one undecodable row fails every later write for
+     the session — the code is what identifies the poison row's shape. *)
+  | Decode_failed error -> "decode failed: " ^ decode_error_code error
   | Invocation_id_collision tool_use_id ->
     "Skill invocation id collision: " ^ tool_use_id
   | Action_identity_collision _ -> "Skill action identity collision"

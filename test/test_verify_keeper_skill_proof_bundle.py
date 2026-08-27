@@ -1,10 +1,14 @@
+import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+import zlib
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +19,7 @@ SCRIPT_PATH = (
     / "workload"
     / "verify_keeper_skill_proof_bundle.py"
 )
+sys.path.insert(0, str(SCRIPT_PATH.parent))
 
 
 def load_module():
@@ -35,14 +40,20 @@ TREE = "b" * 40
 WORKSPACE = "c" * 64
 SNAPSHOT = "d" * 64
 CONTENT = "e" * 64
-LEDGER_REVISION = "f" * 64
 INSTANCE = "018f1d5e-7b3c-7abc-8def-0123456789ab"
 TURN_REF = "trace-one#7"
 SKILL_ID = "call-skill-1"
+MESSAGE = "Natural proof request.\n"
 
 
 def write_json(path: Path, value):
     payload = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
+    path.write_bytes(payload)
+    return payload
+
+
+def write_json_preserving_order(path: Path, value):
+    payload = (json.dumps(value, indent=2) + "\n").encode()
     path.write_bytes(payload)
     return payload
 
@@ -61,6 +72,215 @@ def server():
     }
 
 
+def health():
+    return {
+        "health_detail": "full",
+        "build": {
+            "binary_commit": HEAD,
+            "binary_commit_source": "embedded",
+            "runtime_instance_id": INSTANCE,
+            "started_at": server()["started_at"],
+        },
+        "paths": {
+            "effective_base_path": "/workspace",
+            "effective_masc_root": "/workspace/.masc",
+        },
+    }
+
+
+def source():
+    return {"head": HEAD, "tree": TREE, "tracked_changes": []}
+
+
+def activation():
+    return {
+        "identity": {
+            "source_id": "workspace",
+            "package_id": "review",
+            "name": "review",
+        },
+        "content_revision": CONTENT,
+        "snapshot_revision": SNAPSHOT,
+        "turn_ref": TURN_REF,
+        "runtime_id": "runtime-one",
+        "skill_tool_use_id": SKILL_ID,
+        "agent_core_turn": 7,
+        "invocation": {
+            "kind": "instruction",
+            "origin": {"kind": "session_instruction"},
+            "served_content": {
+                "kind": "skill_body",
+                "bytes": 12,
+                "sha256": CONTENT,
+            },
+        },
+        "delivery": {
+            "boundary": {"kind": "model_response", "response_id": "response-one"},
+            "runtime_id": "runtime-one",
+            "delivered_at": "2026-08-27T00:00:02Z",
+            "content_bytes": 12,
+            "content_sha256": CONTENT,
+        },
+        "actions": [
+            {
+                "identity": {"kind": "call_id", "call_id": "call-action-1"},
+                "tool_name": "keeper_status",
+                "runtime_id": "runtime-one",
+                "agent_core_turn": 7,
+                "observed_at": "2026-08-27T00:00:03Z",
+            }
+        ],
+        "activated_at": "2026-08-27T00:00:01Z",
+    }
+
+
+def ledger():
+    value = {
+        "schema": "masc.skill-activations/v5",
+        "workspace_key": WORKSPACE,
+        "session_id": "trace-one",
+        "revision": "0" * 64,
+        "activations": [activation()],
+        "transition_rejections": [],
+    }
+    value["revision"] = verifier.proof_collector.ledger_revision(value)
+    return value
+
+
+def dashboard(value):
+    activations = value["activations"]
+    rejections = value["transition_rejections"]
+    return {
+        "effective_keeper_surface": {
+            "status": "available",
+            "keeper_name": "keeper-one",
+        },
+        "skill_activations": {
+            "status": "available",
+            "keeper_name": "keeper-one",
+            "ledger": value,
+            "summary": verifier.proof_collector.summarize(activations, rejections),
+            "scoped_summaries": verifier.proof_collector.scoped_summaries(
+                activations, rejections
+            ),
+        },
+    }
+
+
+def historical(value):
+    activations = value["activations"]
+    rejections = value["transition_rejections"]
+    return {
+        "schema": "masc.dashboard.skill-activations/v1",
+        "status": "available",
+        "trace_id": "trace-one",
+        "ledger": value,
+        "summary": verifier.proof_collector.summarize(activations, rejections),
+        "scoped_summaries": verifier.proof_collector.scoped_summaries(
+            activations, rejections
+        ),
+    }
+
+
+def receipt():
+    operation_digest = verifier.ledger_join.natural_producer.canonical_json_digest(
+        verifier.ledger_join.natural_producer.direct_message_input(MESSAGE)
+    )
+    return {
+        "schema": "masc.natural-keeper-skill-proof-producer/v1",
+        "captured_at": "2026-08-27T00:00:00Z",
+        "source": {"head": HEAD, "tree": TREE, "tracked_checkout_clean": True},
+        "keeper": "keeper-one",
+        "submitted_by": "proof-operator",
+        "keeper_admission": "exact_existing",
+        "keeper_declarative_runtime_id": "runtime-one",
+        "actual_invocation_runtime_id": None,
+        "operation": {
+            "operation_id": "operation-one",
+            "acceptance": {
+                "operation_id": "operation-one",
+                "state": "queued",
+                "queued_count": 1,
+                "existing": False,
+            },
+            "state": "Succeeded",
+            "turn_ref": TURN_REF,
+            "status_observations": 1,
+            "typed_terminal_record": {
+                "schema": "masc.keeper_chat_operation.v1",
+                "operation_id": "operation-one",
+                "sequence": "7",
+                "created_at": 1.0,
+                "execution_digest": operation_digest,
+                "source": {
+                    "schema": "masc.keeper_chat_operation.source.v1",
+                    "submitted_by": "proof-operator",
+                    "thread_id": "keeper:keeper-one",
+                    "continuation_channel": {
+                        "kind": "dashboard",
+                        "thread_id": "keeper:keeper-one",
+                    },
+                    "surface": {"kind": "agent"},
+                    "channel": "agent",
+                    "channel_user_id": "",
+                    "channel_user_name": "",
+                    "channel_workspace_id": "",
+                    "conversation_id": None,
+                    "external_message_id": None,
+                    "workspace_id": None,
+                    "extra_mentions": [],
+                    "user_row_origin": "needs_append",
+                },
+                "input": None,
+                "state": "Succeeded",
+                "completed_at": 2.0,
+                "outcome_ref": TURN_REF,
+            },
+            "expected_operation_input_digest": operation_digest,
+        },
+        "message": {
+            "bytes": len(MESSAGE.encode()),
+            "sha256": verifier.digest(MESSAGE.encode()),
+        },
+        "skill_tool_use_id": None,
+        "ledger_lookup": {
+            "keeper": "keeper-one",
+            "turn_ref": TURN_REF,
+            "skill_tool_use_id": None,
+        },
+        "unresolved_identity": {
+            "kind": "operation_surface_does_not_expose_skill_or_runtime_identity",
+            "operation_schema": "masc.keeper_chat_operation.v1",
+        },
+        "producer_calls": {"masc_keeper_msg": 1},
+        "server": server(),
+    }
+
+
+def png_chunk(kind, payload):
+    body = kind + payload
+    return (
+        struct.pack(">I", len(payload))
+        + body
+        + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+    )
+
+
+def png(width=2, height=3, decoded=None):
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    pixels = (
+        b"".join(b"\x00" + (b"\x00\x00\x00" * width) for _ in range(height))
+        if decoded is None
+        else decoded
+    )
+    return (
+        verifier.PNG_SIGNATURE
+        + png_chunk(b"IHDR", ihdr)
+        + png_chunk(b"IDAT", zlib.compress(pixels))
+        + png_chunk(b"IEND", b"")
+    )
+
+
 def make_bundle(root: Path):
     join_root = root / "join"
     proof_root = root / "proof"
@@ -69,85 +289,45 @@ def make_bundle(root: Path):
     proof_root.mkdir()
     tui_root.mkdir()
 
-    action = {
-        "identity": {"kind": "call_id", "call_id": "call-action-1"},
-        "tool_name": "keeper_status",
-        "runtime_id": "runtime-one",
-        "agent_core_turn": 7,
-        "observed_at": "2026-08-27T00:00:03Z",
+    durable = ledger()
+    projected = dashboard(durable)
+    producer_receipt = receipt()
+    receipt_raw = write_json(join_root / "producer-receipt.json", producer_receipt)
+    raw_values = {
+        "producer-receipt.json": producer_receipt,
+        "health-before.json": health(),
+        "health-after.json": health(),
+        "dashboard-tools-before.json": projected,
+        "dashboard-tools-after.json": copy.deepcopy(projected),
+        "historical-skill-activations-before.json": historical(durable),
+        "historical-skill-activations-after.json": historical(copy.deepcopy(durable)),
+        "durable-skill-activations-before.json": durable,
+        "durable-skill-activations-after.json": copy.deepcopy(durable),
+        "source-before.json": source(),
+        "source-after.json": source(),
     }
-    delivery = {
-        "boundary": {"kind": "model_response", "agent_core_turn": 7},
-        "runtime_id": "runtime-one",
-        "delivered_at": "2026-08-27T00:00:02Z",
-        "content_bytes": 12,
-        "content_sha256": CONTENT,
-    }
-    reference_nested = {
-        "identity": {
-            "source_id": "workspace",
-            "package_id": "review",
-            "name": "review",
-        },
-        "content_revision": CONTENT,
-    }
-    reference_flat = {
-        "source_id": "workspace",
-        "package_id": "review",
-        "name": "review",
-        "content_revision": CONTENT,
-    }
-    receipt = {
-        "schema": "masc.natural-keeper-skill-proof-producer/v1",
-        "source": {"head": HEAD, "tree": TREE, "tracked_checkout_clean": True},
-        "keeper": "keeper-one",
-        "producer_calls": {"masc_keeper_msg": 1},
-        "operation": {"state": "Succeeded", "turn_ref": TURN_REF},
-        "server": server(),
-    }
-    receipt_raw = write_json(join_root / "producer-receipt.json", receipt)
     join_payloads = {"producer-receipt.json": receipt_raw}
-    for name in sorted(verifier.JOIN_ARTIFACTS - {"producer-receipt.json"}):
-        payload = (name + "\n").encode()
-        (join_root / name).write_bytes(payload)
-        join_payloads[name] = payload
+    for name, value in raw_values.items():
+        if name != "producer-receipt.json":
+            join_payloads[name] = write_json_preserving_order(join_root / name, value)
+    recomputed_join = verifier.ledger_join.validate_join(
+        receipt=producer_receipt,
+        receipt_raw=receipt_raw,
+        expected_receipt_sha256=verifier.digest(receipt_raw),
+        source_before=raw_values["source-before.json"],
+        source_after=raw_values["source-after.json"],
+        health_before=raw_values["health-before.json"],
+        health_after=raw_values["health-after.json"],
+        dashboard_before=raw_values["dashboard-tools-before.json"],
+        dashboard_after=raw_values["dashboard-tools-after.json"],
+        historical_before=raw_values["historical-skill-activations-before.json"],
+        historical_after=raw_values["historical-skill-activations-after.json"],
+        durable_ledger=raw_values["durable-skill-activations-before.json"],
+        durable_ledger_after=raw_values["durable-skill-activations-after.json"],
+    )
     join = {
         "schema": verifier.JOIN_SCHEMA,
-        "producer": {
-            "source": {"head": HEAD, "tree": TREE},
-            "server": server(),
-            "keeper": "keeper-one",
-            "submitted_by": "proof-operator",
-            "operation_id": "operation-one",
-            "turn_ref": TURN_REF,
-            "trace_id": "trace-one",
-        },
-        "server": server(),
-        "ledger": {
-            "schema": "masc.skill-activations/v5",
-            "workspace_key": WORKSPACE,
-            "session_id": "trace-one",
-            "revision": LEDGER_REVISION,
-            "dashboard_equals_durable": True,
-            "dashboard_projection_kind": "exact_session",
-        },
-        "result": {
-            "kind": "exact_skill_invocation",
-            "match_count": 1,
-            "selected_skill_tool_use_id": SKILL_ID,
-            "matches": [
-                {
-                    "skill_tool_use_id": SKILL_ID,
-                    "turn_ref": TURN_REF,
-                    "snapshot_revision": SNAPSHOT,
-                    "reference": reference_nested,
-                    "invocation_runtime_id": "runtime-one",
-                    "invocation": {"kind": "instruction"},
-                    "delivery": delivery,
-                    "actions": [action],
-                }
-            ],
-        },
+        **recomputed_join,
         "inputs": {"producer_receipt_sha256": verifier.digest(receipt_raw)},
         "artifacts": {
             name: file_identity(payload) for name, payload in join_payloads.items()
@@ -168,38 +348,27 @@ def make_bundle(root: Path):
         },
     }
     build_raw = write_json(proof_root / "tui-build-evidence.json", build)
+    proof_raw_values = {
+        "health.json": health(),
+        "dashboard-tools.json": copy.deepcopy(projected),
+        "skill-activations.json": copy.deepcopy(durable),
+    }
     proof_payloads = {
-        "health.json": b'{"health_detail":"full"}\n',
-        "dashboard-tools.json": b'{"skill_activations":{}}\n',
-        "skill-activations.json": b'{"schema":"masc.skill-activations/v5"}\n',
-        "tui-build-evidence.json": build_raw,
-        "masc_tui.exe": executable,
+        name: write_json_preserving_order(proof_root / name, value)
+        for name, value in proof_raw_values.items()
     }
-    for name, payload in proof_payloads.items():
-        if name not in ("tui-build-evidence.json", "masc_tui.exe"):
-            (proof_root / name).write_bytes(payload)
-    dashboard_png = b"dashboard-png"
+    proof_payloads["tui-build-evidence.json"] = build_raw
+    proof_payloads["masc_tui.exe"] = executable
+    dashboard_png = png(1440, 1000)
     (proof_root / "dashboard-skill-use.png").write_bytes(dashboard_png)
-    proof_identity = {
-        "keeper": "keeper-one",
-        "skill_tool_use_id": SKILL_ID,
-        "workspace_key": WORKSPACE,
-        "session_id": "trace-one",
-        "ledger_revision": LEDGER_REVISION,
-        "reference": reference_flat,
-        "snapshot_revision": SNAPSHOT,
-        "turn_ref": TURN_REF,
-        "invocation_runtime_id": "runtime-one",
-        "delivery": delivery,
-        "actions": [action],
-        "scoped_summary": {
-            "summary": {
-                "instruction_provider_deliveries": 1,
-                "instruction_official_client_handoffs": 0,
-                "invalid_transitions": 0,
-            }
-        },
-    }
+    proof_identity = verifier.proof_collector.validate_proof(
+        health=proof_raw_values["health.json"],
+        dashboard=proof_raw_values["dashboard-tools.json"],
+        durable_ledger=proof_raw_values["skill-activations.json"],
+        keeper="keeper-one",
+        expected_source_sha=HEAD,
+        skill_tool_use_id=SKILL_ID,
+    )
     proof = {
         "schema": verifier.PROOF_SCHEMA,
         "source": {
@@ -231,6 +400,9 @@ def make_bundle(root: Path):
         },
         "dashboard": {
             "path": "dashboard-skill-use.png",
+            "keeper": "keeper-one",
+            "ledger_revision": durable["revision"],
+            "exact_row": SKILL_ID,
             **file_identity(dashboard_png),
         },
         "artifacts": {
@@ -243,7 +415,7 @@ def make_bundle(root: Path):
         "dashboard-skill-use.png": file_identity(dashboard_png),
     }
 
-    tui_png = b"tui-png"
+    tui_png = png(1200, 800)
     (tui_root / "tui-skill-use.png").write_bytes(tui_png)
     tui = {
         "schema": verifier.TUI_SCHEMA,
@@ -263,7 +435,7 @@ def make_bundle(root: Path):
             "manifest_sha256": verifier.digest(proof_raw),
             "keeper": "keeper-one",
             "session_id": "trace-one",
-            "ledger_revision": LEDGER_REVISION,
+            "ledger_revision": durable["revision"],
             "skill_tool_use_id": SKILL_ID,
             "action_markers": ["call=call-action-1"],
             "captured_action_marker": "call=call-action-1",
@@ -272,10 +444,18 @@ def make_bundle(root: Path):
         "selection": {"visited_keepers": ["keeper-one"]},
         "producer_artifacts": producer_artifacts,
         "terminal": {"cols": 180, "rows": 42},
-        "visible_text": "exact visible Skill proof",
-        "visible_text_sha256": verifier.digest(b"exact visible Skill proof"),
+        "visible_text": "\n".join(
+            [
+                "Skill Use — keeper-one",
+                f"session=trace-one  ledger={durable['revision']}",
+                f"id={SKILL_ID}",
+                "invalid=0",
+                "call=call-action-1",
+            ]
+        ),
         "screenshot": {"path": "tui-skill-use.png", **file_identity(tui_png)},
     }
+    tui["visible_text_sha256"] = verifier.digest(tui["visible_text"].encode())
     tui_raw = write_json(tui_root / "tui-evidence.json", tui)
     return {
         "join_root": join_root,
@@ -368,7 +548,8 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                     target = target[component]
                 target[path[-1]] = value
                 with self.assertRaisesRegex(
-                    verifier.VerificationError, "Skill identities differ"
+                    verifier.VerificationError,
+                    "proof manifest identity differs from raw authority",
                 ):
                     verify(bundle)
 
@@ -376,7 +557,9 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
             (bundle["join_root"] / "health-before.json").write_bytes(b"tampered")
-            with self.assertRaisesRegex(verifier.VerificationError, "byte count differs"):
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "byte count differs"
+            ):
                 verify(bundle)
 
     def test_artifact_symlink_is_rejected(self):
@@ -394,7 +577,10 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
             bundle["join"]["result"]["kind"] = "no_skill_observed"
-            with self.assertRaisesRegex(verifier.VerificationError, "join is not exact"):
+            with self.assertRaisesRegex(
+                verifier.VerificationError,
+                "join manifest result differs from raw authority",
+            ):
                 verify(bundle)
 
     def test_extra_declared_artifact_is_rejected(self):
@@ -417,14 +603,17 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                 verify(bundle)
 
     def test_delivery_and_action_tamper_are_rejected(self):
-        for field, value, error in (
-            ("delivery", None, "proof identity.delivery is not an object"),
-            ("actions", [], "no later model-selected action"),
+        for field, value in (
+            ("delivery", None),
+            ("actions", []),
         ):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
                 bundle = make_bundle(Path(raw))
                 bundle["proof"]["proof"][field] = value
-                with self.assertRaisesRegex(verifier.VerificationError, error):
+                with self.assertRaisesRegex(
+                    verifier.VerificationError,
+                    "proof manifest identity differs from raw authority",
+                ):
                     verify(bundle)
 
     def test_identity_field_absent_on_both_sides_is_rejected(self):
@@ -444,7 +633,8 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             del bundle["proof"]["proof"]["keeper"]
             del bundle["tui"]["proof"]["keeper"]
             with self.assertRaisesRegex(
-                verifier.VerificationError, "join producer.keeper is empty"
+                verifier.VerificationError,
+                "raw authority|join producer.keeper is empty",
             ):
                 verify(bundle)
 
@@ -453,7 +643,8 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             del bundle["join"]["result"]["matches"][0]["delivery"]
             del bundle["proof"]["proof"]["delivery"]
             with self.assertRaisesRegex(
-                verifier.VerificationError, "join match.delivery is not an object"
+                verifier.VerificationError,
+                "raw authority|join match.delivery is not an object",
             ):
                 verify(bundle)
 
@@ -465,7 +656,8 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             del bundle["proof"]["proof"]["ledger_revision"]
             del bundle["tui"]["proof"]["ledger_revision"]
             with self.assertRaisesRegex(
-                verifier.VerificationError, "TUI proof.ledger_revision is empty"
+                verifier.VerificationError,
+                "raw authority|TUI proof.ledger_revision is empty",
             ):
                 verify(bundle)
 
@@ -477,7 +669,7 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                 **bundle["proof"]["artifacts"]["health.json"],
             }
             with self.assertRaisesRegex(
-                verifier.VerificationError, "collides with a proof artifact"
+                verifier.VerificationError, "not the exact producer artifact"
             ):
                 verify(bundle)
 
@@ -499,7 +691,173 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
             (bundle["tui_root"] / "tui-skill-use.png").write_bytes(b"tampered")
-            with self.assertRaisesRegex(verifier.VerificationError, "byte count differs"):
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "byte count differs"
+            ):
+                verify(bundle)
+
+    def test_fabricated_raw_join_authority_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            payload = write_json(
+                bundle["join_root"] / "health-before.json",
+                {"health_detail": "full", "fabricated": True},
+            )
+            bundle["join"]["artifacts"]["health-before.json"] = file_identity(payload)
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "join raw authority is invalid"
+            ):
+                verify(bundle)
+
+    def test_fabricated_raw_proof_authority_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            payload = write_json(
+                bundle["proof_root"] / "dashboard-tools.json",
+                {"effective_keeper_surface": {"status": "unavailable"}},
+            )
+            bundle["proof"]["artifacts"]["dashboard-tools.json"] = file_identity(
+                payload
+            )
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "proof raw authority is invalid"
+            ):
+                verify(bundle)
+
+    def test_receipt_terminal_digest_and_owner_are_bound(self):
+        mutations = {
+            "terminal": lambda value: value["operation"].update({"state": "Failed"}),
+            "digest": lambda value: value["operation"]["typed_terminal_record"].update(
+                {"execution_digest": "0" * 64}
+            ),
+            "owner": lambda value: value.update({"submitted_by": "foreign-owner"}),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as raw:
+                bundle = make_bundle(Path(raw))
+                fabricated = receipt()
+                mutate(fabricated)
+                payload = write_json(
+                    bundle["join_root"] / "producer-receipt.json", fabricated
+                )
+                bundle["join"]["inputs"]["producer_receipt_sha256"] = verifier.digest(
+                    payload
+                )
+                bundle["join"]["artifacts"]["producer-receipt.json"] = file_identity(
+                    payload
+                )
+                with self.assertRaisesRegex(
+                    verifier.VerificationError, "join raw authority is invalid"
+                ):
+                    verify(bundle)
+
+    def test_dashboard_screenshot_cannot_alias_a_proof_artifact(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            bundle["proof"]["dashboard"] = {
+                "path": "health.json",
+                **bundle["proof"]["artifacts"]["health.json"],
+            }
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "exact producer artifact"
+            ):
+                verify(bundle)
+
+    def test_fabricated_png_is_rejected_even_when_its_hash_matches(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            payload = b"dashboard-png"
+            (bundle["proof_root"] / "dashboard-skill-use.png").write_bytes(payload)
+            identity = file_identity(payload)
+            bundle["proof"]["dashboard"].update(identity)
+            bundle["tui"]["producer_artifacts"]["dashboard-skill-use.png"] = identity
+            with self.assertRaisesRegex(verifier.VerificationError, "is not a PNG"):
+                verify(bundle)
+
+    def test_ihdr_only_png_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            payload = png()[:33]
+            (bundle["proof_root"] / "dashboard-skill-use.png").write_bytes(payload)
+            identity = file_identity(payload)
+            bundle["proof"]["dashboard"].update(identity)
+            bundle["tui"]["producer_artifacts"]["dashboard-skill-use.png"] = identity
+            with self.assertRaisesRegex(verifier.VerificationError, "no terminal IEND"):
+                verify(bundle)
+
+    def test_short_idat_scanlines_are_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            payload = png(1440, 1000, decoded=b"x")
+            (bundle["proof_root"] / "dashboard-skill-use.png").write_bytes(payload)
+            identity = file_identity(payload)
+            bundle["proof"]["dashboard"].update(identity)
+            bundle["tui"]["producer_artifacts"]["dashboard-skill-use.png"] = identity
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "scanline length differs"
+            ):
+                verify(bundle)
+
+    def test_dashboard_exact_row_is_required_and_bound(self):
+        for exact_row in (None, "call-other"):
+            with (
+                self.subTest(exact_row=exact_row),
+                tempfile.TemporaryDirectory() as raw,
+            ):
+                bundle = make_bundle(Path(raw))
+                if exact_row is None:
+                    bundle["proof"]["dashboard"].pop("exact_row")
+                else:
+                    bundle["proof"]["dashboard"]["exact_row"] = exact_row
+                with self.assertRaisesRegex(
+                    verifier.VerificationError, "Dashboard capture identity differs"
+                ):
+                    verify(bundle)
+
+    def test_dashboard_keeper_and_ledger_revision_are_bound(self):
+        cases = (("keeper", "foreign-keeper"), ("ledger_revision", "0" * 64))
+        for field, value in cases:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                bundle = make_bundle(Path(raw))
+                bundle["proof"]["dashboard"][field] = value
+                with self.assertRaisesRegex(
+                    verifier.VerificationError, "Dashboard capture identity differs"
+                ):
+                    verify(bundle)
+
+    def test_dashboard_and_tui_screenshots_cannot_be_hardlink_aliases(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            dashboard = bundle["proof_root"] / "dashboard-skill-use.png"
+            tui_screenshot = bundle["tui_root"] / "tui-skill-use.png"
+            tui_screenshot.unlink()
+            os.link(dashboard, tui_screenshot)
+            bundle["tui"]["screenshot"].update(file_identity(dashboard.read_bytes()))
+            with self.assertRaisesRegex(verifier.VerificationError, "hardlink aliases"):
+                verify(bundle)
+
+    def test_png_zero_dimension_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            payload = png(0, 10)
+            (bundle["proof_root"] / "dashboard-skill-use.png").write_bytes(payload)
+            identity = file_identity(payload)
+            bundle["proof"]["dashboard"].update(identity)
+            bundle["tui"]["producer_artifacts"]["dashboard-skill-use.png"] = identity
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "dimensions are invalid"
+            ):
+                verify(bundle)
+
+    def test_visible_text_requires_every_exact_receipt_marker(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            visible = bundle["tui"]["visible_text"].replace("invalid=0", "invalid=1")
+            bundle["tui"]["visible_text"] = visible
+            bundle["tui"]["visible_text_sha256"] = verifier.digest(visible.encode())
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "exact Skill receipt markers"
+            ):
                 verify(bundle)
 
     def test_incomplete_marker_is_rejected(self):
@@ -513,6 +871,29 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                     expected_schema=verifier.PROOF_SCHEMA,
                     context="proof manifest",
                 )
+
+    def test_broken_incomplete_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            (bundle["proof_root"] / "INCOMPLETE").symlink_to("missing-target")
+            with self.assertRaisesRegex(verifier.VerificationError, "incomplete"):
+                verifier.load_manifest(
+                    bundle["proof_root"] / "evidence.json",
+                    expected_sha256=verifier.digest(bundle["proof_raw"]),
+                    expected_schema=verifier.PROOF_SCHEMA,
+                    context="proof manifest",
+                )
+
+    def test_duplicate_field_in_raw_authority_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            payload = (
+                b'{"head":"' + HEAD.encode() + b'","head":"' + HEAD.encode() + b'"}'
+            )
+            (bundle["join_root"] / "source-before.json").write_bytes(payload)
+            bundle["join"]["artifacts"]["source-before.json"] = file_identity(payload)
+            with self.assertRaisesRegex(verifier.VerificationError, "repeats field"):
+                verify(bundle)
 
     def test_duplicate_manifest_field_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:

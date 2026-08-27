@@ -37,6 +37,7 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       ; author_id : string
       ; author_name : string option
       ; content : string
+      ; attachments : Discord_gateway_state.inbound_attachment list
       ; raw_content : string
       ; resolved_mentions : resolved_mention list
       ; mention_user_ids : string list

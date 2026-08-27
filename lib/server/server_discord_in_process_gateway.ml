@@ -287,12 +287,24 @@ let resolve_binding_for_message ~channel_id =
   State.resolve_keeper_for_channel_result ~channel_id
   |> Result.map (Option.map (fun resolution -> resolution, []))
 
+(* Files, said as references rather than carried as bytes.
+
+   Discord gives a url, a name and a size; the bytes live behind that url and
+   fetching them is a separate decision with its own size cap, trust question
+   and failure mode. Writing them into the store's [data] field empty would
+   make "not fetched" and "empty file" the same row, so the reference is what
+   travels and it says so.
+
+   Appended to the message the Keeper reads because Discord's own clients show
+   a file as part of the message: a caption with a photo under it is one thing
+   said, and splitting them here would hide half of it. *)
 let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ~(channel_id : string) ~(message_id : string)
       ~(guild_id : string option)
       ~base_dir
       ~(author_id : string) ~(author_name : string option)
       ~(content : string)
+      ~(attachments : Discord_gateway_state.inbound_attachment list)
       ~(mentions_bot : bool)
       ~(explicit_mentions_bot : bool)
       ~(message_reference_channel_id : string option)
@@ -317,6 +329,9 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
     None
   | Ok (Some (resolution, resolution_metadata)) ->
     let keeper_name = resolution.State.keeper_name in
+    (* Same body on both paths. A mention that came with a photo is the same
+       message as an ambient one that did; only the trigger differs. *)
+    let content = Discord_gateway_state.content_with_attachments ~content ~attachments in
     let metadata =
       discord_chat_metadata ~guild_id ~channel_id ~message_id
       @ [ ("discord.channel_id", channel_id)
@@ -475,12 +490,14 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
       ; message_reference_channel_id
       ; message_reference_message_id
       ; referenced_message_author_id
+      ; attachments
       } ->
     (* mentions_bot is already enforced by the trigger policy at the
        gateway-state layer; nothing extra to check here. *)
     accept_message_create ~resolved_binding ~dispatch_for_delivery ~channel_id
       ~message_id ~author_id
-      ~guild_id ~base_dir ~author_name ~content ~mentions_bot ~explicit_mentions_bot
+      ~guild_id ~base_dir ~author_name ~content ~attachments ~mentions_bot
+      ~explicit_mentions_bot
       ~message_reference_channel_id ~message_reference_message_id
       ~referenced_message_author_id ()
   | Gw.Reaction_add _ ->
@@ -518,7 +535,8 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
    on the dispatch path. *)
 let handle_ambient ?resolved_keeper_name ~base_dir
       ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
-      ~(author_id : string) ~(author_name : string option) ~(content : string) () =
+      ~(author_id : string) ~(author_name : string option) ~(content : string)
+      ~(attachments : Discord_gateway_state.inbound_attachment list) () =
   let keeper_name =
     match resolved_keeper_name with
     | Some keeper_name -> Ok (Some keeper_name)
@@ -533,7 +551,12 @@ let handle_ambient ?resolved_keeper_name ~base_dir
     Discord_observability.record_ambient
       Discord_observability.Ambient_dropped_unbound
   | Ok (Some keeper_name) ->
-    let trimmed = String.trim content in
+    (* A photo with no caption is a message. Trimming the text alone read it
+       as empty and dropped it, so a file posted without words never reached
+       the Keeper at all. *)
+    let trimmed =
+      String.trim (Discord_gateway_state.content_with_attachments ~content ~attachments)
+    in
     if String.equal trimmed "" then
       Discord_observability.record_ambient
         Discord_observability.Ambient_dropped_empty
@@ -663,10 +686,17 @@ let handle_ambient ?resolved_keeper_name ~base_dir
 let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create
-      { channel_id; guild_id; message_id; author_id; author_name; content; _ }
-    ->
+      { channel_id
+      ; guild_id
+      ; message_id
+      ; author_id
+      ; author_name
+      ; content
+      ; attachments
+      ; _
+      } ->
     handle_ambient ?resolved_keeper_name ~base_dir ~channel_id ~guild_id
-      ~message_id ~author_id ~author_name ~content ()
+      ~message_id ~author_id ~author_name ~content ~attachments ()
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
 
 let submit_ingress ingress ~lane ~event_id run =

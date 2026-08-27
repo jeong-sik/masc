@@ -71,11 +71,23 @@ let tool_rows block =
    a dashboard row from a named person is that person, and the pane the
    operator is looking at needs no badge to say so. Every other surface is
    where the row came in from, which is the fact the label exists to carry. *)
+(* What a row carries besides its words. The store has held these since the
+   composer learned to stage a file; this reader never looked, so a message
+   that arrived with a 70 KB image read as the sentence beside it and nothing
+   else. The bytes stay in the store -- the pane needs to know a file is
+   there, not to hold it. *)
+type attachment_note =
+  { att_name : string
+  ; att_mime : string
+  ; att_bytes : int
+  }
+
 type row =
   { at : float
   ; turn_id : string option
   ; kind : kind
   ; text : string
+  ; attachments : attachment_note list
   }
 
 type decoded =
@@ -228,6 +240,29 @@ let turn_id_of_fields fields =
       Some (Delivery_identity.Request_id.to_string request_id)
   | Ok None | Error _ -> string_field fields "turn_ref"
 
+let attachment_notes_of fields =
+  match List.assoc_opt "attachments" fields with
+  | Some (`List items) ->
+      List.filter_map
+        (function
+          | `Assoc item ->
+              (* A row that names a file without naming it is not an
+                 attachment this pane can say anything about. *)
+              (match string_field item "name" with
+               | None -> None
+               | Some name ->
+                   Some
+                     { att_name = name
+                     ; att_mime =
+                         Option.value (string_field item "mime_type")
+                           ~default:""
+                     ; att_bytes =
+                         Option.value (int_field item "size") ~default:0
+                     })
+          | _ -> None)
+        items
+  | Some _ | None -> []
+
 let list_field (fields : (string * Yojson.Safe.t) list) name =
   match List.assoc_opt name fields with
   | Some (`List values) -> Some values
@@ -310,6 +345,7 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                   { at
                   ; turn_id = None
                   ; kind = Memory_activity
+                  ; attachments = []
                   ; text =
                       (let change_lines =
                          List.filter_map Fun.id added_lines
@@ -342,6 +378,7 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
         { at
         ; turn_id = None
         ; kind = Memory_activity
+        ; attachments = []
         ; text =
             Printf.sprintf
               "Librarian failed \xc2\xb7 %s\n%s\nsnapshot present: %s \xc2\xb7 cadence deferred: %s"
@@ -366,6 +403,7 @@ let memory_row_of_json = function
                 ; turn_id = None
                 ; kind = Memory_activity
                 ; text = "Memory journal unreadable: " ^ error
+                ; attachments = []
                 })
              (string_field fields "error")
        | Some true ->
@@ -541,16 +579,16 @@ let rows_of_trace ~turn_id at summary =
       (* No reasoning and no calls: the omitted count is the only thing the
          block said, and remains a typed transcript omission rather than a
          synthetic tool call. *)
-      [ Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" } ]
+      [ Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" ; attachments = [] } ]
   | reasoning, [], _ ->
       [ Utterance
-          { at; turn_id; kind = Reasoning (reasoning @ omitted_note); text = "" }
+          { at; turn_id; kind = Reasoning (reasoning @ omitted_note); text = "" ; attachments = [] }
       ]
   | [], _ :: _, _ ->
-      [ Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" } ]
+      [ Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" ; attachments = [] } ]
   | reasoning, _ :: _, _ ->
-      [ Utterance { at; turn_id; kind = Reasoning reasoning; text = "" }
-      ; Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" }
+      [ Utterance { at; turn_id; kind = Reasoning reasoning; text = "" ; attachments = [] }
+      ; Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" ; attachments = [] }
       ]
 
 (* Annotated rather than inferred: an inferred parameter widens to an open
@@ -595,6 +633,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
               ; turn_id
               ; kind = Addressed_to_keeper { speaker; surface }
               ; text = content
+              ; attachments = attachment_notes_of fields
               }
           ]
       | Some "assistant" -> (
@@ -616,7 +655,9 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                   { at
                   ; turn_id
                   ; kind = Delivery_failed { origin_request_id }
-                  ; text = content }
+                  ; text = content
+                  ; attachments = []
+                  }
               ]
           | Some _ | None ->
               (* An autonomous turn persists what it did as a trace block and
@@ -650,6 +691,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                       ; turn_id
                       ; kind = if autonomous then Autonomous_reply else Said_by_keeper
                       ; text = content
+                      ; attachments = []
                       }
                   ]
               in
@@ -698,6 +740,7 @@ let fold_tool_blocks parsed_rows =
         ; turn_id
         ; kind = Tool_calls (Transcript.tool_block activities)
         ; text = ""
+        ; attachments = []
         }
         :: acc
   in

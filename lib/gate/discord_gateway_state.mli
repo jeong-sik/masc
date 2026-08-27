@@ -70,6 +70,25 @@ type mention_kind =
     [Some] for user mentions when Discord's [mentions] array supplied a
     display name; role and channel mentions are currently recorded with
     [None] until a guild cache is wired in. *)
+type inbound_attachment =
+  { ia_id : string
+  ; ia_filename : string
+  ; ia_size : int
+  ; ia_url : string
+  ; ia_content_type : string option
+  }
+(** A file Discord says came with a message. [id], [filename], [size] and
+    [url] are required by the Attachment object; [content_type] is optional and
+    is left absent rather than guessed from the filename. The bytes are not
+    here -- [url] is where they live, and fetching them is a separate decision
+    with its own size and trust questions. *)
+
+(* The readable body of a message: its text, plus one line per attachment.
+   Discord sends [content] empty when a file is posted with no caption, so
+   the files are the whole message and dropping them drops it entirely. *)
+val content_with_attachments :
+  content:string -> attachments:inbound_attachment list -> string
+
 type resolved_mention =
   { mention_id : string
   ; mention_name : string option
@@ -98,6 +117,17 @@ type dispatched_event =
             [author.username]; [None] only when the payload carries
             neither (RFC-0223 P1). *)
       ; content : string
+      ; attachments : inbound_attachment list
+        (** Files Discord says came with the message. Required fields per the
+            Attachment object are [id], [filename], [size], [url] and
+            [proxy_url]; [content_type] is optional and stays [None] rather
+            than being guessed from the name.
+
+            An app without the [MESSAGE_CONTENT] intent is served an empty
+            array rather than an error, so "no files" and "not allowed to see
+            files" look the same here. MASC asks for that intent in
+            [default_intents], which is what makes this field mean what it
+            says. *)
       ; raw_content : string
         (** Original content before mention resolution. *)
       ; resolved_mentions : resolved_mention list

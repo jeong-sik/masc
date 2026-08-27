@@ -826,6 +826,59 @@ let test_memory_failure_keeps_kind_and_detail () =
   | Error detail -> failf "memory failure decode failed: %s" detail
 ;;
 
+(* The store has carried [attachments] since the composer learned to stage a
+   file. This reader ignored the field, so a message that arrived with a 70 KB
+   image read as the sentence beside it and nothing else -- the only trace was
+   the [[Image #1]] the composer had typed into the draft, which is text and
+   not a file. *)
+let test_a_row_names_the_file_it_carries () =
+  let row =
+    `Assoc
+      [ "id", `String "row"
+      ; "role", `String "user"
+      ; "content", `String "here it is"
+      ; "ts", `Float 1.0
+      ; ( "attachments"
+        , `List
+            [ `Assoc
+                [ "id", `String "tui-att-1"
+                ; "type", `String "image"
+                ; "name", `String "image-1.png"
+                ; "size", `Int 70970
+                ; "mime_type", `String "image/png"
+                ]
+            ] )
+      ]
+  in
+  match (decode (`List [ row ])).History.rows with
+  | [ r ] ->
+    check int "the file is named once" 1
+      (List.length r.History.attachments);
+    (match r.History.attachments with
+     | [ note ] ->
+       check string "by its name" "image-1.png"
+         note.History.att_name;
+       check int "and its size" 70970 note.History.att_bytes;
+       check string "and its type" "image/png"
+         note.History.att_mime
+     | _ -> fail "expected one note");
+    (* The words are untouched: the note is drawn beside them, not folded in. *)
+    check string "the message still says what it said" "here it is"
+      r.History.text
+  | rows -> failf "expected one row, got %d" (List.length rows)
+;;
+
+(* A row with no file gains nothing. A marker on every row stops being read. *)
+let test_a_row_without_a_file_says_nothing () =
+  match
+    (decode (`List [ addressed ~speaker_name:"vincent" "just words" ]))
+      .History.rows
+  with
+  | [ r ] ->
+    check int "no notes" 0 (List.length r.History.attachments)
+  | rows -> failf "expected one row, got %d" (List.length rows)
+;;
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
@@ -882,6 +935,10 @@ let () =
             test_one_unreadable_row_does_not_cost_the_transcript
         ; test_case "a non-array payload is an error" `Quick
             test_a_non_array_payload_is_an_error
+        ; test_case "a row names the file it carries" `Quick
+            test_a_row_names_the_file_it_carries
+        ; test_case "a row without a file says nothing" `Quick
+            test_a_row_without_a_file_says_nothing
         ; test_case "a missing ts reads as zero" `Quick
             test_a_missing_ts_reads_as_zero_not_a_failure
         ] )

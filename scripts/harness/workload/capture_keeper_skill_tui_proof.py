@@ -439,6 +439,13 @@ def validate_live_server(
         "live server binary is not embedded",
     )
     expected_started_at = string_field(source, "server_started_at", "evidence.source")
+    expected_instance = string_field(
+        source, "server_runtime_instance_id", "evidence.source"
+    )
+    require(
+        build.get("runtime_instance_id") == expected_instance,
+        "live server process identity changed after proof",
+    )
     require(
         build.get("started_at") == expected_started_at,
         "live server process changed after proof",
@@ -456,6 +463,7 @@ def validate_live_server(
     return {
         "binary_commit": expected_sha,
         "binary_commit_source": "embedded",
+        "runtime_instance_id": expected_instance,
         "started_at": expected_started_at,
         "effective_base_path": expected_base,
         "effective_masc_root": expected_root,

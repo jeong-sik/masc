@@ -30,6 +30,7 @@ capture = load_module()
 HEAD = "a" * 40
 TREE = "b" * 40
 SKILL_ID = "call-skill-1"
+INSTANCE = "018f1d5e-7b3c-7abc-8def-0123456789ab"
 
 
 def fixture(action_identity=None):
@@ -72,6 +73,7 @@ def fixture(action_identity=None):
             "collector_tree": TREE,
             "tracked_checkout_clean": True,
             "server_started_at": "2026-08-27T00:00:00Z",
+            "server_runtime_instance_id": INSTANCE,
             "tui_build": {
                 "manifest_sha256": "c" * 64,
                 "executable_sha256": "d" * 64,
@@ -265,6 +267,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             "build": {
                 "binary_commit": HEAD,
                 "binary_commit_source": "embedded",
+                "runtime_instance_id": INSTANCE,
                 "started_at": "2026-08-27T00:00:00Z",
             },
             "paths": {
@@ -279,6 +282,10 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         health["build"]["started_at"] = "2026-08-27T00:01:00Z"
         with self.assertRaisesRegex(capture.CaptureError, "process changed"):
             capture.validate_live_server(evidence, health)
+        health["build"]["started_at"] = "2026-08-27T00:00:00Z"
+        health["build"]["runtime_instance_id"] = "018f1d5e-7b3c-7abc-8def-0123456789ac"
+        with self.assertRaisesRegex(capture.CaptureError, "process identity changed"):
+            capture.validate_live_server(evidence, health)
 
     def test_verifies_every_producer_artifact_and_dashboard_screenshot(self):
         evidence, dashboard_payload, dashboard = fixture()
@@ -289,6 +296,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 "build": {
                     "binary_commit": HEAD,
                     "binary_commit_source": "embedded",
+                    "runtime_instance_id": INSTANCE,
                     "started_at": "2026-08-27T00:00:00Z",
                 },
                 "paths": {
@@ -362,6 +370,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 "build": {
                     "binary_commit": HEAD,
                     "binary_commit_source": "embedded",
+                    "runtime_instance_id": INSTANCE,
                     "started_at": "2026-08-27T00:00:00Z",
                 },
                 "paths": {

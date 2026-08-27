@@ -25,6 +25,7 @@ def load_module():
 
 proof = load_module()
 SHA = "a" * 40
+INSTANCE = "018f1d5e-7b3c-7abc-8def-0123456789ab"
 
 
 def fixture():
@@ -134,6 +135,7 @@ def fixture():
         "build": {
             "binary_commit": SHA,
             "binary_commit_source": "embedded",
+            "runtime_instance_id": INSTANCE,
             "started_at": "2026-08-27T00:00:00Z",
         },
         "paths": {

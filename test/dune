@@ -1294,7 +1294,6 @@
   test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
-  test_dashboard_http_core
   test_dashboard_composite_claim_window
   test_eval_feed
   test_dashboard_verification
@@ -1438,7 +1437,6 @@
   test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
-  test_dashboard_http_core
   test_dashboard_composite_claim_window
   test_eval_feed
   test_dashboard_verification
@@ -1601,6 +1599,31 @@
    (run %{test})))
  (libraries masc_test_deps))
 
+; Extracted from the Group 3 (tests ...) list above: the config-sync fixture
+; TOML seeds sandbox_profile = "local" (incidental — the suite measures
+; dashboard behavior contracts such as config POST materializing a missing
+; keeper TOML, not sandbox isolation), and keeper config update validation
+; now rejects Local fail-closed without the hatch.
+(test
+ (name test_dashboard_http_core)
+ (modules test_dashboard_http_core)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries
+  masc_test_deps
+  masc_test_runtime
+  masc.embedded_config
+  masc.skill_config
+  masc.skill_reference
+  bigstringaf
+  terminal_size
+  masc.jsonl_writer
+  decompress.de
+  decompress.gz))
+
 (test
  (name test_server_bootstrap_durable_demand_owner)
  (modules test_server_bootstrap_durable_demand_owner)
@@ -1620,12 +1643,17 @@
 
 ; Stable dashboard behavior contracts only. The HTTP core executable also
 ; contains source-shape assertions, so CI selects its behavior suite; the
-; briefing executable is behavior-only and runs in full.
+; briefing executable is behavior-only and runs in full. The HTTP core run
+; carries the local-playground hatch: its config-sync fixture seeds
+; sandbox_profile = "local", incidental to the behavior contracts.
 (rule
  (alias runtest-dashboard-http-behavior-contracts)
  (action
   (progn
-   (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts")
+   (setenv
+    MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+    true
+    (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts"))
    (run %{exe:test_dashboard_briefing.exe}))))
 
 (test

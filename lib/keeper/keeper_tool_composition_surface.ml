@@ -1456,6 +1456,7 @@ let make_tools
       ?on_external_effect_deferred
       ?on_failed
       ?on_externalization_error
+      ~descriptors
       ()
   =
   (* Skill-declared entries went through the same [Catalog.parse] as the
@@ -1539,7 +1540,7 @@ let make_tools
               | Catalog.Async ->
                 (match
                    Catalog.instantiate
-                     ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
+                     ~descriptors
                      ~args:input
                      entry
                  with
@@ -1547,9 +1548,9 @@ let make_tools
                    let message = Catalog.instantiation_error_to_string error in
                    let class_ =
                      match error with
-                     | Catalog.Missing_argument _ -> Tool_result.Policy_rejection
+                     | Catalog.Missing_argument _
                      | Catalog.Instantiated_plan_rejected _ ->
-                       Tool_result.Runtime_failure
+                       Tool_result.Policy_rejection
                    in
                    Tool_result.make_err
                      ~tool_name
@@ -1606,7 +1607,7 @@ let make_tools
               | Catalog.Inline ->
                 (match
                    Catalog.instantiate
-                     ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
+                     ~descriptors
                      ~args:input
                      entry
                  with
@@ -1618,9 +1619,9 @@ let make_tools
                    let message = Catalog.instantiation_error_to_string error in
                    let class_ =
                      match error with
-                     | Catalog.Missing_argument _ -> Tool_result.Policy_rejection
+                     | Catalog.Missing_argument _
                      | Catalog.Instantiated_plan_rejected _ ->
-                       Tool_result.Runtime_failure
+                       Tool_result.Policy_rejection
                    in
                    Tool_result.make_err
                      ~tool_name
@@ -1802,7 +1803,6 @@ let make_tools
                ~start_time
                "composition execution requires Agent-Core invocation identity"
            | Some parent_invocation ->
-             let descriptors = Keeper_tool_descriptor.all_descriptors () in
              (match Keeper_tool_plan_request.plan_of_json ~descriptors input with
               | Error error ->
                 let data =

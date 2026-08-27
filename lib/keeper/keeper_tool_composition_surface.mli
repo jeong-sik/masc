@@ -116,6 +116,10 @@ val make_tools
   -> ?on_external_effect_deferred:(unit -> unit)
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
+  -> descriptors:Keeper_tool_descriptor.t list
+       (** The exact descriptor set already selected for this Keeper turn.
+           Declared compositions and ad-hoc plans validate against this set;
+           they cannot recover the process-global descriptor catalog. *)
   -> unit
   -> Agent_core.Tool.t list
 

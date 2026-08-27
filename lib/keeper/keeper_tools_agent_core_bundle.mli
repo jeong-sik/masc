@@ -81,6 +81,19 @@ module For_testing : sig
     -> unit
     -> Agent_core.Tool.t list
 
+  val make_tools_for_descriptors
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> publication_recovery:
+         Keeper_publication_recovery_availability.turn_context
+    -> ctx_snapshot:Keeper_types.working_context
+    -> descriptors:Keeper_tool_descriptor.t list
+    -> ?skill_catalog:Keeper_skill_catalog.t
+    -> unit
+    -> Agent_core.Tool.t list
+  (** Test seam for a closed per-turn descriptor set. Production obtains the
+      same value from [meta.tool_groups]. *)
+
   val initial_terminal_effect_state :
     Keeper_tools_agent_core.gate_replay_delivery option ->
     Keeper_tools_agent_core.terminal_effect_state

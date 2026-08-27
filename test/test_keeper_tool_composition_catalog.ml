@@ -381,6 +381,31 @@ let test_catalog_params_generate_schema_and_bind () =
     fail ("unexpected error: " ^ Catalog.instantiation_error_to_string error)
 ;;
 
+let test_zero_param_instantiation_revalidates_turn_surface () =
+  let entry =
+    let catalog = parse_ok valid_catalog in
+    match Catalog.find catalog "time-memory-query" with
+    | Some entry -> entry
+    | None -> fail "zero-param composition lookup missed exact name"
+  in
+  let descriptors =
+    Masc.Keeper_tool_descriptor.all_descriptors ()
+    |> List.filter (fun descriptor ->
+      Masc.Keeper_tool_descriptor.keeper_model_names descriptor
+      |> List.exists (String.equal "keeper_time_now"))
+  in
+  match Catalog.instantiate ~descriptors ~args:(`Assoc []) entry with
+  | Error
+      (Catalog.Instantiated_plan_rejected
+        (Plan.Unknown_tool { tool_name = "keeper_memory_search"; _ })) ->
+    ()
+  | Ok _ -> fail "zero-param composition recovered the global Tool catalog"
+  | Error error ->
+    fail
+      ("wrong zero-param surface rejection: "
+       ^ Catalog.instantiation_error_to_string error)
+;;
+
 let test_catalog_rejects_param_declaration_mismatches () =
   let undeclared_reference =
     {|[[compositions]]
@@ -562,6 +587,10 @@ let () =
             "params generate the input schema and bind arguments"
             `Quick
             test_catalog_params_generate_schema_and_bind
+        ; test_case
+            "zero-param instantiation revalidates the turn surface"
+            `Quick
+            test_zero_param_instantiation_revalidates_turn_surface
         ; test_case
             "param declaration mismatches are rejected"
             `Quick

@@ -59,6 +59,18 @@ let make_tool_bundle_for_descriptors
       ()
   : tool_bundle
   =
+  let descriptors =
+    List.map
+      (fun (descriptor : Keeper_tool_descriptor.t) ->
+         match Keeper_tool_descriptor.find_id descriptor.id with
+         | Some canonical -> canonical
+         | None ->
+           invalid_arg
+             (Printf.sprintf
+                "Keeper tool bundle received unknown descriptor id %S"
+                descriptor.id))
+      descriptors
+  in
   let skill_surface_present =
     Keeper_skill_catalog.skills skill_catalog <> []
   in
@@ -478,6 +490,7 @@ let make_tool_bundle_for_descriptors
         ~on_external_effect_deferred:mark_external_effect_deferred
         ~on_failed:mark_terminal_effect_failed
         ~on_externalization_error:mark_completed_terminal_externalization_failed
+        ~descriptors
         ()
   in
   (* Identity tools are external effects by definition; they join the turn
@@ -657,6 +670,27 @@ module For_testing = struct
        ?clock
        ?skill_catalog
        ?turn_ctx_cell
+       ())
+      .tools
+  ;;
+
+  let make_tools_for_descriptors
+        ~config
+        ~meta
+        ~publication_recovery
+        ~ctx_snapshot
+        ~descriptors
+        ?skill_catalog
+        ()
+    =
+    (make_tool_bundle_for_descriptors
+       ~config
+       ~meta
+       ~publication_recovery
+       ~ctx_snapshot
+       ~descriptors
+       ?skill_catalog
+       ~allow_unrecorded_skill_surface:true
        ())
       .tools
   ;;

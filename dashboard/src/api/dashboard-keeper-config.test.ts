@@ -135,4 +135,36 @@ describe('keeper config source projection', () => {
       detail: 'unlock failed',
     }])
   })
+
+  it.each([
+    [
+      'missing warnings',
+      (revision: object) => ({ revision, applied: true }),
+    ],
+    [
+      'extra field',
+      (revision: object) => ({ revision, applied: true, warnings: [], extra: true }),
+    ],
+  ])('rejects config_write with %s', async (_label, configWrite) => {
+    const revision = {
+      manifest: { state: 'sha256', value: 'a'.repeat(64) },
+      runtime_assignment: { state: 'runtime_config_missing' },
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        name: 'rtprobe',
+        config_revision: revision,
+        config_write: configWrite(revision),
+        max_context_override: null,
+        skills: { names: null },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(fetchKeeperConfig('rtprobe')).rejects.toThrow(
+      'Invalid keeper config response: config_write is malformed',
+    )
+  })
 })

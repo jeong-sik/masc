@@ -111,8 +111,9 @@ function decodeConfigRevision(value: unknown): KeeperConfigRevision {
   }
 }
 
-function decodeConfigWarnings(value: unknown): KeeperConfig['config_transaction_warnings'] {
-  if (value === undefined) return undefined
+function decodeConfigWarningArray(
+  value: unknown,
+): NonNullable<KeeperConfig['config_transaction_warnings']> {
   if (!Array.isArray(value)) {
     throw new Error('Invalid keeper config response: config warnings must be an array')
   }
@@ -131,15 +132,26 @@ function decodeConfigWarnings(value: unknown): KeeperConfig['config_transaction_
   })
 }
 
+function decodeConfigWarnings(value: unknown): KeeperConfig['config_transaction_warnings'] {
+  if (value === undefined) return undefined
+  return decodeConfigWarningArray(value)
+}
+
 function decodeConfigWrite(value: unknown): KeeperConfig['config_write'] {
   if (value === undefined) return undefined
-  if (!isRecord(value) || typeof value.applied !== 'boolean') {
+  if (
+    !isRecord(value)
+    || Object.keys(value).length !== 3
+    || !Object.hasOwn(value, 'revision')
+    || typeof value.applied !== 'boolean'
+    || !Object.hasOwn(value, 'warnings')
+  ) {
     throw new Error('Invalid keeper config response: config_write is malformed')
   }
   return {
     revision: decodeConfigRevision(value.revision),
     applied: value.applied,
-    warnings: decodeConfigWarnings(value.warnings) ?? [],
+    warnings: decodeConfigWarningArray(value.warnings),
   }
 }
 

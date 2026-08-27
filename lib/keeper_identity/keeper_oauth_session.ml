@@ -124,12 +124,31 @@ let finish_error_to_string = function
     Printf.sprintf "the exchange did not complete: %s"
       (Flow.exchange_error_to_string err)
 
+type expiry =
+  | Never
+  | Renewable of { expires_at : float option; refresh_token : string }
+  | Expiring_without_renewal of float
+
+(* Only the shape that ends in a lost provider gets a warning. Saying
+   something about every one of them trains an operator to skip the line
+   that mattered. *)
+let expiry_warning = function
+  | Never | Renewable _ -> None
+  | Expiring_without_renewal expires_at ->
+    Some
+      (Printf.sprintf
+         "This credential expires (%s) and the provider returned no refresh \
+          token, so it cannot be renewed. The Keeper will stop reaching this \
+          provider at that point and you will have to attach it again."
+         (let t = Unix.gmtime expires_at in
+          Printf.sprintf "%04d-%02d-%02d %02d:%02d UTC" (t.Unix.tm_year + 1900)
+            (t.Unix.tm_mon + 1) t.Unix.tm_mday t.Unix.tm_hour t.Unix.tm_min))
+
 type finished = {
   keeper : string;
   provider_id : string;
   access_token : string;
-  refresh_token : string;
-  expires_at : float;
+  expiry : expiry;
 }
 
 let finish ?post ~pending ~state ~code ~now () =
@@ -146,17 +165,19 @@ let finish ?post ~pending ~state ~code ~now () =
            ~code
            ~state ~now ())
     in
-    (match tokens.Flow.refresh_token with
-     | Some refresh_token ->
-       Ok
-         { keeper = flow_pending.Flow.keeper
-         ; provider_id = flow_pending.Flow.provider_id
-         ; access_token = tokens.Flow.access_token
-         ; refresh_token
-         ; expires_at = tokens.Flow.expires_at
-         }
-     | None ->
-       (* [Flow.complete] rejects an answer without one, so reaching here
-          would mean that check moved. Naming it keeps the two in step
-          instead of quietly widening what this returns. *)
-       Error (Exchange_failed Flow.No_refresh_token))
+    (* The four pairings the answer can carry, read into the three that mean
+       something different to whoever stores them. A token with no expiry
+       and no refresh token is not a failed login: it is a credential that
+       lasts until the provider revokes it. *)
+    let expiry =
+      match tokens.Flow.refresh_token, tokens.Flow.expires_at with
+      | Some refresh_token, expires_at -> Renewable { expires_at; refresh_token }
+      | None, None -> Never
+      | None, Some expires_at -> Expiring_without_renewal expires_at
+    in
+    Ok
+      { keeper = flow_pending.Flow.keeper
+      ; provider_id = flow_pending.Flow.provider_id
+      ; access_token = tokens.Flow.access_token
+      ; expiry
+      }

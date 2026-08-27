@@ -59,19 +59,27 @@ let handle_callback request reqd =
               (Printf.sprintf "%s is attached to %s" attached.Server_keeper_oauth.keeper
                  attached.Server_keeper_oauth.provider_label)
             ~detail:
-              (match attached.Server_keeper_oauth.tool_discovery with
-               | Ok count ->
-                 Printf.sprintf
-                   "%d tools are now on that Keeper's surface. You can close this tab."
-                   count
-               (* Attached, but the tool list did not come back. Saying so
-                  beats a page that reads like success and a Keeper with no
-                  new tools. *)
-               | Error problem ->
-                 Printf.sprintf
-                   "The credentials are stored, but asking what tools exist did \
-                    not work: %s"
-                   problem)
+              (let outcome =
+                 match attached.Server_keeper_oauth.tool_discovery with
+                 | Ok count ->
+                   Printf.sprintf
+                     "%d tools are now on that Keeper's surface. You can close this tab."
+                     count
+                 (* Attached, but the tool list did not come back. Saying so
+                    beats a page that reads like success and a Keeper with no
+                    new tools. *)
+                 | Error problem ->
+                   Printf.sprintf
+                     "The credentials are stored, but asking what tools exist did \
+                      not work: %s"
+                     problem
+               in
+               (* Ahead of the outcome, because this is the page the operator
+                  reads before closing the tab and what it says happens later
+                  is the part they cannot come back to find. *)
+               match attached.Server_keeper_oauth.warning with
+               | None -> outcome
+               | Some warning -> warning ^ " " ^ outcome)
         | Error message ->
           respond_page ~status:`Bad_request reqd ~title:"masc"
             ~heading:"That login could not be finished" ~detail:message)

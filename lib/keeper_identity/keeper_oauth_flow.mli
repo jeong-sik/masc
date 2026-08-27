@@ -19,11 +19,16 @@
 type tokens = {
   access_token : string;
   refresh_token : string option;
-      (** Absent only in shapes this rejects. Every authorize call asks for
-          [offline_access], so a server that returns none has answered
-          differently than it was asked -- {!No_refresh_token}, not a field
-          that happened to be missing. *)
-  expires_at : float;  (** unix seconds, computed from the response's [expires_in] *)
+      (** What the answer carried, not what the caller may assume. The two
+          callers read absence differently: on a first exchange it means
+          there is no way to renew, on a renewal it means the provider kept
+          the one already on disk. Deciding which belongs to them. *)
+  expires_at : float option;
+      (** unix seconds, computed from the response's [expires_in]. Absent
+          when the answer stated no expiry: RFC 6749 5.1 makes [expires_in]
+          optional, and a token that never expires is a shape some providers
+          issue rather than a malformed answer. Slack's is one, for apps
+          without token rotation. *)
 }
 
 type pending = private {
@@ -79,10 +84,6 @@ type exchange_error =
       (** the provider answered with something this cannot read *)
   | State_mismatch
       (** the callback echoed a state that is not this exchange's *)
-  | No_refresh_token
-      (** [offline_access] was asked for and no refresh token came back.
-          Storing only the access token would leave the Keeper working until
-          it expires and then stopping with no record of why. *)
 
 val exchange_error_to_string : exchange_error -> string
 

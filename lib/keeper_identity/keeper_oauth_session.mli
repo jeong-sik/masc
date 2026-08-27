@@ -75,14 +75,38 @@ type finish_error =
 
 val finish_error_to_string : finish_error -> string
 
+(** What the provider said about how long this credential lasts, and whether
+    it handed over the means to keep it.
+
+    Three shapes rather than two optional fields: the combination is what an
+    operator has to be told about, and a pair of options leaves every reader
+    working out which of four pairings it is looking at. *)
+type expiry =
+  | Never
+      (** No stated expiry and no refresh token. Nothing to renew and
+          nothing that stops on its own -- it lasts until the provider
+          revokes it. Slack issues this for an app without token rotation. *)
+  | Renewable of { expires_at : float option; refresh_token : string }
+      (** A refresh token came back, so the credential can be replaced
+          before or after it lapses. [expires_at] is when to go early;
+          absent means the provider named no moment, so renewal waits for a
+          call to fail rather than a clock. *)
+  | Expiring_without_renewal of float
+      (** States an expiry and carries no way to renew. This one stops
+          working at that moment and leaves nothing on disk to bring it
+          back: the operator has to attach the provider again. The only
+          shape here that ends in a Keeper losing a provider silently. *)
+
+val expiry_warning : expiry -> string option
+(** What to tell the operator about this shape, or [None] when there is
+    nothing to say. Phrased for someone reading a page right after a login,
+    who has to decide whether they are finished. *)
+
 type finished = {
   keeper : string;
   provider_id : string;
   access_token : string;
-  refresh_token : string;
-      (** Not optional here. {!Keeper_oauth_flow} refuses an answer without
-          one, so by this point it exists. *)
-  expires_at : float;
+  expiry : expiry;
 }
 
 val finish :

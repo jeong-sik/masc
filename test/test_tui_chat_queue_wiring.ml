@@ -15,6 +15,81 @@ module Tui_types = Masc_tui_types
 
 let calls ~module_path ~callee = Ast_grep.count_calls ~module_path ~callee
 
+(* Scrolling back and asking for what is behind it are the same act. They used
+   to be three copies of the same four lines, and [pageup] was missing its
+   copy: a page-at-a-time reader stopped at whatever the first load happened to
+   bring in. Going back through one place is what stops it being forgotten
+   again, so the executable has to actually go through it (#31089). *)
+let test_every_way_back_asks_for_what_is_behind_it () =
+  let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"scroll_back" in
+  if n < 3 then
+    failf
+      "every way of scrolling back (arrow, wheel, page) must ask for older \
+       history through scroll_back; it is called %d time(s)"
+      n
+;;
+
+let entry_at at : Tui_types.msg_entry =
+  { Tui_types.me_keeper_name = "alpha"
+  ; me_role = Tui_types.Message_keeper
+  ; me_text = Printf.sprintf "row at %.0f" at
+  ; me_tool_block = None
+  ; me_timestamp = ""
+  ; me_request_id = ""
+  ; me_at = at
+  }
+
+let ats entries =
+  List.map (fun (e : Tui_types.msg_entry) -> e.Tui_types.me_at) entries
+
+(* The refresh brings the newest window. Anything the operator paged back to is
+   older than that window and has to survive the tick. *)
+let test_a_refresh_keeps_what_was_paged_back_to () =
+  let paged = [ entry_at 100.; entry_at 200. ] in
+  let fresh = [ entry_at 300.; entry_at 400. ] in
+  check
+    (list (float 0.001))
+    "older rows kept, fresh window appended"
+    [ 100.; 200.; 300.; 400. ]
+    (ats (Tui_types.merge_paged_history ~paged ~fresh))
+;;
+
+(* Rows the fresh window already carries come back in it, so keeping the paged
+   copy too would show them twice. *)
+let test_a_refresh_does_not_double_the_overlap () =
+  let paged = [ entry_at 100.; entry_at 300.; entry_at 400. ] in
+  let fresh = [ entry_at 300.; entry_at 400.; entry_at 500. ] in
+  check
+    (list (float 0.001))
+    "only rows older than the window survive"
+    [ 100.; 300.; 400.; 500. ]
+    (ats (Tui_types.merge_paged_history ~paged ~fresh))
+;;
+
+(* A window that came back empty says nothing about what is behind it, so it
+   is not a reason to drop what is held. *)
+let test_an_empty_refresh_keeps_the_transcript () =
+  let paged = [ entry_at 100.; entry_at 200. ] in
+  check
+    (list (float 0.001))
+    "kept"
+    [ 100.; 200. ]
+    (ats (Tui_types.merge_paged_history ~paged ~fresh:[]))
+;;
+
+let test_oldest_at_reports_the_cursor () =
+  check
+    (option (float 0.001))
+    "oldest of the held rows"
+    (Some 100.)
+    (Tui_types.oldest_at [ entry_at 300.; entry_at 100.; entry_at 200. ]);
+  check
+    (option (float 0.001))
+    "nothing to page back from"
+    None
+    (Tui_types.oldest_at [])
+;;
+
 let test_enter_during_a_turn_queues () =
   let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
   if n < 1 then
@@ -559,6 +634,16 @@ let () =
             test_the_calls_table_says_what_came_back
         ; test_case "the sending rows show an age" `Quick
             test_the_sending_rows_show_an_age
+        ; test_case "every way back asks for what is behind it" `Quick
+            test_every_way_back_asks_for_what_is_behind_it
+        ; test_case "a refresh keeps what was paged back to" `Quick
+            test_a_refresh_keeps_what_was_paged_back_to
+        ; test_case "a refresh does not double the overlap" `Quick
+            test_a_refresh_does_not_double_the_overlap
+        ; test_case "an empty refresh keeps the transcript" `Quick
+            test_an_empty_refresh_keeps_the_transcript
+        ; test_case "oldest_at reports the cursor" `Quick
+            test_oldest_at_reports_the_cursor
         ] )
     ; ( "queue"
       , [ test_case "take_newest returns the last and keeps order" `Quick

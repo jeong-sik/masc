@@ -995,6 +995,18 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
      mean anything, so it is also what decides whether they are taken. *)
+  (* Moving back and asking for what is behind it are the same act. They were
+     three separate copies of the same four lines and [pageup] was missing its
+     copy, so a page-at-a-time reader stopped at whatever the first load
+     happened to bring in (#31089). Going back through here means the request
+     cannot be forgotten again. *)
+  let scroll_back rows =
+    set_msg_scroll state (state.msg_scroll + rows);
+    match state.msg_older_cursor with
+    | Some before when state.msg_older_exist && not state.msg_older_loading ->
+        load_older ~before
+    | Some _ | None -> ()
+  in
   let live_is_on_screen live =
     (* [msg_live] survives leaving the chat, so a prompt for keeper A must
        not be answered (or interrupted) from keeper B's screen. *)
@@ -1034,11 +1046,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Buffer.add_char state.msg_input '\n';
     true
   | "up" when state.msg_scroll > 0 ->
-    set_msg_scroll state (state.msg_scroll + 1);
-    (match state.msg_older_cursor with
-     | Some before when state.msg_older_exist && not state.msg_older_loading ->
-         load_older ~before
-     | Some _ | None -> ());
+    scroll_back 1;
     true
   | "down" when state.msg_scroll > 0 ->
     set_msg_scroll state (state.msg_scroll - 1);
@@ -1055,11 +1063,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
        hundreds of rows -- took hundreds of notches. Three is what a terminal
        reports per detent, so a notch here covers what a notch covers
        everywhere else. *)
-    set_msg_scroll state (state.msg_scroll + wheel_notch_rows);
-    (match state.msg_older_cursor with
-     | Some before when state.msg_older_exist && not state.msg_older_loading ->
-         load_older ~before
-     | Some _ | None -> ());
+    scroll_back wheel_notch_rows;
     true
   | "wheel-down" ->
     set_msg_scroll state (state.msg_scroll - wheel_notch_rows);
@@ -1067,7 +1071,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | "pageup" ->
     (* A keeper's turn is many rows, so one row per press walks back through a
        single message. A page is the unit the reader actually moves in. *)
-    set_msg_scroll state (state.msg_scroll + keeper_message_page_rows state);
+    scroll_back (keeper_message_page_rows state);
     true
   | "pagedown" ->
     set_msg_scroll state (state.msg_scroll - keeper_message_page_rows state);
@@ -6729,23 +6733,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           | Ok { Keeper_chat_history.rows; dropped } ->
              state.msg_loaded_error <- None;
              state.msg_loaded_dropped <- dropped;
-             (* Where reading further back starts. The oldest row this load
-                carried is the cursor; if it carried none there is nothing to
-                page back from. Whether older rows exist is only learned by
-                asking, so the pane assumes they might and finds out on the
-                first page. *)
-             state.msg_older_cursor <-
-               List.fold_left
-                 (fun oldest (row : Keeper_chat_history.row) ->
-                   match oldest with
-                   | None -> Some row.Keeper_chat_history.at
-                   | Some at ->
-                       Some (Float.min at row.Keeper_chat_history.at))
-                 None rows;
-             state.msg_older_exist <- Option.is_some state.msg_older_cursor;
+             let fresh = List.map (msg_entry_of_history_row keeper_name) rows in
+             let kept = merge_paged_history ~paged:prior_history ~fresh in
+             let cursor = oldest_at kept in
+             (* Where reading further back starts: the oldest row now held. A
+                refresh that reaches no further back than before has learned
+                nothing new about what is behind it, so a "nothing older"
+                answer already given is kept rather than asked again on every
+                tick. *)
+             if state.msg_older_cursor <> cursor then
+               state.msg_older_exist <- Option.is_some cursor;
+             state.msg_older_cursor <- cursor;
              state.msg_older_error <- None;
              forget_session_rows_the_transcript_holds state keeper_name rows;
-             List.map (msg_entry_of_history_row keeper_name) rows
+             kept
           | Error detail ->
              (* The transcript is left as it was and the session rows stay: a
                 failed load must not be the reason the pane goes blank. *)

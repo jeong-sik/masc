@@ -104,6 +104,10 @@ function responseWithQueue(
   approval_queue_violations: DashboardGateResponse['approval_queue_violations'] = [],
   approval_rules_state: DashboardGateResponse['approval_rules_state'] = { state: 'ready' },
   recent_resolved_state: DashboardGateResponse['recent_resolved_state'] = { state: 'ready' },
+  // Trailing overrides rather than two more positional parameters: this chain
+  // is already ten deep and a caller that only cares about one field should
+  // not have to spell the nine before it.
+  extra: Partial<DashboardGateResponse> = {},
 ): DashboardGateResponse {
   const resolvedPage = recent_resolved_state.state === 'ready'
     ? recent_resolved_page ?? {
@@ -125,7 +129,12 @@ function responseWithQueue(
     recent_resolved_state,
     approval_rules,
     approval_rules_state,
+    keeper_modes: [],
+    keeper_modes_state: { state: 'ready' },
+    keeper_judges: [],
+    keeper_judges_state: { state: 'ready' },
     hitl,
+    ...extra,
   } as DashboardGateResponse
 }
 
@@ -143,6 +152,7 @@ async function loadSurface(
   approval_queue_violations: DashboardGateResponse['approval_queue_violations'] = [],
   approval_rules_state: DashboardGateResponse['approval_rules_state'] = { state: 'ready' },
   recent_resolved_state: DashboardGateResponse['recent_resolved_state'] = { state: 'ready' },
+  extra: Partial<DashboardGateResponse> = {},
 ) {
   vi.resetModules()
   const resolveGateApproval = vi
@@ -188,6 +198,7 @@ async function loadSurface(
         approval_queue_violations,
         approval_rules_state,
         recent_resolved_state,
+        extra,
       )
     : responseWithQueue(
         approval_queue,
@@ -199,6 +210,7 @@ async function loadSurface(
         approval_queue_violations,
         approval_rules_state,
         recent_resolved_state,
+        extra,
       )
   const apiMock = () => ({
     fetchDashboardGate: vi.fn().mockResolvedValue(response),
@@ -1476,4 +1488,64 @@ describe('ApprovalsSurface', () => {
     expect(css).toMatch(/@media \(max-width: 980px\)[\s\S]*?\.ap-surface\s*\{\s*flex-direction:\s*column;/)
     expect(css).toMatch(/\.ap-surface\s*>\s*\.ov-scroll\s*\{[^}]*width:\s*100%/)
   })
+
+  it('shows which Keepers were singled out', async () => {
+    const { ApprovalsSurface } = await loadSurface([], [], [], undefined, undefined, undefined, undefined, undefined, undefined, {
+      keeper_modes: [
+        {
+          keeper_name: 'kidsnote',
+          mode: 'manual',
+          updated_by: 'vincent',
+          updated_at: '2026-08-27T05:00:00Z',
+        },
+      ],
+      keeper_judges: [
+        {
+          keeper_name: 'kidsnote',
+          slot_id: 'glm-coding.glm-5-turbo',
+          updated_by: 'vincent',
+          updated_at: '2026-08-27T05:00:00Z',
+        },
+      ],
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const modeRows = container.querySelectorAll('[data-testid="keeper-mode-row"]')
+    expect(modeRows.length).toBe(1)
+    expect(modeRows[0]?.textContent).toContain('kidsnote')
+    // The label an operator picked in the mode control, not the wire value.
+    expect(modeRows[0]?.textContent).toContain('Human')
+    const judgeRows = container.querySelectorAll('[data-testid="keeper-judge-row"]')
+    expect(judgeRows.length).toBe(1)
+    expect(judgeRows[0]?.textContent).toContain('glm-coding.glm-5-turbo')
+  })
+
+  it('says nobody was singled out rather than showing nothing', async () => {
+    const { ApprovalsSurface } = await loadSurface([], [], [])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="keeper-gate-settings"]')?.textContent)
+      .toContain('모드를 따로 정한 Keeper 없음')
+  })
+
+  it('reports an unreadable override file instead of an empty list', async () => {
+    // Empty means nobody was singled out, which is a working configuration. A
+    // file that could not be read must not be able to look like one.
+    const { ApprovalsSurface } = await loadSurface([], [], [], undefined, undefined, undefined, undefined, undefined, undefined, {
+      keeper_modes: [],
+      keeper_modes_state: { state: 'unavailable', error: 'overrides unreadable' },
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const warn = container.querySelector('[data-testid="keeper-modes-unavailable"]')
+    expect(warn?.textContent).toContain('overrides unreadable')
+    expect(container.querySelectorAll('[data-testid="keeper-mode-row"]').length).toBe(0)
+  })
+
 })

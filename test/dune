@@ -3538,3 +3538,8 @@
  (modules test_keeper_composition_async_broker)
  (libraries masc_test_deps masc_schedule multimodal bigstringaf
    masc.keeper_checkpoint_ref masc.embedded_config masc.tool_spawn))
+
+(test
+ (name test_keeper_local_playground_gate)
+ (modules test_keeper_local_playground_gate)
+ (libraries masc_test_deps))

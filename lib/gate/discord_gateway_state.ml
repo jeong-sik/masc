@@ -78,6 +78,14 @@ type mention_kind =
     populated for user mentions when the structured [mentions] array
     included a display name; role/channel mentions stay [None] until a
     guild cache is wired in. *)
+type inbound_attachment =
+  { ia_id : string
+  ; ia_filename : string
+  ; ia_size : int
+  ; ia_url : string
+  ; ia_content_type : string option
+  }
+
 type resolved_mention =
   { mention_id : string
   ; mention_name : string option
@@ -100,6 +108,7 @@ type dispatched_event =
       ; author_id : string
       ; author_name : string option
       ; content : string
+      ; attachments : inbound_attachment list
       ; raw_content : string
             (* Original message content before mention resolution. Kept so
                downstream consumers can fall back to snowflakes or render
@@ -429,6 +438,57 @@ let decode_ready ~payload =
       Error
         "READY payload: missing session_id / resume_gateway_url / user.id"
 
+(* Files Discord says came with the message. Every required field must be
+   there or the entry is dropped: a file with no url is not something a reader
+   can be told about, and inventing a name for it would be worse than saying
+   nothing. [content_type] is optional in the Attachment object and stays
+   absent rather than being guessed from the filename. *)
+let attachment_lines attachments =
+  List.map
+    (fun (a : inbound_attachment) ->
+      Printf.sprintf "[file] %s%s%s %s"
+        a.ia_filename
+        (if a.ia_size > 0 then
+           Printf.sprintf " \xc2\xb7 %d bytes" a.ia_size
+         else "")
+        (match a.ia_content_type with
+         | None -> ""
+         | Some t -> " \xc2\xb7 " ^ t)
+        a.ia_url)
+    attachments
+
+let content_with_attachments ~content ~attachments =
+  match attachment_lines attachments with
+  | [] -> content
+  | lines ->
+    let body = String.trim content in
+    String.concat "\n" (if body = "" then lines else body :: lines)
+
+let decode_inbound_attachments payload =
+  match assoc_opt "attachments" payload with
+  | Some (`List items) ->
+    List.filter_map
+      (fun item ->
+        match
+          ( field_string_opt "id" item
+          , field_string_opt "filename" item
+          , field_string_opt "url" item )
+        with
+        | Some ia_id, Some ia_filename, Some ia_url ->
+          Some
+            { ia_id
+            ; ia_filename
+            ; ia_size =
+                (match assoc_opt "size" item with
+                 | Some (`Int n) -> n
+                 | Some _ | None -> 0)
+            ; ia_url
+            ; ia_content_type = field_string_opt "content_type" item
+            }
+        | _ -> None)
+      items
+  | Some _ | None -> []
+
 let decode_message_create ~bot_user_id ~payload =
   let channel_id = field_string_opt "channel_id" payload in
   let guild_id = field_string_opt "guild_id" payload in
@@ -518,6 +578,7 @@ let decode_message_create ~bot_user_id ~payload =
       Ok
         (Message_create
            { channel_id
+           ; attachments = decode_inbound_attachments payload
            ; message_id
            ; guild_id
            ; author_id

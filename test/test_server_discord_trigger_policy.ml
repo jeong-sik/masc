@@ -188,6 +188,7 @@ let discord_message ~message_id =
     ; author_id = "U123"
     ; author_name = Some "operator"
     ; content = "wake the keeper"
+    ; attachments = []
     ; raw_content = "wake the keeper"
     ; resolved_mentions = []
     ; mention_user_ids = []

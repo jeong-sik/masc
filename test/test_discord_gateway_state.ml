@@ -358,6 +358,7 @@ let message_create_payload
     ?message_reference_channel_id ?message_reference_message_id
     ?referenced_message_author_id ?author_bot ?webhook_id
     ?(mentions = [])
+    ?(attachments : Yojson.Safe.t list = [])
     ~content ~mention_ids ()
     : Yojson.Safe.t =
   let mentions_json =
@@ -400,6 +401,9 @@ let message_create_payload
     ; ("content", `String content)
     ; ("mentions", mentions_json)
     ]
+    @ (match attachments with
+       | [] -> [] (* Absent, as every pre-attachment fixture has it. *)
+       | items -> [ ("attachments", `List items) ])
     @ (match webhook_id with
        | Some w -> [ ("webhook_id", `String w) ]
        | None -> [])
@@ -486,6 +490,206 @@ let test_decode_message_create_with_mention () =
       ()
   | Ok _ -> fail "decoded wrong MESSAGE_CREATE fields"
   | Error msg -> fail msg
+
+(* Discord's Attachment object always carries [id], [filename], [size],
+   [url] and [proxy_url]; [content_type] is optional. An entry missing a
+   required field cannot be described to a reader, so it is dropped rather
+   than shown half-named. *)
+
+let attachment_payload ~content ~attachments =
+  message_create_payload
+    ~id:"MSG1"
+    ~channel_id:"CH1"
+    ~author_id:"USER1"
+    ~content
+    ~mention_ids:[]
+    ~attachments
+    ()
+
+let decode_attachments ~content ~attachments =
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload:(attachment_payload ~content ~attachments)
+  with
+  | Ok (S.Message_create { attachments; _ }) -> attachments
+  | Ok _ -> fail "expected MESSAGE_CREATE"
+  | Error msg -> fail msg
+
+let test_decodes_attachments () =
+  match
+    decode_attachments
+      ~content:"look"
+      ~attachments:
+        [ `Assoc
+            [ ("id", `String "A1")
+            ; ("filename", `String "photo.png")
+            ; ("size", `Int 2103)
+            ; ("url", `String "https://cdn.example/A1/photo.png")
+            ; ("content_type", `String "image/png")
+            ]
+        ]
+  with
+  | [ a ] ->
+      Alcotest.(check string) "id" "A1" a.S.ia_id;
+      Alcotest.(check string) "filename" "photo.png" a.S.ia_filename;
+      Alcotest.(check int) "size" 2103 a.S.ia_size;
+      Alcotest.(check string)
+        "url" "https://cdn.example/A1/photo.png" a.S.ia_url;
+      Alcotest.(check (option string))
+        "content_type" (Some "image/png") a.S.ia_content_type
+  | other ->
+      fail
+        (Printf.sprintf "expected one attachment, got %d" (List.length other))
+
+(* [content_type] is optional in the wire format. Absent stays absent — the
+   extension is not a safe guess for what the bytes are. *)
+let test_attachment_without_content_type () =
+  match
+    decode_attachments
+      ~content:""
+      ~attachments:
+        [ `Assoc
+            [ ("id", `String "A2")
+            ; ("filename", `String "notes")
+            ; ("size", `Int 12)
+            ; ("url", `String "https://cdn.example/A2/notes")
+            ]
+        ]
+  with
+  | [ a ] ->
+      Alcotest.(check (option string))
+        "content_type" None a.S.ia_content_type;
+      Alcotest.(check int) "size" 12 a.S.ia_size
+  | other ->
+      fail
+        (Printf.sprintf "expected one attachment, got %d" (List.length other))
+
+let test_attachment_missing_required_field_is_dropped () =
+  let decoded =
+    decode_attachments
+      ~content:"two files, one unusable"
+      ~attachments:
+        [ `Assoc
+            [ ("id", `String "A3")
+            ; ("filename", `String "good.txt")
+            ; ("size", `Int 4)
+            ; ("url", `String "https://cdn.example/A3/good.txt")
+            ]
+          (* No [url]: there is nothing to point a reader at. *)
+        ; `Assoc
+            [ ("id", `String "A4"); ("filename", `String "no-url.bin") ]
+        ]
+  in
+  Alcotest.(check (list string))
+    "only the usable one survives"
+    [ "good.txt" ]
+    (List.map (fun (a : S.inbound_attachment) -> a.S.ia_filename) decoded)
+
+(* A photo posted with no caption arrives with [content] empty. The files are
+   the message; without them there is nothing left to carry. *)
+let test_caption_less_photo_still_carries_its_file () =
+  match
+    decode_attachments
+      ~content:""
+      ~attachments:
+        [ `Assoc
+            [ ("id", `String "A5")
+            ; ("filename", `String "screenshot.png")
+            ; ("size", `Int 88123)
+            ; ("url", `String "https://cdn.example/A5/screenshot.png")
+            ; ("content_type", `String "image/png")
+            ]
+        ]
+  with
+  | [ a ] ->
+      Alcotest.(check string) "filename" "screenshot.png" a.S.ia_filename
+  | other ->
+      fail
+        (Printf.sprintf "expected one attachment, got %d" (List.length other))
+
+let test_no_attachments_field_decodes_empty () =
+  let payload =
+    message_create_payload
+      ~id:"MSG9"
+      ~channel_id:"CH1"
+      ~author_id:"USER1"
+      ~content:"plain"
+      ~mention_ids:[]
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok (S.Message_create { attachments = []; _ }) -> ()
+  | Ok (S.Message_create _) -> fail "expected no attachments"
+  | Ok _ -> fail "expected MESSAGE_CREATE"
+  | Error msg -> fail msg
+
+let contains_substring haystack needle =
+  let hn = String.length haystack and nn = String.length needle in
+  let rec at i = i + nn <= hn && (String.sub haystack i nn = needle || at (i + 1)) in
+  at 0
+
+let file ?content_type ~name ~size url =
+  { S.ia_id = name
+  ; S.ia_filename = name
+  ; S.ia_size = size
+  ; S.ia_url = url
+  ; S.ia_content_type = content_type
+  }
+
+(* The bug this closes: a photo posted with no caption arrives with [content]
+   empty, and the gateway threw the whole message away as blank. *)
+let test_caption_less_photo_is_not_a_blank_message () =
+  let body =
+    S.content_with_attachments
+      ~content:""
+      ~attachments:
+        [ file
+            ~content_type:"image/png"
+            ~name:"screenshot.png"
+            ~size:88123
+            "https://cdn.example/A5/screenshot.png"
+        ]
+  in
+  Alcotest.(check bool) "not blank" false (String.trim body = "");
+  Alcotest.(check bool)
+    "names the file"
+    true
+    (contains_substring body "screenshot.png");
+  Alcotest.(check bool)
+    "points at it"
+    true
+    (contains_substring body "https://cdn.example/A5/screenshot.png")
+
+let test_caption_keeps_its_text_above_the_files () =
+  let body =
+    S.content_with_attachments
+      ~content:"  see this  "
+      ~attachments:
+        [ file ~name:"a.png" ~size:1 "https://cdn.example/a.png"
+        ; file ~name:"b.png" ~size:2 "https://cdn.example/b.png"
+        ]
+  in
+  match String.split_on_char '\n' body with
+  | [ first; second; third ] ->
+      Alcotest.(check string) "caption first" "see this" first;
+      Alcotest.(check bool) "then a" true (contains_substring second "a.png");
+      Alcotest.(check bool) "then b" true (contains_substring third "b.png")
+  | other ->
+      fail
+        (Printf.sprintf "expected three lines, got %d" (List.length other))
+
+let test_text_only_message_is_untouched () =
+  Alcotest.(check string)
+    "unchanged"
+    "just words"
+    (S.content_with_attachments ~content:"just words" ~attachments:[])
 
 (* RFC-0223 P1 — author display name extraction. *)
 
@@ -2228,6 +2432,21 @@ let () =
             test_decode_message_create_preserves_raw_content
         ; test_case "MESSAGE_CREATE records resolved_mentions metadata" `Quick
             test_decode_message_create_records_resolved_mentions
+        ; test_case "caption-less photo is not a blank message" `Quick
+            test_caption_less_photo_is_not_a_blank_message
+        ; test_case "caption keeps its text above the files" `Quick
+            test_caption_keeps_its_text_above_the_files
+        ; test_case "text-only message is untouched" `Quick
+            test_text_only_message_is_untouched
+        ; test_case "attachments decode" `Quick test_decodes_attachments
+        ; test_case "attachment without content_type" `Quick
+            test_attachment_without_content_type
+        ; test_case "attachment missing a required field is dropped" `Quick
+            test_attachment_missing_required_field_is_dropped
+        ; test_case "caption-less photo still carries its file" `Quick
+            test_caption_less_photo_still_carries_its_file
+        ; test_case "no attachments field decodes empty" `Quick
+            test_no_attachments_field_decodes_empty
         ; test_case "author_name prefers global_name" `Quick
             test_decode_author_name_prefers_global_name
         ; test_case "author_name falls back to username" `Quick

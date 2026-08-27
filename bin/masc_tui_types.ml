@@ -2052,6 +2052,27 @@ let chat_rows_for (state : state) keeper_name =
    forgotten at one of the dozen keys that scroll. Leaving the bottom takes the
    pin; returning to it releases the pin, which is also the gesture for going
    back to following the turn. *)
+(* The oldest moment among these rows, or nothing when there are none. *)
+let oldest_at (entries : msg_entry list) =
+  List.fold_left
+    (fun oldest (entry : msg_entry) ->
+      match oldest with
+      | None -> Some entry.me_at
+      | Some at -> Some (Float.min at entry.me_at))
+    None entries
+
+(* A refresh brings what is new at the bottom; it does not own the top.
+
+   Rows the operator paged back to are older than anything the fresh window
+   carries, so they are kept. Replacing the list with the fresh window alone
+   threw them away on every tick, which is why paging back never got past
+   whatever the first load happened to reach (#31089). *)
+let merge_paged_history ~(paged : msg_entry list) ~(fresh : msg_entry list) =
+  match oldest_at fresh with
+  | None -> paged
+  | Some at ->
+    List.filter (fun (entry : msg_entry) -> entry.me_at < at) paged @ fresh
+
 let set_msg_scroll (state : state) rows =
   let rows = max 0 rows in
   if rows = 0 then begin

@@ -976,7 +976,6 @@ let sample_own_post : Masc.Board.post =
   ; author = agent_id_exn "test-keeper"
   ; title = "My earlier review"
   ; body = "Already said this exact thing."
-  ; content = "Already said this exact thing."
   ; post_kind = Masc.Board.Human_post
   ; meta_json = None
   ; visibility = Masc.Board.Public
@@ -1133,7 +1132,7 @@ let test_board_and_own_post_rows_escape_external_fields () =
   let hostile_post =
     { sample_own_post with
       title = "own title\n- title=forged"
-    ; content = "own body\n- preview=forged"
+    ; body = "own body\n- preview=forged"
     }
   in
   let obs =

@@ -85,7 +85,62 @@ let test_identical_comments_are_distinct_writes () =
 let test_long_post_is_not_locally_rejected () =
   let content = String.make 20_000 'x' in
   let post = create_post ~content in
-  Alcotest.(check int) "full content persisted" 20_000 (String.length post.content)
+  Alcotest.(check int) "full content persisted" 20_000 (String.length post.body)
+;;
+
+(* [content] duplicated [body] byte for byte and [score] restated
+   [votes_up - votes_down]; the decoder refused any row where the two
+   disagreed, so a vote written without a matching score recount dropped the
+   post on the next load. Both keys are gone from the row. *)
+let retired_post_keys = [ "content"; "score" ]
+
+let test_persisted_post_row_carries_no_retired_key () =
+  let post = create_post ~content:"row shape" in
+  let rows =
+    In_channel.with_open_text (Board.persist_path ()) In_channel.input_lines
+    |> List.filter (fun line -> not (String.equal (String.trim line) ""))
+  in
+  Alcotest.(check int) "one row" 1 (List.length rows);
+  let fields =
+    match Yojson.Safe.from_string (List.hd rows) with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "persisted post row is not a JSON object"
+  in
+  List.iter
+    (fun key ->
+       Alcotest.(check bool)
+         (Printf.sprintf "row has no %S" key)
+         false
+         (List.mem_assoc key fields))
+    retired_post_keys;
+  Alcotest.(check string)
+    "body still carries the text"
+    "row shape"
+    (match List.assoc "body" fields with
+     | `String body -> body
+     | _ -> Alcotest.fail "body is not a string");
+  ignore post
+;;
+
+let test_row_carrying_a_retired_key_is_refused () =
+  let post = create_post ~content:"row shape" in
+  let fields =
+    match Board.post_to_yojson post with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "encoded post is not a JSON object"
+  in
+  Alcotest.(check bool)
+    "the row this build writes still reads"
+    true
+    (Option.is_some (Board.post_of_yojson (`Assoc fields)));
+  List.iter
+    (fun key ->
+       let revived = `Assoc (fields @ [ key, `String "anything" ]) in
+       Alcotest.(check bool)
+         (Printf.sprintf "a row carrying %S is refused" key)
+         true
+         (Option.is_none (Board.post_of_yojson revived)))
+    retired_post_keys
 ;;
 
 let () =
@@ -104,6 +159,14 @@ let () =
             "long post has no local content cap"
             `Quick
             (with_board test_long_post_is_not_locally_rejected)
+        ; Alcotest.test_case
+            "persisted row carries no retired key"
+            `Quick
+            (with_board test_persisted_post_row_carries_no_retired_key)
+        ; Alcotest.test_case
+            "a row carrying a retired key is refused"
+            `Quick
+            (with_board test_row_carrying_a_retired_key_is_refused)
         ] )
     ]
 ;;

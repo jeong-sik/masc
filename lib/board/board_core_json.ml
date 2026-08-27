@@ -31,14 +31,12 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
      ; "title", `String p.title
      ; "body", `String p.body
      ; "post_kind", `String (post_kind_to_string p.post_kind)
-     ; "content", `String p.content
      ; "visibility", `String (visibility_to_string p.visibility)
      ; "created_at", `Float p.created_at
      ; "updated_at", `Float p.updated_at
      ; "expires_at", `Float p.expires_at
      ; "votes_up", `Int p.votes_up
      ; "votes_down", `Int p.votes_down
-     ; "score", `Int (p.votes_up - p.votes_down)
      ; "reply_count", `Int p.reply_count
      ; "pinned", `Bool p.pinned
      ]
@@ -72,7 +70,6 @@ let comment_to_yojson (c : comment) : Yojson.Safe.t =
     ; "expires_at", `Float c.expires_at
     ; "votes_up", `Int c.votes_up
     ; "votes_down", `Int c.votes_down
-    ; "score", `Int (c.votes_up - c.votes_down)
     ]
 ;;
 

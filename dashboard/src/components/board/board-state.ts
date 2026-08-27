@@ -377,7 +377,6 @@ export async function loadPostDetail(postId: string) {
       author_identity: data.author_identity,
       title: data.title,
       body: data.body,
-      content: data.content,
       meta: data.meta,
       tags: data.tags,
       votes: data.votes,

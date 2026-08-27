@@ -46,7 +46,7 @@ function keeperSignalTimestamp(keeper: Keeper): string | null {
 function boardPreview(post: BoardPost): string {
   const title = post.title.trim()
   if (title) return title
-  return trimText(post.content)
+  return trimText(post.body)
 }
 
 function keeperPreview(keeper: Keeper): string {

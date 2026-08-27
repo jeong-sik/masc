@@ -412,7 +412,6 @@ let board_context_inference_surface_context (post : Board.post) comments =
             board_context_field "author" (`String author);
             board_context_field "title" (`String post.title);
             board_context_field "body" (`String post.body);
-            board_context_field "content" (`String post.content);
             board_context_field "post_kind" (`String (Board.post_kind_to_string post.post_kind));
             board_context_field "visibility" (`String (Board.visibility_to_string post.visibility));
             board_context_field "hearth" (board_context_string_option_json post.hearth);

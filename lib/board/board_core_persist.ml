@@ -583,7 +583,6 @@ let create_post_with_audience
                 ; author = author_id
                 ; title = normalized_title
                 ; body = normalized_body
-                ; content = normalized_body
                 ; post_kind = normalized_kind
                 ; meta_json = normalized_meta
                 ; visibility
@@ -740,7 +739,6 @@ let create_post_once_by_fusion_run_id
                  String.equal (Agent_id.to_string post.author) (Agent_id.to_string author_id)
                  && String.equal post.title title
                  && String.equal post.body body
-                 && String.equal post.content body
                  && post_kind_equal post.post_kind post_kind
                  && option_equal Yojson.Safe.equal post.meta_json meta_json
                  && visibility_equal post.visibility visibility
@@ -856,7 +854,6 @@ let update_post_with_outcome
                     author = next_author
                   ; title = normalized_title
                   ; body = normalized_body
-                  ; content = normalized_body
                   ; meta_json = normalized_meta
                   ; updated_at = now
                   }

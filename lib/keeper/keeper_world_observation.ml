@@ -485,7 +485,7 @@ let pending_board_event_of_board_signal
     let title, preview, hearth, post_kind, updated_at =
       let post : Board.post = post_snapshot in
       ( post.title
-      , short_preview ~max_len:80 post.content
+      , short_preview ~max_len:80 post.body
       , post.hearth
       , post.post_kind
       , post.updated_at )
@@ -1044,7 +1044,7 @@ let collect_board_events_with_cursor_policy
                 ; post_id = Board.Post_id.to_string p.id
                 ; author = Board.Agent_id.to_string p.author
                 ; title = p.title
-                ; content = p.content
+                ; content = p.body
                 ; hearth = p.hearth
                 ; updated_at = Some p.updated_at
                 }
@@ -1107,7 +1107,7 @@ let collect_board_events_with_cursor_policy
              ; post_id
              ; author = Board.Agent_id.to_string p.author
              ; title = p.title
-             ; content = p.content
+             ; content = p.body
              ; hearth = p.hearth
              ; updated_at = Some p.updated_at
              }
@@ -1204,7 +1204,7 @@ let collect_board_events_with_cursor_policy
                     ; post_id
                     ; author = Board.Agent_id.to_string p.author
                     ; title = p.title
-                    ; preview = short_preview ~max_len:80 p.content
+                    ; preview = short_preview ~max_len:80 p.body
                     ; hearth = p.hearth
                     ; post_kind = p.post_kind
                     ; updated_at = p.updated_at
@@ -1224,7 +1224,7 @@ let collect_board_events_with_cursor_policy
                ; post_id
                ; author = Board.Agent_id.to_string p.author
                ; title = p.title
-               ; content = p.content
+               ; content = p.body
                ; hearth = p.hearth
                ; updated_at = Some p.updated_at
                }
@@ -1237,7 +1237,7 @@ let collect_board_events_with_cursor_policy
                 ; post_id
                 ; author = Board.Agent_id.to_string p.author
                 ; title = p.title
-                ; preview = short_preview ~max_len:80 p.content
+                ; preview = short_preview ~max_len:80 p.body
                 ; hearth = p.hearth
                 ; post_kind = p.post_kind
                 ; updated_at = p.updated_at

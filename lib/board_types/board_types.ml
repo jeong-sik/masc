@@ -194,7 +194,6 @@ type post = {
   author: Agent_id.t;
   title: string;
   body: string;
-  content: string;
   post_kind: post_kind;
   meta_json: Yojson.Safe.t option;
   visibility: visibility;

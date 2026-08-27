@@ -574,14 +574,13 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
   const author = asString(raw.author, '').trim()
-  const body = (asString(raw.body, '').trim() || asString(raw.content, '').trim())
-  const content = body
+  const body = asString(raw.body, '').trim()
   if (!id || !author) return null
 
-  const score = asNumber(raw.score, 0)
   const votesUp = asNumber(raw.votes_up, 0)
   const votesDown = asNumber(raw.votes_down, 0)
-  const votes = asNumber(raw.votes, score || (votesUp - votesDown))
+  const score = votesUp - votesDown
+  const votes = asNumber(raw.votes, score)
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
   const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
   const commentCount = asNumber(raw.comment_count, asNumber(raw.reply_count, 0))
@@ -626,7 +625,6 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     classification_reason: asString(raw.classification_reason, '').trim() || null,
     title,
     body,
-    content,
     meta,
     ...(attachments !== undefined ? { attachments } : {}),
     tags,

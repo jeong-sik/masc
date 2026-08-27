@@ -21,7 +21,6 @@ let make_post ~id ~created_at ~votes_up ~votes_down ~reply_count () : Board.post
   ; author = agent_id_exn "sort-test-author"
   ; title = ""
   ; body = "fixture"
-  ; content = "fixture"
   ; post_kind = Board.Human_post
   ; meta_json = None
   ; visibility = Board.Public

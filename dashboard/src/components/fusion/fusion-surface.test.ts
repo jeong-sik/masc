@@ -63,7 +63,6 @@ function boardPost(overrides: Partial<BoardPost> & { id: string; meta: BoardPost
     pinned: false,
     title: 'Fusion deliberation',
     body: 'Fusion body',
-    content: 'Fusion content',
     meta,
     tags: [],
     votes: 0,

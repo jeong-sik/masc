@@ -1729,6 +1729,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None
+        ; skill_names_present = false
+        ; skill_names_opt = None
         }
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1858,6 +1860,8 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None
+        ; skill_names_present = false
+        ; skill_names_opt = None
         }
       in
       let ctx : _ Keeper_types_profile.context =
@@ -2013,6 +2017,8 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None
+        ; skill_names_present = false
+        ; skill_names_opt = None
         }
       in
       let update_switch, resolve_update_switch = Eio.Promise.create () in

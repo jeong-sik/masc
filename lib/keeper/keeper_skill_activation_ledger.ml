@@ -3,23 +3,43 @@ open Result.Syntax
 type ledger_revision = string
 type workspace_key = string
 
+type task_id_set =
+  | Task_ids of
+      { first : Keeper_id.Task_id.t
+      ; rest : Keeper_id.Task_id.t list
+      }
+
 type instruction_origin =
-  | Task_instruction of { task_id : Keeper_id.Task_id.t }
+  | Task_instruction of { task_ids : task_id_set }
   | Session_instruction
 
 type composition_origin =
   | Task_composition of
-      { task_id : Keeper_id.Task_id.t }
+      { task_ids : task_id_set }
   | Session_composition
 
+type delivery_boundary =
+  | Model_response of { agent_core_turn : int }
+  | Official_client_result_handoff of { agent_core_turn : int }
+
 type delivery =
-  { agent_core_turn : int
+  { boundary : delivery_boundary
+  ; runtime_id : string
   ; delivered_at : string
+  ; content_bytes : int
+  ; content_sha256 : string
+  }
+
+type tool_result_receipt =
+  { tool_use_id : string
+  ; content_bytes : int
+  ; content_sha256 : string
   }
 
 type action =
   { tool_use_id : string
   ; tool_name : string
+  ; runtime_id : string
   ; agent_core_turn : int
   ; observed_at : string
   }
@@ -108,13 +128,20 @@ type summary =
 type summary_scope =
   { snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; turn_ref : Ids.Turn_ref.t
-  ; runtime_id : string
+  ; invocation_runtime_id : string
   ; reference : Skill_reference.t
+  }
+
+type runtime_count =
+  { runtime_id : string
+  ; count : int
   }
 
 type scoped_summary =
   { scope : summary_scope
   ; summary : summary
+  ; delivery_runtime_counts : runtime_count list
+  ; action_runtime_counts : runtime_count list
   }
 
 type record_outcome =
@@ -142,6 +169,8 @@ type decode_error =
   | Invalid_session_id of string
   | Invalid_origin_kind of string
   | Invalid_task_id of string
+  | Empty_task_ids
+  | Duplicate_task_id of string
   | Invalid_tool_name of string
   | Invalid_turn_ref of string
   | Turn_ref_session_mismatch
@@ -153,6 +182,7 @@ type decode_error =
   | Invalid_served_content_bytes of int
   | Invalid_served_content_sha256 of Skill_reference.revision_error
   | Invalid_delivery_agent_core_turn of int
+  | Invalid_delivery_boundary_kind of string
   | Invalid_delivery_time of string
   | Invalid_action_tool_use_id_field
   | Invalid_action_tool_name_field of string
@@ -203,6 +233,8 @@ let decode_error_code = function
   | Invalid_session_id _ -> "invalid_session_id"
   | Invalid_origin_kind _ -> "invalid_origin_kind"
   | Invalid_task_id _ -> "invalid_task_id"
+  | Empty_task_ids -> "empty_task_ids"
+  | Duplicate_task_id _ -> "duplicate_task_id"
   | Invalid_tool_name _ -> "invalid_tool_name"
   | Invalid_turn_ref _ -> "invalid_turn_ref"
   | Turn_ref_session_mismatch -> "turn_ref_session_mismatch"
@@ -214,6 +246,7 @@ let decode_error_code = function
   | Invalid_served_content_bytes _ -> "invalid_served_content_bytes"
   | Invalid_served_content_sha256 _ -> "invalid_served_content_sha256"
   | Invalid_delivery_agent_core_turn _ -> "invalid_delivery_agent_core_turn"
+  | Invalid_delivery_boundary_kind _ -> "invalid_delivery_boundary_kind"
   | Invalid_delivery_time _ -> "invalid_delivery_time"
   | Invalid_action_tool_use_id_field -> "invalid_action_tool_use_id"
   | Invalid_action_tool_name_field _ -> "invalid_action_tool_name"
@@ -277,7 +310,7 @@ let store_error_to_string = function
   | Readback_mismatch -> "readback mismatch"
 ;;
 
-let schema = "masc.skill-activations/v3"
+let schema = "masc.skill-activations/v4"
 let filename = "skill-activations.json"
 let activations ledger = ledger.activations
 let transition_rejections ledger = ledger.transition_rejections
@@ -285,6 +318,25 @@ let revision ledger = ledger.revision
 let ledger_revision_to_string revision = revision
 let workspace_key ledger = ledger.workspace_key
 let session_id ledger = ledger.session_id
+
+let task_id_set_to_list (Task_ids { first; rest }) = first :: rest
+
+let task_id_set_of_list task_ids =
+  let rec duplicate = function
+    | [] -> None
+    | task_id :: rest ->
+      if List.exists (Keeper_id.Task_id.equal task_id) rest
+      then Some task_id
+      else duplicate rest
+  in
+  match task_ids with
+  | [] -> Error Empty_task_ids
+  | first :: rest ->
+    (match duplicate task_ids with
+     | None -> Ok (Task_ids { first; rest })
+     | Some task_id ->
+       Error (Duplicate_task_id (Keeper_id.Task_id.to_string task_id)))
+;;
 
 let empty_summary invalid_transitions =
   { instruction_invocations = 0
@@ -366,7 +418,7 @@ let rejection_activation_turn_ref = function
 let scope_of_activation (activation : activation) =
   { snapshot_revision = activation.snapshot_revision
   ; turn_ref = activation.turn_ref
-  ; runtime_id = activation.runtime_id
+  ; invocation_runtime_id = activation.runtime_id
   ; reference =
       Skill_reference.make
         ~identity:activation.identity
@@ -379,8 +431,23 @@ let equal_summary_scope left right =
     left.snapshot_revision
     right.snapshot_revision
   && Ids.Turn_ref.equal left.turn_ref right.turn_ref
-  && String.equal left.runtime_id right.runtime_id
+  && String.equal left.invocation_runtime_id right.invocation_runtime_id
   && Skill_reference.equal left.reference right.reference
+;;
+
+let runtime_counts runtime_ids =
+  List.fold_left
+    (fun counts runtime_id ->
+       let rec increment reversed = function
+         | [] -> List.rev_append reversed [ { runtime_id; count = 1 } ]
+         | ({ runtime_id = known; count } as current) :: rest ->
+           if String.equal runtime_id known
+           then List.rev_append reversed ({ current with count = count + 1 } :: rest)
+           else increment (current :: reversed) rest
+       in
+       increment [] counts)
+    []
+    runtime_ids
 ;;
 
 let summarize_by_scope ledger =
@@ -412,7 +479,21 @@ let summarize_by_scope ledger =
            ledger.transition_rejections
        in
        let scoped_ledger = { ledger with activations; transition_rejections } in
-       { scope; summary = summarize scoped_ledger })
+       let delivery_runtime_counts =
+         activations
+         |> List.filter_map (fun activation ->
+              Option.map
+                (fun (delivery : delivery) -> delivery.runtime_id)
+                activation.delivery)
+         |> runtime_counts
+       in
+       let action_runtime_counts =
+         activations
+         |> List.concat_map (fun activation ->
+              List.map (fun (action : action) -> action.runtime_id) activation.actions)
+         |> runtime_counts
+       in
+       { scope; summary = summarize scoped_ledger; delivery_runtime_counts; action_runtime_counts })
     scopes
 ;;
 
@@ -425,10 +506,28 @@ let scoped_summary_to_yojson scoped =
                 (Skill_catalog_snapshot.snapshot_revision_to_string
                    scoped.scope.snapshot_revision) )
           ; "turn_ref", Ids.Turn_ref.to_yojson scoped.scope.turn_ref
-          ; "runtime_id", `String scoped.scope.runtime_id
+          ; "invocation_runtime_id", `String scoped.scope.invocation_runtime_id
           ; "reference", Skill_reference.to_yojson scoped.scope.reference
           ] )
     ; "summary", summary_to_yojson scoped.summary
+    ; ( "delivery_runtime_counts"
+      , `List
+          (List.map
+             (fun runtime ->
+                `Assoc
+                  [ "runtime_id", `String runtime.runtime_id
+                  ; "count", `Int runtime.count
+                  ])
+             scoped.delivery_runtime_counts) )
+    ; ( "action_runtime_counts"
+      , `List
+          (List.map
+             (fun runtime ->
+                `Assoc
+                  [ "runtime_id", `String runtime.runtime_id
+                  ; "count", `Int runtime.count
+                  ])
+             scoped.action_runtime_counts) )
     ]
 ;;
 
@@ -546,28 +645,51 @@ let make_activation
     ~activated_at
 ;;
 
+let task_id_set_to_yojson task_ids =
+  `List
+    (List.map
+       (fun task_id -> `String (Keeper_id.Task_id.to_string task_id))
+       (task_id_set_to_list task_ids))
+;;
+
 let instruction_origin_to_yojson = function
-  | Task_instruction { task_id } ->
+  | Task_instruction { task_ids } ->
     `Assoc
       [ "kind", `String "task_instruction"
-      ; "task_id", `String (Keeper_id.Task_id.to_string task_id)
+      ; "task_ids", task_id_set_to_yojson task_ids
       ]
   | Session_instruction -> `Assoc [ "kind", `String "session_instruction" ]
 ;;
 
 let composition_origin_to_yojson = function
-  | Task_composition { task_id } ->
+  | Task_composition { task_ids } ->
     `Assoc
       [ "kind", `String "task_composition"
-      ; "task_id", `String (Keeper_id.Task_id.to_string task_id)
+      ; "task_ids", task_id_set_to_yojson task_ids
       ]
   | Session_composition -> `Assoc [ "kind", `String "session_composition" ]
 ;;
 
+let delivery_boundary_to_yojson = function
+  | Model_response { agent_core_turn } ->
+    `Assoc
+      [ "kind", `String "model_response"
+      ; "agent_core_turn", `Int agent_core_turn
+      ]
+  | Official_client_result_handoff { agent_core_turn } ->
+    `Assoc
+      [ "kind", `String "official_client_result_handoff"
+      ; "agent_core_turn", `Int agent_core_turn
+      ]
+;;
+
 let delivery_to_yojson (delivery : delivery) =
   `Assoc
-    [ "agent_core_turn", `Int delivery.agent_core_turn
+    [ "boundary", delivery_boundary_to_yojson delivery.boundary
+    ; "runtime_id", `String delivery.runtime_id
     ; "delivered_at", `String delivery.delivered_at
+    ; "content_bytes", `Int delivery.content_bytes
+    ; "content_sha256", `String delivery.content_sha256
     ]
 ;;
 
@@ -575,6 +697,7 @@ let action_to_yojson (action : action) =
   `Assoc
     [ "tool_use_id", `String action.tool_use_id
     ; "tool_name", `String action.tool_name
+    ; "runtime_id", `String action.runtime_id
     ; "agent_core_turn", `Int action.agent_core_turn
     ; "observed_at", `String action.observed_at
     ]
@@ -802,6 +925,29 @@ let decode_identity json =
   Ok (Skill_reference.make_identity ~source_id ~package_id ~name)
 ;;
 
+let decode_task_id_set fields =
+  let* task_ids =
+    match List.assoc_opt "task_ids" fields with
+    | Some (`List values) ->
+      List.fold_left
+        (fun result value ->
+           let* reversed = result in
+           match value with
+           | `String text ->
+             let* task_id =
+               Keeper_id.Task_id.of_string text
+               |> Result.map_error (fun _ -> Invalid_task_id text)
+             in
+             Ok (task_id :: reversed)
+           | _ -> Error (Expected_object { field = "task_ids" }))
+        (Ok [])
+        values
+      |> Result.map List.rev
+    | Some _ | None -> Error (Expected_object { field = "task_ids" })
+  in
+  task_id_set_of_list task_ids
+;;
+
 let decode_instruction_origin json =
   let* fields = object_field "origin" json in
   let* kind = string_field "kind" fields in
@@ -810,7 +956,7 @@ let decode_instruction_origin json =
     | "task_instruction" ->
       exact_fields
         ~object_name:"origin"
-        ~allowed:[ "kind"; "task_id" ]
+        ~allowed:[ "kind"; "task_ids" ]
         fields
     | "session_instruction" ->
       exact_fields ~object_name:"origin" ~allowed:[ "kind" ] fields
@@ -818,12 +964,8 @@ let decode_instruction_origin json =
   in
   match kind with
   | "task_instruction" ->
-    let* task_id_text = string_field "task_id" fields in
-    let* task_id =
-      Keeper_id.Task_id.of_string task_id_text
-      |> Result.map_error (fun _ -> Invalid_task_id task_id_text)
-    in
-    Ok (Task_instruction { task_id })
+    let* task_ids = decode_task_id_set fields in
+    Ok (Task_instruction { task_ids })
   | "session_instruction" -> Ok Session_instruction
   | kind -> Error (Invalid_origin_kind kind)
 ;;
@@ -834,21 +976,42 @@ let decode_composition_origin json =
   let* () =
     match kind with
     | "task_composition" ->
-      exact_fields ~object_name:"origin" ~allowed:[ "kind"; "task_id" ] fields
+      exact_fields ~object_name:"origin" ~allowed:[ "kind"; "task_ids" ] fields
     | "session_composition" ->
       exact_fields ~object_name:"origin" ~allowed:[ "kind" ] fields
     | kind -> Error (Invalid_origin_kind kind)
   in
   match kind with
   | "task_composition" ->
-    let* task_id_text = string_field "task_id" fields in
-    let* task_id =
-      Keeper_id.Task_id.of_string task_id_text
-      |> Result.map_error (fun _ -> Invalid_task_id task_id_text)
-    in
-    Ok (Task_composition { task_id })
+    let* task_ids = decode_task_id_set fields in
+    Ok (Task_composition { task_ids })
   | "session_composition" -> Ok Session_composition
   | kind -> Error (Invalid_origin_kind kind)
+;;
+
+let delivery_boundary_turn = function
+  | Model_response { agent_core_turn }
+  | Official_client_result_handoff { agent_core_turn } -> agent_core_turn
+;;
+
+let decode_delivery_boundary json =
+  let* fields = object_field "delivery_boundary" json in
+  let* () =
+    exact_fields
+      ~object_name:"delivery_boundary"
+      ~allowed:[ "kind"; "agent_core_turn" ]
+      fields
+  in
+  let* kind = string_field "kind" fields in
+  let* agent_core_turn = int_field "agent_core_turn" fields in
+  if agent_core_turn < 0
+  then Error (Invalid_delivery_agent_core_turn agent_core_turn)
+  else
+    match kind with
+    | "model_response" -> Ok (Model_response { agent_core_turn })
+    | "official_client_result_handoff" ->
+      Ok (Official_client_result_handoff { agent_core_turn })
+    | observed -> Error (Invalid_delivery_boundary_kind observed)
 ;;
 
 let decode_delivery = function
@@ -858,14 +1021,33 @@ let decode_delivery = function
     let* () =
       exact_fields
         ~object_name:"delivery"
-        ~allowed:[ "agent_core_turn"; "delivered_at" ]
+        ~allowed:
+          [ "boundary"
+          ; "runtime_id"
+          ; "delivered_at"
+          ; "content_bytes"
+          ; "content_sha256"
+          ]
         fields
     in
-    let* agent_core_turn = int_field "agent_core_turn" fields in
+    let* boundary_json =
+      match List.assoc_opt "boundary" fields with
+      | Some value -> Ok value
+      | None -> Error (Expected_object { field = "boundary" })
+    in
+    let* boundary = decode_delivery_boundary boundary_json in
+    let* runtime_id = string_field "runtime_id" fields in
     let* delivered_at = string_field "delivered_at" fields in
+    let* content_bytes = int_field "content_bytes" fields in
+    let* content_sha256 = string_field "content_sha256" fields in
     let* () =
-      if agent_core_turn < 0
-      then Error (Invalid_delivery_agent_core_turn agent_core_turn)
+      if String.equal (String.trim runtime_id) ""
+      then Error Invalid_runtime_id
+      else Ok ()
+    in
+    let* () =
+      if content_bytes < 0
+      then Error (Invalid_served_content_bytes content_bytes)
       else Ok ()
     in
     let* () =
@@ -873,7 +1055,11 @@ let decode_delivery = function
       |> Result.map ignore
       |> Result.map_error (fun _ -> Invalid_delivery_time delivered_at)
     in
-    Ok (Some { agent_core_turn; delivered_at })
+    let* () =
+      Skill_reference.validate_revision_string content_sha256
+      |> Result.map_error (fun error -> Invalid_served_content_sha256 error)
+    in
+    Ok (Some { boundary; runtime_id; delivered_at; content_bytes; content_sha256 })
 ;;
 
 let decode_action json =
@@ -881,13 +1067,25 @@ let decode_action json =
   let* () =
     exact_fields
       ~object_name:"action"
-      ~allowed:[ "tool_use_id"; "tool_name"; "agent_core_turn"; "observed_at" ]
+      ~allowed:
+        [ "tool_use_id"
+        ; "tool_name"
+        ; "runtime_id"
+        ; "agent_core_turn"
+        ; "observed_at"
+        ]
       fields
   in
   let* tool_use_id = string_field "tool_use_id" fields in
   let* tool_name = string_field "tool_name" fields in
+  let* runtime_id = string_field "runtime_id" fields in
   let* agent_core_turn = int_field "agent_core_turn" fields in
   let* observed_at = string_field "observed_at" fields in
+  let* () =
+    if String.equal (String.trim runtime_id) ""
+    then Error Invalid_runtime_id
+    else Ok ()
+  in
   let* () =
     if String.equal (String.trim tool_use_id) ""
     then Error Invalid_action_tool_use_id_field
@@ -908,7 +1106,7 @@ let decode_action json =
     |> Result.map ignore
     |> Result.map_error (fun _ -> Invalid_action_time observed_at)
   in
-  Ok { tool_use_id; tool_name; agent_core_turn; observed_at }
+  Ok { tool_use_id; tool_name; runtime_id; agent_core_turn; observed_at }
 ;;
 
 let decode_served_content json =
@@ -1216,14 +1414,21 @@ let decode_activation ~expected_trace_id json =
     ~activated_at
   in
   (match delivery with
-   | Some observed when observed.agent_core_turn < activation.agent_core_turn ->
+   | Some observed
+     when (match observed.boundary with
+           | Model_response { agent_core_turn } ->
+             agent_core_turn <= activation.agent_core_turn
+           | Official_client_result_handoff { agent_core_turn } ->
+             agent_core_turn < activation.agent_core_turn) ->
      Error
-       (Invalid_delivery_agent_core_turn observed.agent_core_turn)
+       (Invalid_delivery_agent_core_turn
+          (delivery_boundary_turn observed.boundary))
    | Some observed ->
+     let delivery_turn = delivery_boundary_turn observed.boundary in
      (match
         List.find_opt
           (fun (action : action) ->
-             action.agent_core_turn < observed.agent_core_turn)
+             action.agent_core_turn < delivery_turn)
           actions
       with
       | Some (action : action) ->
@@ -1481,10 +1686,35 @@ let observe_delivery
       ~config
       ~trace_id
       ~turn_ref
-      ~tool_result_ids
-      ~agent_core_turn
+      ~tool_results
+      ~boundary
+      ~runtime_id
       ~delivered_at
   =
+  let agent_core_turn = delivery_boundary_turn boundary in
+  let receipt_valid (receipt : tool_result_receipt) =
+    if String.equal (String.trim receipt.tool_use_id) ""
+    then Error (Decode_failed Invalid_skill_tool_use_id)
+    else if receipt.content_bytes < 0
+    then Error (Decode_failed (Invalid_served_content_bytes receipt.content_bytes))
+    else
+      Skill_reference.validate_revision_string receipt.content_sha256
+      |> Result.map_error (fun error ->
+           Decode_failed (Invalid_served_content_sha256 error))
+  in
+  let* () =
+    if String.equal (String.trim runtime_id) ""
+    then Error (Decode_failed Invalid_runtime_id)
+    else Ok ()
+  in
+  let* () =
+    List.fold_left
+      (fun result receipt ->
+         let* () = result in
+         receipt_valid receipt)
+      (Ok ())
+      tool_results
+  in
   with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
     let* () =
       Time_codec.parse_rfc3339 delivered_at
@@ -1495,42 +1725,37 @@ let observe_delivery
     let* current =
       read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
     in
-    let requested = List.sort_uniq String.compare tool_result_ids in
+    let matching_receipt activation =
+      match
+        List.find_opt
+          (fun (receipt : tool_result_receipt) ->
+             String.equal receipt.tool_use_id activation.skill_tool_use_id)
+          tool_results
+      with
+      | None -> None
+      | Some receipt ->
+        (match activation.invocation with
+         | Composition_invocation _ -> Some receipt
+         | Instruction_invocation { served_content; _ } ->
+           let expected_bytes, expected_sha256 =
+             match served_content with
+             | Skill_body { bytes; sha256 }
+             | Skill_resource { bytes; sha256; _ } -> bytes, sha256
+           in
+           if
+             expected_bytes = receipt.content_bytes
+             && String.equal expected_sha256 receipt.content_sha256
+           then Some receipt
+           else None)
+    in
     let rejected =
       List.find_map
         (fun activation ->
-           if not (List.mem activation.skill_tool_use_id requested)
-           then None
-           else if not (Ids.Turn_ref.equal activation.turn_ref turn_ref)
-           then
-             Some
-               ( Delivery_conflict_rejected
-                   { skill_tool_use_id = activation.skill_tool_use_id
-                   ; activation_turn_ref = activation.turn_ref
-                   ; observed_turn_ref = turn_ref
-                   ; observed_agent_core_turn = agent_core_turn
-                   ; observed_at = delivered_at
-                   }
-               , Conflicting_delivery activation.skill_tool_use_id )
-           else if agent_core_turn < activation.agent_core_turn
-           then
-             Some
-               ( Delivery_order_rejected
-                   { skill_tool_use_id = activation.skill_tool_use_id
-                   ; activation_turn_ref = activation.turn_ref
-                   ; observed_turn_ref = turn_ref
-                   ; activation_agent_core_turn = activation.agent_core_turn
-                   ; observed_agent_core_turn = agent_core_turn
-                   ; observed_at = delivered_at
-                   }
-               , Invalid_delivery_order
-                   { skill_tool_use_id = activation.skill_tool_use_id
-                   ; activation_turn = activation.agent_core_turn
-                   ; delivery_turn = agent_core_turn
-                   } )
-           else
-             match activation.delivery with
-             | Some delivery when delivery.agent_core_turn <> agent_core_turn ->
+           match matching_receipt activation with
+           | None -> None
+           | Some receipt ->
+             if not (Ids.Turn_ref.equal activation.turn_ref turn_ref)
+             then
                Some
                  ( Delivery_conflict_rejected
                      { skill_tool_use_id = activation.skill_tool_use_id
@@ -1540,7 +1765,46 @@ let observe_delivery
                      ; observed_at = delivered_at
                      }
                  , Conflicting_delivery activation.skill_tool_use_id )
-             | None | Some _ -> None)
+           else if
+             (match boundary with
+              | Model_response _ -> agent_core_turn <= activation.agent_core_turn
+              | Official_client_result_handoff _ ->
+                agent_core_turn < activation.agent_core_turn)
+             then
+               Some
+                 ( Delivery_order_rejected
+                     { skill_tool_use_id = activation.skill_tool_use_id
+                     ; activation_turn_ref = activation.turn_ref
+                     ; observed_turn_ref = turn_ref
+                     ; activation_agent_core_turn = activation.agent_core_turn
+                     ; observed_agent_core_turn = agent_core_turn
+                     ; observed_at = delivered_at
+                     }
+                 , Invalid_delivery_order
+                     { skill_tool_use_id = activation.skill_tool_use_id
+                     ; activation_turn = activation.agent_core_turn
+                     ; delivery_turn = agent_core_turn
+                     } )
+             else
+               match activation.delivery with
+               | Some delivery
+                 when not (delivery.boundary = boundary)
+                      || not (String.equal delivery.runtime_id runtime_id)
+                      || delivery.content_bytes <> receipt.content_bytes
+                      || not
+                           (String.equal
+                              delivery.content_sha256
+                              receipt.content_sha256) ->
+                 Some
+                   ( Delivery_conflict_rejected
+                       { skill_tool_use_id = activation.skill_tool_use_id
+                       ; activation_turn_ref = activation.turn_ref
+                       ; observed_turn_ref = turn_ref
+                       ; observed_agent_core_turn = agent_core_turn
+                       ; observed_at = delivered_at
+                       }
+                   , Conflicting_delivery activation.skill_tool_use_id )
+               | None | Some _ -> None)
         current.activations
     in
     match rejected with
@@ -1556,13 +1820,21 @@ let observe_delivery
     let reversed, matched, changed =
       List.fold_left
         (fun (reversed, matched, changed) activation ->
-           if not (List.mem activation.skill_tool_use_id requested)
-           then activation :: reversed, matched, changed
-           else
+           match matching_receipt activation with
+           | None -> activation :: reversed, matched, changed
+           | Some receipt ->
              let matched = activation.skill_tool_use_id :: matched in
              match activation.delivery with
              | None ->
-               let delivery = Some { agent_core_turn; delivered_at } in
+               let delivery =
+                 Some
+                   { boundary
+                   ; runtime_id
+                   ; delivered_at
+                   ; content_bytes = receipt.content_bytes
+                   ; content_sha256 = receipt.content_sha256
+                   }
+               in
                { activation with delivery } :: reversed, matched, true
              | Some _ -> activation :: reversed, matched, changed)
         ([], [], false)
@@ -1591,6 +1863,7 @@ let observe_action
       ~active_skill_tool_use_ids
       ~action_tool_use_id
       ~tool_name
+      ~runtime_id
       ~agent_core_turn
       ~observed_at
   =
@@ -1598,6 +1871,8 @@ let observe_action
   then Error Invalid_action_tool_use_id
   else if not (Safe_identifier.is_portable_name tool_name)
   then Error (Invalid_action_tool_name tool_name)
+  else if String.equal (String.trim runtime_id) ""
+  then Error (Decode_failed Invalid_runtime_id)
   else if agent_core_turn < 0
   then Error (Invalid_action_turn agent_core_turn)
   else
@@ -1609,7 +1884,14 @@ let observe_action
           read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
         in
         let active = List.sort_uniq String.compare active_skill_tool_use_ids in
-        let action = { tool_use_id = action_tool_use_id; tool_name; agent_core_turn; observed_at } in
+        let action =
+          { tool_use_id = action_tool_use_id
+          ; tool_name
+          ; runtime_id
+          ; agent_core_turn
+          ; observed_at
+          }
+        in
         let rejected =
           List.find_map
             (fun activation ->
@@ -1621,7 +1903,8 @@ let observe_action
                    || Option.is_none activation.delivery
                    || Option.exists
                         (fun (delivery : delivery) ->
-                           agent_core_turn < delivery.agent_core_turn)
+                           agent_core_turn
+                           < delivery_boundary_turn delivery.boundary)
                         activation.delivery
                  in
                  if before_delivery
@@ -1667,6 +1950,7 @@ let observe_action
                     with
                     | Some known
                       when String.equal known.tool_name action.tool_name
+                           && String.equal known.runtime_id action.runtime_id
                            && known.agent_core_turn = action.agent_core_turn ->
                       Ok (activation :: reversed, added)
                     | Some _ -> Error (Invocation_id_collision action_tool_use_id)

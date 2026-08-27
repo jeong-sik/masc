@@ -25,6 +25,13 @@ let task_id value =
   | Error detail -> fail detail
 ;;
 
+let task_ids values =
+  let typed = List.map task_id values in
+  match Ledger.task_id_set_of_list typed with
+  | Ok value -> value
+  | Error _ -> fail "invalid task id set fixture"
+;;
+
 let with_session f =
   let root = Filename.temp_file "skill-activation-ledger-" "" in
   Sys.remove root;
@@ -77,7 +84,7 @@ let activation_result ?(trace = "trace-one") ?(source = "workspace")
     ?(runtime_id = "test.runtime") ?skill_tool_use_id ?(agent_core_turn = 0)
     ?(body = "skill body")
     ?(absolute_turn = 1) ?(activated_at = "2026-08-26T00:00:00Z")
-    ?(origin = Ledger.Task_instruction { task_id = task_id "task-001" })
+    ?(origin = Ledger.Task_instruction { task_ids = task_ids [ "task-001" ] })
     ?invocation () =
   let skill_tool_use_id =
     Option.value
@@ -134,6 +141,14 @@ let activation ?trace ?source ?package ?name ?revision ?runtime_id ?skill_tool_u
   with
   | Ok value -> value
   | Error _ -> fail "activation fixture was rejected"
+;;
+
+let receipt ?(content = "skill body") tool_use_id =
+  Ledger.
+    { tool_use_id
+    ; content_bytes = String.length content
+    ; content_sha256 = Digestif.SHA256.(digest_string content |> to_hex)
+    }
 ;;
 
 let test_empty_record_and_idempotent_readback () =
@@ -258,8 +273,9 @@ let test_delivery_and_later_action_form_one_exact_chain () =
         ~config
         ~trace_id
         ~turn_ref
-        ~tool_result_ids:[ "unrelated"; "call-skill" ]
-        ~agent_core_turn:1
+        ~tool_results:[ receipt "unrelated"; receipt "call-skill" ]
+        ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+        ~runtime_id:"runtime-delivery"
         ~delivered_at:"2026-08-26T00:00:01Z"
     with
     | Ok value -> value
@@ -272,7 +288,14 @@ let test_delivery_and_later_action_form_one_exact_chain () =
     | _ -> fail "delivery changed activation cardinality"
   in
   (match activation.delivery with
-   | Some delivery -> check int "delivery round" 1 delivery.agent_core_turn
+   | Some delivery ->
+     check string "delivery runtime" "runtime-delivery" delivery.runtime_id;
+     check int "delivery content bytes" 10 delivery.content_bytes;
+     (match delivery.boundary with
+      | Ledger.Model_response { agent_core_turn } ->
+        check int "delivery round" 1 agent_core_turn
+      | Ledger.Official_client_result_handoff _ ->
+        fail "model response recorded as official-client handoff")
    | None -> fail "matching provider input did not record delivery");
   let with_action, added =
     match
@@ -283,6 +306,7 @@ let test_delivery_and_later_action_form_one_exact_chain () =
         ~active_skill_tool_use_ids:[ "call-skill" ]
         ~action_tool_use_id:"call-action"
         ~tool_name:"keeper_time_now"
+        ~runtime_id:"runtime-action"
         ~agent_core_turn:1
         ~observed_at:"2026-08-26T00:00:02Z"
     with
@@ -294,6 +318,7 @@ let test_delivery_and_later_action_form_one_exact_chain () =
    | [ { actions = [ action ]; _ } ] ->
      check string "later action id" "call-action" action.tool_use_id;
      check string "later action tool" "keeper_time_now" action.tool_name
+     ; check string "later action runtime" "runtime-action" action.runtime_id
    | _ -> fail "later action was not attached to the exact Skill invocation");
   let summary = Ledger.summarize with_action in
   check int "one instruction invocation" 1 summary.instruction_invocations;
@@ -301,6 +326,25 @@ let test_delivery_and_later_action_form_one_exact_chain () =
   check int "one delivery" 1 summary.instruction_deliveries;
   check int "one later action" 1 summary.instruction_actions_observed;
   check int "zero invalid transitions" 0 summary.invalid_transitions;
+  (match Ledger.summarize_by_scope with_action with
+   | [ scoped ] ->
+     check string "scope names invocation runtime" "test.runtime"
+       scoped.scope.invocation_runtime_id;
+     check
+       (list (pair string int))
+       "delivery runtime is separate"
+       [ "runtime-delivery", 1 ]
+       (List.map
+          (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+          scoped.delivery_runtime_counts);
+     check
+       (list (pair string int))
+       "action runtime is separate"
+       [ "runtime-action", 1 ]
+       (List.map
+          (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+          scoped.action_runtime_counts)
+   | _ -> fail "one invocation produced the wrong scoped summary count");
   let _, repeated =
     match
       Ledger.observe_action
@@ -310,6 +354,7 @@ let test_delivery_and_later_action_form_one_exact_chain () =
         ~active_skill_tool_use_ids:[ "call-skill" ]
         ~action_tool_use_id:"call-action"
         ~tool_name:"keeper_time_now"
+        ~runtime_id:"runtime-action"
         ~agent_core_turn:1
         ~observed_at:"2026-08-26T00:00:03Z"
     with
@@ -319,34 +364,62 @@ let test_delivery_and_later_action_form_one_exact_chain () =
   check int "repeated action observation is idempotent" 0 repeated
 ;;
 
-let test_official_client_delivery_can_share_the_host_turn () =
+let test_demoted_skill_result_is_not_delivery_or_invalid_transition () =
   with_session @@ fun config trace_id _session_dir ->
-  let value = activation ~skill_tool_use_id:"call-skill" ~agent_core_turn:7 () in
+  let value = activation ~skill_tool_use_id:"call-demoted" () in
   (match Ledger.record ~config ~trace_id value with
    | Ok _ -> ()
    | Error error -> fail (Ledger.store_error_to_string error));
   let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
-  let ledger, matching_ids =
+  let ledger, matched =
     match
       Ledger.observe_delivery
         ~config
         ~trace_id
         ~turn_ref
-        ~tool_result_ids:[ "call-skill" ]
-        ~agent_core_turn:7
+        ~tool_results:[ receipt ~content:"[demoted]" "call-demoted" ]
+        ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+        ~runtime_id:"runtime-b"
         ~delivered_at:"2026-08-26T00:00:01Z"
     with
     | Ok value -> value
     | Error error -> fail (Ledger.store_error_to_string error)
   in
-  check
-    (list string)
-    "same-turn official-client delivery"
-    [ "call-skill" ]
-    matching_ids;
+  check (list string) "digest mismatch is not delivered" [] matched;
+  check int "demotion is not an invalid transition" 0
+    (Ledger.summarize ledger).invalid_transitions;
   match Ledger.activations ledger with
-  | [ { delivery = Some { agent_core_turn = 7; _ }; _ } ] -> ()
-  | _ -> fail "same host-turn delivery was not recorded"
+  | [ { delivery = None; _ } ] -> ()
+  | _ -> fail "demoted Skill result acquired a delivery receipt"
+;;
+
+let test_official_client_handoff_delivers_in_invocation_turn () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-official" ~agent_core_turn:0 () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  let ledger, matched =
+    match
+      Ledger.observe_delivery
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~tool_results:[ receipt "call-official" ]
+        ~boundary:
+          (Ledger.Official_client_result_handoff { agent_core_turn = 0 })
+        ~runtime_id:"codex-runtime"
+        ~delivered_at:"2026-08-26T00:00:01Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check (list string) "official handoff exact id" [ "call-official" ] matched;
+  match Ledger.activations ledger with
+  | [ { delivery = Some { boundary = Ledger.Official_client_result_handoff _; runtime_id; _ }; _ } ] ->
+    check string "official handoff runtime" "codex-runtime" runtime_id
+  | _ -> fail "official-client result handoff was not typed"
 ;;
 
 let test_conflicting_delivery_is_durable_transition_evidence () =
@@ -361,8 +434,9 @@ let test_conflicting_delivery_is_durable_transition_evidence () =
        ~config
        ~trace_id
        ~turn_ref
-       ~tool_result_ids:[ "call-conflict" ]
-       ~agent_core_turn:1
+       ~tool_results:[ receipt "call-conflict" ]
+       ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+       ~runtime_id:"runtime-delivery"
        ~delivered_at:"2026-08-26T00:00:01Z"
    with
    | Ok _ -> ()
@@ -372,8 +446,9 @@ let test_conflicting_delivery_is_durable_transition_evidence () =
        ~config
        ~trace_id
        ~turn_ref
-       ~tool_result_ids:[ "call-conflict" ]
-       ~agent_core_turn:2
+       ~tool_results:[ receipt "call-conflict" ]
+       ~boundary:(Ledger.Model_response { agent_core_turn = 2 })
+       ~runtime_id:"runtime-delivery"
        ~delivered_at:"2026-08-26T00:00:02Z"
    with
    | Error (Ledger.Conflicting_delivery "call-conflict") -> ()
@@ -410,6 +485,7 @@ let test_action_before_delivery_is_durable_transition_evidence () =
        ~active_skill_tool_use_ids:[ "call-undelivered" ]
        ~action_tool_use_id:"call-too-early"
        ~tool_name:"keeper_time_now"
+       ~runtime_id:"runtime-action"
        ~agent_core_turn:1
        ~observed_at:"2026-08-26T00:00:01Z"
    with
@@ -460,8 +536,9 @@ let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
        ~config
        ~trace_id
        ~turn_ref
-       ~tool_result_ids:[ "call-scope-a" ]
-       ~agent_core_turn:1
+       ~tool_results:[ receipt "call-scope-a" ]
+       ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+       ~runtime_id:"runtime-a"
        ~delivered_at:"2026-08-26T00:00:01Z"
    with
    | Ok _ -> ()
@@ -471,8 +548,9 @@ let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
        ~config
        ~trace_id
        ~turn_ref
-       ~tool_result_ids:[ "call-scope-a" ]
-       ~agent_core_turn:2
+       ~tool_results:[ receipt "call-scope-a" ]
+       ~boundary:(Ledger.Model_response { agent_core_turn = 2 })
+       ~runtime_id:"runtime-a"
        ~delivered_at:"2026-08-26T00:00:02Z"
    with
    | Error (Ledger.Conflicting_delivery _) -> ()
@@ -485,11 +563,20 @@ let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
   in
   match Ledger.summarize_by_scope ledger with
   | [ first_scope; second_scope ] ->
-    check string "first runtime" "runtime-a" first_scope.scope.runtime_id;
+    check string "first invocation runtime" "runtime-a"
+      first_scope.scope.invocation_runtime_id;
     check int "first invocation" 1 first_scope.summary.instruction_invocations;
     check int "first delivery" 1 first_scope.summary.instruction_deliveries;
     check int "first rejection" 1 first_scope.summary.invalid_transitions;
-    check string "second runtime" "runtime-b" second_scope.scope.runtime_id;
+    check
+      (list (pair string int))
+      "first delivery runtime counts"
+      [ "runtime-a", 1 ]
+      (List.map
+         (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+         first_scope.delivery_runtime_counts);
+    check string "second invocation runtime" "runtime-b"
+      second_scope.scope.invocation_runtime_id;
     check int "second invocation" 1 second_scope.summary.instruction_invocations;
     check int "second delivery" 0 second_scope.summary.instruction_deliveries;
     check int "second rejection" 0 second_scope.summary.invalid_transitions;
@@ -565,7 +652,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
   in
   let json =
     `Assoc
-      [ "schema", `String "masc.skill-activations/v3"
+      [ "schema", `String "masc.skill-activations/v4"
       ; "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "revision", `String revision
@@ -649,13 +736,23 @@ let test_activation_boundaries_are_typed () =
    | Error _ | Ok _ -> fail "invalid activation time was not rejected");
   let invalid_tool_invocation =
     Ledger.Composition_invocation
-      { origin = Ledger.Task_composition { task_id = task_id "task-001" }
+      { origin = Ledger.Task_composition { task_ids = task_ids [ "task-001" ] }
       ; tool_name = "not/a/tool"
       }
   in
   match activation_result ~invocation:invalid_tool_invocation () with
   | Error (Ledger.Invalid_tool_name _) -> ()
   | Error _ | Ok _ -> fail "invalid composition tool name was not rejected"
+;;
+
+let test_task_id_sets_are_nonempty_and_unique () =
+  (match Ledger.task_id_set_of_list [] with
+   | Error Ledger.Empty_task_ids -> ()
+   | Error _ | Ok _ -> fail "empty Task id set was accepted");
+  let duplicate = task_id "task-001" in
+  match Ledger.task_id_set_of_list [ duplicate; duplicate ] with
+  | Error (Ledger.Duplicate_task_id "task-001") -> ()
+  | Error _ | Ok _ -> fail "duplicate Task id set was accepted"
 ;;
 
 let test_record_rejects_another_trace () =
@@ -738,8 +835,10 @@ let () =
             test_session_origins_roundtrip
         ; test_case "delivery and later action share one exact chain" `Quick
             test_delivery_and_later_action_form_one_exact_chain
-        ; test_case "official-client delivery can share the host turn" `Quick
-            test_official_client_delivery_can_share_the_host_turn
+        ; test_case "demoted result is not delivery" `Quick
+            test_demoted_skill_result_is_not_delivery_or_invalid_transition
+        ; test_case "official client handoff is typed" `Quick
+            test_official_client_handoff_delivers_in_invocation_turn
         ; test_case "conflicting delivery is durable evidence" `Quick
             test_conflicting_delivery_is_durable_transition_evidence
         ; test_case "action before delivery is durable evidence" `Quick
@@ -759,6 +858,8 @@ let () =
             test_duplicate_json_field_is_rejected
         ; test_case "activation constructors enforce typed boundaries" `Quick
             test_activation_boundaries_are_typed
+        ; test_case "Task id sets are nonempty and unique" `Quick
+            test_task_id_sets_are_nonempty_and_unique
         ; test_case "record rejects another trace" `Quick
             test_record_rejects_another_trace
         ; test_case "revision binds workspace and trace" `Quick

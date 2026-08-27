@@ -173,7 +173,7 @@ function keeperReceiptFixture(
         scope: {
           snapshot_revision: 'd'.repeat(64),
           turn_ref: `${sessionId}#1`,
-          runtime_id: 'openai.codex',
+          invocation_runtime_id: 'openai.codex',
           reference,
         },
         summary: {
@@ -187,9 +187,11 @@ function keeperReceiptFixture(
           composition_actions_observed: 0,
           invalid_transitions: 0,
         },
+        delivery_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
+        action_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
       }],
       ledger: {
-        schema: 'masc.skill-activations/v3',
+        schema: 'masc.skill-activations/v4',
         workspace_key: 'e'.repeat(64),
         session_id: sessionId,
         revision: 'c'.repeat(64),
@@ -203,7 +205,7 @@ function keeperReceiptFixture(
             agent_core_turn: 0,
             invocation: {
               kind: 'instruction',
-              origin: { kind: 'task_instruction', task_id: 'task-001' },
+              origin: { kind: 'task_instruction', task_ids: ['task-001', 'task-held'] },
               served_content: {
                 kind: 'skill_body',
                 bytes: 12,
@@ -211,12 +213,16 @@ function keeperReceiptFixture(
               },
             },
             delivery: {
-              agent_core_turn: 1,
+              boundary: { kind: 'model_response', agent_core_turn: 1 },
+              runtime_id: 'anthropic.claude',
               delivered_at: '2026-08-26T00:00:01Z',
+              content_bytes: 12,
+              content_sha256: 'f'.repeat(64),
             },
             actions: [{
               tool_use_id: 'call-action-1',
               tool_name: 'keeper_time_now',
+              runtime_id: 'anthropic.claude',
               agent_core_turn: 1,
               observed_at: '2026-08-26T00:00:02Z',
             }],
@@ -454,7 +460,7 @@ describe('Tools', () => {
       keeperName: 'sangsu',
     }))
     expect(container.textContent).toContain('project-masc/ocaml-coding:ocaml-coding@')
-    expect(container.textContent).toContain('Task instruction · task-001')
+    expect(container.textContent).toContain('Task instruction · task-001, task-held')
     expect(container.textContent).toContain(`snapshot ${'d'.repeat(64)}`)
     expect(container.textContent).toContain('session totals')
     expect(container.textContent).toContain('proof project-masc/ocaml-coding:ocaml-coding')
@@ -464,6 +470,11 @@ describe('Tools', () => {
     expect(container.textContent).toContain('invalid 0')
     expect(container.textContent).toContain('call-skill-1')
     expect(container.textContent).toContain('keeper_time_now')
+    expect(container.textContent).toContain('invocation runtime openai.codex')
+    expect(container.textContent).toContain('delivery runtimes anthropic.claude:1')
+    expect(container.textContent).toContain('action runtimes anthropic.claude:1')
+    expect(container.textContent).toContain('delivered model_response turn 1 · runtime anthropic.claude')
+    expect(container.textContent).toContain('action turn 1 · runtime anthropic.claude')
   })
 
   it('fails loudly when one Keeper projection is omitted', async () => {

@@ -5329,6 +5329,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
                   ~terminal_effect_state:bundle.terminal_effect_state
                   ~terminal_error
                   ~raw_trace_run:None
+                  ()
               with
               | Ok tools -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
@@ -5417,6 +5418,7 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
                   ~terminal_effect_state:bundle.terminal_effect_state
                   ~terminal_error
                   ~raw_trace_run:None
+                  ()
               with
               | Ok tools -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
@@ -5518,6 +5520,7 @@ let test_stale_spawn_handles_remain_correction_capable () =
                   ~terminal_effect_state:bundle.terminal_effect_state
                   ~terminal_error
                   ~raw_trace_run:None
+                  ()
               with
               | Ok tools -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
@@ -5928,6 +5931,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
                   ~terminal_effect_state:bundle.terminal_effect_state
                   ~terminal_error
                   ~raw_trace_run:None
+                  ()
               with
               | Ok tools -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
@@ -6045,6 +6049,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                   ~terminal_effect_state:bundle.terminal_effect_state
                   ~terminal_error
                   ~raw_trace_run:None
+                  ()
               with
               | Ok tools -> tools
               | Error error -> fail (Agent_core.Error.to_string error)
@@ -6170,6 +6175,7 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
                   ~terminal_effect_state:bundle.terminal_effect_state
                   ~terminal_error
                   ~raw_trace_run:None
+                  ()
               with
               | Ok tools -> tools
               | Error error -> fail (Agent_core.Error.to_string error)

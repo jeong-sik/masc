@@ -36,6 +36,16 @@ type agent_setup =
   ; hooks : Agent_core.Hooks.hooks
   ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
   ; model_input_projection : Agent_core.Agent.model_input_projection
+  ; stage_skill_delivery_on_wire :
+      runtime_id:string ->
+      agent_core_turn:int ->
+      Agent_core.Types.message list ->
+      unit
+  ; observe_official_client_result_handoff :
+      runtime_id:string ->
+      invocation:Agent_core.Tool_contract.Invocation.t ->
+      content:string ->
+      unit
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
@@ -75,7 +85,6 @@ type ctx =
   ; receipt_lane_attempt_index_ref : int ref
   ; receipt_response_text_present_ref : bool ref
   ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
-  ; checkpoint_owner : unit -> Runtime_execution.checkpoint_owner option
   ; tool_result_commit_required : unit -> bool
   ; on_tool_result_ready :
       (tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit) option
@@ -97,12 +106,19 @@ let project_model_input ~base_path ~gate_replay_evidence messages =
     Keeper_gate_replay.project_model_input ~base_path evidence messages
 ;;
 
-let trailing_tool_result_ids messages =
+let trailing_tool_result_receipts messages =
   match List.rev messages with
   | { Agent_core.Types.role = Tool; content; _ } :: _ ->
     List.filter_map
       (function
-        | Agent_core.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+        | Agent_core.Types.ToolResult { tool_use_id; content; _ } ->
+          Some
+            Keeper_skill_activation_ledger.
+              { tool_use_id
+              ; content_bytes = String.length content
+              ; content_sha256 =
+                  Digestif.SHA256.(digest_string content |> to_hex)
+              }
         | Text _
         | Thinking _
         | ReasoningDetails _
@@ -117,11 +133,43 @@ let trailing_tool_result_ids messages =
     []
 ;;
 
-let is_skill_activation_tool tool_name =
-  String.equal tool_name Keeper_tool_composition_catalog.skill_tool_name
-  || Option.is_some
-       (Keeper_tool_composition_catalog.skill_source_of_tool_name tool_name)
-;;
+module Skill_delivery_state = struct
+  type staged =
+    { runtime_id : string
+    ; agent_core_turn : int
+    ; tool_results : Keeper_skill_activation_ledger.tool_result_receipt list
+    }
+
+  type t =
+    { mutable pending : staged option
+    ; mutable active_skill_tool_use_ids : string list
+    }
+
+  let create () = { pending = None; active_skill_tool_use_ids = [] }
+
+  let begin_turn state =
+    state.pending <- None;
+    state.active_skill_tool_use_ids <- []
+  ;;
+
+  let stage state ~runtime_id ~agent_core_turn tool_results =
+    state.pending <- Some { runtime_id; agent_core_turn; tool_results }
+  ;;
+
+  let commit_model_response state ~agent_core_turn ~observe =
+    match state.pending with
+    | Some staged when staged.agent_core_turn = agent_core_turn ->
+      state.pending <- None;
+      state.active_skill_tool_use_ids <- observe staged
+    | Some _ | None -> ()
+  ;;
+
+  let set_active state ids =
+    state.active_skill_tool_use_ids <- ids
+  ;;
+
+  let active state = state.active_skill_tool_use_ids
+end
 
 let relative_path_has_segment_prefix prefix raw =
   String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
@@ -297,24 +345,56 @@ let assemble_hooks
        mutex gives those effects one order without introducing a process-global
        gate or serializing tool execution itself. *)
     let serialize_tool_observer = create_tool_observer_serialization () in
-    let active_skill_tool_use_ids = ref [] in
-    let observe_skill_delivery ~tool_result_ids ~agent_core_turn =
+    let skill_delivery_state = Skill_delivery_state.create () in
+    let observe_skill_delivery ~runtime_id ~boundary tool_results =
+      (* Every handoff is a new causal boundary. A failed ledger observation
+         cannot leave ids from an older successful handoff active. *)
+      Skill_delivery_state.set_active skill_delivery_state [];
       match
         Keeper_skill_activation_recorder.observe_delivery
           ~config
           ctx.skill_activation_context
-          ~tool_result_ids
-          ~agent_core_turn
+          ~tool_results
+          ~boundary
+          ~runtime_id
       with
       | Ok delivered ->
-        active_skill_tool_use_ids :=
-          List.sort_uniq String.compare (!active_skill_tool_use_ids @ delivered)
+        Skill_delivery_state.set_active
+          skill_delivery_state
+          (List.sort_uniq String.compare delivered)
       | Error error ->
         Log.Keeper.warn
-          "Skill delivery observation failed for keeper=%s turn=%d error=%s"
+          "Skill delivery observation failed for keeper=%s error=%s"
           meta.name
-          agent_core_turn
           (Keeper_skill_activation_recorder.error_to_string error)
+    in
+    let stage_skill_delivery_on_wire ~runtime_id ~agent_core_turn messages =
+      Skill_delivery_state.stage
+        skill_delivery_state
+        ~runtime_id
+        ~agent_core_turn
+        (trailing_tool_result_receipts messages)
+    in
+    let observe_official_client_result_handoff ~runtime_id ~invocation ~content =
+      let tool_use_id =
+        Agent_core.Tool_contract.Invocation.tool_use_id invocation
+      in
+      let agent_core_turn = Agent_core.Tool_contract.Invocation.turn invocation in
+      let tool_results =
+        [ Keeper_skill_activation_ledger.
+            { tool_use_id
+            ; content_bytes = String.length content
+            ; content_sha256 =
+                Digestif.SHA256.(digest_string content |> to_hex)
+            }
+        ]
+      in
+      observe_skill_delivery
+        ~runtime_id
+        ~boundary:
+          (Keeper_skill_activation_ledger.Official_client_result_handoff
+             { agent_core_turn })
+        tool_results
     in
     let base_hooks =
       Keeper_hooks_agent_core.make_hooks
@@ -440,6 +520,32 @@ let assemble_hooks
     in
     let before_turn_hook : Agent_core.Hooks.hooks =
       { Agent_core.Hooks.empty with
+        after_turn =
+          Some
+            (fun event ->
+              match event with
+              | Agent_core.Hooks.AfterTurn { turn; _ } ->
+                Skill_delivery_state.commit_model_response
+                  skill_delivery_state
+                  ~agent_core_turn:turn
+                  ~observe:(fun staged ->
+                    observe_skill_delivery
+                      ~runtime_id:staged.runtime_id
+                      ~boundary:
+                        (Keeper_skill_activation_ledger.Model_response
+                           { agent_core_turn = turn })
+                      staged.tool_results;
+                    Skill_delivery_state.active skill_delivery_state);
+                Agent_core.Hooks.Continue
+              | Agent_core.Hooks.BeforeTurn _
+              | BeforeTurnParams _
+              | PreToolUse _
+              | PostToolUse _
+              | PostToolUseFailure _
+              | OnStop _
+              | OnError _
+              | OnToolError _ -> Agent_core.Hooks.Continue)
+      ;
         pre_tool_use =
           Some
             (fun event ->
@@ -449,13 +555,14 @@ let assemble_hooks
                        (String.equal
                           tool_name
                           Keeper_tool_composition_catalog.skill_tool_name) ->
-                if !active_skill_tool_use_ids <> []
+                if Skill_delivery_state.active skill_delivery_state <> []
                 then
                   (match
                      Keeper_skill_activation_recorder.observe_action
                        ~config
                        ctx.skill_activation_context
-                       ~active_skill_tool_use_ids:!active_skill_tool_use_ids
+                       ~active_skill_tool_use_ids:
+                         (Skill_delivery_state.active skill_delivery_state)
                        ~invocation
                        ~tool_name
                    with
@@ -477,40 +584,6 @@ let assemble_hooks
               | OnError _
               | OnToolError _ ->
                 Agent_core.Hooks.Continue)
-      ; post_tool_use =
-          Some
-            (fun event ->
-              match event with
-              | Agent_core.Hooks.PostToolUse
-                  { invocation; tool_name; output = Ok _; _ }
-                when is_skill_activation_tool tool_name
-                     && ctx.checkpoint_owner ()
-                        = Some Runtime_execution.Official_client ->
-                (* Official clients own their inner provider/tool loop. They
-                   call [before_turn_params] only once for the whole Keeper
-                   turn, so no later provider-request hook exists to observe
-                   the ToolResult. This post-tool boundary is the last
-                   MASC-owned point before the successful result is returned
-                   to the client. A later dynamic-tool callback can therefore
-                   use the recorded activation, while sibling calls already
-                   admitted in parallel cannot. *)
-                serialize_tool_observer (fun () ->
-                  observe_skill_delivery
-                    ~tool_result_ids:
-                      [ Agent_core.Tool_contract.Invocation.tool_use_id invocation ]
-                    ~agent_core_turn:
-                      (Agent_core.Tool_contract.Invocation.turn invocation));
-                Agent_core.Hooks.Continue
-              | Agent_core.Hooks.PostToolUse _
-              | BeforeTurn _
-              | BeforeTurnParams _
-              | AfterTurn _
-              | PreToolUse _
-              | PostToolUseFailure _
-              | OnStop _
-              | OnError _
-              | OnToolError _ ->
-                Agent_core.Hooks.Continue)
       ;
         before_turn_params =
           Some
@@ -520,13 +593,10 @@ let assemble_hooks
                   { turn; current_params; messages; last_tool_results; _ } ->
                 let hook_t0 = Time_compat.now () in
                 acc.current_turn <- turn;
-                let tool_result_ids = trailing_tool_result_ids messages in
                 (* A delivered Skill can only inform tool choices made from this
                    exact provider request. Do not carry causal candidates into a
                    later Agent Core turn. *)
-                active_skill_tool_use_ids := [];
-                (if tool_result_ids <> []
-                 then observe_skill_delivery ~tool_result_ids ~agent_core_turn:turn);
+                Skill_delivery_state.begin_turn skill_delivery_state;
                 (* Reset the in-turn FSM before this hook writes the next agent-core
                    turn's runtime, policy, and prompt phases. *)
                 Keeper_registry.mark_agent_core_turn_started
@@ -883,6 +953,8 @@ let assemble_hooks
       ; hooks
       ; on_runtime_attempt = ctx.on_runtime_attempt
       ; model_input_projection
+      ; stage_skill_delivery_on_wire
+      ; observe_official_client_result_handoff
       ; gate_replay_evidence
       ; acc
       ; all_tool_names

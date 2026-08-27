@@ -583,6 +583,7 @@ let run_named
     ?event_bus
     ?on_runtime_observation
     ?on_request_wire_observation
+    ?on_official_client_result_handoff
     ?on_model_input_window_observation
     ?runtime_manifest_context
     ?runtime_manifest_append
@@ -932,6 +933,12 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ~on_official_client_result_handoff:
+              (fun ~invocation ~content ->
+                 Option.iter
+                   (fun observe ->
+                      observe ~runtime_id:attempt_runtime_id ~invocation ~content)
+                   on_official_client_result_handoff)
             ~event_bus
             ~raw_trace
             ~on_event
@@ -1039,6 +1046,12 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ~on_official_client_result_handoff:
+              (fun ~invocation ~content ->
+                 Option.iter
+                   (fun observe ->
+                      observe ~runtime_id:attempt_runtime_id ~invocation ~content)
+                   on_official_client_result_handoff)
             ~event_bus
             ~raw_trace
             ~on_event
@@ -1129,6 +1142,12 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ~on_official_client_result_handoff:
+              (fun ~invocation ~content ->
+                 Option.iter
+                   (fun observe ->
+                      observe ~runtime_id:attempt_runtime_id ~invocation ~content)
+                   on_official_client_result_handoff)
             ~event_bus
             ~raw_trace
             ~on_event

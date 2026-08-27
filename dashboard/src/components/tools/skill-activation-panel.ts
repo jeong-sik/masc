@@ -32,11 +32,11 @@ function originLabel(invocation: DashboardSkillActivation['invocation']): string
   const origin = invocation.origin
   switch (origin.kind) {
     case 'task_instruction':
-      return `Task instruction · ${origin.task_id}`
+      return `Task instruction · ${origin.task_ids.join(', ')}`
     case 'session_instruction':
       return 'Session instruction'
     case 'task_composition':
-      return `Task composition · ${origin.task_id} · ${invocation.kind === 'composition' ? invocation.tool_name : ''}`
+      return `Task composition · ${origin.task_ids.join(', ')} · ${invocation.kind === 'composition' ? invocation.tool_name : ''}`
     case 'session_composition':
       return `Session composition · ${invocation.kind === 'composition' ? invocation.tool_name : ''}`
   }
@@ -130,14 +130,17 @@ function ActivationReceipt({
       </div>
       <div class="grid gap-1" data-testid="skill-scoped-summaries">
         ${projection.scoped_summaries.map(scoped => html`
-          <div key=${`${scoped.scope.snapshot_revision}\u0000${scoped.scope.turn_ref}\u0000${scoped.scope.runtime_id}\u0000${referenceLabel(scoped.scope.reference)}`} class="rounded-[var(--r-1)] border border-[var(--color-border-subtle)] p-2 grid gap-1">
+          <div key=${`${scoped.scope.snapshot_revision}\u0000${scoped.scope.turn_ref}\u0000${scoped.scope.invocation_runtime_id}\u0000${referenceLabel(scoped.scope.reference)}`} class="rounded-[var(--r-1)] border border-[var(--color-border-subtle)] p-2 grid gap-1">
             <code class="text-3xs break-all">proof ${referenceLabel(scoped.scope.reference)}</code>
             <code class="text-3xs break-all text-[var(--color-fg-muted)]">
-              snapshot ${scoped.scope.snapshot_revision} · keeper turn ${scoped.scope.turn_ref} · runtime ${scoped.scope.runtime_id}
+              snapshot ${scoped.scope.snapshot_revision} · keeper turn ${scoped.scope.turn_ref} · invocation runtime ${scoped.scope.invocation_runtime_id}
             </code>
             <span class="text-3xs">
               invoked ${scoped.summary.instruction_invocations} · bodies ${scoped.summary.skill_bodies_served} · resources ${scoped.summary.skill_resources_served} · delivered ${scoped.summary.instruction_deliveries} · actions ${scoped.summary.instruction_actions_observed} · compositions ${scoped.summary.composition_invocations}/${scoped.summary.composition_deliveries}/${scoped.summary.composition_actions_observed} · invalid ${scoped.summary.invalid_transitions}
             </span>
+            <code class="text-3xs break-all text-[var(--color-fg-muted)]">
+              delivery runtimes ${scoped.delivery_runtime_counts.map(item => `${item.runtime_id}:${item.count}`).join(', ') || 'none'} · action runtimes ${scoped.action_runtime_counts.map(item => `${item.runtime_id}:${item.count}`).join(', ') || 'none'}
+            </code>
           </div>
         `)}
       </div>
@@ -155,12 +158,12 @@ function ActivationReceipt({
               </code>
               <code class="text-3xs break-all text-[var(--color-fg-muted)]">
                 ${activation.delivery
-                  ? `delivered turn ${activation.delivery.agent_core_turn} · ${activation.delivery.delivered_at}`
+                  ? `delivered ${activation.delivery.boundary.kind} turn ${activation.delivery.boundary.agent_core_turn} · runtime ${activation.delivery.runtime_id} · bytes ${activation.delivery.content_bytes} · sha256 ${activation.delivery.content_sha256} · ${activation.delivery.delivered_at}`
                   : 'delivery pending'}
               </code>
               ${activation.actions.map(action => html`
                 <code class="text-3xs break-all text-[var(--color-fg-muted)]">
-                  action turn ${action.agent_core_turn} · ${action.tool_name} · id ${action.tool_use_id} · ${action.observed_at}
+                  action turn ${action.agent_core_turn} · runtime ${action.runtime_id} · ${action.tool_name} · id ${action.tool_use_id} · ${action.observed_at}
                 </code>
               `)}
               <code class="text-3xs break-all text-[var(--color-fg-muted)]">

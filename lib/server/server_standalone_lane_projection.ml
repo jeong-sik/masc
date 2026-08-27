@@ -147,6 +147,20 @@ let latest_run runs =
     runs
 ;;
 
+let latest_terminal_run terminal_runs =
+  List.fold_left
+    (fun latest ((run, terminal) as candidate) ->
+       match latest with
+       | None -> Some candidate
+       | Some (current_run, current_terminal)
+         when run.started_at +. terminal.elapsed_s
+              > current_run.started_at +. current_terminal.elapsed_s ->
+         Some candidate
+       | Some _ -> latest)
+    None
+    terminal_runs
+;;
+
 let slot_counts runs =
   let counts = Hashtbl.create 8 in
   List.iter
@@ -197,12 +211,11 @@ let lane_json
   let cancelled_count = count_kind Cancelled in
   let elapsed_values = List.map (fun (_, terminal) -> terminal.elapsed_s) terminal_runs in
   let latest = latest_run runs in
-  let latest_terminal = latest_run (List.map fst terminal_runs) in
+  let latest_terminal = latest_terminal_run terminal_runs in
   let latest_terminal_kind =
     match latest_terminal with
     | None -> None
-    | Some run ->
-      (match run.status with Running -> None | Terminal terminal -> Some terminal.kind)
+    | Some (_, terminal) -> Some terminal.kind
   in
   let configuration = resolve_lane spec.lane_id in
   let configured, config_state, admitted_slots, admission_error =
@@ -226,10 +239,9 @@ let lane_json
   in
   let last_started_at = Option.map (fun run -> run.started_at) latest in
   let last_terminal_at =
-    Option.bind latest_terminal (fun run ->
-      match run.status with
-      | Running -> None
-      | Terminal terminal -> Some (run.started_at +. terminal.elapsed_s))
+    Option.map
+      (fun (run, terminal) -> run.started_at +. terminal.elapsed_s)
+      latest_terminal
   in
   `Assoc
     [ "lane_id", `String spec.lane_id
@@ -265,6 +277,7 @@ let lane_json
 let snapshot_json_with
       ~now
       ~resolve_lane
+      ~exact_runs_total
       ~exact_runs
       ~verification_runs
       ~goal_verification_runs
@@ -274,11 +287,17 @@ let snapshot_json_with
     @ List.map observed_verification_run verification_runs
     @ List.map observed_goal_verification_run goal_verification_runs
   in
+  let exact_run_projection_count = List.length exact_runs in
+  let exact_run_source_total = max exact_run_projection_count exact_runs_total in
   `Assoc
     [ "schema", `String "masc.standalone_llm_lanes.v1"
     ; "generated_at", `String (Masc_domain.now_iso ())
     ; "observed_at_unix", `Float now
     ; "observation_only", `Bool true
+    ; "exact_run_projection_count", `Int exact_run_projection_count
+    ; "exact_run_source_total", `Int exact_run_source_total
+    ; ( "exact_run_projection_truncated"
+      , `Bool (exact_run_projection_count < exact_run_source_total) )
     ; "lanes", `List (List.map (lane_json ~now ~resolve_lane all_runs) lane_specs)
     ]
 ;;
@@ -316,10 +335,30 @@ let snapshot_json () =
       Registry_unavailable
         (Runtime_exact_output_registry.publication_error_to_string error)
   in
+  (* [list_runs] is already newest-first from the registry's immutable
+     projection. Do not call [recent_runs] here: it sorts the entire list
+     again, and persistence-failed core rows can remain Running beyond normal
+     completed retention. Traverse once for the source count and take only the
+     bounded prefix used by this matrix. *)
+  let exact_run_source =
+    Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+  in
+  let rec take_exact_runs remaining acc = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | run :: rest -> take_exact_runs (remaining - 1) (run :: acc) rest
+  in
+  let exact_runs =
+    take_exact_runs
+      Exact_lane_run_registry.max_completed_retained
+      []
+      exact_run_source
+  in
   snapshot_json_with
     ~now:(Time_compat.now ())
     ~resolve_lane
-    ~exact_runs:(Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ()))
+    ~exact_runs_total:(List.length exact_run_source)
+    ~exact_runs
     ~verification_runs:
       (Verification_run_registry.list_runs (Verification_run_registry.global ()))
     ~goal_verification_runs:

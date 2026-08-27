@@ -63,6 +63,34 @@ let test_lanes_footer_opens_the_selected_keeper () =
     "j/k:move  Right / Enter:detail  c / m:chat  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
+let test_lanes_scroll_reserves_standalone_matrix_rows () =
+  check Alcotest.int
+    "loading row plus title and divider"
+    3
+    (standalone_lanes_chrome ~row_count:None ~error:None ~truncated:false);
+  check Alcotest.int
+    "five lane rows plus title and divider"
+    7
+    (standalone_lanes_chrome
+       ~row_count:(Some 5)
+       ~error:None
+       ~truncated:false);
+  check Alcotest.int
+    "retained rows plus explicit stale warning"
+    8
+    (standalone_lanes_chrome
+       ~row_count:(Some 5)
+       ~error:(Some "offline")
+       ~truncated:false);
+  check Alcotest.int
+    "bounded-window warning spends one row"
+    8
+    (standalone_lanes_chrome
+       ~row_count:(Some 5)
+       ~error:None
+       ~truncated:true)
+;;
+
 let test_harness_footer_links_to_overview_task () =
   check str "Harness names its task link"
     "j/k:move  PgUp/PgDn:page  Right / Enter:verdict  Left / Esc:back  Y:copy task  r:refresh  Tab:next  q:quit"
@@ -244,6 +272,8 @@ let () =
             test_tools_footer_carries_the_keeper_axis
         ; Alcotest.test_case "Lanes opens the selected Keeper" `Quick
             test_lanes_footer_opens_the_selected_keeper
+        ; Alcotest.test_case "Lanes reserves standalone matrix rows" `Quick
+            test_lanes_scroll_reserves_standalone_matrix_rows
         ; Alcotest.test_case "Harness links to Overview task" `Quick
             test_harness_footer_links_to_overview_task
         ; Alcotest.test_case "Repositories offers the Code tree" `Quick

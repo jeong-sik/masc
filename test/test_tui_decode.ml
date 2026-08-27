@@ -2274,6 +2274,9 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
+      ; "exact_run_projection_count", `Int 4
+      ; "exact_run_source_total", `Int 4
+      ; "exact_run_projection_truncated", `Bool false
       ; "lanes", `List lanes
       ]
   in
@@ -2289,6 +2292,30 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
         "no retained observation"
         "no retained observation"
         (Tui_decode.standalone_lane_status_to_string compaction.sl_status)
+
+let test_decode_standalone_lanes_rejects_duplicate_ids () =
+  let duplicate = standalone_lane_json "board_attention_exact" "Board" in
+  let json =
+    `Assoc
+      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      ; "generated_at", `String "2026-08-27T00:00:00Z"
+      ; "observed_at_unix", `Float 20.
+      ; "observation_only", `Bool true
+      ; "exact_run_projection_count", `Int 5
+      ; "exact_run_source_total", `Int 5
+      ; "exact_run_projection_truncated", `Bool false
+      ; "lanes", `List [ duplicate; duplicate; duplicate; duplicate; duplicate ]
+      ]
+  in
+  match Tui_decode.decode_standalone_lanes_snapshot json with
+  | Ok _ -> Alcotest.fail "duplicate lane ids decoded as a complete matrix"
+  | Error detail ->
+      Alcotest.(check bool)
+        "error names completeness"
+        true
+        (String.starts_with
+           ~prefix:"standalone lanes: expected each known lane"
+           detail)
 
 let fusion_run_json ?(status = "completed") ?(topology = "simple")
     ?(failure_fields = []) run_id =
@@ -3584,8 +3611,10 @@ let () =
       ] );
     ( "decode_standalone_lanes",
       [
-        Alcotest.test_case "keeps running and never-observed states" `Quick
+        Alcotest.test_case "keeps running and no-retained-observation states" `Quick
           test_decode_standalone_lanes_keeps_running_and_no_retained_observation;
+        Alcotest.test_case "rejects duplicate lane ids" `Quick
+          test_decode_standalone_lanes_rejects_duplicate_ids;
       ] );
     ( "decode_fusion",
       [

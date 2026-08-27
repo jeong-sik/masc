@@ -3807,12 +3807,40 @@ let render_lanes (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  box_line_styled buf cols ~style:(Ansi.bold ^ Ansi.cyan)
-    "  Standalone LLM lanes · READ-ONLY OBSERVATION";
+  let standalone_heading =
+    match state.standalone_lanes with
+    | None -> "  Standalone LLM lanes · READ-ONLY OBSERVATION"
+    | Some snapshot ->
+        let observed = Unix.localtime snapshot.sls_observed_at_unix in
+        Printf.sprintf
+          "  Standalone LLM lanes · READ-ONLY OBSERVATION · observed %02d:%02d:%02d"
+          observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
+  in
+  box_line_styled buf cols ~style:(Ansi.bold ^ Ansi.cyan) standalone_heading;
   let standalone_rows =
     match state.standalone_lanes with
     | Some snapshot ->
-        List.map (standalone_lane_row inner) snapshot.Tui_decode.sls_lanes
+        let rows =
+          List.map (standalone_lane_row inner) snapshot.Tui_decode.sls_lanes
+        in
+        let rows =
+          if snapshot.sls_exact_run_projection_truncated
+          then
+            rows
+            @ [ Printf.sprintf
+                  "%s  WINDOWED · exact runs %d/%d; counts and p50 use newest bounded window%s"
+                  Ansi.yellow snapshot.sls_exact_run_projection_count
+                  snapshot.sls_exact_run_source_total Ansi.reset
+              ]
+          else rows
+        in
+        (match state.standalone_lanes_error with
+         | None -> rows
+         | Some detail ->
+             rows
+             @ [ Ansi.yellow ^ "  STALE · refresh failed: "
+                 ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+               ])
     | None ->
         [ (match state.standalone_lanes_error with
            | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
@@ -3843,7 +3871,6 @@ let render_lanes (state : state) =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
       ~overflow_takes_row:layout.sc_overflow_takes_row
-    |> fun height -> max 1 (height - 2 - List.length standalone_rows)
   in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.lanes_scroll max_scroll) in

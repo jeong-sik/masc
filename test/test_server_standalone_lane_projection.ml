@@ -80,6 +80,7 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
     Projection.For_testing.snapshot_json_with
       ~now:110.
       ~resolve_lane
+      ~exact_runs_total:(List.length exact_runs)
       ~exact_runs
       ~verification_runs
       ~goal_verification_runs:[]
@@ -125,6 +126,72 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
   | _ -> fail "expected one selected HITL slot"
 ;;
 
+let test_latest_terminal_uses_completion_time () =
+  let exact_runs =
+    [ exact_run
+        ~run_id:"started-later-finished-first"
+        ~lane:Exact.Librarian
+        ~started_at:100.
+        ~status:
+          (Exact.Completed
+             { outcome = Exact.Failed { code = "early"; detail = "early" }
+             ; elapsed_s = 1.
+             ; output = `Null
+             ; selected_slot = Some "secondary"
+             })
+    ; exact_run
+        ~run_id:"started-first-finished-last"
+        ~lane:Exact.Librarian
+        ~started_at:90.
+        ~status:
+          (Exact.Completed
+             { outcome = Exact.Succeeded
+             ; elapsed_s = 20.
+             ; output = `Null
+             ; selected_slot = Some "primary"
+             })
+    ]
+  in
+  let json =
+    Projection.For_testing.snapshot_json_with
+      ~now:120.
+      ~resolve_lane:(fun lane_id ->
+        Projection.Configured
+          { admitted_slots = [ lane_id ^ "-primary" ]; admission_error = None })
+      ~exact_runs_total:10
+      ~exact_runs
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  let librarian = lane_by_id json "librarian_exact" in
+  check bool
+    "bounded exact projection is explicit"
+    true
+    (json
+     |> Yojson.Safe.Util.member "exact_run_projection_truncated"
+     |> Yojson.Safe.Util.to_bool);
+  check int
+    "source total"
+    10
+    (json |> Yojson.Safe.Util.member "exact_run_source_total" |> Yojson.Safe.Util.to_int);
+  check string
+    "status follows last completion"
+    "idle"
+    (librarian |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  check string
+    "outcome follows last completion"
+    "succeeded"
+    (librarian
+     |> Yojson.Safe.Util.member "last_outcome"
+     |> Yojson.Safe.Util.to_string);
+  check (float 0.)
+    "terminal timestamp"
+    110.
+    (librarian
+     |> Yojson.Safe.Util.member "last_terminal_at"
+     |> Yojson.Safe.Util.to_float)
+;;
+
 let () =
   run
     "server standalone lane projection"
@@ -133,6 +200,10 @@ let () =
             "all five lanes and observation states"
             `Quick
             test_snapshot_names_every_lane_and_keeps_observed_truth
+        ; test_case
+            "latest terminal is ordered by completion time"
+            `Quick
+            test_latest_terminal_uses_completion_time
         ] )
     ]
 ;;

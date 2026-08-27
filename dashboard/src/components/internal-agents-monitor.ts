@@ -571,15 +571,13 @@ export function InternalAgentsMonitor() {
     if (fusion.status === 'fulfilled') {
       next.push(...fusion.value.runs.map(run => ({ source: 'fusion' as const, id: `fusion:${run.runId}`, run })))
     } else failures.push(`Fusion: ${String(fusion.reason)}`)
-    if (standalone.status === 'fulfilled') {
-      setLaneMatrix(standalone.value)
-    } else {
-      setLaneMatrix(null)
+    if (standalone.status === 'rejected') {
       failures.push(isForbidden(standalone.reason)
         ? 'Standalone lane matrix: Admin 권한 필요.'
         : `Standalone lane matrix: ${String(standalone.reason)}`)
     }
     if (version !== refreshVersion.current) return
+    if (standalone.status === 'fulfilled') setLaneMatrix(standalone.value)
     next.sort((a, b) => startedAt(b) - startedAt(a))
     setRows(next)
     setErrors(failures)
@@ -650,6 +648,9 @@ export function InternalAgentsMonitor() {
         ${laneMatrix === null
           ? html`<div class="ia-empty">Standalone lane 관측 정보를 읽는 중이거나 사용할 수 없습니다.</div>`
           : html`
+            ${laneMatrix.exactRunProjectionTruncated
+              ? html`<div class="rounded border border-[var(--status-warn)] p-2 text-xs text-[var(--status-warn)]">Exact run window ${laneMatrix.exactRunProjectionCount} / ${laneMatrix.exactRunSourceTotal} · 표의 exact counts/p50는 최신 bounded window 기준입니다.</div>`
+              : null}
             <div class="ai-tablewrap">
               <table class="ai-table" data-testid="standalone-lane-matrix">
                 <thead>

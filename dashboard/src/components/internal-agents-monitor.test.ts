@@ -14,12 +14,16 @@ const rawApi = vi.hoisted(() => ({
   fetchKeeperRawTrace: vi.fn(),
   fetchKeeperRawTraces: vi.fn(),
 }))
+const sse = vi.hoisted(() => ({ refresh: null as null | (() => void) }))
 
 vi.mock('../api/dashboard', () => api)
 vi.mock('../api/dashboard-memory-journal', () => memoryApi)
 vi.mock('../api/dashboard-keeper-prompt', () => rawApi)
 vi.mock('../sse-store', () => ({
-  registerInternalAgentRefresh: vi.fn(() => vi.fn()),
+  registerInternalAgentRefresh: vi.fn((refresh: () => void) => {
+    sse.refresh = refresh
+    return vi.fn()
+  }),
 }))
 
 import {
@@ -35,6 +39,7 @@ afterEach(() => {
   vi.clearAllMocks()
   keepers.value = []
   shellRuntimeResolution.value = null
+  sse.refresh = null
 })
 
 describe('Librarian prompt evidence', () => {
@@ -73,11 +78,14 @@ describe('InternalAgentsMonitor', () => {
       generatedAt: 'now',
       observedAtUnix: 1,
       observationOnly: true,
+      exactRunProjectionCount: 0,
+      exactRunSourceTotal: 0,
+      exactRunProjectionTruncated: false,
       lanes: [],
     })
   })
 
-  it('shows configured, running, and never-observed standalone lanes without controlling them', async () => {
+  it('shows configured, running, and no-retained-observation lanes without controlling them', async () => {
     api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
     api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
     api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
@@ -108,6 +116,9 @@ describe('InternalAgentsMonitor', () => {
       generatedAt: 'now',
       observedAtUnix: 20,
       observationOnly: true,
+      exactRunProjectionCount: 4,
+      exactRunSourceTotal: 4,
+      exactRunProjectionTruncated: false,
       lanes: [
         lane({ status: 'running', runningCount: 1 }),
         lane({ laneId: 'hitl_auto_judge', label: 'HITL Auto Judge' }),
@@ -125,6 +136,37 @@ describe('InternalAgentsMonitor', () => {
     expect(within(matrix).getByText('No retained observation')).toBeTruthy()
     expect(container.textContent).toContain('qwen3-5-cloud ×4')
     expect(container.textContent).toContain('관측 기록 없음')
+  })
+
+  it('does not let an older refresh overwrite the latest lane matrix', async () => {
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    let resolveOlder!: (value: unknown) => void
+    const older = new Promise(resolve => { resolveOlder = resolve })
+    const lane = (label: string) => ({
+      laneId: 'board_attention_exact', label, required: true, observationOnly: true,
+      configured: true, configurationState: 'ready', admittedSlots: ['primary'],
+      admissionError: null, status: 'idle', retainedRunCount: 1, runningCount: 0,
+      succeededCount: 1, failedCount: 0, cancelledCount: 0, lastStartedAt: 10,
+      lastTerminalAt: 11, lastOutcome: 'succeeded', p50ElapsedSeconds: 1,
+      selectedSlots: [{ slotId: 'primary', count: 1 }],
+    })
+    const snapshot = (label: string) => ({
+      schema: 'masc.standalone_llm_lanes.v1', generatedAt: 'now', observedAtUnix: 20,
+      observationOnly: true, exactRunProjectionCount: 1, exactRunSourceTotal: 1,
+      exactRunProjectionTruncated: false, lanes: [lane(label)],
+    })
+    api.fetchStandaloneLanes
+      .mockImplementationOnce(() => older)
+      .mockResolvedValueOnce(snapshot('Newest matrix'))
+
+    render(html`<${InternalAgentsMonitor} />`)
+    await vi.waitFor(() => expect(sse.refresh).not.toBeNull())
+    sse.refresh?.()
+    expect(await screen.findByText('Newest matrix')).toBeTruthy()
+    resolveOlder(snapshot('Stale matrix'))
+    await vi.waitFor(() => expect(screen.queryByText('Stale matrix')).toBeNull())
   })
 
   it('keeps paused keepers with zero observed runs in the owner matrix', async () => {

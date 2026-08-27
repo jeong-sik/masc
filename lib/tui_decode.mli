@@ -665,6 +665,9 @@ type standalone_lane = {
 
 type standalone_lanes_snapshot = {
   sls_observed_at_unix : float;
+  sls_exact_run_projection_count : int;
+  sls_exact_run_source_total : int;
+  sls_exact_run_projection_truncated : bool;
   sls_lanes : standalone_lane list;
 }
 

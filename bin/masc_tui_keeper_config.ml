@@ -191,9 +191,11 @@ let counted = function
    snapshot the editor opens rather than from the rows drawn here — two rows
    share one heading (sandbox / network) and one row is derived, so a count of
    rows would be a different number than the one [e] shows. *)
-let view_lines ?(sanitize = Fun.id) json =
+let view_lines ~sanitize json =
   let at path = member_path path json in
   let text value = sanitize (value ()) in
+  let editable_value_row label value = editable_row label (text value) in
+  let read_only_value_row label value = read_only_row label (text value) in
   let sources = at [ "sources" ] in
   let source path = Option.bind sources (member_path path) in
   let editable_count =
@@ -207,34 +209,42 @@ let view_lines ?(sanitize = Fun.id) json =
       (styled Masc_tui_theme.Sgr.dim read_only_glyph)
   ; ""
   ; section "effective settings" (Printf.sprintf "e opens %d fields" editable_count)
-  ; editable_row "Runtime"
-      (text (fun () -> string_value (at [ "execution"; "selected_runtime_id" ])))
-  ; editable_row "Autoboot" (bool_value (at [ "autoboot_enabled" ]))
-  ; editable_row "Autonomous turns" (bool_value (at [ "proactive"; "enabled" ]))
-  ; editable_row "Context override" (int_override_value (at [ "max_context_override" ]))
-  ; editable_row "Wake prompt override"
-      (text (fun () -> string_value (at [ "autonomous_wake_prompt" ])))
-  ; editable_row "Sandbox / network"
-      (Printf.sprintf "%s / %s"
-         (text (fun () -> string_value (at [ "sandbox_profile" ])))
-         (text (fun () -> string_value (at [ "network_mode" ]))))
-  ; editable_row "Allowed paths" (text (fun () -> string_list_value (at [ "allowed_paths" ])))
-  ; editable_row "Mention targets"
-      (text (fun () -> string_list_value (at [ "workspace"; "mention_targets" ])))
-  ; editable_row "Skills" (text (fun () -> skill_selection_value (at [ "skills"; "names" ])))
+  ; editable_value_row "Runtime"
+      (fun () -> string_value (at [ "execution"; "selected_runtime_id" ]))
+  ; editable_value_row "Autoboot" (fun () -> bool_value (at [ "autoboot_enabled" ]))
+  ; editable_value_row "Autonomous turns"
+      (fun () -> bool_value (at [ "proactive"; "enabled" ]))
+  ; editable_value_row "Context override"
+      (fun () -> int_override_value (at [ "max_context_override" ]))
+  ; editable_value_row "Wake prompt override"
+      (fun () -> string_value (at [ "autonomous_wake_prompt" ]))
+  ; editable_value_row "Sandbox / network"
+      (fun () ->
+        Printf.sprintf "%s / %s"
+          (string_value (at [ "sandbox_profile" ]))
+          (string_value (at [ "network_mode" ])))
+  ; editable_value_row "Allowed paths"
+      (fun () -> string_list_value (at [ "allowed_paths" ]))
+  ; editable_value_row "Mention targets"
+      (fun () -> string_list_value (at [ "workspace"; "mention_targets" ]))
+  ; editable_value_row "Skills"
+      (fun () -> skill_selection_value (at [ "skills"; "names" ]))
   ; ""
   ; section "derived" "read-only"
-  ; read_only_row "Effective paths"
-      (text (fun () -> string_list_value (at [ "effective_allowed_paths" ])))
+  ; read_only_value_row "Effective paths"
+      (fun () -> string_list_value (at [ "effective_allowed_paths" ]))
   ; ""
   ; section "provenance" "read-only"
-  ; read_only_row "Live override" (bool_value (source [ "has_live_override" ]))
-  ; read_only_row "Override fields"
-      (text (fun () -> string_list_value (source [ "override_fields" ])))
-  ; read_only_row "Precedence" (text (fun () -> string_list_value (source [ "precedence" ])))
-  ; read_only_row "Default manifest"
-      (text (fun () -> string_value (source [ "default_manifest_path" ])))
-  ; read_only_row "Live metadata" (text (fun () -> string_value (source [ "live_meta_path" ])))
+  ; read_only_value_row "Live override"
+      (fun () -> bool_value (source [ "has_live_override" ]))
+  ; read_only_value_row "Override fields"
+      (fun () -> string_list_value (source [ "override_fields" ]))
+  ; read_only_value_row "Precedence"
+      (fun () -> string_list_value (source [ "precedence" ]))
+  ; read_only_value_row "Default manifest"
+      (fun () -> string_value (source [ "default_manifest_path" ]))
+  ; read_only_value_row "Live metadata"
+      (fun () -> string_value (source [ "live_meta_path" ]))
   ; ""
   ; marked_section editable_glyph Masc_tui_theme.Sgr.cyan "instructions"
       (Printf.sprintf "editable \xc2\xb7 %s" (counted instructions))

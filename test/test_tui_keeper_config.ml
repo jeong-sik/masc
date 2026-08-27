@@ -113,7 +113,7 @@ let test_skill_selection_patch_modes () =
   check_skill_patch ~label:"all" ~before:exact_before ~skills:(`Assoc [])
     ~expected:{|{"skills":{}}|}
 
-let rendered_of json = view_lines json |> String.concat "\n"
+let rendered_of json = view_lines ~sanitize:Fun.id json |> String.concat "\n"
 
 let contains haystack needle =
   let pattern = Str.regexp_string needle in
@@ -221,7 +221,7 @@ let test_heading_counts_what_the_editor_opens () =
    made the heading disagree with what the reader could see. *)
 let test_line_count_matches_what_is_drawn () =
   let json = Yojson.Safe.from_string {|{"prompt": {"instructions": "one\ntwo\n"}}|} in
-  let lines = view_lines json in
+  let lines = view_lines ~sanitize:Fun.id json in
   Alcotest.(check bool)
     "heading says 2 lines"
     true
@@ -251,6 +251,22 @@ let test_fetched_text_is_sanitized_but_the_frame_is_not () =
     (contains rendered "before<esc>[31mafter");
   Alcotest.(check bool) "frame kept its own marker" true (contains rendered editable_glyph)
 
+let test_wrong_typed_scalar_is_sanitized_at_the_row_boundary () =
+  let hostile =
+    Yojson.Safe.from_string
+      {|{"autoboot_enabled": "before\u001b]8;;https://example.invalid\u0007after"}|}
+  in
+  let rendered =
+    view_lines
+      ~sanitize:(fun text -> String.concat "<esc>" (String.split_on_char '\027' text))
+      hostile
+    |> String.concat "\n"
+  in
+  Alcotest.(check bool)
+    "wrong-typed fallback was sanitized"
+    true
+    (contains rendered "before<esc>]8;;https://example.invalid")
+
 let () =
   Alcotest.run "tui keeper config"
     [ ( "projection"
@@ -276,5 +292,7 @@ let () =
             test_line_count_matches_what_is_drawn
         ; Alcotest.test_case "fetched text sanitized, frame not" `Quick
             test_fetched_text_is_sanitized_but_the_frame_is_not
+        ; Alcotest.test_case "wrong-typed scalar is sanitized" `Quick
+            test_wrong_typed_scalar_is_sanitized_at_the_row_boundary
         ] )
     ]

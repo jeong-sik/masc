@@ -713,6 +713,68 @@ exit 1
         (String_util.contains_substring stderr
            "Built binary commit differs from source commit"))
 
+let test_same_commit_swap_before_binding_is_rejected_before_rebuild () =
+  with_temp_dir "run-local-binding-race" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let scripts_dir = Filename.concat repo_root "scripts" in
+      let binding_script = Filename.concat scripts_dir "run-local-executable-binding.py" in
+      let real_binding_script = binding_script ^ ".real" in
+      Sys.rename binding_script real_binding_script;
+      write_executable binding_script
+        {|
+#!/bin/sh
+set -eu
+cp "${SWAPPED_EXE_PATH:?}" "${BUILT_RACE_PATH:?}"
+chmod 755 "${BUILT_RACE_PATH}"
+exec "$(dirname "$0")/run-local-executable-binding.py.real" "$@"
+|};
+      let built_exe = Filename.concat repo_root "_build/default/bin/main_eio.exe" in
+      let original_exe = Filename.concat dir "original-main-eio.exe" in
+      let swapped_exe = Filename.concat dir "swapped-main-eio.exe" in
+      let commit = run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ] in
+      write_file original_exe (read_file built_exe);
+      Unix.chmod original_exe 0o755;
+      write_fake_eio_exe ~commit swapped_exe;
+      write_file swapped_exe (read_file swapped_exe ^ "\n# same commit, different bytes\n");
+      Unix.chmod swapped_exe 0o755;
+      let build_count = Filename.concat dir "build-count" in
+      let rebuild_hook = Filename.concat dir "rebuild-hook.sh" in
+      write_executable rebuild_hook
+        {|
+#!/bin/sh
+set -eu
+count=0
+if [ -f "${BUILD_COUNT_FILE:?}" ]; then count="$(cat "$BUILD_COUNT_FILE")"; fi
+count=$((count + 1))
+printf '%s\n' "$count" >"$BUILD_COUNT_FILE"
+if [ "$count" -ge 2 ]; then
+  cp "${ORIGINAL_EXE_PATH:?}" "${BUILT_RACE_PATH:?}"
+  chmod 755 "${BUILT_RACE_PATH}"
+fi
+|};
+      let capture = Filename.concat dir "captured-env.txt" in
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, _stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:
+            [ "BUILT_RACE_PATH", built_exe
+            ; "SWAPPED_EXE_PATH", swapped_exe
+            ; "ORIGINAL_EXE_PATH", original_exe
+            ; "BUILD_COUNT_FILE", build_count
+            ; "FAKE_DUNE_BUILD_HOOK", rebuild_hook
+            ; "FAKE_CAPTURE_FILE", capture
+            ]
+          [| script; "--target-dir"; target |]
+      in
+      check bool "same-commit byte swap rejected" true (code <> 0);
+      check bool "swapped executable never launched" false (Sys.file_exists capture);
+      check string "rebuild cannot erase the observed mismatch" "1" (String.trim (read_file build_count));
+      check bool "error names initial-to-binding mismatch" true
+        (String_util.contains_substring stderr
+           "Materialized executable differs from the initial Dune executable"))
+
 let () =
   run "run_local_script"
     [
@@ -751,5 +813,7 @@ let () =
             test_dune_input_change_before_exec_is_rejected;
           test_case "mutable build path replacement blocks exec" `Quick
             test_mutable_build_path_replacement_blocks_exec;
+          test_case "same-commit swap before binding is rejected before rebuild" `Quick
+            test_same_commit_swap_before_binding_is_rejected_before_rebuild;
         ] );
     ]

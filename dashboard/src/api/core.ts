@@ -236,6 +236,10 @@ export class ApiRequestError extends Error {
   detail?: string
   errorCode?: string
   authErrorCode?: string
+  responseData?: unknown
+  configApplied?: boolean | null
+  runtimeSync?: boolean
+  authoritativeReloadRequired: boolean
 
   constructor(opts: {
     method: string
@@ -247,6 +251,10 @@ export class ApiRequestError extends Error {
     detail?: string
     errorCode?: string
     authErrorCode?: string
+    responseData?: unknown
+    configApplied?: boolean | null
+    runtimeSync?: boolean
+    authoritativeReloadRequired?: boolean
   }) {
     const method = opts.method.toUpperCase()
     const timeout = opts.timeout === true
@@ -266,6 +274,10 @@ export class ApiRequestError extends Error {
     this.detail = detail
     this.errorCode = opts.errorCode?.trim() || undefined
     this.authErrorCode = opts.authErrorCode?.trim() || undefined
+    this.responseData = opts.responseData
+    this.configApplied = opts.configApplied
+    this.runtimeSync = opts.runtimeSync
+    this.authoritativeReloadRequired = opts.authoritativeReloadRequired === true
   }
 }
 
@@ -469,6 +481,10 @@ interface ErrorResponseInfo {
   detail?: string
   errorCode?: string
   authErrorCode?: string
+  responseData?: unknown
+  configApplied?: boolean | null
+  runtimeSync?: boolean
+  authoritativeReloadRequired?: boolean
 }
 
 async function errorResponseInfoFromResponse(res: Response): Promise<ErrorResponseInfo> {
@@ -516,6 +532,16 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
           detail: message || errorDetail || errorCode || undefined,
           errorCode: errorCode || undefined,
           authErrorCode: authErrorCode || undefined,
+          responseData: parsed,
+          configApplied:
+            typeof parsed.config_applied === 'boolean' || parsed.config_applied === null
+              ? parsed.config_applied
+              : undefined,
+          runtimeSync: typeof parsed.runtime_sync === 'boolean'
+            ? parsed.runtime_sync
+            : undefined,
+          authoritativeReloadRequired:
+            parsed.authoritative_reload_required === true,
         }
       }
     }
@@ -539,6 +565,10 @@ export async function apiRequestErrorFromResponse(
     detail: info.detail,
     errorCode: info.errorCode,
     authErrorCode: info.authErrorCode,
+    responseData: info.responseData,
+    configApplied: info.configApplied,
+    runtimeSync: info.runtimeSync,
+    authoritativeReloadRequired: info.authoritativeReloadRequired,
   })
 }
 

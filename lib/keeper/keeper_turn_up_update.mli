@@ -25,4 +25,4 @@ val config_publication_rollback_of_result :
   Keeper_types_profile.tool_result -> string option
 
 val config_reconciliation_required_of_result :
-  Keeper_types_profile.tool_result -> string option
+  Keeper_types_profile.tool_result -> Yojson.Safe.t option

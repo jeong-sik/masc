@@ -586,7 +586,14 @@ let test_rejected_create_publication_removes_manifest () =
   | Error error -> failf "revision after create rollback: %s" error
 ;;
 
-let run_cas_child base name expected_hex instructions =
+let run_cas_child base name expected_hex instructions ready_path start_path =
+  let ready = Unix.openfile ready_path [ Unix.O_WRONLY ] 0 in
+  let start = Unix.openfile start_path [ Unix.O_RDONLY ] 0 in
+  ignore (Unix.write_substring ready "r" 0 1);
+  let token = Bytes.create 1 in
+  ignore (Unix.read start token 0 1);
+  Unix.close ready;
+  Unix.close start;
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
@@ -671,6 +678,12 @@ let test_two_processes_same_revision_have_one_winner () =
     | Error error ->
       fail (Keeper_turn_up_config_persistence.error_to_string error)
   in
+  let ready_path = Filename.concat ctx.config.base_path "cas-ready.fifo" in
+  let start_path = Filename.concat ctx.config.base_path "cas-start.fifo" in
+  Unix.mkfifo ready_path 0o600;
+  Unix.mkfifo start_path 0o600;
+  let ready = Unix.openfile ready_path [ Unix.O_RDWR ] 0o600 in
+  let start = Unix.openfile start_path [ Unix.O_RDWR ] 0o600 in
   let spawn instructions =
     Unix.create_process
       Sys.executable_name
@@ -680,13 +693,27 @@ let test_two_processes_same_revision_have_one_winner () =
        ; name
        ; expected
        ; instructions
+       ; ready_path
+       ; start_path
       |]
       Unix.stdin
       Unix.stdout
       Unix.stderr
   in
+  let read_two_ready_bytes () =
+    let bytes = Bytes.create 2 in
+    let rec loop offset =
+      if offset < 2
+      then loop (offset + Unix.read ready bytes offset (2 - offset))
+    in
+    loop 0
+  in
   let first = spawn "first process" in
   let second = spawn "second process" in
+  read_two_ready_bytes ();
+  ignore (Unix.write_substring start "ss" 0 2);
+  Unix.close ready;
+  Unix.close start;
   let rec status pid =
     match Unix.waitpid [] pid with
     | _, status -> status
@@ -881,6 +908,84 @@ let test_rollback_after_rename_failure_requires_reconciliation () =
     (current_revision_exn ctx.config name = initial)
 ;;
 
+let test_publication_exception_restores_missing_manifest () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-publication-exception-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      Keeper_turn_up_args.parse ctx
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist_with_publication
+       ~expected_revision:Keeper_turn_up_config_persistence.Missing
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ~publish:(fun _ -> raise (Failure "injected publication exception"))
+       ()
+   with
+   | Error (Keeper_turn_up_config_persistence.Publication_exception _) -> ()
+   | Error error ->
+     fail
+       ("unexpected publication error: "
+        ^ Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "raising publication was reported as committed");
+  check bool "publication exception leaves no orphan manifest" true
+    (current_revision_exn ctx.config name
+     = Keeper_turn_up_config_persistence.Missing)
+;;
+
+let test_post_write_revision_failure_restores_missing_manifest () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-post-write-read-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      Keeper_turn_up_args.parse ctx
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  (match
+     Keeper_turn_up_config_persistence.For_testing
+     .persist_with_post_write_revision_failure
+       ~expected_revision:Keeper_turn_up_config_persistence.Missing
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ()
+   with
+   | Error (Keeper_turn_up_config_persistence.Io_error _) -> ()
+   | Error error ->
+     fail
+       ("unexpected post-write read error: "
+        ^ Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "post-write revision failure was reported as committed");
+  check bool "post-write revision failure leaves no orphan manifest" true
+    (current_revision_exn ctx.config name
+     = Keeper_turn_up_config_persistence.Missing)
+;;
+
 (* masc#25767: masc_keeper_up described itself as "Create or update a durable keeper"
    while creation required a sandbox_profile readable only from a keeper TOML the tool
    does not write. The argument was parsed and honoured on update but ignored by the
@@ -969,8 +1074,16 @@ let test_validate_allows_local_with_hatch () =
 
 let () =
   match Array.to_list Sys.argv with
-  | [ _; "--keeper-manifest-cas-child"; base; name; expected; instructions ] ->
-    run_cas_child base name expected instructions
+  | [ _
+    ; "--keeper-manifest-cas-child"
+    ; base
+    ; name
+    ; expected
+    ; instructions
+    ; ready_path
+    ; start_path
+    ] ->
+    run_cas_child base name expected instructions ready_path start_path
   | _ ->
   run
     "keeper_turn_up_args"
@@ -1056,6 +1169,14 @@ let () =
             "rollback after rename failure requires reconciliation"
             `Quick
             test_rollback_after_rename_failure_requires_reconciliation
+        ; test_case
+            "publication exception restores missing manifest"
+            `Quick
+            test_publication_exception_restores_missing_manifest
+        ; test_case
+            "post-write revision failure restores missing manifest"
+            `Quick
+            test_post_write_revision_failure_restores_missing_manifest
         ] )
     ; ( "keeper_name"
       , [ test_case

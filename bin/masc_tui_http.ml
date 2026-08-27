@@ -1277,13 +1277,60 @@ let post_verification_verdict ~(host : string) ~(port : int)
     body is absent from the patch, so the editor round-trip cannot blank a
     setting it never showed. Validation is the route's (it re-uses
     masc_keeper_up's arg parsing), not duplicated here. *)
+type keeper_config_post_error =
+  | Keeper_config_transport_error of string
+  | Keeper_config_revision_conflict of Yojson.Safe.t
+  | Keeper_config_reconciliation_required of Yojson.Safe.t
+  | Keeper_config_http_error of
+      { status : int
+      ; body : string
+      }
+
+let keeper_config_post_error_to_string = function
+  | Keeper_config_transport_error detail -> detail
+  | Keeper_config_revision_conflict _ ->
+    "keeper manifest revision conflict; authoritative reload required"
+  | Keeper_config_reconciliation_required _ ->
+    "keeper manifest reconciliation required; authoritative reload required"
+  | Keeper_config_http_error { status; body } ->
+    Printf.sprintf "keeper config returned %d: %s" status body
+
 let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
-    ~(patch_json : string) : (Yojson.Safe.t, string) result =
-  post_json ~host ~port
-    ~path:
-      (Printf.sprintf "/api/v1/keepers/%s/config"
-         (percent_encode_path_segment keeper_name))
-    ~body:patch_json
+    ~(patch_json : string) : (Yojson.Safe.t, keeper_config_post_error) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/config"
+      (percent_encode_path_segment keeper_name)
+  in
+  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body:patch_json with
+  | Error detail -> Error (Keeper_config_transport_error detail)
+  | Ok (status, body) when Masc.Tui_decode.is_success_http_status status ->
+    (match Yojson.Safe.from_string body with
+     | json -> Ok json
+     | exception Yojson.Json_error detail ->
+       Error (Keeper_config_http_error { status; body = detail }))
+  | Ok (status, body) ->
+    let parsed =
+      match Yojson.Safe.from_string body with
+      | json -> Some json
+      | exception Yojson.Json_error _ -> None
+    in
+    let code =
+      match parsed with
+      | Some json ->
+        (match Json_util.assoc_member_opt "error" json with
+         | Some error ->
+           (match Json_util.assoc_member_opt "code" error with
+            | Some (`String code) -> Some code
+            | Some _ | None -> None)
+         | None -> None)
+      | None -> None
+    in
+    (match status, code, parsed with
+     | 409, Some "keeper_manifest_revision_conflict", Some json ->
+       Error (Keeper_config_revision_conflict json)
+     | 503, Some "keeper_manifest_reconciliation_required", Some json ->
+       Error (Keeper_config_reconciliation_required json)
+     | _ -> Error (Keeper_config_http_error { status; body }))
 
 (** POST /api/v1/keepers/:name/up — masc_keeper_up's own create-or-update
     contract. The keeper name in the path is the row the operator launched

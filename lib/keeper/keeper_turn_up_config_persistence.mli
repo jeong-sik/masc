@@ -42,6 +42,10 @@ type error =
   | Io_error of string
   | Revision_conflict of conflict
   | Reconciliation_required of reconciliation
+  | Publication_exception of
+      { path : string
+      ; detail : string
+      }
 
 type 'a publication =
   | Commit of 'a
@@ -98,4 +102,13 @@ module For_testing : sig
     meta:Keeper_meta_contract.keeper_meta ->
     unit ->
     (unit receipt, error) result
+
+
+  val persist_with_post_write_revision_failure :
+    expected_revision:revision ->
+    config:Workspace.config ->
+    parsed:Keeper_turn_up_args.parsed_args ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    unit ->
+    (outcome receipt, error) result
 end

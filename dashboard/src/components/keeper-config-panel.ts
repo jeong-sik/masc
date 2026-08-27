@@ -1723,6 +1723,18 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         showToast('Keeper 설정이 다른 화면에서 변경되어 최신 값을 다시 불러왔습니다', 'warning')
         return
       }
+      if (
+        err instanceof ApiRequestError
+        && (
+          err.errorCode === 'keeper_manifest_reconciliation_required'
+          || err.authoritativeReloadRequired
+        )
+      ) {
+        runtimeDraft.value = null
+        await loadKeeperConfig(keeperName, { force: true })
+        showToast('Keeper 설정 저장 결과를 확정할 수 없어 권위 설정을 다시 불러왔습니다', 'warning')
+        return
+      }
       const msg = err instanceof Error ? err.message : '저장 실패'
       showToast(msg, 'error')
     } finally {
@@ -1819,6 +1831,19 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         editDraft.value = null
         await loadKeeperConfig(keeperName, { force: true })
         showToast('Keeper 설정이 다른 화면에서 변경되어 최신 값을 다시 불러왔습니다', 'warning')
+        return
+      }
+      if (
+        err instanceof ApiRequestError
+        && (
+          err.errorCode === 'keeper_manifest_reconciliation_required'
+          || err.authoritativeReloadRequired
+        )
+      ) {
+        editMode.value = false
+        editDraft.value = null
+        await loadKeeperConfig(keeperName, { force: true })
+        showToast('Keeper 설정 저장 결과를 확정할 수 없어 권위 설정을 다시 불러왔습니다', 'warning')
         return
       }
       saveError.value = err instanceof Error ? err.message : '저장 실패'

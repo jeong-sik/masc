@@ -41,6 +41,9 @@ module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_json = Masc.Keeper_meta_json
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_owner_registry = Masc.Keeper_owner_registry
+module Paused_work_receipt = Masc.Keeper_paused_work_disposition_receipt
+module Keeper_checkpoint_store = Masc.Keeper_checkpoint_store
+module Fusion_config_loader = Masc.Fusion_config_loader
 module Keeper_lifecycle_reservation = Masc.Keeper_lifecycle_reservation
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_fs = Masc.Keeper_fs
@@ -192,6 +195,23 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let snapshot_path path =
+  let rec collect root relative =
+    let current = if String.equal relative "" then root else Filename.concat root relative in
+    if not (Sys.file_exists current)
+    then []
+    else if Sys.is_directory current
+    then
+      Sys.readdir current
+      |> Array.to_list
+      |> List.sort String.compare
+      |> List.concat_map (fun name ->
+        collect root (if String.equal relative "" then name else Filename.concat relative name))
+    else [ relative, In_channel.with_open_bin current In_channel.input_all ]
+  in
+  collect path ""
+;;
 
 let publication_recovery_registry env sw config =
   Masc_test_deps.with_publication_recovery_registry
@@ -1737,8 +1757,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None
-        ; skill_names_present = false
-        ; skill_names_opt = None
         }
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1789,6 +1807,108 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            ~base_path:config.base_path
            live_name
           : Masc.Keeper_keepalive.joined_stop_result);
+
+      let stale_name = "stale-up-does-not-resume-operator-pause" in
+      let stale_meta =
+        Shutdown_finalize.For_testing.paused_meta (make_meta stale_name)
+      in
+      create_owner_meta_exn config stale_meta;
+      let stale_parsed =
+        { parsed with
+          name = stale_name
+        ; instructions_arg = Some "stale operator intent"
+        }
+      in
+      let initial_revision =
+        match
+          Turn_up_config_persistence.persist
+            ~expected_revision:Turn_up_config_persistence.Missing
+            ~config
+            ~parsed:stale_parsed
+            ~meta:{ stale_meta with instructions = "initial manifest" }
+            ()
+        with
+        | Ok { value = { revision; _ }; _ } -> revision
+        | Error error ->
+          fail (Turn_up_config_persistence.error_to_string error)
+      in
+      let winner_parsed =
+        { stale_parsed with instructions_arg = Some "winning manifest" }
+      in
+      (match
+         Turn_up_config_persistence.persist
+           ~expected_revision:initial_revision
+           ~config
+           ~parsed:winner_parsed
+           ~meta:{ stale_meta with instructions = "winning manifest" }
+           ()
+       with
+       | Ok _ -> ()
+       | Error error ->
+         fail (Turn_up_config_persistence.error_to_string error));
+      let manifest_path =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+        |> fun dir -> Filename.concat dir (stale_name ^ ".toml")
+      in
+      let receipt_root =
+        let keeper_hash =
+          Digestif.SHA256.(digest_string stale_name |> to_hex)
+        in
+        Filename.concat
+          (Filename.concat
+             (Workspace.masc_root_dir config)
+             ("paused-work-dispositions-"
+              ^ Paused_work_receipt.store_version))
+          ("keeper-" ^ keeper_hash)
+      in
+      let trace_id =
+        Keeper_id.Trace_id.to_string stale_meta.runtime.trace_id
+      in
+      let checkpoint_path =
+        Keeper_checkpoint_store.agent_core_checkpoint_path
+          ~session_dir:
+            (Filename.concat
+               (Keeper_types_profile.session_base_dir config)
+               trace_id)
+          ~session_id:trace_id
+      in
+      let runtime_path =
+        Fusion_config_loader.runtime_toml_path ~base_path:config.base_path
+      in
+      let meta_snapshot () =
+        match Keeper_meta_store.read_meta config stale_name with
+        | Ok (Some meta) ->
+          Keeper_meta_json.meta_to_json meta |> Yojson.Safe.to_string
+        | Ok None -> "missing"
+        | Error detail -> fail detail
+      in
+      let authority_snapshot () =
+        ( snapshot_path manifest_path
+        , snapshot_path receipt_root
+        , snapshot_path runtime_path
+        , snapshot_path checkpoint_path
+        , meta_snapshot () )
+      in
+      let before_stale_update = authority_snapshot () in
+      let stale_result =
+        Turn_up_update.update_keeper
+          ~expected_manifest_revision:initial_revision
+          ctx
+          stale_parsed
+          stale_meta
+      in
+      check bool "stale paused update is rejected by manifest CAS" true
+        (Option.is_some
+           (Turn_up_update.manifest_revision_conflict_of_result stale_result));
+      check bool
+        "stale paused update leaves manifest, receipt, runtime, checkpoint, and meta unchanged"
+        true
+        (authority_snapshot () = before_stale_update);
+      (match Keeper_meta_store.read_meta config stale_name with
+       | Ok (Some meta) ->
+         check bool "stale update leaves pause bit set" true meta.paused
+       | Ok None -> fail "stale update removed paused metadata"
+       | Error detail -> fail detail);
 
       let stopped_name = "explicit-up-resumes-operator-stop" in
       let stopped_meta =
@@ -1880,8 +2000,6 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None
-        ; skill_names_present = false
-        ; skill_names_opt = None
         }
       in
       let ctx : _ Keeper_types_profile.context =
@@ -2050,8 +2168,6 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None
-        ; skill_names_present = false
-        ; skill_names_opt = None
         }
       in
       let update_switch, resolve_update_switch = Eio.Promise.create () in

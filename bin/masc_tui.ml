@@ -8715,7 +8715,19 @@ and is loaded on demand through keeper_skill.
                     ~keeper_name:keeper.k_name
                     ~patch_json:(Yojson.Safe.to_string patch)
                 with
-                | Error detail -> add_event state "error" detail
+                | Error
+                    (( Masc_tui_http.Keeper_config_revision_conflict _
+                     | Masc_tui_http.Keeper_config_reconciliation_required _ ) as
+                     error) ->
+                  add_event state "error"
+                    (Masc_tui_http.keeper_config_post_error_to_string error);
+                  state.keeper_config_view <- None;
+                  state.keeper_config_view_error <- None;
+                  launch_keeper_config_view state
+                    ~mailbox:async_messages keeper.k_name
+                | Error error ->
+                  add_event state "error"
+                    (Masc_tui_http.keeper_config_post_error_to_string error)
                 | Ok _ ->
                     add_event state "system"
                       (keeper.k_name ^ ": changed settings applied");

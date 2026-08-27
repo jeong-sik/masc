@@ -3274,6 +3274,10 @@ let test_config_post_restarts_from_atomic_toml () =
   in
   check string "readback carries manifest SHA-256 revision" "sha256"
     Yojson.Safe.Util.(response |> member "manifest_revision" |> member "state" |> to_string);
+  check bool "write receipt says config applied" true
+    Yojson.Safe.Util.(response |> member "manifest_write" |> member "applied" |> to_bool);
+  check string "write receipt carries exact revision" "sha256"
+    Yojson.Safe.Util.(response |> member "manifest_write" |> member "revision" |> member "state" |> to_string);
   let parsed =
     Keeper_toml_loader.parse_toml
       (In_channel.with_open_bin toml_path In_channel.input_all)
@@ -3345,6 +3349,8 @@ let test_config_post_reports_runtime_sync_failure () =
   check bool "runtime not synced" false (json |> member "runtime_sync" |> to_bool);
   check string "typed failure" "keeper_runtime_sync_failed"
     (json |> member "error" |> member "code" |> to_string);
+  check bool "runtime failure preserves applied write receipt" true
+    (json |> member "manifest_write" |> member "applied" |> to_bool);
   let doc =
     match
       Keeper_toml_loader.parse_toml

@@ -370,6 +370,30 @@ describe('typed API errors', () => {
     expect(error.status).toBe(409)
   })
 
+  it('preserves reconciliation state and authoritative reload instruction', async () => {
+    const payload = {
+      config_applied: null,
+      runtime_sync: false,
+      authoritative_reload_required: true,
+      error: {
+        code: 'keeper_manifest_reconciliation_required',
+        path: '/workspace/.masc/config/keepers/alpha.toml',
+        observed: { state: 'unreadable', detail: 'injected' },
+      },
+    }
+    const error = await apiRequestErrorFromResponse(
+      'POST',
+      '/api/v1/keepers/alpha/config',
+      new Response(JSON.stringify(payload), { status: 503 }),
+    )
+
+    expect(error.errorCode).toBe('keeper_manifest_reconciliation_required')
+    expect(error.configApplied).toBeNull()
+    expect(error.runtimeSync).toBe(false)
+    expect(error.authoritativeReloadRequired).toBe(true)
+    expect(error.responseData).toEqual(payload)
+  })
+
   it('uses auth_error_code as authority and keeps error prose as detail', async () => {
     const error = await apiRequestErrorFromResponse(
       'POST',

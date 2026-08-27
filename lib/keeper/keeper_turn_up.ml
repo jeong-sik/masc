@@ -12,6 +12,26 @@ open Keeper_types_profile
 
 type tool_result = Keeper_types_profile.tool_result
 
+let with_manifest_read_warnings warnings result =
+  match warnings with
+  | [] -> result
+  | warnings ->
+    let fields =
+      match Tool_result.metadata result with
+      | Some (`Assoc fields) -> fields
+      | Some metadata -> [ "producer_metadata", metadata ]
+      | None -> []
+    in
+    Tool_result.with_metadata
+      (`Assoc
+         (( "keeper_manifest_read_warnings"
+          , `List
+              (List.map
+                 Keeper_turn_up_config_persistence.warning_to_yojson
+                 warnings) )
+          :: fields))
+      result
+
 let handle_keeper_up ctx args : tool_result =
   match Keeper_turn_up_args.parse ctx args with
   | Error result -> result
@@ -24,12 +44,16 @@ let handle_keeper_up ctx args : tool_result =
      with
      | Error e ->
        tool_result_error ~class_:Tool_result.Runtime_failure (Printf.sprintf "%s" e)
-     | Ok { value = _, Error e; _ } ->
+     | Ok { value = _, Error e; warnings } ->
        tool_result_error ~class_:Tool_result.Runtime_failure (Printf.sprintf "%s" e)
-     | Ok { value = _, Ok None; _ } -> Keeper_turn_up_create.create_keeper ctx p
-     | Ok { value = revision, Ok (Some old); _ } ->
+       |> with_manifest_read_warnings warnings
+     | Ok { value = _, Ok None; warnings } ->
+       Keeper_turn_up_create.create_keeper ctx p
+       |> with_manifest_read_warnings warnings
+     | Ok { value = revision, Ok (Some old); warnings } ->
        Keeper_turn_up_update.update_keeper
          ~expected_manifest_revision:revision
          ctx
          p
-         old)
+         old
+       |> with_manifest_read_warnings warnings)

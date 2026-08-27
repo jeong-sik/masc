@@ -864,6 +864,7 @@ let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event 
   | None -> invalidate_keeper_execution_surfaces ~config ()
 
 let respond_config_sync_error
+      ?manifest_write
       ~request
       reqd
       ~status
@@ -877,12 +878,35 @@ let respond_config_sync_error
     ~status
     ~request
     (`Assoc
-      [ "ok", `Bool false
-      ; "keeper", `String name
-      ; "config_applied", `Bool config_applied
-      ; "runtime_sync", `Bool false
-      ; "error", `Assoc [ "code", `String code; "detail", `String detail ]
-      ])
+      ([ "ok", `Bool false
+       ; "keeper", `String name
+       ; "config_applied", `Bool config_applied
+       ; "runtime_sync", `Bool false
+       ; "error", `Assoc [ "code", `String code; "detail", `String detail ]
+       ]
+       @
+       match manifest_write with
+       | Some receipt -> [ "manifest_write", receipt ]
+       | None -> []))
+    reqd
+
+let manifest_write_receipt result =
+  match Tool_result.metadata result with
+  | Some (`Assoc fields) -> List.assoc_opt "keeper_manifest_write" fields
+  | Some _ | None -> None
+
+let respond_manifest_reconciliation ~request reqd ~name ~error =
+  Http.Response.json_value
+    ~status:`Service_unavailable
+    ~request
+    (`Assoc
+       [ "ok", `Bool false
+       ; "keeper", `String name
+       ; "config_applied", `Null
+       ; "runtime_sync", `Bool false
+       ; "error", error
+       ; "authoritative_reload_required", `Bool true
+       ])
     reqd
 
 let respond_manifest_revision_conflict ~request reqd ~name
@@ -1025,16 +1049,12 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                               Keeper_turn_up_update
                               .config_reconciliation_required_of_result result
                             with
-                            | Some detail ->
-                              respond_config_sync_error
+                            | Some error ->
+                              respond_manifest_reconciliation
                                 ~request:req
                                 reqd
-                                ~status:`Service_unavailable
                                 ~name
-                                ~config_applied:false
-                                ~code:"keeper_manifest_reconciliation_required"
-                                ~detail
-                                ()
+                                ~error
                             | None ->
                            (match
                               Keeper_turn_up_update
@@ -1042,6 +1062,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                             with
                             | Some detail ->
                               respond_config_sync_error
+                                ?manifest_write:(manifest_write_receipt result)
                                 ~request:req
                                 reqd
                                 ~status:`Service_unavailable
@@ -1061,6 +1082,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                detail;
                              invalidate_config_surfaces ~config ~name None;
                              respond_config_sync_error
+                               ?manifest_write:(manifest_write_receipt result)
                                ~request:req
                                reqd
                                ~status:`Service_unavailable
@@ -1082,6 +1104,12 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                              let (_st, json) =
                                Dashboard_http_keeper.keeper_config_json config
                                  name
+                             in
+                             let json =
+                               match manifest_write_receipt result, json with
+                               | Some receipt, `Assoc fields ->
+                                 `Assoc (("manifest_write", receipt) :: fields)
+                               | Some _, _ | None, _ -> json
                              in
                              Http.Response.json_value ~compress:true
                                ~request:req json reqd)))))))))

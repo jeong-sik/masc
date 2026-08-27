@@ -39,6 +39,10 @@ type error =
   | Io_error of string
   | Revision_conflict of conflict
   | Reconciliation_required of reconciliation
+  | Publication_exception of
+      { path : string
+      ; detail : string
+      }
 
 type 'a publication =
   | Commit of 'a
@@ -93,6 +97,8 @@ let error_to_string = function
       path
       observed
       detail
+  | Publication_exception { path; detail } ->
+    Printf.sprintf "keeper manifest publication raised (path %s): %s" path detail
 
 let warning_to_yojson = function
   | Manifest_parent_sync_unconfirmed detail ->
@@ -347,8 +353,8 @@ let strict_write_result = function
           (Fs_compat.atomic_replace_failure_to_string failure)
       ]
 
-let persist_with_publication_using ~with_lock ~restore_snapshot ~expected_revision
-    ~(config : Workspace.config)
+let persist_with_publication_using ~with_lock ~restore_snapshot ~read_revision
+    ~expected_revision ~(config : Workspace.config)
     ~(parsed : Keeper_turn_up_args.parsed_args) ~(meta : keeper_meta) ~publish () =
   let path = manifest_path ~config ~keeper_name:meta.name in
   let instructions_result =
@@ -382,18 +388,53 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~expected_revisi
            else Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits)
         |> strict_write_result
       in
-      let* revision =
-        revision_of_path_unlocked path |> Result.map_error (fun error -> Io_error error)
+      let rollback error =
+         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+        match restore_snapshot path snapshot with
+        | Ok () -> Error error
+        | Error reconciliation -> Error reconciliation
       in
-      let outcome = { path; created; revision } in
-      (match publish outcome with
-       | Commit value ->
-         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
-         Ok { value; warnings = write_warnings }
-       | Rollback value ->
-         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
-         let* () = restore_snapshot path snapshot in
-         Ok { value; warnings = [] }))
+      (match read_revision path with
+       | Error detail ->
+         rollback
+           (Io_error
+              (Printf.sprintf
+                 "cannot read keeper manifest revision after replacement: %s"
+                 detail))
+       | Ok revision ->
+         let outcome = { path; created; revision } in
+         let publication =
+           match publish outcome with
+           | decision -> Ok decision
+           | exception (Eio.Cancel.Cancelled _ as exn) ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             (match rollback (Io_error "publication cancelled") with
+              | Error (Reconciliation_required _ as error) ->
+                Log.Keeper.error
+                  "keeper manifest rollback failed during cancellation: %s"
+                  (error_to_string error)
+              | Error _ | Ok _ -> ());
+             Printexc.raise_with_backtrace exn backtrace
+           | exception exn ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             Error
+               (Publication_exception
+                  { path
+                  ; detail =
+                      Printexc.to_string exn
+                      ^ "\n"
+                      ^ Printexc.raw_backtrace_to_string backtrace
+                  })
+         in
+         (match publication with
+          | Error error -> rollback error
+          | Ok (Commit value) ->
+            Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+            Ok { value; warnings = write_warnings }
+          | Ok (Rollback value) ->
+            Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+            let* () = restore_snapshot path snapshot in
+            Ok { value; warnings = [] })))
   with
   | Error error -> Error (Io_error error)
   | Ok { value = Error error; _ } -> Error error
@@ -407,6 +448,7 @@ let persist_with_publication ~expected_revision ~config ~parsed ~meta ~publish (
   persist_with_publication_using
     ~with_lock:with_manifest_lock
     ~restore_snapshot:restore_snapshot_unlocked
+    ~read_revision:revision_of_path_unlocked
     ~expected_revision
     ~config
     ~parsed
@@ -433,6 +475,7 @@ module For_testing = struct
     persist_with_publication_using
       ~with_lock
       ~restore_snapshot:restore_snapshot_unlocked
+      ~read_revision:revision_of_path_unlocked
       ~expected_revision
       ~config
       ~parsed
@@ -462,11 +505,26 @@ module For_testing = struct
     persist_with_publication_using
       ~with_lock:with_manifest_lock
       ~restore_snapshot
+      ~read_revision:revision_of_path_unlocked
       ~expected_revision
       ~config
       ~parsed
       ~meta
       ~publish:(fun _ -> Rollback ())
+      ()
+  ;;
+
+  let persist_with_post_write_revision_failure ~expected_revision ~config
+      ~parsed ~meta () =
+    persist_with_publication_using
+      ~with_lock:with_manifest_lock
+      ~restore_snapshot:restore_snapshot_unlocked
+      ~read_revision:(fun _ -> Error "injected post-write revision read failure")
+      ~expected_revision
+      ~config
+      ~parsed
+      ~meta
+      ~publish:(fun outcome -> Commit outcome)
       ()
   ;;
 end

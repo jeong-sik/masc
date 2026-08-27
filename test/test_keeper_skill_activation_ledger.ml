@@ -323,7 +323,9 @@ let test_delivery_and_later_action_form_one_exact_chain () =
   let summary = Ledger.summarize with_action in
   check int "one instruction invocation" 1 summary.instruction_invocations;
   check int "one body served" 1 summary.skill_bodies_served;
-  check int "one delivery" 1 summary.instruction_deliveries;
+  check int "one provider delivery" 1 summary.instruction_provider_deliveries;
+  check int "zero official handoffs" 0
+    summary.instruction_official_client_handoffs;
   check int "one later action" 1 summary.instruction_actions_observed;
   check int "zero invalid transitions" 0 summary.invalid_transitions;
   (match Ledger.summarize_by_scope with_action with
@@ -332,11 +334,15 @@ let test_delivery_and_later_action_form_one_exact_chain () =
        scoped.scope.invocation_runtime_id;
      check
        (list (pair string int))
-       "delivery runtime is separate"
+       "provider delivery runtime is separate"
        [ "runtime-delivery", 1 ]
        (List.map
           (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
-          scoped.delivery_runtime_counts);
+          scoped.provider_delivery_runtime_counts);
+    check (list (pair string int)) "no official handoff runtime" []
+      (List.map
+         (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+         scoped.official_client_handoff_runtime_counts);
      check
        (list (pair string int))
        "action runtime is separate"
@@ -416,10 +422,79 @@ let test_official_client_handoff_delivers_in_invocation_turn () =
     | Error error -> fail (Ledger.store_error_to_string error)
   in
   check (list string) "official handoff exact id" [ "call-official" ] matched;
+  (match Ledger.activations ledger with
+   | [ { delivery = Some { boundary = Ledger.Official_client_result_handoff _; runtime_id; _ }; _ } ] ->
+     check string "official handoff runtime" "codex-runtime" runtime_id
+   | _ -> fail "official-client result handoff was not typed");
+  let summary = Ledger.summarize ledger in
+  check int "handoff is not provider delivery" 0
+    summary.instruction_provider_deliveries;
+  check int "one official client handoff" 1
+    summary.instruction_official_client_handoffs;
+  check int "handoff without action is incomplete" 0
+    summary.instruction_actions_observed;
+  (match Ledger.summarize_by_scope ledger with
+   | [ scoped ] ->
+     check (list (pair string int)) "no provider delivery runtime" []
+       (List.map
+          (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+          scoped.provider_delivery_runtime_counts);
+     check
+       (list (pair string int))
+       "official handoff runtime is separate"
+       [ "codex-runtime", 1 ]
+       (List.map
+          (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+          scoped.official_client_handoff_runtime_counts)
+   | _ -> fail "official handoff produced the wrong scoped summary")
+  ; let completed, added =
+      match
+        Ledger.observe_action
+          ~config
+          ~trace_id
+          ~turn_ref
+          ~active_skill_tool_use_ids:[ "call-official" ]
+          ~action_tool_use_id:"call-after-handoff"
+          ~tool_name:"keeper_time_now"
+          ~runtime_id:"codex-runtime"
+          ~agent_core_turn:0
+          ~observed_at:"2026-08-26T00:00:02Z"
+      with
+      | Ok value -> value
+      | Error error -> fail (Ledger.store_error_to_string error)
+    in
+    check int "later action completes official handoff proof" 1 added;
+    check int "completed handoff has one action" 1
+      (Ledger.summarize completed).instruction_actions_observed
+;;
+
+let test_cross_turn_tool_result_replay_is_not_delivery_or_rejection () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-replayed" () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let replay_turn = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:2 in
+  let ledger, matched =
+    match
+      Ledger.observe_delivery
+        ~config
+        ~trace_id
+        ~turn_ref:replay_turn
+        ~tool_results:[ receipt "call-replayed" ]
+        ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+        ~runtime_id:"runtime-next-turn"
+        ~delivered_at:"2026-08-26T00:00:01Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check (list string) "cross-turn replay has no matched ids" [] matched;
+  check int "cross-turn replay is not an invalid transition" 0
+    (Ledger.summarize ledger).invalid_transitions;
   match Ledger.activations ledger with
-  | [ { delivery = Some { boundary = Ledger.Official_client_result_handoff _; runtime_id; _ }; _ } ] ->
-    check string "official handoff runtime" "codex-runtime" runtime_id
-  | _ -> fail "official-client result handoff was not typed"
+  | [ { delivery = None; _ } ] -> ()
+  | _ -> fail "cross-turn replay acquired a durable delivery"
 ;;
 
 let test_conflicting_delivery_is_durable_transition_evidence () =
@@ -566,7 +641,8 @@ let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
     check string "first invocation runtime" "runtime-a"
       first_scope.scope.invocation_runtime_id;
     check int "first invocation" 1 first_scope.summary.instruction_invocations;
-    check int "first delivery" 1 first_scope.summary.instruction_deliveries;
+    check int "first provider delivery" 1
+      first_scope.summary.instruction_provider_deliveries;
     check int "first rejection" 1 first_scope.summary.invalid_transitions;
     check
       (list (pair string int))
@@ -574,11 +650,12 @@ let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
       [ "runtime-a", 1 ]
       (List.map
          (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
-         first_scope.delivery_runtime_counts);
+         first_scope.provider_delivery_runtime_counts);
     check string "second invocation runtime" "runtime-b"
       second_scope.scope.invocation_runtime_id;
     check int "second invocation" 1 second_scope.summary.instruction_invocations;
-    check int "second delivery" 0 second_scope.summary.instruction_deliveries;
+    check int "second provider delivery" 0
+      second_scope.summary.instruction_provider_deliveries;
     check int "second rejection" 0 second_scope.summary.invalid_transitions;
     let first_json = Ledger.scoped_summary_to_yojson first_scope in
     check string "scope reference revision"
@@ -839,6 +916,8 @@ let () =
             test_demoted_skill_result_is_not_delivery_or_invalid_transition
         ; test_case "official client handoff is typed" `Quick
             test_official_client_handoff_delivers_in_invocation_turn
+        ; test_case "cross-turn ToolResult replay is ignored" `Quick
+            test_cross_turn_tool_result_replay_is_not_delivery_or_rejection
         ; test_case "conflicting delivery is durable evidence" `Quick
             test_conflicting_delivery_is_durable_transition_evidence
         ; test_case "action before delivery is durable evidence" `Quick

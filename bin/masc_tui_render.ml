@@ -7332,24 +7332,29 @@ let skill_invocation_text = function
     ( skill_composition_origin_text ~tool_name origin
     , "composition invocation tool=" ^ tool_name )
 
-let skill_delivery_text = function
+let skill_delivery_text ~has_action = function
   | None -> "pending"
   | Some (delivery : Masc.Keeper_skill_activation_ledger.delivery) ->
-      let kind, turn =
+      let kind, turn, proof =
         match delivery.boundary with
         | Masc.Keeper_skill_activation_ledger.Model_response { agent_core_turn } ->
-          "model_response", agent_core_turn
+          "provider_delivery", agent_core_turn, ""
         | Official_client_result_handoff { agent_core_turn } ->
-          "official_client_result_handoff", agent_core_turn
+          ( "official_client_result_handoff"
+          , agent_core_turn
+          , if has_action
+            then " proof=complete_later_action"
+            else " proof=incomplete_no_later_action" )
       in
       Printf.sprintf
-        "%s turn=%d runtime=%s bytes=%d sha256=%s at=%s"
+        "%s turn=%d runtime=%s bytes=%d sha256=%s at=%s%s"
         kind
         turn
         (Terminal_text.single_line delivery.runtime_id)
         delivery.content_bytes
         (Terminal_text.single_line delivery.content_sha256)
         delivery.delivered_at
+        proof
 
 let skill_action_lines actions =
   List.map
@@ -7596,20 +7601,24 @@ let render_tools (state : state) =
                       scoped.scope.invocation_runtime_id)
                ; Ansi.dim,
                  Printf.sprintf
-                   "     invoked=%d bodies=%d resources=%d delivered=%d actions=%d composition=%d/%d/%d invalid=%d"
+                   "     invoked=%d bodies=%d resources=%d provider_deliveries=%d official_handoffs=%d actions=%d composition=%d/%d/%d/%d invalid=%d"
                    scoped_summary.instruction_invocations
                    scoped_summary.skill_bodies_served
                    scoped_summary.skill_resources_served
-                   scoped_summary.instruction_deliveries
+                   scoped_summary.instruction_provider_deliveries
+                   scoped_summary.instruction_official_client_handoffs
                    scoped_summary.instruction_actions_observed
                    scoped_summary.composition_invocations
-                   scoped_summary.composition_deliveries
+                   scoped_summary.composition_provider_deliveries
+                   scoped_summary.composition_official_client_handoffs
                    scoped_summary.composition_actions_observed
                    scoped_summary.invalid_transitions
                ; Ansi.dim,
                  Printf.sprintf
-                   "     delivery_runtimes=%s action_runtimes=%s"
-                   (runtime_counts scoped.delivery_runtime_counts)
+                   "     provider_delivery_runtimes=%s official_handoff_runtimes=%s action_runtimes=%s"
+                   (runtime_counts scoped.provider_delivery_runtime_counts)
+                   (runtime_counts
+                      scoped.official_client_handoff_runtime_counts)
                    (runtime_counts scoped.action_runtime_counts)
                ])
             scoped_summaries
@@ -7638,7 +7647,9 @@ let render_tools (state : state) =
                  ^ Terminal_text.single_line served
                ; Ansi.dim,
                  "       delivered "
-                 ^ (skill_delivery_text activation.delivery
+                 ^ (skill_delivery_text
+                      ~has_action:(not (List.is_empty activation.actions))
+                      activation.delivery
                     |> Terminal_text.single_line)
                ; Ansi.dim,
                  Printf.sprintf "       snapshot=%s keeper_turn=%s origin=%s"
@@ -7658,18 +7669,20 @@ let render_tools (state : state) =
             (List.length sap_activations)
         ; Ansi.bold,
           Printf.sprintf
-            "   session totals: invoked=%d bodies=%d resources=%d delivered=%d actions=%d invalid=%d"
+            "   session totals: invoked=%d bodies=%d resources=%d provider_deliveries=%d official_handoffs=%d actions=%d invalid=%d"
             summary.instruction_invocations
             summary.skill_bodies_served
             summary.skill_resources_served
-            summary.instruction_deliveries
+            summary.instruction_provider_deliveries
+            summary.instruction_official_client_handoffs
             summary.instruction_actions_observed
             summary.invalid_transitions
         ; Ansi.dim,
           Printf.sprintf
-            "   composition invoked=%d delivered=%d actions=%d"
+            "   composition invoked=%d provider_deliveries=%d official_handoffs=%d actions=%d"
             summary.composition_invocations
-            summary.composition_deliveries
+            summary.composition_provider_deliveries
+            summary.composition_official_client_handoffs
             summary.composition_actions_observed
         ; Ansi.dim,
           Printf.sprintf "   session=%s  ledger=%s"

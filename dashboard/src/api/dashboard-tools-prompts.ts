@@ -644,10 +644,12 @@ export interface DashboardSkillActivationSummary {
   instruction_invocations: number
   skill_bodies_served: number
   skill_resources_served: number
-  instruction_deliveries: number
+  instruction_provider_deliveries: number
+  instruction_official_client_handoffs: number
   instruction_actions_observed: number
   composition_invocations: number
-  composition_deliveries: number
+  composition_provider_deliveries: number
+  composition_official_client_handoffs: number
   composition_actions_observed: number
   invalid_transitions: number
 }
@@ -660,7 +662,8 @@ export interface DashboardSkillScopedSummary {
     reference: DashboardSkillReference
   }
   summary: DashboardSkillActivationSummary
-  delivery_runtime_counts: Array<{ runtime_id: string; count: number }>
+  provider_delivery_runtime_counts: Array<{ runtime_id: string; count: number }>
+  official_client_handoff_runtime_counts: Array<{ runtime_id: string; count: number }>
   action_runtime_counts: Array<{ runtime_id: string; count: number }>
 }
 
@@ -671,7 +674,7 @@ export type DashboardSkillActivationProjection =
       summary: DashboardSkillActivationSummary
       scoped_summaries: DashboardSkillScopedSummary[]
       ledger: {
-        schema: string
+        schema: 'masc.skill-activations/v4'
         workspace_key: string
         session_id: string
         revision: string
@@ -994,6 +997,394 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function exactSkillActivationObject(
+  value: unknown,
+  label: string,
+  fields: readonly string[],
+): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error(`skill_activations ${label} is not an object`)
+  const allowed = new Set(fields)
+  const unexpected = Object.keys(value).find(field => !allowed.has(field))
+  if (unexpected !== undefined) {
+    throw new Error(`skill_activations ${label} has unexpected field ${unexpected}`)
+  }
+  return value
+}
+
+function skillActivationString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`skill_activations ${label} must be a nonempty string`)
+  }
+  return value
+}
+
+function skillActivationSha256(value: unknown, label: string): string {
+  const sha256 = skillActivationString(value, label)
+  if (!/^[0-9a-f]{64}$/i.test(sha256)) {
+    throw new Error(`skill_activations ${label} must be a 64-character sha256`)
+  }
+  return sha256
+}
+
+function skillActivationNonnegativeInteger(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(`skill_activations ${label} must be a nonnegative integer`)
+  }
+  return value
+}
+
+function decodeSkillActivationSummary(
+  value: unknown,
+  label: string,
+): DashboardSkillActivationSummary {
+  const fields = [
+    'instruction_invocations',
+    'skill_bodies_served',
+    'skill_resources_served',
+    'instruction_provider_deliveries',
+    'instruction_official_client_handoffs',
+    'instruction_actions_observed',
+    'composition_invocations',
+    'composition_provider_deliveries',
+    'composition_official_client_handoffs',
+    'composition_actions_observed',
+    'invalid_transitions',
+  ] as const
+  const record = exactSkillActivationObject(value, label, fields)
+  return {
+    instruction_invocations: skillActivationNonnegativeInteger(record.instruction_invocations, `${label}.instruction_invocations`),
+    skill_bodies_served: skillActivationNonnegativeInteger(record.skill_bodies_served, `${label}.skill_bodies_served`),
+    skill_resources_served: skillActivationNonnegativeInteger(record.skill_resources_served, `${label}.skill_resources_served`),
+    instruction_provider_deliveries: skillActivationNonnegativeInteger(record.instruction_provider_deliveries, `${label}.instruction_provider_deliveries`),
+    instruction_official_client_handoffs: skillActivationNonnegativeInteger(record.instruction_official_client_handoffs, `${label}.instruction_official_client_handoffs`),
+    instruction_actions_observed: skillActivationNonnegativeInteger(record.instruction_actions_observed, `${label}.instruction_actions_observed`),
+    composition_invocations: skillActivationNonnegativeInteger(record.composition_invocations, `${label}.composition_invocations`),
+    composition_provider_deliveries: skillActivationNonnegativeInteger(record.composition_provider_deliveries, `${label}.composition_provider_deliveries`),
+    composition_official_client_handoffs: skillActivationNonnegativeInteger(record.composition_official_client_handoffs, `${label}.composition_official_client_handoffs`),
+    composition_actions_observed: skillActivationNonnegativeInteger(record.composition_actions_observed, `${label}.composition_actions_observed`),
+    invalid_transitions: skillActivationNonnegativeInteger(record.invalid_transitions, `${label}.invalid_transitions`),
+  }
+}
+
+function decodeSkillReference(value: unknown, label: string): DashboardSkillReference {
+  const record = exactSkillActivationObject(value, label, ['identity', 'content_revision'])
+  const identity = exactSkillActivationObject(
+    record.identity,
+    `${label}.identity`,
+    ['source_id', 'package_id', 'name'],
+  )
+  return {
+    identity: {
+      source_id: skillActivationString(identity.source_id, `${label}.identity.source_id`),
+      package_id: skillActivationString(identity.package_id, `${label}.identity.package_id`),
+      name: skillActivationString(identity.name, `${label}.identity.name`),
+    },
+    content_revision: skillActivationSha256(record.content_revision, `${label}.content_revision`),
+  }
+}
+
+function decodeTaskIds(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`skill_activations ${label} must be a nonempty array`)
+  }
+  const taskIds = value.map((taskId, index) => skillActivationString(taskId, `${label}[${index}]`))
+  if (new Set(taskIds).size !== taskIds.length) {
+    throw new Error(`skill_activations ${label} must not contain duplicates`)
+  }
+  return taskIds
+}
+
+function decodeInstructionOrigin(value: unknown, label: string): DashboardSkillInstructionOrigin {
+  const base = exactSkillActivationObject(value, label, ['kind', 'task_ids'])
+  if (base.kind === 'task_instruction') {
+    return {
+      kind: 'task_instruction',
+      task_ids: decodeTaskIds(base.task_ids, `${label}.task_ids`),
+    }
+  }
+  if (base.kind === 'session_instruction') {
+    exactSkillActivationObject(value, label, ['kind'])
+    return { kind: 'session_instruction' }
+  }
+  throw new Error(`skill_activations ${label}.kind is unsupported`)
+}
+
+function decodeCompositionOrigin(value: unknown, label: string): DashboardSkillCompositionOrigin {
+  const base = exactSkillActivationObject(value, label, ['kind', 'task_ids'])
+  if (base.kind === 'task_composition') {
+    return {
+      kind: 'task_composition',
+      task_ids: decodeTaskIds(base.task_ids, `${label}.task_ids`),
+    }
+  }
+  if (base.kind === 'session_composition') {
+    exactSkillActivationObject(value, label, ['kind'])
+    return { kind: 'session_composition' }
+  }
+  throw new Error(`skill_activations ${label}.kind is unsupported`)
+}
+
+function decodeSkillActivationInvocation(
+  value: unknown,
+  label: string,
+): DashboardSkillActivationInvocation {
+  const record = exactSkillActivationObject(
+    value,
+    label,
+    ['kind', 'origin', 'served_content', 'tool_name'],
+  )
+  if (record.kind === 'instruction') {
+    exactSkillActivationObject(value, label, ['kind', 'origin', 'served_content'])
+    const served = exactSkillActivationObject(
+      record.served_content,
+      `${label}.served_content`,
+      ['kind', 'relative_path', 'bytes', 'sha256'],
+    )
+    const bytes = skillActivationNonnegativeInteger(served.bytes, `${label}.served_content.bytes`)
+    const sha256 = skillActivationSha256(served.sha256, `${label}.served_content.sha256`)
+    const origin = decodeInstructionOrigin(record.origin, `${label}.origin`)
+    if (served.kind === 'skill_body') {
+      exactSkillActivationObject(record.served_content, `${label}.served_content`, ['kind', 'bytes', 'sha256'])
+      return { kind: 'instruction', origin, served_content: { kind: 'skill_body', bytes, sha256 } }
+    }
+    if (served.kind === 'skill_resource') {
+      exactSkillActivationObject(
+        record.served_content,
+        `${label}.served_content`,
+        ['kind', 'relative_path', 'bytes', 'sha256'],
+      )
+      return {
+        kind: 'instruction',
+        origin,
+        served_content: {
+          kind: 'skill_resource',
+          relative_path: skillActivationString(served.relative_path, `${label}.served_content.relative_path`),
+          bytes,
+          sha256,
+        },
+      }
+    }
+    throw new Error(`skill_activations ${label}.served_content.kind is unsupported`)
+  }
+  if (record.kind === 'composition') {
+    exactSkillActivationObject(value, label, ['kind', 'origin', 'tool_name'])
+    return {
+      kind: 'composition',
+      origin: decodeCompositionOrigin(record.origin, `${label}.origin`),
+      tool_name: skillActivationString(record.tool_name, `${label}.tool_name`),
+    }
+  }
+  throw new Error(`skill_activations ${label}.kind is unsupported`)
+}
+
+function decodeSkillActivation(value: unknown, label: string): DashboardSkillActivation {
+  const record = exactSkillActivationObject(value, label, [
+    'identity',
+    'content_revision',
+    'snapshot_revision',
+    'turn_ref',
+    'runtime_id',
+    'skill_tool_use_id',
+    'agent_core_turn',
+    'invocation',
+    'delivery',
+    'actions',
+    'activated_at',
+  ])
+  const reference = decodeSkillReference(
+    { identity: record.identity, content_revision: record.content_revision },
+    label,
+  )
+  let delivery: DashboardSkillActivation['delivery'] = null
+  if (record.delivery !== null) {
+    const delivered = exactSkillActivationObject(record.delivery, `${label}.delivery`, [
+      'boundary',
+      'runtime_id',
+      'delivered_at',
+      'content_bytes',
+      'content_sha256',
+    ])
+    const boundary = exactSkillActivationObject(
+      delivered.boundary,
+      `${label}.delivery.boundary`,
+      ['kind', 'agent_core_turn'],
+    )
+    if (boundary.kind !== 'model_response' && boundary.kind !== 'official_client_result_handoff') {
+      throw new Error(`skill_activations ${label}.delivery.boundary.kind is unsupported`)
+    }
+    delivery = {
+      boundary: {
+        kind: boundary.kind,
+        agent_core_turn: skillActivationNonnegativeInteger(
+          boundary.agent_core_turn,
+          `${label}.delivery.boundary.agent_core_turn`,
+        ),
+      },
+      runtime_id: skillActivationString(delivered.runtime_id, `${label}.delivery.runtime_id`),
+      delivered_at: skillActivationString(delivered.delivered_at, `${label}.delivery.delivered_at`),
+      content_bytes: skillActivationNonnegativeInteger(delivered.content_bytes, `${label}.delivery.content_bytes`),
+      content_sha256: skillActivationSha256(delivered.content_sha256, `${label}.delivery.content_sha256`),
+    }
+  }
+  if (!Array.isArray(record.actions)) throw new Error(`skill_activations ${label}.actions must be an array`)
+  const actions = record.actions.map((action, index) => {
+    const actionLabel = `${label}.actions[${index}]`
+    const decoded = exactSkillActivationObject(action, actionLabel, [
+      'tool_use_id',
+      'tool_name',
+      'runtime_id',
+      'agent_core_turn',
+      'observed_at',
+    ])
+    return {
+      tool_use_id: skillActivationString(decoded.tool_use_id, `${actionLabel}.tool_use_id`),
+      tool_name: skillActivationString(decoded.tool_name, `${actionLabel}.tool_name`),
+      runtime_id: skillActivationString(decoded.runtime_id, `${actionLabel}.runtime_id`),
+      agent_core_turn: skillActivationNonnegativeInteger(decoded.agent_core_turn, `${actionLabel}.agent_core_turn`),
+      observed_at: skillActivationString(decoded.observed_at, `${actionLabel}.observed_at`),
+    }
+  })
+  return {
+    ...reference,
+    snapshot_revision: skillActivationSha256(record.snapshot_revision, `${label}.snapshot_revision`),
+    turn_ref: skillActivationString(record.turn_ref, `${label}.turn_ref`),
+    runtime_id: skillActivationString(record.runtime_id, `${label}.runtime_id`),
+    skill_tool_use_id: skillActivationString(record.skill_tool_use_id, `${label}.skill_tool_use_id`),
+    agent_core_turn: skillActivationNonnegativeInteger(record.agent_core_turn, `${label}.agent_core_turn`),
+    invocation: decodeSkillActivationInvocation(record.invocation, `${label}.invocation`),
+    delivery,
+    actions,
+    activated_at: skillActivationString(record.activated_at, `${label}.activated_at`),
+  }
+}
+
+function decodeTransitionRejection(value: unknown, label: string): DashboardSkillTransitionRejection {
+  const record = exactSkillActivationObject(value, label, [
+    'kind',
+    'skill_tool_use_id',
+    'activation_turn_ref',
+    'observed_turn_ref',
+    'activation_agent_core_turn',
+    'observed_agent_core_turn',
+    'observed_at',
+    'action_tool_use_id',
+    'tool_name',
+  ])
+  const common = {
+    skill_tool_use_id: skillActivationString(record.skill_tool_use_id, `${label}.skill_tool_use_id`),
+    activation_turn_ref: skillActivationString(record.activation_turn_ref, `${label}.activation_turn_ref`),
+    observed_turn_ref: skillActivationString(record.observed_turn_ref, `${label}.observed_turn_ref`),
+    observed_agent_core_turn: skillActivationNonnegativeInteger(record.observed_agent_core_turn, `${label}.observed_agent_core_turn`),
+    observed_at: skillActivationString(record.observed_at, `${label}.observed_at`),
+  }
+  if (record.kind === 'delivery_order') {
+    exactSkillActivationObject(value, label, [
+      'kind',
+      'skill_tool_use_id',
+      'activation_turn_ref',
+      'observed_turn_ref',
+      'activation_agent_core_turn',
+      'observed_agent_core_turn',
+      'observed_at',
+    ])
+    return {
+      kind: 'delivery_order',
+      ...common,
+      activation_agent_core_turn: skillActivationNonnegativeInteger(
+        record.activation_agent_core_turn,
+        `${label}.activation_agent_core_turn`,
+      ),
+    }
+  }
+  if (record.kind === 'delivery_conflict') {
+    exactSkillActivationObject(value, label, [
+      'kind',
+      'skill_tool_use_id',
+      'activation_turn_ref',
+      'observed_turn_ref',
+      'observed_agent_core_turn',
+      'observed_at',
+    ])
+    return { kind: 'delivery_conflict', ...common }
+  }
+  if (record.kind === 'action_before_delivery') {
+    exactSkillActivationObject(value, label, [
+      'kind',
+      'skill_tool_use_id',
+      'activation_turn_ref',
+      'observed_turn_ref',
+      'action_tool_use_id',
+      'tool_name',
+      'observed_agent_core_turn',
+      'observed_at',
+    ])
+    return {
+      kind: 'action_before_delivery',
+      ...common,
+      action_tool_use_id: skillActivationString(record.action_tool_use_id, `${label}.action_tool_use_id`),
+      tool_name: skillActivationString(record.tool_name, `${label}.tool_name`),
+    }
+  }
+  throw new Error(`skill_activations ${label}.kind is unsupported`)
+}
+
+function decodeRuntimeCounts(
+  value: unknown,
+  label: string,
+): Array<{ runtime_id: string; count: number }> {
+  if (!Array.isArray(value)) throw new Error(`skill_activations ${label} must be an array`)
+  return value.map((entry, index) => {
+    const entryLabel = `${label}[${index}]`
+    const record = exactSkillActivationObject(entry, entryLabel, ['runtime_id', 'count'])
+    const count = skillActivationNonnegativeInteger(record.count, `${entryLabel}.count`)
+    if (count === 0) throw new Error(`skill_activations ${entryLabel}.count must be positive`)
+    return {
+      runtime_id: skillActivationString(record.runtime_id, `${entryLabel}.runtime_id`),
+      count,
+    }
+  })
+}
+
+function decodeScopedSummary(value: unknown, label: string): DashboardSkillScopedSummary {
+  const record = exactSkillActivationObject(value, label, [
+    'scope',
+    'summary',
+    'provider_delivery_runtime_counts',
+    'official_client_handoff_runtime_counts',
+    'action_runtime_counts',
+  ])
+  const scope = exactSkillActivationObject(record.scope, `${label}.scope`, [
+    'snapshot_revision',
+    'turn_ref',
+    'invocation_runtime_id',
+    'reference',
+  ])
+  return {
+    scope: {
+      snapshot_revision: skillActivationSha256(scope.snapshot_revision, `${label}.scope.snapshot_revision`),
+      turn_ref: skillActivationString(scope.turn_ref, `${label}.scope.turn_ref`),
+      invocation_runtime_id: skillActivationString(
+        scope.invocation_runtime_id,
+        `${label}.scope.invocation_runtime_id`,
+      ),
+      reference: decodeSkillReference(scope.reference, `${label}.scope.reference`),
+    },
+    summary: decodeSkillActivationSummary(record.summary, `${label}.summary`),
+    provider_delivery_runtime_counts: decodeRuntimeCounts(
+      record.provider_delivery_runtime_counts,
+      `${label}.provider_delivery_runtime_counts`,
+    ),
+    official_client_handoff_runtime_counts: decodeRuntimeCounts(
+      record.official_client_handoff_runtime_counts,
+      `${label}.official_client_handoff_runtime_counts`,
+    ),
+    action_runtime_counts: decodeRuntimeCounts(
+      record.action_runtime_counts,
+      `${label}.action_runtime_counts`,
+    ),
+  }
+}
+
 export function normalizeSkillActivationProjection(
   value: unknown,
 ): DashboardSkillActivationProjection | null | undefined {
@@ -1002,76 +1393,66 @@ export function normalizeSkillActivationProjection(
     throw new Error('skill_activations is not a typed projection')
   }
   if (value.status === 'no_session') {
-    if (typeof value.keeper_name !== 'string') throw new Error('skill_activations keeper_name missing')
-    return value as unknown as DashboardSkillActivationProjection
+    const record = exactSkillActivationObject(value, 'no_session', ['status', 'keeper_name'])
+    return {
+      status: 'no_session',
+      keeper_name: skillActivationString(record.keeper_name, 'no_session.keeper_name'),
+    }
   }
   if (value.status === 'unavailable') {
-    if (typeof value.keeper_name !== 'string' || typeof value.reason !== 'string' || typeof value.detail !== 'string') {
-      throw new Error('skill_activations unavailable projection is incomplete')
+    const record = exactSkillActivationObject(
+      value,
+      'unavailable',
+      ['status', 'keeper_name', 'reason', 'detail'],
+    )
+    return {
+      status: 'unavailable',
+      keeper_name: skillActivationString(record.keeper_name, 'unavailable.keeper_name'),
+      reason: skillActivationString(record.reason, 'unavailable.reason'),
+      detail: skillActivationString(record.detail, 'unavailable.detail'),
     }
-    return value as unknown as DashboardSkillActivationProjection
   }
-  if (value.status !== 'available' || !isRecord(value.ledger)) {
-    throw new Error('skill_activations status is unsupported')
-  }
-  if (value.ledger.schema !== 'masc.skill-activations/v4') {
+  if (value.status !== 'available') throw new Error('skill_activations status is unsupported')
+  const projection = exactSkillActivationObject(
+    value,
+    'available',
+    ['status', 'keeper_name', 'summary', 'scoped_summaries', 'ledger'],
+  )
+  const ledger = exactSkillActivationObject(projection.ledger, 'available.ledger', [
+    'schema',
+    'workspace_key',
+    'session_id',
+    'revision',
+    'activations',
+    'transition_rejections',
+  ])
+  if (ledger.schema !== 'masc.skill-activations/v4') {
     throw new Error('skill_activations schema is not v4')
   }
-  if (!Array.isArray(value.ledger.activations) || !Array.isArray(value.scoped_summaries)) {
+  if (
+    !Array.isArray(ledger.activations)
+    || !Array.isArray(ledger.transition_rejections)
+    || !Array.isArray(projection.scoped_summaries)
+  ) {
     throw new Error('skill_activations arrays are missing')
   }
-  for (const row of value.ledger.activations) {
-    if (!isRecord(row) || typeof row.runtime_id !== 'string' || !Array.isArray(row.actions)) {
-      throw new Error('skill activation runtime evidence is incomplete')
-    }
-    if (!isRecord(row.invocation) || !isRecord(row.invocation.origin)) {
-      throw new Error('skill activation origin is missing')
-    }
-    const originKind = row.invocation.origin.kind
-    if (originKind === 'task_instruction' || originKind === 'task_composition') {
-      const taskIds = row.invocation.origin.task_ids
-      if (
-        !Array.isArray(taskIds)
-        || taskIds.length === 0
-        || taskIds.some(taskId => typeof taskId !== 'string')
-        || new Set(taskIds).size !== taskIds.length
-      ) {
-        throw new Error('skill activation task_ids is not a nonempty set')
-      }
-    }
-    if (row.delivery !== null) {
-      if (!isRecord(row.delivery) || !isRecord(row.delivery.boundary)) {
-        throw new Error('skill delivery boundary is missing')
-      }
-      const boundaryKind = row.delivery.boundary.kind
-      if (boundaryKind !== 'model_response' && boundaryKind !== 'official_client_result_handoff') {
-        throw new Error('skill delivery boundary kind is unsupported')
-      }
-      if (
-        typeof row.delivery.boundary.agent_core_turn !== 'number'
-        || typeof row.delivery.runtime_id !== 'string'
-        || typeof row.delivery.content_bytes !== 'number'
-        || typeof row.delivery.content_sha256 !== 'string'
-      ) {
-        throw new Error('skill delivery provenance is incomplete')
-      }
-    }
-    if (row.actions.some(action => !isRecord(action) || typeof action.runtime_id !== 'string')) {
-      throw new Error('skill action runtime evidence is incomplete')
-    }
+  return {
+    status: 'available',
+    keeper_name: skillActivationString(projection.keeper_name, 'available.keeper_name'),
+    summary: decodeSkillActivationSummary(projection.summary, 'available.summary'),
+    scoped_summaries: projection.scoped_summaries.map((scoped, index) =>
+      decodeScopedSummary(scoped, `available.scoped_summaries[${index}]`)),
+    ledger: {
+      schema: 'masc.skill-activations/v4',
+      workspace_key: skillActivationSha256(ledger.workspace_key, 'available.ledger.workspace_key'),
+      session_id: skillActivationString(ledger.session_id, 'available.ledger.session_id'),
+      revision: skillActivationSha256(ledger.revision, 'available.ledger.revision'),
+      activations: ledger.activations.map((activation, index) =>
+        decodeSkillActivation(activation, `available.ledger.activations[${index}]`)),
+      transition_rejections: ledger.transition_rejections.map((rejection, index) =>
+        decodeTransitionRejection(rejection, `available.ledger.transition_rejections[${index}]`)),
+    },
   }
-  for (const scoped of value.scoped_summaries) {
-    if (
-      !isRecord(scoped)
-      || !isRecord(scoped.scope)
-      || typeof scoped.scope.invocation_runtime_id !== 'string'
-      || !Array.isArray(scoped.delivery_runtime_counts)
-      || !Array.isArray(scoped.action_runtime_counts)
-    ) {
-      throw new Error('skill scoped runtime evidence is incomplete')
-    }
-  }
-  return value as unknown as DashboardSkillActivationProjection
 }
 
 export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): Promise<DashboardToolsResponse> {

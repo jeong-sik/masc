@@ -112,7 +112,8 @@ and action runtime identities are compared as separate dimensions:
 | offered exact Skills | at least 1 |
 | distinct `keeper_skill` invocations | at least 1 |
 | bodies + resources served | equal to successful instruction invocations |
-| content delivered to provider input | equal to served content selected for proof |
+| content delivered to provider input (`Model_response`) | equal to served content selected for provider proof |
+| official-client result handoffs | counted separately from provider delivery; a handoff alone is incomplete |
 | later model-selected tool actions | at least 1 |
 | unmatched or invalid use transitions | 0 |
 | Dashboard decode errors | 0 |
@@ -124,6 +125,12 @@ The proof is repeated in three ways:
 2. a real Keeper task proves natural model activation and a later action; and
 3. a runtime A-to-B retry proves the same frozen Skill reference survives
    provider failover.
+
+An official-client handoff is evidence that the dynamic result reached the
+official-client adapter boundary, not evidence that a provider accepted it.
+Its proof becomes complete only when a later action is causally attached; a
+handoff with zero later actions remains visible as incomplete. No adapter ACK is
+invented to upgrade it into provider delivery.
 
 Session totals are operational context, not a proof row. Browser and TUI captures
 must group proof counts by the same snapshot revision, turn reference,

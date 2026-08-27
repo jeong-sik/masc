@@ -171,8 +171,10 @@ let test_dashboard_projection_is_live_outside_inventory_cache () =
     (summary_count "instruction_invocations" after);
   check int "one body served" 1
     (summary_count "skill_bodies_served" after);
-  check int "no inferred delivery" 0
-    (summary_count "instruction_deliveries" after);
+  check int "no inferred provider delivery" 0
+    (summary_count "instruction_provider_deliveries" after);
+  check int "no inferred official client handoff" 0
+    (summary_count "instruction_official_client_handoffs" after);
   check int "strict ledger has no invalid transitions" 0
     (summary_count "invalid_transitions" after)
 ;;

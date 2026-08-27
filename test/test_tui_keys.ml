@@ -125,6 +125,16 @@ let test_fusion_footer_pins_the_shared_list_projection () =
     "j/k:move  PgUp/PgDn:page  Enter:detail  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
 
+let test_lanes_run_list_footer_names_the_drill_down () =
+  check str "the standalone lane run list names open and back"
+    "j/k:move  Right / Enter:prompt  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    Masc_tui_keys.footer_hints_lanes_run_list
+
+let test_lanes_run_detail_footer_appends_the_scroll_position () =
+  check str "the run detail footer carries its live scroll position"
+    "j/k:scroll  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  (3/40)"
+    (Masc_tui_keys.footer_hints_lanes_run_detail ~scroll:3 ~max_scroll:40)
+
 let test_overview_footer_projects_by_focus () =
   (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh
      Tab:next  2:keepers" (and "j/k:tasks  Enter:detail  esc:events …").
@@ -138,6 +148,11 @@ let test_overview_footer_projects_by_focus () =
   check str "tasks mode keeps arrow/Enter/Esc and drops t"
     "j/k:tasks  h/l:pane  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints_overview ~task_focus:true)
+
+let test_planning_footer_carries_filter_and_sort () =
+  check str "planning names filter and sort"
+    "j/k:move  f:filter  s:sort  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Planning)
 
 let test_system_logs_lost_the_keys_it_never_had () =
   (* The old help table documented g, G, and f on System logs; the dispatch
@@ -282,10 +297,16 @@ let () =
             test_verification_footer_carries_the_verdict_keys
         ; Alcotest.test_case "Fusion pins the shared list projection" `Quick
             test_fusion_footer_pins_the_shared_list_projection
+        ; Alcotest.test_case "Lanes run list names the drill-down" `Quick
+            test_lanes_run_list_footer_names_the_drill_down
+        ; Alcotest.test_case "Lanes run detail appends the scroll position" `Quick
+            test_lanes_run_detail_footer_appends_the_scroll_position
         ; Alcotest.test_case "Overview footer projects by focus" `Quick
             test_overview_footer_projects_by_focus
         ; Alcotest.test_case "System logs lost the keys it never had" `Quick
             test_system_logs_lost_the_keys_it_never_had
+        ; Alcotest.test_case "Planning carries filter and sort" `Quick
+            test_planning_footer_carries_filter_and_sort
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick

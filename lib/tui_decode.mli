@@ -90,6 +90,12 @@ type planning_goal = {
   pg_last_review_note : string option;
       (** What a keeper or operator wrote at the last transition. Free text,
           unlike {!pg_proof}, which is the judge's. *)
+  pg_last_review_at : string option;
+  pg_created_at : string option;
+  pg_updated_at : string option;
+      (** Server timestamps (RFC 3339). Optional: an older server build may
+          not emit them, and the TUI renders what is there rather than
+          refusing the goal. *)
 }
 
 type planning_rollup = {
@@ -977,6 +983,46 @@ val decode_librarian_actual_input :
   run_id:string -> Yojson.Safe.t -> (string list, string) result
 (** Read [run.input.payload.actual_input] from one exact-lane detail response,
     prefixed with the run/actor/status identity the TUI displays above it. *)
+
+(* One exact-lane run as the paged listing serves it: identity and outcome,
+   never the payloads. Completion fields are absent while the run is still
+   running. *)
+type lane_run_summary =
+  { lrs_run_id : string
+  ; lrs_lane : string
+  ; lrs_actor : string
+  ; lrs_started_at : float
+  ; lrs_status : string
+  ; lrs_elapsed_s : float option
+  ; lrs_selected_slot : string option
+  }
+
+type lane_run_page =
+  { lrpg_runs : lane_run_summary list
+  ; lrpg_next : (float * string) option
+  }
+
+type lane_run_detail =
+  { lrd_run_id : string
+  ; lrd_lane : string
+  ; lrd_actor : string
+  ; lrd_started_at : float
+  ; lrd_status : string
+  ; lrd_elapsed_s : float option
+  ; lrd_selected_slot : string option
+  ; lrd_input_payload : Yojson.Safe.t
+  ; lrd_output : Yojson.Safe.t option
+  }
+
+val decode_lane_run_page :
+  lane:string -> Yojson.Safe.t -> (lane_run_page, string) result
+(** One cursor page of exact-lane summaries, filtered to [lane]. [lrpg_next]
+    is the page cursor of the unfiltered page, so paging does not stall on a
+    page where the lane has no runs. *)
+
+val decode_lane_run_detail : Yojson.Safe.t -> (lane_run_detail, string) result
+(** The whole record of one exact-lane run, [input.payload] and [output]
+    included; [lrd_output] is [None] while the run is still running. *)
 
 type log_kind =
   | Log_turn

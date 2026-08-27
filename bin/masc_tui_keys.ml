@@ -113,7 +113,8 @@ let for_surface = function
       [ b Navigate "j/k" "move"; b Act "Enter" "choose"; b Act "Esc" "back" ]
   | Lanes ->
       [ b Navigate "j/k" "move" ~help:"move the lane cursor"
-      ; b Act "Right / Enter" "detail" ~help:"open the selected Keeper"
+      ; b Act "Right / Enter" "detail"
+          ~help:"open the selected Keeper, or a standalone lane's exact runs"
       ; b Act "c / m" "chat" ~help:"chat with the selected Keeper"
       ; b Act "Esc" "overview"
       ]
@@ -145,6 +146,8 @@ let for_surface = function
       [ b Navigate "j/k" "move"
       ; b Act "Right / Enter" "detail"
       ; b Act "Left / Esc" "back"
+      ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
+      ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
       ; b Act "c" "complete" ~help:"complete goal"
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
@@ -346,6 +349,27 @@ let footer_hints_fusion_detail ~scroll ~max_scroll =
         ; b Navigate "PgUp/PgDn" "page"
         ; b Act "Y" "copy"
         ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
+        ]
+        @ listing_meta))
+    scroll max_scroll
+
+(* Lanes sub-modes ([lanes_mode] owns overview/list/detail —
+   masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
+   two name the drill-down the same way the Fusion detail footer does. *)
+let footer_hints_lanes_run_list =
+  hints_of_bindings
+    ([ b Navigate "j/k" "move" ~help:"move the run cursor"
+     ; b Act "Right / Enter" "prompt" ~help:"open the run's prompt and output"
+     ; b Act "Left / Esc" "back" ~help:"back to the lane overview"
+     ]
+     @ listing_meta)
+
+let footer_hints_lanes_run_detail ~scroll ~max_scroll =
+  Printf.sprintf "%s  (%d/%d)"
+    (hints_of_bindings
+       ([ b Navigate "j/k" "scroll"
+        ; b Navigate "PgUp/PgDn" "page"
+        ; b Act "Left / Esc" "back" ~help:"back to the run list"
         ]
         @ listing_meta))
     scroll max_scroll

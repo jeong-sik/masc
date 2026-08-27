@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = (
     REPO_ROOT / "scripts" / "harness" / "workload" / "keeper_skill_use_proof.py"
 )
+sys.path.insert(0, str(SCRIPT_PATH.parent))
 
 
 def load_module():
@@ -179,14 +180,23 @@ class KeeperSkillUseProofTest(unittest.TestCase):
             )
             return Response()
 
-        with mock.patch.object(proof, "urlopen", side_effect=open_request):
+        with mock.patch.object(
+            proof.proof_http, "open_no_redirect", side_effect=open_request
+        ):
             value, raw = proof.read_json("https://masc.invalid/strict", 3.0, token)
 
         self.assertEqual(value, {"ok": True})
         self.assertNotIn(token.encode(), raw)
-        options = proof.dashboard_context_options(token)
-        self.assertEqual(
-            options["extra_http_headers"], {"Authorization": f"Bearer {token}"}
+        options = proof.dashboard_context_options()
+        self.assertNotIn("extra_http_headers", options)
+        self.assertNotIn(
+            "Authorization",
+            proof.proof_http.scoped_bearer_headers(
+                base_url="https://masc.example",
+                request_url="https://foreign.example/image.png",
+                headers={"Authorization": f"Bearer {token}"},
+                token=token,
+            ),
         )
 
     def test_token_file_is_one_regular_non_symlink_line(self):
@@ -204,6 +214,71 @@ class KeeperSkillUseProofTest(unittest.TestCase):
             link.symlink_to(target)
             with self.assertRaisesRegex(proof.ProofError, "symlink"):
                 proof.read_token(link)
+
+    def test_dashboard_auth_fetch_rejects_redirect_without_following_it(self):
+        class RequestValue:
+            url = "https://masc.example/api/v1/dashboard/tools"
+            headers = {"Accept": "application/json"}
+
+        class ResponseValue:
+            status = 302
+
+        route = mock.Mock()
+        route.request = RequestValue()
+        route.fetch.return_value = ResponseValue()
+
+        proof.handle_dashboard_route(
+            route, base_url="https://masc.example", token="secret"
+        )
+
+        route.fetch.assert_called_once_with(
+            headers={
+                "Accept": "application/json",
+                "Authorization": "Bearer secret",
+            },
+            max_redirects=0,
+        )
+        route.abort.assert_called_once_with("blockedbyclient")
+        route.continue_.assert_not_called()
+        route.fulfill.assert_not_called()
+
+    def test_dashboard_auth_fulfills_one_same_origin_response(self):
+        class RequestValue:
+            url = "https://masc.example/api/v1/dashboard/tools"
+            headers = {"Accept": "application/json"}
+
+        class ResponseValue:
+            status = 200
+
+        response = ResponseValue()
+        route = mock.Mock()
+        route.request = RequestValue()
+        route.fetch.return_value = response
+
+        proof.handle_dashboard_route(
+            route, base_url="https://masc.example", token="secret"
+        )
+
+        route.fetch.assert_called_once()
+        route.fulfill.assert_called_once_with(response=response)
+        route.abort.assert_not_called()
+        route.continue_.assert_not_called()
+
+    def test_dashboard_foreign_request_strips_auth_without_fetch(self):
+        class RequestValue:
+            url = "https://assets.example/image.png"
+            headers = {"Authorization": "Bearer inherited", "Accept": "image/png"}
+
+        route = mock.Mock()
+        route.request = RequestValue()
+
+        proof.handle_dashboard_route(
+            route, base_url="https://masc.example", token="secret"
+        )
+
+        route.continue_.assert_called_once_with(headers={"Accept": "image/png"})
+        route.fetch.assert_not_called()
+        route.fulfill.assert_not_called()
 
     def test_rejects_base_url_credentials(self):
         with self.assertRaisesRegex(proof.ProofError, "must not contain credentials"):

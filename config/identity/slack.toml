@@ -15,8 +15,21 @@
 # it -- a Slack user token without rotation is long-lived, so there is
 # nothing for a Keeper to renew and no moment for it to stop at.
 #
-# Still not measured: whether the MCP endpoint accepts a token of that
-# shape. The login completes; the first tool call is what would say.
+# Measured 2026-08-27: the login completes with a token of that shape and
+# the credentials are stored. What the first tool call then hits is not the
+# token -- it is an app setting:
+#
+#   {"code":-32600,"message":"App is not enabled for Slack MCP server
+#    access. Please enable it here: .../apps/<APP_ID>/app-assistant"}
+#
+# An HTTP 400 naming the app, not a 401 naming the credential. The app has
+# to have Features > Agents & AI Apps > Model Context Protocol turned on,
+# which is separate from token rotation and from the scopes. Until that is
+# on, no token of any shape reaches the tools.
+#
+# So the shape question is still open, and it can only be answered after
+# that toggle: whether Slack then accepts a non-rotating token is the next
+# thing to measure.
 #
 # Turning rotation on gets an expiring token and a refresh token instead.
 # It cannot be turned off again, and installs the app already has are

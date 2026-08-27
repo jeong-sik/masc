@@ -60,6 +60,11 @@
  (modules test_tui_keeper_config)
  (libraries alcotest masc_tui_keeper_config yojson str))
 
+(test
+ (name test_tui_keeper_sandbox)
+ (modules test_tui_keeper_sandbox)
+ (libraries alcotest masc masc_tui_keeper_sandbox yojson str))
+
 (tests
  (names
   test_keeper_lifecycle_gate

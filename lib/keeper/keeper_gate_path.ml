@@ -13,3 +13,7 @@ let always_allowed ~base_path = Filename.concat (dir ~base_path) "always-allowed
 
 let keeper_modes ~base_path = Filename.concat (dir ~base_path) "keeper-modes.json"
 ;;
+
+let keeper_judge_slots ~base_path =
+  Filename.concat (dir ~base_path) "keeper-judge-slots.json"
+;;

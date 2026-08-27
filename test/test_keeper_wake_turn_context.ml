@@ -360,7 +360,7 @@ let test_held_task_skills_section_renders () =
   in
   check bool "heading" true (contains ~needle:"### Skills Named by Tasks You Hold" user);
   check bool "line names the task and exact skills" true
-    (contains ~needle:"task-364 (held by you) names skills: [{" user
+    (contains ~needle:"task-364 (held by you) names exact Skill catalog rows: [{" user
      && contains ~needle:"\"name\":\"mission-snapshot\"" user
      && contains ~needle:"\"name\":\"work-intake\"" user);
   check bool "unprojected refs are explicitly unavailable" true
@@ -512,6 +512,7 @@ let test_direct_turn_reuses_current_task_context () =
     Turn.For_testing.direct_turn_dynamic_context
       ~current_task:(Inputs.Current_task task)
       ~held_task_skills:[]
+      ~task_skill_surfaces:[]
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:"worktree state"
       ~telemetry_feedback_text:"telemetry state"
@@ -541,6 +542,7 @@ let test_direct_turn_carries_held_task_skills () =
           ; held_skills = [ skill_reference "mission-snapshot" 'a' ]
           }
         ]
+      ~task_skill_surfaces:[]
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:""
       ~telemetry_feedback_text:""
@@ -549,8 +551,11 @@ let test_direct_turn_carries_held_task_skills () =
   check bool "held skills heading" true
     (contains ~needle:"### Skills Named by Tasks You Hold" context);
   check bool "held exact skills line" true
-    (contains ~needle:"task-364 (held by you) names skills: [{" context
+    (contains ~needle:"task-364 (held by you) names exact Skill catalog rows: [{" context
      && contains ~needle:"\"name\":\"mission-snapshot\"" context);
+  check bool "catalog row is conditional on this attempt's schema" true
+    (contains ~needle:"only when that tool is present in the current attempt's tool schema" context
+     && contains ~needle:"a runtime may suppress all tools" context);
   check bool "no synthetic current task" false (contains ~needle:"### Current Task" context)
 
 let test_direct_turn_has_no_synthetic_task_context () =
@@ -558,6 +563,7 @@ let test_direct_turn_has_no_synthetic_task_context () =
     Turn.For_testing.direct_turn_dynamic_context
       ~current_task:Inputs.No_current_task
       ~held_task_skills:[]
+      ~task_skill_surfaces:[]
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:""
       ~telemetry_feedback_text:""

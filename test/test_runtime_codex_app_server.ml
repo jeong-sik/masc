@@ -1594,7 +1594,7 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
                                 ~skill_snapshot:
                                   (Skill_catalog_snapshot.config_unreadable
                                      ~detail:"test fixture has no Skill publication")
-                                ~task_skill_scope:Keeper_task_skill_turn.No_task
+                                ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
                                 ~runtime_id:"codex.codex"
                                 ()))))))
 ;;

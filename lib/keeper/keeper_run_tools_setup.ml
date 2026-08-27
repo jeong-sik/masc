@@ -97,10 +97,6 @@ let gate_causal_initial
     ]
 ;;
 
-let skill_catalog_config_error detail =
-  Agent_core.Error.Config
-    (Agent_core.Error.InvalidConfig { field = "skills"; detail })
-;;
 let expected_model_tool_names
       ~skill_catalog
       ~identity_tool_names
@@ -148,96 +144,6 @@ let expected_model_tool_names
          @ identity_tool_names))
 ;;
 
-(* Every held task is resolved against the same immutable snapshot as the
-   current task. The resolver's typed carrier remains intact; only its message
-   is enriched with the task that supplied the bad reference. *)
-let resolve_task_skills ~skill_snapshot ~task_id skills =
-  match
-    Keeper_task_skill_turn.resolve_for_task
-      ~snapshot:skill_snapshot
-      ~task_id
-      skills
-  with
-  | Ok selection -> Ok selection
-  | Error error ->
-    let core_error = Keeper_task_skill_turn.core_error error in
-    (match core_error with
-     | Agent_core.Error.Internal_carried { message; carrier } ->
-       Error
-         (Agent_core.Error.Internal_carried
-            { message = Printf.sprintf "task %s: %s" task_id message; carrier })
-     | ( Api _
-       | Provider _
-       | Agent _
-       | Mcp _
-       | Config _
-       | Serialization _
-       | Io _
-       | Orchestration _
-       | Internal _ ) as error ->
-       Error error)
-;;
-
-let task_skill_sets
-      ~(config : Workspace.config)
-      ~(meta : Keeper_meta_contract.keeper_meta)
-  =
-  let tasks = Workspace.get_tasks_safe config in
-  let current =
-    match meta.current_task_id with
-    | None -> Ok []
-    | Some current_task_id ->
-      let task_id = Keeper_id.Task_id.to_string current_task_id in
-      (match
-         List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id) tasks
-       with
-       | None ->
-         Error
-           (skill_catalog_config_error
-              (Printf.sprintf
-                 "current task %S is missing while resolving declared skills"
-                 task_id))
-       | Some task -> Ok [ task_id, task.skills ])
-  in
-  match current with
-  | Error _ as error -> error
-  | Ok current ->
-    let held =
-      Keeper_world_observation_inputs.held_task_skills_of_tasks ~config ~meta tasks
-      |> List.map (fun (entry : Keeper_world_observation_inputs.held_task_skills) ->
-           entry.held_task_id, entry.held_skills)
-    in
-    Ok (current @ held)
-;;
-
-(* The executable bundle carries the skills every held task names: the current
-   task and the other Claimed/InProgress tasks this keeper owns. The prompt
-   lists all of them, so validating and then discarding held selections would
-   advertise an exact reference that [keeper_skill] cannot execute. *)
-let resolve_held_task_skill_selection
-      ~(config : Workspace.config)
-      ~(meta : Keeper_meta_contract.keeper_meta)
-      ~skill_snapshot
-  =
-  match task_skill_sets ~config ~meta with
-  | Error _ as error -> error
-  | Ok task_skill_sets ->
-    let rec resolve selections = function
-      | [] -> Ok (Keeper_task_skill_turn.merge (List.rev selections))
-      | (task_id, skills) :: rest ->
-        (match resolve_task_skills ~skill_snapshot ~task_id skills with
-         | Error _ as error -> error
-         | Ok selection -> resolve (selection :: selections) rest)
-    in
-    resolve [] task_skill_sets
-;;
-
-let validate_held_task_skill_admission ~config ~meta ~skill_snapshot =
-  Result.map
-    (fun _ -> ())
-    (resolve_held_task_skill_selection ~config ~meta ~skill_snapshot)
-;;
-
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -261,7 +167,8 @@ let prepare_agent_setup
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
-      ~(task_skill_scope : Keeper_task_skill_turn.task_scope)
+      ~(task_skill_selection :
+          (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result)
       ~(trajectory_acc : Trajectory.accumulator option)
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -316,7 +223,7 @@ let prepare_agent_setup
       on_tool_result_ready
   in
   let* task_skill_selection =
-    resolve_held_task_skill_selection ~config ~meta ~skill_snapshot
+    Result.map_error Keeper_task_skill_turn.core_error task_skill_selection
   in
   let* skill_activation_context =
     Keeper_skill_activation_recorder.make

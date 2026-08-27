@@ -16,6 +16,9 @@ import type {
   KeeperApprovalQueueItem,
   KeeperApprovalRule,
   KeeperApprovalRulesState,
+  KeeperGateModeOverride,
+  KeeperGateJudgePreference,
+  KeeperGateSettingsState,
   KeeperResolvedApprovalItem,
   KeeperResolvedApprovalPage,
   GateDecisionSource,
@@ -675,6 +678,93 @@ const GATE_MODES: ReadonlyArray<{ mode: GateMode; label: string }> = [
   { mode: 'always_allow', label: 'Always Allow' },
 ]
 
+// One Keeper an operator singled out. Both kinds render the same way -- who,
+// what was chosen, and who chose it -- because that is what an operator scans
+// the list for. The mode override says only what was asked for: the Gate keeps
+// the stricter of it and the workspace, and a row asking for less is on file
+// without being in force.
+function KeeperGateSettingRow({
+  keeperName,
+  value,
+  updatedBy,
+  updatedAt,
+  testId,
+}: {
+  keeperName: string
+  value: string
+  updatedBy: string
+  updatedAt: string
+  testId: string
+}) {
+  return html`
+    <li class="ap-rule-row" data-testid=${testId}>
+      <span class="ap-rule-keeper mono">${keeperName}</span>
+      <span class="ap-rule-tool mono">${value}</span>
+      <span class="ap-rule-provenance mono">${updatedBy}</span>
+      <span class="ap-rule-expiry mono">${updatedAt === '' ? '시각 없음' : updatedAt}</span>
+    </li>
+  `
+}
+
+function KeeperGateSettingsCard({
+  modes,
+  modesState,
+  judges,
+  judgesState,
+}: {
+  modes: KeeperGateModeOverride[]
+  modesState: KeeperGateSettingsState
+  judges: KeeperGateJudgePreference[]
+  judgesState: KeeperGateSettingsState
+}) {
+  const modeLabel = (mode: GateMode) =>
+    GATE_MODES.find(entry => entry.mode === mode)?.label ?? mode
+  return html`
+    <section class="wka-card" data-testid="keeper-gate-settings">
+      <div class="wka-h">
+        <h3>Keeper 개별 설정</h3>
+        <span class="mono">${(modes.length + judges.length).toLocaleString()}</span>
+      </div>
+      <div class="wka-hint mono">workspace 설정보다 엄격한 쪽만 적용됩니다</div>
+
+      ${modesState.state === 'unavailable'
+        ? html`<div class="ap-env-warn" role="alert" data-testid="keeper-modes-unavailable">모드 오버라이드 읽기 실패: ${modesState.error}</div>`
+        : modes.length > 0
+        ? html`
+            <ul class="ap-rule-list">${modes.map(row => html`
+              <${KeeperGateSettingRow}
+                key=${`mode:${row.keeper_name}`}
+                keeperName=${row.keeper_name}
+                value=${modeLabel(row.mode)}
+                updatedBy=${row.updated_by}
+                updatedAt=${row.updated_at}
+                testId="keeper-mode-row"
+              />
+            `)}</ul>
+          `
+        : html`<div class="ap-side-empty">모드를 따로 정한 Keeper 없음</div>`}
+
+      <div class="wka-hint mono">판정자 — lane 이 내놓는 것 중 먼저 갈 곳</div>
+      ${judgesState.state === 'unavailable'
+        ? html`<div class="ap-env-warn" role="alert" data-testid="keeper-judges-unavailable">판정자 설정 읽기 실패: ${judgesState.error}</div>`
+        : judges.length > 0
+        ? html`
+            <ul class="ap-rule-list">${judges.map(row => html`
+              <${KeeperGateSettingRow}
+                key=${`judge:${row.keeper_name}`}
+                keeperName=${row.keeper_name}
+                value=${row.slot_id}
+                updatedBy=${row.updated_by}
+                updatedAt=${row.updated_at}
+                testId="keeper-judge-row"
+              />
+            `)}</ul>
+          `
+        : html`<div class="ap-side-empty">판정자를 따로 정한 Keeper 없음</div>`}
+    </section>
+  `
+}
+
 function ApAside({
   openCount,
   resolvedItems,
@@ -765,6 +855,13 @@ function ApAside({
             `
           : html`<div class="ap-side-empty">저장된 Always 규칙 없음</div>`}
       </section>
+
+      <${KeeperGateSettingsCard}
+        modes=${gateData.value?.keeper_modes ?? []}
+        modesState=${gateData.value?.keeper_modes_state ?? { state: 'ready' }}
+        judges=${gateData.value?.keeper_judges ?? []}
+        judgesState=${gateData.value?.keeper_judges_state ?? { state: 'ready' }}
+      />
 
       <section class="wka-card">
         <div class="wka-h">

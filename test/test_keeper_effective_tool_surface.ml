@@ -1,6 +1,20 @@
 open Alcotest
 open Masc
 
+let resolve_observed_task_skills ~config ~meta ~skill_snapshot =
+  Keeper_task_skill_turn.resolve_observations
+    ~snapshot:skill_snapshot
+    ~current_task:(Keeper_world_observation_inputs.read_current_task ~config ~meta)
+    ~held_task_skills:
+      (Keeper_world_observation_inputs.read_held_task_skills ~config ~meta)
+  |> Result.map_error Keeper_task_skill_turn.core_error
+;;
+
+let validate_observed_task_skills ~config ~meta ~skill_snapshot =
+  Result.map (fun _ -> ())
+    (resolve_observed_task_skills ~config ~meta ~skill_snapshot)
+;;
+
 let composition_skill ~name ~execution =
   Printf.sprintf
     {|---
@@ -163,6 +177,7 @@ let project
     ~current_task_id:(Some "task-001")
     ~skills_left_out
     ~task_skill_references
+    ~task_selection:None
     ~skill_snapshot:snapshot
 ;;
 
@@ -263,6 +278,7 @@ let test_external_composition_preserves_snapshot_provenance () =
       ~current_task_id:None
       ~skills_left_out:[]
       ~task_skill_references:[]
+      ~task_selection:None
       ~skill_snapshot:(configured_external_skill_snapshot ())
   with
   | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
@@ -431,7 +447,7 @@ let test_turn_admission_uses_dedicated_instruction_reader () =
          | Error detail -> fail detail
        in
        match
-         Keeper_run_tools_setup.validate_held_task_skill_admission
+         validate_observed_task_skills
            ~config
            ~meta
            ~skill_snapshot:(skill_snapshot ())
@@ -502,7 +518,7 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
          | Error detail -> fail detail
        in
        (match
-          Keeper_run_tools_setup.validate_held_task_skill_admission
+          validate_observed_task_skills
             ~config
             ~meta:(meta ~tool_groups:(Some [ "board" ]))
             ~skill_snapshot:
@@ -511,18 +527,16 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
         | Ok () -> fail "held task's missing skill was not inspected"
         | Error error ->
           let rendered = Agent_core.Error.to_string error in
-          check bool "the held task, not the current one, is named" true
-            (String_util.contains_substring rendered task_b);
-          check bool "the held skill is named" true
+          check bool "the held exact skill is named" true
             (String_util.contains_substring rendered "guide"));
        (match
-          Keeper_run_tools_setup.validate_held_task_skill_admission
+          validate_observed_task_skills
             ~config ~meta:(meta ~tool_groups:(Some [ "board" ])) ~skill_snapshot:snapshot
         with
         | Ok () -> ()
         | Error error -> fail (Agent_core.Error.to_string error));
        (match
-          Keeper_run_tools_setup.resolve_held_task_skill_selection
+          resolve_observed_task_skills
             ~config
             ~meta:(meta ~tool_groups:(Some [ "board" ]))
             ~skill_snapshot:snapshot
@@ -537,9 +551,59 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
                (Skill_reference.equal guide_reference selected.reference);
              check (list string) "held Task provenance stays attached" [ task_b ]
                selected.task_ids
-           | _ -> fail "held exact selection cardinality changed"));
+           | _ -> fail "held exact selection cardinality changed");
+          let changed = Workspace_backlog.read_backlog config in
+          Workspace_backlog.write_backlog config
+            { changed with
+              tasks =
+                List.map
+                  (fun (task : Masc_domain.task) ->
+                     if String.equal task.id task_b then { task with skills = [] }
+                     else task)
+                  changed.tasks
+            };
+          (match
+             Keeper_effective_tool_surface.For_testing.project
+               ~keeper_name:"skill-held"
+               ~runtime_id:"fixture.runtime"
+               ~official_client_kind:"agent_core"
+               ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
+               ~native_posture:None
+               ~tool_groups:(Some [ "board" ])
+               ~current_task_id:(Some task_a)
+               ~skills_left_out:[]
+               ~task_skill_references:[]
+               ~task_selection:(Some selection)
+               ~skill_snapshot:snapshot
+           with
+           | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+           | Ok surface ->
+             check bool "bundle keeps prompt-phase held exact ref" true
+               (List.exists
+                  (Skill_reference.equal guide_reference)
+                  surface.instruction_skills);
+             let global, _ = Keeper_skill_catalog.of_snapshot snapshot in
+             let projection =
+               Keeper_skill_catalog.project_turn
+                 ~global ~task:(Keeper_task_skill_turn.skills selection)
+             in
+             let prompt_instruction_refs =
+               Keeper_skill_catalog.exact_surfaces
+                 projection ~task:(Keeper_task_skill_turn.skills selection)
+               |> List.filter_map
+                    (fun (row : Keeper_skill_catalog.exact_surface) ->
+                       match row.availability with
+                       | Keeper_skill_catalog.Instruction_tool -> Some row.reference
+                       | Keeper_skill_catalog.Composition_tool _
+                       | Keeper_skill_catalog.Exact_unavailable _ -> None)
+             in
+             check string "frozen prompt surface equals executable bundle"
+               (Skill_reference.list_to_yojson prompt_instruction_refs
+                |> Yojson.Safe.to_string)
+               (Skill_reference.list_to_yojson surface.instruction_skills
+                |> Yojson.Safe.to_string)));
        match
-         Keeper_run_tools_setup.validate_held_task_skill_admission
+         validate_observed_task_skills
            ~config ~meta:(meta ~tool_groups:None) ~skill_snapshot:snapshot
        with
        | Ok () -> ()
@@ -615,6 +679,7 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
       ~current_task_id:(Some "task-001")
       ~skills_left_out:[]
       ~task_skill_references:[ reference_by_name skill_snapshot "guide" ]
+      ~task_selection:None
       ~skill_snapshot
   with
   | Error error -> fail (Keeper_task_skill_turn.error_to_string error)

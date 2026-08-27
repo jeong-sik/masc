@@ -109,9 +109,10 @@ val prepare_agent_setup
   -> config_root:string
   -> runtime_config_path:string option
   -> skill_snapshot:Skill_catalog_snapshot.t
-  -> task_skill_scope:Keeper_task_skill_turn.task_scope
-       (** Exact refs captured with the current-task observation before any
-           provider attempt. Retries reuse this list and [skill_snapshot]. *)
+  -> task_skill_selection:
+       (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result
+       (** Frozen current+held exact selection captured beside the prompt.
+           Setup must not reread mutable Workspace task state. *)
   -> trajectory_acc:Trajectory.accumulator option
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)

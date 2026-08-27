@@ -24,13 +24,6 @@ type partition = private
   ; compositions : selected list
   }
 
-type task_scope =
-  | No_task
-  | Task of
-      { task_id : string
-      ; references : Skill_reference.t list
-      }
-
 val resolve :
   snapshot:Skill_catalog_snapshot.t -> Skill_reference.t list -> (t, error) result
 (** Resolve every Task reference against the already captured immutable
@@ -44,6 +37,14 @@ val resolve_for_task :
 (** Resolve one Task's exact references while retaining its identity as
     activation provenance. *)
 
+val resolve_observations :
+  snapshot:Skill_catalog_snapshot.t ->
+  current_task:Keeper_world_observation_inputs.current_task_observation ->
+  held_task_skills:Keeper_world_observation_inputs.held_task_skills list ->
+  (t, error) result
+(** Resolve current and held Task references exactly once from one observed turn
+    state, retaining every Task identity on shared references. *)
+
 val empty : t
 val merge : t list -> t
 (** Preserve Task order while deduplicating identical exact references. *)
@@ -52,12 +53,6 @@ val error_code : error -> string
 val error_to_string : error -> string
 val core_error : error -> Agent_core.Error.t
 val of_core_error : Agent_core.Error.t -> error option
-
-val scope_of_observation :
-  Keeper_world_observation_inputs.current_task_observation -> task_scope
-(** Capture Task identity and exact Skill references from one observation. *)
-
-val references : task_scope -> Skill_reference.t list
 
 val partition : t -> partition
 (** Split one exact selection by its projected surface. Malformed composition

@@ -65,6 +65,7 @@ module For_testing : sig
     tool_groups:string list option ->
     current_task_id:string option ->
     task_skill_references:Skill_reference.t list ->
+    task_selection:Keeper_task_skill_turn.t option ->
     skill_snapshot:Skill_catalog_snapshot.t ->
     (t, Keeper_task_skill_turn.error) result
   (** Pure projection seam over one frozen Task/snapshot pair. *)

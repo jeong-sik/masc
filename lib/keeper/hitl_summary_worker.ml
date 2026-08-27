@@ -143,6 +143,24 @@ let prepare_flow
     Registry.resolve_lane registry ~lane_id
     |> Result.map_error lane_error
   in
+  (* Which of the lane's admitted judges this Keeper is put to first. Only
+     here: the readiness check below asks whether the lane can run at all,
+     which is a workspace question with no Keeper in it. *)
+  let* resolved =
+    match
+      Keeper_gate_judge_slot.find
+        ~base_path:entry.Keeper_approval_queue_rules_types.audit_base_path
+        ~keeper_name:entry.Keeper_approval_queue_rules_types.keeper_name
+    with
+    | Error detail -> Error ("HITL judge preference unavailable: " ^ detail)
+    | Ok None -> Ok resolved
+    | Ok (Some preference) ->
+      Result.map
+        (fun selected_slots -> { Registry.selected_slots })
+        (Keeper_gate_judge_slot.prefer ~slots:resolved.Registry.selected_slots
+           ~slot_id_of:(fun (slot : Registry.selected_slot) -> slot.Registry.slot_id)
+           ~preferred:preference.Keeper_gate_judge_slot.slot_id)
+  in
   let* snapshot =
     snapshot_resolved_lane
       ~messages:(messages_for_summary ~system_prompt ~context_bundle)

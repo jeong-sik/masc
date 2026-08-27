@@ -883,6 +883,64 @@ end
    rather than a field on the workspace one: the two answer different
    questions, and a body that omitted [keeper_name] would otherwise move
    every keeper at once. *)
+(* Which of the lane's admitted judges this Keeper is put to first. Naming a
+   slot the lane does not offer is refused here rather than at the next
+   judgment, so an operator finds out while they are still looking at the
+   screen they set it on. *)
+let handle_gate_keeper_judge_body state operator_name request reqd body_str =
+  let refuse message =
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (operator_error_json message)
+  in
+  try
+    let fields =
+      match Yojson.Safe.from_string body_str with
+      | `Assoc fields -> fields
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+        []
+    in
+    match List.assoc_opt "keeper_name" fields with
+    | Some (`String keeper_name) when String.trim keeper_name <> "" -> (
+      match
+        match List.assoc_opt "slot_id" fields with
+        | None | Some `Null -> Ok None
+        | Some (`String slot_id) when String.trim slot_id <> "" ->
+          Ok (Some (String.trim slot_id))
+        | Some _ -> Error "slot_id must be a non-empty string or null"
+      with
+      | Error message -> refuse message
+      | Ok slot_id -> (
+        let config = Mcp_server.workspace_config state in
+        match
+          Keeper_gate_judge_slot.set config ~actor:operator_name ~keeper_name
+            slot_id
+        with
+        | Error message -> refuse message
+        | Ok current ->
+          Dashboard_cache.invalidate_prefix
+            (Printf.sprintf "gate:%s;" config.base_path);
+          Sse.broadcast
+            (`Assoc
+               [ "type", `String "gate_keeper_judge_changed"
+               ; "keeper_name", `String keeper_name
+               ; ( "slot_id"
+                 , match slot_id with
+                   | Some slot_id -> `String slot_id
+                   | None -> `Null )
+               ]);
+          respond_json_value_with_cors request reqd
+            (`Assoc
+               [ "ok", `Bool true
+               ; "keeper_name", `String keeper_name
+               ; ( "slot_id"
+                 , match current with
+                   | Some current -> `String current.Keeper_gate_judge_slot.slot_id
+                   | None -> `Null )
+               ])))
+    | Some _ | None -> refuse "keeper_name is required"
+  with Yojson.Json_error message -> refuse message
+;;
+
 let handle_gate_keeper_mode_body state operator_name request reqd body_str =
   let refuse message =
     respond_json_value_with_cors ~status:`Bad_request request reqd
@@ -2073,6 +2131,12 @@ let add_routes ~sw ~clock router =
          (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
              (handle_gate_keeper_mode_body state operator_name request reqd))
+         request reqd)
+  |> Http.Router.post "/api/v1/dashboard/gate/keeper-judge" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state operator_name _req reqd ->
+           Http.Request.read_body_async reqd
+             (handle_gate_keeper_judge_body state operator_name request reqd))
          request reqd)
   |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
        with_public_read (fun state req reqd ->

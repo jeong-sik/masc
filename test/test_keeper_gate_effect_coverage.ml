@@ -285,6 +285,92 @@ let test_an_unreadable_override_file_is_not_an_empty_list () =
     failf "an unreadable override file resolved to %s"
       (Keeper_gate_mode.to_string mode)
 
+(* Which admitted judge a Keeper is put to first. The lane keeps its failover,
+   so this is an ordering question, and the failure that matters is naming a
+   judge the lane never declared. *)
+let slot_ids = [ "glm.turbo"; "ollama.flash"; "ollama.qwen" ]
+
+let preferred_order preferred =
+  Keeper_gate_judge_slot.prefer ~slots:slot_ids ~slot_id_of:Fun.id ~preferred
+
+let test_a_preference_moves_one_judge_to_the_front () =
+  match preferred_order "ollama.qwen" with
+  | Ok order ->
+    check (list string) "asked-for judge first, the rest in order"
+      [ "ollama.qwen"; "glm.turbo"; "ollama.flash" ] order
+  | Error detail -> fail ("a declared slot was refused: " ^ detail)
+
+let test_the_rest_of_the_lane_stays_behind_it () =
+  (* Not a restriction. The lane has failover because a weekly quota runs out
+     and a bundle outgrows a context window, and both still happen. *)
+  match preferred_order "ollama.flash" with
+  | Ok order ->
+    check int "every judge is still reachable" (List.length slot_ids)
+      (List.length order)
+  | Error detail -> fail ("a declared slot was refused: " ^ detail)
+
+let test_a_judge_the_lane_does_not_offer_is_refused () =
+  (* Quietly falling back would leave an operator believing this Keeper is
+     judged by a model it has never been judged by. *)
+  match preferred_order "some.model" with
+  | Ok _ -> fail "accepted a judge the lane never declared"
+  | Error detail ->
+    check bool "and the refusal names what is on offer" true
+      (List.for_all
+         (fun slot_id ->
+           try ignore (Str.search_forward (Str.regexp_string slot_id) detail 0); true
+           with Not_found -> false)
+         slot_ids)
+
+let test_a_preference_survives_a_round_trip () =
+  with_workspace @@ fun (base_path, config) ->
+  (match
+     Keeper_gate_judge_slot.set config ~actor:"test" ~keeper_name:"kidsnote"
+       (Some "ollama.qwen")
+   with
+   | Ok _ -> ()
+   | Error detail -> fail ("could not set a judge preference: " ^ detail));
+  (match Keeper_gate_judge_slot.find ~base_path ~keeper_name:"kidsnote" with
+   | Ok (Some row) ->
+     check string "what was set comes back" "ollama.qwen"
+       row.Keeper_gate_judge_slot.slot_id
+   | Ok None -> fail "the preference was not stored"
+   | Error detail -> fail ("could not read it back: " ^ detail));
+  match Keeper_gate_judge_slot.find ~base_path ~keeper_name:"rondo" with
+  | Ok None -> ()
+  | Ok (Some _) -> fail "one Keeper's preference reached another"
+  | Error detail -> fail ("could not read another keeper: " ^ detail)
+
+let test_clearing_a_preference_removes_it () =
+  with_workspace @@ fun (base_path, config) ->
+  let set value =
+    match
+      Keeper_gate_judge_slot.set config ~actor:"test" ~keeper_name:"kidsnote" value
+    with
+    | Ok _ -> ()
+    | Error detail -> fail ("could not set a judge preference: " ^ detail)
+  in
+  set (Some "ollama.qwen");
+  set None;
+  match Keeper_gate_judge_slot.all ~base_path with
+  | Ok [] -> ()
+  | Ok rows -> failf "clearing left %d preference(s) behind" (List.length rows)
+  | Error detail -> fail ("could not read the preferences: " ^ detail)
+
+let test_an_unreadable_preference_file_is_not_an_empty_list () =
+  with_workspace @@ fun (base_path, _config) ->
+  Fs_compat.mkdir_p (Keeper_gate_path.dir ~base_path);
+  (match
+     Fs_compat.save_file_atomic
+       (Keeper_gate_path.keeper_judge_slots ~base_path)
+       "{ not a list"
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("could not write the fixture: " ^ detail));
+  match Keeper_gate_judge_slot.find ~base_path ~keeper_name:"kidsnote" with
+  | Error _ -> ()
+  | Ok _ -> fail "an unreadable preference file read as no preference"
+
 let test_keeper_effects_defer_without_dispatch () =
   with_clean_gate_runtime @@ fun () ->
   let base_path = temp_dir "keeper-gate-deferred" in
@@ -563,6 +649,20 @@ let () =
             test_clearing_an_override_removes_it
         ; test_case "an unreadable override file is not an empty list" `Quick
             test_an_unreadable_override_file_is_not_an_empty_list
+        ] )
+    ; ( "per-keeper judge"
+      , [ test_case "a preference moves one judge to the front" `Quick
+            test_a_preference_moves_one_judge_to_the_front
+        ; test_case "the rest of the lane stays behind it" `Quick
+            test_the_rest_of_the_lane_stays_behind_it
+        ; test_case "a judge the lane does not offer is refused" `Quick
+            test_a_judge_the_lane_does_not_offer_is_refused
+        ; test_case "a preference survives a round trip" `Quick
+            test_a_preference_survives_a_round_trip
+        ; test_case "clearing a preference removes it" `Quick
+            test_clearing_a_preference_removes_it
+        ; test_case "an unreadable preference file is not an empty list" `Quick
+            test_an_unreadable_preference_file_is_not_an_empty_list
         ] )
     ; ( "causal_context"
       , [ test_case

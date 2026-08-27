@@ -2,8 +2,18 @@
 
     {!Keeper_tool_approval_policy} decides call by call; this module says
     whether a keeper consults it at all. [Auto] is that policy unchanged.
-    [Yolo] runs every call unasked — an operator's explicit, loud choice for
-    a keeper they are watching.
+    [Yolo] skips it — an operator's explicit, loud choice for a keeper they
+    are watching.
+
+    What it skips, and what it does not. This stance is read in exactly one
+    place: the PreToolUse hook that asks over the open chat stream. An
+    external effect that goes to {!Keeper_gate} -- a write to a service this
+    Keeper is attached to, a sandbox command, a durable memory write -- is
+    decided there, by the workspace Gate mode and this Keeper's own override,
+    and reaches its decision whatever this says. So [Yolo] is "stop asking me
+    in this chat", not "let everything through": before 2026-08-27 those
+    happened to be the same sentence, because writing to somebody else's Jira
+    did not reach the Gate at all.
 
     Deliberately in-memory, like {!Keeper_tool_approval_registry}: a stance
     this permissive must not outlive the process that was told to take it. A
@@ -12,7 +22,9 @@
 
 type mode =
   | Auto  (** The approval policy decides, call by call. *)
-  | Yolo  (** Every call runs unasked. *)
+  | Yolo
+      (** Calls this hook would ask about run unasked. Effects the Gate
+          decides are still decided there. *)
 
 val mode_to_string : mode -> string
 val mode_of_string : string -> mode option

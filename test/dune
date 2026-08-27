@@ -260,7 +260,6 @@
   test_playground_paths
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
-  test_keeper_effective_meta_overlay
   test_metrics_rotation
   test_tool_error
   test_tool_token
@@ -605,7 +604,6 @@
   test_playground_paths
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
-  test_keeper_effective_meta_overlay
   test_metrics_rotation
   test_tool_error
   test_tool_token
@@ -875,6 +873,33 @@
    (run %{test})))
  (libraries masc_test_deps))
 
+; Extracted from the big (tests ...) group above: most fixtures declare
+; sandbox_profile = "local" (or carry no profile source, which resolves to the
+; persisted-meta placeholder Local) because the sandbox is incidental to the
+; overlay/status semantics under test — and config load now rejects Local
+; fail-closed without the hatch.
+(test
+ (name test_keeper_effective_meta_overlay)
+ (modules test_keeper_effective_meta_overlay)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries
+  masc_test_deps
+  masc_schedule
+  multimodal
+  bigstringaf
+  masc.keeper_checkpoint_ref
+  masc.embedded_config
+  masc.keeper_identity
+  masc.mcp_client
+  masc.tool_spawn
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot))
+
 ; Focused CI gate: the conditions wire vocabulary must match on both ends.
 ; #26569 had the encoder emitting thirteen fields while the client zod object
 ; declared eleven; zod strips undeclared keys, so two conditions never reached
@@ -932,7 +957,7 @@
  (deps
   %{workspace_root}/lib/keeper/keeper_unified_turn.ml
   %{workspace_root}/lib/keeper/keeper_turn.ml)
- (libraries alcotest ast_grep))
+ (libraries alcotest ast_grep masc_test_deps))
 
 (test
  (name test_tool_call_log_requeue_on_failure)

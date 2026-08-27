@@ -378,6 +378,10 @@ let effective_meta_of_profile_defaults
   in
   match target_sandbox_profile with
   | Error _ as err -> err
+  | Ok Local when not (Env_config_sandbox.Gate.allow_local_playground ()) ->
+      Error
+        (Printf.sprintf "keeper %s rejected: %s"
+           meta.name Env_config_sandbox.Gate.disabled_message)
   | Ok sandbox_profile ->
       let default_network_mode =
         if has_profile_source then default_network_mode_for_profile sandbox_profile

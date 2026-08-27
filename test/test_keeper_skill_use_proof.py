@@ -160,6 +160,86 @@ def refresh_projection(dashboard, ledger):
 
 
 class KeeperSkillUseProofTest(unittest.TestCase):
+    def test_dashboard_capture_uses_exact_keeper_and_ledger_scoped_rows(self):
+        calls = []
+
+        class Rows:
+            def evaluate_all(self, expression):
+                calls.append(("evaluate_all", expression))
+                return ["another-call", "call-skill-1"]
+
+        class Panel:
+            def wait_for(self, *, state, timeout):
+                calls.append(("wait_for", state, timeout))
+
+            def get_attribute(self, name):
+                calls.append(("panel_attribute", name))
+                return "ledger-revision"
+
+            def locator(self, selector):
+                calls.append(("panel_locator", selector))
+                return Rows()
+
+        class KeeperSelect:
+            selected = ""
+
+            def count(self):
+                return 1
+
+            def select_option(self, *, value):
+                self.selected = value
+                calls.append(("select_option", value))
+
+            def input_value(self):
+                return self.selected
+
+        class Page:
+            def __init__(self):
+                self.keeper_select = KeeperSelect()
+
+            def goto(self, url, *, wait_until, timeout):
+                calls.append(("goto", url, wait_until, timeout))
+
+            def get_by_role(self, role, *, name, exact):
+                calls.append(("get_by_role", role, name, exact))
+                return self.keeper_select
+
+            def locator(self, selector):
+                calls.append(("page_locator", selector))
+                return Panel()
+
+            def screenshot(self, *, path, full_page):
+                calls.append(("screenshot", Path(path).name, full_page))
+
+        with tempfile.TemporaryDirectory() as raw:
+            proof.capture_dashboard_page(
+                page=Page(),
+                dashboard_url=(
+                    "http://127.0.0.1:9934/dashboard/"
+                    f"{proof.DASHBOARD_SKILL_RECEIPTS_ROUTE}"
+                ),
+                keeper="keeper-one",
+                skill_tool_use_id="call-skill-1",
+                ledger_revision="ledger-revision",
+                screenshot=Path(raw) / "dashboard-skill-use.png",
+            )
+
+        self.assertIn(
+            (
+                "goto",
+                "http://127.0.0.1:9934/dashboard/#lab?section=tools",
+                "networkidle",
+                60_000,
+            ),
+            calls,
+        )
+        self.assertIn(("get_by_role", "combobox", "Keeper", True), calls)
+        self.assertIn(("select_option", "keeper-one"), calls)
+        self.assertIn(("panel_locator", '[data-testid="skill-activation-row"]'), calls)
+        self.assertNotIn(
+            ("page_locator", '[data-testid="skill-activation-row"]'), calls
+        )
+
     def test_strict_http_reads_send_bearer_without_serializing_it(self):
         token = "strict-proof-token"
 

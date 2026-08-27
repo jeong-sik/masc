@@ -169,6 +169,72 @@ for schedule_ledger_name in schedules.json schedules.json.last-good; do
 done
 ```
 
+### board post 의 content / score 은퇴 (게시판 중복 필드 숙청 배포에서 1회)
+
+post 행에서 `content` 와 `score` 를 뺀 바이너리를 처음 올릴 때만 해당한다.
+
+`content` 는 `body` 를 글자 그대로 복사한 값이었고, `score` 는 `votes_up - votes_down` 을 다시 적은 값이었다. 디코더는 두 값이 어긋나면 그 행을 통째로 버렸고, 버린 사실은 어디에도 남지 않았다. 두 키를 없앤 디코더는 그 키를 달고 있는 행을 모르는 필드로 보고 거절한다. 스토어를 먼저 손보지 않고 올리면 게시글과 댓글이 전부 사라진다. 옛 행을 읽는 코드는 만들지 않는다.
+
+서버를 세운 뒤(§5) 실행한다. 먼저 몇 행이 걸리는지 센다.
+
+```bash
+python3 - '<base>/.masc' <<'COUNT'
+import json, pathlib, sys
+masc = pathlib.Path(sys.argv[1])
+for name, keys in (('board_posts.jsonl', ('content', 'score')),
+                   ('board_comments.jsonl', ('score',))):
+    path = masc / name
+    if not path.exists():
+        print(f'{name}: absent')
+        continue
+    rows = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    hit = sum(1 for r in rows if any(k in r for k in keys))
+    print(f'{name}: rows={len(rows)} carrying_retired_key={hit}')
+COUNT
+```
+
+행 수를 확인했으면 두 키를 벗겨 다시 쓴다. 백업을 먼저 뜬다.
+
+```bash
+cp '<base>/.masc/board_posts.jsonl' '<base>/.masc/backups/board_posts.jsonl.pre-purge'
+cp '<base>/.masc/board_comments.jsonl' '<base>/.masc/backups/board_comments.jsonl.pre-purge'
+
+python3 - '<base>/.masc' <<'STRIP'
+import json, os, pathlib, sys
+masc = pathlib.Path(sys.argv[1])
+for name, keys in (('board_posts.jsonl', ('content', 'score')),
+                   ('board_comments.jsonl', ('score',))):
+    path = masc / name
+    if not path.exists():
+        continue
+    out = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        for k in keys:
+            row.pop(k, None)
+        out.append(json.dumps(row, ensure_ascii=False))
+    tmp = path.with_suffix(path.suffix + '.new')
+    tmp.write_text('\n'.join(out) + '\n')
+    os.replace(tmp, path)
+    print(f'{name}: rewrote {len(out)} rows')
+STRIP
+```
+
+`board_attention_candidates/` 는 저장된 post 행을 통째로 품고 있어 같은 이유로 무효가 된다. `schema_version` 이 4 에서 5 로 올라갔으므로 옛 파일은 읽기 시점에 거절된다. 디렉터리를 비운다 — keeper 가 게시판을 다시 읽으면 후보는 다시 쌓인다.
+
+```bash
+mv '<base>/.masc/board_attention_candidates' '<base>/.masc/backups/board_attention_candidates.v4'
+mkdir -p '<base>/.masc/board_attention_candidates'
+```
+
+기동(§7) 뒤 로그에서 로드된 수가 위에서 센 행 수와 맞는지 본다. 적으면 남은 행이 조용히 버려진 것이다.
+
+```bash
+rg -o 'loaded [0-9]+ (posts|comments)' '<base>/.masc/logs/masc-8935-supervised.out.log' | tail -2
+```
+
 ### keeper chat 행이 읽기마다 버려질 때
 
 증상은 로그에 이 줄이 쏟아지는 것이다. 2026-08-27 에 30분짜리 로그 하나에서 **18,445 건** 나왔다.

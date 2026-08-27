@@ -457,7 +457,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                 when String.trim stdout = "" && String.trim stderr = "" ->
                 process_error_output
                   ~label:(String.concat " " (List.map Filename.quote argv))
-                  ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec)
+                  ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec)
                   ()
               | Some _ | None -> stderr
             in
@@ -801,11 +801,11 @@ let run_argv ?timeout_sec ?env (argv : string list) : string =
                       output_for_status ~status ~stdout:(Exec_buffer.render buf) ~stderr:""))
             with
             | Explicit_process_timeout timeout_sec ->
-                Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
+                Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 process_error_output ~label
-                  ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+                  ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ()
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
                 if should_retry_unix_fallback exn then (
@@ -854,11 +854,11 @@ let run_argv_with_stdin ?timeout_sec ?env ~(stdin_content : string) (argv : stri
                       output_for_status ~status ~stdout:(Exec_buffer.render buf) ~stderr:""))
             with
             | Explicit_process_timeout timeout_sec ->
-                Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
+                Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 process_error_output ~label
-                  ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+                  ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ()
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
                 if should_retry_unix_fallback exn then (
@@ -963,7 +963,7 @@ let run_argv_with_stdin_and_status_split
                     Exec_buffer.render stderr_buf ))
             with
             | Explicit_process_timeout timeout_sec ->
-                Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
+                Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 let timeout_status = timed_out_status in
@@ -972,7 +972,7 @@ let run_argv_with_stdin_and_status_split
                 let stderr =
                   if String.trim stdout = "" && String.trim stderr = "" then
                     process_error_output ~label
-                      ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+                      ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ()
                   else stderr
                 in
                 (timeout_status, stdout, stderr)
@@ -1141,11 +1141,11 @@ let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
            Ok (unix_status, rendered_output out, rendered_output err))
        with
        | Explicit_process_timeout timeout_sec ->
-         Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s" timeout_sec
+         Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s" timeout_sec
            (Timeout_origin.to_label !phase_ref) label;
          observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
          Ok (timed_out_status, "", process_error_output ~label
-               ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ())
+               ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ())
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> Error (Printf.sprintf "%s: %s" label (Printexc.to_string exn))))
 ;;
@@ -1184,7 +1184,7 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
                     Exec_buffer.render stderr_buf ))
             with
             | Explicit_process_timeout timeout_sec ->
-                Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
+                Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 let timeout_status = timed_out_status in
@@ -1193,7 +1193,7 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
                 let stderr =
                   if String.trim stdout = "" && String.trim stderr = "" then
                     process_error_output ~label
-                      ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+                      ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ()
                   else stderr
                 in
                 (timeout_status, stdout, stderr)
@@ -1288,7 +1288,7 @@ let run_argv_with_status_split_streaming
                 unix_status, Exec_buffer.render stdout_buf, Exec_buffer.render stderr_buf)
           with
           | Explicit_process_timeout timeout_sec ->
-            Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
+            Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
               timeout_sec (Timeout_origin.to_label !phase_ref) label;
             observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
             let timeout_status = timed_out_status in
@@ -1297,7 +1297,7 @@ let run_argv_with_status_split_streaming
             let stderr =
               if String.trim stdout = "" && String.trim stderr = ""
               then process_error_output ~label
-                     ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+                     ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ()
               else stderr
             in
             timeout_status, stdout, stderr
@@ -1546,7 +1546,7 @@ let run_argv_pipeline_with_status_split ?timeout_sec
              with
              | Pipeline_redirect_failed message -> Error message
              | Explicit_process_timeout timeout_sec ->
-                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
+                 Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
                    timeout_sec (Timeout_origin.to_label !phase_ref) label;
                  observe_process_timeout
                    (match stages with [] -> [] | stage :: _ -> stage.argv)
@@ -1555,7 +1555,7 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                  let stderr =
                    if String.trim streamed_stderr = "" then
                      process_error_output ~label
-                       ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec)
+                       ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec)
                        ()
                    else streamed_stderr
                  in

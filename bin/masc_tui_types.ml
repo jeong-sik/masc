@@ -558,17 +558,19 @@ type keeper_mode =
     case a tab earns (unrelated content would want its own surface). *)
 type keeper_detail_tab =
   | Detail_info
+  | Detail_sandbox
   | Detail_instructions
   | Detail_secrets
   | Detail_github
   | Detail_identity
 
 let keeper_detail_tabs =
-  [ Detail_info; Detail_instructions; Detail_secrets; Detail_github
+  [ Detail_info; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
   ; Detail_identity ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
+  | Detail_sandbox -> "Sandbox"
   | Detail_instructions -> "Settings"
   | Detail_secrets -> "Secrets"
   | Detail_github -> "GitHub"
@@ -1031,6 +1033,7 @@ type code_history_listing = {
    hold a third. *)
 type config_pane =
   | Config_runtime
+  | Config_params
   | Config_prompts
   | Config_themes
 
@@ -1050,6 +1053,12 @@ type state = {
      the scroll survives only while it is open. *)
   mutable agenda_open: bool;
   mutable agenda_scroll: int;
+  (* The [@] answering overlay: the footer badge says that keepers are
+     mid-turn, and this says which ones, on which lane, for how long. Modal
+     like the agenda sheet, and like it the scroll survives only while it
+     is open. *)
+  mutable answering_open: bool;
+  mutable answering_scroll: int;
   (* [/context] opens the last observed provider-input inspector. It is an
      overlay rather than another surface because it answers "what is in this
      Keeper's current head" from whichever Keeper surface raised the question.
@@ -1137,6 +1146,8 @@ type state = {
   mutable runtime_config_view_error: string option;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
+  mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
+  mutable keeper_sandbox_view_error: string option;
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
@@ -1254,6 +1265,12 @@ type state = {
      surface. *)
   mutable keeper_tool_approvals: Tui_decode.keeper_tool_approval list;
   mutable keeper_tool_approvals_error: string option;
+  (* Which keepers are mid-turn right now, from GET /api/v1/keepers/turns.
+     Rides the same tick as the approvals above, for the same reason: the
+     "answering now" badge is drawn from every surface, so it cannot wait
+     for the operator to open the keeper list. *)
+  mutable keeper_turns: Tui_decode.keeper_turn_row list;
+  mutable keeper_turns_error: string option;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -1269,6 +1286,19 @@ type state = {
      rather than "unknown". Distinct from [keeper_yolo_names], which is the
      in-memory stance a restart clears. *)
   mutable keeper_gate_modes: (string * string) list;
+  (* Runtime_params registry rows, as the surface reads them: key, current,
+     default, and whether somebody moved it. Loaded like the other config
+     views rather than kept live -- these change when an operator changes
+     them, not on their own. *)
+  mutable runtime_params: Tui_decode.runtime_param_row list;
+  mutable runtime_params_error: string option;
+  mutable runtime_params_loading: bool;
+  (* The Runtime params pane is an operator surface, not a passive dump.
+     Selection and the in-progress JSON value live separately from the shared
+     Config scroll used by runtime.toml/prompt bodies. *)
+  mutable runtime_params_cursor: int;
+  mutable runtime_param_edit: (string * string) option;
+  mutable runtime_params_notice: (bool * string) option;
   mutable keeper_gate_judges: (string * string) list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   (* The list draws each ask on one row; this opens the selected one whole.
@@ -1741,6 +1771,8 @@ let create_state
   help_open = false;
   agenda_open = false;
   agenda_scroll = 0;
+  answering_open = false;
+  answering_scroll = 0;
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -1787,6 +1819,8 @@ let create_state
   runtime_config_view_error = None;
   config_scroll = 0;
   detail_tab = Detail_info;
+  keeper_sandbox_view = None;
+  keeper_sandbox_view_error = None;
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;
@@ -1848,10 +1882,18 @@ let create_state
   ask_submit_inflight = false;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
+  keeper_turns = [];
+  keeper_turns_error = None;
   gate_pending = [];
   gate_modes = None;
   gate_error = None;
   keeper_yolo_names = [];
+  runtime_params = [];
+  runtime_params_error = None;
+  runtime_params_loading = false;
+  runtime_params_cursor = 0;
+  runtime_param_edit = None;
+  runtime_params_notice = None;
   keeper_gate_modes = [];
   keeper_gate_judges = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;

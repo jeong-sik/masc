@@ -342,8 +342,12 @@ let submit_librarian ~keeper_name entry sw f =
     Submitted
   | Replace_latest ->
     record_counter ~keeper_name MemoryLaneCoalesced;
-    Log.Keeper.warn ~keeper_name
-      "memory lane coalesced latest snapshot (lane=librarian pending=2): replacing \
+    (* Coalescing is the lane's normal flow (a newer unit supersedes an
+       unprocessed older one), not a fault; INFO keeps it observable without
+       paging. The old message hardcoded "pending=2" as a literal, which
+       reported a count no code tracked. *)
+    Log.Keeper.info ~keeper_name
+      "memory lane coalesced latest snapshot (lane=librarian): replacing \
        superseded post-turn memory unit";
     Coalesced
   | Start_drain drain ->

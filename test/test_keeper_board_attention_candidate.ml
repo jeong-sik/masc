@@ -81,7 +81,6 @@ let post_of_signal (signal : Masc.Board_dispatch.board_signal) : Masc.Board.post
   ; author = agent_id_exn signal.author
   ; title = signal.title
   ; body = signal.content
-  ; content = signal.content
   ; post_kind = Masc.Board.Human_post
   ; meta_json = None
   ; visibility = Masc.Board.Public

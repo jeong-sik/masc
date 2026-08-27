@@ -3550,12 +3550,147 @@ let decode_keeper_gate_settings json =
   let* judges = pairs "judges" "slot_id" in
   Ok (modes, judges)
 
+(* Keep the JSON spelling, including quotes around strings.  The Config pane
+   now hands this exact spelling to its inline editor and sends the parsed
+   value back to the typed runtime-parameter route.  Flattening strings to
+   their display text made it impossible to distinguish ["30"] from [30] at
+   the write boundary.  The renderer removes quotes for display only. *)
+type runtime_param_row =
+  { rpr_key : string
+  ; rpr_current_json : string
+  ; rpr_default_json : string
+  ; rpr_has_override : bool
+  ; rpr_description : string
+  ; rpr_value_type : string
+  ; rpr_min_json : string option
+  ; rpr_max_json : string option
+  }
+
+let decode_runtime_params json =
+  let* items = required_list_field json "parameters" in
+  let text = Yojson.Safe.to_string in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+      let* key = required_string_field item "key" in
+      let field name =
+        match item with
+        | `Assoc fields -> List.assoc_opt name fields
+        | _ -> None
+      in
+      let current = match field "current" with Some v -> text v | None -> "-" in
+      let default = match field "default" with Some v -> text v | None -> "-" in
+      let overridden =
+        match field "has_override" with Some (`Bool b) -> b | Some _ | None -> false
+      in
+      let meta_field name =
+        match field "meta" with
+        | Some (`Assoc fields) -> List.assoc_opt name fields
+        | Some _ | None -> None
+      in
+      let meta_string name =
+        match meta_field name with Some (`String value) -> value | Some _ | None -> ""
+      in
+      let meta_json name = Option.map text (meta_field name) in
+      let row =
+        { rpr_key = key
+        ; rpr_current_json = current
+        ; rpr_default_json = default
+        ; rpr_has_override = overridden
+        ; rpr_description = meta_string "description"
+        ; rpr_value_type = meta_string "value_type"
+        ; rpr_min_json = meta_json "min_value"
+        ; rpr_max_json = meta_json "max_value"
+        }
+      in
+      loop (row :: acc) rest
+  in
+  loop [] items
+
 let decode_keeper_tool_approvals json =
   let* items = required_list_field json "pending" in
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | item :: rest ->
         let* decoded = decode_keeper_tool_approval item in
+        loop (decoded :: acc) rest
+  in
+  loop [] items
+
+type keeper_turn_lane =
+  | Turn_lane_autonomous
+  | Turn_lane_chat_operation
+  | Turn_lane_maintenance
+
+let keeper_turn_lane_of_string = function
+  | "autonomous" -> Some Turn_lane_autonomous
+  | "chat_operation" -> Some Turn_lane_chat_operation
+  | "maintenance" -> Some Turn_lane_maintenance
+  | _ -> None
+
+type keeper_turn_state =
+  | Keeper_turn_idle
+  | Keeper_turn_running of { lane : keeper_turn_lane; started_at_unix : float }
+  | Keeper_turn_unavailable of string
+
+type keeper_turn_row = {
+  ktr_keeper_name : string;
+  ktr_state : keeper_turn_state;
+}
+
+let decode_keeper_turn_row json =
+  let* ktr_keeper_name = required_string_field json "keeper_name" in
+  let* status = required_string_field json "status" in
+  match status with
+  | "unavailable" ->
+      let* detail = required_string_field json "detail" in
+      Ok { ktr_keeper_name; ktr_state = Keeper_turn_unavailable detail }
+  | "ok" -> (
+      match Json_util.assoc_member_opt "turn" json with
+      | None -> Error "keeper turn row is missing required field 'turn'"
+      | Some `Null -> Ok { ktr_keeper_name; ktr_state = Keeper_turn_idle }
+      | Some (`Assoc _ as turn_json) ->
+          let* lane_raw = required_string_field turn_json "lane" in
+          let* lane =
+            match keeper_turn_lane_of_string lane_raw with
+            | Some lane -> Ok lane
+            | None ->
+                Error (Printf.sprintf "unknown keeper turn lane %S" lane_raw)
+          in
+          let* started_at_unix =
+            match Json_util.assoc_member_opt "started_at_unix" turn_json with
+            | Some (`Float value) -> Ok value
+            | Some (`Int value) -> Ok (Float.of_int value)
+            | Some other ->
+                Error
+                  (Printf.sprintf
+                     "turn field 'started_at_unix' must be a number (received \
+                      %s)"
+                     (Json_util.kind_name other))
+            | None -> Error "turn is missing required field 'started_at_unix'"
+          in
+          Ok
+            {
+              ktr_keeper_name;
+              ktr_state = Keeper_turn_running { lane; started_at_unix };
+            }
+      | Some other ->
+          Error
+            (Printf.sprintf "field 'turn' must be an object or null (received %s)"
+               (Json_util.kind_name other)))
+  | value -> Error (Printf.sprintf "unknown keeper turn row status %S" value)
+
+let decode_keeper_turns json =
+  let* schema = required_string_field json "schema" in
+  let* () =
+    if String.equal schema "masc.keeper_turns.v1" then Ok ()
+    else Error (Printf.sprintf "unknown keeper turns schema %S" schema)
+  in
+  let* items = required_list_field json "keepers" in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+        let* decoded = decode_keeper_turn_row item in
         loop (decoded :: acc) rest
   in
   loop [] items

@@ -745,6 +745,13 @@ let load_keeper_tool_approvals ~(host : string) ~(port : int) :
   | Error err -> Error ("tool approvals load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_tool_approvals json
 
+(** Load which keepers are mid-turn right now (the "answering now" badge). *)
+let load_keeper_turns ~(host : string) ~(port : int) :
+    (Tui_decode.keeper_turn_row list, string) result =
+  match fetch_keeper_turns ~host ~port with
+  | Error err -> Error ("keeper turns load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_keeper_turns json
+
 (** Load the durable Gate: pending approvals and both lane modes. *)
 let load_dashboard_gate ~(host : string) ~(port : int) :
     (Tui_decode.gate_snapshot, string) result =
@@ -758,6 +765,13 @@ let load_keeper_gate_settings ~(host : string) ~(port : int) :
   match fetch_keeper_gate_settings ~host ~port with
   | Error err -> Error ("keeper Gate settings load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_gate_settings json
+
+(** Load the Runtime_params registry rows. *)
+let load_runtime_params ~(host : string) ~(port : int) :
+    (Tui_decode.runtime_param_row list, string) result =
+  match fetch_runtime_params ~host ~port with
+  | Error err -> Error ("runtime params load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_runtime_params json
 
 (** Load the keepers whose approval gate is moved off [auto]. *)
 let load_keeper_tool_approval_modes ~(host : string) ~(port : int) :
@@ -1032,6 +1046,17 @@ let load_keeper_config_view ~(host : string) ~(port : int)
     Ok
       (Masc_tui_keeper_config.view_lines
          ~sanitize:Masc.Tui_decode.sanitize_terminal_text json)
+
+let load_keeper_sandbox_view ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Masc_tui_keeper_sandbox.t, string) result =
+  match
+    Masc_tui_http.fetch_keeper_status_snapshot ~host ~port ~keeper_name
+  with
+  | Error err -> Error ("keeper sandbox status load failed: " ^ err)
+  | Ok json ->
+    Masc_tui_keeper_sandbox.decode
+      ~sanitize:Masc.Tui_decode.sanitize_terminal_text
+      json
 
 let load_keeper_config_editor ~(host : string) ~(port : int)
     ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =

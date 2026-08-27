@@ -16,6 +16,10 @@ type status_item =
      the server resolved. [Server_base_path] already names the server's, so
      the pair reads as the disagreement it is. *)
   | Workspace_mismatch of string
+  (* Keepers mid-turn right now, first name first. The operator who sent a
+     message and walked to another surface reads the answer's progress here
+     instead of standing on the chat pane. Empty list draws nothing. *)
+  | Keeper_answering of string list
   | Port of int
 
 (* Enough of the commit to tell two checkouts apart, which is the question
@@ -33,6 +37,9 @@ type retention =
   | Workspace_identity
   | Build_identity
   | Refresh_context
+  (* Live turn activity outlasts the identity facts a keeper list can also
+     answer, but yields to the conflict notice and the port. *)
+  | Live_activity
   (* Last to go. A footer with no room for the port still has room to say the
      screen is reading two different workspaces. *)
   | Workspace_conflict
@@ -70,6 +77,15 @@ let status_item_projection = function
       { text = "MISMATCH local " ^ local ^ " (r:retry)"
       ; retention = Workspace_conflict
       }
+  | Keeper_answering [] -> None
+  | Keeper_answering [ name ] ->
+    Some { text = "\xe2\x97\x8c answering " ^ name; retention = Live_activity }
+  | Keeper_answering (name :: rest) ->
+    Some
+      { text =
+          Printf.sprintf "\xe2\x97\x8c answering %s +%d" name (List.length rest)
+      ; retention = Live_activity
+      }
   | Port port when port > 0 ->
     Some { text = Printf.sprintf "Port: %d" port; retention = Endpoint_identity }
   | Port _ -> None
@@ -85,6 +101,7 @@ let omission_order =
   [ Refresh_context
   ; Build_identity
   ; Workspace_identity
+  ; Live_activity
   ; Endpoint_identity
   ; Workspace_conflict
   ]

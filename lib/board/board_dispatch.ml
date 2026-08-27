@@ -355,7 +355,7 @@ let emit_post_created ~(audience : Board.audience) (post : Board.post) =
         ; post_id = pid
         ; author = auth
         ; title = post.title
-        ; content = post.content
+        ; content = post.body
         ; hearth = post.hearth
         ; updated_at = Some post.updated_at
         }
@@ -364,7 +364,7 @@ let emit_post_created ~(audience : Board.audience) (post : Board.post) =
   emit_board_sse_event
     (Post_created
        { post_id = pid; author = auth; title = post.title;
-         content = post.content; post_kind = post.post_kind;
+         content = post.body; post_kind = post.post_kind;
          hearth = post.hearth })
 
 let create_post ~author ~content ?title ?body ~post_kind ?meta_json
@@ -405,7 +405,7 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
           Board.audience_for_post
             ~visibility:post.visibility
             ~title:post.title
-            ~content:post.content
+            ~content:post.body
         with
         | Ok audience -> emit_post_created ~audience post
         | Error error ->
@@ -586,7 +586,7 @@ let emit_vote_board_signal ~target ~target_author ~voter ~direction
         ; post_id = Board.Post_id.to_string post.id
         ; author = voter
         ; title = post.title
-        ; content = post.content
+        ; content = post.body
         ; hearth = post.hearth
         ; updated_at = Some post.updated_at
         }
@@ -702,7 +702,7 @@ let emit_reaction_board_signal store (toggled : Board.reaction_toggle_result) =
             ; post_id = Board.Post_id.to_string post.id
             ; author = toggled.user_id
             ; title = post.title
-            ; content = post.content
+            ; content = post.body
             ; hearth = post.hearth
             ; updated_at = Some post.updated_at
             }
@@ -787,7 +787,7 @@ let search ~query ~limit =
       in
       let predicate (p : Board.post) =
         matches_str p.title
-        || matches_str p.content
+        || matches_str p.body
         || matches_str (Board.Agent_id.to_string p.author)
         || (match p.hearth with Some h -> matches_str h | None -> false)
       in

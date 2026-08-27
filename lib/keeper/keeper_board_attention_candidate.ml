@@ -126,10 +126,16 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-(* v4: post_created candidate identity became the typed event key
+(* v5: the persisted post lost its [content] and [score] keys — [content]
+   duplicated [body] byte for byte and [score] restated [votes_up - votes_down],
+   and the decoder refused any row where the two disagreed. v4 rows carry both
+   keys, so the current post decoder refuses them and the identity check they
+   feed can never pass; v4 ledgers are retired at deploy, not read.
+
+   v4: post_created candidate identity became the typed event key
    (keeper, kind, post_id) — v3 rows hash volatile fields and fail the
    read-time identity check, so v3 ledgers are retired at deploy, not read. *)
-let schema_version = 4
+let schema_version = 5
 
 let quarantine_failure_category_to_string = function
   | Candidate_membership_conflict -> "candidate_membership_conflict"

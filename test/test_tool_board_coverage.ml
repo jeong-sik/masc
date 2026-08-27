@@ -447,8 +447,6 @@ let test_post_create_metadata_payload () =
     Yojson.Safe.Util.(json |> member "title" |> to_string);
   Alcotest.(check string) "body kept" "Visible answer\n\nSupporting detail"
     Yojson.Safe.Util.(json |> member "body" |> to_string);
-  Alcotest.(check string) "content alias" "Visible answer\n\nSupporting detail"
-    Yojson.Safe.Util.(json |> member "content" |> to_string);
   Alcotest.(check string) "public posts stay direct" "direct"
     Yojson.Safe.Util.(json |> member "post_kind" |> to_string);
   Alcotest.(check string) "source meta kept" "keeper_autonomy"
@@ -626,7 +624,7 @@ let test_post_create_sources_footer_and_meta () =
   in
   Alcotest.(check bool) "create ok" true ok;
   let json = parse_create_response_json body in
-  let content = Yojson.Safe.Util.(json |> member "content" |> to_string) in
+  let content = Yojson.Safe.Util.(json |> member "body" |> to_string) in
   Alcotest.(check bool) "sources footer appended" true
     (String_util.contains_substring content "## Sources");
   Alcotest.(check bool) "source url rendered" true
@@ -1268,7 +1266,7 @@ let test_dispatch_post_update_success () =
     (String_util.contains_substring msg_edit "edited tool body");
   (match Board_dispatch.get_post ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok post -> Alcotest.(check string) "edit persisted" "edited tool body" post.content)
+   | Ok post -> Alcotest.(check string) "edit persisted" "edited tool body" post.body)
 
 let test_dispatch_post_update_rejects_non_owner () =
   with_eio @@ fun env ->
@@ -1298,7 +1296,7 @@ let test_dispatch_post_update_rejects_non_owner () =
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post ->
      Alcotest.(check string) "original preserved on rejected edit" "owned tool body"
-       post.content)
+       post.body)
 
 let test_dispatch_post_update_transfers_author () =
   with_eio @@ fun env ->
@@ -1335,7 +1333,7 @@ let test_dispatch_post_update_transfers_author () =
         "tool-transfer-next"
         (Board.Agent_id.to_string post.author);
       Alcotest.(check string) "tool transfer content persisted"
-        "transferred tool body" post.content
+        "transferred tool body" post.body
 
 let test_dispatch_post_update_missing_id () =
   with_eio @@ fun env ->

@@ -2759,6 +2759,87 @@ let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
   | Ok _ -> Alcotest.fail "a row with no call id decoded"
   | Error _ -> ()
 
+let keeper_turns_json =
+  `Assoc
+    [ ("schema", `String "masc.keeper_turns.v1")
+    ; ( "keepers"
+      , `List
+          [ `Assoc
+              [ ("keeper_name", `String "kidsnote")
+              ; ("status", `String "ok")
+              ; ( "turn"
+                , `Assoc
+                    [ ("lane", `String "autonomous")
+                    ; ("started_at_unix", `Float 1787828193.5)
+                    ] )
+              ]
+          ; `Assoc
+              [ ("keeper_name", `String "analyst")
+              ; ("status", `String "ok")
+              ; ("turn", `Null)
+              ]
+          ; `Assoc
+              [ ("keeper_name", `String "rondo")
+              ; ("status", `String "unavailable")
+              ; ("detail", `String "owner_not_found")
+              ; ("turn", `Null)
+              ]
+          ] )
+    ]
+
+let test_decode_keeper_turns () =
+  match Tui_decode.decode_keeper_turns keeper_turns_json with
+  | Error err -> Alcotest.fail err
+  | Ok [ running; idle; unavailable ] ->
+      Alcotest.(check string) "running keeper" "kidsnote"
+        running.Tui_decode.ktr_keeper_name;
+      (match running.ktr_state with
+       | Tui_decode.Keeper_turn_running { lane; started_at_unix } ->
+           Alcotest.(check bool) "autonomous lane" true
+             (lane = Tui_decode.Turn_lane_autonomous);
+           Alcotest.(check (float 0.001)) "started at" 1787828193.5
+             started_at_unix
+       | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _ ->
+           Alcotest.fail "running keeper decoded as not running");
+      Alcotest.(check bool) "idle keeper" true
+        (idle.Tui_decode.ktr_state = Tui_decode.Keeper_turn_idle);
+      (match unavailable.Tui_decode.ktr_state with
+       | Tui_decode.Keeper_turn_unavailable detail ->
+           Alcotest.(check string) "unavailable detail" "owner_not_found" detail
+       | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_running _ ->
+           Alcotest.fail "an owner lookup failure decoded as a turn state")
+  | Ok rows -> Alcotest.failf "expected three rows, got %d" (List.length rows)
+
+let test_decode_keeper_turns_rejects_unknown_lane () =
+  let unknown_lane =
+    `Assoc
+      [ ("schema", `String "masc.keeper_turns.v1")
+      ; ( "keepers"
+        , `List
+            [ `Assoc
+                [ ("keeper_name", `String "kidsnote")
+                ; ("status", `String "ok")
+                ; ( "turn"
+                  , `Assoc
+                      [ ("lane", `String "warp")
+                      ; ("started_at_unix", `Float 1.0)
+                      ] )
+                ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_keeper_turns unknown_lane with
+  | Ok _ -> Alcotest.fail "an unknown lane decoded instead of erroring"
+  | Error _ -> ()
+
+let test_decode_keeper_turns_rejects_unknown_schema () =
+  let unknown_schema =
+    `Assoc [ ("schema", `String "masc.keeper_turns.v2"); ("keepers", `List []) ]
+  in
+  match Tui_decode.decode_keeper_turns unknown_schema with
+  | Ok _ -> Alcotest.fail "an unknown schema decoded instead of erroring"
+  | Error _ -> ()
+
 (* GET /api/v1/runtime/resolved, the picker's comprehensive shared document. *)
 let picker_default_runtime =
   `Assoc
@@ -3524,6 +3605,88 @@ let test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper () =
   | Ok _ -> Alcotest.fail "accepted a setting that names nobody"
 
 
+let runtime_params_json =
+  `Assoc
+    [ ( "parameters"
+      , `List
+          [ `Assoc
+              [ ("key", `String "keeper.hitl.thinking_blocks")
+              ; ("current", `Int 5)
+              ; ("default", `Int 3)
+              ; ("has_override", `Bool true)
+              ; ( "meta"
+                , `Assoc
+                    [ ("description", `String "How many thinking blocks to retain")
+                    ; ("value_type", `String "integer")
+                    ; ("min_value", `Int 0)
+                    ; ("max_value", `Int 20)
+                    ] )
+              ]
+          ; `Assoc
+              [ ("key", `String "dashboard.agent_quiet_threshold_sec")
+              ; ("current", `Float 300.0)
+              ; ("default", `Float 300.0)
+              ; ("has_override", `Bool false)
+              ]
+          ; `Assoc
+              [ ("key", `String "keeper.mode")
+              ; ("current", `String "careful")
+              ; ("default", `String "normal")
+              ; ("has_override", `Bool true)
+              ]
+          ] )
+    ; ("surfaces", `List [])
+    ]
+
+let test_decode_runtime_params_reads_current_and_default () =
+  match Tui_decode.decode_runtime_params runtime_params_json with
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+  | Ok rows ->
+    (* Current/default travel together, and strings retain quotes so the
+       inline editor can round-trip their JSON type. *)
+    Alcotest.(check (list (triple string string string)))
+      "key, current, default"
+      [ ("keeper.hitl.thinking_blocks", "5", "3")
+      ; ("dashboard.agent_quiet_threshold_sec", "300.0", "300.0")
+      ; ("keeper.mode", {|"careful"|}, {|"normal"|})
+      ]
+      (List.map
+         (fun row ->
+           let open Tui_decode in
+           row.rpr_key, row.rpr_current_json, row.rpr_default_json)
+         rows);
+    Alcotest.(check (list bool))
+      "and which one somebody moved" [ true; false; true ]
+      (List.map (fun row -> row.Tui_decode.rpr_has_override) rows);
+    (match rows with
+     | first :: _ ->
+       let open Tui_decode in
+       Alcotest.(check string) "description"
+         "How many thinking blocks to retain" first.rpr_description;
+       Alcotest.(check string) "type" "integer" first.rpr_value_type;
+       Alcotest.(check (option string)) "min" (Some "0") first.rpr_min_json;
+       Alcotest.(check (option string)) "max" (Some "20") first.rpr_max_json
+     | [] -> Alcotest.fail "expected runtime param rows")
+
+let test_decode_runtime_params_takes_an_empty_registry () =
+  match
+    Tui_decode.decode_runtime_params (`Assoc [ ("parameters", `List []) ])
+  with
+  | Ok [] -> ()
+  | Ok _ -> Alcotest.fail "invented a parameter"
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+
+let test_decode_runtime_params_rejects_a_row_without_a_key () =
+  (* A row with no key cannot be shown against anything, and dropping it
+     quietly hides a knob that is in force. *)
+  match
+    Tui_decode.decode_runtime_params
+      (`Assoc [ ("parameters", `List [ `Assoc [ ("current", `Int 1) ] ]) ])
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "accepted a parameter that names nothing"
+
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_runtime_surface",
@@ -3549,6 +3712,14 @@ let () =
           test_decode_keeper_tool_approvals_accepts_legacy_row
       ; Alcotest.test_case "rejects a thin row" `Quick
           test_decode_keeper_tool_approvals_rejects_a_thin_row
+      ] );
+    ( "decode_keeper_turns",
+      [ Alcotest.test_case "running, idle, and unavailable rows" `Quick
+          test_decode_keeper_turns
+      ; Alcotest.test_case "rejects an unknown lane" `Quick
+          test_decode_keeper_turns_rejects_unknown_lane
+      ; Alcotest.test_case "rejects an unknown schema" `Quick
+          test_decode_keeper_turns_rejects_unknown_schema
       ] );
     ( "decode_tools",
       [
@@ -3824,6 +3995,15 @@ let () =
       [
         Alcotest.test_case "stops on cycle" `Quick
           test_bounded_parent_depth_stops_on_cycle;
+      ] );
+    ( "runtime_params",
+      [
+        Alcotest.test_case "reads current and default" `Quick
+          test_decode_runtime_params_reads_current_and_default;
+        Alcotest.test_case "takes an empty registry" `Quick
+          test_decode_runtime_params_takes_an_empty_registry;
+        Alcotest.test_case "rejects a row without a key" `Quick
+          test_decode_runtime_params_rejects_a_row_without_a_key;
       ] );
     ( "keeper_gate_settings",
       [

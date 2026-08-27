@@ -830,6 +830,27 @@ val decode_keeper_gate_settings :
     operator reading one for the other is the reason both are named in
     full. *)
 
+type runtime_param_row =
+  { rpr_key : string
+  ; rpr_current_json : string
+  ; rpr_default_json : string
+  ; rpr_has_override : bool
+  ; rpr_description : string
+  ; rpr_value_type : string
+  ; rpr_min_json : string option
+  ; rpr_max_json : string option
+  }
+
+val decode_runtime_params :
+  Yojson.Safe.t -> (runtime_param_row list, string) result
+(** Typed display/edit rows from [/api/v1/runtime/params].
+
+    Current and default use their exact JSON spelling.  The TUI displays a
+    friendly form but keeps this spelling for the inline edit/write boundary,
+    so a JSON string cannot be confused with a number or boolean.  Registry
+    metadata stays attached so the selected row can explain its type, bounds,
+    and purpose before an operator changes it. *)
+
 val decode_tool_approval_mode_overrides :
   Yojson.Safe.t -> ((string * string) list, string) result
 (** Decode [GET /api/v1/keepers/tool-approval-mode]'s
@@ -871,6 +892,31 @@ val decode_keeper_tool_approvals :
   Yojson.Safe.t -> (keeper_tool_approval list, string) result
 (** Decode the [{pending: [...]}] listing, oldest first, rejecting rows with
     missing or mistyped fields rather than dropping them. *)
+
+type keeper_turn_lane =
+  | Turn_lane_autonomous
+  | Turn_lane_chat_operation
+  | Turn_lane_maintenance
+
+type keeper_turn_state =
+  | Keeper_turn_idle
+  | Keeper_turn_running of { lane : keeper_turn_lane; started_at_unix : float }
+      (** [started_at_unix] is the server owner clock's epoch reading; derive
+          display age against the local clock, never trust a precomputed one. *)
+  | Keeper_turn_unavailable of string
+      (** The owner registry could not answer for this keeper — distinct from
+          idle so the badge never reads "not running" out of a lookup error. *)
+
+type keeper_turn_row = {
+  ktr_keeper_name : string;
+  ktr_state : keeper_turn_state;
+}
+
+val decode_keeper_turns :
+  Yojson.Safe.t -> (keeper_turn_row list, string) result
+(** Decode [GET /api/v1/keepers/turns] ([masc.keeper_turns.v1]): one row per
+    registered keeper. Unknown schema, status, or lane is an error, not a
+    silently defaulted row. *)
 
 (** Where one keeper points today. [ra_source] is the server's word:
     ["default"] rides the fleet default, ["explicit"] was assigned. *)

@@ -523,8 +523,28 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     | Masc_tui_types.Workspace_identity_unread
     | Masc_tui_types.Workspace_identity_match -> []
   in
-  Masc_tui_footer.line ~status:(status @ identity @ conflict) ~dim:Ansi.dim
-    ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
+  (* Keepers mid-turn, the one this pane last messaged first: that is the
+     answer the operator who walked away is waiting on. *)
+  let answering =
+    let running =
+      List.filter_map
+        (fun (row : Tui_decode.keeper_turn_row) ->
+          match row.ktr_state with
+          | Tui_decode.Keeper_turn_running _ -> Some row.ktr_keeper_name
+          | Tui_decode.Keeper_turn_idle
+          | Tui_decode.Keeper_turn_unavailable _ -> None)
+        state.keeper_turns
+    in
+    let running =
+      match state.msg_target_keeper_name with
+      | Some target when List.mem target running ->
+          target :: List.filter (fun name -> name <> target) running
+      | Some _ | None -> running
+    in
+    match running with [] -> [] | _ -> [ Masc_tui_footer.Keeper_answering running ]
+  in
+  Masc_tui_footer.line ~status:(status @ identity @ conflict @ answering)
+    ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
   let composer = Composer_projection.of_state state in
@@ -3247,9 +3267,21 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
    name cannot push the columns to its right out of the frame and the style
    bytes never count toward the width. *)
 let keeper_row_content ~(columns : Render_schedule.keeper_columns)
-    ~yolo ~paused ~health ~next_action ~keeper ~runtime =
+    ~yolo ~paused ~health ~turn ~next_action ~keeper ~runtime =
   let status_color = keeper_action_color next_action in
   let glyph = keeper_state_glyph ~paused ~health in
+  (* A running turn takes the status word: "answering" is the fact the
+     operator scans this table for, and health returns the cell the moment
+     the turn ends. Idle and unavailable rows keep the health word —
+     unavailable is the owner lookup failing, which the health column
+     already describes better than a blank would. *)
+  let status_word, status_color =
+    match (turn : Tui_decode.keeper_turn_state option) with
+    | Some (Tui_decode.Keeper_turn_running _) -> ("answering", Ansi.cyan)
+    | Some Tui_decode.Keeper_turn_idle
+    | Some (Tui_decode.Keeper_turn_unavailable _)
+    | None -> (keeper_health_word health, status_color)
+  in
   (* Selection is the full-row band the caller draws (box_line_selected over
      a strip_sgr'd copy of this row), so the row itself carries no marker.
      The caret's three gutter cells stay as spaces so columns do not shift
@@ -3270,8 +3302,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
   String.concat ""
     [ "   "
     ; status_color ^ glyph ^ " "
-      ^ fit_width (keeper_health_word health)
-          (Render_schedule.keeper_status_width - 2)
+      ^ fit_width status_word (Render_schedule.keeper_status_width - 2)
       ^ Ansi.reset
     ; " "
     ; (* A keeper whose gate runs every call unasked wears its name in
@@ -3559,11 +3590,20 @@ let render_keeper_list (state : state) =
             | Keeper_control.Present row -> Some row
             | Keeper_control.Absent | Keeper_control.Unobserved -> None
           in
+          let turn =
+            List.find_map
+              (fun (row : Tui_decode.keeper_turn_row) ->
+                if String.equal row.ktr_keeper_name keeper.k_name then
+                  Some row.ktr_state
+                else None)
+              state.keeper_turns
+          in
           let row =
             keeper_row_content ~columns
               ~yolo:(List.mem keeper.k_name state.keeper_yolo_names)
               ~paused:reading.Keeper_control.paused
               ~health:(Keeper_control.health reading)
+              ~turn
               ~next_action:(Keeper_control.next_action reading)
               ~keeper ~runtime
           in
@@ -4348,6 +4388,16 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let all_lines =
       match state.detail_tab with
       | Detail_info -> info_lines
+      | Detail_sandbox ->
+          stamped_or
+            (Option.map
+               (fun (stamp, reading) ->
+                 ( stamp
+                 , Masc_tui_keeper_sandbox.view_lines
+                     ~width:(max 24 (cols - 8))
+                     reading ))
+               state.keeper_sandbox_view)
+            state.keeper_sandbox_view_error
       | Detail_instructions ->
           stamped_or state.keeper_config_view state.keeper_config_view_error
       | Detail_secrets -> secret_lines state k
@@ -4381,11 +4431,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let tab_hint =
       match state.detail_tab with
       | Detail_github -> "[ ]:tab  L:login"
+      | Detail_sandbox -> "[ ]:tab  R:refresh"
+      | Detail_instructions -> "[ ]:tab  e:edit JSON in $EDITOR"
       (* Arrows first: the digits only reach the first nine rows and the
          list is a declaration directory that can hold more. *)
       | Detail_identity ->
         "[ ]:tab  arrows+enter:connect  A:app  /:filter  R:refresh"
-      | Detail_info | Detail_instructions | Detail_secrets -> "[ ]:tab"
+      | Detail_info | Detail_secrets -> "[ ]:tab"
     in
     let title =
       Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s   %s%s%s" Ansi.bold
@@ -9211,10 +9263,129 @@ let config_pane_strip (state : state) =
   in
   String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
     [ name Config_runtime "runtime.toml"
+    ; name Config_params "params"
     ; name Config_prompts "prompts"
     ; name Config_themes "themes"
     ]
   ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
+
+(* The Runtime_params registry. A view, not a second place values live:
+   overrides are written by the server to .masc/runtime_params.json, and this
+   shows what is there beside what it would be without them.
+
+   runtime.toml sits in the pane next door and answers a different question --
+   which runtimes and lanes exist. One value claimed by two files is how "I set
+   it and it did not take" happens, so these stay two panes over one store. *)
+let render_runtime_params (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s  %s"
+       (screen_title " MASC Config")
+       (config_pane_strip state)
+       (connection_badge state));
+  (match state.runtime_params_notice with
+   | None ->
+     box_line_styled buf cols ~style:(Theme.recede ())
+       "  Live overrides · persisted in .masc/runtime_params.json · server validates type/range"
+   | Some (ok, detail) ->
+     box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
+       ("  " ^ Terminal_text.single_line detail));
+  let selected = List.nth_opt state.runtime_params state.runtime_params_cursor in
+  let selected_contract =
+    match selected with
+    | None -> "  Select a row to see its contract"
+    | Some row ->
+      let open Tui_decode in
+      let type_name =
+        if String.trim row.rpr_value_type = "" then "typed value"
+        else row.rpr_value_type
+      in
+      let bounds =
+        [ Option.map (fun value -> "min " ^ value) row.rpr_min_json
+        ; Option.map (fun value -> "max " ^ value) row.rpr_max_json
+        ]
+        |> List.filter_map Fun.id
+        |> String.concat " · "
+      in
+      String.concat " · "
+        (List.filter (fun text -> String.trim text <> "")
+           [ "  " ^ type_name; bounds; row.rpr_description ])
+  in
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (fit_width (Terminal_text.single_line selected_contract) (max 1 (cols - 1)));
+  box_divider buf cols;
+  let editing = Option.is_some state.runtime_param_edit in
+  (* Editing adds a divider and two form rows.  Spend those rows out of the
+     list budget so the footer remains visible instead of falling underneath
+     the always-present composer. *)
+  let content_height = max 1 (rows - (if editing then 10 else 7)) in
+  let count = List.length state.runtime_params in
+  let cursor = max 0 (min state.runtime_params_cursor (count - 1)) in
+  let first = if cursor < content_height then 0 else cursor - content_height + 1 in
+  let display_json text =
+    match Yojson.Safe.from_string text with
+    | `String value -> value
+    | _ -> text
+    | exception Yojson.Json_error _ -> text
+  in
+  (match state.runtime_params_error with
+   | Some detail ->
+     box_line buf cols ((Theme.bad ()) ^ "설정을 읽지 못했습니다: " ^ Ansi.reset
+                        ^ Terminal_text.single_line detail);
+     for _ = 2 to content_height do box_empty buf cols done
+   | None ->
+     if state.runtime_params_loading && state.runtime_params = []
+     then begin
+       box_line buf cols (Ansi.dim ^ "  (loading runtime parameters…)" ^ Ansi.reset);
+       for _ = 2 to content_height do box_empty buf cols done
+     end
+     else if state.runtime_params = []
+     then begin
+       box_line buf cols (Ansi.dim ^ "  등록된 설정 없음" ^ Ansi.reset);
+       for _ = 2 to content_height do box_empty buf cols done
+     end else begin
+       for index = 0 to content_height - 1 do
+         match List.nth_opt state.runtime_params (first + index) with
+         | None -> box_empty buf cols
+         | Some row ->
+           let open Tui_decode in
+           let line =
+             Printf.sprintf "  %s %-43s %-16s%s"
+               (if row.rpr_has_override then "●" else "○")
+               (Terminal_text.single_line row.rpr_key)
+               (Terminal_text.single_line (display_json row.rpr_current_json))
+               (if row.rpr_has_override
+                then Printf.sprintf "  default %s"
+                       (Terminal_text.single_line (display_json row.rpr_default_json))
+                else "")
+           in
+           if first + index = cursor then box_line_selected buf cols line
+           else
+             box_line_styled buf cols
+               ~style:(if row.rpr_has_override then Ansi.cyan else Ansi.dim) line
+       done
+     end);
+  (match state.runtime_param_edit with
+   | None -> ()
+   | Some (key, draft) ->
+     box_divider buf cols;
+     box_line buf cols
+       (Printf.sprintf "  %svalue>%s %s" Ansi.bold Ansi.reset
+          (fit_width (Terminal_text.single_line draft) (max 1 (cols - 12))));
+     box_line_styled buf cols ~style:(Theme.recede ())
+       (Printf.sprintf "  editing %s · JSON value · Enter apply · Ctrl-U clear · Esc cancel"
+          (Terminal_text.single_line key)));
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:
+         (if editing then "type JSON  Enter:apply  Ctrl-U:clear  Esc:cancel"
+          else "j/k:select  Enter/e:edit  x:default  p:next  r:reload"));
+  finish_surface state ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
+;;
 
 let render_prompts (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -9538,7 +9709,8 @@ let render_surface (state : state) =
     match state.config_pane with
     | Config_prompts -> render_prompts state
     | Config_themes -> render_themes state
-    | Config_runtime -> render_config state)
+    | Config_runtime -> render_config state
+    | Config_params -> render_runtime_params state)
   | Resources -> render_resources state
   | Code -> render_code state
   | Tools -> render_tools state
@@ -10020,6 +10192,53 @@ let agenda_viewport (state : state) =
    Tone rather than a colour per row: the headings carry the structure, a
    held call is the one thing that needs answering now, and the wakes recede
    the same way they do on the strip. *)
+let answering_lines (state : state) =
+  Masc_tui_answering.overlay
+    ~now:(Unix.gettimeofday ())
+    ~chat_target:state.msg_target_keeper_name
+    ~error:state.keeper_turns_error
+    state.keeper_turns
+
+let answering_viewport (state : state) =
+  let terminal_rows, _cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  (List.length (answering_lines state), framed_content_height ~rows)
+
+let render_answering (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 2048 in
+  framed_top buf cols;
+  framed_line
+    buf
+    cols
+    (screen_title " Answering" ^ "  " ^ Ansi.dim ^ "Esc or @ to close"
+   ^ Ansi.reset);
+  framed_divider buf cols;
+  let lines = answering_lines state in
+  let content_height = framed_content_height ~rows in
+  let scroll =
+    Masc_tui_scroll.normalize
+      ~count:(List.length lines)
+      ~height:content_height
+      state.answering_scroll
+  in
+  let paint (line : Masc_tui_answering.line) =
+    match line.Masc_tui_answering.tone with
+    | Masc_tui_answering.Heading -> Ansi.bold ^ line.Masc_tui_answering.text ^ Ansi.reset
+    | Masc_tui_answering.Running -> Ansi.cyan ^ line.Masc_tui_answering.text ^ Ansi.reset
+    | Masc_tui_answering.Unknown -> (Theme.warn ()) ^ line.Masc_tui_answering.text ^ Ansi.reset
+    | Masc_tui_answering.Quiet -> Ansi.dim ^ line.Masc_tui_answering.text ^ Ansi.reset
+  in
+  lines
+  |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
+  |> List.iter (fun line -> framed_line buf cols (paint line));
+  framed_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
+  finish_surface state ~surface_key:"answering" ~rows:terminal_rows ~cols buf
+;;
+
 let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -10094,6 +10313,9 @@ let render (state : state) =
     (frame, clamped, None)
   else if state.agenda_open then
     let frame, clamped = render_agenda state in
+    (frame, clamped, None)
+  else if state.answering_open then
+    let frame, clamped = render_answering state in
     (frame, clamped, None)
   else
     let frame, clamped = render_surface state in

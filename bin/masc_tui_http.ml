@@ -932,6 +932,13 @@ let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/keepers/tool-approvals"
 
+(** GET /api/v1/keepers/turns — which keepers are mid-turn right now. The
+    running-turn slot lives in the server's Keeper Owner, not in the durable
+    meta the local keeper list is read from, so the badge has to ask. *)
+let fetch_keeper_turns ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/keepers/turns"
+
 (** POST /api/v1/keepers/<name>/identity-switch — turn one attached service
     on or off for this keeper without touching the consent. *)
 let post_identity_switch ~(host : string) ~(port : int) ~(keeper_name : string)
@@ -1000,6 +1007,31 @@ let post_dashboard_gate_external_mode ~(host : string) ~(port : int)
 let fetch_keeper_gate_settings ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/gate/keeper-settings"
+
+(** GET /api/v1/runtime/params — the Runtime_params registry: every knob this
+    build registered, what it is set to, and what it would be with nobody
+    overriding it. *)
+let fetch_runtime_params ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/runtime/params"
+
+(** Set one typed Runtime_params override.  [value] stays JSON all the way to
+    the server; the registry owns type and bounds validation. *)
+let post_runtime_param_set ~(host : string) ~(port : int) ~(key : string)
+    ~(value : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ "param_key", `String key; "value", value ])
+  in
+  post_json ~host ~port ~path:"/api/v1/runtime/params/set" ~body
+
+(** Clear one Runtime_params override, returning it to the registered default. *)
+let post_runtime_param_clear ~(host : string) ~(port : int) ~(key : string) :
+    (Yojson.Safe.t, string) result =
+  let body =
+    Yojson.Safe.to_string (`Assoc [ "param_key", `String key ])
+  in
+  post_json ~host ~port ~path:"/api/v1/runtime/params/clear" ~body
 
 (** GET /api/v1/keepers/tool-approval-mode — per-keeper gate stances. *)
 let fetch_keeper_tool_approval_modes ~(host : string) ~(port : int) :
@@ -1292,6 +1324,15 @@ let fetch_keeper_config_snapshot ~(host : string) ~(port : int)
     ~path:
       (Printf.sprintf "/api/v1/keepers/%s/config"
          (percent_encode_path_segment keeper_name))
+
+(** GET /api/v1/gate/keeper-status?name=... — the selected Keeper's detailed
+    status, including the server-observed [sandbox_live] projection. *)
+let fetch_keeper_status_snapshot ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/gate/keeper-status?name=%s"
+         (percent_encode_query_value keeper_name))
 
 (** GET /api/v1/keepers/:name/github-identity — the keeper's GitHub CLI
     identity observation (config dir, projected token env, stored and

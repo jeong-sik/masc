@@ -54,6 +54,11 @@ type turn_in_flight =
     measures the resulting starvation and is where an admission policy belongs.
     Any such policy must keep the invariant above, not merely the counter. *)
 
+(** Wire spelling of a {!turn_lane} ("autonomous" / "chat_operation" /
+    "maintenance"). Every projection that serializes a lane reads this one
+    mapping; consumers must not re-spell the variants locally. *)
+val turn_lane_to_string : turn_lane -> string
+
 type autonomous_block =
   | Turn_busy of turn_in_flight option
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t

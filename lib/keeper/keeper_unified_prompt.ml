@@ -948,7 +948,7 @@ let format_own_board_post_text (post : Board.post) : string =
     ; "replies", string_of_int post.reply_count
     ; "votes", Printf.sprintf "+%d/-%d" post.votes_up post.votes_down
     ; "title", Keeper_types_profile.short_preview ~max_len:80 post.title
-    ; "preview", Keeper_types_profile.short_preview ~max_len:80 post.content
+    ; "preview", Keeper_types_profile.short_preview ~max_len:80 post.body
     ]
 ;;
 

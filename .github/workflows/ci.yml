@@ -622,9 +622,30 @@ jobs:
           echo "${bin_dir}" >> "$GITHUB_PATH"
           "${bin_dir}/grpcurl" -version
 
+      # The cold rebuild is why this job left the PR lane: the job comment
+      # above records 12 minutes of setup and build per run against a tree a
+      # PR changes a handful of files in. The opam switch was already cached,
+      # which is why toolchain setup costs seconds; dune's artifact cache was
+      # not, so every run recompiled the whole graph. Measured on run
+      # 33066540815: Build 11.7 min of the job's 18.1.
+      - name: Restore dune cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/dune
+          # A fresh key per commit so every run saves its own entry; the
+          # prefix restore-key then hands the next run the newest entry for
+          # this runner, which is what makes the build incremental. The arch
+          # is in the key because artifacts are not portable across it.
+          key: dune-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            dune-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Build
         id: build_step
         env:
+          # Off by default for user rules; the whole graph is what needs to
+          # survive between runs.
+          DUNE_CACHE: enabled
           # Public ubuntu-latest runners provide four CPUs and 16 GB RAM. Use
           # all four for the compile-only graph; focused behavior suites below
           # remain serial because some own fixed ports and shared fixtures.
@@ -668,6 +689,14 @@ jobs:
           kill "${heartbeat_pid}" 2>/dev/null || true
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
+
+      # GitHub evicts repository caches LRU above 10 GB, so an untrimmed dune
+      # cache would push out the opam and pnpm entries that make the other
+      # jobs fast. Bounded before the post-job save, and never fatal: a
+      # failure here costs cache size, not the build result.
+      - name: Trim dune cache
+        if: always()
+        run: opam exec -- dune cache trim --size 2GB || true
 
       - name: Check direct environment reads against config floor
         # The checker derives the dependency floor from `dune describe`, so it

@@ -1315,6 +1315,9 @@ type async_msg =
       Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_tool_approvals_loaded of
       (Tui_decode.keeper_tool_approval list, string) result
+  | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
+      (** Which keepers are mid-turn right now, for the "answering now"
+          badge drawn from every surface. *)
   | Gate_snapshot_loaded of (Tui_decode.gate_snapshot, string) result
       (** The durable Gate beside the held calls: pending approvals that
           survive nobody watching, and both lane modes. *)
@@ -1360,7 +1363,11 @@ type async_msg =
   | Keeper_calls_loaded of
       string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Keeper_config_view_loaded of string * (string list, string) result
+  | Keeper_sandbox_view_loaded of
+      string * (Masc_tui_keeper_sandbox.t, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
+  | Runtime_params_loaded of
+      (Tui_decode.runtime_param_row list, string) result
   | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of ((string * string) list, string) result
@@ -1614,6 +1621,26 @@ let launch_keeper_tool_approvals_load state ~mailbox =
   | None ->
       enqueue_async mailbox
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
+
+let launch_keeper_turns_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_keeper_turns ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_turns_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_turns_loaded (Error "Eio switch is unavailable"))
 
 let launch_gate_snapshot_load state ~mailbox =
   let host = server_peer_host in
@@ -2404,6 +2431,27 @@ let launch_runtime_config_load state ~mailbox =
       enqueue_async mailbox
         (Runtime_config_view_loaded (Error "Eio switch is unavailable"))
 
+let launch_runtime_params_load state ~mailbox =
+  state.runtime_params_loading <- true;
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_runtime_params ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Runtime_params_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Runtime_params_loaded (Error "Eio switch is unavailable"))
+
 let launch_prompts_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -2466,6 +2514,27 @@ let launch_keeper_config_view state ~mailbox keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_config_view_loaded
+           (keeper_name, Error "Eio switch is unavailable"))
+
+let launch_keeper_sandbox_view state ~mailbox keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_sandbox_view_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_sandbox_view_loaded
            (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_github_identity_view state ~mailbox keeper_name =
@@ -3206,9 +3275,14 @@ let goto_surface state ~mailbox (destination : surface) =
    | Connectors -> launch_connectors_load state ~mailbox
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
-   | Config ->
-       if state.config_pane = Config_prompts then launch_prompts_load state ~mailbox
-       else launch_runtime_config_load state ~mailbox
+   | Config -> (
+       (* Each pane loads its own source. Named rather than left to an
+          if/else chain: a pane added later should have to say where its data
+          comes from instead of quietly inheriting runtime.toml's. *)
+       match state.config_pane with
+       | Config_prompts -> launch_prompts_load state ~mailbox
+       | Config_params -> launch_runtime_params_load state ~mailbox
+       | Config_runtime | Config_themes -> launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
    | Overview | Acting | Keepers _ | Board | Planning | System_logs -> ());
@@ -4810,6 +4884,10 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
       load_live_context_if_safe state base_path keeper;
       (match state.detail_tab with
        | Detail_info -> ()
+       | Detail_sandbox ->
+           state.keeper_sandbox_view <- None;
+           state.keeper_sandbox_view_error <- None;
+           launch_keeper_sandbox_view state ~mailbox keeper.k_name
        | Detail_instructions ->
            state.keeper_config_view <- None;
            state.keeper_config_view_error <- None;
@@ -4844,6 +4922,10 @@ let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
      because the stamped answer names the previous keeper. *)
   match state.detail_tab with
   | Detail_info -> ()
+  | Detail_sandbox ->
+      state.keeper_sandbox_view <- None;
+      state.keeper_sandbox_view_error <- None;
+      launch_keeper_sandbox_view state ~mailbox keeper.k_name
   | Detail_instructions ->
       state.keeper_config_view <- None;
       state.keeper_config_view_error <- None;
@@ -4984,6 +5066,10 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        badge is how an operator finds out. The server caches the snapshot. *)
     launch_keeper_tool_approvals_load state ~mailbox;
     launch_gate_snapshot_load state ~mailbox;
+    (* The "answering now" badge rides every tick for the same reason as the
+       approvals above: it is drawn from every surface, and its whole point
+       is the operator who walked away from the chat pane. *)
+    launch_keeper_turns_load state ~mailbox;
     (* The schedule list rides for the same reason, now that the agenda strip
        names the next wake from every surface. Fetched only on the Schedules
        surface it was empty everywhere else, and a strip that says nothing is
@@ -6272,6 +6358,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.keeper_config_view <- Some (keeper_name, lines);
             state.keeper_config_view_error <- None
         | Error detail -> state.keeper_config_view_error <- Some detail)
+  | Keeper_sandbox_view_loaded (keeper_name, result) -> (
+      let still_selected =
+        match List.nth_opt state.keepers state.keeper_cursor with
+        | Some keeper -> String.equal keeper.k_name keeper_name
+        | None -> false
+      in
+      if still_selected then
+        match result with
+        | Ok reading ->
+            state.keeper_sandbox_view <- Some (keeper_name, reading);
+            state.keeper_sandbox_view_error <- None
+        | Error detail -> state.keeper_sandbox_view_error <- Some detail)
   | Prompts_loaded result ->
       (match result with
        | Ok snapshot ->
@@ -6298,6 +6396,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.prompts_librarian_input <- None;
             state.prompts_librarian_input_error <- Some detail
       end
+  | Runtime_params_loaded result -> (
+      state.runtime_params_loading <- false;
+      match result with
+      | Ok rows ->
+          state.runtime_params <- rows;
+          state.runtime_params_cursor <-
+            max 0 (min state.runtime_params_cursor (List.length rows - 1));
+          state.runtime_params_error <- None
+      | Error detail ->
+          (* Reported, not swallowed into an empty list: empty means nothing is
+             registered, which is a working state. *)
+          state.runtime_params_error <- Some detail)
   | Runtime_config_view_loaded result -> (
       match result with
       | Ok (path, lines) ->
@@ -6772,6 +6882,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Keeper_turns_loaded result ->
+      (match result with
+       | Ok rows ->
+           state.keeper_turns <- rows;
+           state.keeper_turns_error <- None
+       | Error detail ->
+           (* Keep the last known rows: a fetch that failed says nothing
+              about the turns themselves, and blanking every badge on one
+              lost poll would flicker. The error shows on the keeper list. *)
+           state.keeper_turns_error <- Some detail)
   | Gate_snapshot_loaded result ->
       (match result with
        | Ok snapshot ->
@@ -7669,6 +7789,19 @@ let main () =
      that gives this back is already installed. *)
   Frame_presenter.setup frame_presenter ~write:(output_string stdout)
     ~flush:(fun () -> flush stdout);
+  (* Reads the palette rather than taking a colour, so every caller sends
+     whatever is in force at the moment it asks -- picking a scheme, dropping
+     one, and the first paint all go through the same answer. *)
+  let sync_theme_background () =
+    Frame_presenter.sync_background ~write:(output_string stdout)
+      ~flush:(fun () -> flush stdout)
+      (Option.map Masc_tui_terminal_palette.background
+         (Masc_tui_terminal_palette.current ()))
+  in
+  (* A scheme named in runtime.toml was applied at boot, before this existed.
+     Sending it here is what makes a saved choice survive a restart with its
+     background rather than only its ink. *)
+  sync_theme_background ();
   output_string stdout mouse_tracking_enable;
   output_string stdout bracketed_paste_enable;
   (* Only terminals with an extended profile receive this opt-in. Apple
@@ -8037,6 +8170,57 @@ let main () =
                    ^ Masc_tui_http.runtime_config_commit_receipt_summary receipt);
                 launch_runtime_config_load state ~mailbox:async_messages
               | Error detail -> add_event state "error" ("save failed: " ^ detail))))))
+  in
+  let selected_runtime_param () =
+    List.nth_opt state.runtime_params state.runtime_params_cursor
+  in
+  let handle_runtime_param_edit_open () =
+    match selected_runtime_param () with
+    | None ->
+      state.runtime_params_notice <- Some (false, "No runtime parameter is selected")
+    | Some row ->
+      state.runtime_param_edit <- Some (row.Tui_decode.rpr_key, row.rpr_current_json);
+      state.runtime_params_notice <- None
+  in
+  let handle_runtime_param_edit_apply () =
+    match state.runtime_param_edit with
+    | None -> ()
+    | Some (key, draft) -> (
+      match Yojson.Safe.from_string draft with
+      | exception Yojson.Json_error detail ->
+        state.runtime_params_notice <-
+          Some (false, "Invalid JSON value: " ^ detail)
+      | value -> (
+        match
+          Masc_tui_http.post_runtime_param_set ~host:server_peer_host
+            ~port:state.port ~key ~value
+        with
+        | Error detail ->
+          state.runtime_params_notice <- Some (false, "Set failed: " ^ detail)
+        | Ok _ ->
+          state.runtime_param_edit <- None;
+          state.runtime_params_notice <-
+            Some (true, Printf.sprintf "Set %s = %s" key (Yojson.Safe.to_string value));
+          launch_runtime_params_load state ~mailbox:async_messages))
+  in
+  let handle_runtime_param_clear () =
+    match selected_runtime_param () with
+    | None ->
+      state.runtime_params_notice <- Some (false, "No runtime parameter is selected")
+    | Some row ->
+      let key = row.Tui_decode.rpr_key in
+      if not row.rpr_has_override then
+        state.runtime_params_notice <- Some (true, key ^ " already uses its default")
+      else (
+        match
+          Masc_tui_http.post_runtime_param_clear ~host:server_peer_host
+            ~port:state.port ~key
+        with
+        | Error detail ->
+          state.runtime_params_notice <- Some (false, "Reset failed: " ^ detail)
+        | Ok _ ->
+          state.runtime_params_notice <- Some (true, "Reset " ^ key ^ " to its default");
+          launch_runtime_params_load state ~mailbox:async_messages)
   in
   let skill_template ~composition =
     if composition
@@ -8579,6 +8763,7 @@ and is loaded on demand through keeper_skill.
         && (not state.agenda_open)
         && (not state.context_inspector_open)
         && (not state.palette_open)
+        && Option.is_none state.runtime_param_edit
         && Option.is_none state.search
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
@@ -8591,6 +8776,31 @@ and is loaded on demand through keeper_skill.
       in
       (match key with
        | Some _ when composer_claimed -> ()
+       (* Inline Runtime_params editing is modal: printable keys, including q,
+          belong to the JSON value.  The server remains the type/range
+          authority when Enter submits it. *)
+       | Some k when Option.is_some state.runtime_param_edit ->
+           (match state.runtime_param_edit with
+            | None -> ()
+            | Some (param_key, draft) ->
+              let set value = state.runtime_param_edit <- Some (param_key, value) in
+              (match k with
+               | "esc" ->
+                 state.runtime_param_edit <- None;
+                 state.runtime_params_notice <- Some (true, param_key ^ ": edit cancelled")
+               | "\r" | "\n" | "enter" -> handle_runtime_param_edit_apply ()
+               | "\127" | "\b" | "backspace" ->
+                 set (Masc_tui_message_layout.drop_last_utf8_scalar draft);
+                 state.runtime_params_notice <- None
+               | s when String.length s = 1 && Char.code s.[0] = 21 ->
+                 set "";
+                 state.runtime_params_notice <- None
+               | s
+                 when (String.length s = 1 && Char.code s.[0] >= 32)
+                      || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                 set (draft ^ s);
+                 state.runtime_params_notice <- None
+               | _ -> ()))
        | Some _
          when quit_key
               && (compact_viewport
@@ -8826,6 +9036,23 @@ and is loaded on demand through keeper_skill.
                   | _ -> Masc_tui_scroll.up
                 in
                 state.agenda_scroll <- move ~count ~height state.agenda_scroll
+            | _ -> ())
+       (* Modal like the agenda sheet: a panel answering "who is mid-turn"
+          should not have a surface binding fire underneath it. *)
+       | Some k when state.answering_open ->
+           (match k with
+            | "@" | "esc" ->
+                state.answering_open <- false;
+                state.answering_scroll <- 0
+            | "j" | "down" | "k" | "up" ->
+                let count, height = Masc_tui_render.answering_viewport state in
+                let move =
+                  match k with
+                  | "j" | "down" -> Masc_tui_scroll.down
+                  | _ -> Masc_tui_scroll.up
+                in
+                state.answering_scroll <-
+                  move ~count ~height state.answering_scroll
             | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
@@ -9182,6 +9409,11 @@ and is loaded on demand through keeper_skill.
            state.detail_tab <- List.nth tabs ((index + step) mod count);
            state.detail_scroll <- 0;
            (match selected_keeper state, state.detail_tab with
+            | Some keeper, Detail_sandbox ->
+                state.keeper_sandbox_view <- None;
+                state.keeper_sandbox_view_error <- None;
+                launch_keeper_sandbox_view state ~mailbox:async_messages
+                  keeper.k_name
             | Some keeper, Detail_instructions ->
                 state.keeper_config_view <- None;
                 state.keeper_config_view_error <- None;
@@ -9276,6 +9508,33 @@ and is loaded on demand through keeper_skill.
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
        | Some "\r" when state.view = Tools -> handle_skill_run ()
+       | Some ("\r" | "\n" | "enter")
+         when state.view = Config && state.config_pane = Config_params ->
+           handle_runtime_param_edit_open ()
+       | Some ("\r" | "\n" | "enter")
+         when state.view = Config && state.config_pane = Config_themes ->
+           (* Applying is the whole action: the palette's generation bumps and
+              every cached colour rebuilds, which is the same road a theme
+              switch reported by the terminal takes. A name no bundled scheme
+              answers to leaves the screen alone rather than quietly dropping
+              to colours nobody picked.
+
+              All three spellings, because a terminal sends CR, a Kitty-
+              protocol one sends the name, and a footer that says "Enter" has
+              to mean whichever one arrived. *)
+           let entries = Masc_tui_theme_choice.entries () in
+           (match List.nth_opt entries state.theme_cursor with
+            | None -> ()
+            | Some entry ->
+              if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
+              then begin
+                state.theme_choice <- Some entry.Masc_tui_theme_choice.name;
+                (* The ink changed; the page has to change with it. A light
+                   scheme picks dark text because it expects a light page, so
+                   leaving the terminal's own background is what made "light
+                   theme is still black". *)
+                sync_theme_background ()
+              end)
        | Some "c" when state.view = Tools -> handle_skill_create ~composition:false ()
        | Some "C" when state.view = Tools -> handle_skill_create ~composition:true ()
        | Some (("n" | "N") as direction)
@@ -9413,6 +9672,9 @@ and is loaded on demand through keeper_skill.
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0
+       | Some "@" ->
+           state.answering_open <- true;
+           state.answering_scroll <- 0
        | Some ":" ->
            state.palette_open <- true;
            state.palette_query <- "";
@@ -9689,22 +9951,11 @@ and is loaded on demand through keeper_skill.
            let page = surface_page_rows state in
            let direction = if key = Some "pagedown" then 1 else -1 in
            (match state.view with
-            | Config when state.config_pane = Config_themes ->
-                (* Applying is the whole action: the palette's generation
-                   bumps and every cached colour rebuilds, which is the same
-                   road a theme switch reported by the terminal takes. A name
-                   no bundled scheme answers to leaves the screen alone rather
-                   than quietly dropping to colours nobody picked. *)
-                let entries = Masc_tui_theme_choice.entries () in
-                (match List.nth_opt entries state.theme_cursor with
-                 | None -> ()
-                 | Some entry ->
-                   if
-                     Masc_tui_theme_choice.apply
-                       entry.Masc_tui_theme_choice.name
-                   then
-                     state.theme_choice <-
-                       Some entry.Masc_tui_theme_choice.name)
+            (* Themes take no page key. Applying a scheme used to live here,
+               where the footer never said it was and where PageDown is a
+               scroll everywhere else. It answers to Enter now, which is what
+               the footer has been advertising. *)
+            | Config when state.config_pane = Config_themes -> ()
             | Code -> ()
             | Board ->
                 (match state.board_mode with
@@ -9800,6 +10051,9 @@ and is loaded on demand through keeper_skill.
                      launch_keeper_calls_load state ~mailbox:async_messages
                        keeper.k_name
                  | None -> ())
+            | Keepers Keeper_detail ->
+                refresh_keeper_detail_selection state ~base_path
+                  ~mailbox:async_messages
             | Board ->
                 (match state.board_mode with
                  | Board_read post_id ->
@@ -9845,7 +10099,7 @@ and is loaded on demand through keeper_skill.
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load state ~mailbox:async_messages
-            | Overview | Acting | Keepers Keeper_list | Keepers Keeper_detail
+            | Overview | Acting | Keepers Keeper_list
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" | Some "shift-tab" ->
@@ -10184,6 +10438,12 @@ and is loaded on demand through keeper_skill.
                   state.prompts_librarian_input_error <- None;
                   state.prompts_librarian_input_loading <- false
                 end
+            | Config when state.config_pane = Config_params ->
+                state.runtime_params_cursor <-
+                  min
+                    (max 0 (List.length state.runtime_params - 1))
+                    (state.runtime_params_cursor + 1);
+                state.runtime_params_notice <- None
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <- state.approval_detail_scroll + 1
             | Approvals ->
@@ -10434,6 +10694,10 @@ and is loaded on demand through keeper_skill.
                   state.prompts_librarian_input_error <- None;
                   state.prompts_librarian_input_loading <- false
                 end
+            | Config when state.config_pane = Config_params ->
+                state.runtime_params_cursor <-
+                  max 0 (state.runtime_params_cursor - 1);
+                state.runtime_params_notice <- None
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <-
                   max 0 (state.approval_detail_scroll - 1)
@@ -11205,12 +11469,17 @@ and is loaded on demand through keeper_skill.
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "x" | Some "X"
+         when state.view = Config && state.config_pane = Config_params ->
+           handle_runtime_param_clear ()
+       | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_themes ->
            (* Back to whatever the terminal reports. Not a theme named
               "terminal" -- there is nothing to name, only the absence of a
               choice, which is where masc started. *)
            Masc_tui_theme_choice.follow_terminal ();
-           state.theme_choice <- None
+           state.theme_choice <- None;
+           (* Withdrawing the choice withdraws the background with it. *)
+           sync_theme_background ()
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_librarian_input_read ()
@@ -11222,16 +11491,27 @@ and is loaded on demand through keeper_skill.
               reader's own colours, which no server has an opinion about. *)
            state.config_pane <-
              (match state.config_pane with
-              | Config_runtime -> Config_prompts
+              | Config_runtime -> Config_params
+              | Config_params -> Config_prompts
               | Config_prompts -> Config_themes
               | Config_themes -> Config_runtime);
            state.prompts_cursor <- 0;
            state.config_scroll <- 0;
+           state.runtime_params_cursor <- 0;
+           state.runtime_param_edit <- None;
+           state.runtime_params_notice <- None;
            state.prompts_librarian_input <- None;
            state.prompts_librarian_input_error <- None;
            state.prompts_librarian_input_loading <- false;
-           if state.config_pane = Config_prompts && state.prompts_snapshot = None
-           then launch_prompts_load state ~mailbox:async_messages
+           (* Cycling into a pane is entering it. Without this the params pane
+              draws whatever the last load left, which for a first visit is an
+              empty list -- and empty reads as "nothing registered". *)
+           (match state.config_pane with
+            | Config_prompts ->
+              if state.prompts_snapshot = None
+              then launch_prompts_load state ~mailbox:async_messages
+            | Config_params -> launch_runtime_params_load state ~mailbox:async_messages
+            | Config_runtime | Config_themes -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -11311,8 +11591,11 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
             | Config ->
-                if state.config_pane = Config_prompts then handle_prompt_edit ()
-                else handle_runtime_config_edit ()
+                (match state.config_pane with
+                 | Config_prompts -> handle_prompt_edit ()
+                 | Config_runtime -> handle_runtime_config_edit ()
+                 | Config_params -> handle_runtime_param_edit_open ()
+                 | Config_themes -> ())
             | Tools -> handle_skill_edit ()
             | Approvals ->
                 (* Cycle the external-services Gate lane: what happens to a

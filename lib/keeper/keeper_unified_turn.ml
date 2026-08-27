@@ -831,6 +831,26 @@ let run_keeper_cycle
          [`Executing`]. The matching [mark_turn_finished] in the finally
          block clears the field, preventing stale state on idle keepers. *)
                Keeper_registry.mark_turn_started ~base_path:config.base_path ~wake meta.name;
+               (* Refresh from the committed owner projection, then put the
+                  TOML back on. The projection is durable keeper JSON, which
+                  omits the TOML-owned fields on purpose
+                  ([Keeper_meta_contract.effective_meta_result]), so adopting
+                  it whole handed the rest of the turn a meta whose
+                  sandbox_profile had reverted to the decoder's [Local] --
+                  a keeper whose TOML said docker then ran Execute on the
+                  host while the status API, which overlays separately, kept
+                  answering docker (#31178).
+
+                  [effective_meta_of_profile_defaults] exists for exactly this
+                  second overlay: the turn loaded [entry_profile_defaults]
+                  once in [turn_profile_and_meta] and reapplies it here rather
+                  than re-reading the profile, so two reads inside one turn
+                  cannot disagree.
+
+                  A profile that no longer applies is not a reason to run the
+                  turn under the looser sandbox, so that keeps the meta the
+                  turn was admitted with -- the same thing the two arms below
+                  already do. *)
                let meta =
                  match
                    Keeper_owner_registry.get
@@ -839,7 +859,20 @@ let run_keeper_cycle
                  with
                  | Ok owner ->
                    (match (Keeper_owner.projection owner).meta with
-                    | Some latest -> latest
+                    | Some latest ->
+                      (match
+                         Keeper_meta_contract.effective_meta_of_profile_defaults
+                           entry_profile_defaults
+                           latest
+                       with
+                       | Ok effective -> effective
+                       | Error detail ->
+                         Log.Keeper.warn
+                           ~keeper_name:meta.name
+                           "kept the admitted meta: the owner projection could \
+                            not be made effective: %s"
+                           detail;
+                         meta)
                     | None -> meta)
                  | Error _ -> meta
                in

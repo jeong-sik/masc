@@ -124,7 +124,6 @@ let post_of_signal (signal : Board_dispatch.board_signal) : Board.post =
   ; author = agent_id_exn signal.author
   ; title = signal.title
   ; body = signal.content
-  ; content = signal.content
   ; post_kind = Board.Human_post
   ; meta_json = None
   ; visibility = Board.Public

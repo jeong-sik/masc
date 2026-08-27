@@ -109,6 +109,14 @@ let trace_step_of_trajectory = function
   | Agent_core.Trajectory.Observe _ | Agent_core.Trajectory.Respond _ -> None
 ;;
 
+(* Terminal-failure cache for exact run reads. The trace format is a hard
+   cut: files written with an earlier trace_version are never migrated or
+   rewritten, so a version-mismatched run can never become readable. Without
+   the cache, every dashboard poll re-reads the same rejected file and
+   replays the same warning (16,128 WARN/day on 2026-08-27, 1,089 runs x 46
+   polls). Healable failures (missing file, I/O) stay uncached. *)
+let version_rejected_runs : (string, unit) Hashtbl.t = Hashtbl.create 64
+
 let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
   match record.turn_kind, record.raw_trace_run_ref with
   | Turn_record.Direct, _ -> None
@@ -135,50 +143,66 @@ let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
           run_ref.path;
         None
       | Current_regular_file ->
-        (match Agent_core.Raw_trace_query.read_run (agent_core_run_ref run_ref) with
-         | Error err ->
-           Log.Keeper.warn ~keeper_name
-             "autonomous turn source: cannot read exact run %s: %s"
-             run_ref.worker_run_id
-             (Agent_core.Error.to_string err);
-           None
-         | Ok [] ->
-           Log.Keeper.warn ~keeper_name
-             "autonomous turn source: exact run %s has no records"
-             run_ref.worker_run_id;
-           None
-         | Ok ((first : Agent_core.Raw_trace.record) :: _ as records) ->
-           (match check_raw_trace_identity run_ref records with
-            | Error Runtime_agent_name_mismatch ->
-              Log.Keeper.warn ~keeper_name
-                "autonomous turn source: exact run %s has a mismatched AGENT_CORE runtime identity"
-                run_ref.worker_run_id;
-              None
-            | Error Session_id_mismatch ->
-              Log.Keeper.warn ~keeper_name
-                "autonomous turn source: exact run %s has a mismatched session identity"
-                run_ref.worker_run_id;
-              None
-            | Ok () ->
-              let final_text =
-                records
-                |> List.rev
-                |> List.find_opt (fun (row : Agent_core.Raw_trace.record) ->
-                  row.record_type = Agent_core.Raw_trace.Run_finished)
-                |> Option.map (fun (row : Agent_core.Raw_trace.record) -> row.final_text)
-                |> Option.join
-              in
-              let trace =
-                Agent_core.Trajectory.of_raw_trace_records records
-                |> fun trajectory -> trajectory.steps
-                |> List.filter_map trace_step_of_trajectory
-              in
-              Some
-                { turn_id = Ids.Turn_ref.to_string record.turn_ref
-                ; started_at = first.ts
-                ; final_text
-                ; trace
-                }))
+        if
+          Hashtbl.mem version_rejected_runs
+            (run_ref.path ^ "\000" ^ run_ref.worker_run_id)
+        then None
+        else
+          (match Agent_core.Raw_trace_query.read_run (agent_core_run_ref run_ref) with
+           | Error (Agent_core.Error.Serialization
+                      (Agent_core.Error.VersionMismatch _) as err) ->
+             Hashtbl.replace version_rejected_runs
+               (run_ref.path ^ "\000" ^ run_ref.worker_run_id)
+               ();
+             Log.Keeper.warn ~keeper_name
+               "autonomous turn source: cannot read exact run %s: %s"
+               run_ref.worker_run_id
+               (Agent_core.Error.to_string err);
+             None
+           | Error err ->
+             Log.Keeper.warn ~keeper_name
+               "autonomous turn source: cannot read exact run %s: %s"
+               run_ref.worker_run_id
+               (Agent_core.Error.to_string err);
+             None
+           | Ok [] ->
+             Log.Keeper.warn ~keeper_name
+               "autonomous turn source: exact run %s has no records"
+               run_ref.worker_run_id;
+             None
+           | Ok ((first : Agent_core.Raw_trace.record) :: _ as records) ->
+             (match check_raw_trace_identity run_ref records with
+              | Error Runtime_agent_name_mismatch ->
+                Log.Keeper.warn ~keeper_name
+                  "autonomous turn source: exact run %s has a mismatched AGENT_CORE runtime identity"
+                  run_ref.worker_run_id;
+                None
+              | Error Session_id_mismatch ->
+                Log.Keeper.warn ~keeper_name
+                  "autonomous turn source: exact run %s has a mismatched session identity"
+                  run_ref.worker_run_id;
+                None
+              | Ok () ->
+                let final_text =
+                  records
+                  |> List.rev
+                  |> List.find_opt (fun (row : Agent_core.Raw_trace.record) ->
+                    row.record_type = Agent_core.Raw_trace.Run_finished)
+                  |> Option.map (fun (row : Agent_core.Raw_trace.record) ->
+                    row.final_text)
+                  |> Option.join
+                in
+                let trace =
+                  Agent_core.Trajectory.of_raw_trace_records records
+                  |> fun trajectory -> trajectory.steps
+                  |> List.filter_map trace_step_of_trajectory
+                in
+                Some
+                  { turn_id = Ids.Turn_ref.to_string record.turn_ref
+                  ; started_at = first.ts
+                  ; final_text
+                  ; trace
+                  }))
 ;;
 
 let load_recent ~config ~keeper_name ?(limit = default_limit) ?since () =

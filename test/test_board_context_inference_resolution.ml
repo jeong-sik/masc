@@ -60,7 +60,6 @@ let make_post ~id ~author =
     author = agent_id_of_string author;
     title = "Test post";
     body = "Test body";
-    content = "Test content";
     post_kind = Board.Human_post;
     meta_json = None;
     visibility = Board.Internal;

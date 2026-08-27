@@ -184,6 +184,11 @@ let test_independent_across_keepers () =
    evaluates after the blocker. *)
 let test_librarian_saturation_coalesces_latest () =
   Lane.For_testing.reset ();
+  let ring_before =
+    match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> 0
+  in
   let evaluated = ref [] in
   Eio_main.run (fun _env ->
     Eio.Switch.run (fun sw ->
@@ -226,6 +231,38 @@ let test_librarian_saturation_coalesces_latest () =
     "only running and newest snapshot evaluate"
     [ "running"; "trace-newest:3:newest-a,newest-b" ]
     (List.rev !evaluated);
+  (* The coalesced-path message must state the lane without the fabricated
+     "pending=2" literal the old WARN hardcoded (2026-08-27 audit: 69
+     identical messages reporting a count no code tracked). *)
+  let coalesce_rows =
+    Log.Ring.recent ~since_seq:ring_before ()
+    |> List.filter (fun (row : Log.Ring.entry) ->
+           String.equal row.message
+             "memory lane coalesced latest snapshot (lane=librarian): \
+              replacing superseded post-turn memory unit")
+  in
+  Alcotest.(check bool)
+    "coalesced units each log the honest lane message" true
+    (List.length coalesce_rows = 2);
+  let contains_substring hay needle =
+    let hl = String.length hay and nl = String.length needle in
+    let rec from i =
+      i + nl <= hl
+      && (String.sub hay i nl = needle || from (i + 1))
+    in
+    from 0
+  in
+  let lane_rows_with_fabricated_count =
+    Log.Ring.recent ~since_seq:ring_before ()
+    |> List.filter (fun (row : Log.Ring.entry) ->
+           String.equal row.module_name "Keeper"
+           && contains_substring row.message "memory lane")
+    |> List.exists (fun (row : Log.Ring.entry) ->
+           contains_substring row.message "pending=2")
+  in
+  Alcotest.(check bool)
+    "no fabricated pending count survives" true
+    (not lane_rows_with_fabricated_count);
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" with
   | Some 0 -> ()
   | Some n -> Alcotest.failf "pending leaked after coalesced drain: %d" n

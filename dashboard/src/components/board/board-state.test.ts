@@ -48,7 +48,6 @@ function makePost(overrides: Partial<BoardPost> = {}): BoardPost {
     author: 'test-agent',
     title: 'Test post',
     body: 'Test body content',
-    content: '',
     meta: null,
     tags: [],
     votes: 0,

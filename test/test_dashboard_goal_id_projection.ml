@@ -85,6 +85,36 @@ let test_multi_goal_projects_first () =
     (goal_id_of j)
 ;;
 
+(* The projection runs on every snapshot refresh; an unchanged multi-goal
+   linkage must warn once per distinct (task, goals) state, not once per
+   poll — task-376 logged the identical warning 631 times on 2026-08-27. *)
+let test_multi_goal_warns_once_per_state () =
+  let idx =
+    index_from_registry [ "goal-a", [ "task-9" ]; "goal-b", [ "task-9" ] ]
+  in
+  let task = make_task ~id:"task-9" in
+  let before =
+    match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> 0
+  in
+  let first = DE.task_json ~goal_task_index:idx task in
+  let second = DE.task_json ~goal_task_index:idx task in
+  check (option string) "first projection keeps canonical goal"
+    (Some "goal-a") (goal_id_of first);
+  check (option string) "second projection keeps canonical goal"
+    (Some "goal-a") (goal_id_of second);
+  let warns =
+    Log.Ring.recent ~since_seq:before ()
+    |> List.filter (fun (row : Log.Ring.entry) ->
+           String.equal row.module_name "Dashboard"
+           && String.equal row.message
+                "[dashboard_execution] task task-9 linked to 2 goals; projecting \
+                 canonical goal-a (extra: goal-b)")
+  in
+  check int "multi-goal linkage warns once, not per refresh" 1 (List.length warns)
+;;
+
 let () =
   run
     "dashboard_goal_id_projection"
@@ -96,6 +126,8 @@ let () =
             "multi-goal projects deterministic first registry goal"
             `Quick
             test_multi_goal_projects_first
+        ; test_case "multi-goal warns once per linkage state" `Quick
+            test_multi_goal_warns_once_per_state
         ] )
     ]
 ;;

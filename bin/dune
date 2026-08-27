@@ -320,6 +320,12 @@
  (libraries masc masc.time_codec masc_tui_message_layout unix))
 
 (library
+ (name masc_tui_answering)
+ (wrapped false)
+ (modules masc_tui_answering)
+ (libraries masc))
+
+(library
  (name masc_tui_keys)
  (wrapped false)
  (modules masc_tui_keys)
@@ -620,6 +626,12 @@
  (libraries yojson masc_tui_theme))
 
 (library
+ (name masc_tui_keeper_sandbox)
+ (wrapped false)
+ (modules masc_tui_keeper_sandbox)
+ (libraries yojson masc_tui_theme masc_tui_message_layout))
+
+(library
  (name masc_tui_csi)
  (wrapped false)
  (modules masc_tui_csi))
@@ -658,6 +670,7 @@
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_control
   masc_tui_keeper_selection
+  masc_tui_keeper_sandbox
   masc_tui_context_state
   masc_tui_message_layout
   masc_tui_metrics_tail
@@ -708,6 +721,7 @@
  (package masc)
  (libraries
   masc_tui_agenda
+  masc_tui_answering
   masc_tui_ask_projection
   masc_tui_frame
   masc_tui_attachment
@@ -766,6 +780,7 @@
   masc_tui_composer_projection
   masc_tui_keeper_control
   masc_tui_keeper_config
+  masc_tui_keeper_sandbox
   masc_tui_markdown
   masc_tui_graphics
   masc_tui_image_ref

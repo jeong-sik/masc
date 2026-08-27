@@ -60,6 +60,11 @@
  (modules test_tui_keeper_config)
  (libraries alcotest masc_tui_keeper_config yojson str))
 
+(test
+ (name test_tui_keeper_sandbox)
+ (modules test_tui_keeper_sandbox)
+ (libraries alcotest masc masc_tui_keeper_sandbox yojson str))
+
 (tests
  (names
   test_keeper_lifecycle_gate
@@ -3217,7 +3222,7 @@
 (test
  (name test_tui_frame_presenter)
  (modules test_tui_frame_presenter)
- (libraries alcotest masc_tui_frame_presenter))
+ (libraries alcotest str masc_tui_frame_presenter masc_tui_terminal_palette))
 
 (test
  (name test_tui_approval_authority)
@@ -3354,6 +3359,11 @@
  (name test_tui_footer_status_items)
  (modules test_tui_footer_status_items)
  (libraries alcotest str masc_tui_footer masc_tui_message_layout))
+
+(test
+ (name test_tui_answering)
+ (modules test_tui_answering)
+ (libraries alcotest astring masc masc_tui_answering))
 
 (test
  (name test_tui_help_scroll)
@@ -3693,6 +3703,8 @@
  (libraries alcotest masc))
 
 (include stanzas/test_rest_approvals_because.inc)
+
+(include stanzas/test_keeper_turns_route.inc)
 
 (include stanzas/test_keeper_ask.inc)
 

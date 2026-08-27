@@ -557,18 +557,26 @@ let task_execution_links_json (task : Masc_domain.task) =
    this is a read-time projection so the Work board can nest jobs under goals.
    A task may appear under multiple goals in the legacy registry — the first
    match is chosen deterministically and the multi-goal case is logged rather
-   than hidden, surfacing the single-goal-per-task invariant violation. *)
+   than hidden, surfacing the single-goal-per-task invariant violation.
+   The projection runs on every snapshot refresh, so an unchanged linkage
+   would re-warn on every poll (task-376 hit 631 WARNs on 2026-08-27);
+   warn once per distinct (task, goals) state instead. *)
+let multi_goal_warned : (string, unit) Hashtbl.t = Hashtbl.create 16
+
 let task_canonical_goal_id goal_task_index (task : Masc_domain.task) =
   match Hashtbl.find_opt goal_task_index task.id with
   | None | Some [] -> None
   | Some [ goal_id ] -> Some goal_id
-  | Some (goal_id :: extra) ->
-    Log.Dashboard.warn
-      "[dashboard_execution] task %s linked to %d goals; projecting canonical %s (extra: %s)"
-      task.id
-      (1 + List.length extra)
-      goal_id
-      (String.concat "," extra);
+  | Some (goal_id :: extra as all_goals) ->
+    let warn_key = task.id ^ "\000" ^ String.concat "," all_goals in
+    if not (Hashtbl.mem multi_goal_warned warn_key) then (
+      Hashtbl.replace multi_goal_warned warn_key ();
+      Log.Dashboard.warn
+        "[dashboard_execution] task %s linked to %d goals; projecting canonical %s (extra: %s)"
+        task.id
+        (1 + List.length extra)
+        goal_id
+        (String.concat "," extra));
     Some goal_id
 ;;
 

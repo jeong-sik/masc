@@ -1428,6 +1428,50 @@ let post_skill_editor_save ~host ~port ~reference ~source_text =
   | Ok json -> decode_skill_editor_save_receipt json
 ;;
 
+let fetch_skill_editor_sources ~host ~port =
+  match get_json ~host ~port ~path:"/api/v1/skills/editor/sources" with
+  | Error _ as error -> error
+  | Ok (`Assoc fields) ->
+    (match List.assoc_opt "sources" fields with
+     | Some (`List values) ->
+       values
+       |> List.fold_left
+            (fun acc value ->
+               match acc, value with
+               | Error _ as error, _ -> error
+               | Ok sources, `Assoc fields ->
+                 (match List.assoc_opt "source_id" fields with
+                  | Some (`String source_id) -> Ok (source_id :: sources)
+                  | _ -> Error "Skill source entry is incomplete")
+               | Ok _, _ -> Error "Skill source entry must be an object")
+            (Ok [])
+       |> Result.map List.rev
+     | _ -> Error "Skill editor sources response is incomplete")
+  | Ok _ -> Error "Skill editor sources response must be an object"
+;;
+
+let post_skill_editor_create ~host ~port ~source_id ~package_id ~source_text =
+  post_json
+    ~host
+    ~port
+    ~path:"/api/v1/skills/editor/create"
+    ~body:
+      (Yojson.Safe.to_string
+         (`Assoc
+           [ "source_id", `String source_id
+           ; "package_id", `String package_id
+           ; "source_text", `String source_text
+           ]))
+;;
+
+let post_skill_run ~host ~port reference =
+  post_json
+    ~host
+    ~port
+    ~path:"/api/v1/skills/runs"
+    ~body:(skill_editor_body reference None)
+;;
+
 (** GET /api/v1/prompts — every prompt the registry serves, with the file
     value, any override, and what is currently effective. *)
 let fetch_prompts ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =

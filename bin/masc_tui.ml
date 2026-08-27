@@ -28,6 +28,10 @@ module Terminal_write_repair = Masc_tui_terminal_write_repair
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
+let json_assoc_member_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
     terminal's first changed frame. *)
 let frame_interval_ns = 16_000_000L
@@ -7830,6 +7834,125 @@ let main () =
                 launch_runtime_config_load state ~mailbox:async_messages
               | Error detail -> add_event state "error" ("save failed: " ^ detail))))))
   in
+  let skill_template ~composition =
+    if composition
+    then
+      {|---
+name: new-skill
+description: Describe the repeatable job this Skill performs.
+---
+
+# New composition Skill
+
+This preset runs one no-argument tool. Add nodes and dependencies after the
+first preview succeeds. Change execution to "async" for durable background work.
+
+```toml composition
+[[compositions]]
+name = "new-skill"
+description = "Describe the repeatable job this Skill performs."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+|}
+    else
+      {|---
+name: new-skill
+description: Describe when an agent should use this Skill.
+---
+
+# New instruction Skill
+
+Write the durable procedure here. The body stays out of the eager tool context
+and is loaded on demand through keeper_skill.
+|}
+  in
+  let skill_name_from_source source_text =
+    source_text
+    |> String.split_on_char '\n'
+    |> List.find_map (fun line ->
+      let prefix = "name:" in
+      if String.starts_with ~prefix line
+      then
+        let value =
+          String.sub line (String.length prefix) (String.length line - String.length prefix)
+          |> String.trim
+        in
+        if String.equal value "" then None else Some value
+      else None)
+  in
+  let handle_skill_create ~composition () =
+    let host = server_peer_host in
+    let port = state.port in
+    match Masc_tui_http.fetch_skill_editor_sources ~host ~port with
+    | Error detail -> add_event state "error" ("Skill sources failed: " ^ detail)
+    | Ok [] -> add_event state "error" "no ready read-write Skill source"
+    | Ok (source_id :: _) ->
+      (match Masc_tui_editor.editor_command () with
+       | None -> add_event state "error" "no $EDITOR set; export EDITOR to create Skills"
+       | Some _ ->
+         (match
+            Masc_tui_editor.roundtrip
+              ~restore:restore_terminal
+              ~reenter:reenter_terminal
+              ~suffix:".md"
+              (skill_template ~composition)
+          with
+          | None -> add_event state "system" "Skill creation cancelled"
+          | Some source_text ->
+            (match skill_name_from_source source_text with
+             | None -> add_event state "error" "Skill template has no name frontmatter"
+             | Some "new-skill" ->
+               add_event state "error" "change new-skill to a real unique name before creating"
+             | Some package_id ->
+               (match
+                  Masc_tui_http.post_skill_editor_create
+                    ~host
+                    ~port
+                    ~source_id
+                    ~package_id
+                    ~source_text
+                with
+                | Error detail -> add_event state "error" ("Skill create failed: " ^ detail)
+                | Ok json ->
+                  let status =
+                    match json_assoc_member_opt "status" json with
+                    | Some (`String value) -> value
+                    | _ -> "created"
+                  in
+                  add_event
+                    state
+                    "system"
+                    (Printf.sprintf "%s · %s/%s" status source_id package_id);
+                  launch_tools_load state ~mailbox:async_messages))))
+  in
+  let handle_skill_run () =
+    match selected_tools_skill_profile state with
+    | None -> add_event state "error" "no published Skill selected"
+    | Some profile when String.equal profile.esp_kind "instruction" ->
+      add_event
+        state
+        "system"
+        "instruction Skill results belong to the Keeper turn; inspect Skill Activations or Keeper calls"
+    | Some profile ->
+      let key =
+        Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string
+      in
+      (match
+         Masc_tui_http.post_skill_run
+           ~host:server_peer_host
+           ~port:state.port
+           profile.esp_reference
+       with
+       | Error detail -> add_event state "error" ("Skill run lookup failed: " ^ detail)
+       | Ok json -> state.tools_skill_run <- Some (key, json))
+  in
   let handle_skill_edit () =
     match selected_tools_skill_profile state with
     | None -> add_event state "error" "no published Skill selected"
@@ -8903,6 +9026,9 @@ let main () =
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
+       | Some "\r" when state.view = Tools -> handle_skill_run ()
+       | Some "c" when state.view = Tools -> handle_skill_create ~composition:false ()
+       | Some "C" when state.view = Tools -> handle_skill_create ~composition:true ()
        | Some (("n" | "N") as direction)
          when state.search_last <> ""
               && Option.is_some (surface_row_texts state state.view) ->

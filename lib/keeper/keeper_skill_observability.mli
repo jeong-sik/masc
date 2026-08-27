@@ -3,6 +3,34 @@
     Counts come from the same validated plan and descriptor-aware schedule as
     execution. They are not inferred from prose, names, or historical logs. *)
 
+type dependency_kind = Data | Order | Data_and_order
+
+type flow_dependency = private
+  { node_id : string
+  ; kind : dependency_kind
+  }
+
+type flow_node = private
+  { id : string
+  ; tool_name : string
+  ; dependencies : flow_dependency list
+  ; batch_index : int
+  ; batch_size : int
+  ; execution_mode : string
+  ; statically_read_only : bool option
+  }
+
+type flow_batch = private
+  { index : int
+  ; execution_mode : string
+  ; node_ids : string list
+  }
+
+type flow = private
+  { nodes : flow_node list
+  ; batches : flow_batch list
+  }
+
 type profile = private
   { reference : Skill_reference.t
   ; kind : string
@@ -18,6 +46,7 @@ type profile = private
   ; max_parallelism : int
   ; statically_read_only : bool option
   ; declaration_span : Keeper_skill_body_ast.span option
+  ; flow : flow option
   }
 
 val of_skill : Keeper_skill_catalog.skill -> profile option

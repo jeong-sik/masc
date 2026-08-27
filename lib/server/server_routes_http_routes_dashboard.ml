@@ -450,16 +450,53 @@ let parse_skill_editor_body body_str =
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
 
+type skill_create_body =
+  { source_id : Skill_source_config.source_id
+  ; package_id : string
+  ; source_text : string
+  }
+
+let parse_skill_create_body body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc _ as json ->
+      let ( let* ) = Result.bind in
+      let required name =
+        match Json_util.assoc_member_opt name json with
+        | Some (`String value) when not (String.equal (String.trim value) "") ->
+          Ok (String.trim value)
+        | Some (`String _) -> Error (name ^ " must not be empty")
+        | Some _ -> Error (name ^ " must be a string")
+        | None -> Error (name ^ " required")
+      in
+      let* source_id_text = required "source_id" in
+      let* source_id =
+        Skill_source_config.source_id_of_string source_id_text
+        |> Result.map_error (fun detail -> "invalid source_id: " ^ detail)
+      in
+      let* package_id = required "package_id" in
+      let* source_text =
+        match Json_util.assoc_member_opt "source_text" json with
+        | Some (`String value) when not (String.equal value "") -> Ok value
+        | Some (`String _) -> Error "source_text must not be empty"
+        | Some _ -> Error "source_text must be a string"
+        | None -> Error "source_text required"
+      in
+      Ok { source_id; package_id; source_text }
+    | _ -> Error "JSON object body required"
+  with
+  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
+
 let skill_editor_error_status = function
   | Server_skill_editor.Source_read_only -> `Forbidden
-  | Revision_conflict _ -> `Conflict
+  | Revision_conflict _ | Package_already_exists -> `Conflict
   | Snapshot_not_registered | Snapshot_uninitialized | Reference_not_current
   | Source_not_ready | Source_file_missing ->
     `Not_found
   | Invalid_workspace | Source_read_failed | Write_failed _ ->
     `Internal_server_error
   | Source_too_large _ -> `Payload_too_large
-  | Validation_failed _ -> `Bad_request
+  | Invalid_package_id _ | Validation_failed _ -> `Bad_request
 
 let respond_skill_editor_error ~request reqd error =
   Http.Response.json_value
@@ -471,6 +508,58 @@ let respond_skill_editor_error ~request reqd error =
       ; "error", `String (Server_skill_editor.error_to_string error)
       ])
     reqd
+;;
+
+let skill_run_projection reference =
+  let scan_limit = 5_000 in
+  let rows = Keeper_tool_call_log.read_recent_rows ~n:scan_limit () in
+  let exact_parent =
+    rows
+    |> List.rev
+    |> List.find_opt (fun row ->
+      match Json_util.assoc_member_opt "record_kind" row,
+            Json_util.assoc_member_opt "skill_reference" row
+      with
+      | Some (`String "composition_run"), Some reference_json ->
+        (match Skill_reference.of_yojson reference_json with
+         | Ok observed -> Skill_reference.equal observed reference
+         | Error _ -> false)
+      | _ -> false)
+  in
+  match exact_parent with
+  | None ->
+    `Assoc
+      [ "status", `String "never_observed"
+      ; "reference", Skill_reference.to_yojson reference
+      ; "scan_limit", `Int scan_limit
+      ]
+  | Some parent ->
+    let run_id =
+      match Json_util.assoc_member_opt "composition_run_id" parent with
+      | Some (`String value) -> Some value
+      | _ -> None
+    in
+    let nodes =
+      match run_id with
+      | None -> []
+      | Some expected ->
+        List.filter
+          (fun row ->
+             match Json_util.assoc_member_opt "composition_run_id" row,
+                   Json_util.assoc_member_opt "record_kind" row
+             with
+             | Some (`String observed), Some (`String "tool_call") ->
+               String.equal expected observed
+             | _ -> false)
+          rows
+    in
+    `Assoc
+      [ "status", `String "observed"
+      ; "reference", Skill_reference.to_yojson reference
+      ; "scan_limit", `Int scan_limit
+      ; "run", parent
+      ; "nodes", `List nodes
+      ]
 ;;
 
 type runtime_route_lane =
@@ -1288,6 +1377,89 @@ let add_routes ~sw ~clock router =
                   ~config:(Mcp_server.workspace_config state)
                   ~actor:agent_name
                   ~body)))
+         request reqd)
+  |> Http.Router.get "/api/v1/skills/editor/sources" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           match
+             Server_skill_editor.writable_sources
+               ~base_path:(Mcp_server.workspace_config state).base_path
+           with
+           | Error error -> respond_skill_editor_error ~request:req reqd error
+           | Ok sources ->
+             Http.Response.json_value
+               ~compress:true
+               ~request:req
+               (`Assoc
+                 [ "status", `String "ready"
+                 ; ( "sources"
+                   , `List
+                       (List.map Server_skill_editor.writable_source_to_yojson sources) )
+                 ])
+               reqd)
+         request reqd)
+  |> Http.Router.post "/api/v1/skills/runs" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match parse_skill_editor_body body_str with
+             | Error message ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+             | Ok { reference; source_text = _ } ->
+               Http.Response.json_value
+                 ~compress:true
+                 ~request:req
+                 (skill_run_projection reference)
+                 reqd))
+         request reqd)
+  |> Http.Router.post "/api/v1/skills/editor/create" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match parse_skill_create_body body_str with
+             | Error message ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+             | Ok { source_id; package_id; source_text } ->
+               let base_path = (Mcp_server.workspace_config state).base_path in
+               let refresh () =
+                 match Runtime.load_config_observation () with
+                 | Error message -> Error message
+                 | Ok observation ->
+                   Server_skill_snapshot_runtime.refresh_from_observation
+                     ~base_path
+                     observation
+                   |> Result.map_error Server_skill_snapshot_runtime.error_to_string
+               in
+               (match
+                  Server_skill_editor.create
+                    ~base_path
+                    ~source_id
+                    ~package_id
+                    ~source_text
+                    ~refresh
+                with
+                | Error error -> respond_skill_editor_error ~request:req reqd error
+                | Ok outcome ->
+                  let preview, status, audit_outcome =
+                    match outcome with
+                    | Server_skill_editor.Created_and_published
+                        { preview; snapshot_revision = _ } ->
+                      preview, "created_and_published", Audit_log.Success
+                    | Created_but_unpublished { preview; reason } ->
+                      preview, "created_but_unpublished", Audit_log.Failure reason
+                  in
+                  audit_skill_write
+                    state
+                    agent_name
+                    ~reference:preview.reference
+                    ~source_text
+                    ~status
+                    ~outcome:audit_outcome;
+                  Http.Response.json_value
+                    ~compress:true
+                    ~request:req
+                    (Server_skill_editor.create_outcome_to_yojson outcome)
+                    reqd)))
          request reqd)
   |> Http.Router.post "/api/v1/skills/editor/read" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

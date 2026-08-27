@@ -34,6 +34,18 @@ type save_outcome =
       ; reason : string
       }
 
+type writable_source = private { source_id : Skill_source_config.source_id }
+
+type create_outcome =
+  | Created_and_published of
+      { preview : preview
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      }
+  | Created_but_unpublished of
+      { preview : preview
+      ; reason : string
+      }
+
 type error =
   | Invalid_workspace
   | Snapshot_not_registered
@@ -43,6 +55,8 @@ type error =
   | Source_file_missing
   | Source_read_failed
   | Source_read_only
+  | Package_already_exists
+  | Invalid_package_id of string
   | Revision_conflict of { actual : Skill_reference.content_revision }
   | Source_too_large of { bytes : int; max_bytes : int }
   | Validation_failed of string
@@ -58,9 +72,24 @@ val save :
   refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
   (save_outcome, error) result
 
+(** Writable, ready source identities only. Resolved host paths never leave
+    this authority boundary. *)
+val writable_sources : base_path:string -> (writable_source list, error) result
+
+(** Create one new package directory and SKILL.md without overwriting. *)
+val create :
+  base_path:string ->
+  source_id:Skill_source_config.source_id ->
+  package_id:string ->
+  source_text:string ->
+  refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
+  (create_outcome, error) result
+
 val access_to_string : access -> string
 val error_code : error -> string
 val error_to_string : error -> string
 val loaded_to_yojson : loaded -> Yojson.Safe.t
 val preview_to_yojson : preview -> Yojson.Safe.t
 val save_outcome_to_yojson : save_outcome -> Yojson.Safe.t
+val writable_source_to_yojson : writable_source -> Yojson.Safe.t
+val create_outcome_to_yojson : create_outcome -> Yojson.Safe.t

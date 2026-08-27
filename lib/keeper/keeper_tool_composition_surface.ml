@@ -402,6 +402,7 @@ let observe_node_result
 
 let observe_composition_run_summary
       ~composition_tool
+      ?skill_reference
       ~composition_execution
       ~composition_tool_kind
       ~composition_run_id
@@ -442,6 +443,7 @@ let observe_composition_run_summary
       ~execution_mode:schedule.execution_mode
       ?typed_result
       ~composition_tool
+      ?skill_reference
       ~composition_run_id:
         (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
       ~composition_execution
@@ -475,6 +477,7 @@ let observe_composition_run_summary
 
 let observe_async_run_settlement
       ~composition_tool
+      ~skill_reference
       ~composition_tool_kind
       ~composition_run_id
       ~parent_invocation
@@ -514,6 +517,7 @@ let observe_async_run_settlement
            in
            observe_composition_run_summary
              ~composition_tool
+             ~skill_reference
              ~composition_execution:Catalog.Async
              ~composition_tool_kind
              ~composition_run_id
@@ -829,6 +833,7 @@ let result_from_json ~tool_name ~start_time ~class_ ~ok data =
 
 let async_submission_result
       ~entry
+      ~skill_reference
       ~plan
       ~tool_name
       ~parent_invocation
@@ -870,6 +875,7 @@ let async_submission_result
          ~on_worker_settled:(fun settlement ->
            observe_async_run_settlement
              ~composition_tool:tool_name
+             ~skill_reference
              ~composition_tool_kind:tool_kind
              ~composition_run_id
              ~parent_invocation
@@ -1589,6 +1595,7 @@ let make_tools
                            | Activation_ledger.Already_recorded _ ) ->
                          async_submission_result
                            ~entry
+                           ~skill_reference:skill.reference
                            ~plan
                            ~tool_name
                            ~parent_invocation
@@ -1602,6 +1609,7 @@ let make_tools
                     | None ->
                       async_submission_result
                         ~entry
+                        ~skill_reference:skill.reference
                         ~plan
                         ~tool_name
                         ~parent_invocation
@@ -1768,6 +1776,7 @@ let make_tools
              in
              observe_composition_run_summary
                ~composition_tool:tool_name
+               ~skill_reference:skill.reference
                ~composition_execution:Catalog.Inline
                ~composition_tool_kind:(Catalog.tool_kind entry)
                ~composition_run_id

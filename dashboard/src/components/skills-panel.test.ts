@@ -311,6 +311,7 @@ describe('labels', () => {
           statically_read_only: true,
         },
         declaration: { start_line: 3, end_line: 30 },
+        flow: null,
       },
       usage: [{
         keeper: 'rondo',

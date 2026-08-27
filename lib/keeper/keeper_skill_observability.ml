@@ -1,3 +1,31 @@
+type dependency_kind = Data | Order | Data_and_order
+
+type flow_dependency =
+  { node_id : string
+  ; kind : dependency_kind
+  }
+
+type flow_node =
+  { id : string
+  ; tool_name : string
+  ; dependencies : flow_dependency list
+  ; batch_index : int
+  ; batch_size : int
+  ; execution_mode : string
+  ; statically_read_only : bool option
+  }
+
+type flow_batch =
+  { index : int
+  ; execution_mode : string
+  ; node_ids : string list
+  }
+
+type flow =
+  { nodes : flow_node list
+  ; batches : flow_batch list
+  }
+
 type profile =
   { reference : Skill_reference.t
   ; kind : string
@@ -13,6 +41,7 @@ type profile =
   ; max_parallelism : int
   ; statically_read_only : bool option
   ; declaration_span : Keeper_skill_body_ast.span option
+  ; flow : flow option
   }
 
 let tool_component_bytes (tool : Agent_core.Tool.t) =
@@ -66,6 +95,93 @@ let statically_read_only plan =
     | None -> false)
 ;;
 
+let execution_mode_to_string = function
+  | Agent_core.Tool_contract.Concurrent -> "concurrent"
+  | Serial -> "serial"
+;;
+
+let dependency_kind ~data ~order =
+  match data, order with
+  | true, true -> Data_and_order
+  | true, false -> Data
+  | false, true -> Order
+  | false, false -> invalid_arg "flow dependency has no source"
+;;
+
+let flow_of_plan plan =
+  let scheduled = Keeper_tool_plan_executor.schedule plan in
+  let scheduled_nodes =
+    scheduled
+    |> List.concat_map (function
+      | Keeper_tool_plan_executor.Serial_batch node -> [ node ]
+      | Concurrent_batch nodes -> nodes)
+  in
+  let schedule_for node_id =
+    List.find_opt
+      (fun (scheduled : Keeper_tool_plan_executor.scheduled_node) ->
+         Keeper_tool_plan.Node_id.equal scheduled.node.id node_id)
+      scheduled_nodes
+  in
+  let nodes =
+    Keeper_tool_plan.nodes plan
+    |> List.map (fun (node : Keeper_tool_plan.node) ->
+      let data_dependencies = Keeper_tool_plan.Json_template.dependencies node.input in
+      let all_dependencies = Keeper_tool_plan.dependencies node in
+      let dependencies =
+        all_dependencies
+        |> List.map (fun dependency ->
+          let data =
+            List.exists (Keeper_tool_plan.Node_id.equal dependency) data_dependencies
+          in
+          let order = List.exists (Keeper_tool_plan.Node_id.equal dependency) node.after in
+          { node_id = Keeper_tool_plan.Node_id.to_string dependency
+          ; kind = dependency_kind ~data ~order
+          })
+      in
+      let batch_index, batch_size, execution_mode =
+        match schedule_for node.id with
+        | Some scheduled ->
+          let schedule = scheduled.schedule in
+          ( schedule.batch_index
+          , schedule.batch_size
+          , execution_mode_to_string schedule.execution_mode )
+        | None -> invalid_arg "validated plan node has no execution schedule"
+      in
+      let statically_read_only =
+        match Keeper_tool_plan.descriptor plan node.id with
+        | Some descriptor -> Keeper_tool_descriptor.readonly_static_hint descriptor
+        | None -> None
+      in
+      { id = Keeper_tool_plan.Node_id.to_string node.id
+      ; tool_name = node.tool_name
+      ; dependencies
+      ; batch_index
+      ; batch_size
+      ; execution_mode
+      ; statically_read_only
+      })
+  in
+  let batches =
+    scheduled
+    |> List.mapi (fun index -> function
+      | Keeper_tool_plan_executor.Serial_batch node ->
+        { index
+        ; execution_mode = "serial"
+        ; node_ids = [ Keeper_tool_plan.Node_id.to_string node.node.id ]
+        }
+      | Concurrent_batch nodes ->
+        { index
+        ; execution_mode = "concurrent"
+        ; node_ids =
+            List.map
+              (fun (node : Keeper_tool_plan_executor.scheduled_node) ->
+                 Keeper_tool_plan.Node_id.to_string node.node.id)
+              nodes
+        })
+  in
+  { nodes; batches }
+;;
+
 let instruction_discovery_bytes reference description =
   String.length (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
   + 2
@@ -90,6 +206,7 @@ let of_skill_with_reference reference (skill : Keeper_skill_catalog.skill) =
          ; max_parallelism = 0
          ; statically_read_only = None
          ; declaration_span = None
+         ; flow = None
          }
      | Keeper_skill_catalog.Composition entry ->
        let batch_count, parallel_batch_count, max_parallelism =
@@ -111,6 +228,7 @@ let of_skill_with_reference reference (skill : Keeper_skill_catalog.skill) =
          ; max_parallelism
          ; statically_read_only = Some (statically_read_only entry.plan)
          ; declaration_span = skill.composition_span
+         ; flow = Some (flow_of_plan entry.plan)
          }
 ;;
 
@@ -123,6 +241,51 @@ let of_catalog catalog =
 ;;
 
 let to_yojson profile =
+  let dependency_kind_to_string = function
+    | Data -> "data"
+    | Order -> "order"
+    | Data_and_order -> "data_and_order"
+  in
+  let flow_to_yojson flow =
+    `Assoc
+      [ ( "nodes"
+        , `List
+            (List.map
+               (fun node ->
+                  `Assoc
+                    [ "id", `String node.id
+                    ; "tool_name", `String node.tool_name
+                    ; ( "dependencies"
+                      , `List
+                          (List.map
+                             (fun dependency ->
+                                `Assoc
+                                  [ "node_id", `String dependency.node_id
+                                  ; ( "kind"
+                                    , `String (dependency_kind_to_string dependency.kind) )
+                                  ])
+                             node.dependencies) )
+                    ; "batch_index", `Int node.batch_index
+                    ; "batch_size", `Int node.batch_size
+                    ; "execution_mode", `String node.execution_mode
+                    ; ( "statically_read_only"
+                      , match node.statically_read_only with
+                        | Some value -> `Bool value
+                        | None -> `Null )
+                    ])
+               flow.nodes) )
+      ; ( "batches"
+        , `List
+            (List.map
+               (fun batch ->
+                  `Assoc
+                    [ "index", `Int batch.index
+                    ; "execution_mode", `String batch.execution_mode
+                    ; "node_ids", `List (List.map (fun id -> `String id) batch.node_ids)
+                    ])
+               flow.batches) )
+      ]
+  in
   `Assoc
     [ "reference", Skill_reference.to_yojson profile.reference
     ; "kind", `String profile.kind
@@ -170,5 +333,9 @@ let to_yojson profile =
             [ "start_line", `Int span.start_line
             ; "end_line", `Int span.end_line
             ] )
+    ; ( "flow"
+      , match profile.flow with
+        | Some flow -> flow_to_yojson flow
+        | None -> `Null )
     ]
 ;;

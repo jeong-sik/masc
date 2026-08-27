@@ -65,10 +65,12 @@ flowchart LR
   NM -->|"예"| OK["keeper_compose_&lt;name&gt; 로 승격"]
 ```
 
-fence 개수가 유일한 갈림길이다. `masc-composition-tool`, 다른 클라이언트의
-`disable-model-invocation`, `allowed-tools`는 모두 명시적으로 거부한다. composition
-선언을 남겨 놓고 도구만 숨기는 별도 상태는 없다. 문서용 예시는 더 긴 CommonMark 외부
-fence로 감싼다.
+fence 개수가 유일한 갈림길이다. `masc-composition-tool`과 다른 클라이언트의
+`disable-model-invocation`은 명시적으로 거부한다. [Agent Skills
+규격](https://agentskills.io/specification)의 실험적 선택 필드인 `allowed-tools`는 문자열일
+때 파싱하지만, MASC 권한이나 도구 제한으로 해석하지 않고 저장하지도 않는다.
+composition 선언을 남겨 놓고 도구만 숨기는 별도 상태는 없다. 문서용 예시는 더 긴
+CommonMark 외부 fence로 감싼다.
 
 **실패와 편차는 다르다**: `Skill_catalog_snapshot`이 source scan 결과와 진단을 먼저
 불변 snapshot으로 발행하고, `Keeper_skill_catalog.of_snapshot`이 그 snapshot을 runtime

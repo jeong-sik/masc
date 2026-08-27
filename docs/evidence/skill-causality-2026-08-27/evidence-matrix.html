@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MASC Skill Causality Evidence</title>
+  <style>
+    :root { color-scheme: dark; --bg:#080b10; --panel:#111722; --line:#283447; --text:#e8eef8; --muted:#91a0b5; --cyan:#5de4e7; --green:#57e389; --amber:#ffc857; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:radial-gradient(circle at 85% 0%,#112739 0,#080b10 34%); color:var(--text); font:15px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    main { width:1500px; margin:0 auto; padding:38px 42px 46px; }
+    .eyebrow { color:var(--cyan); letter-spacing:.16em; text-transform:uppercase; font-size:12px; }
+    h1 { margin:8px 0 10px; font-size:30px; letter-spacing:-.04em; }
+    .lede { color:var(--muted); margin:0 0 22px; }
+    .chips { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:22px; }
+    .chip { border:1px solid var(--line); background:#0d131d; border-radius:999px; padding:7px 12px; }
+    .chip strong { color:var(--green); }
+    .card { border:1px solid var(--line); background:rgba(17,23,34,.94); border-radius:14px; overflow:hidden; box-shadow:0 18px 70px rgba(0,0,0,.35); }
+    table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    th { text-align:left; color:#a9bad0; background:#0d131d; font-size:12px; letter-spacing:.08em; text-transform:uppercase; padding:13px 14px; border-bottom:1px solid var(--line); }
+    td { padding:14px; border-bottom:1px solid #202b3a; vertical-align:top; }
+    tr:last-child td { border-bottom:0; }
+    td:nth-child(1){width:17%;font-weight:700} td:nth-child(2){width:21%} td:nth-child(3){width:12%} td:nth-child(4){width:31%} td:nth-child(5){width:19%}
+    code { color:#b9e6ff; overflow-wrap:anywhere; }
+    .yes { color:var(--green); font-weight:800; }
+    .verdict { display:inline-flex; align-items:center; gap:7px; color:var(--green); font-weight:800; }
+    .verdict::before { content:'✓'; width:20px; height:20px; border-radius:50%; display:grid; place-items:center; background:rgba(87,227,137,.13); }
+    .sub { color:var(--muted); font-size:13px; margin-top:4px; }
+    .toolbar { display:flex; justify-content:space-between; align-items:center; margin:18px 0 12px; }
+    button { cursor:pointer; border:1px solid #2f9ca1; color:var(--cyan); background:#0c2027; padding:10px 14px; border-radius:8px; font:inherit; font-weight:700; }
+    button:focus { outline:2px solid var(--cyan); outline-offset:3px; }
+    #details { display:none; border:1px solid #2a4057; background:#09131d; border-radius:12px; padding:16px 18px; margin-top:12px; }
+    #details.open { display:grid; grid-template-columns:1fr 1fr; gap:9px 24px; }
+    .detail-label { color:var(--muted); }
+    .detail-value { color:#d5f6ff; overflow-wrap:anywhere; }
+    footer { display:flex; justify-content:space-between; color:#718198; margin-top:16px; font-size:12px; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">MASC · exact evidence bundle</div>
+  <h1>Official-client Skill delivery → action causality</h1>
+  <p class="lede">PR #31044 · exact test stdout + live Keeper operation + durable ledger + post-restart projection</p>
+  <div class="chips">
+    <div class="chip">Targeted <strong>19 / 19</strong></div>
+    <div class="chip">Delivery <strong>1</strong></div>
+    <div class="chip">Action <strong>1</strong></div>
+    <div class="chip">Invalid <strong>0</strong></div>
+    <div class="chip">Live <strong>ready · ok</strong></div>
+  </div>
+  <section class="card" aria-label="Evidence matrix">
+    <table>
+      <thead><tr><th>검증 축</th><th>소스 / 대상</th><th>실측</th><th>영구 증거</th><th>판정</th></tr></thead>
+      <tbody>
+        <tr><td>병합 · ancestry</td><td><code>6feaeac9e2</code><div class="sub">current 8271633261</div></td><td class="yes">YES</td><td>GitHub PR #31044<div class="sub">fix is current-main ancestor</div></td><td><span class="verdict">Verified high</span></td></tr>
+        <tr><td>same-turn 계약</td><td>Exact merge commit</td><td class="yes">YES</td><td><code>test-stdout.log</code><div class="sub">19/19 · exit 0</div></td><td><span class="verdict">Verified high</span></td></tr>
+        <tr><td>OCaml 정합</td><td><code>dune build @check</code></td><td class="yes">YES</td><td><code>test-stdout.log</code><div class="sub">dune_check=0</div></td><td><span class="verdict">Verified high</span></td></tr>
+        <tr><td>Live operation</td><td><code>...-20260827-0617</code></td><td class="yes">YES</td><td>operation SQLite<div class="sub">Succeeded · turn #295</div></td><td><span class="verdict">Verified high</span></td></tr>
+        <tr><td>인과관계</td><td>turn-opening → time</td><td class="yes">YES</td><td>durable Skill ledger<div class="sub">1 invocation · 1 delivery · 1 action · 0 invalid</div></td><td><span class="verdict">Verified high</span></td></tr>
+        <tr><td>재기동 readback</td><td>Live <code>8271633261</code></td><td class="yes">YES</td><td>dashboard projection<div class="sub">startup/config/fleet/dashboard ok</div></td><td><span class="verdict">Verified high</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+  <div class="toolbar">
+    <span class="sub">상세 식별자는 클릭 후 노출 · screenshot interaction assertion 대상</span>
+    <button id="toggle-details" aria-expanded="false">Show exact IDs</button>
+  </div>
+  <section id="details" aria-label="Exact evidence identifiers">
+    <div class="detail-label">Operation</div><div class="detail-value">codex-official-skill-causality-20260827-0617</div>
+    <div class="detail-label">Turn</div><div class="detail-value">trace-1787654779375-00001#295</div>
+    <div class="detail-label">Skill ToolUse</div><div class="detail-value">call_agent_core_64f7566f92d86044b31d4823c67fa907_7d03_7</div>
+    <div class="detail-label">Action ToolUse</div><div class="detail-value">call_agent_core_64f7566f92d86044b31d4823c67fa907_7d03_9</div>
+    <div class="detail-label">Ledger SHA-256</div><div class="detail-value">4648a7fd4e191d2b272cbc2c68577e6d1a92b44e879eddab50e6673aae5fff37</div>
+  </section>
+  <footer><span>Generated 2026-08-27T01:59:38Z</span><span>masc.skill-causality-evidence.v1</span></footer>
+</main>
+<script>
+  const button = document.querySelector('#toggle-details');
+  const details = document.querySelector('#details');
+  button.addEventListener('click', () => {
+    const open = details.classList.toggle('open');
+    button.setAttribute('aria-expanded', String(open));
+    button.textContent = open ? 'Hide exact IDs' : 'Show exact IDs';
+  });
+</script>
+</body>
+</html>
+

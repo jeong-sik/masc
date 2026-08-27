@@ -269,6 +269,13 @@ val load :
   trace_id:Keeper_id.Trace_id.t ->
   (t, store_error) result
 
+val load_existing :
+  config:Workspace.config ->
+  trace_id:Keeper_id.Trace_id.t ->
+  (t option, store_error) result
+(** Read an already-materialized ledger. Unlike {!load}, absence remains
+    [None] instead of being projected as a synthetic empty ledger. *)
+
 val record :
   config:Workspace.config ->
   trace_id:Keeper_id.Trace_id.t ->

@@ -1859,6 +1859,28 @@ let add_routes ~sw ~clock router =
            in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/skill-activations" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         match Server_utils.query_param req "trace_id" |> Option.map String.trim with
+         | None | Some "" ->
+           respond_public_read_json_value ~status:`Bad_request req reqd
+             (dashboard_error_json "trace_id query param is required")
+         | Some raw_trace_id ->
+           (match
+              Domain_pool_ref.submit_io_or_inline (fun () ->
+                Keeper_skill_activation_projection.resolve_trace_string
+                  ~config:(Mcp_server.workspace_config state)
+                  raw_trace_id)
+            with
+            | Error detail ->
+              respond_public_read_json_value ~status:`Bad_request req reqd
+                (dashboard_error_json detail)
+            | Ok projection ->
+              let json =
+                Keeper_skill_activation_projection.trace_to_yojson projection
+              in
+              Http.Response.json_value ~compress:true ~request:req json reqd)
+       ) request reqd)
   (* Schedule projection, served by its owner. The no-query aggregate keeps its
      shared live cache; an exact schedule_id lookup reads the same ledger and
      row encoder without adding a client-controlled cache key. *)

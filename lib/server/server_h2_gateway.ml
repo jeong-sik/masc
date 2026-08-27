@@ -949,6 +949,29 @@ let h2_request_handler _client_addr h2_reqd =
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
+      | `GET, "/api/v1/dashboard/skill-activations" ->
+          with_h2_public_read h2_reqd (fun state ->
+            match trimmed_query_param httpun_request "trace_id" with
+            | None ->
+              h2_respond_json_value h2_reqd
+                (`Assoc [ "error", `String "trace_id query param is required" ])
+                ~status:`Bad_request ~extra_headers:cors
+            | Some raw_trace_id ->
+              (match
+                 Keeper_skill_activation_projection.resolve_trace_string
+                   ~config:(Mcp_server.workspace_config state)
+                   raw_trace_id
+               with
+               | Error detail ->
+                 h2_respond_json_value h2_reqd
+                   (`Assoc [ "error", `String detail ])
+                   ~status:`Bad_request ~extra_headers:cors
+               | Ok projection ->
+                 let json =
+                   Keeper_skill_activation_projection.trace_to_yojson projection
+                 in
+                 h2_respond_json_value h2_reqd json ~extra_headers:cors))
+
       | `GET, "/api/v1/dashboard/project-snapshot"
       | `GET, "/api/v1/dashboard/namespace-truth" ->
           with_h2_public_read h2_reqd (fun state ->

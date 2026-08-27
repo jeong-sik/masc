@@ -414,6 +414,26 @@ let pending_stimulus_remains ~ctx ~keeper_name =
     false
 ;;
 
+(* Autoboot warmup is a dispatch delay, not an extra heartbeat cadence. The
+   first cycle runs before warmup and skips intake; sleeping the full cadence
+   here used to leave restored durable work (and the bootstrap stimulus) idle
+   for up to [heartbeat.interval_sec] after every server restart. *)
+let next_keepalive_sleep_duration_sec
+      ~proactive_warmup_sec
+      ~proactive_warmup_elapsed
+      ~keepalive_started_ts
+      ~now_ts
+      ~cadence_sec
+  =
+  let cadence_sec = Float.max 0.0 cadence_sec in
+  if proactive_warmup_sec <= 0 || proactive_warmup_elapsed
+  then cadence_sec
+  else (
+    let elapsed_sec = Float.max 0.0 (now_ts -. keepalive_started_ts) in
+    let warmup_remaining_sec = float_of_int proactive_warmup_sec -. elapsed_sec in
+    Float.max 0.0 (Float.min cadence_sec warmup_remaining_sec))
+;;
+
 let run_keepalive_unified_turn
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
@@ -1365,7 +1385,14 @@ let run_heartbeat_loop
                ~stop
                ~wakeup
                (fun () ->
-                 float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())));
+                 next_keepalive_sleep_duration_sec
+                   ~proactive_warmup_sec
+                   ~proactive_warmup_elapsed
+                   ~keepalive_started_ts
+                   ~now_ts:(Time_compat.now ())
+                   ~cadence_sec:
+                     (float_of_int
+                        (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))));
       if Atomic.get stop then () else loop ())
   in
   loop ()
@@ -1373,4 +1400,5 @@ let run_heartbeat_loop
 
 module For_testing = struct
   let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
+  let next_keepalive_sleep_duration_sec = next_keepalive_sleep_duration_sec
 end

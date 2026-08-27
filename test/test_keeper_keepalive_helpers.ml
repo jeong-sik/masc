@@ -1042,6 +1042,49 @@ let test_thread_participant_drop_is_bounded_under_persistent_failure () =
        | None -> fail "boundlane registry entry missing")
 ;;
 
+let test_autoboot_warmup_bounds_first_cadence_sleep () =
+  let next = Keeper_heartbeat_loop.For_testing.next_keepalive_sleep_duration_sec in
+  check (float 0.001) "fresh warmup" 66.0
+    (next
+       ~proactive_warmup_sec:66
+       ~proactive_warmup_elapsed:false
+       ~keepalive_started_ts:100.0
+       ~now_ts:100.0
+       ~cadence_sec:300.0);
+  check (float 0.001) "partially elapsed warmup" 26.0
+    (next
+       ~proactive_warmup_sec:66
+       ~proactive_warmup_elapsed:false
+       ~keepalive_started_ts:100.0
+       ~now_ts:140.0
+       ~cadence_sec:300.0)
+;;
+
+let test_warmup_boundary_and_steady_cadence () =
+  let next = Keeper_heartbeat_loop.For_testing.next_keepalive_sleep_duration_sec in
+  check (float 0.001) "warmup crossed during pre-warmup cycle" 0.0
+    (next
+       ~proactive_warmup_sec:66
+       ~proactive_warmup_elapsed:false
+       ~keepalive_started_ts:100.0
+       ~now_ts:166.0
+       ~cadence_sec:300.0);
+  check (float 0.001) "elapsed warmup" 300.0
+    (next
+       ~proactive_warmup_sec:66
+       ~proactive_warmup_elapsed:true
+       ~keepalive_started_ts:100.0
+       ~now_ts:166.0
+       ~cadence_sec:300.0);
+  check (float 0.001) "disabled warmup" 300.0
+    (next
+       ~proactive_warmup_sec:0
+       ~proactive_warmup_elapsed:true
+       ~keepalive_started_ts:100.0
+       ~now_ts:100.0
+       ~cadence_sec:300.0)
+;;
+
 (* ── Test runner ─── *)
 
 let () =
@@ -1102,6 +1145,10 @@ let () =
             test_cadence_wake_consumes_only_active_sleep
         ; test_case "cadence handshake precedes duration resolution" `Quick
             test_cadence_handshake_precedes_duration_resolution
+        ; test_case "autoboot warmup bounds the first cadence sleep" `Quick
+            test_autoboot_warmup_bounds_first_cadence_sleep
+        ; test_case "elapsed warmup keeps the configured cadence" `Quick
+            test_warmup_boundary_and_steady_cadence
         ] )
     ]
 ;;

@@ -86,6 +86,49 @@ let patch_of_edit ~before ~after =
         Ok (`Assoc changed)
   | _ -> Error "keeper settings must remain a JSON object"
 
+(* Marker column. The glyph carries the editable/read-only split on its own,
+   because colour collapses to nothing under NO_COLOR and dim inverts on a
+   light background. Colour repeats what the glyph already says. *)
+let editable_glyph = "\xe2\x97\x8f"
+let read_only_glyph = "\xe2\x97\x8b"
+
+let label_width = 22
+
+let styled code text =
+  if String.equal code "" then text else code ^ text ^ Masc_tui_theme.Sgr.reset
+
+(* Notes and values share one column so the eye reads the pane as a table
+   rather than as ragged prose. Padding is computed from the visible prefix,
+   which the styling codes do not add to. *)
+let note_column = label_width + 5
+
+let pad_to_note ~prefix_width = String.make (max 1 (note_column - prefix_width)) ' '
+
+let section title note =
+  let heading = styled Masc_tui_theme.Sgr.bold title in
+  if String.equal note ""
+  then " " ^ heading
+  else
+    Printf.sprintf " %s%s%s" heading
+      (pad_to_note ~prefix_width:(1 + String.length title))
+      (styled Masc_tui_theme.Sgr.dim note)
+
+let marked_section glyph colour title note =
+  Printf.sprintf " %s %s%s%s"
+    (styled colour glyph)
+    (styled Masc_tui_theme.Sgr.bold title)
+    (pad_to_note ~prefix_width:(3 + String.length title))
+    (styled Masc_tui_theme.Sgr.dim note)
+
+let marked_row glyph colour label value =
+  Printf.sprintf "  %s %s %s"
+    (styled colour glyph)
+    (styled colour (Printf.sprintf "%-*s" label_width label))
+    value
+
+let editable_row label value = marked_row editable_glyph Masc_tui_theme.Sgr.cyan label value
+let read_only_row label value = marked_row read_only_glyph Masc_tui_theme.Sgr.dim label value
+
 let string_value ?(missing = "not observed") = function
   | Some (`String value) when String.trim value <> "" -> value
   | Some (`String _) -> "(empty)"
@@ -119,37 +162,105 @@ let skill_selection_value = function
   | Some (`List names) -> string_list_value (Some (`List names))
   | value -> string_value value
 
-let row label value = Printf.sprintf "%-22s %s" label value
+(* A stored field usually ends with a newline, which splits into a trailing
+   empty line. Left in, it doubles the gap before the next heading and makes
+   the line count in that heading one more than the reader can see. Interior
+   blanks are the text's own paragraphs and stay. *)
+let rec drop_trailing_blanks = function
+  | [] -> []
+  | lines ->
+    (match List.rev lines with
+     | last :: rest when String.trim last = "" -> drop_trailing_blanks (List.rev rest)
+     | _ -> lines)
 
-let view_lines json =
+let free_text ~sanitize = function
+  | Some (`String text) when String.trim text <> "" ->
+    String.split_on_char '\n' text
+    |> drop_trailing_blanks
+    |> List.map (fun line -> "   " ^ sanitize line)
+  | Some _ | None -> [ "   (not declared)" ]
+
+let counted = function
+  | [ "   (not declared)" ] -> "not declared"
+  | [ _ ] -> "1 line"
+  | lines -> Printf.sprintf "%d lines" (List.length lines)
+
+(* One document, but the reader has to be able to answer "will [e] change
+   this?" without counting rows against the editor stem. The glyph answers it
+   on every line, and the field count in the heading is taken from the same
+   snapshot the editor opens rather than from the rows drawn here — two rows
+   share one heading (sandbox / network) and one row is derived, so a count of
+   rows would be a different number than the one [e] shows. *)
+let view_lines ?(sanitize = Fun.id) json =
   let at path = member_path path json in
+  let text value = sanitize (value ()) in
   let sources = at [ "sources" ] in
   let source path = Option.bind sources (member_path path) in
-  [ "# effective settings"
-  ; row "Runtime" (string_value (at [ "execution"; "selected_runtime_id" ]))
-  ; row "Autoboot" (bool_value (at [ "autoboot_enabled" ]))
-  ; row "Autonomous turns" (bool_value (at [ "proactive"; "enabled" ]))
-  ; row "Context override" (int_override_value (at [ "max_context_override" ]))
-  ; row "Wake prompt override" (string_value (at [ "autonomous_wake_prompt" ]))
-  ; row "Sandbox / network"
+  let editable_count =
+    match editable_snapshot json with `Assoc fields -> List.length fields | _ -> 0
+  in
+  let prompt key = at [ "prompt"; key ] in
+  let instructions = free_text ~sanitize (prompt "instructions") in
+  let effective_prompt = free_text ~sanitize (prompt "effective_system_prompt") in
+  [ Printf.sprintf " %s editable   %s read-only"
+      (styled Masc_tui_theme.Sgr.cyan editable_glyph)
+      (styled Masc_tui_theme.Sgr.dim read_only_glyph)
+  ; ""
+  ; section "effective settings" (Printf.sprintf "e opens %d fields" editable_count)
+  ; editable_row "Runtime"
+      (text (fun () -> string_value (at [ "execution"; "selected_runtime_id" ])))
+  ; editable_row "Autoboot" (bool_value (at [ "autoboot_enabled" ]))
+  ; editable_row "Autonomous turns" (bool_value (at [ "proactive"; "enabled" ]))
+  ; editable_row "Context override" (int_override_value (at [ "max_context_override" ]))
+  ; editable_row "Wake prompt override"
+      (text (fun () -> string_value (at [ "autonomous_wake_prompt" ])))
+  ; editable_row "Sandbox / network"
       (Printf.sprintf "%s / %s"
-         (string_value (at [ "sandbox_profile" ]))
-         (string_value (at [ "network_mode" ])))
-  ; row "Allowed paths" (string_list_value (at [ "allowed_paths" ]))
-  ; row "Effective paths" (string_list_value (at [ "effective_allowed_paths" ]))
-  ; row "Mention targets"
-      (string_list_value (at [ "workspace"; "mention_targets" ]))
-  ; row "Skills" (skill_selection_value (at [ "skills"; "names" ]))
+         (text (fun () -> string_value (at [ "sandbox_profile" ])))
+         (text (fun () -> string_value (at [ "network_mode" ]))))
+  ; editable_row "Allowed paths" (text (fun () -> string_list_value (at [ "allowed_paths" ])))
+  ; editable_row "Mention targets"
+      (text (fun () -> string_list_value (at [ "workspace"; "mention_targets" ])))
+  ; editable_row "Skills" (text (fun () -> skill_selection_value (at [ "skills"; "names" ])))
   ; ""
-  ; "# provenance"
-  ; row "Live override" (bool_value (source [ "has_live_override" ]))
-  ; row "Override fields" (string_list_value (source [ "override_fields" ]))
-  ; row "Precedence" (string_list_value (source [ "precedence" ]))
-  ; row "Default manifest" (string_value (source [ "default_manifest_path" ]))
-  ; row "Live metadata" (string_value (source [ "live_meta_path" ]))
+  ; section "derived" "read-only"
+  ; read_only_row "Effective paths"
+      (text (fun () -> string_list_value (at [ "effective_allowed_paths" ])))
   ; ""
-  ; "# editing"
-  ; "Press e to edit the observed values. Only changed fields are sent."
-  ; "Skills: {} selects all; {\"names\":[]} selects none; names select exactly."
-  ; "Deleting a field means unchanged. null clears context/wake overrides."
+  ; section "provenance" "read-only"
+  ; read_only_row "Live override" (bool_value (source [ "has_live_override" ]))
+  ; read_only_row "Override fields"
+      (text (fun () -> string_list_value (source [ "override_fields" ])))
+  ; read_only_row "Precedence" (text (fun () -> string_list_value (source [ "precedence" ])))
+  ; read_only_row "Default manifest"
+      (text (fun () -> string_value (source [ "default_manifest_path" ])))
+  ; read_only_row "Live metadata" (text (fun () -> string_value (source [ "live_meta_path" ])))
+  ; ""
+  ; marked_section editable_glyph Masc_tui_theme.Sgr.cyan "instructions"
+      (Printf.sprintf "editable \xc2\xb7 %s" (counted instructions))
   ]
+  @ instructions
+  @ [ ""
+    ; marked_section read_only_glyph Masc_tui_theme.Sgr.dim "effective system prompt"
+        (Printf.sprintf "read-only \xc2\xb7 %s" (counted effective_prompt))
+    ]
+  @ effective_prompt
+  @ (match sources with
+     | None -> []
+     | Some value ->
+       (* The named provenance rows above pick five fields out of this object.
+          The raw block stays because the endpoint decides what else it sends,
+          and dropping the rest would quietly narrow what the operator can
+          see. *)
+       ""
+       :: marked_section read_only_glyph Masc_tui_theme.Sgr.dim "sources" "read-only \xc2\xb7 raw"
+       :: (Yojson.Safe.pretty_to_string value
+           |> String.split_on_char '\n'
+           |> List.map (fun line -> "   " ^ sanitize line)))
+  @ [ ""
+    ; section "editing" ""
+    ; "   e opens the observed values. Only changed fields are sent."
+    ; "   Skills: {} selects all; {\"names\":[]} selects none; names select exactly."
+    ; "   Deleting a field means unchanged. null clears context/wake overrides."
+    ]
+;;

@@ -431,19 +431,15 @@ let run_keeper_invocation_turn_admitted_inner
        | Error failure -> turn_resources_error ~surface failure
        | Ok { entry; publication_recovery } ->
       (match
-         Keeper_unified_turn_pre_dispatch.load_profile_defaults
+         Keeper_unified_turn_pre_dispatch.turn_profile_and_meta
            ~base_path:ctx.config.base_path
-           ~keeper_name:entry.meta.name
+           ~entry_meta:entry.meta
        with
-       | Error err -> tool_result_error ~class_:Tool_result.Runtime_failure (Agent_core.Error.to_string err)
-       | Ok profile_defaults ->
-      (match
-         Keeper_meta_contract.effective_meta_of_profile_defaults
-           profile_defaults
-           entry.meta
-       with
-       | Error error -> tool_result_error ~class_:Tool_result.Runtime_failure error
-       | Ok meta ->
+       | Error err ->
+         tool_result_error
+           ~class_:Tool_result.Runtime_failure
+           (Agent_core.Error.to_string err)
+       | Ok (profile_defaults, meta) ->
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a keeper whose
          runtime cannot take an image on its own,
          evict each image to the artifact store + an eager analyze_image reading
@@ -873,7 +869,7 @@ let run_keeper_invocation_turn_admitted_inner
               in
               tool_result_ok_data reply_json
 
-)))))
+))))
 
 (* Turn-observation boundary for the chat lane.
 

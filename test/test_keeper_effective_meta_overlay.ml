@@ -15,6 +15,7 @@ module Turn_up_config = Masc.Keeper_turn_up_config_persistence
    is referenced directly (not via [Masc.]); [Keeper_runtime] (ensure_keeper_meta)
    lives in the main [masc] library. Same pattern as test_keeper_lifecycle_registry_dispatch. *)
 module Keeper_runtime = Masc.Keeper_runtime
+module Pre_dispatch = Masc.Keeper_unified_turn_pre_dispatch
 
 let with_owner_inventory config f =
   Eio_main.run @@ fun env ->
@@ -1309,6 +1310,50 @@ instructions = "Missing sandbox profile"
             (Some true)
             (json_bool_field "keepalive_running" row))
 
+(* The turn path's own entry point. Durable keeper JSON carries no config
+   fields, so the raw store read below is [Local] no matter what the TOML says
+   -- the assertion is that one call gets both the snapshot and a meta that
+   already has it applied. Loading the snapshot without applying it ran every
+   heartbeat turn's [Execute] on the host against a [docker] declaration
+   (#30982). *)
+let test_turn_profile_and_meta_applies_the_declared_profile () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "containment" in
+  write_keeper_toml
+    ~keepers_dir
+    ~name
+    ~sandbox_profile:"docker"
+    ~instructions:"Stay in the container.";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let entry_meta =
+    match Store.read_meta config name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "expected seeded keeper meta"
+    | Error err -> Alcotest.failf "read_meta failed: %s" err
+  in
+  Alcotest.(check string)
+    "durable meta carries the decoder placeholder, not the declaration"
+    "local"
+    (Profile.sandbox_profile_to_string entry_meta.sandbox_profile);
+  match
+    Pre_dispatch.turn_profile_and_meta
+      ~base_path:config.Workspace.base_path
+      ~entry_meta
+  with
+  | Error err ->
+    Alcotest.failf "turn_profile_and_meta failed: %s" (Agent_core.Error.to_string err)
+  | Ok (defaults, meta) ->
+    Alcotest.(check string)
+      "the meta a turn runs with carries the declared profile"
+      "docker"
+      (Profile.sandbox_profile_to_string meta.sandbox_profile);
+    Alcotest.(check (option string))
+      "the snapshot returned alongside it declares the same profile"
+      (Some "docker")
+      (Option.map Profile.sandbox_profile_to_string defaults.sandbox_profile)
+;;
+
 let () =
   init_runtime_default_for_tests ();
   Alcotest.run "keeper_effective_meta_overlay"
@@ -1317,6 +1362,9 @@ let () =
         [
           Alcotest.test_case "TOML sandbox overlay reaches effective meta"
             `Quick test_toml_overlay_reaches_effective_meta;
+          Alcotest.test_case
+            "turn_profile_and_meta applies the declared sandbox profile"
+            `Quick test_turn_profile_and_meta_applies_the_declared_profile;
           Alcotest.test_case
             "profile-defaults overlay applies without reloading the profile"
             `Quick test_profile_defaults_overlay_applies_without_reloading;

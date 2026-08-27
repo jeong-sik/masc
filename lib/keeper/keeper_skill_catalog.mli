@@ -40,12 +40,16 @@ type skill = private
         (** Exact snapshot identity. [None] exists only for document-only test
             catalogs that have no snapshot authority. *)
   ; provenance : provenance option
+  ; composition_span : Keeper_skill_body_ast.span option
+        (** Source lines of the top-level [toml composition] fence. [None] for
+            instruction Skills and projection fallbacks. *)
   ; surface : surface
   }
 
 type composition = private
   { entry : Keeper_tool_composition_catalog.entry
   ; provenance : provenance option
+  ; span : Keeper_skill_body_ast.span option
   }
 
 type t

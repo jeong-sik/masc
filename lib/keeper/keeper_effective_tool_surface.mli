@@ -32,6 +32,10 @@ type t =
   ; skill_resource_read_max_bytes : int option
   ; instruction_skills : Skill_reference.t list
   ; composition_skills : Skill_reference.t list
+  ; skill_profiles : Keeper_skill_observability.profile list
+  ; tool_surface_bytes : int
+  ; skill_tool_surface_bytes : int
+  ; skill_body_bytes : int
   ; skills_left_out : string list
         (** Documents the catalog could not read, by the directory they were
             found in and why. This surface answers "what can this Keeper

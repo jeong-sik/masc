@@ -463,8 +463,8 @@ describe('ScheduleSurface', () => {
       render(html`<${ScheduleSurface} />`, container)
       await flush()
 
-      container.querySelector<HTMLButtonElement>('[data-testid="schedule-diagnostics-toggle"]')?.click()
-      await flush()
+      // The prune button lives on the view bar, not behind the diagnostics
+      // toggle: succeeded rows are cleaned from where they are seen.
       container.querySelector<HTMLButtonElement>('[data-testid="schedule-prune-btn"]')?.click()
       await flush()
 

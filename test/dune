@@ -3034,7 +3034,7 @@
 (test
  (name test_tui_frame_presenter)
  (modules test_tui_frame_presenter)
- (libraries alcotest masc_tui_frame_presenter))
+ (libraries alcotest str masc_tui_frame_presenter masc_tui_terminal_palette))
 
 (test
  (name test_tui_approval_authority)

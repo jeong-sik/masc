@@ -48,6 +48,24 @@ let clear_screen = "\027[2J"
    frame reliably row 1 of the window. *)
 let enter_alternate_screen = "\027[?1049h"
 let leave_alternate_screen = "\027[?1049l"
+(* OSC 11 asks the terminal to make its own background this colour; OSC 111
+   puts it back. Both belong here rather than in the theme module: a scheme is
+   a set of colours, and painting the window those colours live in is the
+   renderer's job. A terminal that does not know these ignores them, which is
+   why they can be sent unconditionally.
+
+   The reset matters more than the set. A terminal keeps whatever background
+   it was last told to use, so an exit that skips OSC 111 leaves the reader's
+   shell wearing masc's colours until they close the window. *)
+let set_background_color rgb =
+  Printf.sprintf "\027]11;rgb:%02x/%02x/%02x\027\\" 
+    (Masc_tui_terminal_palette.red rgb)
+    (Masc_tui_terminal_palette.green rgb)
+    (Masc_tui_terminal_palette.blue rgb)
+;;
+
+let reset_background_color = "\027]111\027\\"
+
 let erase_line = "\027[2K"
 let hide_cursor = "\027[?25l"
 let show_cursor = "\027[?25h"
@@ -64,6 +82,19 @@ let last_frame_is_compact presenter =
   | None -> true
   | Some previous -> previous.compact_frame
 
+(* Sent when a scheme is picked and when one is dropped. [None] is "follow the
+   terminal", which is a reset rather than a colour: masc has no opinion to
+   send once the reader has withdrawn theirs. *)
+let sync_background ~write ~flush background =
+  try
+    write
+      (match background with
+       | Some rgb -> set_background_color rgb
+       | None -> reset_background_color);
+    flush ()
+  with _ -> ()
+;;
+
 let setup presenter ~write ~flush =
   presenter.invalidated <- true;
   try
@@ -75,7 +106,10 @@ let cleanup presenter ~write ~flush =
   try
     write
       ((if presenter.synchronized_output then end_synchronized_output else "")
-       ^ reset_style ^ show_cursor ^ enable_autowrap ^ leave_alternate_screen
+       ^ reset_style ^ show_cursor ^ enable_autowrap
+       (* Before leaving the alternate screen, so the shell that comes back is
+          already wearing its own background rather than masc's. *)
+       ^ reset_background_color ^ leave_alternate_screen
        (* Started at probe time so a theme switch would be reported. Left on,
           the terminal keeps reporting to whatever runs next, which receives
           [CSI ? 997 ; n n] as typed input it never asked for. *)

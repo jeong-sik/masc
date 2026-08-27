@@ -224,6 +224,7 @@ type task_op =
   | Task_create
   | Task_claim
   | Task_done
+  | Task_release
 
 let task_op_of_keeper_tool = function
   | Keeper_tooling.Name.Tasks_list -> Some Tasks_list
@@ -232,6 +233,7 @@ let task_op_of_keeper_tool = function
   | Keeper_tooling.Name.Task_create -> Some Task_create
   | Keeper_tooling.Name.Task_claim -> Some Task_claim
   | Keeper_tooling.Name.Task_done -> Some Task_done
+  | Keeper_tooling.Name.Task_release -> Some Task_release
 ;;
 
 let task_op_of_name name =
@@ -832,6 +834,84 @@ let handle_keeper_task_tool_with_outcome
      | Workspace.Claim_next_claimed _
      | Workspace.Claim_next_no_unclaimed
      | Workspace.Claim_next_no_eligible _ -> Keeper_tool_execution.success payload)
+    | Task_release ->
+    (* Handing a task back is the other half of the claim refusal in
+       [Workspace_task_claim.held_tasks_refusal_message]: a keeper that
+       cannot finish what it holds is also barred from claiming anything
+       else, and before this tool existed its only way out was for the
+       keeper to be shut down (keeper_shutdown_finalize.ml:137). The
+       release is explicit and carries a summary; #18839 removed the
+       implicit auto-release because a task with no handoff note travelled
+       between keepers losing its progress. *)
+    let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
+    let summary = Safe_ops.json_string ~default:"" "summary" args |> String.trim in
+    let optional_field name =
+      match Safe_ops.json_string ~default:"" name args |> String.trim with
+      | "" -> []
+      | value -> [ name, `String value ]
+    in
+    if task_id = ""
+    then
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Workflow_rejection
+        (workflow_rejection_error_json
+           ~typed_outcome:
+             (Keeper_tool_outcome.Error
+                { reason = "keeper_task_release rejected: task_id required" })
+           "task_id is required.")
+    else if summary = ""
+    then
+      (* The next owner reads this and nothing else about where the work
+         stands, so an empty summary is refused here rather than stored. *)
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Workflow_rejection
+        (workflow_rejection_error_json
+           ~typed_outcome:
+             (Keeper_tool_outcome.Error
+                { reason = "keeper_task_release rejected: summary required" })
+           "summary is required. Say where the task stands so the next owner \
+            can start from it. Example: summary='reproduced on the merged-cell \
+            table, fix not started'.")
+    else (
+      let args_for_transition =
+        [ "task_id", `String task_id
+        ; "action", `String "release"
+        ; ( "handoff_context"
+          , `Assoc
+              (("summary", `String summary)
+               :: (optional_field "reason" @ optional_field "next_step")) )
+        ]
+      in
+      let transition_result =
+        Task.Tool.handle_transition
+          ~tool_name:"keeper_task_release"
+          ~start_time:0.0
+          { Task.Tool.config
+          ; agent_name = keeper_agent_sender ~meta
+          ; sw = Eio_context.get_switch_opt ()
+          }
+          (`Assoc args_for_transition)
+      in
+      let payload =
+        keeper_tool_result_json
+          ~typed_outcome:
+            (match transition_result with
+             | Tool_result.Completed _ -> Some Keeper_tool_outcome.Progress
+             | Tool_result.Deferred _ -> None
+             | Tool_result.Failed _ ->
+               (* A refused release (not the owner, stale version) left the
+                  keeper holding the task, so it is not progress. *)
+               Some
+                 (Keeper_tool_outcome.Error
+                    { reason = Tool_result.message transition_result }))
+          transition_result
+      in
+      match transition_result with
+      | Tool_result.Completed _ -> Keeper_tool_execution.success payload
+      | Tool_result.Deferred { metadata; _ } ->
+        Keeper_tool_execution.deferred_data ?metadata (Tool_result.data transition_result)
+      | Tool_result.Failed { class_; _ } ->
+        Keeper_tool_execution.failure ~class_ payload)
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in

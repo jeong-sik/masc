@@ -437,6 +437,13 @@ let explicit_metadata : (string * metadata) list =
       hidden_runtime_tool
         "Keeper task-completion runtime tool; callable but hidden from the public MCP schema surface."
         complete_task_tool );
+    ( "keeper_task_release",
+      (* Same permission as [masc_transition], whose release action this
+         covers: picking a different one would let the same release succeed
+         on one surface and fail on the other. *)
+      hidden_runtime_tool
+        "Keeper task-release runtime tool; callable but hidden from the public MCP schema surface."
+        complete_task_tool );
     ( "keeper_tools_list",
       hidden_runtime_tool
         "Keeper tool-list runtime tool; callable but hidden from the public MCP schema surface."

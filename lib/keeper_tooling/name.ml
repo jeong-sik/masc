@@ -13,6 +13,7 @@ type t =
   | Task_claim
   | Task_create
   | Task_done
+  | Task_release
   | Tasks_audit
   | Tasks_list
 
@@ -21,6 +22,7 @@ let to_string = function
   | Task_claim -> "keeper_task_claim"
   | Task_create -> "keeper_task_create"
   | Task_done -> "keeper_task_done"
+  | Task_release -> "keeper_task_release"
   | Tasks_audit -> "keeper_tasks_audit"
   | Tasks_list -> "keeper_tasks_list"
 ;;
@@ -30,6 +32,7 @@ let of_string = function
   | "keeper_task_claim" -> Some Task_claim
   | "keeper_task_create" -> Some Task_create
   | "keeper_task_done" -> Some Task_done
+  | "keeper_task_release" -> Some Task_release
   | "keeper_tasks_audit" -> Some Tasks_audit
   | "keeper_tasks_list" -> Some Tasks_list
   | _ -> None

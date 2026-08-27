@@ -169,9 +169,7 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_execution.success_data
          (Keeper_tool_in_process_runtime.handle_time_now ~args))
   | Tool_tools_list ->
-    Some
-      (Keeper_tool_execution.success
-         (Keeper_tool_in_process_runtime.handle_tools_list ~meta:ctx.meta ~args))
+    Some (Keeper_tool_in_process_runtime.handle_tools_list ~meta:ctx.meta ~args)
   | Tool_context_status ->
     Some
       (Keeper_tool_execution.success

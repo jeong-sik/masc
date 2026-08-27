@@ -180,3 +180,10 @@ val with_registry_meta
     by category plus descriptor_surface metadata for executor/policy/schema
     discovery. *)
 val keeper_tools_list_json : meta:Keeper_meta_contract.keeper_meta -> string
+
+val keeper_tools_search_json
+  :  meta:Keeper_meta_contract.keeper_meta
+  -> query:string
+  -> (Yojson.Safe.t, Keeper_capability_search.error) result
+(** Search only the same already-authorized descriptor set rendered by
+    {!keeper_tools_list_json}. *)

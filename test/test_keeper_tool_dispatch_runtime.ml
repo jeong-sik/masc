@@ -442,6 +442,11 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     | None -> fail ("missing descriptor_surface entry for " ^ internal_name)
   in
   let find_descriptor = find_descriptor_in descriptor_surface in
+  let tools_list = find_descriptor "keeper_tools_list" in
+  check string
+    "tools_list schema authority is the TOML registry"
+    "canonical_registry"
+    (string_member "input_schema_source" tools_list);
   let descriptor_for_internal internal_name =
     match KTD.descriptors_for_internal internal_name with
     | descriptor :: _ -> descriptor
@@ -605,6 +610,99 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     Yojson.Safe.Util.(member "required" empty_shape |> to_list |> List.length);
   check bool "empty schema has no shape errors" true
     (Yojson.Safe.Util.member "schema_errors" empty_shape = `Null);
+  let search =
+    match KES.keeper_tools_search_json ~meta ~query:"current time" with
+    | Ok value -> value
+    | Error error ->
+      fail
+        (Yojson.Safe.to_string
+           (Masc.Keeper_capability_search.error_to_yojson error))
+  in
+  let matches = Yojson.Safe.Util.(member "matches" search |> to_list) in
+  check bool "FTS returns a ranked result" true (matches <> []);
+  check string
+    "FTS finds the authorized time capability"
+    "keeper_time_now"
+    Yojson.Safe.Util.(List.hd matches |> member "matched_name" |> to_string);
+  check int
+    "rank is explicit and one-based"
+    1
+    Yojson.Safe.Util.(List.hd matches |> member "rank" |> to_int);
+  let unrestricted_files =
+    match KES.keeper_tools_search_json ~meta ~query:"file" with
+    | Ok value -> Yojson.Safe.Util.(member "matches" value |> to_list)
+    | Error error ->
+      fail
+        (Yojson.Safe.to_string
+           (Masc.Keeper_capability_search.error_to_yojson error))
+  in
+  check bool
+    "unrestricted FTS can find the filesystem capability"
+    true
+    (List.exists
+       (fun row ->
+          String.equal
+            "Read"
+            Yojson.Safe.Util.(member "matched_name" row |> to_string))
+       unrestricted_files);
+  let board_only = { meta with tool_groups = Some [ "board" ] } in
+  let filtered =
+    match KES.keeper_tools_search_json ~meta:board_only ~query:"file" with
+    | Ok value -> Yojson.Safe.Util.(member "matches" value |> to_list)
+    | Error error ->
+      fail
+        (Yojson.Safe.to_string
+           (Masc.Keeper_capability_search.error_to_yojson error))
+  in
+  check bool
+    "FTS never returns the off-surface filesystem capability"
+    false
+    (List.exists
+       (fun row ->
+          String.equal
+            "Read"
+            Yojson.Safe.Util.(member "matched_name" row |> to_string))
+       filtered);
+  let no_substring =
+    match KES.keeper_tools_search_json ~meta ~query:"fil" with
+    | Ok value -> value
+    | Error error ->
+      fail
+        (Yojson.Safe.to_string
+           (Masc.Keeper_capability_search.error_to_yojson error))
+  in
+  check int
+    "FTS does not silently add substring matching"
+    0
+    Yojson.Safe.Util.(member "match_count" no_substring |> to_int);
+  (match KES.keeper_tools_search_json ~meta ~query:"\"unterminated" with
+   | Error (Masc.Keeper_capability_search.Invalid_query _) -> ()
+   | Error error ->
+     failf
+       "malformed FTS query has wrong error: %s"
+       (Yojson.Safe.to_string
+          (Masc.Keeper_capability_search.error_to_yojson error))
+   | Ok _ -> fail "malformed FTS query was accepted");
+  let empty =
+    Masc.Keeper_tool_in_process_runtime.handle_tools_list
+      ~meta
+      ~args:(`Assoc [ "query", `String "  " ])
+  in
+  (match empty.KTE.disposition with
+   | Tool_result.Failed Tool_result.Policy_rejection -> ()
+   | Tool_result.Failed class_ ->
+     failf
+       "empty query has wrong failure class: %s"
+       (Tool_result.tool_failure_class_to_string class_)
+   | Tool_result.Completed () | Tool_result.Deferred () ->
+     fail "empty query did not produce a typed rejection");
+  check string
+    "empty query has a typed error kind"
+    "empty_query"
+    (match empty.data with
+     | Some data ->
+       Yojson.Safe.Util.(data |> member "error" |> member "kind" |> to_string)
+     | None -> fail "empty query omitted typed rejection data");
   ()
 
 let test_execute_with_outcome_missing_file_is_failure () =
@@ -4717,6 +4815,56 @@ let composition_invocation ~completion =
     ~completion
 ;;
 
+let test_tools_search_error_reaches_agent_core_as_typed_payload () =
+  with_exec_fixture
+    "tools-search-agent-core-error"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       let tool =
+         match find_tool_by_name tools "keeper_tools_list" with
+         | Some tool -> tool
+         | None -> fail "keeper_tools_list is absent from Agent Core bundle"
+       in
+       let reject input =
+         match
+           Agent_core.Tool.execute
+             ~invocation:
+               (composition_invocation
+                  ~completion:Agent_core.Tool_contract.Continue_after_success)
+             tool
+             input
+         with
+         | Ok _ -> fail "invalid capability search unexpectedly completed"
+         | Error error ->
+           check
+             (option bool)
+             "policy rejection remains deterministic"
+             (Some true)
+             (Option.map
+                (fun class_ -> class_ = Agent_core.Types.Deterministic)
+                error.Agent_core.Types.error_class);
+           parse_json error.Agent_core.Types.message
+           |> Yojson.Safe.Util.member "masc.payload"
+       in
+       let empty = reject (`Assoc [ "query", `String "  " ]) in
+       check string
+         "Agent Core receives the typed search error kind"
+         "empty_query"
+         Yojson.Safe.Util.(empty |> member "error" |> member "kind" |> to_string);
+       let wrong_type = reject (`Assoc [ "query", `Int 3 ]) in
+       check string
+         "descriptor validation reaches Agent Core as typed data"
+         "invalid_args"
+         Yojson.Safe.Util.(wrong_type |> member "reason" |> to_string))
+;;
+
 let one_node_clock_composition =
   {|[[compositions]]
 name = "clock"
@@ -7085,6 +7233,8 @@ let () =
     ("keeper_tools_list_json", [
       test_case "uses typed groups" `Quick
         test_keeper_tools_list_json_uses_typed_groups;
+      test_case "Agent Core receives typed search failures" `Quick
+        test_tools_search_error_reaches_agent_core_as_typed_payload;
       test_case "descriptor route miss is typed runtime failure" `Quick
         test_descriptor_route_miss_payload_is_typed_runtime_failure;
     ]);

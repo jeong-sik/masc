@@ -6373,20 +6373,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
          rather than instead of it -- one provider refusing is not a reason
          to take the others off the screen, and the message that matters
          most here is the one telling them what to do about it. *)
-      | Error detail -> state.identity_attempt_error <- Some detail)
+      | Error detail -> state.identity_attempt_error <- Some (Masc_tui_types.Notice_bad, detail))
   | Identity_app_saved (provider_id, result) ->
     state.identity_attempt_error <-
       Some
         (match result with
          | Ok 0 ->
-           Printf.sprintf
-             "%s: app recorded. No scopes given, so the service's own list is \
-              what will be asked for."
-             provider_id
+           ( Masc_tui_types.Notice_ok
+           , Printf.sprintf
+               "%s: app recorded. No scopes given, so the service's own list \
+                is what will be asked for."
+               provider_id )
          | Ok count ->
-           Printf.sprintf "%s: app recorded, asking for %d scope%s." provider_id
-             count (if count = 1 then "" else "s")
-         | Error detail -> Printf.sprintf "%s: %s" provider_id detail)
+           ( Masc_tui_types.Notice_ok
+           , Printf.sprintf "%s: app recorded, asking for %d scope%s."
+               provider_id count (if count = 1 then "" else "s") )
+         | Error detail ->
+           (Masc_tui_types.Notice_bad, Printf.sprintf "%s: %s" provider_id detail))
   | Identity_refreshed (keeper_name, result) -> (
       match result with
       (* Re-read rather than patch what is on screen: the catalog the server
@@ -8015,8 +8018,7 @@ let main () =
            (* One line: a copied secret carries the newline that ended it,
               and a field is not a place for one. *)
            let text =
-             String.trim
-               (Terminal_text.single_line paste.Masc_tui_paste.text)
+             Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text
            in
            (match state.identity_app_form with
             | Some form ->

@@ -3930,16 +3930,29 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   (* Built by the shared function and only coloured here: the key handler
      counts these rows to know where the list starts, and two places wrapping
      the same text at their own idea of the width would disagree. *)
-  let attempt =
-    Masc_tui_types.identity_notice ~cols
-      (Option.map Terminal_text.single_line state.identity_attempt_error)
+  let attempt_kind =
+    Option.map fst state.identity_attempt_error
   in
   let attempt =
+    Masc_tui_types.identity_notice ~cols
+      (Option.map
+         (fun (kind, text) -> (kind, Terminal_text.single_line text))
+         state.identity_attempt_error)
+  in
+  (* Green when it worked and red when it did not. One line reports both, and
+     drawing a recorded app in the colour of a refusal is a report that reads
+     as its own opposite. *)
+  let attempt =
+    let body =
+      match attempt_kind with
+      | Some Masc_tui_types.Notice_ok -> Theme.ok ()
+      | Some Masc_tui_types.Notice_bad | None -> Theme.bad ()
+    in
     List.mapi
       (fun index line ->
-        if index = List.length attempt - 1
-        then Ansi.dim ^ line ^ Ansi.reset
-        else Theme.bad () ^ line ^ Ansi.reset)
+        if line = "" then line
+        else if index = List.length attempt - 1 then Ansi.dim ^ line ^ Ansi.reset
+        else body ^ line ^ Ansi.reset)
       attempt
   in
   (* The query, and what it left. Shown even when it matches nothing --

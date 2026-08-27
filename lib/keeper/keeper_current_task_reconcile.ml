@@ -160,14 +160,26 @@ let sync_current_task_id_from_backlog ~(config : Workspace.config)
            (Keeper_owner_reducer.Set_current_task
               { task_id = desired; updated_at = Masc_domain.now_iso () })
        with
-       | Ok (Some updated_meta) ->
+       | Ok (Some _persisted) ->
          Log.Keeper.debug
            ~keeper_name:meta.name
            "reconciled current_task_id=%s from backlog ownership"
            (match desired with
             | Some task_id -> Keeper_id.Task_id.to_string task_id
             | None -> "(cleared)");
-         updated_meta
+         (* Update the one field this function is named for, on the caller's
+            meta. [apply_meta] answers with the committed owner projection,
+            which is durable JSON: that file omits the TOML-owned fields on
+            purpose ([Keeper_meta_contract.effective_meta_result]), so every
+            one of them -- sandbox_profile, network_mode, allowed_paths,
+            instructions -- comes back as the decoder's default. Returning it
+            handed the turn a meta that had silently lost its overlay, and a
+            keeper whose TOML said docker then dispatched Execute to the host.
+
+            The two failure arms below already keep [meta]; only success
+            replaced it, so the profile survived exactly the turns where the
+            task id happened to match and this branch never ran. *)
+         { meta with current_task_id = desired }
        | Ok None ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string WriteMetaFailures)

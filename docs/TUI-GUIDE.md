@@ -290,8 +290,12 @@ Before the first response the page says `(not loaded yet)`. A successful empty
 response says `(no keeper lane snapshots)`. A failed refresh leaves the prior
 rows on screen, adds the error in red, and says that an empty body is not a
 reading. Move the lane cursor with `j` / `k`. Right or `Enter` opens that
-Keeper in the existing Keeper detail view. If the lane's Keeper is not in the
-current local roster, the key does nothing.
+Keeper in the existing Keeper detail view. `c` or `m` opens its chat directly;
+`Esc` returns to the same Lanes selection. Both paths join the lane's Keeper
+name exactly to the current local roster. If that Keeper is absent, the keys do
+not open another row; the Lanes pane keeps its selection and names the missing
+Keeper in an action error. Moving the lane cursor, receiving a new lane
+reading, or observing a changed roster clears that target-specific error.
 
 ### Keeper detail
 
@@ -871,6 +875,7 @@ Per surface:
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
 | Right / `Enter` | Keepers | Open keeper detail |
 | Right / `Enter` | Lanes | Open the selected lane's Keeper detail |
+| `c` / `m` | Lanes | Open the selected lane's Keeper chat; `Esc` returns to Lanes |
 | Right / `Enter` | Board | Open post body |
 | `Ctrl-W` | Board read, Resources | Switch the focused pane |
 | `h` / `l` | Wide Board read | Focus post list / post detail |
@@ -920,6 +925,7 @@ Within a surface:
 
   Keepers   --Right/Enter-->  Keeper detail  --l-->  Keeper logs
   Lanes     --Right/Enter--^
+  Lanes     --c/m----------->  Message input  --Esc-->  Lanes
 
   Keeper list/detail  --c-->  Message input
 

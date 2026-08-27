@@ -766,12 +766,13 @@ let identity_login_landed ~providers ~login =
       | Identity_declared _ | Identity_unreadable _ -> false)
     providers
 
-(** Where [Esc] returns after the chat pane was opened. Keeping only the two
+(** Where [Esc] returns after the chat pane was opened. Keeping only the three
     legal destinations makes a new Keeper sub-view an explicit compiler error
     instead of silently becoming the detail view. *)
 type keeper_chat_return =
   | Keeper_chat_return_list
   | Keeper_chat_return_detail
+  | Keeper_chat_return_lanes
 
 (** Top-level TUI surface. *)
 (* A picture currently on the terminal. Only the drawn case: a refusal has
@@ -924,6 +925,9 @@ let surface_needs : surface -> surface_needs = function
 type scrolled = {
   sc_count : int;  (** rows of content the surface has *)
   sc_chrome : int;  (** rows it spends on its own frame *)
+  sc_overflow_takes_row : bool;
+      (** [true] when an overflow indicator is drawn from the remaining body
+          instead of already being reserved in [sc_chrome]. *)
   sc_preview_keep : int option;
       (** rows the list keeps when the surface draws a preview under it, or
           [None] when the list has the whole body. A surface that adds a
@@ -932,11 +936,14 @@ type scrolled = {
           wildcard branch can. *)
 }
 
-(* These seven draw the same frame: a title, a column row, three dividers, the
-   scroll line and the footer -- and two more rows when a load error is on
-   screen. The number is the drawing's; a surface whose chrome moves has to
-   move it here in the same change. *)
+(* These seven draw the same fixed frame around their content, and spend two
+   more rows when a load error is on screen. A conditional overflow row is
+   declared separately in [sc_overflow_takes_row]; a surface whose chrome
+   moves has to move the typed layout in the same change. *)
 let listing_chrome ~error = if Option.is_some error then 9 else 7
+let lanes_listing_chrome ~load_error ~action_error =
+  listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
+
 let runtime_listing_chrome ~error = listing_chrome ~error + 2
 let system_log_listing_chrome ~error = listing_chrome ~error + 1
 
@@ -1276,6 +1283,7 @@ type state = {
      shows as "no projection" rather than as an empty credential set. *)
   mutable keeper_secrets: Tui_decode.keeper_secret_projection list;
   mutable lanes_error: string option;
+  mutable lanes_action_error: string option;
   mutable lanes_scroll: int;
   mutable lanes_cursor: int;
   (* What is waiting on a verdict. Loaded when the surface is opened rather
@@ -1590,6 +1598,32 @@ let keeper_reading (state : state) (keeper : keeper) :
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+(** The typed Keeper identity on the selected Lanes row. *)
+let selected_lane_name (state : state) =
+  match state.lanes with
+  | None -> None
+  | Some snapshot ->
+      Option.map
+        (fun lane -> lane.Tui_decode.kl_keeper)
+        (List.nth_opt snapshot.Tui_decode.kls_lanes state.lanes_cursor)
+
+(** The roster Keeper named by the selected Lanes row, together with that
+    Keeper's roster cursor. The two lists can have different orders, so the
+    lane's typed [kl_keeper] identity is joined exactly to [k_name]; a numeric
+    cursor is never copied between them. *)
+let selected_lane_keeper (state : state) =
+  match selected_lane_name state with
+  | None -> None
+  | Some keeper_name ->
+           let rec find cursor = function
+             | [] -> None
+             | (keeper : keeper) :: remaining ->
+                 if String.equal keeper.k_name keeper_name then
+                   Some (cursor, keeper)
+                 else find (cursor + 1) remaining
+           in
+           find 0 state.keepers
+
 (** Whether a goal lifecycle arm targets this goal. Answered here rather
     than at the renderer so the renderer never reads [pg_id] outside
     [Terminal_text] -- the sanitize guard counts every access, comparison
@@ -1792,6 +1826,7 @@ let create_state
   lanes = None;
   keeper_secrets = [];
   lanes_error = None;
+  lanes_action_error = None;
   lanes_scroll = 0;
   lanes_cursor = 0;
   system_logs = None;
@@ -2136,9 +2171,26 @@ let surface_body_rows (state : state) ~terminal_rows =
      - agenda_chrome_rows state)
 ;;
 
+let lanes_scrolled (state : state) =
+  { sc_count =
+      (match state.lanes with
+       | None -> 0
+       | Some snapshot -> List.length snapshot.Tui_decode.kls_lanes)
+  ; sc_chrome =
+      lanes_listing_chrome ~load_error:state.lanes_error
+        ~action_error:state.lanes_action_error
+  ; sc_overflow_takes_row = true
+  ; sc_preview_keep = None
+  }
+
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
-    Some { sc_count = count; sc_chrome = listing_chrome ~error; sc_preview_keep = None }
+    Some
+      { sc_count = count
+      ; sc_chrome = listing_chrome ~error
+      ; sc_overflow_takes_row = false
+      ; sc_preview_keep = None
+      }
   in
   function
   | System_logs ->
@@ -2148,6 +2200,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
              | None -> 0
              | Some s -> List.length s.Tui_decode.sys_entries)
         ; sc_chrome = system_log_listing_chrome ~error:state.system_logs_error
+        ; sc_overflow_takes_row = false
         ; sc_preview_keep = None
         }
   | Verification ->
@@ -2157,11 +2210,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
           (match state.verification with
            | None -> 0
            | Some s -> List.length s.Tui_decode.vs_requests)
-  | Lanes ->
-      listing ~error:state.lanes_error
-        (match state.lanes with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.kls_lanes)
+  | Lanes -> Some (lanes_scrolled state)
   | Harness ->
       if Option.is_some state.harness_detail then None
       else
@@ -2183,6 +2232,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         ; sc_chrome =
             listing_chrome ~error:state.changes_error
             + changes_budget_note_rows state
+        ; sc_overflow_takes_row = false
         ; sc_preview_keep = Some changes_preview_keep_rows
         }
   | Connectors ->
@@ -2197,6 +2247,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
              | None -> 0
              | Some s -> List.length s.Tui_decode.rss_candidates)
         ; sc_chrome = runtime_listing_chrome ~error:state.runtime_surface_error
+        ; sc_overflow_takes_row = false
         ; sc_preview_keep = None
         }
   | Tools ->

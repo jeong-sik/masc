@@ -59,8 +59,8 @@ let test_plain_listing_footer_shape () =
     (Masc_tui_keys.footer_hints System_logs)
 
 let test_lanes_footer_opens_the_selected_keeper () =
-  check str "Lanes names its Keeper detail jump"
-    "j/k:move  Right / Enter:detail  Esc:overview  r:refresh  Tab:next  q:quit"
+  check str "Lanes names its Keeper detail and chat jumps"
+    "j/k:move  Right / Enter:detail  c / m:chat  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_harness_footer_links_to_overview_task () =

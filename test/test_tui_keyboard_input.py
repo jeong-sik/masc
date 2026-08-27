@@ -342,6 +342,28 @@ def wait_for_fixture_event(
     return True
 
 
+def wait_for_fixture_served(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    fixture: SequencedHttpResponse,
+    *,
+    after: int,
+    description: str,
+    timeout: float = 3.0,
+) -> None:
+    """Wait for a callable GET fixture without relying on POST capture."""
+    deadline = time.monotonic() + timeout
+    while fixture.served <= after:
+        read_available(master_fd, output)
+        if process.poll() is not None:
+            raise AssertionError(f"TUI exited before {description}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            raise AssertionError(f"timed out waiting for {description}")
+        select.select([master_fd], [], [], min(0.05, remaining))
+
+
 def write_all(master_fd: int, output: bytearray, data: bytes) -> None:
     """Write every byte, draining the TUI as it goes.
 
@@ -5878,13 +5900,16 @@ def keeper_lane_row(
 def keeper_lanes_interaction(
     fixtures: HttpFixtures,
     gate: GatedHttpResponse,
+    history: SequencedHttpResponse,
+    memory: SequencedHttpResponse,
+    file_changes: SequencedHttpResponse,
 ) -> Interaction:
-    """One visit distinguishes unread, empty, failed, and populated lanes."""
+    """One visit covers lane readings, exact chat, and an unmatched Keeper."""
 
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
-        _slave_fd: int,
+        slave_fd: int,
         output: bytearray,
         _base_path: str,
     ) -> None:
@@ -6080,6 +6105,63 @@ def keeper_lanes_interaction(
                 "successful lane shrink left no selected Keeper row: "
                 f"{shrunk!r}"
             )
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=140,
+            needle=b"MASC Lanes (1 keepers)",
+        )
+        chat_get_counts = history.served, memory.served, file_changes.served
+        lane_chat = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"c",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+        lane_chat_plain = CSI_RE.sub(b"", lane_chat)
+        if b"Esc:Lanes" not in lane_chat_plain:
+            raise AssertionError(
+                f"chat opened from Lanes did not name its return: {lane_chat!r}"
+            )
+        wait_for_fixture_served(
+            process,
+            master_fd,
+            output,
+            history,
+            after=chat_get_counts[0],
+            description="alpha chat history GET",
+        )
+        wait_for_fixture_served(
+            process,
+            master_fd,
+            output,
+            memory,
+            after=chat_get_counts[1],
+            description="alpha memory journal GET",
+        )
+        wait_for_fixture_served(
+            process,
+            master_fd,
+            output,
+            file_changes,
+            after=chat_get_counts[2],
+            description="alpha chat file changes GET",
+        )
+        lanes_return = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b",
+            b"MASC Lanes (1 keepers)",
+        )
+        if banded_alpha.search(lanes_return) is None:
+            raise AssertionError(
+                "Esc from lane chat did not preserve the selected lane: "
+                f"{lanes_return!r}"
+            )
         right_detail = send_and_wait(
             process,
             master_fd,
@@ -6105,6 +6187,87 @@ def keeper_lanes_interaction(
             raise AssertionError(
                 "Enter did not preserve the lane-to-Keeper selection: "
                 f"{enter_detail!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        tab_until(process, master_fd, output, b"MASC Lanes")
+        orphan_count = 24
+        fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
+            [
+                keeper_lane_row(
+                    f"orphan-{index:02d}",
+                    phase="running",
+                    turn_phase="idle",
+                    idle_seconds=0,
+                    runtime_state=None,
+                    selected_model=None,
+                    diagnosis=None,
+                )
+                for index in range(orphan_count)
+            ]
+        )
+        orphan = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"r",
+            b"orphan-00",
+        )
+        os.write(master_fd, b"j" * (orphan_count - 1))
+        wait_for_terminal_input_consumed(slave_fd)
+        drain_until_quiet(process, master_fd, output)
+        orphan_name = f"orphan-{orphan_count - 1:02d}".encode()
+        orphan = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=31,
+            columns=140,
+            needle=orphan_name,
+            controls=(FULL_REDRAW,),
+        )
+        banded_orphan = re.compile(rb"\x1b\[7m[^\x1b\n]*" + re.escape(orphan_name))
+        if banded_orphan.search(orphan) is None:
+            raise AssertionError(f"orphan lane was not selected: {orphan!r}")
+        chat_get_counts = history.served, memory.served, file_changes.served
+        os.write(master_fd, b"c")
+        wait_for_terminal_input_consumed(slave_fd)
+        drain_until_quiet(process, master_fd, output)
+        orphan_after_c = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=31,
+            columns=140,
+            needle=b"Cannot open chat: Keeper orphan-23 is not registered",
+            controls=(FULL_REDRAW,),
+        )
+        if banded_orphan.search(orphan_after_c) is None:
+            raise AssertionError(
+                f"unmatched lane c left its selected row: {orphan_after_c!r}"
+            )
+        if chat_get_counts != (
+            history.served,
+            memory.served,
+            file_changes.served,
+        ):
+            raise AssertionError("unmatched lane c loaded another Keeper's chat data")
+        os.write(master_fd, b"k")
+        wait_for_terminal_input_consumed(slave_fd)
+        drain_until_quiet(process, master_fd, output)
+        moved_from_error = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=32,
+            columns=140,
+            needle=b"orphan-22",
+            controls=(FULL_REDRAW,),
+        )
+        if b"Cannot open chat" in CSI_RE.sub(b"", moved_from_error):
+            raise AssertionError("moving the lane cursor kept a stale action error")
+        if re.search(rb"\x1b\[7m[^\x1b\n]*orphan-22", moved_from_error) is None:
+            raise AssertionError(
+                f"moving after the action error lost its selected row: {moved_from_error!r}"
             )
         os.write(master_fd, b"q")
 
@@ -7802,6 +7965,12 @@ def run_keyboard_regression(executable: str) -> None:
     lanes_fixtures = keeper_runtime_http_fixtures()
     lanes_gate = GatedHttpResponse(keeper_lanes_response([]))
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
+    lanes_history = SequencedHttpResponse([(200, [])])
+    lanes_memory = SequencedHttpResponse([(200, {"keeper": "alpha", "entries": []})])
+    lanes_file_changes = SequencedHttpResponse([file_changes_alpha_response()])
+    lanes_fixtures["/api/v1/keepers/alpha/chat/history"] = lanes_history
+    lanes_fixtures["/api/v1/keepers/alpha/memory-journal?limit=20"] = lanes_memory
+    lanes_fixtures[FILE_CHANGES_ALPHA_PATH] = lanes_file_changes
     runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
         runtime_http_fixtures()
     )
@@ -7935,9 +8104,16 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="Keeper lanes unread, failed, empty, and populated",
-        interact=keeper_lanes_interaction(lanes_fixtures, lanes_gate),
+        description="Keeper lanes readings, detail, and exact chat navigation",
+        interact=keeper_lanes_interaction(
+            lanes_fixtures,
+            lanes_gate,
+            lanes_history,
+            lanes_memory,
+            lanes_file_changes,
+        ),
         http_fixtures=lanes_fixtures,
+        extra_args=("--tool-view", "full"),
     )
     run_terminal_scenario(
         executable,

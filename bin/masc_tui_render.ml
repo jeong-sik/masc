@@ -3663,7 +3663,8 @@ let render_lanes (state : state) =
     | None -> []
     | Some snapshot -> snapshot.Tui_decode.kls_lanes
   in
-  let shown = List.length lanes in
+  let layout = lanes_scrolled state in
+  let shown = layout.sc_count in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
@@ -3692,12 +3693,18 @@ let render_lanes (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let chrome_rows = listing_chrome ~error:state.lanes_error in
+  (match state.lanes_action_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:(Theme.warn ())
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
   (* The overflow indicator spends a content row rather than growing the
      frame past its budget, where the truncation's casualty was the footer. *)
-  let base_height = max 1 (rows - chrome_rows) in
   let content_height =
-    if shown > base_height then max 1 (base_height - 1) else base_height
+    Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+      ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
+      ~overflow_takes_row:layout.sc_overflow_takes_row
   in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.lanes_scroll max_scroll) in
@@ -5159,7 +5166,8 @@ let render_keeper_message (state : state) =
       | None ->
           (match state.msg_return with
            | Keeper_chat_return_list -> "Esc:list"
-           | Keeper_chat_return_detail -> "Esc:detail")
+           | Keeper_chat_return_detail -> "Esc:detail"
+           | Keeper_chat_return_lanes -> "Esc:Lanes")
     in
     let switch_hint =
       match next_keeper_message_target state with

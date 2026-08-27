@@ -292,8 +292,7 @@ let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
     | None -> None, None, None, None
   in
   `Assoc
-    ([ "mode", `String "observation_only"
-     ; "active_keepers", `Int active_keepers
+    ([ "active_keepers", `Int active_keepers
      ; "nofile_soft_limit", option_int_to_yojson soft_limit
      ; "process_open_fds", option_int_to_yojson open_fds
      ; "process_remaining_fds", option_int_to_yojson process_remaining

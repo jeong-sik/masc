@@ -258,16 +258,16 @@ let test_invalid_optional_values_are_diagnostic () =
        (Skill_document.diagnostics null_compatibility))
 ;;
 
-let test_allowed_tools_is_preserved_as_experimental_metadata () =
+let test_allowed_tools_preserves_skills_ref_string_vector () =
   let valid =
     Skill_document.decode
-      ~directory_name:"allowed-tools"
-      "---\nname: allowed-tools\ndescription: A test skill\nallowed-tools: Bash(jq:*) Bash(git:*)\n---\nBody"
+      ~directory_name:"my-skill"
+      "---\nname: my-skill\ndescription: A test skill\nallowed-tools: Bash(jq:*) Bash(git:*)\n---\nBody"
   in
   check_conformance "conformant" valid;
   let document = document_exn valid in
   Alcotest.(check (option string))
-    "official skills-ref value"
+    "skills-ref positive parser vector"
     (Some "Bash(jq:*) Bash(git:*)")
     document.allowed_tools;
   Alcotest.(check (list (pair string string)))
@@ -277,14 +277,21 @@ let test_allowed_tools_is_preserved_as_experimental_metadata () =
   Alcotest.(check int)
     "not treated as an extension"
     0
-    (List.length document.extensions);
+    (List.length document.extensions)
+;;
+
+(* The Agent Skills specification owns the string shape. The reference parser
+   copies the YAML value without validating that shape, so its positive vector
+   does not define null or list behavior. MASC keeps a non-string document
+   usable with an explicit conformance diagnostic and no observed value. *)
+let test_allowed_tools_non_string_is_masc_conformance_diagnostic () =
   List.iter
     (fun (label, value) ->
        let decoded =
          Skill_document.decode
            ~directory_name:"allowed-tools"
            (Printf.sprintf
-              "---\nname: allowed-tools\ndescription: Reject a non-string official field.\nallowed-tools: %s\n---\nBody"
+              "---\nname: allowed-tools\ndescription: Diagnose a non-string allowed-tools value.\nallowed-tools: %s\n---\nBody"
               value)
        in
        check_conformance "runtime_compatible" decoded;
@@ -450,9 +457,13 @@ let () =
             `Quick
             test_invalid_optional_values_are_diagnostic
         ; Alcotest.test_case
-            "allowed-tools experimental metadata"
+            "allowed-tools skills-ref string vector"
             `Quick
-            test_allowed_tools_is_preserved_as_experimental_metadata
+            test_allowed_tools_preserves_skills_ref_string_vector
+        ; Alcotest.test_case
+            "allowed-tools non-string MASC policy"
+            `Quick
+            test_allowed_tools_non_string_is_masc_conformance_diagnostic
         ; Alcotest.test_case
             "foreign and duplicate metadata"
             `Quick

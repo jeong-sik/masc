@@ -83,9 +83,9 @@ type t = private
   ; license : string option
   ; compatibility : string option
   ; allowed_tools : string option
-        (** Exact [allowed-tools] frontmatter string. This experimental field is
-            preserved for observation only; it does not grant tools or narrow
-            the runtime tool surface. *)
+        (** YAML-decoded [allowed-tools] string. MASC preserves this
+            experimental field for observation without interpreting its tokens;
+            it does not grant tools or narrow the runtime tool surface. *)
   ; metadata : (string * string) list
         (** Unique, specification-conforming string metadata. Ambiguous
             duplicate keys and non-string values are excluded here. *)

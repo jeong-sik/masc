@@ -745,6 +745,13 @@ let load_keeper_tool_approvals ~(host : string) ~(port : int) :
   | Error err -> Error ("tool approvals load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_tool_approvals json
 
+(** Load the durable Gate: pending approvals and both lane modes. *)
+let load_dashboard_gate ~(host : string) ~(port : int) :
+    (Tui_decode.gate_snapshot, string) result =
+  match fetch_dashboard_gate ~host ~port with
+  | Error err -> Error ("gate load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_gate_snapshot json
+
 (** Load the keepers whose approval gate is moved off [auto]. *)
 let load_keeper_tool_approval_modes ~(host : string) ~(port : int) :
     ((string * string) list, string) result =

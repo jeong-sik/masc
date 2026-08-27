@@ -3511,6 +3511,8 @@
 
 (include stanzas/test_rest_approvals_because.inc)
 
+(include stanzas/test_keeper_turns_route.inc)
+
 (include stanzas/test_keeper_ask.inc)
 
 (include stanzas/test_keeper_ask_store.inc)

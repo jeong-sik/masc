@@ -344,6 +344,63 @@ let handle_keeper_tool_approvals_list _state request reqd =
        ])
 ;;
 
+(* Which keepers are mid-turn right now, one row per registered keeper. The
+   running-turn slot lives in the Keeper Owner (process memory), not in the
+   durable meta a keeper list is read from, so surfaces that want an
+   "answering now" badge poll this projection instead of growing the meta
+   contract. [started_at_unix] is the owner clock's epoch reading; the
+   consumer derives display age against its own clock (same policy as
+   [asked_at] above). An unreadable name census is an error response, not an
+   empty fleet: reading unreadable as "nobody is running" would hide every
+   badge exactly when the store is broken. *)
+let handle_keeper_turns_list state request reqd =
+  let config = Mcp_server.workspace_config state in
+  match Keeper_meta_store.keeper_names config with
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    respond_json_value_with_cors ~status:`Internal_server_error request reqd
+      (`Assoc
+         [ ( "error"
+           , `String
+               (Printf.sprintf "keeper name census failed: %s"
+                  (Printexc.to_string exn)) )
+         ])
+  | keeper_names ->
+    let row keeper_name =
+      match
+        Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name
+      with
+      | Error error ->
+        `Assoc
+          [ ("keeper_name", `String keeper_name)
+          ; ("status", `String "unavailable")
+          ; ( "detail"
+            , `String (Keeper_owner_registry.lookup_error_to_string error) )
+          ; ("turn", `Null)
+          ]
+      | Ok owner ->
+        let turn_json =
+          match Keeper_owner.turn_in_flight owner with
+          | None -> `Null
+          | Some (turn : Keeper_owner.turn_in_flight) ->
+            `Assoc
+              [ ("lane", `String (Keeper_owner.turn_lane_to_string turn.lane))
+              ; ("started_at_unix", `Float turn.started_at)
+              ]
+        in
+        `Assoc
+          [ ("keeper_name", `String keeper_name)
+          ; ("status", `String "ok")
+          ; ("turn", turn_json)
+          ]
+    in
+    respond_json_value_with_cors ~status:`OK request reqd
+      (`Assoc
+         [ ("schema", `String "masc.keeper_turns.v1")
+         ; ("keepers", `List (List.map row (List.sort String.compare keeper_names)))
+         ])
+;;
+
 (* The per-keeper approval stance. GET lists the overrides — a keeper absent
    from the list is [auto] — and POST sets one. Setting is logged at the
    server, not only echoed to the caller: [yolo] means every tool call runs

@@ -1259,6 +1259,12 @@ type state = {
      surface. *)
   mutable keeper_tool_approvals: Tui_decode.keeper_tool_approval list;
   mutable keeper_tool_approvals_error: string option;
+  (* Which keepers are mid-turn right now, from GET /api/v1/keepers/turns.
+     Rides the same tick as the approvals above, for the same reason: the
+     "answering now" badge is drawn from every surface, so it cannot wait
+     for the operator to open the keeper list. *)
+  mutable keeper_turns: Tui_decode.keeper_turn_row list;
+  mutable keeper_turns_error: string option;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -1861,6 +1867,8 @@ let create_state
   ask_submit_inflight = false;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
+  keeper_turns = [];
+  keeper_turns_error = None;
   gate_pending = [];
   gate_modes = None;
   gate_error = None;

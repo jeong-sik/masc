@@ -55,11 +55,7 @@ let keeper_owner_health_json () =
           (Printexc.to_string exn);
         []
     in
-    let lane_to_string = function
-      | Keeper_owner.Autonomous -> "autonomous"
-      | Keeper_owner.Chat_operation -> "chat_operation"
-      | Keeper_owner.Maintenance -> "maintenance"
-    in
+    let lane_to_string = Keeper_owner.turn_lane_to_string in
     let row keeper_name =
       match
         Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name

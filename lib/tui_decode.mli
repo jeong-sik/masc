@@ -880,6 +880,31 @@ val decode_keeper_tool_approvals :
 (** Decode the [{pending: [...]}] listing, oldest first, rejecting rows with
     missing or mistyped fields rather than dropping them. *)
 
+type keeper_turn_lane =
+  | Turn_lane_autonomous
+  | Turn_lane_chat_operation
+  | Turn_lane_maintenance
+
+type keeper_turn_state =
+  | Keeper_turn_idle
+  | Keeper_turn_running of { lane : keeper_turn_lane; started_at_unix : float }
+      (** [started_at_unix] is the server owner clock's epoch reading; derive
+          display age against the local clock, never trust a precomputed one. *)
+  | Keeper_turn_unavailable of string
+      (** The owner registry could not answer for this keeper — distinct from
+          idle so the badge never reads "not running" out of a lookup error. *)
+
+type keeper_turn_row = {
+  ktr_keeper_name : string;
+  ktr_state : keeper_turn_state;
+}
+
+val decode_keeper_turns :
+  Yojson.Safe.t -> (keeper_turn_row list, string) result
+(** Decode [GET /api/v1/keepers/turns] ([masc.keeper_turns.v1]): one row per
+    registered keeper. Unknown schema, status, or lane is an error, not a
+    silently defaulted row. *)
+
 (** Where one keeper points today. [ra_source] is the server's word:
     ["default"] rides the fleet default, ["explicit"] was assigned. *)
 type runtime_assignment = {

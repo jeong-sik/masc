@@ -2757,6 +2757,13 @@ let add_routes ~sw ~clock router =
        with_public_read (fun state _req reqd ->
          handle_keeper_tool_approvals_list state request reqd) request reqd)
 
+  (* Which keepers are mid-turn right now. Read-only Owner projection with
+     the same read authority as the listing above: it names activity, and
+     every mutation stays behind its own authed route. *)
+  |> Http.Router.get "/api/v1/keepers/turns" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_keeper_turns_list state request reqd) request reqd)
+
   (* The per-keeper approval stance the gate consults per call. Reading the
      overrides is a public-read projection like the listing above; setting
      one decides what a running turn may do next, so it carries the same

@@ -5,7 +5,7 @@
 // is not an identity contract. The roster therefore needs no disclaimer copy.
 
 import { html } from 'htm/preact'
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { Agent, Keeper } from '../types'
 import {
   agents,
@@ -75,6 +75,7 @@ import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
 import { hashForRoute, navigate } from '../router'
+import { keeperTurns, runningTurnFor, subscribeKeeperTurnsRefresh } from './keeper-turns-state'
 import { operatorSnapshot } from '../operator-store'
 import { FleetAsideActions, FleetQueueSection, FleetRotationSection } from './fleet-aside-extras'
 
@@ -810,8 +811,21 @@ export function countRuntimeKinds(
   }
 }
 
+
+// "3m" reads at a glance in a tooltip; second-precision would imply the
+// badge refreshes faster than its 5s poll actually does.
+function answeringElapsed(startedAtUnix: number): string {
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - startedAtUnix))
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  return `${Math.floor(seconds / 3600)}h`
+}
+
 export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFilterMode } = {}) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // The "answering now" badge polls the Owner's running-turn projection;
+  // keeper snapshots cannot answer it (the slot is process memory).
+  useEffect(() => subscribeKeeperTurnsRefresh(), [])
 
   const agentList = agents.value
   const keeperList = keepers.value
@@ -1144,6 +1158,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     // 일시정지 UI so it is filtered out in keeperExclusionLabel. Surfaced on
     // execution keepers via enrich_keeper_with_diagnostic.
     const exclusionLabel = keeperExclusionLabel(row.keeperRuntime?.exclusion_reason)
+    // Only keeper rows can be mid-turn; directory agents have no turn slot.
+    const answeringTurn = row.keeperRuntime
+      ? runningTurnFor(keeperTurns.value, row.keeperRuntime.name)
+      : null
     // #16 (38-bug campaign PR-5): never claim a bare "실행 중" (running)
     // as a silent default — that hid actively-executing / idle-waiting /
     // reactively-woken behind one label. Prefer the FSM stage label, then
@@ -1218,6 +1236,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <span class="inline-block h-1.5 w-1.5 rounded-full" style="background:currentColor" aria-hidden="true"></span>
             ${chipLabel}
           </span>
+          ${answeringTurn
+            ? html`<span
+                class="fl-gloss"
+                data-answering
+                title=${`지금 턴이 돌고 있습니다 · ${answeringTurn.lane} · ${answeringElapsed(answeringTurn.started_at_unix)} 경과`}
+              >◌ 응답 중</span>`
+            : null}
           <span class="fl-gloss" title=${glossTitle}>${glossText}</span>
           ${row.bandActionHint ? html`<span class="fl-gloss">${row.bandActionHint}</span>` : null}
           ${exclusionLabel

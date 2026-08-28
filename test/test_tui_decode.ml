@@ -2496,6 +2496,8 @@ let test_decode_standalone_lane_keeps_the_run_start () =
           ; standalone_lane_json "librarian_exact" "Librarian"
           ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
               "compaction_exact" "Compaction"
+          ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
+              "assembler_exact" "Assembler"
           ; standalone_lane_json "verifier_exact" "Verifier"
           ]
       ]
@@ -2539,6 +2541,8 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
         "librarian_exact" "Librarian"
     ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
         "compaction_exact" "Compaction"
+    ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
+        "assembler_exact" "Assembler"
     ; standalone_lane_json "verifier_exact" "Verifier"
     ]
   in
@@ -2557,7 +2561,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
   match Tui_decode.decode_standalone_lanes_snapshot json with
   | Error detail -> Alcotest.failf "decode failed: %s" detail
   | Ok snapshot ->
-      Alcotest.(check int) "all five lanes" 5 (List.length snapshot.sls_lanes);
+      Alcotest.(check int) "all six lanes" 6 (List.length snapshot.sls_lanes);
       let first = List.hd snapshot.sls_lanes in
       Alcotest.(check string) "running status" "running"
         (Tui_decode.standalone_lane_status_to_string first.sl_status);

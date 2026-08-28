@@ -7,8 +7,8 @@ import { LANE_IDS } from './dashboard-standalone-lanes'
 
 // OCaml -> dashboard parity for the standalone-lane wire vocabulary.
 //
-// Exact_lane_run_registry.lane_key owns the four registry spellings and
-// Runtime.verifier_exact_lane_id the fifth; the TUI decoder consumes both
+// Exact_lane_run_registry.lane_key owns the registry spellings and
+// Runtime.verifier_exact_lane_id owns the verifier spelling; the TUI decoder consumes both
 // directly, but this bundle can only carry a copy. This test reads the two
 // OCaml sources rather than trusting the copy, so renaming or adding a lane
 // turns exactly this file red (same pattern as turn-outcome-parity.test.ts

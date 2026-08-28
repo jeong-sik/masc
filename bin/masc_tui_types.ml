@@ -2687,7 +2687,7 @@ let lanes_scrolled (state : state) =
       ; sc_preview_keep = None
       }
   | Lanes_overview ->
-  (* The renderer draws one title and one divider around either the five
+  (* The renderer draws one title and one divider around either the registered
      standalone rows or its single loading/error row. This belongs in the
      typed scroll model: subtracting it only while drawing lets key movement
      land on Keeper rows the frame cannot show. *)

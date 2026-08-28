@@ -1128,7 +1128,8 @@ in
 check
   (list string)
   "public seed exact-output lane ids"
-  [ "board_attention_exact"
+  [ "assembler_exact"
+  ; "board_attention_exact"
   ; "compaction_exact"
   ; "hitl_auto_judge"
   ; "librarian_exact"
@@ -1148,6 +1149,17 @@ check
        String.equal lane_id "board_attention_exact"
        || String.equal lane_id "hitl_auto_judge")
      lane_signatures);
+check
+  (option (list string))
+  "assembler_exact slot order is frozen"
+  (Some [ "glm-coding.glm-5-turbo"; "deepseek.deepseek-v4-pro" ])
+  (match
+     List.find_opt
+       (fun (lane_id, _) -> String.equal lane_id "assembler_exact")
+       lane_signatures
+   with
+   | Some (_, slot_ids) -> Some slot_ids
+   | None -> None);
 (* RFC-0361 D7(a): the completion-authority judgement lane is the single
    provider-selection SSOT and failover follows declaration order. *)
 check

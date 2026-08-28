@@ -451,15 +451,12 @@ let test_exact_history_is_not_pruned_across_lanes () =
   let path = Filename.temp_file "exact-lane-runs-all-" ".jsonl" in
   remove_if_exists path;
   let registry = R.create ~path () in
+  let lanes = Array.of_list R.all_lanes in
   List.init 80 Fun.id
   |> List.iter (fun index ->
     let run_id = Printf.sprintf "run-%02d" index in
     let lane =
-      match index mod 4 with
-      | 0 -> R.Librarian
-      | 1 -> R.Hitl_auto_judge
-      | 2 -> R.Board_attention
-      | _ -> R.Compaction
+      lanes.(index mod Array.length lanes)
     in
     R.register_running
       registry
@@ -476,9 +473,32 @@ let test_exact_history_is_not_pruned_across_lanes () =
       ~output:(`Assoc [ "index", `Int index ]));
   let replayed = R.replay path in
   check int "all exact runs survive replay" 80 (List.length (R.list_runs replayed));
+  check
+    (list string)
+    "every registered lane survives replay"
+    (R.all_lanes |> List.map R.lane_key |> List.sort String.compare)
+    (R.list_runs replayed
+     |> List.map (fun (run : R.run) -> R.lane_key run.lane)
+     |> List.sort_uniq String.compare);
   let permissions = (Unix.stat path).Unix.st_perm land 0o777 in
   check int "durable registry is private" 0o600 permissions;
   remove_if_exists path
+;;
+
+let test_all_lanes_matches_the_independent_constructor_oracle () =
+  let expected =
+    [ R.Librarian
+    ; R.Hitl_auto_judge
+    ; R.Board_attention
+    ; R.Compaction
+    ; R.Assembler
+    ]
+  in
+  check
+    (list string)
+    "all_lanes is the complete ordered constructor enumeration"
+    (List.map R.lane_key expected)
+    (List.map R.lane_key R.all_lanes)
 ;;
 
 let test_failed_durable_registration_is_not_published_in_memory () =
@@ -688,6 +708,7 @@ let test_summary_carries_no_payload () =
   let detail = R.run_to_yojson run in
   check bool "summary omits input" true (Option.is_none (field "input" summary));
   check bool "summary omits output" true (Option.is_none (field "output" summary));
+  check bool "summary does not invent a subject" true (field "subject_id" summary = Some `Null);
   check bool "detail keeps input" true (Option.is_some (field "input" detail));
   check bool "detail keeps output" true (Option.is_some (field "output" detail));
   check bool "summary still identifies the run" true (Option.is_some (field "run_id" summary))
@@ -716,6 +737,8 @@ let () =
             test_store_version_pins_the_registration_shape
         ; test_case "exact history is not cross-lane pruned" `Quick
             test_exact_history_is_not_pruned_across_lanes
+        ; test_case "all lanes matches independent constructor oracle" `Quick
+            test_all_lanes_matches_the_independent_constructor_oracle
         ; test_case "retention is derived from the monitor page size" `Quick
             test_retention_is_derived_from_the_monitor_page_size
         ; test_case "completed runs are bounded" `Quick

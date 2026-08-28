@@ -34,6 +34,7 @@ type Filter =
   | 'auto-judge'
   | 'board-attention'
   | 'compaction'
+  | 'assembler'
   | 'verification'
   | 'fusion'
 type Row =
@@ -118,6 +119,7 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'auto-judge', label: 'Auto Judge' },
   { id: 'board-attention', label: 'Board Attention' },
   { id: 'compaction', label: 'Compaction' },
+  { id: 'assembler', label: 'Assembler' },
   { id: 'verification', label: 'Verification' },
   { id: 'fusion', label: 'Fusion' },
 ]
@@ -130,6 +132,7 @@ function laneLabel(row: Row): string {
     case 'hitl_auto_judge': return 'Auto Judge'
     case 'board_attention_exact': return 'Board Attention'
     case 'compaction_exact': return 'Compaction'
+    case 'assembler_exact': return 'Assembler'
   }
 }
 
@@ -154,7 +157,7 @@ function actor(row: Row): string {
 function subject(row: Row): string {
   if (row.source === 'verification') return row.run.taskId
   if (row.source === 'fusion') return row.run.runId
-  return row.run.subjectId
+  return row.run.subjectId ?? '—'
 }
 
 function startedAt(row: Row): number {
@@ -183,6 +186,7 @@ function rowKind(row: Row): Exclude<Filter, 'all'> {
     case 'hitl_auto_judge': return 'auto-judge'
     case 'board_attention_exact': return 'board-attention'
     case 'compaction_exact': return 'compaction'
+    case 'assembler_exact': return 'assembler'
     default: {
       const unreachable: never = row.run.lane
       return unreachable
@@ -448,7 +452,7 @@ function ExactRunDetail({ runId }: { runId: string }) {
                 <${JsonViewerCard} title="After memory + change · typed" data=${memoryEvidence.after} expandAll=${true} />
               </div>
             </div>`}
-        ${run.lane === 'librarian_exact'
+        ${run.lane === 'librarian_exact' && run.subjectId !== null
           ? html`<div class="ia-evi">
               <${LibrarianJournal}
                 keeper=${run.actor}
@@ -456,7 +460,9 @@ function ExactRunDetail({ runId }: { runId: string }) {
                 revision=${librarianRevision(run.output)}
               />
             </div>`
-          : null}
+          : run.lane === 'librarian_exact'
+            ? html`<p class="ia-note">이 exact-run registry 세대는 subject_id를 기록하지 않아 Memory journal을 trace로 결합하지 않습니다.</p>`
+            : null}
       </div>
     `
 }

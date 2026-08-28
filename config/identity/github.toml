@@ -23,6 +23,18 @@ id = "github"
 label = "GitHub"
 mcp_url = "https://api.githubcopilot.com/mcp/"
 
+# The Keeper's gh CLI already holds a github.com token -- device login puts it
+# there and rewrites it on every login and logout -- and measurement on
+# 2026-08-29 showed that token authorizes the MCP endpoint above: initialize
+# answered 200 with the tool list. So this provider reads the credential where
+# gh keeps it rather than asking an operator to make an OAuth app for a second
+# copy of the same grant.
+credential_source = "github_cli"
+credential_source_host = "github.com"
+
+# Still declared, and unused while credential_source is github_cli: switching
+# this file back to the OAuth exchange should not also have to reinvent the
+# names its tokens were stored under.
 access_token_env = "GITHUB_ACCESS_TOKEN"
 expires_at_env = "GITHUB_ACCESS_TOKEN_EXPIRES_AT"
 refresh_token_file = "/home/keeper/.github/refresh_token"

@@ -440,6 +440,115 @@ let single_offered ~base_path =
       | _ -> Alcotest.fail "expected exactly one tool")
   | Ok None | Error _ -> Alcotest.fail "the catalog did not come back"
 
+(* ── where the bearer comes from ─────────────────────────────────────── *)
+
+module Github = Masc.Keeper_github_identity
+
+let github_declaration =
+  {|
+id = "github"
+label = "GitHub"
+mcp_url = "https://api.githubcopilot.com/mcp/"
+credential_source = "github_cli"
+credential_source_host = "github.com"
+access_token_env = "GITHUB_ACCESS_TOKEN"
+expires_at_env = "GITHUB_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.github/refresh_token"
+renew_before_sec = 600
+|}
+
+let github_provider () =
+  match Provider.load ~file_name:"github" ~contents:github_declaration with
+  | Ok provider -> provider
+  | Error err ->
+      Alcotest.failf "declaration rejected: %s" (Provider.error_to_string err)
+
+(* Writes the credential the way the GitHub tab does -- through
+   [ensure_config_dir], which resolves the directory from a workspace config
+   -- and leaves the reader to resolve it from a base path. If those two ever
+   name different directories the token is written where nothing looks. *)
+let rec mkdir_p path =
+  if Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o700)
+
+let write_gh_identity ~base_path ~keeper_name token =
+  let config = Masc.Workspace.default_config base_path in
+  mkdir_p (Masc.Workspace.keepers_runtime_dir config);
+  let config_dir =
+    match Github.ensure_config_dir ~config ~keeper_name with
+    | Error message -> Alcotest.failf "gh config dir: %s" message
+    | Ok path -> path
+  in
+  let hosts = Filename.concat config_dir "hosts.yml" in
+  let channel = open_out_bin hosts in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel (Printf.sprintf "github.com:\n  oauth_token: %s\n" token));
+  Unix.chmod hosts 0o600
+
+(* GitHub publishes no registration endpoint, so nothing ever writes
+   GITHUB_ACCESS_TOKEN into the projection. The declaration says the bearer is
+   the one gh already holds, and this is that claim as a sent request rather
+   than as a field being set somewhere. *)
+let test_github_cli_credential_is_what_gets_sent () =
+  let base_path = temp_base () in
+  let keeper_name = "acme-daycare" in
+  write_gh_identity ~base_path ~keeper_name "gho_from_device_login";
+  let post, sent = recording_transport () in
+  match
+    Identity_tools.run_call ~post ~base_path ~keeper_name
+      ~provider:(github_provider ()) ~remote_name:"list_issues"
+      ~arguments:(`Assoc []) ()
+  with
+  | Error _ -> Alcotest.fail "a logged-in gh identity did not authorize the call"
+  | Ok _ ->
+      check (Alcotest.option str) "the gh token is the bearer"
+        (Some "Bearer gho_from_device_login") (bearer sent)
+
+(* The next login has to be the one that gets spent. masc keeps no copy, so
+   this is the property that copy would have broken. *)
+let test_github_cli_credential_follows_a_relogin () =
+  let base_path = temp_base () in
+  let keeper_name = "acme-daycare" in
+  write_gh_identity ~base_path ~keeper_name "gho_first";
+  let post, sent = recording_transport () in
+  (match
+     Identity_tools.run_call ~post ~base_path ~keeper_name
+       ~provider:(github_provider ()) ~remote_name:"list_issues"
+       ~arguments:(`Assoc []) ()
+   with
+  | Error _ -> Alcotest.fail "the first credential did not authorize the call"
+  | Ok _ -> check (Alcotest.option str) "first" (Some "Bearer gho_first") (bearer sent));
+  write_gh_identity ~base_path ~keeper_name "gho_second";
+  let post, sent = recording_transport () in
+  match
+    Identity_tools.run_call ~post ~base_path ~keeper_name
+      ~provider:(github_provider ()) ~remote_name:"list_issues"
+      ~arguments:(`Assoc []) ()
+  with
+  | Error _ -> Alcotest.fail "the second credential did not authorize the call"
+  | Ok _ ->
+      check (Alcotest.option str) "the newer login is spent"
+        (Some "Bearer gho_second") (bearer sent)
+
+(* The field has to gate, not decorate. A provider that did not declare the gh
+   source must not pick that credential up just because it is on disk --
+   otherwise every provider silently starts sending a GitHub token. *)
+let test_an_oauth_provider_ignores_the_gh_credential () =
+  let base_path = temp_base () in
+  let keeper_name = "acme-daycare" in
+  write_gh_identity ~base_path ~keeper_name "gho_not_for_atlassian";
+  let post, sent = recording_transport () in
+  match
+    Identity_tools.run_call ~post ~base_path ~keeper_name ~provider:(provider ())
+      ~remote_name:"getJiraIssue" ~arguments:(`Assoc []) ()
+  with
+  | Ok _ -> Alcotest.fail "an OAuth provider spent the gh credential"
+  | Error _ -> check (Alcotest.option str) "nothing was sent" None (bearer sent)
+
 let test_this_process_env_is_not_a_keepers_credential () =
   (* masc's own environment is not what a Keeper is handed. If it were, a
      variable of the same name here would be spent as that Keeper's
@@ -756,6 +865,12 @@ let () =
             test_a_keeper_with_no_token_gets_a_refusal_not_a_crash;
           Alcotest.test_case "this process's env is not a keeper's credential"
             `Quick test_this_process_env_is_not_a_keepers_credential;
+          Alcotest.test_case "the gh CLI credential is what gets sent" `Quick
+            test_github_cli_credential_is_what_gets_sent;
+          Alcotest.test_case "the gh CLI credential follows a relogin" `Quick
+            test_github_cli_credential_follows_a_relogin;
+          Alcotest.test_case "an OAuth provider ignores the gh credential" `Quick
+            test_an_oauth_provider_ignores_the_gh_credential;
           Alcotest.test_case "the projected token is the one sent" `Quick
             test_the_projected_token_is_the_one_sent;
         ] );

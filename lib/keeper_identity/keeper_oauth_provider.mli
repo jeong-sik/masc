@@ -23,6 +23,18 @@ type error =
 
 val error_to_string : error -> string
 
+type credential_source =
+  | Oauth_exchange
+      (** The access token is what an OAuth exchange produced, and it lives
+          in this Keeper's secret projection under {!access_token_env}. *)
+  | Github_cli of { hostname : string }
+      (** The access token is the one this Keeper's [gh] CLI already holds
+          for [hostname], and masc reads it there rather than keeping a
+          copy. A provider says this when its authorization server has no
+          registration endpoint but a working credential already exists:
+          GitHub is the case this was written for. The credential's
+          lifecycle belongs to [gh], so masc never renews it. *)
+
 type t = private {
   id : string;
       (** One path component, checked when the declaration is read. The
@@ -64,6 +76,12 @@ type t = private {
       (** How long before the stated expiry to exchange again. A turn that
           starts inside this window gets a fresh token rather than one that
           expires mid-call. *)
+  credential_source : credential_source;
+      (** Where the access token comes from. Declared rather than inferred
+          from whether one happens to be on file: a provider with no token
+          yet and a provider whose token lives elsewhere are different
+          states, and reading the second as the first is how a working
+          credential gets asked for again. *)
   authorize_params : (string * string) list;
       (** Parameters this server wants on the authorize call beyond what the
           specs define, in declaration order.

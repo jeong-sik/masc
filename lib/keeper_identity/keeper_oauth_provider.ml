@@ -21,6 +21,10 @@ let error_to_string = function
       file
   | Malformed_toml detail -> Printf.sprintf "TOML parse error: %s" detail
 
+type credential_source =
+  | Oauth_exchange
+  | Github_cli of { hostname : string }
+
 type t = {
   id : string;
   client_group : string;
@@ -30,6 +34,7 @@ type t = {
   expires_at_env : string;
   refresh_token_file : string;
   renew_before_sec : int;
+  credential_source : credential_source;
   authorize_params : (string * string) list;
 }
 
@@ -158,6 +163,23 @@ let load ~file_name ~contents =
     let* expires_at_env = string_field pairs "expires_at_env" in
     let* refresh_token_file = string_field pairs "refresh_token_file" in
     let* renew_before_sec = int_field pairs "renew_before_sec" in
+    (* Absent is the OAuth exchange, and every other spelling is an error
+       rather than a fallback: a typo here would otherwise send masc looking
+       for a token in a place the operator did not name. *)
+    let* credential_source =
+      let* declared = optional_string_field pairs "credential_source" in
+      match declared with
+      | None | Some "oauth_exchange" -> Ok Oauth_exchange
+      | Some "github_cli" ->
+        let* hostname = string_field pairs "credential_source_host" in
+        Ok (Github_cli { hostname })
+      | Some _ ->
+        Error
+          (Wrong_type
+             { field = "credential_source"
+             ; expected = "\"oauth_exchange\" or \"github_cli\""
+             })
+    in
     if renew_before_sec < 0
     then Error (Wrong_type { field = "renew_before_sec"; expected = "a non-negative integer" })
     else
@@ -170,6 +192,7 @@ let load ~file_name ~contents =
         ; expires_at_env
         ; refresh_token_file
         ; renew_before_sec
+        ; credential_source
         ; authorize_params
         }
   | Ok

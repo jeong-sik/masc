@@ -44,6 +44,77 @@ let expect_rejected ~why ?(file_name = "atlassian") contents =
   | Ok _ -> Alcotest.failf "accepted a declaration that %s" why
   | Error _ -> ()
 
+let shipped_github () =
+  match Embedded_config.read "identity/github.toml" with
+  | Some contents -> contents
+  | None ->
+      Alcotest.fail
+        "config/identity/github.toml is not in the embedded config tree"
+
+let credential_source_to_string = function
+  | Keeper_oauth_provider.Oauth_exchange -> "oauth_exchange"
+  | Keeper_oauth_provider.Github_cli { hostname } -> "github_cli:" ^ hostname
+
+(* GitHub publishes no registration endpoint, and the Keeper's gh CLI already
+   holds a token for github.com. The shipped file says so; if that line is
+   dropped the provider silently goes back to asking for an OAuth app nobody
+   made, and the Identity screen answers 400 again. *)
+let test_shipped_github_reads_the_gh_cli_credential () =
+  let provider = load_or_fail ~file_name:"github" (shipped_github ()) in
+  check str "credential source" "github_cli:github.com"
+    (credential_source_to_string
+       provider.Keeper_oauth_provider.credential_source)
+
+(* Absent means the OAuth exchange -- the thirty-odd other declarations say
+   nothing and must keep working. *)
+let test_absent_credential_source_is_the_oauth_exchange () =
+  let provider = load_or_fail (shipped_atlassian ()) in
+  check str "credential source" "oauth_exchange"
+    (credential_source_to_string
+       provider.Keeper_oauth_provider.credential_source)
+
+(* Appended after [authorize_params] a bare key lands inside that table, not
+   at the top level, and the declaration would parse as if nothing was said.
+   So these go in above it. *)
+let with_top_level_keys keys =
+  let marker = "[authorize_params]" in
+  match String.index_opt atlassian_toml '[' with
+  | None -> Alcotest.fail "the Atlassian fixture no longer has a table"
+  | Some _ ->
+      let parts = String.split_on_char '\n' atlassian_toml in
+      let rebuilt =
+        List.concat_map
+          (fun line -> if String.equal line marker then keys @ [ line ] else [ line ])
+          parts
+      in
+      String.concat "\n" rebuilt
+
+(* A misspelling must not fall through to a default: masc would then look for
+   a token in a place the operator did not name and report it missing. *)
+let test_unknown_credential_source_is_rejected () =
+  expect_rejected ~why:"names a credential source that does not exist"
+    (with_top_level_keys [ "credential_source = \"gh_cli\"" ])
+
+(* The gh CLI keeps one credential per host, so a source that reads it has to
+   say which host it means. *)
+let test_github_cli_source_requires_a_host () =
+  expect_rejected ~why:"reads the gh CLI without naming a host"
+    (with_top_level_keys [ "credential_source = \"github_cli\"" ])
+
+(* And the pair together is accepted, so the two refusals above are about the
+   missing half rather than the field being unreadable. *)
+let test_github_cli_source_with_a_host_is_accepted () =
+  let provider =
+    load_or_fail
+      (with_top_level_keys
+         [ "credential_source = \"github_cli\""
+         ; "credential_source_host = \"ghe.example.com\""
+         ])
+  in
+  check str "credential source" "github_cli:ghe.example.com"
+    (credential_source_to_string
+       provider.Keeper_oauth_provider.credential_source)
+
 let test_reads_the_shipped_declaration () =
   let provider = load_or_fail (shipped_atlassian ()) in
   check str "label" "Atlassian" provider.Keeper_oauth_provider.label;
@@ -1257,7 +1328,17 @@ let test_the_shipped_env_entries_are_ones_the_projection_accepts () =
 let () =
   Alcotest.run "keeper_oauth_identity"
     [ ( "declaration",
-        [ Alcotest.test_case "reads the shipped Atlassian file" `Quick
+        [ Alcotest.test_case "shipped GitHub file reads the gh CLI credential"
+            `Quick test_shipped_github_reads_the_gh_cli_credential;
+          Alcotest.test_case "absent credential source is the OAuth exchange"
+            `Quick test_absent_credential_source_is_the_oauth_exchange;
+          Alcotest.test_case "unknown credential source is rejected"
+            `Quick test_unknown_credential_source_is_rejected;
+          Alcotest.test_case "github_cli source requires a host"
+            `Quick test_github_cli_source_requires_a_host;
+          Alcotest.test_case "github_cli source with a host is accepted"
+            `Quick test_github_cli_source_with_a_host_is_accepted;
+          Alcotest.test_case "reads the shipped Atlassian file" `Quick
             test_reads_the_shipped_declaration;
           Alcotest.test_case "refuses a renamed file" `Quick
             test_rejects_a_renamed_file;

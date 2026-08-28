@@ -324,8 +324,13 @@ let yaml_scalar_has_value value =
    host or below that host's [users] mapping.  Decode that closed shape instead
    of treating arbitrary non-empty bytes (notably the post-logout [{}]) as an
    identity.  Unsupported YAML constructs fail closed rather than being
-   guessed into configured state. *)
-let hosts_yaml_has_stored_token content =
+   guessed into configured state.
+
+   Returns the (host, token) pairs it decoded rather than a bare "yes". One
+   scanner answers both questions asked of this file -- whether an identity is
+   configured, and what the token for a given host is -- because a second
+   decoder of the same bytes is a second thing to keep in step. *)
+let hosts_yaml_stored_tokens content =
   let lines = String.split_on_char '\n' content in
   let meaningful =
     List.filter_map
@@ -337,11 +342,11 @@ let hosts_yaml_has_stored_token content =
       lines
   in
   match meaningful with
-  | [] -> Ok false
-  | [ line ] when String.equal (String.trim line) "{}" -> Ok false
+  | [] -> Ok []
+  | [ line ] when String.equal (String.trim line) "{}" -> Ok []
   | _ ->
-    let rec scan active_host has_token = function
-      | [] -> Ok has_token
+    let rec scan active_host found = function
+      | [] -> Ok (List.rev found)
       | raw_line :: rest ->
         if String.contains raw_line '\t'
         then Error "GitHub CLI hosts.yml must not contain tab indentation"
@@ -356,7 +361,7 @@ let hosts_yaml_has_stored_token content =
           in
           let line = String.sub raw_line indentation (String.length raw_line - indentation) in
           if String.equal line "" || String.starts_with ~prefix:"#" line
-          then scan active_host has_token rest
+          then scan active_host found rest
           else
             (match String.index_opt line ':' with
              | None -> Error "GitHub CLI hosts.yml contains a non-mapping entry"
@@ -375,17 +380,21 @@ let hosts_yaml_has_stored_token content =
                then
                  if not (String.equal value "")
                  then Error "GitHub CLI host entry must be a mapping"
-                 else scan true has_token rest
-               else if not active_host
-               then Error "GitHub CLI hosts.yml contains data outside a host mapping"
-               else
-                 scan
-                   active_host
-                   (has_token
-                    || (String.equal key "oauth_token" && yaml_scalar_has_value value))
-                   rest)
+                 else scan (Some key) found rest
+               else (
+                 match active_host with
+                 | None ->
+                   Error "GitHub CLI hosts.yml contains data outside a host mapping"
+                 | Some host ->
+                   if String.equal key "oauth_token" && yaml_scalar_has_value value
+                   then scan active_host ((host, value) :: found) rest
+                   else scan active_host found rest))
     in
-    scan false false meaningful
+    scan None [] meaningful
+;;
+
+let hosts_yaml_has_stored_token content =
+  Result.map (fun pairs -> pairs <> []) (hosts_yaml_stored_tokens content)
 ;;
 
 let hosts_file_has_stored_token ~config_dir hosts_path =
@@ -393,6 +402,38 @@ let hosts_file_has_stored_token ~config_dir hosts_path =
   | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
   | Ok None -> Ok false
   | Ok (Some content) -> hosts_yaml_has_stored_token content
+;;
+
+(* The token this Keeper's gh CLI already holds for [hostname].
+
+   Read on demand rather than copied anywhere. gh owns hosts.yml and rewrites
+   it on every login and logout; a copy kept beside it would answer with a
+   credential the Keeper no longer has, and nothing in either file would say
+   which one was current. Absence is an error naming the fix rather than an
+   empty token, because a caller that got "" would send it and read GitHub's
+   401 as the provider being down. *)
+let stored_token ~base_path ~keeper_name ~hostname =
+  let config_dir = config_dir_of_base_path ~base_path ~keeper_name in
+  let hosts_path = Filename.concat config_dir "hosts.yml" in
+  match Fs_compat.load_owned_regular_file ~ownership_root:config_dir hosts_path with
+  | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
+  | Ok None ->
+    Error
+      (Printf.sprintf
+         "keeper %S has no GitHub CLI identity; log it in from the GitHub tab first"
+         keeper_name)
+  | Ok (Some content) ->
+    (match hosts_yaml_stored_tokens content with
+     | Error _ as error -> error
+     | Ok pairs ->
+       (match List.assoc_opt hostname pairs with
+        | Some token -> Ok token
+        | None ->
+          Error
+            (Printf.sprintf
+               "keeper %S has a GitHub CLI identity but none for %s"
+               keeper_name
+               hostname)))
 ;;
 
 let inspect_optional_directory path =

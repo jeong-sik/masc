@@ -97,6 +97,15 @@ module Runtime = struct
     | exception _ -> None
   ;;
 
+  (* Removing a guest is a VM shutdown, not a container kill. Measured
+     2026-08-28 on container 1.3.0: `container delete --force` took 66.7s,
+     and stop-then-delete 63.0s. The Cleanup_rm bucket is 10s and the Io
+     bucket 30s -- both were picked for docker, and either turns every
+     removal into a timeout. *)
+  let microvm_remove_timeout_sec () =
+    max 30.0 (get_float ~default:180.0 "MASC_KEEPER_MICROVM_REMOVE_TIMEOUT_SEC")
+  ;;
+
   let microvm_dns () =
     match get_string ~default:"" "MASC_KEEPER_MICROVM_DNS" with
     | "" -> (match host_nameserver () with Some server -> server | None -> "")

@@ -2212,6 +2212,44 @@ let test_roster_read_failure_is_reported_beside_the_roster () =
     )
 ;;
 
+(* A keeper surface refuses two different things with one sentence: a keeper
+   that is gone, and a name that was never a keeper. The reader acts
+   differently on each — the first is worth looking for, the second is not. *)
+let test_refusal_says_whether_the_name_is_an_agent () =
+  with_test_env (fun config ->
+    let previous = Atomic.get Workspace_hooks.runtime_agents_fn in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.runtime_agents_fn previous)
+      (fun () ->
+        Atomic.set Workspace_hooks.runtime_agents_fn (fun hook_config ->
+          if String.equal hook_config.base_path config.base_path
+          then [ runtime_agent "an-agent-not-a-keeper" ]
+          else []);
+        let agent_detail =
+          Masc.Keeper_tool_surface_ops.keeper_absent_detail
+            ~config
+            "an-agent-not-a-keeper"
+        in
+        Alcotest.(check bool)
+          "a name the roster knows is named as an agent"
+          true
+          (str_contains agent_detail "is an agent, not a keeper");
+        let unknown_detail =
+          Masc.Keeper_tool_surface_ops.keeper_absent_detail
+            ~config
+            "nobody-knows-this-name"
+        in
+        Alcotest.(check bool)
+          "a name nobody knows stays a keeper that was not found"
+          true
+          (str_contains unknown_detail "keeper not found");
+        Alcotest.(check bool)
+          "and it is not called an agent"
+          false
+          (str_contains unknown_detail "is an agent"))
+    )
+;;
+
 let test_get_active_agents_filters_inactive_runtime_agents () =
   with_test_env (fun config ->
     let previous = Atomic.get Workspace_hooks.runtime_agents_fn in
@@ -3393,6 +3431,10 @@ let () =
             "a roster read that failed is named beside the roster"
             `Quick
             test_roster_read_failure_is_reported_beside_the_roster
+        ; Alcotest.test_case
+            "refusal says whether the name is an agent"
+            `Quick
+            test_refusal_says_whether_the_name_is_an_agent
         ; Alcotest.test_case "get messages raw" `Quick test_get_messages_raw
         ; Alcotest.test_case "is agent joined" `Quick test_is_agent_session_bound
         ] )

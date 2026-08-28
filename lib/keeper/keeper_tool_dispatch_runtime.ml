@@ -106,7 +106,7 @@ let runtime_context
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?capability_surface
+      ~capability_authority
       ()
   =
   Keeper_tool_runtime.
@@ -123,11 +123,12 @@ let runtime_context
     ; continuation_channel
     ; gate_context
     ; gate_grant
-    ; capability_surface
+    ; capability_authority
     }
 ;;
 
-let execute_keeper_tool_descriptor_with_outcome
+let execute_keeper_tool_descriptor_with_authority
+      ~capability_authority
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(publication_recovery :
@@ -142,7 +143,6 @@ let execute_keeper_tool_descriptor_with_outcome
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?capability_surface
       ~(descriptor : Keeper_tool_descriptor.t)
       ~(input : Yojson.Safe.t)
       ()
@@ -164,7 +164,7 @@ let execute_keeper_tool_descriptor_with_outcome
         ?continuation_channel
         ?gate_context
         ?gate_grant
-        ?capability_surface
+        ~capability_authority
         ()
     in
     (match Keeper_tool_runtime.handle context ~descriptor ~args:input with
@@ -188,7 +188,16 @@ let execute_keeper_tool_descriptor_with_outcome
       data
 ;;
 
-let execute_keeper_tool_call_with_outcome
+let execute_keeper_tool_descriptor_for_capability_surface_with_outcome
+      ~capability_surface
+  =
+  execute_keeper_tool_descriptor_with_authority
+    ~capability_authority:
+      (Keeper_tool_runtime.Frozen_surface capability_surface)
+;;
+
+let execute_keeper_tool_call_with_authority
+      ~capability_authority
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(publication_recovery :
@@ -205,7 +214,6 @@ let execute_keeper_tool_call_with_outcome
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?capability_surface
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
@@ -227,7 +235,7 @@ let execute_keeper_tool_call_with_outcome
            ?continuation_channel
            ?gate_context
            ?gate_grant
-           ?capability_surface
+           ~capability_authority
            ()
        in
        let descriptor_dispatch =
@@ -281,6 +289,26 @@ let execute_keeper_tool_call_with_outcome
               data)
 ;;
 
+let execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+  =
+  execute_keeper_tool_call_with_authority
+    ~capability_authority:
+      (Keeper_tool_runtime.Frozen_surface capability_surface)
+;;
+
+module Compatibility = struct
+  let execute_keeper_tool_descriptor_with_outcome =
+    execute_keeper_tool_descriptor_with_authority
+      ~capability_authority:Keeper_tool_runtime.Compatibility_meta
+  ;;
+
+  let execute_keeper_tool_call_with_outcome =
+    execute_keeper_tool_call_with_authority
+      ~capability_authority:Keeper_tool_runtime.Compatibility_meta
+  ;;
+end
+
 let execute_keeper_tool_call
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -294,7 +322,7 @@ let execute_keeper_tool_call
   : string
   =
   let result =
-    execute_keeper_tool_call_with_outcome
+    Compatibility.execute_keeper_tool_call_with_outcome
       ~config
       ~meta
       ~publication_recovery

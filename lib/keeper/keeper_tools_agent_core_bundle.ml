@@ -357,8 +357,16 @@ let make_tool_bundle_for_descriptors_with_policy
          in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
+             let make_handler =
+               match capability_surface with
+               | Some capability_surface ->
+                 Keeper_tools_agent_core_handler.make_keeper_tool_handler
+                   ~capability_surface
+               | None ->
+                 Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
+             in
              let h =
-               Keeper_tools_agent_core_handler.make_keeper_tool_handler
+               make_handler
                  ~name:internal
                  ~input_schema:descriptor.input_schema
                  ~config
@@ -370,7 +378,6 @@ let make_tool_bundle_for_descriptors_with_policy
                  ?continuation_channel
                  ?gate_context:gate_context_provider
                  ?gate_grant
-                 ?capability_surface
                  ?record_gate_result
                  ?on_completed
                  ~on_deferred:mark_deferred_tool_result
@@ -467,6 +474,11 @@ let make_tool_bundle_for_descriptors_with_policy
         ?composition_plan_index
         ~config
         ~meta
+        ~capability_authority:
+          (match capability_surface with
+           | Some capability_surface ->
+             Keeper_tool_runtime.Frozen_surface capability_surface
+           | None -> Keeper_tool_runtime.Compatibility_meta)
         ~publication_recovery
         ~ctx_snapshot
         ?record_instruction_activation

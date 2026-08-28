@@ -323,7 +323,7 @@ let test_file_change_evidence_crosses_handler_and_hook_on_exact_invocation () =
            ]
        in
        let handler =
-         Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler
+         Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
            ~name:descriptor.internal_name
            ~descriptor
            ~model_name:descriptor.public_name

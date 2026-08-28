@@ -794,6 +794,7 @@ let async_worker_result
       ~request_sw
       ~(config : Workspace.config)
       ~meta
+      ~capability_authority
       ~publication_recovery
       ~ctx_snapshot
       ~turn_context
@@ -815,6 +816,7 @@ let async_worker_result
       (async_parent_invocation ~request_id source_invocation)
     ~config
     ~meta
+    ~capability_authority
     ~publication_recovery
     ~ctx_snapshot
     ~turn_sandbox_factory:sandbox_factory
@@ -855,6 +857,7 @@ let async_submission_result
       ~parent_invocation
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~capability_authority
       ~publication_recovery
       ~ctx_snapshot
       ~turn_context
@@ -913,6 +916,7 @@ let async_submission_result
              ~request_sw
              ~config
              ~meta
+             ~capability_authority
              ~publication_recovery
              ~ctx_snapshot
              ~turn_context
@@ -1453,6 +1457,7 @@ let make_tools
       ?record_composition_activation
       ~(config : Workspace.config)
       ~meta
+      ~capability_authority
       ~publication_recovery
       ~ctx_snapshot
       ?turn_sandbox_factory
@@ -1599,6 +1604,7 @@ let make_tools
                            ~parent_invocation
                            ~config
                            ~meta
+                           ~capability_authority
                            ~publication_recovery
                            ~ctx_snapshot
                            ~turn_context
@@ -1613,6 +1619,7 @@ let make_tools
                         ~parent_invocation
                         ~config
                         ~meta
+                        ~capability_authority
                         ~publication_recovery
                         ~ctx_snapshot
                         ~turn_context
@@ -1681,6 +1688,7 @@ let make_tools
                  ~parent_invocation
                  ~config
                  ~meta
+                 ~capability_authority
                  ~publication_recovery
                  ~ctx_snapshot
                  ?turn_sandbox_factory
@@ -1869,6 +1877,7 @@ let make_tools
                        ~parent_invocation
                        ~config
                        ~meta
+                       ~capability_authority
                        ~publication_recovery
                        ~ctx_snapshot
                        ?turn_sandbox_factory

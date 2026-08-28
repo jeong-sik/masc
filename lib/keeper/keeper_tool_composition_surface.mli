@@ -100,6 +100,7 @@ val make_tools
           result)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> capability_authority:Keeper_tool_runtime.capability_authority
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context

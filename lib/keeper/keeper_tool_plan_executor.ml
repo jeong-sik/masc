@@ -446,6 +446,7 @@ let execute_keeper
       ~parent_invocation
       ~config
       ~meta
+      ~capability_authority
       ~publication_recovery
       ~ctx_snapshot
       ?turn_sandbox_factory
@@ -490,8 +491,16 @@ let execute_keeper
           (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent) -> None, None
     in
     let execution_evidence = ref None in
+    let make_handler =
+      match capability_authority with
+      | Keeper_tool_runtime.Frozen_surface capability_surface ->
+        Keeper_tools_agent_core_handler.make_keeper_tool_handler
+          ~capability_surface
+      | Keeper_tool_runtime.Compatibility_meta ->
+        Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
+    in
     let handler =
-      Keeper_tools_agent_core_handler.make_keeper_tool_handler
+      make_handler
         ~name:descriptor.internal_name
         ~descriptor
         ~model_name:node.tool_name

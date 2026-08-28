@@ -904,11 +904,23 @@ type keeper_turn_lane =
   | Turn_lane_chat_operation
   | Turn_lane_maintenance
 
+type keeper_turn_preview = {
+  ktp_text_tail : string;
+      (** Tail of the newest response text this turn has produced. *)
+  ktp_current_tool : string option;
+      (** The most recent tool call the turn ran, when any. *)
+}
+
 type keeper_turn_state =
   | Keeper_turn_idle
-  | Keeper_turn_running of { lane : keeper_turn_lane; started_at_unix : float }
+  | Keeper_turn_running of {
+      lane : keeper_turn_lane;
+      started_at_unix : float;
+      preview : keeper_turn_preview option;
+    }
       (** [started_at_unix] is the server owner clock's epoch reading; derive
-          display age against the local clock, never trust a precomputed one. *)
+          display age against the local clock, never trust a precomputed one.
+          [preview] is the live glance an older server does not send. *)
   | Keeper_turn_unavailable of string
       (** The owner registry could not answer for this keeper — distinct from
           idle so the badge never reads "not running" out of a lookup error. *)

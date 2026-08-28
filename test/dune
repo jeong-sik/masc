@@ -3358,6 +3358,11 @@
  (libraries alcotest astring masc masc_tui_answering))
 
 (test
+ (name test_keeper_turn_preview)
+ (modules test_keeper_turn_preview)
+ (libraries alcotest masc))
+
+(test
  (name test_tui_help_scroll)
  (modules test_tui_help_scroll)
  (libraries alcotest masc_tui_frame masc_tui_help masc_tui_scroll))

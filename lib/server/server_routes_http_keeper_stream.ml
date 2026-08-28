@@ -383,9 +383,26 @@ let handle_keeper_turns_list state request reqd =
           match Keeper_owner.turn_in_flight owner with
           | None -> `Null
           | Some (turn : Keeper_owner.turn_in_flight) ->
+            (* The live glance rides only a running turn: the preview plane
+               is process memory that outlives turn end unread, and gating
+               it here is what keeps a stale tail unreachable. *)
+            let preview_json =
+              match Keeper_turn_preview.current ~keeper_name with
+              | None -> `Null
+              | Some (preview : Keeper_turn_preview.t) ->
+                `Assoc
+                  [ ("text_tail", `String preview.text_tail)
+                  ; ( "current_tool"
+                    , match preview.current_tool with
+                      | None -> `Null
+                      | Some tool_name -> `String tool_name )
+                  ; ("updated_at_unix", `Float preview.updated_at)
+                  ]
+            in
             `Assoc
               [ ("lane", `String (Keeper_owner.turn_lane_to_string turn.lane))
               ; ("started_at_unix", `Float turn.started_at)
+              ; ("preview", preview_json)
               ]
         in
         `Assoc

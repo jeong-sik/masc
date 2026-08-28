@@ -9,9 +9,10 @@ let row name state : Tui_decode.keeper_turn_row =
   { Tui_decode.ktr_keeper_name = name; ktr_state = state }
 ;;
 
-let running ~lane ~started name =
+let running ?preview ~lane ~started name =
   row name
-    (Tui_decode.Keeper_turn_running { lane; started_at_unix = started })
+    (Tui_decode.Keeper_turn_running
+       { lane; started_at_unix = started; preview })
 ;;
 
 let texts lines =

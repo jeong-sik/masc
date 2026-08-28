@@ -1671,9 +1671,13 @@ function SchCard({
 export function SchDetail({
   request,
   onClose,
+  signals = [],
 }: {
   request: DashboardScheduledAutomationRequest
   onClose: () => void
+  /** The projection's shared recent-signal window; the drawer filters it to
+   *  this schedule to show past emissions, not just the last wake. */
+  signals?: DashboardScheduledAutomationSignal[]
 }) {
   // External-system sync: Escape-to-close keyboard listener (legitimate effect).
   useEffect(() => {
@@ -1779,6 +1783,7 @@ export function SchDetail({
               queueEvidence=${request.keeper_queue_evidence ?? null}
               reactionEvidence=${request.keeper_reaction_evidence ?? null}
             />
+            <${SchEmissionHistory} scheduleId=${request.schedule_id} signals=${signals} />
             ${request.payload_keeper_name
               ? html`
                   <a
@@ -1825,6 +1830,35 @@ function SchWakeReceipt({
     <${QueueEvidenceBlock} evidence=${queueEvidence} compact=${true} />
     <${ReactionEvidenceBlock} evidence=${reactionEvidence} compact=${true} />
     ${wake.error ? html`<div class="sch-exec bad">${wake.error}</div>` : null}
+  `
+}
+
+// The projection ships one shared window of recent wake signals (newest
+// last, `signal_limit` deep, across every schedule). Filtered to this
+// schedule it is the execution history the drawer lacked: last_wake holds
+// only the latest receipt, so earlier firings of a recurring schedule were
+// invisible. The window cap is stated on the section, not silently applied.
+function SchEmissionHistory({
+  scheduleId,
+  signals,
+}: {
+  scheduleId: string
+  signals: DashboardScheduledAutomationSignal[]
+}) {
+  const mine = signals
+    .filter(signal => signal.schedule_id === scheduleId)
+    .sort((a, b) => (b.emitted_at ?? 0) - (a.emitted_at ?? 0))
+  if (mine.length === 0) return null
+  return html`
+    <div class="sch-kvs" data-testid="schedule-emission-history">
+      <div class="sch-kv"><span class="k">발행 이력</span><span class="v mono">최근 신호 창 안에서 ${mine.length}건</span></div>
+      ${mine.map(signal => html`
+        <div class="sch-kv" data-emission=${signal.occurrence_id}>
+          <span class="k">${formatDateTimeKo(signal.emitted_at_iso ?? null)}</span>
+          <span class="v mono">${signal.event_type ?? signal.kind}</span>
+        </div>
+      `)}
+    </div>
   `
 }
 
@@ -1961,7 +1995,7 @@ function SchedulePrototypeSurface({
       </section>
 
       ${selected
-        ? html`<${SchDetail} request=${selected} onClose=${() => { setSelectedScheduleId(null) }} />`
+        ? html`<${SchDetail} request=${selected} signals=${automation.signals ?? []} onClose=${() => { setSelectedScheduleId(null) }} />`
         : null}
     </div>
   `

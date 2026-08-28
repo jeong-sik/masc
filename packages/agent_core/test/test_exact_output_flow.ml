@@ -676,7 +676,7 @@ let test_later_missing_credential_does_not_block_current_success () =
   | Error _ -> fail "later missing credential blocked the current candidate"
 ;;
 
-let test_json_syntax_is_prompt_only_even_for_native_target () =
+let test_json_syntax_requests_json_mode_when_the_target_can_enforce_it () =
   let (result, advances), posts =
     with_counted_server
       ~measurement_reply:(Measurement_tokens 1)
@@ -708,11 +708,22 @@ let test_json_syntax_is_prompt_only_even_for_native_target () =
   in
   (match request with
    | `Assoc fields ->
-     check
-       bool
-       "prompt-only syntax emits no response_format field for a native target"
-       false
-       (List.mem_assoc "response_format" fields)
+     (* Escalation contract (2026-08-29): a json-mode-capable target gets the
+        provider-native syntax fence — the caller's stated requirement is
+        exactly "valid JSON", so enforcing it at the provider is not the
+        schema escalation the old pin forbade. glm-5-turbo failed the
+        librarian lane's JSON on 63 of 67 live runs while this tier sat
+        unreachable. *)
+     (match List.assoc_opt "response_format" fields with
+      | Some (`Assoc format_fields) ->
+        check
+          bool
+          "json-mode-capable target gets response_format json_object"
+          true
+          (List.assoc_opt "type" format_fields = Some (`String "json_object"))
+      | Some _ -> fail "response_format was not an object"
+      | None ->
+        fail "json-mode-capable target did not receive a response_format fence")
    | _ -> fail "prompt-only syntax request body was not an object");
   let messages = Yojson.Safe.Util.(request |> member "messages" |> to_list) in
   check int "strict JSON instruction is appended last" 2 (List.length messages);
@@ -743,6 +754,47 @@ let test_json_syntax_is_prompt_only_even_for_native_target () =
       true
       ((EO.flow_success_output success).output = `Assoc [ "name", `String "accepted" ])
   | Error _ -> fail "valid JSON text fallback did not succeed"
+;;
+
+let test_json_syntax_stays_prompt_only_without_json_mode () =
+  let (result, _advances), posts =
+    with_counted_server
+      ~measurement_reply:(Measurement_tokens 1)
+      ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"text-only" ~base_url ~native:false ~json:false () ]
+    @@ fun snapshot ->
+    let advances = ref 0 in
+    let result =
+      execute_with_accepting_test_validator
+        ~net
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ ->
+          incr advances;
+          Ok ())
+        (start_flow (frozen_flow snapshot [ "text-only" ]))
+    in
+    result, !advances
+  in
+  (match result with
+   | Ok _ -> ()
+   | Error _ -> fail "text-only target failed the accepting validator");
+  let request =
+    match posts.generation_bodies with
+    | [ body ] -> Yojson.Safe.from_string body
+    | _ -> fail "text-only syntax did not retain its single generation body"
+  in
+  match request with
+  | `Assoc fields ->
+    check
+      bool
+      "a target without JSON mode still gets no response_format field"
+      false
+      (List.mem_assoc "response_format" fields)
+  | _ -> fail "text-only request body was not an object"
 ;;
 
 let test_fenced_text_json_advances_to_frozen_successor () =
@@ -4175,9 +4227,13 @@ let () =
             `Quick
             test_later_missing_credential_does_not_block_current_success
         ; test_case
-            "JSON syntax is prompt-only even for a native target"
+            "JSON syntax requests JSON mode when the target can enforce it"
             `Quick
-            test_json_syntax_is_prompt_only_even_for_native_target
+            test_json_syntax_requests_json_mode_when_the_target_can_enforce_it
+        ; test_case
+            "JSON syntax stays prompt-only when the target cannot enforce it"
+            `Quick
+            test_json_syntax_stays_prompt_only_without_json_mode
         ; test_case
             "fenced JSON advances to frozen successor"
             `Quick

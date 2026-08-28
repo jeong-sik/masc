@@ -1,6 +1,7 @@
 # Design: Off-host keeper execution over OpenSSH + microVM; local playground disabled
 
 - Date: 2026-08-27
+- Amended: 2026-08-28 (§1 host constraint, §4.1a on-host microVM lane, §10 in-flight work)
 - Status: Draft (pending user review)
 - Supersedes the recommendation of: `docs/rfc/RFC-0213-keeper-sandbox-isolation.md` §5.2 (B1 seatbelt as durable target)
 - Activates: RFC-0213 §4 option **C — Off-host microVM**, gated on building the SSH transport first
@@ -33,6 +34,11 @@ Keeper tool execution today:
 - Host constraint: macOS (Apple Silicon). Linux microVM primitives (KVM/Firecracker/
   gVisor) are unavailable; nested virtualization is not supported, so true microVMs
   require a **remote Linux host**.
+  **Amended 2026-08-28**: Apple's `container` CLI (Virtualization.framework,
+  macOS 26+) provides on-host per-container lightweight VMs — each guest runs
+  its own Linux kernel. This does not replace the off-host end state (the host
+  still runs the server and holds credentials) but it invalidates "no on-host
+  microVM lane exists" as a premise. See §4.1a.
 
 The one existing seam that fits a remote lane: `Masc_exec.Sandbox_target.t`
 (`lib/exec/sandbox_target.mli:37-39`):
@@ -122,6 +128,73 @@ Touch points (all verified):
 8. RFC: update RFC-0213 (or new RFC) recording the strategy change: B1 seatbelt
    rejected (deprecated Apple API, still a shared host kernel); C activated via
    SSH relocation.
+
+### 4.1a On-host microVM lane — Apple `container` CLI (added 2026-08-28)
+
+Landed since this document was written:
+
+- `Micro_vm` sandbox profile exists (#31253, merged 2026-08-28 12:20 KST) —
+  "refuses rather than substitutes": a keeper that asks for a VM is never
+  silently run under Docker with a docker label (#31225 is the incident that
+  motivated this).
+- `lib/keeper/keeper_sandbox_microvm.ml` — the Apple `container` argv builder,
+  with measured numbers in its header (macOS 26.6.1 / M3 Max / container CLI
+  1.3.0): **4.0–4.4 s VM start** vs Docker's 0.6–0.9 s, **~400 MB host memory
+  per running VM**, guest kernel `Linux 6.18.35`. Its own doc comment states
+  the remaining step: "Dispatch still refuses `Micro_vm` until a later change
+  routes it here."
+- Phase 0's dispatch gate is implemented and deployed: the `Local ->` branch
+  returns `local_playground_disabled` unless `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND`
+  lifts it (dev/test hatch, warns once per process, keeper named).
+
+#### As-is / to-be
+
+As-is: keeper cognition (turn loop, provider calls) runs in the server
+process; only tool execution enters a sandbox. Docker containers are created
+per turn (`masc-keeper-turn-*`), reused within the turn by a factory cache
+(one runtime per playground/network/root/image), torn down at turn end
+(#30604), with an orphan sweep at container creation
+(`reap_prior_turn_containers`) and a TTL-labelled managed lane
+(`masc_keeper_sandbox_start`) beside it. `Micro_vm` parses but never executes.
+
+To-be, in two wiring steps that reuse that machinery:
+
+| step | change | why it is wiring, not construction |
+|---|---|---|
+| W1 | Split the shared `Docker \| Micro_vm` dispatch branch (`keeper_tool_execute_runtime.ml:358`) and route `Micro_vm` to the existing argv builder | The builder, the refuse default, and the `Sandbox_target` runner-injection seam all exist; the branch split also removes the #31225 label-confusion class structurally |
+| W2 | Give `Micro_vm` a keeper-lifetime managed VM instead of the per-turn lifecycle (start on first exec, reap on `keeper_down`/TTL) | Managed kind, TTL labels, expiry check, and the reaper exist for Docker; a 4-second boot per turn is unusable, per keeper it amortises to one boot |
+
+Cost envelope: at ~400 MB per VM, all 10 current keepers on `Micro_vm` would
+hold ~4 GB resident (3% of the 128 GB dev host). Network defaults to
+`Network_none`; opening it is an explicit per-keeper TOML declaration.
+
+Isolation delta: Docker shares the host kernel (a wall inside one building);
+`Micro_vm` gives each keeper its own guest kernel (a separate building) — an
+escape must cross the hypervisor, not a namespace boundary.
+
+Relation to the off-host end state: W1/W2 exercise the same seam
+(`Sandbox_target` with injected runners) and the same lifecycle contract
+(create/reuse/reap with owner + TTL labels) that Phase 2's remote Firecracker
+lane needs. Nothing here is throwaway; the off-host lane replaces the runner,
+not the contract.
+
+#### Sequenced follow-ups (orthogonal, in cost order)
+
+1. **Deny decisions as typed evidence** — every policy allow/deny lands on the
+   receipt plane with the rule that fired, so a keeper can read its own
+   refusals (observed 2026-08-28: one keeper retried the same nonexistent
+   path 12 times because denials only reach operator logs). In-flight work
+   already points here — see §10.
+2. **Inference gateway (credential exclusion)** — the OpenShell/pi.dev
+   `inference.local` pattern (§4.4): sandboxed code calls a local endpoint,
+   the gateway injects provider keys upstream, raw keys never enter the
+   sandbox. Not urgent on-host (today almost nothing inside a sandbox calls
+   a provider); becomes the enabling piece for Phase 1+ off-host.
+   Subscription CLI runtimes (codex/claude OAuth) stay outside this pattern —
+   that boundary must be stated, not assumed away.
+3. **Per-keeper typed policy record** — collapse profile/network/path-gate/env
+   hatches into one parsed policy document. Largest blast radius (strict
+   decoder makes it a runtime-reset event); last.
 
 ### 4.2 Phase 1 — SSH remote execution lane
 
@@ -315,3 +388,21 @@ differ:
 - **Firecracker alternative**: if the remote host cannot do KVM, Cloud Hypervisor
   or QEMU-microvm are drop-in equivalents at the lifecycle layer; the design only
   assumes "VM exposes sshd".
+
+## 10. In-flight work registry (2026-08-28)
+
+Coordinates for anyone (human or keeper) picking up W1/W2 — check these have
+landed or been abandoned before touching the dispatch:
+
+| ref | state (2026-08-28) | overlaps |
+|---|---|---|
+| #31253 | merged | `Micro_vm` profile axis + refuse default |
+| `keeper_sandbox_microvm.ml` | merged | Apple `container` argv builder (W1 input) |
+| #31298 | open PR | CI boundary-matrix rows for the two microvm modules |
+| `fix/keeper-sandbox-routing-contract` | branch, +470 | types sandbox routing evidence (follow-up 1) |
+| `fix/keeper-sandbox-effect-wiring` | branch, +996 | wires routing receipts (follow-up 1) — stacked on the contract branch |
+| `fix/dashboard-sandbox-routing-projection` | branch | dashboard projection of the same evidence |
+
+The two routing-evidence branches implement follow-up 1 of §4.1a; W1/W2
+should rebase on whichever of them lands rather than duplicating the receipt
+plumbing.

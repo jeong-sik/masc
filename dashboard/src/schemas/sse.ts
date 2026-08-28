@@ -148,6 +148,9 @@ const STRING_FIELDS = new Set([
   'composition_tool',
   'composition_run_id',
   'composition_node_id',
+  'assembler_run_id',
+  'proposal_id',
+  'proposal_provenance_status',
   'composition_execution',
   'parent_tool_use_id',
   'tool_use_id',
@@ -197,6 +200,40 @@ const NUMBER_FIELDS = new Set([
 ])
 
 const BOOLEAN_FIELDS = new Set(['success', 'reacted', 'tool_io_redacted'])
+
+const PROPOSAL_PROVENANCE_STATUSES = new Set([
+  'retained_match',
+  'retained_unconfirmed',
+  'not_retained',
+  'retained_contradiction',
+])
+
+function validateProposalProvenanceFields(
+  value: Record<string, unknown>,
+): SafeParseResult<true> {
+  const fields = [
+    value.assembler_run_id,
+    value.proposal_id,
+    value.proposal_provenance_status,
+  ]
+  if (fields.every(field => field === undefined)) return ok(true)
+  if (
+    typeof value.assembler_run_id !== 'string'
+    || value.assembler_run_id.length === 0
+  ) {
+    return fail('assembler_run_id', 'Expected non-empty assembler_run_id')
+  }
+  if (typeof value.proposal_id !== 'string' || value.proposal_id.length === 0) {
+    return fail('proposal_id', 'Expected non-empty proposal_id')
+  }
+  if (
+    typeof value.proposal_provenance_status !== 'string'
+    || !PROPOSAL_PROVENANCE_STATUSES.has(value.proposal_provenance_status)
+  ) {
+    return fail('proposal_provenance_status', 'Expected canonical proposal provenance status')
+  }
+  return ok(true)
+}
 
 const KEEPER_CHAT_AG_UI_EVENT_TYPES = new Set([
   'RUN_STARTED',
@@ -979,6 +1016,8 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
         'Expected keeper_tool_call disposition to be completed, deferred, or failed',
       )
     }
+    const provenance = validateProposalProvenanceFields(value)
+    if (!provenance.success) return provenance
   }
 
   if (value.type === 'keeper_tool_call_evidence_committed') {
@@ -996,6 +1035,8 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
         return fail(field, `Expected a non-empty ${field}`)
       }
     }
+    const provenance = validateProposalProvenanceFields(value)
+    if (!provenance.success) return provenance
     if (typeof value.parent_tool_use_id !== 'string') {
       return fail('parent_tool_use_id', 'Expected parent_tool_use_id to be a string')
     }

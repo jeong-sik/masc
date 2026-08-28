@@ -1,8 +1,10 @@
 open Alcotest
 
 module Descriptor = Masc.Keeper_tool_descriptor
+module Exact = Masc.Exact_lane_run_registry
 module Plan = Masc.Keeper_plan_proposal
 module Execution_request = Masc.Keeper_plan_proposal_execution_request
+module Provenance = Masc.Keeper_plan_proposal_provenance
 module Store = Masc.Keeper_plan_proposal_store
 module Surface = Masc.Keeper_capability_surface
 
@@ -31,15 +33,20 @@ let reference name =
 ;;
 
 let test_execution_request_is_closed_and_typed () =
+  let assembler_run_id = "exact-assembler-run-1" in
   let proposal_id = String.make 64 'a' in
   let valid =
     `Assoc
-      [ "proposal_id", `String proposal_id
+      [ "assembler_run_id", `String assembler_run_id
+      ; "proposal_id", `String proposal_id
       ; "approval_tools", `List [ `String "keeper_time_now" ]
       ]
   in
   (match Execution_request.of_yojson valid with
    | Ok request ->
+     check string "Assembler run id roundtrip" assembler_run_id
+       (Execution_request.assembler_run_id request
+        |> Execution_request.Assembler_run_id.to_string);
      check string "proposal id roundtrip" proposal_id
        (Execution_request.proposal_id request |> Plan.Proposal_id.to_string);
      check (list string) "approval tools roundtrip" [ "keeper_time_now" ]
@@ -56,23 +63,29 @@ let test_execution_request_is_closed_and_typed () =
   in
   rejects "duplicate_field"
     (`Assoc
-      [ "proposal_id", `String proposal_id
+      [ "assembler_run_id", `String assembler_run_id
+      ; "proposal_id", `String proposal_id
       ; "proposal_id", `String proposal_id
       ; "approval_tools", `List [ `String "keeper_time_now" ]
       ]);
   rejects "empty_approval_tools"
     (`Assoc
-      [ "proposal_id", `String proposal_id; "approval_tools", `List [] ]);
+      [ "assembler_run_id", `String assembler_run_id
+      ; "proposal_id", `String proposal_id
+      ; "approval_tools", `List []
+      ]);
   rejects "empty_approval_tool"
     (`Assoc
-      [ "proposal_id", `String proposal_id
+      [ "assembler_run_id", `String assembler_run_id
+      ; "proposal_id", `String proposal_id
       ; "approval_tools", `List [ `String "" ]
       ]);
   let schema_nonempty_whitespace = " \n\t" in
   (match
      Execution_request.of_yojson
        (`Assoc
-         [ "proposal_id", `String proposal_id
+         [ "assembler_run_id", `String assembler_run_id
+         ; "proposal_id", `String proposal_id
          ; "approval_tools", `List [ `String schema_nonempty_whitespace ]
          ])
    with
@@ -86,9 +99,33 @@ let test_execution_request_is_closed_and_typed () =
      failf
        "schema-valid nonempty whitespace was rejected: %s"
        (Execution_request.error_to_yojson error |> Yojson.Safe.to_string));
+  rejects "empty_assembler_run_id"
+    (`Assoc
+      [ "assembler_run_id", `String ""
+      ; "proposal_id", `String proposal_id
+      ; "approval_tools", `List [ `String "keeper_time_now" ]
+      ]);
+  let whitespace_run_id = " \n\t" in
+  (match
+     Execution_request.of_yojson
+       (`Assoc
+         [ "assembler_run_id", `String whitespace_run_id
+         ; "proposal_id", `String proposal_id
+         ; "approval_tools", `List [ `String "keeper_time_now" ]
+         ])
+   with
+   | Ok request ->
+     check string "Assembler minLength=1 parity preserves whitespace"
+       whitespace_run_id
+       (Execution_request.assembler_run_id request
+        |> Execution_request.Assembler_run_id.to_string)
+   | Error error ->
+     failf "schema-valid Assembler run id rejected: %s"
+       (Execution_request.error_to_yojson error |> Yojson.Safe.to_string));
   rejects "invalid_proposal_id"
     (`Assoc
-      [ "proposal_id", `String "not-a-digest"
+      [ "assembler_run_id", `String assembler_run_id
+      ; "proposal_id", `String "not-a-digest"
       ; "approval_tools", `List [ `String "keeper_time_now" ]
       ])
 ;;
@@ -309,6 +346,183 @@ let read_file path =
   | Ok (Some content) -> content
   | Ok None -> failf "missing file %s" path
   | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
+;;
+
+let with_exact_registry f =
+  let path = Filename.temp_file "proposal-provenance-" ".jsonl" in
+  Sys.remove path;
+  Fun.protect
+    ~finally:(fun () ->
+      match Unix.lstat path with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      | stat when stat.Unix.st_kind = Unix.S_DIR -> Unix.rmdir path
+      | _ -> Sys.remove path)
+    (fun () -> f path (Exact.create ~path ()))
+;;
+
+let assembler_run_id value =
+  match Execution_request.Assembler_run_id.of_string value with
+  | Ok value -> value
+  | Error _ -> failf "invalid Assembler run fixture %S" value
+;;
+
+let register_exact registry ~run_id ~lane =
+  Exact.register_running
+    registry
+    ~run_id
+    ~lane
+    ~actor:"assembler-provenance-test"
+    ~started_at:1.0
+    ~input:(Exact.Exact_input `Null)
+;;
+
+let complete_exact registry ~run_id ~proposal_id =
+  match
+    Exact.mark_completed
+      registry
+      ~run_id
+      ~outcome:Exact.Succeeded
+      ~elapsed_s:0.1
+      ~selected_slot:(Some "assembler-test-slot")
+      ~output:
+        (`Assoc
+          [ "proposal_id", `String (Plan.Proposal_id.to_string proposal_id) ])
+  with
+  | Ok () -> ()
+  | Error error ->
+    failf "exact completion fixture failed: %s"
+      (Exact.completion_error_to_string error)
+;;
+
+let test_provenance_distinguishes_retention_and_contradiction () =
+  let proposal_id = create () |> Plan.id in
+  with_exact_registry (fun _path registry ->
+    (match
+       Provenance.verify
+         ~registry
+         ~assembler_run_id:(assembler_run_id "missing")
+         ~proposal_id
+     with
+     | Provenance.Not_retained -> ()
+     | _ -> fail "missing producer was not typed as not_retained");
+    register_exact registry ~run_id:"matched" ~lane:Exact.Assembler;
+    complete_exact registry ~run_id:"matched" ~proposal_id;
+    (match
+       Provenance.verify
+         ~registry
+         ~assembler_run_id:(assembler_run_id "matched")
+         ~proposal_id
+     with
+     | Provenance.Retained_match -> ()
+     | _ -> fail "matching retained producer was not verified");
+    register_exact registry ~run_id:"wrong-lane" ~lane:Exact.Librarian;
+    (match
+       Provenance.verify
+         ~registry
+         ~assembler_run_id:(assembler_run_id "wrong-lane")
+         ~proposal_id
+     with
+     | Provenance.Retained_contradiction (Provenance.Wrong_lane Exact.Librarian) ->
+       ()
+     | _ -> fail "wrong-lane producer was not a typed contradiction");
+    register_exact registry ~run_id:"running" ~lane:Exact.Assembler;
+    (match
+       Provenance.verify
+         ~registry
+         ~assembler_run_id:(assembler_run_id "running")
+         ~proposal_id
+     with
+     | Provenance.Retained_contradiction Provenance.Run_not_completed -> ()
+     | _ -> fail "running producer was not a typed contradiction"));
+  with_exact_registry (fun path registry ->
+    register_exact registry ~run_id:"unconfirmed" ~lane:Exact.Assembler;
+    Sys.remove path;
+    Unix.mkdir path 0o700;
+    (match
+       Exact.mark_completed
+         registry
+         ~run_id:"unconfirmed"
+         ~outcome:Exact.Succeeded
+         ~elapsed_s:0.1
+         ~selected_slot:(Some "assembler-test-slot")
+         ~output:
+           (`Assoc
+             [ "proposal_id", `String (Plan.Proposal_id.to_string proposal_id) ])
+     with
+     | Error (Exact.Persistence_failed _) -> ()
+     | Error error ->
+       failf "wrong unconfirmed completion result: %s"
+         (Exact.completion_error_to_string error)
+     | Ok () -> fail "completion unexpectedly persisted into a directory");
+    match
+      Provenance.verify
+        ~registry
+        ~assembler_run_id:(assembler_run_id "unconfirmed")
+        ~proposal_id
+    with
+    | Provenance.Retained_unconfirmed -> ()
+    | _ -> fail "matched volatile completion was not retained_unconfirmed")
+;;
+
+let test_deferred_result_keeps_metadata_with_one_canonical_identity () =
+  let proposal_id = create () |> Plan.id in
+  let assembler_run_id = assembler_run_id "canonical-assembler-run" in
+  let result =
+    Tool_result.make_deferred
+      ~tool_name:"fixture_deferred"
+      ~start_time:0.0
+      ~data:(`Assoc [ "deferred_reason", `String "fixture" ])
+      ~metadata:
+        (`Assoc
+          [ "proposal_id", `String "spoofed-first"
+          ; "retained", `String "metadata-value"
+          ; "proposal_id", `String "spoofed-second"
+          ; "assembler_run_id", `String "spoofed-run"
+          ; "proposal_provenance_status", `String "spoofed-status"
+          ])
+      ()
+    |> Provenance.attach_to_result
+         ~assembler_run_id
+         ~proposal_id
+         Provenance.Not_retained
+  in
+  let assert_identity json =
+    match json with
+    | `Assoc fields ->
+      let values name =
+        List.filter_map
+          (fun (field, value) ->
+             if String.equal field name then Some value else None)
+          fields
+      in
+      check (list string) "one canonical Assembler run"
+        [ "canonical-assembler-run" ]
+        (values "assembler_run_id"
+         |> List.map Yojson.Safe.Util.to_string);
+      check (list string) "one canonical proposal"
+        [ Plan.Proposal_id.to_string proposal_id ]
+        (values "proposal_id" |> List.map Yojson.Safe.Util.to_string);
+      check (list string) "one canonical provenance status"
+        [ "not_retained" ]
+        (values "proposal_provenance_status"
+         |> List.map Yojson.Safe.Util.to_string)
+    | _ -> fail "provenance enrichment did not return an object"
+  in
+  match result with
+  | Tool_result.Deferred payload ->
+    assert_identity payload.data;
+    (match payload.metadata with
+     | Some (`Assoc fields as metadata) ->
+       assert_identity metadata;
+       check (option string) "unrelated metadata is retained"
+         (Some "metadata-value")
+         (match List.assoc_opt "retained" fields with
+          | Some (`String value) -> Some value
+          | _ -> None)
+     | Some _ -> fail "deferred metadata is not an object"
+     | None -> fail "deferred metadata was lost")
+  | Tool_result.Completed _ -> fail "deferred result became completed"
+  | Tool_result.Failed _ -> fail "deferred result became failed"
 ;;
 
 let test_store_roundtrip_deduplicates_without_dispatch () =
@@ -649,6 +863,10 @@ let () =
         ; test_case "error JSON covers typed sums" `Quick test_error_json_codecs_cover_every_top_level_sum
         ; test_case "execution request is closed and schema-parity typed" `Quick
             test_execution_request_is_closed_and_typed
+        ; test_case "provenance distinguishes retention and contradiction" `Quick
+            test_provenance_distinguishes_retention_and_contradiction
+        ; test_case "deferred result keeps one canonical producer identity" `Quick
+            test_deferred_result_keeps_metadata_with_one_canonical_identity
         ] )
     ; ( "store"
       , [ test_case "roundtrip deduplicates without dispatch" `Quick test_store_roundtrip_deduplicates_without_dispatch

@@ -572,6 +572,7 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
   let capability_surface = surface () in
   let time_reference = reference capability_surface "keeper_time_now" in
   let context_reference = reference capability_surface "keeper_context_status" in
+  let board_reference = reference capability_surface "masc_board_list" in
   let meta = assembler_meta "assembler-tool-test" in
   let publication_recovery =
     { Keeper_publication_recovery_availability.provider =
@@ -579,6 +580,13 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
     ; keeper_name = meta.name
     }
   in
+  let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+  Keeper_tool_call_log.set_turn_context
+    ~cell:turn_ctx_cell
+    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    ~session_id:"assembler-tool-session"
+    ~turn:1
+    ();
   let bundle =
     Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
       ~config
@@ -589,11 +597,14 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
            ~eio:false
            ~system_prompt:"assembler Tool test")
       ~clock
+      ~turn_ctx_cell
       ~capability_surface
       ()
   in
   Fun.protect
-    ~finally:bundle.cleanup
+    ~finally:(fun () ->
+      bundle.cleanup ();
+      Keeper_tool_call_log.reset_for_testing ())
     (fun () ->
        let tool = find_agent_core_tool bundle.tools "keeper_assemble_plan" in
        let input =
@@ -625,6 +636,13 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
        let execution_request =
          match field "execution_request" output with
          | Some (`Assoc fields as request) ->
+          check (option string) "execution request binds the Assembler run"
+            (match field "run_id" output with
+             | Some (`String value) -> Some value
+             | _ -> None)
+            (match List.assoc_opt "assembler_run_id" fields with
+             | Some (`String value) -> Some value
+             | _ -> None);
           check (option string) "execution request binds the proposal id"
             (Some proposal_id)
             (match List.assoc_opt "proposal_id" fields with
@@ -686,6 +704,8 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
        check bool "ordinary Tool dispatch log remains absent" false
          (Sys.file_exists
             (Filename.concat (Workspace.masc_root_dir config) "tool_calls"));
+       Keeper_tool_call_log.reset_for_testing ();
+       Keeper_tool_call_log.init ~base_path:config.base_path ();
        let proposal_tool =
          find_agent_core_tool bundle.tools "keeper_proposal_execute"
        in
@@ -713,6 +733,52 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
                 fields)
          | _ -> assert false
        in
+       (match Agent_core.Tool.execute proposal_tool execution_request with
+        | Ok _ -> fail "proposal executed without Agent-Core invocation identity"
+        | Error error ->
+          check string "missing invocation is rejected explicitly"
+            "proposal execution requires Agent-Core invocation identity"
+            error.message);
+       let contradictory_run_id = "assembler-proposal-wrong-lane" in
+       Exact.register_running
+         (Exact.global ())
+         ~run_id:contradictory_run_id
+         ~lane:Exact.Librarian
+         ~actor:meta.name
+         ~started_at:1.0
+         ~input:(Exact.Exact_input `Null);
+       let contradictory_request =
+         match execution_request with
+         | `Assoc fields ->
+           `Assoc
+             (List.map
+                (fun (name, value) ->
+                   if String.equal name "assembler_run_id"
+                   then name, `String contradictory_run_id
+                   else name, value)
+                fields)
+         | _ -> assert false
+       in
+       (match
+          Agent_core.Tool.execute
+            ~invocation:(invocation "assembler-proposal-contradiction")
+            proposal_tool
+            contradictory_request
+        with
+        | Ok _ -> fail "contradictory producer provenance executed the proposal"
+        | Error error ->
+          let payload =
+            Yojson.Safe.from_string error.message
+            |> Yojson.Safe.Util.member "masc.payload"
+          in
+          check (option string) "producer contradiction is typed"
+            (Some "proposal_provenance_contradiction")
+            (match field "error" payload with
+             | Some (`String value) -> Some value
+             | _ -> None));
+       check int "pre-effect refusals emitted no composition rows" 0
+         (Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:8 ()
+          |> List.length);
        (match
           Agent_core.Tool.execute
             ~invocation:(invocation "assembler-proposal-tampered")
@@ -746,6 +812,16 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
          (match field "proposal_id" execution_output with
           | Some (`String value) -> Some value
           | _ -> None);
+       check (option string) "proposal execution returns its Assembler run"
+         (Some run_id)
+         (match field "assembler_run_id" execution_output with
+          | Some (`String value) -> Some value
+          | _ -> None);
+       check (option string) "retained producer is verified"
+         (Some "retained_match")
+         (match field "proposal_provenance_status" execution_output with
+          | Some (`String value) -> Some value
+          | _ -> None);
        (match field "actions" execution_output with
         | Some (`List actions) ->
           check (list string) "stored plan executed the exact Tool sequence"
@@ -759,6 +835,317 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
                  | _ -> fail "proposal action was not an object")
                actions)
         | _ -> fail "proposal execution did not return typed actions");
+       let rows =
+         Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:8 ()
+       in
+       let summary_rows, node_rows =
+         List.partition
+           (fun row ->
+              Safe_ops.json_string_opt "record_kind" row
+              = Some "composition_run")
+           rows
+       in
+       check int "one proposal composition summary row" 1
+         (List.length summary_rows);
+       check int "three proposal node rows" 3 (List.length node_rows);
+       List.iter
+         (fun row ->
+            check (option string) "telemetry joins the Assembler run"
+              (Some run_id)
+              (Safe_ops.json_string_opt "assembler_run_id" row);
+            check (option string) "telemetry joins the proposal"
+              (Some (Proposal.Proposal_id.to_string proposal_id))
+              (Safe_ops.json_string_opt "proposal_id" row);
+            check (option string) "telemetry preserves retained verification"
+              (Some "retained_match")
+              (Safe_ops.json_string_opt "proposal_provenance_status" row);
+            check (option string) "telemetry joins the parent Tool call"
+              (Some "assembler-proposal-execute")
+              (Safe_ops.json_string_opt "parent_tool_use_id" row))
+         rows;
+       let run_ids =
+         List.filter_map
+           (Safe_ops.json_string_opt "composition_run_id")
+           rows
+         |> List.sort_uniq String.compare
+       in
+       check int "summary and nodes share one composition run" 1
+         (List.length run_ids);
+       (match summary_rows with
+        | [ summary ] ->
+          check (option string) "summary preserves completed disposition"
+            (Some "completed")
+            (Safe_ops.json_string_opt "disposition" summary)
+        | _ -> assert false);
+       let failed_proposal =
+         match
+           Proposal.create
+             ~descriptors:(Surface.descriptors capability_surface)
+             ~objective:"Reject an invalid current-time input before dispatch"
+             ~execution:Proposal.Inline
+             ~capability_surface_sha256:(Surface.digest capability_surface)
+             ~ordinary_tool_references:[ time_reference ]
+             ~plan_json:
+               (`Assoc
+                 [ ( "nodes"
+                   , `List
+                       [ `Assoc
+                           [ "id", `String "invalid-clock"
+                           ; "tool", `String "keeper_time_now"
+                           ; ( "input"
+                             , `Assoc
+                                 [ "kind", `String "literal"
+                                 ; ( "value"
+                                   , `Assoc [ "unexpected", `Bool true ] )
+                                 ] )
+                           ] ] )
+                 ])
+         with
+         | Ok proposal -> proposal
+         | Error error ->
+           failf "failed proposal fixture rejected before execution: %s"
+             (Proposal.error_to_yojson error |> Yojson.Safe.to_string)
+       in
+       (match Store.save config failed_proposal with
+        | Ok Store.Stored | Ok Store.Already_present -> ()
+        | Error error ->
+          failf "failed proposal fixture did not persist: %s"
+            (Store.error_to_yojson error |> Yojson.Safe.to_string));
+       let failed_proposal_id =
+         Proposal.id failed_proposal |> Proposal.Proposal_id.to_string
+       in
+       let failed_request =
+         `Assoc
+           [ "assembler_run_id", `String "failed-producer-not-retained"
+           ; "proposal_id", `String failed_proposal_id
+           ; "approval_tools", `List [ `String "keeper_time_now" ]
+           ]
+       in
+       (match
+          Agent_core.Tool.execute
+            ~invocation:(invocation "assembler-proposal-failed")
+            proposal_tool
+            failed_request
+        with
+        | Ok _ -> fail "invalid proposal input unexpectedly executed"
+        | Error error ->
+          let payload =
+            Yojson.Safe.from_string error.message
+            |> Yojson.Safe.Util.member "masc.payload"
+          in
+          check (option string) "failed response retains producer identity"
+            (Some "failed-producer-not-retained")
+            (match field "assembler_run_id" payload with
+             | Some (`String value) -> Some value
+             | _ -> None);
+          check (option string) "failed response retains proposal identity"
+            (Some failed_proposal_id)
+            (match field "proposal_id" payload with
+             | Some (`String value) -> Some value
+             | _ -> None);
+          check (option string) "failed response retains provenance status"
+            (Some "not_retained")
+            (match field "proposal_provenance_status" payload with
+             | Some (`String value) -> Some value
+             | _ -> None));
+       let failed_rows =
+         Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:8 ()
+         |> List.filter (fun row ->
+           Safe_ops.json_string_opt "proposal_id" row
+           = Some failed_proposal_id)
+       in
+       (match failed_rows with
+        | [ summary ] ->
+          check (option string) "failed proposal records one terminal summary"
+            (Some "composition_run")
+            (Safe_ops.json_string_opt "record_kind" summary);
+          check (option string) "failed proposal summary is failed"
+            (Some "failed")
+            (Safe_ops.json_string_opt "disposition" summary)
+        | rows ->
+          failf "failed proposal recorded %d causal rows instead of one summary"
+            (List.length rows));
+       let board_tool = find_agent_core_tool bundle.tools "masc_board_list" in
+       let board_revision =
+         let board_invocation =
+           Agent_core.Tool_contract.Invocation.create
+             ~tool_use_id:"assembler-proposal-board-revision"
+             ~turn:1
+             ~schedule:
+               { Agent_core.Tool_contract.planned_index = 0
+               ; batch_index = 0
+               ; batch_size = 1
+               ; execution_mode = Agent_core.Tool_contract.Serial
+               }
+             ~completion:(Agent_core.Tool.completion board_tool)
+         in
+         match
+           Agent_core.Tool.execute
+             ~invocation:board_invocation
+             board_tool
+             (`Assoc [])
+         with
+         | Error error -> failf "board revision read failed: %s" error.message
+         | Ok output ->
+           Yojson.Safe.from_string output.content
+           |> Yojson.Safe.Util.member "revision"
+           |> Yojson.Safe.Util.to_string
+       in
+       let deferred_proposal =
+         match
+           Proposal.create
+             ~descriptors:(Surface.descriptors capability_surface)
+             ~objective:"Read the board only when its revision changes"
+             ~execution:Proposal.Inline
+             ~capability_surface_sha256:(Surface.digest capability_surface)
+             ~ordinary_tool_references:[ board_reference ]
+             ~plan_json:
+               (`Assoc
+                 [ ( "nodes"
+                   , `List
+                       [ `Assoc
+                           [ "id", `String "unchanged-board"
+                           ; "tool", `String "masc_board_list"
+                           ; ( "input"
+                             , `Assoc
+                                 [ "kind", `String "literal"
+                                 ; ( "value"
+                                   , `Assoc
+                                       [ "if_revision", `String board_revision ] )
+                                 ] )
+                           ] ] )
+                 ])
+         with
+         | Ok proposal -> proposal
+         | Error error ->
+           failf "deferred proposal fixture rejected before execution: %s"
+             (Proposal.error_to_yojson error |> Yojson.Safe.to_string)
+       in
+       (match Store.save config deferred_proposal with
+        | Ok Store.Stored | Ok Store.Already_present -> ()
+        | Error error ->
+          failf "deferred proposal fixture did not persist: %s"
+            (Store.error_to_yojson error |> Yojson.Safe.to_string));
+       let deferred_proposal_id =
+         Proposal.id deferred_proposal |> Proposal.Proposal_id.to_string
+       in
+       let deferred_request =
+         `Assoc
+           [ "assembler_run_id", `String "deferred-producer-not-retained"
+           ; "proposal_id", `String deferred_proposal_id
+           ; "approval_tools", `List [ `String "masc_board_list" ]
+           ]
+       in
+       (match
+          Agent_core.Tool.execute
+            ~invocation:(invocation "assembler-proposal-deferred")
+            proposal_tool
+            deferred_request
+        with
+        | Error error -> failf "deferred proposal returned Error: %s" error.message
+        | Ok output ->
+          let payload = Yojson.Safe.from_string output.content in
+          check (option string) "deferred response retains producer identity"
+            (Some "deferred-producer-not-retained")
+            (match field "assembler_run_id" payload with
+             | Some (`String value) -> Some value
+             | _ -> None);
+          check (option string) "deferred response retains proposal identity"
+            (Some deferred_proposal_id)
+            (match field "proposal_id" payload with
+             | Some (`String value) -> Some value
+             | _ -> None);
+          check (option string) "deferred response retains provenance status"
+            (Some "not_retained")
+            (match field "proposal_provenance_status" payload with
+             | Some (`String value) -> Some value
+             | _ -> None);
+          check (option string) "Agent-Core keeps deferred disposition"
+            (Some "deferred")
+            (match output.Agent_core.Types._meta with
+             | Some metadata ->
+               (match field "masc.tool_disposition" metadata with
+                | Some (`String value) -> Some value
+                | _ -> None)
+             | None -> None));
+       let deferred_rows =
+         Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:8 ()
+         |> List.filter (fun row ->
+           Safe_ops.json_string_opt "proposal_id" row
+           = Some deferred_proposal_id)
+       in
+       let deferred_summaries, deferred_nodes =
+         List.partition
+           (fun row ->
+              Safe_ops.json_string_opt "record_kind" row
+              = Some "composition_run")
+           deferred_rows
+       in
+       check int "deferred proposal records one terminal summary" 1
+         (List.length deferred_summaries);
+       check int "deferred proposal records one deferred node" 1
+         (List.length deferred_nodes);
+       (match deferred_summaries with
+        | [ summary ] ->
+          check (option string) "deferred summary keeps disposition"
+            (Some "deferred")
+            (Safe_ops.json_string_opt "disposition" summary)
+        | _ -> assert false);
+       let async_proposal =
+         match
+           Proposal.create
+             ~descriptors:(Surface.descriptors capability_surface)
+             ~objective:"Read the current time asynchronously"
+             ~execution:Proposal.Async
+             ~capability_surface_sha256:(Surface.digest capability_surface)
+             ~ordinary_tool_references:[ time_reference ]
+             ~plan_json:Yojson.Safe.Util.(plan_output |> member "plan")
+         with
+         | Ok proposal -> proposal
+         | Error error ->
+           failf "async proposal fixture rejected: %s"
+             (Proposal.error_to_yojson error |> Yojson.Safe.to_string)
+       in
+       (match Store.save config async_proposal with
+        | Ok Store.Stored | Ok Store.Already_present -> ()
+        | Error error ->
+          failf "async proposal fixture did not persist: %s"
+            (Store.error_to_yojson error |> Yojson.Safe.to_string));
+       let async_request =
+         `Assoc
+           [ "assembler_run_id", `String "assembler-run-not-retained"
+           ; ( "proposal_id"
+             , `String
+                 (Proposal.id async_proposal
+                  |> Proposal.Proposal_id.to_string) )
+           ; "approval_tools", `List [ `String "keeper_time_now" ]
+           ]
+       in
+       (match
+          Agent_core.Tool.execute
+            ~invocation:(invocation "assembler-proposal-async")
+            proposal_tool
+            async_request
+        with
+        | Ok _ -> fail "unsupported async proposal reported success"
+        | Error error ->
+          let payload =
+            Yojson.Safe.from_string error.message
+            |> Yojson.Safe.Util.member "masc.payload"
+          in
+          check (option string) "async refusal is typed"
+            (Some "not_supported")
+            (match field "error" payload with
+             | Some (`String value) -> Some value
+             | _ -> None);
+          check (option string) "evicted producer remains non-blocking provenance"
+            (Some "not_retained")
+            (match field "proposal_provenance_status" payload with
+             | Some (`String value) -> Some value
+             | _ -> None));
+       check int "non-executed async proposal emitted no additional rows" 7
+         (Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:8 ()
+          |> List.length);
        check int "proposal execution does not recall the Assembler" 1
          (Fixture.post_count accepted))
 ;;

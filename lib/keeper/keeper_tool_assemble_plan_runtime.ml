@@ -80,7 +80,8 @@ let success_data (success : Flow.success) =
     ; "store_result", `String (store_result_to_string success.store_result)
     ; ( "execution_request"
       , `Assoc
-          [ "proposal_id", `String proposal_id
+          [ "assembler_run_id", `String success.run_id
+          ; "proposal_id", `String proposal_id
           ; "approval_tools", `List approval_tools
           ] )
     ]

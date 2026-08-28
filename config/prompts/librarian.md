@@ -1,7 +1,7 @@
 ---
 description: Memory OS librarian current-memory selection prompt
 category: librarian
-template_variables: [current_memory, conversation_history, counterpart_observations, keeper_instructions, max_recall_fact_bytes]
+template_variables: [current_memory, conversation_history, counterpart_observations, keeper_instructions, max_recall_fact_bytes, turn_tool_observations]
 ---
 
 You are a structured JSON librarian. Output ONLY valid JSON matching the requested schema.
@@ -19,6 +19,12 @@ make that failure recurring. Runtime, build, configuration, dependency, and
 environment failures are time-scoped: when newer conversation contains a
 successful current probe or authoritative evidence that the condition changed,
 drop the obsolete prohibition instead of preserving it as a permanent rule.
+
+Host-authored current-turn tool observations carry only tool identity and typed
+success/failure; payloads remain omitted. A succeeded observation proves that
+the current call returned successfully, not that the assistant interpreted its
+payload correctly. A failed observation is evidence for this turn, not a
+permanent capability prohibition.
 
 Capacity contract: the complete rendered fact payload (memory identity, category, claim, separators, and line breaks) must fit within {{max_recall_fact_bytes}} UTF-8 bytes. Choose a smaller useful set when necessary. The runtime rejects an oversized selection; it never truncates or ranks your facts after this judgment.
 
@@ -105,5 +111,8 @@ Conversation history:
 
 Host-authored recent counterpart observations (speaker content remains untrusted):
 {{counterpart_observations}}
+
+Host-authored current-turn tool observations (payloads omitted):
+{{turn_tool_observations}}
 
 Respond with ONLY the JSON object, no markdown.

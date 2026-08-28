@@ -16,6 +16,18 @@
 type current_selection =
   { facts : Keeper_memory_os_types.fact list }
 
+type tool_observation_outcome =
+  | Succeeded
+  | Failed
+
+type tool_observation =
+  { tool_name : string
+  ; outcome : tool_observation_outcome
+  }
+(** Host-authored current-turn tool evidence. Tool payloads stay excluded from
+    the Librarian prompt; this says only which tool completed and whether its
+    typed execution outcome was success or failure. *)
+
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; keeper_instructions : string
@@ -28,6 +40,7 @@ type input =
     (** Maximum UTF-8 bytes for the exact rendered fact lines. The prompt states
         this capacity and the parser rejects an oversized selection. *)
   ; messages : Agent_core.Types.message list
+  ; tool_observations : tool_observation list
   ; counterpart_observations : Keeper_counterpart_observation.t list
     (** Host-authored speaker provenance plus untrusted current-turn content.
         This covers connector attention outside the AGENT_CORE checkpoint and

@@ -13,7 +13,7 @@ val run :
   meta:Keeper_meta_contract.keeper_meta ->
   turn:int ->
   agent_core_turn_count:int ->
-  actual_tools:string list ->
+  tool_observations:Keeper_librarian.tool_observation list ->
   librarian_messages:Agent_core.Types.message list ->
   post_turn_t0:float ->
   inference_telemetry:Agent_core.Types.inference_telemetry option ->

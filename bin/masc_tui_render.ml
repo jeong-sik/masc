@@ -883,6 +883,52 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
 
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
+(* ── the A-family surface chrome contract ─────────────────────────────
+   One owner for a borderless surface's fixed rows: top gap, title row,
+   divider, height fill, bottom gap, and the status-tail footer. The body
+   pushes its rows through the record and the contract counts them, so the
+   hand-tallied chrome_rows constants (the fixed-chrome-row trap: add a row,
+   forget the count, lose a body line) cannot drift — there is nothing left
+   to tally by hand. Surfaces keep composing their own title (screen_title
+   plus whatever meta) and hints; the contract owns geometry only. *)
+
+type chrome_body = {
+  push : string -> unit;
+  push_styled : style:string -> string -> unit;
+  push_selected : string -> unit;
+  push_divider : unit -> unit;
+  push_empty : unit -> unit;
+}
+
+let surface_chrome (state : state) ~terminal_rows ~cols ~surface_key ~title
+    ~hints ~(body : budget:int -> chrome_body -> unit) =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols title;
+  box_divider buf cols;
+  (* top + title + divider + bottom + footer: the five rows the contract
+     itself draws. Everything else is the body's budget. *)
+  let contract_rows = 5 in
+  let budget = max 1 (rows - contract_rows) in
+  let used = ref 0 in
+  let body_pushers =
+    { push = (fun line -> incr used; box_line buf cols line)
+    ; push_styled =
+        (fun ~style line -> incr used; box_line_styled buf cols ~style line)
+    ; push_selected = (fun line -> incr used; box_line_selected buf cols line)
+    ; push_divider = (fun () -> incr used; box_divider buf cols)
+    ; push_empty = (fun () -> incr used; box_empty buf cols)
+    }
+  in
+  body ~budget body_pushers;
+  for _ = !used + 1 to budget do
+    box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
+  finish_surface state ~surface_key ~rows:terminal_rows ~cols buf
+
 let connection_status_badge : Masc_tui_types.connection_status -> string =
   function
   | Connected as status ->
@@ -7093,8 +7139,6 @@ let render_fusion_detail (state : state) run_id =
    own, and one that is not syncing is working from whatever was last pulled. *)
 let render_repositories (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
   let repos =
     match state.repositories with
     | None -> []
@@ -7106,7 +7150,7 @@ let render_repositories (state : state) =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
   in
-  let header =
+  let title =
     match state.repositories with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
@@ -7117,82 +7161,69 @@ let render_repositories (state : state) =
           (screen_title " MASC Repositories") shown timestamp
           (connection_badge state)
   in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-  let col_hdr =
-    Printf.sprintf "  %-18s %-12s %-9s %-6s %s" "Name" "Branch" "Status" "Sync"
-      "Keepers"
-  in
-  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
-  box_divider buf cols;
-  (match state.repositories_error with
-   | None -> ()
-   | Some detail ->
-       box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
-  let chrome_rows = if Option.is_some state.repositories_error then 9 else 7 in
-  let content_height = max 1 (rows - chrome_rows) in
-  let max_scroll = max 0 (shown - content_height) in
-  let scroll = max 0 (min state.repositories_scroll max_scroll) in
-  if shown = 0 then begin
-    let empty =
-      match
-        empty_page_of ~snapshot:state.repositories
-          ~error:state.repositories_error
-      with
-      | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note
-      | Page_empty -> "  (no repositories registered)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
-    for _ = 1 to content_height - 1 do
-      box_empty buf cols
-    done
-  end
-  else
-    for i = 0 to content_height - 1 do
-      let idx = i + scroll in
-      match List.nth_opt repos idx with
-      | None -> box_empty buf cols
-      | Some r ->
-          let open Masc.Tui_decode in
-          let keepers =
-            match r.rp_keepers with
-            | [] -> "-"
-            | names -> String.concat ", " names
-          in
-          let line =
-            Printf.sprintf "  %-18s %-12s %-9s %-6s %s"
-              (Terminal_text.single_line r.rp_name)
-              (Terminal_text.single_line r.rp_default_branch)
-              (Terminal_text.single_line r.rp_status)
-              (if r.rp_auto_sync then "auto" else "manual")
-              (Terminal_text.single_line keepers)
-          in
-          (* A repository nobody works in is dim rather than absent: it is
-             registered, and that it has no keeper is the thing to notice. *)
-          let style = match r.rp_keepers with [] -> Ansi.dim | _ -> Ansi.reset in
-          if idx = state.repositories_cursor then box_line_selected buf cols line
-          else box_line_styled buf cols ~style line
-    done;
-  if shown > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d repositories, scroll %d]" shown scroll);
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
-  finish_surface state ~surface_key:"repositories" ~rows:terminal_rows ~cols buf
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"repositories"
+    ~title ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~body:(fun ~budget c ->
+      c.push_styled ~style:(Theme.recede ())
+        (Printf.sprintf "  %-18s %-12s %-9s %-6s %s" "Name" "Branch" "Status"
+           "Sync" "Keepers");
+      c.push_divider ();
+      (match state.repositories_error with
+       | None -> ()
+       | Some detail ->
+           c.push_styled ~style:(Theme.bad ())
+             ("  " ^ Keeper_chat.terminal_safe_text detail);
+           c.push_divider ());
+      let fixed = 2 + (if Option.is_some state.repositories_error then 2 else 0) in
+      let room = max 1 (budget - fixed) in
+      let overflowing = shown > room in
+      let content_height = if overflowing then max 1 (room - 1) else room in
+      let max_scroll = max 0 (shown - content_height) in
+      let scroll = max 0 (min state.repositories_scroll max_scroll) in
+      if shown = 0 then
+        let empty =
+          match
+            empty_page_of ~snapshot:state.repositories
+              ~error:state.repositories_error
+          with
+          | Page_failed -> page_failed_note
+          | Page_unread -> page_unread_note
+          | Page_empty -> "  (no repositories registered)"
+        in
+        c.push_styled ~style:(Theme.recede ()) empty
+      else begin
+        for i = 0 to content_height - 1 do
+          let idx = i + scroll in
+          match List.nth_opt repos idx with
+          | None -> c.push_empty ()
+          | Some r ->
+              let open Masc.Tui_decode in
+              let keepers =
+                match r.rp_keepers with
+                | [] -> "-"
+                | names -> String.concat ", " names
+              in
+              let line =
+                Printf.sprintf "  %-18s %-12s %-9s %-6s %s"
+                  (Terminal_text.single_line r.rp_name)
+                  (Terminal_text.single_line r.rp_default_branch)
+                  (Terminal_text.single_line r.rp_status)
+                  (if r.rp_auto_sync then "auto" else "manual")
+                  (Terminal_text.single_line keepers)
+              in
+              (* A repository nobody works in is dim rather than absent: it is
+                 registered, and that it has no keeper is the thing to notice. *)
+              let style =
+                match r.rp_keepers with [] -> Ansi.dim | _ -> Ansi.reset
+              in
+              if idx = state.repositories_cursor then c.push_selected line
+              else c.push_styled ~style line
+        done;
+        if overflowing then
+          c.push_styled ~style:(Theme.recede ())
+            (Printf.sprintf "[%d repositories, scroll %d]" shown scroll)
+      end)
 
-(* The files a keeper wrote, read back out of the tool-call log.
-
-   The durable chat transcript keeps a rendered line per tool call and drops
-   the arguments, so once a turn ends there is nowhere on this surface to see
-   what an Edit replaced. This row is where that is: the address the file has
-   in any checkout, the turn and task it belonged to, and enough of the new
-   text to recognise it by. Pressing the open key hands the selected row to
-   the operator's editor. *)
 let change_row_address (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_location with
   | Masc.Tui_decode.Fc_in_repo { repo_id; relative_path } ->
@@ -7676,8 +7707,6 @@ let render_changes (state : state) =
    an operator acts on. *)
 let render_connectors (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
   let connectors =
     match state.connectors with
     | None -> []
@@ -7689,7 +7718,7 @@ let render_connectors (state : state) =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
   in
-  let header =
+  let title =
     match state.connectors with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
@@ -7701,72 +7730,69 @@ let render_connectors (state : state) =
           snapshot.Masc.Tui_decode.cs_active snapshot.Masc.Tui_decode.cs_total
           timestamp (connection_badge state)
   in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-  let col_hdr =
-    Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector" "Configured"
-      "Reachable" "Status" "Channel"
-  in
-  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
-  box_divider buf cols;
-  (match state.connectors_error with
-   | None -> ()
-   | Some detail ->
-       box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
-  let chrome_rows = if Option.is_some state.connectors_error then 9 else 7 in
-  let content_height = max 1 (rows - chrome_rows) in
-  let max_scroll = max 0 (shown - content_height) in
-  let scroll = max 0 (min state.connectors_scroll max_scroll) in
-  if shown = 0 then begin
-    let empty =
-      match
-        empty_page_of ~snapshot:state.connectors ~error:state.connectors_error
-      with
-      | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note
-      | Page_empty -> "  (no connectors registered)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
-    for _ = 1 to content_height - 1 do
-      box_empty buf cols
-    done
-  end
-  else
-    for i = 0 to content_height - 1 do
-      let idx = i + scroll in
-      match List.nth_opt connectors idx with
-      | None -> box_empty buf cols
-      | Some c ->
-          let open Masc.Tui_decode in
-          let yes_no flag = if flag then "yes" else "no" in
-          let line =
-            Printf.sprintf "  %-16s %-11s %-11s %-10s %s"
-              (Terminal_text.single_line c.cn_display_name)
-              (yes_no c.cn_available) (yes_no c.cn_connected)
-              (Terminal_text.single_line c.cn_status)
-              (Terminal_text.single_line_or ~default:"-" c.cn_channel)
-          in
-          let style =
-            (* Set up and unreachable is the row to act on: it was working.
-               Never configured is dim -- it is a choice, not a fault. *)
-            if c.cn_available && not c.cn_connected then (Theme.bad ())
-            else if not c.cn_available then Ansi.dim
-            else Ansi.reset
-          in
-          if idx = state.connectors_cursor then box_line_selected buf cols line
-          else box_line_styled buf cols ~style line
-    done;
-  if shown > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d connectors, scroll %d]" shown scroll);
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  b:bind  u:unbind  Tab:next  q:quit  r:refresh");
-  finish_surface state ~surface_key:"connectors" ~rows:terminal_rows ~cols buf
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
+    ~hints:"j/k:scroll  b:bind  u:unbind  Tab:next  q:quit  r:refresh"
+    ~body:(fun ~budget c ->
+      c.push_styled ~style:(Theme.recede ())
+        (Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector"
+           "Configured" "Reachable" "Status" "Channel");
+      c.push_divider ();
+      (match state.connectors_error with
+       | None -> ()
+       | Some detail ->
+           c.push_styled ~style:(Theme.bad ())
+             ("  " ^ Keeper_chat.terminal_safe_text detail);
+           c.push_divider ());
+      let fixed = 2 + (if Option.is_some state.connectors_error then 2 else 0) in
+      let room = max 1 (budget - fixed) in
+      let overflowing = shown > room in
+      let content_height = if overflowing then max 1 (room - 1) else room in
+      let max_scroll = max 0 (shown - content_height) in
+      let scroll = max 0 (min state.connectors_scroll max_scroll) in
+      if shown = 0 then
+        let empty =
+          match
+            empty_page_of ~snapshot:state.connectors
+              ~error:state.connectors_error
+          with
+          | Page_failed -> page_failed_note
+          | Page_unread -> page_unread_note
+          | Page_empty -> "  (no connectors registered)"
+        in
+        c.push_styled ~style:(Theme.recede ()) empty
+      else begin
+        for i = 0 to content_height - 1 do
+          let idx = i + scroll in
+          match List.nth_opt connectors idx with
+          | None -> c.push_empty ()
+          | Some connector ->
+              let open Masc.Tui_decode in
+              let yes_no flag = if flag then "yes" else "no" in
+              let line =
+                Printf.sprintf "  %-16s %-11s %-11s %-10s %s"
+                  (Terminal_text.single_line connector.cn_display_name)
+                  (yes_no connector.cn_available)
+                  (yes_no connector.cn_connected)
+                  (Terminal_text.single_line connector.cn_status)
+                  (Terminal_text.single_line_or ~default:"-"
+                     connector.cn_channel)
+              in
+              let style =
+                (* Set up and unreachable is the row to act on: it was
+                   working. Never configured is dim -- it is a choice, not a
+                   fault. *)
+                if connector.cn_available && not connector.cn_connected then
+                  Theme.bad ()
+                else if not connector.cn_available then Ansi.dim
+                else Ansi.reset
+              in
+              if idx = state.connectors_cursor then c.push_selected line
+              else c.push_styled ~style line
+        done;
+        if overflowing then
+          c.push_styled ~style:(Theme.recede ())
+            (Printf.sprintf "[%d connectors, scroll %d]" shown scroll)
+      end)
 
 let runtime_refresh_badge refresh_state =
   let open Masc.Tui_decode in

@@ -52,6 +52,14 @@ function servedLabel(activation: DashboardSkillActivation): string {
     : `resource ${served.relative_path} · ${served.bytes} bytes · ${served.sha256}`
 }
 
+function loadReasonLabel(reason: Extract<DashboardEffectiveKeeperSurface, { status: 'available' }>['skill_profiles'][number]['load_reasons'][number]): string {
+  switch (reason.kind) {
+    case 'catalog_default': return 'catalog default'
+    case 'keeper_profile': return 'Keeper profile'
+    case 'task': return `Task ${reason.task_id}`
+  }
+}
+
 function actionIdentityLabel(action: DashboardSkillActivation['actions'][number]): string {
   return action.identity.kind === 'call_id'
     ? `call ${action.identity.call_id}`
@@ -69,7 +77,6 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
       </div>
     `
   }
-  const references = [...surface.instruction_skills, ...surface.composition_skills]
   const skillSelection = surface.skill_selection.mode === 'all'
     ? html`<span>All published Skills</span>`
     : surface.skill_selection.names.length === 0
@@ -89,6 +96,12 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
       <code class="text-3xs break-all text-[var(--color-fg-muted)]">
         snapshot ${surface.skill_snapshot_revision} · deferred resource bound ${surface.skill_resource_read_max_bytes ?? 'not configured'}
       </code>
+      <div class="grid gap-1" data-testid="skill-context-totals">
+        <span class="text-xs">Skill context footprint</span>
+        <code class="text-3xs break-all text-[var(--color-fg-muted)]">
+          profile discovery ${surface.skill_discovery_bytes} B · eager ${surface.skill_eager_body_bytes} B · deferred bodies ${surface.skill_body_bytes} B · skill tool schema ${surface.skill_tool_surface_bytes}/${surface.tool_surface_bytes} B all tool schema
+        </code>
+      </div>
       ${surface.tool_delivery.status === 'suppressed'
         ? html`<div class="text-xs text-[var(--color-status-warn)]" data-testid="skill-tool-delivery-suppressed">
             Tool delivery suppressed · ${surface.tool_delivery.reason}
@@ -115,10 +128,18 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
             </div>
           `}
       <div class="grid gap-1">
-        ${references.length === 0
+        ${surface.skill_profiles.length === 0
           ? html`<span class="text-xs text-[var(--color-fg-muted)]">No readable Skills</span>`
-          : references.map(reference => html`
-              <code key=${referenceLabel(reference)} class="text-3xs break-all">${referenceLabel(reference)}</code>
+          : surface.skill_profiles.map(profile => html`
+              <div key=${referenceLabel(profile.reference)} class="grid gap-0.5 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] p-2">
+                <code class="text-3xs break-all">${referenceLabel(profile.reference)}</code>
+                <span class="text-3xs text-[var(--color-fg-muted)]">
+                  ${profile.kind} · ${profile.execution} · discovery ${profile.context.discovery_bytes} B · eager ${profile.context.eager_body_bytes} B · deferred ${profile.context.body_bytes} B
+                </span>
+                <span class="text-3xs" data-testid="skill-load-reason">
+                  why loaded: ${profile.load_reasons.map(loadReasonLabel).join(' + ') || 'unattributed'}
+                </span>
+              </div>
             `)}
       </div>
       ${surface.tool_surface_sha256

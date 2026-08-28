@@ -152,6 +152,26 @@ function keeperReceiptFixture(
       skill_resource_read_max_bytes: 65_536,
       instruction_skills: [reference],
       composition_skills: [],
+      skill_profiles: [{
+        reference,
+        kind: 'instruction',
+        execution: 'on_demand',
+        context: {
+          body_bytes: 840,
+          eager_body_bytes: 0,
+          discovery_bytes: 160,
+          tool_schema_bytes: null,
+        },
+        load_reasons: [
+          { kind: 'task', task_id: 'task-001' },
+          { kind: 'keeper_profile' },
+        ],
+      }],
+      tool_surface_bytes: 4_800,
+      skill_tool_surface_bytes: 320,
+      skill_discovery_bytes: 160,
+      skill_eager_body_bytes: 0,
+      skill_body_bytes: 840,
       skills_left_out: [],
       count: 2,
       tools: [],
@@ -483,6 +503,10 @@ describe('Tools', () => {
       keeperName: 'sangsu',
     }))
     expect(container.textContent).toContain('project-masc/ocaml-coding:ocaml-coding@')
+    expect(container.querySelector('[data-testid="skill-context-totals"]')?.textContent)
+      .toContain('profile discovery 160 B · eager 0 B · deferred bodies 840 B')
+    expect(container.querySelector('[data-testid="skill-load-reason"]')?.textContent)
+      .toContain('Task task-001 + Keeper profile')
     expect(container.textContent).toContain('Task instruction · task-001, task-held')
     expect(container.textContent).toContain(`snapshot ${'d'.repeat(64)}`)
     expect(container.querySelector('[data-testid="skill-selection"]')?.textContent)
@@ -649,6 +673,11 @@ describe('Tools', () => {
     }
     receipt.effective_keeper_surface.instruction_skills = []
     receipt.effective_keeper_surface.composition_skills = []
+    receipt.effective_keeper_surface.skill_profiles = []
+    receipt.effective_keeper_surface.skill_discovery_bytes = 0
+    receipt.effective_keeper_surface.skill_eager_body_bytes = 0
+    receipt.effective_keeper_surface.skill_body_bytes = 0
+    receipt.effective_keeper_surface.skill_tool_surface_bytes = 0
     receipt.effective_keeper_surface.tools = []
     receipt.effective_keeper_surface.count = 0
     mocks.fetchDashboardTools.mockResolvedValue(receipt)

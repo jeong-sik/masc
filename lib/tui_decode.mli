@@ -254,6 +254,11 @@ type skills_catalog = {
   sc_surfaces : skills_catalog_surface list;
 }
 
+type effective_skill_load_reason =
+  | Skill_catalog_default
+  | Skill_keeper_profile
+  | Skill_task of string
+
 type effective_skill_profile = {
   esp_reference : Skill_reference.t;
   esp_name : string;
@@ -261,6 +266,7 @@ type effective_skill_profile = {
   esp_execution : string;
   esp_body_bytes : int;
   esp_discovery_bytes : int;
+  esp_load_reasons : effective_skill_load_reason list;
   esp_node_count : int;
   esp_batch_count : int;
   esp_max_parallelism : int;
@@ -287,6 +293,8 @@ type effective_tool_surface =
       ets_skill_profiles : effective_skill_profile list;
       ets_tool_surface_bytes : int;
       ets_skill_tool_surface_bytes : int;
+      ets_skill_discovery_bytes : int;
+      ets_skill_eager_body_bytes : int;
       ets_skill_body_bytes : int;
       ets_tools : effective_tool list;
       ets_tool_surface_sha256 : string option;

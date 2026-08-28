@@ -1323,6 +1323,7 @@ type async_msg =
       int * (Masc_tui_loader.runtime_surface_load, string) result
   | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
   | Skills_catalog_loaded of (Masc.Tui_decode.skills_catalog, string) result
+  | Tools_async_observation_loaded of (Yojson.Safe.t, string) result
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_assignment list,
@@ -1850,7 +1851,13 @@ let launch_tools_load state ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Tools_loaded result)
+    enqueue_async mailbox (Tools_loaded result);
+    let async_observation =
+      try Masc_tui_http.fetch_async_request_observation ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Tools_async_observation_loaded async_observation)
   in
   (* The skills catalog (usage + flows) is a separate read and must not
      delay the tool list: a slow catalog costs its own section, not the
@@ -7370,6 +7377,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.skills_catalog <- Some catalog;
           state.skills_catalog_error <- None
       | Error detail -> state.skills_catalog_error <- Some detail)
+  | Tools_async_observation_loaded result -> (
+      match result with
+      | Ok observation ->
+          state.tools_async_observation <- Some observation;
+          state.tools_async_observation_error <- None
+      | Error detail -> state.tools_async_observation_error <- Some detail)
   | Runtime_catalog_loaded result -> (
       match result with
       | Ok (runtimes, assignments) ->

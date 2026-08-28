@@ -346,8 +346,15 @@ module Recovery_for_testing = struct
   let consume_owner_projection_batch = consume_owner_projection_batch
 end
 
+let latest_keeper_msg_recovery = Atomic.make None
+
+let latest_keeper_msg_recovery_observation () =
+  Atomic.get latest_keeper_msg_recovery
+;;
+
 let recover_keeper_msg_requests_on_startup ~base_path =
   let report = Keeper_msg_async.recover_lost_disk_records ~base_path () in
+  Atomic.set latest_keeper_msg_recovery (Some report);
   if
     report.lost > 0
     || report.finalized > 0

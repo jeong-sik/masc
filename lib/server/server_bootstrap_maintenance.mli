@@ -11,6 +11,11 @@ val recover_keeper_msg_requests_on_startup :
 (** Settle durable async request rows that cannot have a live owner after a
     process restart. Called synchronously before background server work starts. *)
 
+val latest_keeper_msg_recovery_observation :
+  unit -> Keeper_msg_async.recovery_report option
+(** Last startup recovery report observed by this process. This is a read-only
+    process-local projection; it is not recovery authority or durable state. *)
+
 val start_background_maintenance :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

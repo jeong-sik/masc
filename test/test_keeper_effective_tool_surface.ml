@@ -175,6 +175,16 @@ let project
       ~native_posture
       ()
   =
+  let task_selection =
+    match
+      Keeper_task_skill_turn.resolve_for_task
+        ~snapshot
+        ~task_id:"task-001"
+        task_skill_references
+    with
+    | Ok selection -> selection
+    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  in
   Keeper_effective_tool_surface.For_testing.project
     ~keeper_name:"fixture"
     ~runtime_id:"fixture.runtime"
@@ -186,7 +196,7 @@ let project
     ~current_task_id:(Some "task-001")
     ~skills_left_out
     ~task_skill_references
-    ~task_selection:None
+    ~task_selection:(Some task_selection)
     ~skill_snapshot:snapshot
 ;;
 
@@ -228,6 +238,17 @@ let test_skill_name_selection_is_structured_and_filters_task () =
        "not_in_turn_skill_catalog"
        Yojson.Safe.Util.(member "reason" value |> to_string)
    | _ -> fail "unavailable name projection changed shape");
+  let selected_reasons =
+    Yojson.Safe.Util.(member "skill_profiles" json |> to_list)
+    |> List.concat_map (fun profile ->
+         Yojson.Safe.Util.(member "load_reasons" profile |> to_list)
+         |> List.map (fun reason ->
+              Yojson.Safe.Util.(member "kind" reason |> to_string)))
+  in
+  check (list string)
+    "configured Keeper profile is the exact load reason"
+    [ "keeper_profile" ]
+    selected_reasons;
   let none =
     match
       project
@@ -299,6 +320,21 @@ let test_projection_names_equal_turn_surface_authority () =
        && surface.skill_tool_surface_bytes < surface.tool_surface_bytes);
     check bool "Skill bodies are measured but never eager" true
       (surface.skill_body_bytes > 0);
+    check bool "Skill discovery total is measured" true
+      (surface.skill_discovery_bytes > 0);
+    check int "Skill eager total remains exact" 0 surface.skill_eager_body_bytes;
+    let json = Keeper_effective_tool_surface.to_yojson (Available surface) in
+    let profile_reasons =
+      Yojson.Safe.Util.(member "skill_profiles" json |> to_list)
+      |> List.map (fun profile ->
+           Yojson.Safe.Util.(member "load_reasons" profile |> to_list)
+           |> List.map (fun reason ->
+                Yojson.Safe.Util.(member "kind" reason |> to_string)))
+    in
+    check (list (list string))
+      "exact load reasons distinguish Task and catalog default"
+      [ [ "task"; "catalog_default" ]; [ "catalog_default" ] ]
+      profile_reasons;
     (match surface.skill_profiles with
      | [ instruction; composition ] ->
        check string "instruction activation" "on_demand" instruction.execution;

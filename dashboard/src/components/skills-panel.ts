@@ -4,10 +4,12 @@ import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
   createSkill,
+  fetchAsyncRequestObservation,
   fetchSkills,
   fetchSkillEvidence,
   fetchWritableSkillSources,
   type SkillEvidenceResponse,
+  type AsyncRequestObservation,
   type SkillIdentity,
   type SkillProfile,
   type SkillSnapshotConfig,
@@ -243,6 +245,48 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
   `
 }
 
+function AsyncRequestObservationView({
+  observation,
+  error,
+}: {
+  observation: AsyncRequestObservation | null
+  error: string | null
+}) {
+  if (error) return html`<div class="text-[var(--color-status-error)]">Async broker unavailable: ${error}</div>`
+  if (!observation) return html`<div class="ss-muted">Loading async broker observation…</div>`
+  if (observation.status === 'unavailable') {
+    return html`<div class="text-[var(--color-status-error)]">Durable async inventory is unavailable.</div>`
+  }
+  const recovery = observation.startup_recovery
+  return html`
+    <div class="rounded border border-[var(--color-border)] p-3" data-testid="async-request-observation">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <strong>Async broker</strong>
+        <span>${observation.summary.active} active</span>
+        <span class="text-[var(--color-status-good)]">${observation.summary.runtime_owned} runtime-owned</span>
+        <span class=${observation.summary.ownership_unknown > 0 ? 'text-[var(--color-status-warn)]' : 'ss-muted'}>${observation.summary.ownership_unknown} ownership unknown</span>
+        <span class=${observation.summary.record_errors > 0 ? 'text-[var(--color-status-error)]' : 'ss-muted'}>${observation.summary.record_errors} record errors</span>
+      </div>
+      ${observation.requests.length > 0 ? html`
+        <div class="mt-2 grid gap-1">
+          ${observation.requests.map(request => html`
+            <div class="mono text-3xs" key=${request.request_id}>
+              ${request.request_id} · ${request.keeper_name} · ${request.status}
+              · ${request.elapsed_sec === undefined ? '?s' : `${request.elapsed_sec.toFixed(1)}s`}
+              · ${request.worker_ownership}
+            </div>
+          `)}
+        </div>
+      ` : html`<div class="mt-1 ss-muted">No durable active requests.</div>`}
+      <div class="mt-2 ss-muted text-3xs">
+        ${recovery
+          ? `startup recovery lost=${recovery.lost} finalized=${recovery.finalized} cleaned=${recovery.cleaned} unreadable=${recovery.unreadable} failed=${recovery.failed}`
+          : 'startup recovery was not observed by this process'}
+      </div>
+    </div>
+  `
+}
+
 function skillTemplate(kind: 'instruction' | 'composition', name: string, description: string, body: string): string {
   const frontmatter = `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\n`
   if (kind === 'instruction') return `${frontmatter}# ${name}\n\n${body}\n`
@@ -253,6 +297,8 @@ export function SkillsPanel() {
   const response = useSignal<SkillsResponse | null>(null)
   const loading = useSignal(true)
   const error = useSignal<string | null>(null)
+  const asyncObservation = useSignal<AsyncRequestObservation | null>(null)
+  const asyncObservationError = useSignal<string | null>(null)
   const expanded = useSignal<string | null>(null)
   const evidence = useSignal<Record<string, SkillEvidenceResponse>>({})
   const evidenceLoading = useSignal<string | null>(null)
@@ -281,8 +327,23 @@ export function SkillsPanel() {
         if (!cancelled) loading.value = false
       }
     }
+    const loadAsyncObservation = async () => {
+      try {
+        const observation = await fetchAsyncRequestObservation({ signal: ctl.signal })
+        if (cancelled) return
+        asyncObservation.value = observation
+        asyncObservationError.value = null
+      } catch (e) {
+        if (cancelled || isAbortError(e)) return
+        asyncObservationError.value = (e as Error).message || 'async observation fetch failed'
+      }
+    }
     load()
-    const iv = window.setInterval(load, POLL_INTERVAL_MS)
+    loadAsyncObservation()
+    const iv = window.setInterval(() => {
+      load()
+      loadAsyncObservation()
+    }, POLL_INTERVAL_MS)
     return () => {
       cancelled = true
       ctl.abort()
@@ -354,6 +415,7 @@ export function SkillsPanel() {
           <div class="flex items-center gap-2"><button class="ss-btn" type="submit" disabled=${!createSource.value}>Create + publish</button><span class="ss-muted">${createStatus.value}</span></div>
         </form>
       ` : null}
+      <${AsyncRequestObservationView} observation=${asyncObservation.value} error=${asyncObservationError.value} />
       <div class="ss-muted" data-testid="skills-revision">
         snapshot ${res.snapshot.snapshot_revision.slice(0, 12)} · catalog ${res.snapshot.catalog_revision.slice(0, 12)}
         · ${resourceReadBoundLabel(res.snapshot.config)}

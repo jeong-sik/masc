@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  decodeAsyncRequestObservation,
   decodeSkillEvidenceResponse,
   SkillsContractError,
 } from './dashboard-skills'
@@ -71,5 +72,79 @@ describe('skill evidence contract', () => {
     })
 
     expect(decoded.coverage.unavailable).toEqual(['sangsu: ledger_unreadable'])
+  })
+})
+
+const recovery = {
+  lost: 1,
+  finalized: 0,
+  cleaned: 0,
+  staging_files_inspected: 0,
+  staging_files_deleted: 0,
+  staging_files_preserved: 0,
+  unreadable: 0,
+  failed: 0,
+  store_errors: [],
+  record_errors: [],
+}
+
+describe('async request observation contract', () => {
+  it('keeps durable row and current-process ownership distinct', () => {
+    const decoded = decodeAsyncRequestObservation({
+      schema: 'masc.async-request-observation/v1',
+      status: 'ready',
+      summary: {
+        active: 2,
+        runtime_owned: 1,
+        ownership_unknown: 1,
+        record_errors: 0,
+      },
+      requests: [
+        {
+          request_id: 'request-owned',
+          keeper_name: 'rondo',
+          submitted_by: 'operator',
+          status: 'running',
+          submitted_at: 1,
+          elapsed_sec: 2,
+          worker_ownership: 'runtime_owned',
+        },
+        {
+          request_id: 'request-disk-only',
+          keeper_name: 'sangsu',
+          submitted_by: 'operator',
+          status: 'queued',
+          submitted_at: 2,
+          elapsed_sec: 1,
+          worker_ownership: 'disk_only_ownership_unknown',
+        },
+      ],
+      record_errors: [],
+      startup_recovery: recovery,
+    })
+
+    expect(decoded.status).toBe('ready')
+    if (decoded.status === 'ready') {
+      expect(decoded.requests.map(row => row.worker_ownership)).toEqual([
+        'runtime_owned',
+        'disk_only_ownership_unknown',
+      ])
+    }
+  })
+
+  it('rejects summary counts that invent or omit durable rows', () => {
+    expect(() => decodeAsyncRequestObservation({
+      schema: 'masc.async-request-observation/v1',
+      status: 'ready',
+      summary: {
+        active: 2,
+        runtime_owned: 1,
+        ownership_unknown: 1,
+        record_errors: 0,
+      },
+      requests: [],
+      record_errors: [],
+      startup_recovery: null,
+    })).toThrow(SkillsContractError)
   })
 })

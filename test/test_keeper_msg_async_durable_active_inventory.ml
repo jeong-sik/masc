@@ -37,6 +37,18 @@ let active_dir ~base_path =
   |> record_dir
 ;;
 
+let projected_ownership ~base_path ~request_id =
+  Server_async_request_observability.project ~base_path
+  |> Yojson.Safe.Util.member "requests"
+  |> Yojson.Safe.Util.to_list
+  |> List.find (fun row ->
+    String.equal
+      request_id
+      (Yojson.Safe.Util.member "request_id" row |> Yojson.Safe.Util.to_string))
+  |> Yojson.Safe.Util.member "worker_ownership"
+  |> Yojson.Safe.Util.to_string
+;;
+
 let test_reads_disk_only_entry () =
   with_temp_base "keeper-msg-durable-inventory-" (fun base_path ->
     Eio_main.run
@@ -59,6 +71,11 @@ let test_reads_disk_only_entry () =
       |> accepted_request_id
     in
     Eio.Promise.await started;
+    check
+      string
+      "current process owns worker"
+      "runtime_owned"
+      (projected_ownership ~base_path ~request_id);
     Async.For_testing.forget ~base_path ~caller ~request_id;
     (match Async.read_durable_active_inventory ~base_path with
      | Ok { entries = [ entry ]; record_errors = [] } ->
@@ -68,6 +85,11 @@ let test_reads_disk_only_entry () =
          (match entry.status with Async.Running -> true | _ -> false)
      | Ok _ -> fail "expected one exact active entry"
      | Error _ -> fail "durable active inventory read was rejected");
+    check
+      string
+      "disk row does not invent worker ownership"
+      "disk_only_ownership_unknown"
+      (projected_ownership ~base_path ~request_id);
     Eio.Promise.resolve resolve_release ();
     Eio.Fiber.yield ())
 ;;
@@ -171,10 +193,23 @@ let test_reports_malformed_link_non_file_and_name () =
 
 let test_missing_partition_is_empty () =
   with_temp_base "keeper-msg-durable-inventory-empty-" (fun base_path ->
-    match Async.read_durable_active_inventory ~base_path with
-    | Ok { entries = []; record_errors = [] } -> ()
-    | Ok _ -> fail "missing active partition was not empty"
-    | Error _ -> fail "missing active partition was rejected")
+    (match Async.read_durable_active_inventory ~base_path with
+     | Ok { entries = []; record_errors = [] } -> ()
+     | Ok _ -> fail "missing active partition was not empty"
+     | Error _ -> fail "missing active partition was rejected");
+    ignore
+      (Server_bootstrap_maintenance.recover_keeper_msg_requests_on_startup
+         ~base_path
+        : Async.recovery_report);
+    let recovery =
+      Server_async_request_observability.project ~base_path
+      |> Yojson.Safe.Util.member "startup_recovery"
+    in
+    check
+      int
+      "startup recovery remains observable"
+      0
+      (Yojson.Safe.Util.member "lost" recovery |> Yojson.Safe.Util.to_int))
 ;;
 
 let quick name f = test_case name `Quick f

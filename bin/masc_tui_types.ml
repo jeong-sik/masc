@@ -1613,6 +1613,8 @@ type state = {
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
+  mutable tools_async_observation: Yojson.Safe.t option;
+  mutable tools_async_observation_error: string option;
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
@@ -2213,6 +2215,8 @@ let create_state
   tools_scroll = 0;
   tools_skill_cursor = 0;
   tools_skill_evidence = None;
+  tools_async_observation = None;
+  tools_async_observation_error = None;
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;

@@ -155,6 +155,7 @@
   masc.masc_exec
   masc.masc_exec_bash_parser
   masc.masc_exec_command_gate
+  exec_ssh_protocol
   masc_board
   masc.board_addressing
   masc.board_handlers

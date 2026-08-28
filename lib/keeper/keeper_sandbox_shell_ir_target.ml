@@ -15,6 +15,8 @@ type docker_dispatch =
   ; runtime : Keeper_turn_sandbox_runtime.t
   }
 
+type ssh_dispatch = { target : Masc_exec.Sandbox_target.t }
+
 let target_error ?(fields = []) ?(class_ = Tool_result.Runtime_failure) message =
   { message; fields; class_ }
 ;;
@@ -150,5 +152,31 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
        Ok
          { target = Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()
          ; runtime
+       })
+;;
+
+let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
+  match Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name:meta.name with
+  | Error message ->
+    Error
+      (target_error ~class_:Tool_result.Policy_rejection
+         ~fields:[ "requested_sandbox", `String "remote_ssh" ] message)
+  | Ok endpoint ->
+    (match Keeper_sandbox_ssh.create ?ssh_bin ~base_path ~endpoint () with
+     | Error message ->
+       Error
+         (target_error ~class_:Tool_result.Dependency_unavailable
+            ~fields:
+              [ "requested_sandbox", `String "remote_ssh"
+              ; "remote_endpoint", `String endpoint.name
+              ]
+            message)
+     | Ok ssh ->
+       let runner = Keeper_sandbox_ssh.runner ~timeout_sec ssh in
+       Ok
+         { target =
+             Masc_exec.Sandbox_target.ssh
+               ~endpoint:(Keeper_sandbox_ssh.sandbox_endpoint ssh)
+               ~runner ()
          })
 ;;

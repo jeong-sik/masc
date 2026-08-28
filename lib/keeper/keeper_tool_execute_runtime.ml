@@ -350,18 +350,53 @@ let handle_tool_execute_typed
                 (Keeper_sandbox_shell_ir_target.target_error
                    ("local_playground_disabled: "
                     ^ Env_config_sandbox.Gate.disabled_message))
-          (* Fail closed, never a silent Docker/host fallthrough
-             (RFC-0001): the SSH runner is Phase 1 task 6. *)
           | Remote_ssh ->
-            Error
-              (Keeper_sandbox_shell_ir_target.target_error
-                 ~class_:Tool_result.Policy_rejection
-                 ~fields:
-                   [ "requested_sandbox", `String "remote_ssh"
-                   ; "sandbox_profile", `String "remote_ssh"
-                   ]
-                 "remote_ssh_dispatch_unavailable: SSH runner not wired yet \
-                  (Phase 1 task 6); no fallback to docker or host dispatch")
+            (* Host identity projection is deliberately absent: the remote
+               shim synthesizes its own minimal environment and receives only
+               endpoint-allowlisted typed entries. The existing typed-env
+               secret check still applies before any transport is created. *)
+            (match
+               Keeper_github_identity.validate_local_tool_env
+                 (typed_input_env input)
+             with
+             | Error err ->
+               Error
+                 (Keeper_sandbox_shell_ir_target.target_error
+                    ~fields:
+                      [ "requested_sandbox", `String "remote_ssh"
+                      ; "sandbox_profile", `String "remote_ssh"
+                      ]
+                    err)
+             | Ok () ->
+               (match
+                  Keeper_sandbox_shell_ir_target.ssh_target
+                    ~base_path:config.base_path
+                    ~meta
+                    ~timeout_sec
+                    ()
+                with
+                | Error error -> Error error
+                | Ok dispatch ->
+                  let endpoint_fields =
+                    match dispatch.target with
+                    | Masc_exec.Sandbox_target.Ssh { endpoint; _ } ->
+                      [ "remote_endpoint", `String endpoint.name
+                      ; "remote_host", `String endpoint.host
+                      ]
+                    | Host | Docker _ -> []
+                  in
+                  Ok
+                    { sandbox = dispatch.target
+                    ; fields =
+                        [ "requested_sandbox", `String "remote_ssh"
+                        ; "via", `String "remote_ssh"
+                        ; "sandbox_profile", `String "remote_ssh"
+                        ]
+                        @ endpoint_fields
+                    ; base_host_env = None
+                    ; github_secret_files = (fun () -> Ok [])
+                    ; cleanup = Fun.id
+                    }))
           (* Both guest profiles enter the same target constructor, but a
              [Micro_vm] keeper never reaches a docker runtime: the factory
              resolves it to [Backend_unimplemented] and the constructor

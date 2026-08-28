@@ -718,6 +718,55 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~cl
       s)
   |> unix_status_of_eio_status
 
+(** Write one request to child stdin, then keep the pipe open while stdout and
+    stderr drain. Some framed protocols use stdin EOF as an out-of-band cancel
+    signal, so [Eio.Flow.string_source] is not correct for them: it closes as
+    soon as the request bytes have been copied. The owning switch closes
+    [stdin_w] on cancellation, which preserves the same deterministic child
+    reap path as the other spawn helpers. *)
+let spawn_and_drain_both_with_stdin_held_open
+    ?phase_ref
+    ~sw
+    pm
+    ~cwd
+    ?env
+    ~stdin_content
+    ~clock
+    argv
+    ~on_stdout_chunk
+    ~on_stderr_chunk
+    stdout_buf
+    stderr_buf
+  =
+  let stdin_r, stdin_w = Eio.Process.pipe ~sw pm in
+  let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
+  let stderr_r, stderr_w = Eio.Process.pipe ~sw pm in
+  let proc =
+    Eio.Process.spawn ~sw pm ~cwd ?env ~stdin:stdin_r ~stdout:stdout_w
+      ~stderr:stderr_w argv
+  in
+  Option.iter (fun r -> r := Timeout_origin.Command) phase_ref;
+  Eio.Flow.close stdin_r;
+  Eio.Flow.close stdout_w;
+  Eio.Flow.close stderr_w;
+  let status = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      finalize_spawned_proc ~clock proc status
+        [ "stdin", (stdin_w :> Eio.Resource.close_ty Eio.Resource.t)
+        ; "stdout", (stdout_r :> Eio.Resource.close_ty Eio.Resource.t)
+        ; "stderr", (stderr_r :> Eio.Resource.close_ty Eio.Resource.t)
+        ])
+    (fun () ->
+      Eio.Flow.copy_string stdin_content stdin_w;
+      Eio.Fiber.both
+        (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:on_stdout_chunk)
+        (fun () -> drain_to_eof stderr_r stderr_buf ~on_chunk:on_stderr_chunk);
+      let s = Eio.Process.await proc in
+      status := Some s;
+      s)
+  |> unix_status_of_eio_status
+
 type output_destination =
   | Captured
   | Written_to of {
@@ -1007,6 +1056,68 @@ let run_argv_with_stdin_and_status_split
                     "",
                     process_error_output ~label
                       ~reason:(reason_of_exn_for_output exn) () )))
+
+let run_argv_with_stdin_held_open_and_status_split
+    ?timeout_sec
+    ?env
+    ?cwd
+    ?on_stdout_chunk
+    ?on_stderr_chunk
+    ~(stdin_content : string)
+    (argv : string list) : Unix.process_status * string * string =
+  let timeout_sec = validate_timeout_sec timeout_sec in
+  Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin_and_status
+    ~argv ?env ();
+  with_spawn_guard (fun () ->
+    match get_proc_mgr (), get_clock (), get_cwd_default () with
+    | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
+      ( Unix.WEXITED 127
+      , ""
+      , "Process_eio.run_argv_with_stdin_held_open_and_status_split: initialized Eio runtime required" )
+    | Ok pm, Ok clk, Ok default_cwd ->
+      let effective_cwd =
+        match cwd with
+        | None -> default_cwd
+        | Some dir -> Eio.Path.(default_cwd / dir)
+      in
+      let stdout_buf = create_capture () in
+      let stderr_buf = create_capture () in
+      let label = String.concat " " (List.map Filename.quote argv) in
+      let phase_ref = ref Timeout_origin.Spawn in
+      let on_stdout_chunk = Option.value on_stdout_chunk ~default:ignore_chunk in
+      let on_stderr_chunk = Option.value on_stderr_chunk ~default:ignore_chunk in
+      try
+        with_explicit_timeout_exn clk timeout_sec (fun () ->
+          let unix_status =
+            Eio.Switch.run (fun sw ->
+              spawn_and_drain_both_with_stdin_held_open
+                ~phase_ref ~sw pm ~cwd:effective_cwd ?env ~stdin_content
+                ~clock:clk argv ~on_stdout_chunk ~on_stderr_chunk stdout_buf
+                stderr_buf)
+          in
+          unix_status, Exec_buffer.render stdout_buf, Exec_buffer.render stderr_buf)
+      with
+      | Explicit_process_timeout timeout_sec ->
+        Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
+          timeout_sec (Timeout_origin.to_label !phase_ref) label;
+        observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
+        let stdout = Exec_buffer.render stdout_buf in
+        let stderr = Exec_buffer.render stderr_buf in
+        let stderr =
+          if String.trim stdout = "" && String.trim stderr = ""
+          then
+            process_error_output ~label
+              ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ()
+          else stderr
+        in
+        timed_out_status, stdout, stderr
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Misc.error "[Process_eio] held-open stdin argv error: %s — %s"
+          label (Printexc.to_string exn);
+        ( Unix.WEXITED 127
+        , Exec_buffer.render stdout_buf
+        , process_error_output ~label ~reason:(reason_of_exn_for_output exn) () ))
 
 let run_argv_with_stdin_and_status
     ?timeout_sec

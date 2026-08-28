@@ -538,6 +538,16 @@ let test_denylist_beats_allowlist () =
 
 - [ ] **Step 5: Redirect-path arms** — `keeper_tool_execute_runtime.ml:402-428` `Remote_ssh` arms translate redirect paths via `Keeper_remote_path` (replacing any fail-closed stub from Task 6).
 
+  **2026-08-28 implementation finding:** the current `Sandbox_target.runner`
+  contract carries argv/env/cwd/stdin and captured output, but no remote file
+  operations or redirect metadata. A string translation cannot make a remote
+  file openable from `Exec_dispatch`, and treating the host bookkeeping bundle
+  as a bind mount would be false. Until the typed remote read/write attachment
+  contract in #31442 lands, SSH file redirects remain explicitly fail-closed as
+  `remote_ssh_redirect_unavailable`; they never open a same-named host file.
+  Path translation, streamed-output rewriting, and SSH read ops are independently
+  shippable and covered by this task's focused tests.
+
 - [ ] **Step 6: GREEN + no-regression.**
 
 - [ ] **Step 7: Commit** — `feat(keeper): bidirectional remote path translation + SSH read-ops backend`

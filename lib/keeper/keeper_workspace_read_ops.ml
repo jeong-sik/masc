@@ -116,11 +116,10 @@ let try_handle_with_outcome
   in
   let run_readonly_in_sandbox ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
       ~max_bytes ~timeout_sec () =
-    (* Pre-flight parity with [Keeper_sandbox_read_backend.read_file]: verify
-       the host target exists before spawning a container, so a wrong path
-       guess fails with a precise host-path error instead of burning a docker
-       run that ends in "No such file or directory". *)
-    if not (Sys.file_exists target) then
+    (* Docker has a shared host mount, so its host-side existence preflight is
+       precise and cheap. Remote SSH does not: the host path is bookkeeping
+       only, and existence is authoritative on the endpoint. *)
+    if meta.sandbox_profile <> Remote_ssh && not (Sys.file_exists target) then
       Error
         (sandbox_read_error ~target
            (Printf.sprintf

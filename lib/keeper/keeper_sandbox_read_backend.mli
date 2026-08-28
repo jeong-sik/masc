@@ -12,13 +12,13 @@
 
 (** [should_route_read ~meta] is [true] iff this keeper's reads
     should go through the sandbox backend. Encapsulates the
-    [sandbox_profile=docker] policy so callers do not have to repeat
-    it. *)
+    [sandbox_profile=docker|micro_vm|remote_ssh] policy so callers do not have
+    to repeat it. *)
 val should_route_read : meta:Keeper_meta_contract.keeper_meta -> bool
 
-(** [container_path_of_host ~config ~meta ~host_path] maps a
-    host-side absolute playground path to its in-container
-    counterpart. Returns [Error _] when [host_path] is not inside the
+(** [container_path_of_host ~config ~meta ~host_path] maps a host-side
+    absolute playground path to its selected backend counterpart (container or
+    SSH endpoint). Returns [Error _] when [host_path] is not inside the
     keeper's playground bundle (programmer error — caller should have
     run the containment check first). *)
 val container_path_of_host :
@@ -28,8 +28,9 @@ val container_path_of_host :
   (string, string) result
 
 (** [read_file ~config ~meta ~host_path ~max_bytes ~timeout_sec ()] reads
-    [host_path] through the sandbox backend with the keeper's playground mounted
-    read-only and returns the captured bytes (clamped to [max_bytes]).
+    [host_path] through the selected sandbox backend and returns the captured
+    bytes (clamped to [max_bytes]). Docker mounts the playground read-only;
+    SSH invokes the fixed remote shim and never probes the host path first.
 
     Errors include backend image misconfiguration, backend command failure, or
     the input not being inside the playground. *)

@@ -85,6 +85,7 @@ type shared_state =
    correct guard; no yielding work or logging happens while it is held. *)
 let shared_states : (string, shared_state) Hashtbl.t = Hashtbl.create 8
 let shared_states_mu = Stdlib.Mutex.create ()
+let ssh_bin_override : string option Atomic.t = Atomic.make None
 
 let shared_state ~base_path (endpoint : Exec_ssh_endpoint.t) =
   let key =
@@ -110,7 +111,8 @@ type t =
   ; identity_file : string
   ; known_hosts_file : string
   ; control_path_dir : string
-  ; host_playground_root : string
+  ; base_path : string
+  ; keeper_name : string
   ; shared : shared_state
   }
 
@@ -127,7 +129,13 @@ let ensure_control_path_dir path =
          path msg)
 ;;
 
-let create ?(ssh_bin = "ssh") ~base_path ~(endpoint : Exec_ssh_endpoint.t) () =
+let create ?ssh_bin ~base_path ~keeper_name
+    ~(endpoint : Exec_ssh_endpoint.t) () =
+  let ssh_bin =
+    match ssh_bin with
+    | Some path -> path
+    | None -> Option.value (Atomic.get ssh_bin_override) ~default:"ssh"
+  in
   let control_path_dir = Filename.concat base_path ".masc/run/ssh" in
   let* () = ensure_control_path_dir control_path_dir in
   Ok
@@ -136,10 +144,15 @@ let create ?(ssh_bin = "ssh") ~base_path ~(endpoint : Exec_ssh_endpoint.t) () =
     ; identity_file = resolve_path ~base_path endpoint.identity_file
     ; known_hosts_file = resolve_path ~base_path endpoint.known_hosts_file
     ; control_path_dir
-    ; host_playground_root = Filename.concat base_path ".masc/playground"
+    ; base_path
+    ; keeper_name
     ; shared = shared_state ~base_path endpoint
     }
 ;;
+
+module For_testing = struct
+  let set_ssh_bin_override value = Atomic.set ssh_bin_override value
+end
 
 let ssh_argv t =
   let endpoint = t.endpoint in
@@ -284,26 +297,9 @@ let local_wall_budget t timeout_sec =
   float_of_int t.endpoint.connect_timeout_sec +. timeout_sec +. 4.0
 ;;
 
-let path_is_at_or_below ~root path =
-  String.equal path root
-  || String.starts_with ~prefix:(root ^ Filename.dir_sep) path
-;;
-
 let remote_cwd t cwd =
-  if path_is_at_or_below ~root:t.endpoint.remote_root cwd
-  then Ok cwd
-  else if path_is_at_or_below ~root:t.host_playground_root cwd
-  then
-    let suffix =
-      String.sub cwd (String.length t.host_playground_root)
-        (String.length cwd - String.length t.host_playground_root)
-    in
-    Ok (t.endpoint.remote_root ^ suffix)
-  else
-    Error
-      (Printf.sprintf
-         "remote_ssh_path_jail_violation: endpoint %s cwd %s is outside %s"
-         t.endpoint.name cwd t.host_playground_root)
+  Keeper_remote_path.host_to_remote ~base_path:t.base_path
+    ~endpoint:t.endpoint ~keeper:t.keeper_name cwd
 ;;
 
 let runner ~timeout_sec t =
@@ -338,23 +334,55 @@ let runner ~timeout_sec t =
            Eio.Semaphore.acquire t.shared.semaphore;
            Eio.Switch.on_release sw (fun () ->
              Eio.Semaphore.release t.shared.semaphore);
-           let stderr_stream = { callback = on_stderr_chunk; tail = "" } in
+           let stdout_path_stream =
+             Option.map
+               (fun emit ->
+                 Keeper_remote_path.stream ~base_path:t.base_path
+                   ~endpoint:t.endpoint ~keeper:t.keeper_name ~emit)
+               on_stdout_chunk
+           in
+           let stderr_path_stream =
+             Option.map
+               (fun emit ->
+                 Keeper_remote_path.stream ~base_path:t.base_path
+                   ~endpoint:t.endpoint ~keeper:t.keeper_name ~emit)
+               on_stderr_chunk
+           in
+           let stderr_stream =
+             { callback =
+                 Option.map Keeper_remote_path.rewrite_stream_chunk
+                   stderr_path_stream
+             ; tail = ""
+             }
+           in
            let budget = local_wall_budget t timeout_sec in
            let ssh_status, stdout, raw_stderr =
              Process_eio.run_argv_with_stdin_held_open_and_status_split
                ~timeout_sec:budget
                ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-               ?on_stdout_chunk
+               ?on_stdout_chunk:
+                 (Option.map Keeper_remote_path.rewrite_stream_chunk
+                    stdout_path_stream)
                ~on_stderr_chunk:(stream_stderr_chunk stderr_stream)
                ~stdin_content:frame
                (ssh_argv t)
            in
+           Option.iter Keeper_remote_path.finish_stream stdout_path_stream;
            let local_timed_out =
              Process_eio.exit_reason_of_status ssh_status = Process_eio.Timed_out
            in
            match split_final_trailer raw_stderr with
            | Error detail ->
              flush_stderr_payload stderr_stream stderr_stream.tail;
+             Option.iter Keeper_remote_path.finish_stream stderr_path_stream;
+             let stdout =
+               Keeper_remote_path.rewrite_output ~base_path:t.base_path
+                 ~endpoint:t.endpoint ~keeper:t.keeper_name stdout
+             in
+             let raw_stderr =
+               Keeper_remote_path.rewrite_output ~base_path:t.base_path
+                 ~endpoint:t.endpoint ~keeper:t.keeper_name raw_stderr
+             in
              let error =
                if local_timed_out
                then local_timeout_error endpoint_name budget
@@ -368,6 +396,15 @@ let runner ~timeout_sec t =
                | Error _ -> stderr_stream.tail
              in
              flush_stderr_payload stderr_stream streamed_payload;
+             Option.iter Keeper_remote_path.finish_stream stderr_path_stream;
+             let stdout =
+               Keeper_remote_path.rewrite_output ~base_path:t.base_path
+                 ~endpoint:t.endpoint ~keeper:t.keeper_name stdout
+             in
+             let payload_stderr =
+               Keeper_remote_path.rewrite_output ~base_path:t.base_path
+                 ~endpoint:t.endpoint ~keeper:t.keeper_name payload_stderr
+             in
              if ssh_status = Unix.WEXITED 255 || local_timed_out
              then
                let error =

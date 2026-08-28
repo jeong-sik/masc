@@ -157,11 +157,19 @@ let deliver_capture destination text =
      with
      | Sys_error message -> Error (Printf.sprintf "cannot write %s: %s" path message))
 
-let unresolved_target_message target =
-  Printf.sprintf
-    "a file redirect to %s is not carried out for a sandboxed stage: the path \
-     names a file inside the sandbox and would be opened on this host"
-    (Path_scope.raw (Redirect_scope.target_as_written target))
+let unresolved_target_message ~sandbox target =
+  let path = Path_scope.raw (Redirect_scope.target_as_written target) in
+  match sandbox with
+  | Sandbox_target.Ssh _ ->
+    Printf.sprintf
+      "remote_ssh_redirect_unavailable: remote file redirect %s has no remote \
+       file-operation transport; refusing host fallback"
+      path
+  | Sandbox_target.Host | Docker _ ->
+    Printf.sprintf
+      "a file redirect to %s is not carried out for a sandboxed stage: the path \
+       names a file inside the sandbox and would be opened on this host"
+      path
 
 let redirect_plan_of_redirects ~cwd redirects =
   let step (plan, attach) = function
@@ -346,7 +354,8 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
           s.redirects
       with
       | Some (Redirect_scope.File { target; _ }) ->
-        unsupported_redirect_result (unresolved_target_message target)
+        unsupported_redirect_result
+          (unresolved_target_message ~sandbox:s.sandbox target)
       | Some (Redirect_scope.Fd_to_fd _ | Redirect_scope.Literal _) | None ->
         (match s.sandbox with
          | Docker { runner; _ } | Ssh { runner; _ } ->

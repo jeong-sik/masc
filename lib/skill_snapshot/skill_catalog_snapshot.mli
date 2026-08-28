@@ -85,6 +85,9 @@ type rejection = private
   ; source_id : Skill_source_config.source_id
   ; package_id : package_id option
   ; directory : string
+  ; content_revision : content_revision option
+        (** Digest of the exact candidate bytes when the document was read.
+            Unreadable candidates have no content revision. *)
   ; reason : rejection_reason
   }
 

@@ -17,6 +17,16 @@
   masc_test_deps))
 
 (test
+ (name test_keeper_skill_inventory)
+ (modules test_keeper_skill_inventory)
+ (libraries
+  alcotest
+  masc
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot))
+
+(test
  (name test_server_skill_editor)
  (modules test_server_skill_editor)
  (libraries

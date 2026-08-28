@@ -191,12 +191,52 @@ let omission_order =
   ; Workspace_conflict
   ]
 
+(* Hints are "key:action" items separated by two spaces. When even an empty
+   status tail leaves the row too wide, whole items drop from the back and
+   an ellipsis marks the cut -- a reader sees "later keys omitted", never
+   half a word. Items keep their order: the surface put the load-bearing
+   keys first. *)
+let split_on_double_space text =
+  let n = String.length text in
+  let rec loop start i acc =
+    if i >= n then
+      let piece = String.sub text start (n - start) in
+      List.rev (piece :: acc)
+    else if i + 1 < n && text.[i] = ' ' && text.[i + 1] = ' ' then
+      let piece = String.sub text start (i - start) in
+      let rec skip j = if j < n && text.[j] = ' ' then skip (j + 1) else j in
+      let next = skip (i + 2) in
+      loop next next (piece :: acc)
+    else loop start (i + 1) acc
+  in
+  loop 0 0 []
+
+let drop_hint_items ~max_cells hints =
+  let items =
+    split_on_double_space hints
+    |> List.filter (fun item -> not (String.equal (String.trim item) ""))
+  in
+  let ellipsis = "\xe2\x80\xa6" in
+  let rec fit kept =
+    match kept with
+    | [] -> None
+    | _ ->
+      let candidate = "  " ^ String.concat "  " kept ^ "  " ^ ellipsis in
+      if Masc_tui_message_layout.display_width candidate <= max_cells
+      then Some candidate
+      else fit (List.filteri (fun i _ -> i < List.length kept - 1) kept)
+  in
+  fit items
+
 let rec fit_body ~max_cells ~hints ~omissions statuses =
   let rendered = body hints statuses in
   if Masc_tui_message_layout.display_width rendered <= max_cells then rendered
   else
     match statuses, omissions with
-    | [], _ -> Masc_tui_message_layout.fit_width rendered max_cells
+    | [], _ ->
+      (match drop_hint_items ~max_cells hints with
+       | Some fitted -> fitted
+       | None -> Masc_tui_message_layout.fit_width rendered max_cells)
     | _, retention :: rest ->
       fit_body ~max_cells ~hints ~omissions:rest
         (List.filter (fun status -> status.retention <> retention) statuses)

@@ -926,6 +926,18 @@ let test_cadence_fresh_then_periodic () =
     (Runtime.cadence_step ~cadence:3 ~counter:2)
 ;;
 
+(* The property that makes the failure path's counter reset load-bearing:
+   a due pass stores the cadence value itself, and a counter left there is
+   due again on the very next turn. Before the fix, failure classes outside
+   the old backoff set skipped the reset and re-ran the lane's heaviest
+   prompt every turn for as long as the (typically persistent) condition
+   lasted. *)
+let test_cadence_due_counter_is_due_again_without_reset () =
+  Alcotest.(check (pair int bool))
+    "a counter parked at the cadence value is immediately due again"
+    (3, true)
+    (Runtime.cadence_step ~cadence:3 ~counter:3)
+
 let test_cadence_trace_rollover_is_fresh () =
   check (pair (pair string int) bool) "same trace advances"
     (("trace-a", 2), false)
@@ -1005,7 +1017,9 @@ let () =
             test_constraint_category_excludes_self_imposed_scope
         ] )
     ; ( "cadence"
-      , [ test_case "fresh then periodic" `Quick test_cadence_fresh_then_periodic
+      , [ test_case "fresh then periodic" `Quick test_cadence_fresh_then_periodic;
+        test_case "due counter is due again without reset" `Quick
+          test_cadence_due_counter_is_due_again_without_reset
         ; test_case "trace rollover is fresh" `Quick
             test_cadence_trace_rollover_is_fresh
         ] )

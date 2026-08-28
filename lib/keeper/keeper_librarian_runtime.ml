@@ -196,18 +196,6 @@ let selected_slot_of_extraction_error = function
     None
 ;;
 
-let should_record_cadence_backoff_after_error = function
-  | Exact_execution_failed { outward_effect = Outward_effect_started; _ }
-  | Domain_output_invalid _ ->
-    true
-  | Exact_execution_failed { outward_effect = No_outward_effect; _ }
-  | Execution_clock_unavailable
-  | Prompt_render_failed _
-  | Exact_setup_failed _
-  | Memory_snapshot_write_failed _ ->
-    false
-;;
-
 let render_prompt key variables =
   match Prompt_registry.render_prompt_template key variables with
   | Ok text ->
@@ -668,8 +656,16 @@ let run_best_effort
                Keeper_metrics.(to_string MemoryOsLibrarianFailures)
                ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
                ();
-             let deferred = should_record_cadence_backoff_after_error error in
-             if deferred then cadence_record_attempt ~keeper_id ~trace_id;
+             (* Every failure defers the next pass by the full cadence. The
+                old split re-ran the "safe to retry" classes (setup, prompt
+                render, no-outward-effect execution, snapshot write) on EVERY
+                subsequent turn, because a due pass leaves the counter at the
+                cadence value — but those classes are exactly the ones that
+                tend to persist (an unpublished registry, a broken template),
+                so the lane burned its heaviest prompt each turn for as long
+                as the condition lasted. A three-turn delay on recovery is
+                the cheaper side of that trade. *)
+             cadence_record_attempt ~keeper_id ~trace_id;
              record_failure
                ~keepers_dir
                ~keeper_id
@@ -677,11 +673,10 @@ let run_best_effort
                ~kind:(extraction_error_kind error)
                ~detail:
                  (Printf.sprintf
-                    "memory os librarian failed lane=%s: %s; cadence deferred=%b"
+                    "memory os librarian failed lane=%s: %s"
                     exact_lane_id
-                    detail
-                    deferred)
-               ~cadence_deferred:deferred
+                    detail)
+               ~cadence_deferred:true
          with
          (* A cancelled pass reached the lane registry and stopped there, so the
             journal — the record of what the librarian did on this keeper —

@@ -17,7 +17,7 @@ import type {
   KeeperApprovalRule,
   KeeperApprovalRulesState,
   KeeperGateModeOverride,
-  KeeperGateJudgePreference,
+  KeeperExactLanePreference,
   KeeperGateSettingsState,
   KeeperResolvedApprovalItem,
   KeeperResolvedApprovalPage,
@@ -806,13 +806,13 @@ function KeeperGateSettingRow({
 function KeeperGateSettingsCard({
   modes,
   modesState,
-  judges,
-  judgesState,
+  exactLanes,
+  exactLanesState,
 }: {
   modes: KeeperGateModeOverride[]
   modesState: KeeperGateSettingsState
-  judges: KeeperGateJudgePreference[]
-  judgesState: KeeperGateSettingsState
+  exactLanes: KeeperExactLanePreference[]
+  exactLanesState: KeeperGateSettingsState
 }) {
   const modeLabel = (mode: GateMode) =>
     GATE_MODES.find(entry => entry.mode === mode)?.label ?? mode
@@ -820,9 +820,9 @@ function KeeperGateSettingsCard({
     <section class="wka-card" data-testid="keeper-gate-settings">
       <div class="wka-h">
         <h3>Keeper 개별 설정</h3>
-        <span class="mono">${(modes.length + judges.length).toLocaleString()}</span>
+        <span class="mono">${(modes.length + exactLanes.length).toLocaleString()}</span>
       </div>
-      <div class="wka-hint mono">workspace 설정보다 엄격한 쪽만 적용됩니다</div>
+      <div class="wka-hint mono">Gate mode — workspace 설정보다 엄격한 쪽만 적용</div>
 
       ${modesState.state === 'unavailable'
         ? html`<div class="ap-env-warn" role="alert" data-testid="keeper-modes-unavailable">모드 오버라이드 읽기 실패: ${modesState.error}</div>`
@@ -841,23 +841,23 @@ function KeeperGateSettingsCard({
           `
         : html`<div class="ap-side-empty">모드를 따로 정한 Keeper 없음</div>`}
 
-      <div class="wka-hint mono">판정자 — lane 이 내놓는 것 중 먼저 갈 곳</div>
-      ${judgesState.state === 'unavailable'
-        ? html`<div class="ap-env-warn" role="alert" data-testid="keeper-judges-unavailable">판정자 설정 읽기 실패: ${judgesState.error}</div>`
-        : judges.length > 0
+      <div class="wka-hint mono">Exact lane — Keeper별 첫 slot, 나머지는 failover</div>
+      ${exactLanesState.state === 'unavailable'
+        ? html`<div class="ap-env-warn" role="alert" data-testid="keeper-exact-lanes-unavailable">Exact lane 설정 읽기 실패: ${exactLanesState.error}</div>`
+        : exactLanes.length > 0
         ? html`
-            <ul class="ap-rule-list">${judges.map(row => html`
+            <ul class="ap-rule-list">${exactLanes.map(row => html`
               <${KeeperGateSettingRow}
-                key=${`judge:${row.keeper_name}`}
+                key=${`exact:${row.keeper_name}:${row.lane_id}`}
                 keeperName=${row.keeper_name}
-                value=${row.slot_id}
+                value=${`${row.lane_id} → ${row.slot_id}`}
                 updatedBy=${row.updated_by}
                 updatedAt=${row.updated_at}
-                testId="keeper-judge-row"
+                testId="keeper-exact-lane-row"
               />
             `)}</ul>
           `
-        : html`<div class="ap-side-empty">판정자를 따로 정한 Keeper 없음</div>`}
+        : html`<div class="ap-side-empty">Exact lane 첫 slot을 따로 정한 Keeper 없음</div>`}
     </section>
   `
 }
@@ -980,8 +980,8 @@ function ApAside({
       <${KeeperGateSettingsCard}
         modes=${gateData.value?.keeper_modes ?? []}
         modesState=${gateData.value?.keeper_modes_state ?? { state: 'ready' }}
-        judges=${gateData.value?.keeper_judges ?? []}
-        judgesState=${gateData.value?.keeper_judges_state ?? { state: 'ready' }}
+        exactLanes=${gateData.value?.keeper_exact_lanes ?? []}
+        exactLanesState=${gateData.value?.keeper_exact_lanes_state ?? { state: 'ready' }}
       />
 
       <section class="wka-card">

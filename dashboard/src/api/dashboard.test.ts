@@ -1931,8 +1931,8 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -1985,8 +1985,8 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -2030,8 +2030,8 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         approval_rules: [{
           id: 'rule-1',
           keeper_name: 'keeper-a',
@@ -2078,15 +2078,16 @@ describe('fetchDashboardGate', () => {
           },
         ],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [
+        keeper_exact_lanes: [
           {
             keeper_name: 'kidsnote',
+            lane_id: 'hitl_auto_judge',
             slot_id: 'glm-coding.glm-5-turbo',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',
           },
         ],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -2101,7 +2102,55 @@ describe('fetchDashboardGate', () => {
         updated_at: '2026-08-27T05:00:00Z',
       },
     ])
-    expect(result.keeper_judges[0]?.slot_id).toBe('glm-coding.glm-5-turbo')
+    expect(result.keeper_exact_lanes[0]).toMatchObject({
+      lane_id: 'hitl_auto_judge',
+      slot_id: 'glm-coding.glm-5-turbo',
+    })
+  })
+
+  it('rejects the retired Judge-only preference shape', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        ...emptyResolvedHistory,
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        keeper_modes: [],
+        keeper_modes_state: { state: 'ready' },
+        keeper_judges: [],
+        keeper_judges_state: { state: 'ready' },
+        hitl: gateHitl,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    await expect(fetchDashboardGate()).rejects.toThrow(/keeper_exact_lanes_state/)
+  })
+
+  it('requires lane identity on every exact-lane preference', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        ...emptyResolvedHistory,
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        keeper_modes: [],
+        keeper_modes_state: { state: 'ready' },
+        keeper_exact_lanes: [{
+          keeper_name: 'kidsnote',
+          slot_id: 'glm-coding.glm-5-turbo',
+          updated_by: 'vincent',
+          updated_at: '2026-08-27T05:00:00Z',
+        }],
+        keeper_exact_lanes_state: { state: 'ready' },
+        hitl: gateHitl,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    await expect(fetchDashboardGate()).rejects.toThrow(
+      /keeper_exact_lanes contains an invalid row/,
+    )
   })
 
   it('refuses per-keeper rows alongside an unavailable state', async () => {
@@ -2124,8 +2173,8 @@ describe('fetchDashboardGate', () => {
           },
         ],
         keeper_modes_state: { state: 'unavailable', error: 'overrides unreadable' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -2150,8 +2199,8 @@ describe('fetchDashboardGate', () => {
           },
         ],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -2172,8 +2221,8 @@ describe('fetchDashboardGate', () => {
         },
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -2195,8 +2244,8 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         approval_rules: [{
           id: 'rule-invalid',
           keeper_name: 'keeper-a',
@@ -2227,8 +2276,8 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -2305,8 +2354,8 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -2338,8 +2387,8 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -2420,8 +2469,8 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -2489,8 +2538,8 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -2521,8 +2570,8 @@ describe('fetchDashboardGate', () => {
       approval_rules_state: { state: 'ready' },
       keeper_modes: [],
       keeper_modes_state: { state: 'ready' },
-      keeper_judges: [],
-      keeper_judges_state: { state: 'ready' },
+      keeper_exact_lanes: [],
+      keeper_exact_lanes_state: { state: 'ready' },
       hitl: {
         gate_mode: { mode: 'auto_judge', configured: false, state: 'ready' },
         external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },

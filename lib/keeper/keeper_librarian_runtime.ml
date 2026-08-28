@@ -104,6 +104,7 @@ let message role text =
 type exact_setup_error =
   | Exact_registry_unavailable of Runtime_exact_output_registry.publication_error
   | Exact_lane_unavailable of Runtime_exact_output_registry.lane_resolution_error
+  | Exact_lane_preference_unavailable of string
   | Exact_candidate_invalid of
       { position : int
       ; slot_id : string
@@ -147,6 +148,8 @@ let exact_setup_error_to_string = function
     ^ Runtime_exact_output_registry.publication_error_to_string error
   | Exact_lane_unavailable error ->
     Runtime_exact_output_registry.lane_resolution_error_to_string error
+  | Exact_lane_preference_unavailable detail ->
+    "exact lane preference unavailable: " ^ detail
   | Exact_candidate_invalid { position; slot_id } ->
     Printf.sprintf
       "exact lane candidate invalid position=%d slot=%S"
@@ -278,7 +281,7 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
-let prepare_attempt messages =
+let prepare_attempt ~base_path ~keeper_id messages =
   let open Result.Syntax in
   let* registry =
     Runtime_exact_output_registry.current ()
@@ -289,6 +292,16 @@ let prepare_attempt messages =
     Runtime_exact_output_registry.resolve_lane registry ~lane_id:exact_lane_id
     |> Result.map_error (fun error ->
       Exact_setup_failed (Exact_lane_unavailable error))
+  in
+  let* resolved =
+    Keeper_exact_lane_preference.apply
+      ~base_path
+      ~keeper_name:keeper_id
+      ~lane_id:exact_lane_id
+      resolved
+    |> Result.map_error (fun detail ->
+      Exact_setup_failed
+        (Exact_lane_preference_unavailable detail))
   in
   let* candidates =
     flow_candidates resolved.selected_slots
@@ -358,11 +371,13 @@ let exact_execution_error error =
 let execute_exact_output_classified
       ~clock
       ~net
+      ~base_path
+      ~keeper_id
       ~(selected_input : Keeper_librarian.input)
       ~messages
   =
   let open Result.Syntax in
-  let* attempt = prepare_attempt messages in
+  let* attempt = prepare_attempt ~base_path ~keeper_id messages in
   let validate flow_success =
     let output = Exact_output.flow_success_output flow_success in
     match
@@ -522,6 +537,7 @@ let failed_output = `Assoc []
 ;;
 
 let run_best_effort
+      ~base_path
       ~keepers_dir
       ~keeper_id
       ~expected_revision
@@ -594,6 +610,8 @@ let run_best_effort
                execute_exact_output_classified
                  ~clock
                  ~net
+                 ~base_path
+                 ~keeper_id
                  ~selected_input:prompt_input
                  ~messages:[ message Agent_core.Types.User prompt ]
              in

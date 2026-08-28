@@ -39,8 +39,8 @@ const readyGate: DashboardGateResponse = {
   approval_rules_state: { state: 'ready' },
   keeper_modes: [],
   keeper_modes_state: { state: 'ready' },
-  keeper_judges: [],
-  keeper_judges_state: { state: 'ready' },
+  keeper_exact_lanes: [],
+  keeper_exact_lanes_state: { state: 'ready' },
   hitl: null,
 }
 

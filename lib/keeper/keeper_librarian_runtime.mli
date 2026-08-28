@@ -35,7 +35,8 @@ type extraction_error
     happens, so adding an [extraction_error] case fails to compile until it
     names its journal kind. *)
 val run_best_effort
-  :  keepers_dir:string
+  :  base_path:string
+  -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int option
   -> Keeper_librarian.input

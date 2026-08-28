@@ -1741,6 +1741,11 @@
  (modules test_keeper_board_attention_exact_flow)
  (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
 
+(test
+ (name test_keeper_librarian_exact_lane_preference)
+ (modules test_keeper_librarian_exact_lane_preference)
+ (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
+
 ; The exact-execution lease guard and exact-disposition recovery suites lived
 ; here. Both drove the lease-taking fence (bind / release / quarantine /
 ; prepare / finalize) that #25969 left unreachable when it moved production to

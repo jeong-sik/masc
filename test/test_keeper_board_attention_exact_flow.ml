@@ -76,10 +76,8 @@ let prepare_exact ~net candidate =
    | None ->
      let meta =
        Masc_test_deps.meta_of_json_fixture
-         (`Assoc
-           [ "name", `String keeper_name
-           ; "trace_id", `String ("trace-" ^ keeper_name)
-           ])
+       (`Assoc
+          [ "name", `String keeper_name ])
        |> Result.get_ok
      in
      ignore (Keeper_registry.register_offline ~base_path keeper_name meta));
@@ -171,7 +169,6 @@ let candidate post_id : Candidate.candidate =
         ; ( "keeper_context"
           , `Assoc
               [ "lane_keeper_name", `String keeper_name
-              ; "agent_name", `String "alpha-agent"
               ; "keeper_record_id", `Null
               ; "keeper_runtime_uid", `Null
               ; "instructions", `String "continue"
@@ -453,6 +450,65 @@ let test_domain_candidate_id_mismatch_advances_to_declared_successor () =
       | _ -> Alcotest.fail "semantic failover did not preserve declared dispatch order"))
 ;;
 
+let test_keeper_preference_reorders_the_board_lane () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      with_temp_base "board-attention-per-keeper-preference" @@ fun base_path ->
+      let candidate = candidate "board-attention-per-keeper-preference" in
+      let response =
+        Fixture.openai_response
+          (judgment_output ~candidate_id:candidate.candidate_id)
+      in
+      let first = Fixture.start_server ~sw ~net ~clock (Fixture.Reply response) in
+      let preferred =
+        Fixture.start_server ~sw ~net ~clock (Fixture.Reply response)
+      in
+      publish_lane
+        [ target "board-default" first.base_url
+        ; target "board-preferred" preferred.base_url
+        ];
+      (match
+         Keeper_exact_lane_preference.set
+           (Workspace.default_config base_path)
+           ~actor:"test"
+           ~keeper_name:candidate.keeper_name
+           ~lane_id:Exact_flow.lane_id
+           (Some "board-preferred")
+       with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      let prepared =
+        match
+          Exact_flow.prepare
+            ~base_path
+            ~keeper_name:candidate.keeper_name
+            ~net:(Some net)
+            candidate
+        with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "preferred Board lane did not prepare"
+      in
+      let result =
+        Exact_flow.execute
+          ~clock
+          ~before_dispatch:(fun _ -> Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+          prepared
+      in
+      (match result with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "preferred Board slot selected"
+           "board-preferred"
+           judgment.slot_id
+       | Error _ -> Alcotest.fail "preferred Board exact flow failed");
+      Alcotest.(check int) "default Board slot not called" 0 (Fixture.post_count first);
+      Alcotest.(check int)
+        "preferred Board slot called once"
+        1
+        (Fixture.post_count preferred)))
+;;
+
 let test_missing_lane_is_setup_error_without_dispatch () =
   with_prompt_registry (fun () ->
     run_eio (fun ~sw ~net ~clock ->
@@ -545,6 +601,10 @@ let () =
             "strict singleton mismatch advances to declared successor"
             `Quick
             test_domain_candidate_id_mismatch_advances_to_declared_successor
+        ; Alcotest.test_case
+            "Keeper preference reorders the Board lane"
+            `Quick
+            test_keeper_preference_reorders_the_board_lane
         ; Alcotest.test_case
             "missing lane is setup error without dispatch"
             `Quick

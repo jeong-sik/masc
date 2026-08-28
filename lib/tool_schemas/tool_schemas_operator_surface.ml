@@ -34,19 +34,14 @@ let ask_withdraw = schema_of_name "masc_ask_withdraw"
 let broadcast = schema_of_name "masc_broadcast"
 let config = schema_of_name "masc_config"
 let dashboard = schema_of_name "masc_dashboard"
-let deliver = schema_of_name "masc_deliver"
 let gc = schema_of_name "masc_gc"
 let keeper_waiting_inventory = schema_of_name "masc_keeper_waiting_inventory"
 let messages = schema_of_name "masc_messages"
-let note_add = schema_of_name "masc_note_add"
 let pause = schema_of_name "masc_pause"
 let pause_status = schema_of_name "masc_pause_status"
 let plan_clear_task = schema_of_name "masc_plan_clear_task"
-let plan_get = schema_of_name "masc_plan_get"
 let plan_get_task = schema_of_name "masc_plan_get_task"
-let plan_init = schema_of_name "masc_plan_init"
 let plan_set_task = schema_of_name "masc_plan_set_task"
-let plan_update = schema_of_name "masc_plan_update"
 let resume = schema_of_name "masc_resume"
 let start = schema_of_name "masc_start"
 let tool_help = schema_of_name "masc_tool_help"
@@ -55,5 +50,5 @@ let tool_help = schema_of_name "masc_tool_help"
    pause_status are absent from it by design — they are Operator_only, reached
    as individual values rather than through the Keeper-visible list. *)
 let schemas : Masc_domain.tool_schema list =
-  [ ask; ask_status; ask_withdraw; broadcast; config; dashboard; deliver; gc; keeper_waiting_inventory; messages; note_add; plan_clear_task; plan_get; plan_get_task; plan_init; plan_set_task; plan_update; start; tool_help ]
+  [ ask; ask_status; ask_withdraw; broadcast; config; dashboard; gc; keeper_waiting_inventory; messages; plan_clear_task; plan_get_task; plan_set_task; start; tool_help ]
 ;;

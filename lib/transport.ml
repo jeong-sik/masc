@@ -298,11 +298,6 @@ module Rest = struct
         ] );
       ( "planning",
         [
-          "masc_plan_init";
-          "masc_plan_get";
-          "masc_plan_update";
-          "masc_note_add";
-          "masc_deliver";
         ] );
       ( "messaging",
         [

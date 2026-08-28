@@ -2187,16 +2187,10 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_task_descriptor "set_goal" "masc_task_set_goal"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_plan_* + note + deliver (8 entries) ── *)
-  ; masc_plan_descriptor ~keeper_model_projection:Operator_only
-       "init" "masc_plan_init"
-       ~readonly:false
-  ; masc_plan_descriptor ~keeper_model_projection:Operator_only
-       "update" "masc_plan_update"
-       ~readonly:false
-  ; masc_plan_descriptor ~keeper_model_projection:Operator_only
-      "get" "masc_plan_get"
-      ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_plan_* current-task trio (3 entries).
+     The five plan-document tools (init/update/get + note_add/deliver)
+     were retired with their planning/<task_id> store; only the
+     current-task session pointer remains. ── *)
   ; masc_plan_descriptor ~keeper_model_projection:Operator_only
        "set_task" "masc_plan_set_task"
        ~readonly:false
@@ -2204,10 +2198,6 @@ let internal_descriptors : t list =
        "get_task" "masc_plan_get_task"
        ~readonly:true
   ; masc_plan_descriptor "clear_task" "masc_plan_clear_task"
-       ~readonly:false
-  ; masc_plan_descriptor "note_add" "masc_note_add"
-       ~readonly:false
-  ; masc_plan_descriptor "deliver" "masc_deliver"
        ~readonly:false
   (* ── RFC-0182 §3.1 — masc_run_* cluster (4 entries) ──────────── *)
   ; masc_run_descriptor "masc_run_init"

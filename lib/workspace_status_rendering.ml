@@ -127,7 +127,6 @@ let status_summary_string
     ~(done_count : int)
     ~(cancelled_count : int)
     ~(binding : current_binding)
-    ~(planning_state : planning_context_state)
     ~(attention_items : string list)
     ~(state : Masc_domain.workspace_state)
     ~(task_goal_index : (string, string list) Hashtbl.t)
@@ -164,11 +163,6 @@ let status_summary_string
        (option_or_dash binding.effective_current)
        (option_or_dash binding.drift_reason)
        (bool_flag binding.claim_first_suppressed));
-  (match planning_state.planning_missing_task with
-  | Some task_id ->
-      Buffer.add_string buf
-        (Printf.sprintf "Planning: missing=yes | task=%s\n" task_id)
-  | None -> ());
   if credential_state.credential_required then
     Buffer.add_string buf
       (Printf.sprintf "Credential: required=yes | available=%s | candidates=%s\n"

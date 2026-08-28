@@ -407,8 +407,8 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (member "workspace" "keeper_task_claim");
   check bool "MASC task tool grouped as workspace" (is_model_visible "masc_transition")
     (member "workspace" "masc_transition");
-  check bool "MASC plan tool grouped as workspace" (is_model_visible "masc_plan_get")
-    (member "workspace" "masc_plan_get");
+  check bool "MASC plan tool grouped as workspace" (is_model_visible "masc_plan_get_task")
+    (member "workspace" "masc_plan_get_task");
   check bool "surface read grouped as surface" true
     (member "surface" "keeper_surface_read");
   check bool "surface read not hidden under meta" false

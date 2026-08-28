@@ -22,6 +22,3 @@ type current_binding =
   ; claim_first_suppressed : bool
   }
 
-type planning_context_state =
-  { planning_missing_task : string option
-  }

@@ -99,10 +99,7 @@ let strict_success_names =
     "masc_library_add";
     "masc_library_list";
     "masc_messages";
-    "masc_plan_get";
-    "masc_plan_init";
     "masc_plan_set_task";
-    "masc_plan_update";
     "masc_start";
     "masc_status";
     "masc_tool_help";
@@ -444,13 +441,6 @@ let ensure_task fixture =
 let ensure_plan_initialized fixture =
   let task_id = ensure_task fixture in
   ignore
-    (execute_tool_ok fixture ~name:"masc_plan_init"
-       ~arguments:
-         (`Assoc
-           [
-             ("task_id", `String task_id);
-           ]));
-  ignore
     (execute_tool_ok fixture ~name:"masc_plan_set_task"
        ~arguments:
          (`Assoc
@@ -550,7 +540,7 @@ let ensure_code_file fixture =
 let prepare_for_name fixture name =
   if List.mem name [ "keeper_task_claim"; "masc_transition"; "masc_plan_set_task" ] then
     ignore (ensure_task fixture);
-  if List.mem name [ "masc_plan_get"; "masc_plan_update"; "masc_plan_get_task"; "masc_plan_clear_task" ] then
+  if List.mem name [ "masc_plan_get_task"; "masc_plan_clear_task" ] then
     ensure_plan_initialized fixture;
   if name = "masc_run_plan" then
     ensure_run_initialized fixture;

@@ -661,50 +661,6 @@ let test_masc_board_post_schema_supports_judgment () =
 (* 8. Plan Tool Tests                                            *)
 (* ============================================================ *)
 
-let test_masc_plan_init_schema () =
-  match find_registered_tool "masc_plan_init" with
-  | None -> Alcotest.fail "masc_plan_init not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has task_id" true (List.mem_assoc "task_id" props)
-      | None -> Alcotest.fail "masc_plan_init missing properties"
-
-let test_masc_plan_update_schema () =
-  match find_registered_tool "masc_plan_update" with
-  | None -> Alcotest.fail "masc_plan_update not found"
-  | Some _ -> ()
-
-let test_masc_plan_get_schema () =
-  match find_registered_tool "masc_plan_get" with
-  | None -> Alcotest.fail "masc_plan_get not found"
-  | Some _ -> ()
-
-let test_masc_deliver_schema () =
-  match find_registered_tool "masc_deliver" with
-  | None -> Alcotest.fail "masc_deliver not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has content" true (List.mem_assoc "content" props)
-      | None -> Alcotest.fail "masc_deliver missing properties"
-
-(* ============================================================ *)
-(* 9. Voting Tool Tests                                          *)
-(* ============================================================ *)
-
-(* ============================================================ *)
-(* 10. Auth Tool Tests                                           *)
-(* ============================================================ *)
-
-
-(* ============================================================ *)
-(* 11. A2A Tool Tests                                            *)
-(* ============================================================ *)
-
-
-(* Dedicated runtime-verify schema coverage moved to runtime admin coverage. *)
-
 let test_masc_keeper_up_schema () =
   match find_registered_tool "masc_keeper_up" with
   | None -> Alcotest.fail "masc_keeper_up not found"
@@ -915,12 +871,6 @@ let () =
         test_masc_batch_add_tasks_schema;
       Alcotest.test_case "masc_board_post supports judgment" `Quick
         test_masc_board_post_schema_supports_judgment;
-    ];
-    "plan_tools", [
-      Alcotest.test_case "plan_init" `Quick test_masc_plan_init_schema;
-      Alcotest.test_case "plan_update" `Quick test_masc_plan_update_schema;
-      Alcotest.test_case "plan_get" `Quick test_masc_plan_get_schema;
-      Alcotest.test_case "deliver" `Quick test_masc_deliver_schema;
     ];
     "goal_tools", [
       Alcotest.test_case "goal_list" `Quick test_masc_goal_list_schema;

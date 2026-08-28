@@ -106,8 +106,16 @@ let image_present ~image ~timeout_sec =
   match
     Process_eio.run_argv_with_status ~timeout_sec argv
   with
+  (* Exit status separates the answers, so none of them is guessed.
+     Measured against container 1.3.0 on 2026-08-28: 0 for a present image,
+     1 for an absent one, 127 when the CLI is not on PATH.
+
+     The first version collapsed everything that was not 0 into "image
+     missing". A dead daemon, a timeout and an uninstalled CLI all told the
+     operator to build an image they already had -- the unknown-to-convenient
+     -default shape this module was written to avoid. *)
   | Unix.WEXITED 0, _ -> Ok ()
-  | _ ->
+  | Unix.WEXITED 1, _ ->
     Error
       (Printf.sprintf
          "microvm_image_missing: %s is not in the container image store. \
@@ -116,6 +124,26 @@ let image_present ~image ~timeout_sec =
           registry instead of failing. Next: build or load the image with \
           `container image` before starting a microvm keeper."
          image)
+  | Unix.WEXITED 127, _ ->
+    Error
+      "microvm_cli_unavailable: the `container` CLI is not on PATH. Next: \
+       install Apple container, or move the keeper to sandbox_profile = \
+       \"docker\"."
+  | status, out ->
+    (* Says what it saw rather than naming a cause it does not know. The
+       image may well be present; the probe could not find out. *)
+    Error
+      (Printf.sprintf
+         "microvm_image_probe_failed: `container image inspect %s` did not \
+          answer whether the image exists (%s). Next: check that the \
+          container system is running with `container system status`."
+         image
+         (Keeper_sandbox_runtime.docker_failure_output_for_log out
+          |> fun detail ->
+          match status with
+          | Unix.WEXITED code -> Printf.sprintf "exit %d: %s" code detail
+          | Unix.WSIGNALED n -> Printf.sprintf "signal %d: %s" n detail
+          | Unix.WSTOPPED n -> Printf.sprintf "stopped %d: %s" n detail))
 ;;
 
 (* ── Turn-container argv ─────────────────────────────────────────────

@@ -86,9 +86,9 @@ let host_root_rel_of_profile profile name =
         (Playground_paths.sanitize_keeper_name name)
   | Remote_ssh ->
       (* Host-side bookkeeping bundle (telemetry, workspace views). The
-         keeper's working files live on the remote endpoint; dispatch and
-         remote path translation land with the SSH runner (Phase 1 task 6+)
-         and fail closed until then. *)
+         keeper's working files live on the remote endpoint, and this path
+         is only what the host keeps about them; [Keeper_remote_path]
+         translates between the two. *)
       Playground_paths.bundle_root name
 
 let host_root_rel_of_agent ~base_path ~agent_name =

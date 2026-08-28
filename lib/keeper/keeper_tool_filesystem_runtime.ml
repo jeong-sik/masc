@@ -1332,8 +1332,8 @@ let check_invariant_sandbox_isolation
     (match Keeper_sandbox_factory.resolve_opt (Some factory) ~cwd with
      (* No guest root to check against; the call itself is refused where it
         would run. No turn runtime exists to scope the isolation invariant to
-        ([Remote_ssh_profile] included: the SSH turn runtime lands with
-        Phase 1 task 6 and dispatch fails closed until then). *)
+        ([Remote_ssh_profile] included: its calls are scoped on the remote
+        side, not against a local guest root). *)
      | Backend_unimplemented _ | No_factory | Local_profile | Remote_ssh_profile -> Ok ()
      | Runtime runtime ->
        let host_root = Keeper_turn_sandbox_runtime.host_root runtime in

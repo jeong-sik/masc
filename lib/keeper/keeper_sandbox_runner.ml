@@ -187,12 +187,13 @@ let run_command_with_status ~config ~meta ~timeout_sec ~host ~backend =
   match effective_sandbox_profile ~meta with
   (* Fail closed, never a silent host route (RFC-0001): [route_for]
      classifies Remote_ssh as "not the Docker backend", which would
-     otherwise fall through to [run_host_command] here. The SSH runner
-     lands in Phase 1 task 6. *)
+     otherwise fall through to [run_host_command] here. A remote_ssh
+     keeper does not pass through this router at all. *)
   | Keeper_types_profile_sandbox.Remote_ssh, _ ->
     Error
-      "remote_ssh_dispatch_unavailable: SSH runner not wired yet (Phase 1 \
-       task 6); no fallback to docker or host dispatch"
+      "remote_ssh_dispatch_unavailable: this router serves the Docker and \
+       host backends; a remote_ssh keeper dispatches through the SSH \
+       runner instead, and there is no fallback to docker or host dispatch"
   (* [Micro_vm] routes exactly as on main: [uses_backend] classifies it as
      the sandbox backend, and the docker-shell entrypoints refuse the
      profile themselves before building an argv. *)

@@ -187,7 +187,7 @@ val route_via :
     [remote_ssh_dispatch_unavailable] when the effective profile is
     [Remote_ssh]: [route_for] classifies that profile as "not the Docker
     backend", which would otherwise be a silent host route (RFC-0001).
-    The SSH runner lands in Phase 1 task 6. *)
+    A remote_ssh keeper dispatches through the SSH runner instead. *)
 val run_command_with_status :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

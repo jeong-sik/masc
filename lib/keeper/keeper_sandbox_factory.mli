@@ -41,8 +41,8 @@ type resolve_result =
   | Remote_ssh_profile
       (** The effective profile is [Remote_ssh]. Distinct from
           [Local_profile] so no caller can read it as "host execution is
-          fine": there is no SSH turn runtime yet (Phase 1 task 6), and
-          consumers fail closed on this constructor. *)
+          fine": Docker-shaped consumers fail closed on this constructor,
+          and SSH dispatch has its own path. *)
 
 type t
 
@@ -76,8 +76,8 @@ val resolve :
     turn's factory, never midway through the current turn.
 
     [Local_profile] is returned when the effective sandbox profile is [Local].
-    [Remote_ssh_profile] is returned when it is [Remote_ssh] (no SSH turn
-    runtime exists yet; consumers fail closed — Phase 1 task 6).
+    [Remote_ssh_profile] is returned when it is [Remote_ssh] (there is no
+    Docker runtime to resolve for it; consumers fail closed).
     [No_factory] is only produced by {!resolve_opt}. *)
 
 val resolve_opt :

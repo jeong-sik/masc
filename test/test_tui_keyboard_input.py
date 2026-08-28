@@ -3453,7 +3453,9 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         # iTerm reports Ctrl-W as CSI-u after the TUI enables keyboard
         # disambiguation. It must reach the same pane binding as legacy 0x17.
         send_and_wait(process, master_fd, output, b"z", b"h/l:pane")
-        send_and_wait(process, master_fd, output, b"\x1b[119;5u", b"Board (3)  [j/k]")
+        # Focus is a caret on the pane title now, not a key list (keys live in
+        # the footer): the same press must move focus, observed by the caret.
+        send_and_wait(process, master_fd, output, b"\x1b[119;5u", "\u25b8 Board (3)".encode())
         send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
         send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")
         send_and_wait(process, master_fd, output, b"l", b"j/k:scroll")

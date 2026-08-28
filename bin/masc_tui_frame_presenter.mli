@@ -55,18 +55,27 @@ val present :
     [Unchanged] means no bytes were necessary, so semantic input authority
     must remain with the last frame that was actually emitted. *)
 
-val sync_background :
-  write:(string -> unit) ->
-  flush:(unit -> unit) ->
-  Masc_tui_terminal_palette.rgb option ->
-  unit
-(** Ask the terminal to paint its own background this colour, or [None] to put
-    it back.
+type page =
+  { foreground : Masc_tui_terminal_palette.rgb
+  ; background : Masc_tui_terminal_palette.rgb
+  }
+(** The two colours a terminal draws with when nothing else says otherwise.
+    They travel together because they are only meaningful against each other:
+    either one alone is a contrast ratio against a colour the scheme did not
+    choose. *)
 
-    Without this a scheme changes only the ink. A light scheme picks dark text
-    because it expects a light page, so on a dark terminal it is less readable
-    than the scheme it replaced -- the shape "light theme is still black".
+val sync_page :
+  write:(string -> unit) -> flush:(unit -> unit) -> page option -> unit
+(** Ask the terminal to use these as its own text and page colours, or [None]
+    to put both back.
 
-    A terminal that does not know OSC 11 ignores it, so this is sent without
-    asking first. {!cleanup} resets on the way out; a caller that changes the
-    scheme mid-session has to send the new colour itself. *)
+    masc draws most of its text without naming a colour, so that text is
+    whatever the terminal's default foreground is. Painting the page and
+    leaving the text alone therefore does not make a scheme half-applied, it
+    makes it unreadable: a light scheme paints the page near-white and the
+    reader's near-white default text stays on it. This is why the pair is one
+    argument rather than two calls.
+
+    A terminal that does not know OSC 10 and 11 ignores them, so this is sent
+    without asking first. {!cleanup} resets on the way out; a caller that
+    changes the scheme mid-session has to send the new colours itself. *)

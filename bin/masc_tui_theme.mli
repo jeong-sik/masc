@@ -318,3 +318,16 @@ val lift_is_enabled : unit -> bool
     colour their theme placed deliberately. The cost is that masc says some
     things with colour alone, and a scheme that leaves those dim stops saying
     them. Whose call that is, is the reason this is a setting. *)
+
+val lift_is_enabled : unit -> bool
+(** What {!set_lift_enabled} was last given.
+
+    The theme screen reads this to label its last column. The count beside a
+    scheme is the number of its colours under the readable floor, and that
+    number means "lifted" under one setting and "left under the floor" under
+    the other -- so the screen has to be able to ask which.
+
+    This was removed once, in #31216, as an export nothing called. It was:
+    #31212 added the setting and no reader for it, which is the same thing as
+    a setting that does not appear anywhere. The answer was a caller, not a
+    smaller surface. *)

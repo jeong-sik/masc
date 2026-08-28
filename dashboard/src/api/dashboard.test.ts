@@ -3090,15 +3090,22 @@ describe('dashboard goals decoding', () => {
 })
 
 describe('fetchKeeperConfig', () => {
+  const manifestRevision = { state: 'sha256', value: 'a'.repeat(64) } as const
+  const configRevision = {
+    manifest: manifestRevision,
+    runtime_assignment: { state: 'runtime_config_missing' as const },
+  } as const
+
   it('normalizes singleton and boolean string fields with a canonical context override', async () => {
     const rawResponse = {
       name: 'keeper-sangsu',
+      config_revision: configRevision,
       autoboot_enabled: 'false',
       max_context_override: 64_000,
       autonomous_wake_prompt: '백로그를 확인하고 하나 진행해.',
       sandbox_profile: 'docker',
       network_mode: 'none',
-      sandbox_last_error: 'sandbox docker exec failed',
+      keeper_last_error: 'sandbox docker exec failed',
       allowed_paths: '/tmp/workspace',
       effective_allowed_paths: ['/tmp/workspace'],
       prompt: {
@@ -3196,7 +3203,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.autonomous_wake_prompt).toBe('백로그를 확인하고 하나 진행해.')
     expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
-    expect(result.sandbox_last_error).toBe('sandbox docker exec failed')
+    expect(result.keeper_last_error).toBe('sandbox docker exec failed')
     expect(result.execution.models).toEqual(['llama:test-balanced'])
     expect(result.execution.verify).toBe(true)
     expect(result.execution.selected_runtime_id).toBe('keeper_unified')
@@ -3225,7 +3232,7 @@ describe('fetchKeeperConfig', () => {
   ])('rejects a non-canonical max_context_override wire value: %s', async (_label, wireValue) => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
-        `{"name":"keeper-sangsu","max_context_override":${wireValue}}`,
+        `{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":${wireValue}}`,
         {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -3241,7 +3248,7 @@ describe('fetchKeeperConfig', () => {
 
   it('rejects a missing max_context_override wire field', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"name":"keeper-sangsu"}', {
+      new Response('{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}}}', {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -3253,9 +3260,41 @@ describe('fetchKeeperConfig', () => {
     )
   })
 
+  it('rejects a missing or unavailable manifest revision authority', async () => {
+    for (const manifestRevision of [
+      undefined,
+      { state: 'unavailable', detail: 'permission denied' },
+    ]) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          name: 'keeper-sangsu',
+          ...(manifestRevision === undefined
+            ? {}
+            : {
+                config_revision: {
+                  manifest: manifestRevision,
+                  runtime_assignment: { state: 'runtime_config_missing' },
+                },
+              }),
+          max_context_override: null,
+          skills: { names: null },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(fetchKeeperConfig('keeper-sangsu')).rejects.toThrowError(
+        /config_revision/,
+      )
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('decodes an absent autonomous_wake_prompt as inherit (null)', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"name":"keeper-sangsu","max_context_override":null,"skills":{"names":null}}', {
+      new Response('{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null,"skills":{"names":null}}', {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -3268,7 +3307,7 @@ describe('fetchKeeperConfig', () => {
 
   it('rejects a response that omits the Skill selection authority', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"name":"keeper-sangsu","max_context_override":null}', {
+      new Response('{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null}', {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -3285,6 +3324,7 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          config_revision: configRevision,
           max_context_override: null,
           skills: { names: null },
           prompt: {
@@ -3314,6 +3354,7 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          config_revision: configRevision,
           max_context_override: null,
           skills: { names: null },
           field_presence: {
@@ -3355,6 +3396,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+            config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
             metrics,
@@ -3391,6 +3433,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+            config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
             runtime: {
@@ -3415,10 +3458,17 @@ describe('fetchKeeperConfig', () => {
 })
 
 describe('keeper config mutation API', () => {
+  const manifestRevision = { state: 'sha256', value: 'b'.repeat(64) } as const
+  const configRevision = {
+    manifest: manifestRevision,
+    runtime_assignment: { state: 'runtime_config_missing' as const },
+  } as const
+
   it('ensures dashboard auth before posting runtime_id changes', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+        config_revision: configRevision,
         max_context_override: null,
         skills: { names: null },
         execution: {
@@ -3437,7 +3487,11 @@ describe('keeper config mutation API', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await patchKeeperConfig('keeper-sangsu', { runtime_id: 'b.two' })
+    const result = await patchKeeperConfig(
+      'keeper-sangsu',
+      { runtime_id: 'b.two' },
+      configRevision,
+    )
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
@@ -3447,7 +3501,10 @@ describe('keeper config mutation API', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/keepers/keeper-sangsu/config')
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body as string)).toEqual({ runtime_id: 'b.two' })
+    expect(JSON.parse(init.body as string)).toEqual({
+      runtime_id: 'b.two',
+      expected_config_revision: configRevision,
+    })
     expect(result.execution.selected_runtime_id).toBe('b.two')
   })
 
@@ -3455,6 +3512,7 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+        config_revision: configRevision,
         max_context_override: null,
         skills: { names: ['ocaml-coding'] },
       }), {
@@ -3466,11 +3524,12 @@ describe('keeper config mutation API', () => {
 
     const result = await patchKeeperConfig('keeper-sangsu', {
       skills: { names: ['ocaml-coding'] },
-    })
+    }, configRevision)
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(init.body as string)).toEqual({
       skills: { names: ['ocaml-coding'] },
+      expected_config_revision: configRevision,
     })
     expect(result.skills.names).toEqual(['ocaml-coding'])
   })
@@ -3618,13 +3677,16 @@ describe('runtime.toml raw config API', () => {
 
   function committedPayload(payload: Record<string, unknown>): Record<string, unknown> {
     const application = isUnknownRecord(payload.application) ? payload.application : {}
+    const sourceRevision = 'a'.repeat(64)
     return {
       ...payload,
+      source_revision: sourceRevision,
       state: 'committed',
       commit: {
-        source_revision: 'runtime-source-revision',
+        source_revision: sourceRevision,
         order: '7',
         durability: 'durable',
+        warnings: [],
       },
       application: {
         operation: 'test_write',
@@ -3641,7 +3703,7 @@ describe('runtime.toml raw config API', () => {
         ...application,
         skills: {
           state: 'published',
-          input_source_revision: 'runtime-source-revision',
+          input_source_revision: sourceRevision,
           snapshot_revision: 'skill-snapshot-revision',
           catalog_revision: 'skill-catalog-revision',
           config_state: 'configured',
@@ -3657,6 +3719,7 @@ describe('runtime.toml raw config API', () => {
         path: '/tmp/.masc/config/runtime.toml',
         file_name: 'runtime.toml',
         source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
+        source_revision: 'a'.repeat(64),
         application: {
           operation: 'read',
           routing: { status: 'active', requires_restart: false, applied_at: null },
@@ -3728,6 +3791,7 @@ describe('runtime.toml raw config API', () => {
       path: '/tmp/.masc/config/runtime.toml',
       file_name: 'runtime.toml',
       source_text: '[runtime]\n',
+      source_revision: 'a'.repeat(64),
       reloaded: false,
     }
     if (inventory !== undefined) payload.provider_protocols = inventory
@@ -3783,9 +3847,10 @@ describe('runtime.toml raw config API', () => {
     expect(result.application?.keeper_overlay.status).toBe('pending_restart')
     expect(result.state).toBe('committed')
     expect(result.commit).toEqual({
-      source_revision: 'runtime-source-revision',
+      source_revision: 'a'.repeat(64),
       order: '7',
       durability: 'durable',
+      warnings: [],
     })
     expect(result.application.skills).toMatchObject({
       state: 'published',
@@ -3801,11 +3866,13 @@ describe('runtime.toml raw config API', () => {
       state: 'committed',
       path: '/tmp/.masc/config/runtime.toml',
       source_text: '[runtime]\n',
+      source_revision: 'a'.repeat(64),
       provider_protocols: providerProtocols,
       commit: {
         source_revision: 'runtime-source-revision',
         order: '8',
         durability: 'durable',
+        warnings: [],
       },
       application: {
         operation: 'raw_save',
@@ -4003,7 +4070,16 @@ describe('runtime.toml raw config API', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await patchRuntimeAssignment('sangsu', null)
+    const expectedAssignmentRevision = {
+      state: 'runtime_config_present' as const,
+      source_revision: 'a'.repeat(64),
+      assignment: { state: 'assigned' as const, runtime_id: 'openai.gpt' },
+    }
+    const result = await patchRuntimeAssignment(
+      'sangsu',
+      null,
+      expectedAssignmentRevision,
+    )
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -4012,8 +4088,9 @@ describe('runtime.toml raw config API', () => {
     expect(JSON.parse(init.body as string)).toEqual({
       keeper_name: 'sangsu',
       runtime_id: null,
+      expected_assignment_revision: expectedAssignmentRevision,
     })
-    expect(result.source_text).toBe(sourceText)
+    expect('source_text' in result ? result.source_text : null).toBe(sourceText)
   })
 })
 

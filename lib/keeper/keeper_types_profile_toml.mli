@@ -117,6 +117,10 @@ val keeper_toml_load_error_to_string : keeper_toml_load_error -> string
 val keeper_toml_load_error_paths : keeper_toml_load_error -> string list
 val inspect_keeper_toml :
   string -> (string * keeper_profile_defaults, keeper_toml_load_error) result
+val inspect_keeper_toml_content :
+  path:string ->
+  string ->
+  (string * keeper_profile_defaults, keeper_toml_load_error) result
 val load_keeper_toml :
   string -> (string * keeper_profile_defaults, keeper_toml_load_error) result
 

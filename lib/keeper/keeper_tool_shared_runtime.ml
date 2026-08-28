@@ -205,14 +205,6 @@ let resolve_keeper_confined_write_path
   | Error rejection -> user_message_error rejection
 ;;
 
-let resolve_keeper_path ~config ~meta ~raw_path =
-  resolve_keeper_confined_write_path
-    ~config
-    ~meta
-    ~endpoint:Keeper_alerting_path.Follow_referent
-    ~raw_path
-  |> Result.map Keeper_alerting_path.confined_host_path
-;;
 
 let resolve_keeper_read_path
       ~(config : Workspace.config)

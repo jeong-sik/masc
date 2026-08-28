@@ -12,6 +12,7 @@ open Keeper_types_profile
     write checkpoint, start keepalive, return the [keeper_up]
     response envelope. *)
 val create_keeper :
+  expected_config_revision:Keeper_turn_up_config_persistence.config_revision ->
   _ Keeper_types_profile.context ->
   Keeper_turn_up_args.parsed_args ->
   tool_result

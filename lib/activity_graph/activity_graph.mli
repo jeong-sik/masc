@@ -53,12 +53,6 @@ end
     store name it from here instead of spelling the literal. *)
 val store_dirname : string
 
-val format_sse_event : event -> string
-(** Renders [value] as a single SSE frame:
-    [id: <seq>\nevent: activity\ndata: <json>\n\n].
-    Consumed by {!emit} during fan-out and by the dashboard's
-    catch-up endpoint when streaming the post-resume tail. *)
-
 (** {1 Event emission} *)
 
 val emit :

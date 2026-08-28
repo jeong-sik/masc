@@ -102,6 +102,11 @@ val keepers_dir_for_base_path : base_path:string -> string
 (** [keepers_dir_for_base_path ~base_path] returns the keepers directory for an
     explicit workspace base path. *)
 
+val runtime_toml_path_for_base_path : base_path:string -> string
+(** Canonical [runtime.toml] path for an explicit workspace, honoring the same
+    config-root override and base-path rules as {!resolve_for_base_path}. The
+    file need not exist. *)
+
 val keeper_runtime_store_of_dirname : string -> Common.keeper_runtime_store option
 (** Base-path-independent resolver for canonical child-store names under
     [Common.keepers_runtime_dirname]. *)

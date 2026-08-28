@@ -229,7 +229,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
   in
   let sandbox_error_count =
     count_where live_keepers (fun keeper ->
-      Option.is_some (json_string_field_opt "sandbox_last_error" keeper))
+      Option.is_some (json_string_field_opt "keeper_last_error" keeper))
   in
   let docker_live_count =
     count_where live_keepers (fun keeper ->

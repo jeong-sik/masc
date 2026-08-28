@@ -7,6 +7,7 @@ import { isRecord, asBoolean, asNumber, asNullableString, asRecordArray, asStrin
 import { ensureDevToken } from './dev-token'
 import type { RuntimeDefaultsResponse } from './schemas/runtime-defaults'
 import type { RuntimeResolvedResponse } from './schemas/runtime-resolved'
+import type { KeeperRuntimeAssignmentRevision } from '../types'
 
 export interface DashboardRuntimeParameterPolicy {
   reasoning_toggle_wire?: string | null
@@ -1029,6 +1030,7 @@ export interface RuntimeTomlConfig {
   path: string | null
   file_name: string
   source_text: string
+  source_revision: string
   provider_protocols: RuntimeTomlEditorProtocol[]
   application?: RuntimeConfigApplication
   validation?: RuntimeConfigValidation
@@ -1045,6 +1047,37 @@ export interface RuntimeConfigCommit {
   source_revision: string
   order: string
   durability: 'durable' | 'unconfirmed'
+  warnings: Array<{ code: string; detail: string }>
+}
+
+function decodeKeeperRuntimeAssignmentRevision(
+  raw: unknown,
+): KeeperRuntimeAssignmentRevision | undefined {
+  if (hasExactKeys(raw, ['state']) && raw.state === 'runtime_config_missing') {
+    return { state: 'runtime_config_missing' }
+  }
+  if (!hasExactKeys(raw, ['state', 'source_revision', 'assignment'])
+    || raw.state !== 'runtime_config_present') return undefined
+  const sourceRevision = asString(raw.source_revision)
+  if (!sourceRevision || !/^[0-9a-f]{64}$/.test(sourceRevision)) return undefined
+  const assignment = raw.assignment
+  if (hasExactKeys(assignment, ['state']) && assignment.state === 'missing') {
+    return {
+      state: 'runtime_config_present',
+      source_revision: sourceRevision,
+      assignment: { state: 'missing' },
+    }
+  }
+  if (hasExactKeys(assignment, ['state', 'runtime_id']) && assignment.state === 'assigned') {
+    const runtimeId = asString(assignment.runtime_id)
+    if (!runtimeId || runtimeId.trim() === '') return undefined
+    return {
+      source_revision: sourceRevision,
+      state: 'runtime_config_present',
+      assignment: { state: 'assigned', runtime_id: runtimeId },
+    }
+  }
+  return undefined
 }
 
 export type RuntimeSkillApplication =
@@ -1768,11 +1801,16 @@ function decodeOfficialClientProbeResponse(raw: unknown): DashboardOfficialClien
 
 function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
   const record = isRecord(raw) ? raw : {}
+  const sourceRevision = asString(record.source_revision)
+  if (!sourceRevision || !/^[0-9a-f]{64}$/.test(sourceRevision)) {
+    throw new Error('runtime.toml source_revision이 없습니다')
+  }
   return {
     ok: asBoolean(record.ok) ?? true,
     path: asNullableString(record.path),
     file_name: asString(record.file_name) ?? 'runtime.toml',
     source_text: asString(record.source_text, ''),
+    source_revision: sourceRevision,
     provider_protocols: parseRuntimeTomlEditorProtocols(record.provider_protocols),
     application: normalizeRuntimeConfigApplication(record.application),
     validation: normalizeRuntimeConfigValidation(record.validation),
@@ -1785,14 +1823,20 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
 }
 
 function decodeRuntimeConfigCommit(raw: unknown): RuntimeConfigCommit | undefined {
-  if (!hasExactKeys(raw, ['source_revision', 'order', 'durability'])) return undefined
+  if (!hasExactKeys(raw, ['source_revision', 'order', 'durability', 'warnings'])) return undefined
   const sourceRevision = asString(raw.source_revision)
   const order = asString(raw.order)
   const durability = asString(raw.durability)
+  const warnings = asRecordArray(raw.warnings)
+  const decodedWarnings = warnings.map((warning) => ({
+    code: asString(warning.code) ?? '',
+    detail: asString(warning.detail) ?? '',
+  }))
   if (!sourceRevision || !order || (durability !== 'durable' && durability !== 'unconfirmed')) {
     return undefined
   }
-  return { source_revision: sourceRevision, order, durability }
+  if (decodedWarnings.some(warning => !warning.code || !warning.detail)) return undefined
+  return { source_revision: sourceRevision, order, durability, warnings: decodedWarnings }
 }
 
 function decodeRuntimeSkillApplication(raw: unknown): RuntimeSkillApplication | undefined {
@@ -2186,12 +2230,30 @@ export async function patchRuntimeMediaFailover(
 export async function patchRuntimeAssignment(
   keeperName: string,
   runtimeId: string | null,
-): Promise<CommittedRuntimeTomlConfig> {
+  expectedAssignmentRevision: KeeperRuntimeAssignmentRevision,
+): Promise<CommittedRuntimeTomlConfig | {
+  ok: true
+  applied: false
+  assignment_revision: KeeperRuntimeAssignmentRevision
+}> {
   await ensureDevToken()
-  return post<unknown>('/api/v1/runtime/config/assignment', {
+  const raw = await post<unknown>('/api/v1/runtime/config/assignment', {
     keeper_name: keeperName,
     runtime_id: runtimeId,
-  }).then(decodeCommittedRuntimeTomlConfig)
+    expected_assignment_revision: expectedAssignmentRevision,
+  })
+  if (isRecord(raw) && raw.ok === true && raw.applied === false) {
+    const assignmentRevision = decodeKeeperRuntimeAssignmentRevision(raw.assignment_revision)
+    if (!assignmentRevision) {
+      throw new Error('runtime assignment no-op revision이 없습니다')
+    }
+    return {
+      ok: true,
+      applied: false,
+      assignment_revision: assignmentRevision,
+    }
+  }
+  return decodeCommittedRuntimeTomlConfig(raw)
 }
 
 /**

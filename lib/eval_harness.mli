@@ -177,6 +177,3 @@ val report_to_string : eval_suite_result -> string
 (** Pretty-print a suite result as a human-readable report
     (overall pass rate, per-scenario score breakdown). *)
 
-val write_results_jsonl :
-  path:string -> eval_suite_result -> unit
-(** Append each {!eval_run} to [path] as one JSON object per line. *)

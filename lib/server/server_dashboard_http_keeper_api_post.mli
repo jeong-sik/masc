@@ -160,6 +160,13 @@ val handle_keeper_bulk_directive_post :
     entries carry [name] and [operator_operation_id]. *)
 
 module For_testing : sig
+  val respond_config_reconciliation :
+    request:Httpun.Request.t ->
+    Httpun.Reqd.t ->
+    name:string ->
+    error:Yojson.Safe.t ->
+    unit
+
   val github_login_stream_headers : string -> Httpun.Headers.t
   val github_login_stream_send_with :
     write:(string -> unit) ->

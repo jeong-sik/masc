@@ -109,6 +109,23 @@ val load_keeper_profile_defaults_result_for_base_path :
   base_path:string ->
   string ->
   (keeper_profile_defaults, keeper_toml_load_error) result
+
+type declarative_manifest_snapshot =
+  | Declarative_manifest_missing
+  | Declarative_manifest_present of
+      { path : string
+      ; sha256 : string
+      }
+
+type declarative_materialization_defaults =
+  { profile_defaults : keeper_profile_defaults
+  ; manifest_snapshot : declarative_manifest_snapshot
+  }
+
+val load_declarative_materialization_defaults :
+  base_path:string ->
+  string ->
+  (declarative_materialization_defaults, keeper_toml_load_error) result
 val load_keeper_profile_defaults_result :
   string -> (keeper_profile_defaults, keeper_toml_load_error) result
 val invalidate_keeper_profile_defaults_cache : string -> unit

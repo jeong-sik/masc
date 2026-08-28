@@ -236,6 +236,11 @@ export class ApiRequestError extends Error {
   detail?: string
   errorCode?: string
   authErrorCode?: string
+  responseData?: unknown
+  configApplied?: boolean
+  configApplicationState?: 'indeterminate'
+  runtimeSync?: boolean
+  authoritativeReloadRequired: boolean
 
   constructor(opts: {
     method: string
@@ -247,6 +252,11 @@ export class ApiRequestError extends Error {
     detail?: string
     errorCode?: string
     authErrorCode?: string
+    responseData?: unknown
+    configApplied?: boolean
+    configApplicationState?: 'indeterminate'
+    runtimeSync?: boolean
+    authoritativeReloadRequired?: boolean
   }) {
     const method = opts.method.toUpperCase()
     const timeout = opts.timeout === true
@@ -266,6 +276,11 @@ export class ApiRequestError extends Error {
     this.detail = detail
     this.errorCode = opts.errorCode?.trim() || undefined
     this.authErrorCode = opts.authErrorCode?.trim() || undefined
+    this.responseData = opts.responseData
+    this.configApplied = opts.configApplied
+    this.configApplicationState = opts.configApplicationState
+    this.runtimeSync = opts.runtimeSync
+    this.authoritativeReloadRequired = opts.authoritativeReloadRequired === true
   }
 }
 
@@ -469,6 +484,11 @@ interface ErrorResponseInfo {
   detail?: string
   errorCode?: string
   authErrorCode?: string
+  responseData?: unknown
+  configApplied?: boolean
+  configApplicationState?: 'indeterminate'
+  runtimeSync?: boolean
+  authoritativeReloadRequired?: boolean
 }
 
 async function errorResponseInfoFromResponse(res: Response): Promise<ErrorResponseInfo> {
@@ -487,6 +507,12 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
         ? jsonRpcError.data
         : null
       const errorDetail = typeof parsed.error === 'string' ? parsed.error.trim() : ''
+      const structuredErrorCode = typeof jsonRpcError?.code === 'string'
+        ? jsonRpcError.code.trim()
+        : ''
+      const structuredErrorDetail = typeof jsonRpcError?.detail === 'string'
+        ? jsonRpcError.detail.trim()
+        : ''
       const topLevelAuthErrorCode = typeof parsed.auth_error_code === 'string'
         ? parsed.auth_error_code.trim()
         : ''
@@ -497,18 +523,35 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
       const errorCode =
         authErrorCode
         || (typeof parsed.error_code === 'string' ? parsed.error_code.trim() : '')
+        || structuredErrorCode
         || (typeof parsed.status === 'string' ? parsed.status.trim() : '')
         || errorDetail
       const topLevelMessage = typeof parsed.message === 'string' ? parsed.message.trim() : ''
       const jsonRpcMessage = typeof jsonRpcError?.message === 'string'
         ? jsonRpcError.message.trim()
         : ''
-      const message = topLevelMessage || jsonRpcMessage
+      const message = topLevelMessage || jsonRpcMessage || structuredErrorDetail
+      const configApplicationState = isRecord(parsed.config_application)
+        && parsed.config_application.state === 'indeterminate'
+        && Object.keys(parsed.config_application).length === 1
+        ? 'indeterminate' as const
+        : undefined
       if (message || errorDetail || errorCode) {
         return {
           detail: message || errorDetail || errorCode || undefined,
           errorCode: errorCode || undefined,
           authErrorCode: authErrorCode || undefined,
+          responseData: parsed,
+          configApplied:
+            typeof parsed.config_applied === 'boolean'
+              ? parsed.config_applied
+              : undefined,
+          configApplicationState,
+          runtimeSync: typeof parsed.runtime_sync === 'boolean'
+            ? parsed.runtime_sync
+            : undefined,
+          authoritativeReloadRequired:
+            parsed.authoritative_reload_required === true,
         }
       }
     }
@@ -532,6 +575,11 @@ export async function apiRequestErrorFromResponse(
     detail: info.detail,
     errorCode: info.errorCode,
     authErrorCode: info.authErrorCode,
+    responseData: info.responseData,
+    configApplied: info.configApplied,
+    configApplicationState: info.configApplicationState,
+    runtimeSync: info.runtimeSync,
+    authoritativeReloadRequired: info.authoritativeReloadRequired,
   })
 }
 

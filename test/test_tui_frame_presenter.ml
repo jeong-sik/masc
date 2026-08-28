@@ -274,27 +274,47 @@ let test_viewport_discards_offscreen_rows () =
   check bool "last visible row is painted" true (contains painted "visible two");
   check bool "offscreen row is not emitted" false (contains painted "offscreen")
 
-(* A scheme changes the ink; without this it does not change the page. A light
-   scheme picks dark text because it expects a light background, so on a dark
-   terminal it reads worse than the one it replaced. *)
+(* A scheme changes the ink it names; without this it does not change the two
+   colours it does not name. masc draws most of its text without naming a
+   colour, so that text is the terminal's default foreground. *)
+let solarized_dark =
+  { Presenter.foreground =
+      Masc_tui_terminal_palette.make_rgb ~red:0x93 ~green:0xa1 ~blue:0xa1
+  ; background =
+      Masc_tui_terminal_palette.make_rgb ~red:0x00 ~green:0x2b ~blue:0x36
+  }
+;;
+
 let test_a_scheme_repaints_the_terminals_own_background () =
   let captured = sink () in
-  let rgb =
-    Masc_tui_terminal_palette.make_rgb ~red:0x00 ~green:0x2b ~blue:0x36
-  in
-  Presenter.sync_background ~write:(write captured) ~flush:(flush captured)
-    (Some rgb);
+  Presenter.sync_page ~write:(write captured) ~flush:(flush captured)
+    (Some solarized_dark);
   let sent = output captured in
   check bool "OSC 11 carries the scheme's own background" true
     (contains sent "\027]11;rgb:00/2b/36\027\\")
 
+(* The half that was missing. Between #31196 and its fix masc painted the page
+   and left the text: pick a light scheme on a dark terminal and the page went
+   near-white under the reader's near-white default text. Measured on a pty --
+   nine OSC 11 went out walking the catalogue and no OSC 10 at all. *)
+let test_a_scheme_also_repaints_the_terminals_own_text () =
+  let captured = sink () in
+  Presenter.sync_page ~write:(write captured) ~flush:(flush captured)
+    (Some solarized_dark);
+  check bool "OSC 10 carries the scheme's own foreground" true
+    (contains (output captured) "\027]10;rgb:93/a1/a1\027\\")
+
 let test_withdrawing_a_scheme_puts_the_background_back () =
   (* [None] is "follow the terminal", which is a reset rather than a colour:
-     masc has no opinion to send once the reader has withdrawn theirs. *)
+     masc has no opinion to send once the reader has withdrawn theirs. Both
+     halves come back, for the same reason both go out. *)
   let captured = sink () in
-  Presenter.sync_background ~write:(write captured) ~flush:(flush captured) None;
-  check bool "OSC 111 restores the terminal's own" true
-    (contains (output captured) "\027]111\027\\")
+  Presenter.sync_page ~write:(write captured) ~flush:(flush captured) None;
+  let sent = output captured in
+  check bool "OSC 111 restores the terminal's own page" true
+    (contains sent "\027]111\027\\");
+  check bool "OSC 110 restores the terminal's own text" true
+    (contains sent "\027]110\027\\")
 
 let test_cleanup_returns_the_background_before_the_screen () =
   (* The failure this exists for: quit with a scheme in force and the reader's
@@ -307,7 +327,9 @@ let test_cleanup_returns_the_background_before_the_screen () =
   let left = output captured in
   check bool "cleanup returns the background" true
     (contains left "\027]111\027\\");
-  let reset_at = Str.search_forward (Str.regexp_string "\027]111") left 0 in
+  check bool "cleanup returns the text colour too" true
+    (contains left "\027]110\027\\");
+  let reset_at = Str.search_forward (Str.regexp_string "\027]110") left 0 in
   let leave_at = Str.search_forward (Str.regexp_string "\027[?1049l") left 0 in
   check bool "before leaving the alternate screen" true (reset_at < leave_at)
 
@@ -358,6 +380,8 @@ let () =
             test_alternate_screen_is_taken_and_given_back
         ; test_case "a scheme repaints the terminal's background" `Quick
             test_a_scheme_repaints_the_terminals_own_background
+        ; test_case "a scheme repaints the terminal's text too" `Quick
+            test_a_scheme_also_repaints_the_terminals_own_text
         ; test_case "withdrawing puts the background back" `Quick
             test_withdrawing_a_scheme_puts_the_background_back
         ; test_case "cleanup returns the background first" `Quick

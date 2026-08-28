@@ -560,7 +560,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 Keeper_state_machine_json.conditions_to_json entry.conditions
             | None -> `Null
           in
-          let sandbox_last_error =
+          let keeper_last_error =
             match registry_entry with
             | Some entry -> entry.last_error
             | None -> None
@@ -804,8 +804,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("sandbox_profile",
                 `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
               ("sandbox_target", `String sandbox_target);
-              ("sandbox_last_error",
-                Json_util.string_opt_to_json sandbox_last_error);
+              ("keeper_last_error",
+                Json_util.string_opt_to_json keeper_last_error);
               ("runtime_contract", runtime_contract);
               ("goal_progress", goal_progress);
               ("blocked_task_count", `Int blocked_task_count);

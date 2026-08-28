@@ -357,9 +357,9 @@ let footer_hints_fusion_detail ~scroll ~max_scroll =
         @ listing_meta))
     scroll max_scroll
 
-(* Lanes sub-modes ([lanes_mode] owns overview/list/detail —
+(* Lanes sub-modes ([lanes_mode] owns overview/list/detail/notice —
    masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
-   two name the drill-down the same way the Fusion detail footer does. *)
+   name the drill-downs the same way the Fusion detail footer does. *)
 let footer_hints_lanes_run_list =
   hints_of_bindings
     ([ b Navigate "j/k" "move" ~help:"move the run cursor"
@@ -377,6 +377,13 @@ let footer_hints_lanes_run_detail ~scroll ~max_scroll =
         ]
         @ listing_meta))
     scroll max_scroll
+
+(* The lane notice is static — there is nothing to move through, so it keeps
+   only the way back plus the shared tail. *)
+let footer_hints_lane_notice =
+  hints_of_bindings
+    ([ b Act "Left / Esc" "back" ~help:"back to the lane overview" ]
+     @ listing_meta)
 
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)

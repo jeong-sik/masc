@@ -24,7 +24,22 @@ let write_initial_meta ~intake_token config meta =
   | Ok None -> Error "Keeper owner removed metadata during create"
   | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
 
-let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
+let with_config_warnings warnings result =
+  match warnings with
+  | [] -> result
+  | warnings ->
+    Tool_result.with_metadata
+      (`Assoc
+         [ ( "keeper_config_warnings"
+           , `List
+               (List.map
+                  Keeper_turn_up_config_persistence.warning_to_yojson
+                  warnings) )
+         ])
+      result
+
+let create_keeper ~expected_config_revision (ctx : _ context)
+    (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
   let tracker = Progress.start_tracking ~task_id ~total_steps:7 () in
@@ -94,50 +109,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                        ~base_path:ctx.config.base_path
                        ~keeper_name:p.name
                        (fun intake_token ->
-                  let base_dir = session_base_dir ctx.config in
-                  (* Ensure full session dir tree, not just base_dir (issue #3019) *)
-                  ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
-                  let bundle_paths =
-                    (* Surface per-Keeper sandbox boot
-                       silent-failure (2026-05-05).  Keeper_fs.ensure_dir
-                       raises on filesystem error; the previous [ignore]
-                       discarded it.  Now we log + emit a Otel_metric_store
-                       counter so the dashboard makes failure visible
-                       without aborting keeper boot.  ensure_dir runs under an
-                       Eio.Mutex and re-raises [Eio.Cancel.Cancelled], so route
-                       through the RFC-0106 SSOT combinator: a bare catch-all
-                       would swallow Cancelled and let a cancelled create keep
-                       booting a keeper that should not exist. *)
-                    Cancel_safe.protect
-                      ~on_exn:(fun exn ->
-                        Log.Keeper.error
-                          "create_keeper sandbox bundle init raised: keeper=%s exn=%s"
-                          p.name (Printexc.to_string exn);
-                        Otel_metric_store.inc_counter
-                          Keeper_metrics.(to_string LifecycleDispatchRejections)
-                          ~labels:[("keeper", p.name);
-                                   ("event", "sandbox_bundle_init_raised")]
-                          ();
-                        [])
-                      (fun () ->
-                        Keeper_alerting_path.ensure_sandbox_bundle_for_profile
-                          ~config:ctx.config ~name:p.name ~sandbox_profile)
-                  in
-                  List.iter (fun bp ->
-                    if not (Sys.file_exists bp) then begin
-                      Log.Keeper.warn
-                        "create_keeper sandbox bundle path missing post-init: keeper=%s path=%s"
-                        p.name bp;
-                      Otel_metric_store.inc_counter
-                        Keeper_metrics.(to_string LifecycleDispatchRejections)
-                        ~labels:[("keeper", p.name);
-                                 ("event", "sandbox_bundle_missing_post_init")]
-                        ()
-                    end) bundle_paths;
-                  let session =
-                    Keeper_context_runtime.create_session ~session_id:trace_id
-                      ~base_dir
-                  in
       let meta : Keeper_meta_contract.keeper_meta = {
         id = None;
         name = p.name;
@@ -210,74 +181,104 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       let ctx0 =
         Keeper_context_runtime.create ~eio:true ~system_prompt
       in
-      Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
-      let init_save_result =
-        try
-          Keeper_context_runtime.save_agent_core_checkpoint
-            ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
-            ~keeper_name:meta.name
-            ~session
-            ~agent_name:meta.name
-            ~ctx:ctx0
-          |> Result.map_error (fun error -> `Write_error error)
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-            log_keeper_exn ~label:"save_agent_core_checkpoint (init) exception" exn;
-            Error (`Unexpected_exception (Printexc.to_string exn))
-      in
-      match init_save_result with
-      | Error error ->
-        let detail =
-          match error with
-          | `Write_error error ->
-            Keeper_context_core.checkpoint_write_error_to_string
-              ~persistence_error_to_string:Fun.id
-              error
-          | `Unexpected_exception detail -> detail
-        in
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string CheckpointFailures)
-          ~labels:[("keeper", p.name); ("site", Keeper_checkpoint_failure_operation.(to_label Create_initial_save))]
-          ();
-        Log.Keeper.error
-          "create_keeper failed: initial checkpoint save error for name=%s: %s"
-          p.name detail;
-        Progress.stop_tracking task_id;
-        tool_result_error ~class_:Tool_result.Runtime_failure (Printf.sprintf "initial checkpoint save failed: %s" detail)
-      | Ok _ ->
-      let runtime_assignment_result =
-        match p.runtime_id_opt with
-        | None -> Ok ()
-        | Some runtime_id ->
-          Runtime.set_runtime_id_for_keeper
-            ~keeper_name:p.name
-            ~runtime_id
-            ()
-          (* See [Runtime.set_runtime_id_for_keeper]: the persisted receipt is the effect. *)
-          |> Result.map ignore
-      in
-      (match runtime_assignment_result with
-       | Error e ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string LifecycleDispatchRejections)
-           ~labels:[("keeper", p.name); ("event", "create_runtime_assignment")]
-           ();
-         Log.Keeper.error
-           "create_keeper failed: runtime assignment error for name=%s: %s"
-           p.name
-           e;
-         Progress.stop_tracking task_id;
-         tool_result_error ~class_:Tool_result.Runtime_failure e
-       | Ok () ->
       Progress.Tracker.step tracker ~message:"Writing declarative keeper configuration" ();
       (match
-         Keeper_turn_up_config_persistence.persist
+         Keeper_turn_up_config_persistence.persist_with_publication
+           ~expected_revision:expected_config_revision
            ~config:ctx.config
            ~parsed:p
            ~meta
+           ~publish:(fun runtime_transaction _outcome ->
+             let base_dir = session_base_dir ctx.config in
+             ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
+             let bundle_paths =
+               Cancel_safe.protect
+                 ~on_exn:(fun exn ->
+                   Log.Keeper.error
+                     "create_keeper sandbox bundle init raised: keeper=%s exn=%s"
+                     p.name
+                     (Printexc.to_string exn);
+                   Otel_metric_store.inc_counter
+                     Keeper_metrics.(to_string LifecycleDispatchRejections)
+                     ~labels:
+                       [ ("keeper", p.name); ("event", "sandbox_bundle_init_raised") ]
+                     ();
+                   [])
+                 (fun () ->
+                   Keeper_alerting_path.ensure_sandbox_bundle_for_profile
+                     ~config:ctx.config
+                     ~name:p.name
+                     ~sandbox_profile)
+             in
+             List.iter
+               (fun path ->
+                 if not (Sys.file_exists path)
+                 then (
+                   Log.Keeper.warn
+                     "create_keeper sandbox bundle path missing post-init: keeper=%s path=%s"
+                     p.name
+                     path;
+                   Otel_metric_store.inc_counter
+                     Keeper_metrics.(to_string LifecycleDispatchRejections)
+                     ~labels:
+                       [ ("keeper", p.name)
+                       ; ("event", "sandbox_bundle_missing_post_init")
+                       ]
+                     ()))
+               bundle_paths;
+             let session =
+               Keeper_context_runtime.create_session ~session_id:trace_id ~base_dir
+             in
+             Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
+             let checkpoint_result =
+               try
+                 Keeper_context_runtime.save_agent_core_checkpoint
+                   ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+                   ~keeper_name:meta.name
+                   ~session
+                   ~agent_name:meta.name
+                   ~ctx:ctx0
+                 |> Result.map_error (fun error ->
+                   Keeper_context_core.checkpoint_write_error_to_string
+                     ~persistence_error_to_string:Fun.id
+                     error)
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                 log_keeper_exn
+                   ~label:"save_agent_core_checkpoint (init) exception"
+                   exn;
+                 Error (Printexc.to_string exn)
+             in
+             match checkpoint_result with
+             | Error detail ->
+               Keeper_turn_up_config_persistence.Rollback
+                 (Error (`Checkpoint detail))
+             | Ok _ ->
+               Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
+               (match
+                  Runtime.commit_keeper_assignment runtime_transaction
+                    ~runtime_id:p.runtime_id_opt
+                with
+                | Error error ->
+                  Keeper_turn_up_config_persistence.Rollback
+                    (Error (`Runtime_assignment error))
+                | Ok runtime_write ->
+                  let runtime_warnings =
+                    Keeper_turn_up_config_persistence
+                    .warnings_of_runtime_assignment_write runtime_write
+                  in
+                  (match write_initial_meta ~intake_token ctx.config meta with
+                   | Ok () ->
+                     Keeper_turn_up_config_persistence.Commit_with_warnings
+                       (Ok (), runtime_warnings)
+                   | Error error ->
+                     Keeper_turn_up_config_persistence.Rollback
+                       (Error (`Metadata error)))))
+           ()
        with
        | Error e ->
+         let detail = Keeper_turn_up_config_persistence.error_to_string e in
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string LifecycleDispatchRejections)
            ~labels:[("keeper", p.name); ("event", "create_config_persistence")]
@@ -285,23 +286,47 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          Log.Keeper.error
            "create_keeper failed: declarative config write error for name=%s: %s"
            p.name
-           e;
+           detail;
          Progress.stop_tracking task_id;
          tool_result_error ~class_:Tool_result.Runtime_failure
-           (Printf.sprintf "declarative keeper config write failed: %s" e)
-       | Ok _ ->
-      Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
-      match write_initial_meta ~intake_token ctx.config meta with
-      | Error e ->
-        Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
-          ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
-        Log.Keeper.error
-          "create_keeper failed: owner metadata commit error for name=%s: %s"
-          p.name
-          e;
-        Progress.stop_tracking task_id;
-        tool_result_error ~class_:Tool_result.Runtime_failure e
-      | Ok () ->
+           (Printf.sprintf "declarative keeper config write failed: %s" detail)
+       | Ok { value = Error (`Checkpoint detail); warnings } ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string CheckpointFailures)
+           ~labels:
+             [ ("keeper", p.name)
+             ; ( "site"
+               , Keeper_checkpoint_failure_operation.(to_label Create_initial_save) )
+             ]
+           ();
+         Log.Keeper.error
+           "create_keeper failed: initial checkpoint save error for name=%s: %s"
+           p.name
+           detail;
+         Progress.stop_tracking task_id;
+         tool_result_error
+           ~class_:Tool_result.Runtime_failure
+           (Printf.sprintf "initial checkpoint save failed: %s" detail)
+         |> with_config_warnings warnings
+       | Ok { value = Error (`Metadata e); warnings } ->
+         Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
+           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
+         Log.Keeper.error
+           "create_keeper failed: owner metadata commit error for name=%s: %s"
+           p.name
+           e;
+         Progress.stop_tracking task_id;
+         tool_result_error ~class_:Tool_result.Runtime_failure e
+         |> with_config_warnings warnings
+       | Ok { value = Error (`Runtime_assignment e); warnings } ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string LifecycleDispatchRejections)
+           ~labels:[("keeper", p.name); ("event", "create_runtime_assignment")]
+           ();
+         Progress.stop_tracking task_id;
+         tool_result_error ~class_:Tool_result.Runtime_failure e
+         |> with_config_warnings warnings
+       | Ok { value = Ok (); warnings } ->
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
@@ -333,7 +358,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            tool_result_error ~class_:Tool_result.Runtime_failure
              (Printf.sprintf
                 "keeper metadata was created but lane launch failed: %s"
-                (start_keepalive_outcome_to_string rejected))))))
+                (start_keepalive_outcome_to_string rejected)))
+        |> with_config_warnings warnings))
                    with
                    | result, None -> result
                    | result, Some operation_id ->

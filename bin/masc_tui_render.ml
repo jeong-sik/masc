@@ -4279,11 +4279,43 @@ let render_lane_run_detail (state : state) ~run_id =
   finish_surface state ~clamped:(Lane_run_detail_scroll scroll)
     ~surface_key:"lane-run" ~rows:terminal_rows ~cols buf
 
+(* The lane notice is static: it explains a recording boundary and fetches
+   nothing, so it draws its lines whole with no scroll model, and the text
+   itself lives in [Masc_tui_types.verifier_lane_notice_lines] where a test
+   can pin it. *)
+let render_lane_notice (state : state) ~lane_id =
+  let terminal_rows, cols = get_terminal_size () in
+  let buf = Buffer.create 2048 in
+  let header =
+    Printf.sprintf "%s · %s  %s"
+      (screen_title " MASC Lanes")
+      (fit_width
+         (Terminal_text.single_line (standalone_lane_label state lane_id))
+         20)
+      (connection_badge state)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  List.iter
+    (fun line ->
+       match line with
+       | Lane_notice_heading text ->
+           box_line_styled buf cols ~style:Ansi.bold text
+       | Lane_notice_text text -> box_line buf cols text
+       | Lane_notice_dim text -> box_line_styled buf cols ~style:Ansi.dim text)
+    verifier_lane_notice_lines;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:Masc_tui_keys.footer_hints_lane_notice);
+  finish_surface state ~surface_key:"lane-notice" ~rows:terminal_rows ~cols buf
+
 let render_lanes (state : state) =
   match state.lanes_mode with
   | Lanes_overview -> render_lanes_overview state
   | Lanes_run_list lane_id -> render_lane_run_list state ~lane_id
   | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
+  | Lanes_lane_notice lane_id -> render_lane_notice state ~lane_id
 
 (** Render keeper detail view with live context and scrolling *)
 (* The detail box alone -- borders, title, scrolled content -- written into

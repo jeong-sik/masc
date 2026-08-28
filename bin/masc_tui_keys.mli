@@ -59,6 +59,10 @@ val footer_hints_lanes_run_detail : scroll:int -> max_scroll:int -> string
 (** The Lanes run-detail footer, with the live scroll position appended the
     same way the Fusion detail footer does. *)
 
+val footer_hints_lane_notice : string
+(** The Lanes lane-notice footer. The pane is static, so it keeps only the
+    way back plus the shared tail. *)
+
 val help_sections :
   ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list
 (** Sections for the help sheet. [current] puts that surface's own section

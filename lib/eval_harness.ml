@@ -355,56 +355,9 @@ let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : ev
 (* JSON serialization                                                *)
 (* ================================================================ *)
 
-let grader_result_to_json (r : grader_result) : Yojson.Safe.t =
-  `Assoc [
-    ("grader", `String r.grader_desc);
-    ("score", `Float r.score);
-    ("weight", `Float r.weight);
-    ("passed", `Bool r.passed);
-    ("detail", `String r.detail);
-  ]
 
-let eval_run_to_json (r : eval_run) : Yojson.Safe.t =
-  `Assoc [
-    ("scenario_id", `String r.scenario_id);
-    ("run_index", `Int r.run_index);
-    ("trace_id", `String r.trace_id);
-    ("weighted_score", `Float r.weighted_score);
-    ("passed", `Bool r.passed);
-    ("tool_calls", `List (List.map (fun s -> `String s) r.tool_calls_made));
-    ("total_turns", `Int r.total_turns);
-    ("total_cost_usd", Json_util.float_opt_to_json r.total_cost_usd);
-    ("duration_ms", `Int r.duration_ms);
-    ("outcome", Trajectory.outcome_to_json r.outcome);
-    ("error", Json_util.string_opt_to_json r.error);
-    ("scores", `List (List.map grader_result_to_json r.scores));
-  ]
 
-let eval_result_to_json (r : eval_result) : Yojson.Safe.t =
-  `Assoc [
-    ("scenario_id", `String r.scenario.id);
-    ("scenario_name", `String r.scenario.name);
-    ("category", `String r.scenario.category);
-    ("pass_at_k", `Float r.pass_at_k);
-    ("mean_score", `Float r.mean_score);
-    ("consistency", `Float r.consistency);
-    ("total_cost_usd", Json_util.float_opt_to_json r.total_cost_usd);
-    ("ci95_low", `Float r.ci95_low);
-    ("ci95_high", `Float r.ci95_high);
-    ("min_runs_met", `Bool r.min_runs_met);
-    ("runs", `List (List.map eval_run_to_json r.runs));
-  ]
 
-let suite_result_to_json (r : eval_suite_result) : Yojson.Safe.t =
-  `Assoc [
-    ("suite_name", `String r.suite_name);
-    ("started_at", `Float r.started_at);
-    ("ended_at", `Float r.ended_at);
-    ("overall_pass_rate", `Float r.overall_pass_rate);
-    ("total_cost_usd", Json_util.float_opt_to_json r.total_cost_usd);
-    ("total_runs", `Int r.total_runs);
-    ("results", `List (List.map eval_result_to_json r.results));
-  ]
 
 (* ================================================================ *)
 (* Scenario parsing from JSON                                        *)
@@ -619,14 +572,3 @@ let report_to_string (r : eval_suite_result) : string =
   Buffer.contents buf
 
 (** Write suite results as JSONL (one line per eval_result). *)
-let write_results_jsonl ~(path : string) (r : eval_suite_result) : unit =
-  let buf = Buffer.create 4096 in
-  (* Header line *)
-  Buffer.add_string buf (Yojson.Safe.to_string (suite_result_to_json r));
-  Buffer.add_char buf '\n';
-  (* Per-result lines *)
-  List.iter (fun er ->
-    Buffer.add_string buf (Yojson.Safe.to_string (eval_result_to_json er));
-    Buffer.add_char buf '\n'
-  ) r.results;
-  Fs_compat.save_file path (Buffer.contents buf)

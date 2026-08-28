@@ -117,9 +117,13 @@ def ttyd_session(
 ) -> Iterator[Page]:
     web_port = free_port()
     env = dict(os.environ)
+    # An operator shell that exports NO_COLOR=1 would otherwise blank every
+    # colour the TUI draws, and the README frames would come out monochrome.
+    env.pop("NO_COLOR", None)
     env.update(
         {
             "MASC_BASE_PATH": str(base),
+            "MASC_TUI_FORCE_COLOR": "1",
             "MASC_TUI_SYNC": "off",
             "TERM": "xterm-256color",
             "NO_PROXY": "127.0.0.1,localhost",

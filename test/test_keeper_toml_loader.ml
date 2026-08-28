@@ -55,9 +55,9 @@ let test_nested_table_edits_follow_semantic_path () =
     "[keeper]\nname = \"probe\"\n\n[keeper.skills]\nnames = [\"old\"]\n\n[keeper.tools]\ngroups = [\"fs\"]\nnative = \"read\"\n"
     (fun path ->
       let edit fields =
-        match L.edit_keeper_toml_fields ~path fields with
+        match L.edit_keeper_toml_fields_strict_staged ~path fields with
         | Ok () -> ()
-        | Error error -> fail error
+        | Error error -> fail (Fs_compat.atomic_replace_failure_to_string error)
       in
       edit
         [ "skills.names", L.Set (L.Toml_string_array [ "ocaml-coding" ])
@@ -89,14 +89,14 @@ let test_dotted_assignments_follow_semantic_path () =
     "[keeper]\nskills.names = [\"old\"]\ntools.groups = [\"fs\"]\ntools.native = \"read\"\n"
     (fun path ->
       (match
-         L.edit_keeper_toml_fields
+         L.edit_keeper_toml_fields_strict_staged
            ~path
            [ "skills.names", L.Set (L.Toml_string_array [])
            ; "tools.groups", L.Set (L.Toml_string_array [ "core" ])
            ]
        with
        | Ok () -> ()
-       | Error error -> fail error);
+       | Error error -> fail (Fs_compat.atomic_replace_failure_to_string error));
       let content = In_channel.with_open_bin path In_channel.input_all in
       match L.parse_toml content with
       | Error error -> fail error

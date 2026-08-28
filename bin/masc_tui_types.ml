@@ -346,11 +346,14 @@ type planning_mode =
     above the Keeper table; [Lanes_run_list] drills into one standalone
     lane's recent exact runs, and [Lanes_run_detail] reads one run's recorded
     prompt and output. The lane id rides along so Left/Esc from a run returns
-    to the list it came from. *)
+    to the list it came from. [Lanes_lane_notice] answers Enter on a lane
+    whose runs record no LLM prompt/output at all: a static pane that says
+    what is recorded instead, rather than a run list that would read empty. *)
 type lanes_mode =
   | Lanes_overview
   | Lanes_run_list of string
   | Lanes_run_detail of string * string
+  | Lanes_lane_notice of string
 
 (** Which Lanes overview section the row cursor is in. The Keeper rows keep
     [lanes_cursor]; the standalone observation rows are fixed above the table
@@ -1912,6 +1915,15 @@ let selected_standalone_lane (state : state) =
       List.nth_opt snapshot.Tui_decode.sls_lanes state.lanes_standalone_cursor
   | Lanes_section_standalone, None | Lanes_section_keeper, _ -> None
 
+(** Row count of the standalone observation matrix, snapshot or not. Every
+    mapping between the Lanes overview's two sections and one flat index --
+    the "/" search list, its landing, a mouse press -- reads this, so the
+    count cannot drift between the list and the landing. *)
+let lanes_standalone_count (state : state) =
+  match state.standalone_lanes with
+  | None -> 0
+  | Some snapshot -> List.length snapshot.Tui_decode.sls_lanes
+
 (** The typed Keeper identity on the selected Lanes row. *)
 let selected_lane_name (state : state) =
   match state.lanes with
@@ -2566,9 +2578,11 @@ let lanes_scrolled (state : state) =
       ; sc_overflow_takes_row = true
       ; sc_preview_keep = None
       }
-  | Lanes_run_detail _ ->
-      (* The detail's lines are built by the drawing; the frame reports the
-         clamp through [clamped_scroll], so no count is knowable here. *)
+  | Lanes_run_detail _ | Lanes_lane_notice _ ->
+      (* The detail's and the notice's lines are built by the drawing; the
+         frame reports the clamp through [clamped_scroll], so no count is
+         knowable here. The notice is shorter than any frame and never
+         scrolls, but it shares the shape. *)
       { sc_count = 0
       ; sc_chrome = 0
       ; sc_overflow_takes_row = false
@@ -2603,6 +2617,103 @@ let lanes_scrolled (state : state) =
   ; sc_preview_keep = None
   }
 
+(** One styled line of the lane notice pane. The text is static -- the pane
+    explains a recording boundary and fetches nothing -- so the style travels
+    with the line and the renderer only translates constructors into Theme
+    tokens. *)
+type lane_notice_line =
+  | Lane_notice_heading of string
+  | Lane_notice_text of string
+  | Lane_notice_dim of string
+
+(* What the Verifier lane notice says. Its runs live in the verification
+   registries (lib/verification_run_registry.ml and
+   lib/goal_verification_run_registry.ml) with outcome, elapsed and tool
+   observations but no LLM prompt/output, so the run-list drill-down would be
+   an empty reading; the pane names what is recorded and where it is read
+   instead. *)
+let verifier_lane_notice_lines =
+  [ Lane_notice_heading "  This lane records no LLM prompt/output"
+  ; Lane_notice_text ""
+  ; Lane_notice_text
+      "  Verifier runs are kept by the verification registries, not the"
+  ; Lane_notice_text
+      "  exact-lane run store. A run records its outcome, elapsed time, and"
+  ; Lane_notice_text
+      "  tool observations with output excerpts -- never a prompt."
+  ; Lane_notice_text ""
+  ; Lane_notice_dim
+      "  Read them on the Verification surface: Tab to Verify, or press :"
+  ; Lane_notice_dim "  and type \"go verify\"."
+  ]
+
+(** Where a left-button press lands on the Lanes overview, as a row of one of
+    its two sections. *)
+type lanes_overview_hit =
+  | Lanes_hit_standalone of int  (** index into [sls_lanes] *)
+  | Lanes_hit_keeper of int  (** index into [kls_lanes] *)
+  | Lanes_hit_none  (** chrome, notes and padding: nothing to select *)
+
+(* The first standalone row is the frame's sixth line: surface strip, box top,
+   header, divider, matrix heading. [render_lanes_overview] draws in that
+   order and this answers a click from the same order -- a row added to either
+   section moves both. *)
+let lanes_overview_first_standalone_row = 6
+
+let lanes_overview_hit (state : state) ~terminal_rows ~row : lanes_overview_hit =
+  if row < lanes_overview_first_standalone_row then Lanes_hit_none
+  else
+    let standalone_count = lanes_standalone_count state in
+    let standalone_note_rows =
+      match state.standalone_lanes with
+      | None ->
+          (* The single loading/error note row that stands in for the matrix. *)
+          1
+      | Some snapshot ->
+          (if snapshot.Tui_decode.sls_exact_run_projection_truncated then 1
+           else 0)
+          + if Option.is_some state.standalone_lanes_error then 1 else 0
+    in
+    let offset = row - lanes_overview_first_standalone_row in
+    if offset < standalone_count then Lanes_hit_standalone offset
+    else
+      (* Below the matrix: its note rows, then the Keeper table's divider,
+         column header and divider, then one row and a divider per error
+         notice -- the rows the drawing spends before the first Keeper row. *)
+      let keeper_first_row =
+        lanes_overview_first_standalone_row + standalone_count
+        + standalone_note_rows + 3
+        + (if Option.is_some state.lanes_error then 2 else 0)
+        + (if Option.is_some state.lanes_action_error then 2 else 0)
+      in
+      if row < keeper_first_row then Lanes_hit_none
+      else
+        let shown =
+          match state.lanes with
+          | None -> 0
+          | Some snapshot -> List.length snapshot.Tui_decode.kls_lanes
+        in
+        if shown = 0 then Lanes_hit_none
+        else
+          let layout = lanes_scrolled state in
+          let content_height =
+            Masc_tui_scroll.content_height
+              ~rows:(surface_body_rows state ~terminal_rows)
+              ~chrome:layout.sc_chrome ~count:layout.sc_count
+              ~preview_keep:layout.sc_preview_keep
+              ~overflow_takes_row:layout.sc_overflow_takes_row
+          in
+          let visible = row - keeper_first_row in
+          if visible >= content_height then Lanes_hit_none
+          else
+            (* The drawing clamps the scroll against the same bound, so a
+               press on a windowed row names the Keeper shown there. *)
+            let scroll =
+              max 0 (min state.lanes_scroll (max 0 (shown - content_height)))
+            in
+            let index = visible + scroll in
+            if index < shown then Lanes_hit_keeper index else Lanes_hit_none
+
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
     Some
@@ -2632,7 +2743,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            | Some s -> List.length s.Tui_decode.vs_requests)
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_detail _ -> None
+       | Lanes_run_detail _ | Lanes_lane_notice _ -> None
        | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state))
   | Harness ->
       if Option.is_some state.harness_detail then None
@@ -2713,12 +2824,28 @@ let surface_row_texts (state : state) : surface -> string list option = function
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_list _ | Lanes_run_detail _ -> None
+       | Lanes_run_list _ | Lanes_run_detail _ | Lanes_lane_notice _ -> None
        | Lanes_overview ->
-           Option.map
-             (fun s ->
-               List.map (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
-             state.lanes)
+           (* The standalone lane labels lead: the observation matrix sits
+              above the Keeper table on screen, so a match index below
+              [lanes_standalone_count] names a standalone row and anything at
+              or past it a Keeper row. The landing in [search_land] reads the
+              same split. *)
+           let standalone =
+             match state.standalone_lanes with
+             | None -> []
+             | Some snapshot ->
+                 List.map
+                   (fun (lane : Tui_decode.standalone_lane) -> lane.sl_label)
+                   snapshot.Tui_decode.sls_lanes
+           in
+           (match state.lanes with
+            | Some s ->
+                Some
+                  (standalone
+                   @ List.map
+                       (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
+            | None -> (match standalone with [] -> None | _ -> Some standalone)))
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else

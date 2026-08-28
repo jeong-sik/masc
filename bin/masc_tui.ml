@@ -455,6 +455,11 @@ type input_event =
           stdin here is the key stream, so its bytes are typed into whatever
           the operator was writing. Reading it is what keeps that from
           happening, whether or not anyone is waiting for it. *)
+  | Mouse_left_press of int * int
+      (** [(row, column)] of an unmodified left-button press, 1-based as the
+          terminal reported it. Only surfaces that map frame rows to their own
+          rows consume one; everywhere else it is inert, like a wheel notch on
+          a surface with nothing to scroll. *)
 
 (* How long to wait for the next byte of a paste already in progress. The
    terminal writes the payload in one go behind the start marker, so this is a
@@ -543,13 +548,19 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
                                ~timeout:paste_byte_timeout_seconds)))
                (* A parameter span starting with [<] is an SGR mouse report.
                   Wheel reports become the same keys the arrows make, so every
-                  surface's scroll binding answers the wheel; a report nothing
-                  consumes stays unclaimed rather than leaking into a key. *)
+                  surface's scroll binding answers the wheel; an unmodified
+                  left press travels as its own event so a surface can map the
+                  row to its cursor; a report nothing consumes stays unclaimed
+                  rather than leaking into a key. *)
                | Some (params, final)
                  when String.length params > 0 && params.[0] = '<' -> (
                    match Masc.Tui_decode.sgr_wheel_key params final with
                    | Some wheel_key -> key wheel_key
-                   | None -> key "unknown-esc")
+                   | None -> (
+                       match Masc.Tui_decode.sgr_left_press params final with
+                       | Some (row, column) ->
+                           Some (Mouse_left_press (row, column))
+                       | None -> key "unknown-esc"))
                (* A bare [CSI M] is the legacy X10 mouse report: three raw
                   bytes follow and belong to the report, not to the typist.
                   Terminals that ignore the SGR half of the [?1006;1000h]
@@ -1314,7 +1325,7 @@ type async_msg =
   | Runtime_assignment_set of
       string
       * string option
-      * (Masc_tui_http.runtime_config_commit_receipt, string) result
+      * (Masc_tui_http.runtime_assignment_write_result, string) result
       (** keeper, the runtime it was pointed at ([None] = back to default),
           and whether the server took it. *)
   | Keeper_chat_approval_answered of
@@ -3178,7 +3189,15 @@ let launch_verification_load state ~mailbox =
 let search_row_cursor state =
   match state.view with
   | Keepers Keeper_list -> Some state.keeper_cursor
-  | Lanes -> Some state.lanes_cursor
+  | Lanes ->
+      (* The searched list leads with the standalone lane labels
+         ([surface_row_texts]), so the cursor's position in it is
+         section-aware. *)
+      Some
+        (match state.lanes_section with
+         | Lanes_section_standalone -> state.lanes_standalone_cursor
+         | Lanes_section_keeper ->
+             lanes_standalone_count state + state.lanes_cursor)
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else Some state.verification_cursor
@@ -3196,7 +3215,7 @@ let search_row_cursor state =
   | _ -> None
 
 let search_land state index =
-  let follow scroll set_scroll =
+  let follow ?(cursor = index) scroll set_scroll =
     match scrolled_surface state state.view with
     | None -> ()
     | Some scrolled ->
@@ -3206,16 +3225,28 @@ let search_land state index =
            [ensure_visible] reports the row as already on screen. Both movers
            ask the same helper for the same reason. *)
         let height = surface_body_height ~rows:(surface_rows state) scrolled in
-        set_scroll (Masc_tui_scroll.ensure_visible ~cursor:index ~height scroll)
+        set_scroll (Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
   in
   match state.view with
   | Keepers Keeper_list -> state.keeper_cursor <- index
   | Lanes ->
-      state.lanes_cursor <- index;
-      (* Search text covers the Keeper rows only, so a landing is always in
-         the keeper section. *)
-      state.lanes_section <- Lanes_section_keeper;
-      follow state.lanes_scroll (fun s -> state.lanes_scroll <- s)
+      (* [index] names the combined search list, which leads with the
+         standalone lane labels ([surface_row_texts]): below the count it is a
+         matrix row, at or past it a Keeper row. *)
+      let standalone_count = lanes_standalone_count state in
+      if index < standalone_count then begin
+        (* The matrix rows are fixed above the table and never scroll, so no
+           window follows the landing. *)
+        state.lanes_section <- Lanes_section_standalone;
+        state.lanes_standalone_cursor <- index
+      end
+      else begin
+        let keeper_index = index - standalone_count in
+        state.lanes_section <- Lanes_section_keeper;
+        state.lanes_cursor <- keeper_index;
+        follow ~cursor:keeper_index state.lanes_scroll
+          (fun s -> state.lanes_scroll <- s)
+      end
   | Verification ->
       state.verification_cursor <- index;
       follow state.verification_scroll (fun s -> state.verification_scroll <- s)
@@ -3262,10 +3293,15 @@ let search_land state index =
       ()
 
 (* An action notice spends two rows in the Lanes frame. Re-window immediately
-   after installing it so the row that caused the notice remains visible. *)
+   after installing it so the row that caused the notice remains visible --
+   only when the Keeper table owns the cursor; the standalone rows are fixed
+   above it and never scroll. *)
 let show_lanes_action_error state detail =
   state.lanes_action_error <- Some detail;
-  search_land state state.lanes_cursor
+  match state.lanes_section with
+  | Lanes_section_standalone -> ()
+  | Lanes_section_keeper ->
+      search_land state (lanes_standalone_count state + state.lanes_cursor)
 
 let search_jump ?(backwards = false) state ~query ~after =
   let query = String.lowercase_ascii query in
@@ -3667,8 +3703,18 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
   let run () =
     let result =
       try
-        Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
-          ~runtime_id
+        match
+          Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name
+        with
+        | Error detail -> Error detail
+        | Ok json ->
+          (match
+             Masc_tui_keeper_config.expected_runtime_assignment_revision json
+           with
+           | Ok expected_assignment_revision ->
+             Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
+               ~runtime_id ~expected_assignment_revision
+           | Error detail -> Error detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -4213,9 +4259,10 @@ let selected_surface_reference state =
                  (fun (lane : Tui_decode.keeper_lane) ->
                    Link.reference Keeper lane.kl_keeper)
                  (List.nth_opt snapshot.Tui_decode.kls_lanes state.lanes_cursor))
-       (* A standalone lane row or a run drill-down names no Keeper to follow. *)
+       (* A standalone lane row, a run drill-down, or the lane notice names no
+          Keeper to follow. *)
        | Lanes_overview, Lanes_section_standalone
-       | Lanes_run_list _, _ | Lanes_run_detail _, _ -> None)
+       | Lanes_run_list _, _ | Lanes_run_detail _, _ | Lanes_lane_notice _, _ -> None)
   | Verification ->
       (* The task, not the request: a verification request is a question about
          a task, and the task is the thing another surface can open. *)
@@ -5038,6 +5085,71 @@ let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
       state.identity_view_error <- None;
       launch_identity_view state ~mailbox keeper.k_name
 ;;
+
+(* Enter on a Lanes overview row, shared with the mouse: a press on the row
+   already selected is Enter, so both paths open through the same two
+   helpers. *)
+let open_lanes_standalone_selection state ~mailbox =
+  match selected_standalone_lane state with
+  | Some (lane : Tui_decode.standalone_lane) ->
+      if String.equal lane.sl_lane_id Runtime.verifier_exact_lane_id then begin
+        (* Verifier runs are recorded in the verification registries, which
+           have no LLM prompt/output -- the notice pane says what is recorded
+           instead of opening an empty list or faking a payload. *)
+        state.lanes_action_error <- None;
+        state.lanes_mode <- Lanes_lane_notice lane.sl_lane_id
+      end
+      else begin
+        state.lanes_action_error <- None;
+        open_lane_run_list state ~mailbox lane
+      end
+  | None ->
+      show_lanes_action_error state
+        "Cannot open runs: standalone lane observation is unavailable"
+
+let open_lanes_keeper_selection state ~base_path ~mailbox =
+  match selected_lane_keeper state with
+  | None ->
+      show_lanes_action_error state
+        (if Option.is_some state.keepers_error then
+           "Cannot open detail: Keeper roster is unavailable"
+         else
+           match selected_lane_name state with
+           | None -> "Cannot open detail: no lane is selected"
+           | Some keeper_name ->
+               Printf.sprintf "Cannot open detail: Keeper %s is not registered"
+                 (Keeper_chat.terminal_safe_text keeper_name))
+  | Some (keeper_cursor, keeper) ->
+      state.lanes_action_error <- None;
+      state.keeper_cursor <- keeper_cursor;
+      open_keeper_detail state ~base_path ~mailbox keeper
+
+(* A left press on the Lanes overview is the cursor keys by another hand: the
+   first press lands the selection on the row under it (exactly where j/k
+   would put it), and a press on the row already selected is Enter. *)
+let handle_lanes_overview_click state ~base_path ~mailbox ~terminal_rows ~row =
+  match lanes_overview_hit state ~terminal_rows ~row with
+  | Lanes_hit_none -> ()
+  | Lanes_hit_standalone index ->
+      if
+        state.lanes_section = Lanes_section_standalone
+        && state.lanes_standalone_cursor = index
+      then open_lanes_standalone_selection state ~mailbox
+      else begin
+        state.lanes_action_error <- None;
+        state.lanes_section <- Lanes_section_standalone;
+        state.lanes_standalone_cursor <- index
+      end
+  | Lanes_hit_keeper index ->
+      if state.lanes_section = Lanes_section_keeper && state.lanes_cursor = index
+      then open_lanes_keeper_selection state ~base_path ~mailbox
+      else begin
+        (* The pressed row is on screen, so the window already shows it; only
+           the selection moves. *)
+        state.lanes_action_error <- None;
+        state.lanes_section <- Lanes_section_keeper;
+        state.lanes_cursor <- index
+      end
 
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
    session id, then the stream, read until it ends. Every step reports back
@@ -7244,14 +7356,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       | Error detail -> state.runtime_catalog_error <- Some detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with
-      | Ok receipt ->
+      | Ok write ->
+          let summary =
+            match write with
+            | Masc_tui_http.Runtime_assignment_committed receipt ->
+              Masc_tui_http.runtime_config_commit_receipt_summary receipt
+            | Masc_tui_http.Runtime_assignment_unchanged -> "unchanged"
+          in
           add_event state "system"
             ((match runtime_id with
               | Some id -> Printf.sprintf "%s now runs on %s" keeper_name id
               | None ->
                   Printf.sprintf "%s is back on the default runtime" keeper_name)
              ^ " · "
-             ^ Masc_tui_http.runtime_config_commit_receipt_summary receipt);
+             ^ summary);
           (* The assignment table just changed under the picker; re-read it
              rather than patching a local copy the server may disagree with. *)
           launch_runtime_catalog_load state ~mailbox
@@ -7402,8 +7520,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (* A refresh may reorder or shrink the snapshot. Keep the logical
              Keeper selected where it still exists, and make the clamped row
              visible when Lanes is on screen. Off-surface loads still leave a
-             valid cursor for the next visit. *)
-          if state.view = Lanes then search_land state cursor
+             valid cursor for the next visit. [search_land] names the combined
+             search list, which leads with the standalone rows, so the Keeper
+             cursor goes in past them. *)
+          if state.view = Lanes then
+            search_land state (lanes_standalone_count state + cursor)
       | Error detail ->
           (* Keep the previous rows visible. The error says that they are
              stale; clearing them would turn a failed refresh into an empty
@@ -7430,7 +7551,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                    stale, clearing them would turn a failed refresh into an
                    empty reading. *)
                 state.lane_runs_error <- Some detail)
-       | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ -> ())
+       | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _
+       | Lanes_lane_notice _ -> ())
   | Lane_run_detail_loaded (run_id, result) ->
       (match state.lanes_mode with
        | Lanes_run_detail (_, open_run) when String.equal open_run run_id ->
@@ -7439,7 +7561,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                 state.lane_run_detail <- Some detail;
                 state.lane_run_detail_error <- None
             | Error detail -> state.lane_run_detail_error <- Some detail)
-       | Lanes_run_detail _ | Lanes_overview | Lanes_run_list _ -> ())
+       | Lanes_run_detail _ | Lanes_overview | Lanes_run_list _
+       | Lanes_lane_notice _ -> ())
   | Harness_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -7926,10 +8049,15 @@ let main () =
   (* Reads the palette rather than taking a colour, so every caller sends
      whatever is in force at the moment it asks -- picking a scheme, dropping
      one, and the first paint all go through the same answer. *)
-  let sync_theme_background () =
-    Frame_presenter.sync_background ~write:(output_string stdout)
+  let sync_theme_page () =
+    Frame_presenter.sync_page ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout)
-      (Option.map Masc_tui_terminal_palette.background
+      (Option.map
+         (fun palette ->
+           { Frame_presenter.foreground =
+               Masc_tui_terminal_palette.foreground palette
+           ; background = Masc_tui_terminal_palette.background palette
+           })
          (Masc_tui_terminal_palette.current ()))
   in
   (* Live preview, the way a theme picker is expected to work: moving the
@@ -7949,7 +8077,7 @@ let main () =
       if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
       then begin
         state.theme_choice <- Some entry.Masc_tui_theme_choice.name;
-        sync_theme_background ()
+        sync_theme_page ()
       end
   in
   (* Esc, and leaving the pane. Restoring goes through the same two calls a
@@ -7964,7 +8092,7 @@ let main () =
        | Some name -> ignore (Masc_tui_theme_choice.apply name : bool)
        | None -> Masc_tui_theme_choice.follow_terminal ());
       state.theme_choice <- previous;
-      sync_theme_background ()
+      sync_theme_page ()
   in
   (* Shadowed on purpose: every surface change in this loop goes through here,
      and a preview must not survive one. Wrapping is what keeps the three call
@@ -7980,7 +8108,7 @@ let main () =
   (* A scheme named in runtime.toml was applied at boot, before this existed.
      Sending it here is what makes a saved choice survive a restart with its
      background rather than only its ink. *)
-  sync_theme_background ();
+  sync_theme_page ();
   output_string stdout mouse_tracking_enable;
   output_string stdout bracketed_paste_enable;
   (* Only terminals with an extended profile receive this opt-in. Apple
@@ -8715,10 +8843,30 @@ and is loaded on demand through keeper_skill.
                     ~keeper_name:keeper.k_name
                     ~patch_json:(Yojson.Safe.to_string patch)
                 with
-                | Error detail -> add_event state "error" detail
-                | Ok _ ->
-                    add_event state "system"
-                      (keeper.k_name ^ ": changed settings applied");
+                | Error
+                    (( Masc_tui_http.Keeper_config_revision_conflict _
+                     | Masc_tui_http.Keeper_config_reconciliation_required _
+                     | Masc_tui_http.Keeper_config_runtime_sync_failed _ ) as
+                     error) ->
+                  add_event state "error"
+                    (Masc_tui_http.keeper_config_post_error_to_string error);
+                  state.keeper_config_view <- None;
+                  state.keeper_config_view_error <- None;
+                  launch_keeper_config_view state
+                    ~mailbox:async_messages keeper.k_name
+                | Error error ->
+                  add_event state "error"
+                    (Masc_tui_http.keeper_config_post_error_to_string error)
+                | Ok response ->
+                    (match
+                       Masc_tui_keeper_config.config_write_status_message
+                         ~keeper_name:keeper.k_name response
+                     with
+                     | Error detail ->
+                       add_event state "error"
+                         (keeper.k_name ^ ": invalid config write receipt: " ^ detail)
+                     | Ok (severity, message) ->
+                       add_event state severity message);
                     if
                       state.view = Keepers Keeper_detail
                       && state.detail_tab = Detail_instructions
@@ -8825,7 +8973,8 @@ and is loaded on demand through keeper_skill.
         else
           match input with
           | Some (Key name) -> Some name
-          | Some (Pasted _) | Some (Graphics_reply _) | None -> None
+          | Some (Pasted _) | Some (Graphics_reply _)
+          | Some (Mouse_left_press _) | None -> None
       in
       (* Async agenda state can change the usable row budget after the last
          paint. Read the compact marker from that paint, not from the newer
@@ -8911,10 +9060,28 @@ and is loaded on demand through keeper_skill.
                       (Masc_tui_attachment.error_to_string error))
             | Some _ | None ->
                 handle_paste state ~base_path ~mailbox:async_messages ~paste)
+       (* A left press on the Lanes overview moves the row cursor (and opens
+          the row it already named). The modals above the surface -- help,
+          agenda, palette, search -- keep the press from reaching rows they
+          cover, exactly like a key. *)
+       | Some (Mouse_left_press (row, _column))
+         when state.view = Lanes
+              && state.lanes_mode = Lanes_overview
+              && (not dismissed_image)
+              && (not compact_viewport)
+              && (not state.help_open)
+              && (not state.agenda_open)
+              && (not state.palette_open)
+              && (not state.context_inspector_open)
+              && Option.is_none state.search ->
+           let terminal_rows, _ = get_terminal_size () in
+           handle_lanes_overview_click state ~base_path ~mailbox:async_messages
+             ~terminal_rows ~row
        (* A graphics reply is read and dropped. Nothing asks for one outside
           the capability probe, which does its own reading before the loop
           starts; what matters here is that it does not become keys. *)
-       | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _) | None -> ());
+       | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _)
+       | Some (Mouse_left_press _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
       let _terminal_rows, terminal_columns = get_terminal_size () in
@@ -9788,7 +9955,7 @@ and is loaded on demand through keeper_skill.
                    scheme picks dark text because it expects a light page, so
                    leaving the terminal's own background is what made "light
                    theme is still black". *)
-                sync_theme_background ()
+                sync_theme_page ()
               end)
        | Some "c" when state.view = Tools -> handle_skill_create ~composition:false ()
        | Some "C" when state.view = Tools -> handle_skill_create ~composition:true ()
@@ -10309,7 +10476,8 @@ and is loaded on demand through keeper_skill.
                        max 0
                          (min (count - 1)
                             (state.lane_runs_cursor + (direction * page)))
-                 | Lanes_overview -> ())
+                 (* The notice is a static pane; there is nothing to page. *)
+                 | Lanes_lane_notice _ | Lanes_overview -> ())
             | Overview | Acting | Keepers _ | Approvals | Planning
             | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
@@ -10361,7 +10529,9 @@ and is loaded on demand through keeper_skill.
                  | Lanes_run_detail (_, run_id) ->
                      launch_lane_run_detail_load state ~mailbox:async_messages
                        ~run_id
-                 | Lanes_overview -> ())
+                 (* The notice is static; the overview reload above is all it
+                    can ask for. *)
+                 | Lanes_lane_notice _ | Lanes_overview -> ())
             | Harness -> launch_harness_load state ~mailbox:async_messages
             | Fusion ->
                 launch_fusion_runs_load state ~mailbox:async_messages;
@@ -10542,6 +10712,9 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_error <- None;
                      state.lane_runs_cursor <- 0;
                      state.lane_runs_scroll <- 0
+                 (* The notice holds no fetched state, so leaving it is just
+                    the mode. *)
+                 | Lanes_lane_notice _ -> state.lanes_mode <- Lanes_overview
                  | Lanes_overview -> state.view <- Overview)
             | Acting | Keepers Keeper_list -> state.view <- Overview
             | Approvals ->
@@ -10664,6 +10837,7 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_error <- None;
                      state.lane_runs_cursor <- 0;
                      state.lane_runs_scroll <- 0
+                 | Lanes_lane_notice _ -> state.lanes_mode <- Lanes_overview
                  | Lanes_overview -> ())
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Approvals
@@ -10864,6 +11038,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_run_detail _ ->
                      state.lane_run_detail_scroll <-
                        state.lane_run_detail_scroll + 1
+                 | Lanes_lane_notice _ -> ()
                  | Lanes_run_list _ ->
                      (let cursor, scroll =
                         move_row_cursor state ~delta:1
@@ -11146,6 +11321,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_run_detail _ ->
                      state.lane_run_detail_scroll <-
                        max 0 (state.lane_run_detail_scroll - 1)
+                 | Lanes_lane_notice _ -> ()
                  | Lanes_run_list _ ->
                      (let cursor, scroll =
                         move_row_cursor state ~delta:(-1)
@@ -11432,48 +11608,15 @@ and is loaded on demand through keeper_skill.
                                  ~run_id:run.lrs_run_id
                            | None -> ())
                       | None -> ())
-                 | Lanes_run_detail _ -> ()
+                 | Lanes_run_detail _ | Lanes_lane_notice _ -> ()
                  | Lanes_overview ->
                      (match state.lanes_section with
                       | Lanes_section_standalone ->
-                          (match selected_standalone_lane state with
-                           | Some (lane : Tui_decode.standalone_lane) ->
-                               if
-                                 String.equal lane.sl_lane_id
-                                   Runtime.verifier_exact_lane_id
-                               then
-                                 (* Verifier runs are recorded in the
-                                    verification registries, which have no LLM
-                                    prompt/output — say so rather than opening
-                                    an empty list or faking a payload. *)
-                                 show_lanes_action_error state
-                                   "Verifier lane runs record no LLM prompt/output; see the Verification surface"
-                               else begin
-                                 state.lanes_action_error <- None;
-                                 open_lane_run_list state
-                                   ~mailbox:async_messages lane
-                               end
-                           | None ->
-                               show_lanes_action_error state
-                                 "Cannot open runs: standalone lane observation is unavailable")
+                          open_lanes_standalone_selection state
+                            ~mailbox:async_messages
                       | Lanes_section_keeper ->
-                          (match selected_lane_keeper state with
-                           | None ->
-                               show_lanes_action_error state
-                                 (if Option.is_some state.keepers_error then
-                                    "Cannot open detail: Keeper roster is unavailable"
-                                  else
-                                    match selected_lane_name state with
-                                    | None -> "Cannot open detail: no lane is selected"
-                                    | Some keeper_name ->
-                                        Printf.sprintf
-                                          "Cannot open detail: Keeper %s is not registered"
-                                          (Keeper_chat.terminal_safe_text keeper_name))
-                           | Some (keeper_cursor, keeper) ->
-                               state.lanes_action_error <- None;
-                               state.keeper_cursor <- keeper_cursor;
-                               open_keeper_detail state ~base_path
-                                 ~mailbox:async_messages keeper)))
+                          open_lanes_keeper_selection state ~base_path
+                            ~mailbox:async_messages))
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
                    thing is readable before [y] answers it. *)
@@ -11872,7 +12015,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick -> ()
             | Lanes ->
                 (match state.lanes_mode, state.lanes_section with
-                 | (Lanes_run_list _ | Lanes_run_detail _), _ -> ()
+                 | (Lanes_run_list _ | Lanes_run_detail _ | Lanes_lane_notice _), _ -> ()
                  | Lanes_overview, Lanes_section_standalone ->
                      show_lanes_action_error state
                        "Cannot open chat: a standalone lane has no Keeper"
@@ -11936,7 +12079,7 @@ and is loaded on demand through keeper_skill.
            state.theme_choice <- None;
            state.theme_before_preview <- None;
            (* Withdrawing the choice withdraws the background with it. *)
-           sync_theme_background ()
+           sync_theme_page ()
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_librarian_input_read ()

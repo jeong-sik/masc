@@ -34,6 +34,7 @@ type parsed_args =
   ; native_tool_posture_present : bool
   ; instructions_arg : string option
   ; profile_defaults : keeper_profile_defaults
+  ; declarative_manifest_snapshot : declarative_manifest_snapshot
   ; instructions_opt : string option
   ; autonomous_instructions_arg : string option
   ; autonomous_instructions_opt : string option

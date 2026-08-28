@@ -11,8 +11,13 @@ describe('keeper config source projection', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'rtprobe',
+        config_revision: {
+          manifest: { state: 'sha256', value: 'a'.repeat(64) },
+          runtime_assignment: { state: 'runtime_config_missing' },
+        },
         max_context_override: null,
         proactive: { enabled: true },
+        skills: { names: null },
         sources: {
           live_meta_path: '/workspace/.masc/keepers/rtprobe.json',
           default_manifest_path: '/workspace/.masc/config/keepers/rtprobe.toml',
@@ -84,6 +89,82 @@ describe('keeper config source projection', () => {
 
     await expect(fetchKeeperConfig('rtprobe')).rejects.toThrow(
       'Keeper config unavailable for rtprobe: profile_error at /workspace/.masc/config/keepers/rtprobe.toml: missing required sandbox_profile',
+    )
+  })
+
+  it('preserves composite config write and durability warning receipts', async () => {
+    const revision = {
+      manifest: { state: 'sha256', value: 'a'.repeat(64) },
+      runtime_assignment: { state: 'runtime_config_missing' },
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        name: 'rtprobe',
+        config_revision: revision,
+        config_write: {
+          revision,
+          applied: true,
+          warnings: [{
+            code: 'runtime_config_parent_sync_unconfirmed',
+            detail: 'runtime parent fsync failed',
+          }],
+        },
+        config_transaction_warnings: [{
+          code: 'keeper_manifest_lock_release_unconfirmed',
+          detail: 'unlock failed',
+        }],
+        max_context_override: null,
+        skills: { names: null },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    const config = await fetchKeeperConfig('rtprobe')
+    expect(config.config_write).toEqual({
+      revision,
+      applied: true,
+      warnings: [{
+        code: 'runtime_config_parent_sync_unconfirmed',
+        detail: 'runtime parent fsync failed',
+      }],
+    })
+    expect(config.config_transaction_warnings).toEqual([{
+      code: 'keeper_manifest_lock_release_unconfirmed',
+      detail: 'unlock failed',
+    }])
+  })
+
+  it.each([
+    [
+      'missing warnings',
+      (revision: object) => ({ revision, applied: true }),
+    ],
+    [
+      'extra field',
+      (revision: object) => ({ revision, applied: true, warnings: [], extra: true }),
+    ],
+  ])('rejects config_write with %s', async (_label, configWrite) => {
+    const revision = {
+      manifest: { state: 'sha256', value: 'a'.repeat(64) },
+      runtime_assignment: { state: 'runtime_config_missing' },
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        name: 'rtprobe',
+        config_revision: revision,
+        config_write: configWrite(revision),
+        max_context_override: null,
+        skills: { names: null },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(fetchKeeperConfig('rtprobe')).rejects.toThrow(
+      'Invalid keeper config response: config_write is malformed',
     )
   })
 })

@@ -13,7 +13,10 @@ type RuntimeTomlEditorProtocolFixture = Omit<
   readonly required_provider_fields: readonly string[]
 }
 
-type RuntimeTomlConfigFixtureInput = Omit<RuntimeTomlConfig, 'path' | 'provider_protocols'> & {
+type RuntimeTomlConfigFixtureInput = Omit<
+  RuntimeTomlConfig,
+  'path' | 'provider_protocols' | 'source_revision'
+> & {
   path: string
   provider_protocols?: readonly RuntimeTomlEditorProtocolFixture[]
 }
@@ -59,6 +62,7 @@ export function committedRuntimeTomlConfigFixture(
   return {
     ...config,
     ok: true,
+    source_revision: sourceRevision,
     provider_protocols: (config.provider_protocols ?? []).map(protocol => ({
       ...protocol,
       provider_fields: [...protocol.provider_fields],
@@ -69,6 +73,7 @@ export function committedRuntimeTomlConfigFixture(
       source_revision: sourceRevision,
       order: options.order ?? '7',
       durability: options.durability ?? 'durable',
+      warnings: [],
     },
     application: {
       operation: application?.operation ?? 'test_write',

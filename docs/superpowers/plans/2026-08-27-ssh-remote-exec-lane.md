@@ -250,7 +250,7 @@ let () =
 
 - [ ] **Step 1: Write the failing test + dune stanza**
 
-`test/test_exec_dispatch_ssh.ml` mirrors the Docker mock-runner case in `test/test_exec_dispatch.ml`: build an `Ssh` target whose `runner` records `(argv, env, cwd, stdin_content)` and returns `(Unix.WEXITED 0, "out", "err")`, dispatch a simple command, assert the runner saw the command and the dispatch result carries the mocked stdout/stderr. Include the `pipeline_runner = None` case asserting pipeline dispatch fails with the same named error the Docker arm produces when no pipeline runner is injected.
+`test/test_exec_dispatch_ssh.ml` mirrors the Docker mock-runner case in `test/test_exec_dispatch.ml`: build an `Ssh` target whose `runner` records `(argv, env, cwd, stdin_content)` and returns `(Unix.WEXITED 0, "out", "err")`, dispatch a simple command, assert the runner saw the command and the dispatch result carries the mocked stdout/stderr. Include the `pipeline_runner = None` pipeline case asserting Docker parity: with no pipeline runner injected, the pipeline decomposes to per-stage `dispatch_simple` through the plain runner (pinned by `test_exec_dispatch.ml:384-416` — no named error exists for this case), and a `pipeline_runner = Some` case asserting the streaming pipeline runner is preferred.
 
 - [ ] **Step 2: RED** — build fails (unbound `Sandbox_target.ssh`).
 

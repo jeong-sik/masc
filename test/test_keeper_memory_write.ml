@@ -10,15 +10,6 @@ let make_args ~title ~content =
 ;;
 
 let error_label = Runtime.memory_write_error_kind_to_string
-let json = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
-
-let authorize_for_persistence_test ~operation ~input:_ continue =
-  Alcotest.(check string)
-    "memory write Gate operation"
-    Runtime.memory_write_gate_operation
-    operation;
-  continue ()
-;;
 
 let assert_invalid ~expected = function
   | Runtime.Memory_write_invalid { error_kind; _ } ->
@@ -171,7 +162,6 @@ let test_write_comes_back_through_recall () =
     Runtime.keeper_memory_write_with_outcome
       ~config
       ~meta
-      ~authorize_external_effect:authorize_for_persistence_test
       ~args:
         (make_args
            ~title:""
@@ -278,7 +268,6 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
       Runtime.keeper_memory_write_with_outcome
         ~config
         ~meta
-        ~authorize_external_effect:authorize_for_persistence_test
         ~args:(make_args ~title:"" ~content:"workspace A only")
       |> fun result -> result.Masc.Keeper_tool_execution.raw_output
       |> Yojson.Safe.from_string
@@ -335,44 +324,6 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
       (int_field "memory_facts_total" status))
 ;;
 
-let test_authorization_block_prevents_persistence () =
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "authorization-blocked" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
-  let args = make_args ~title:"blocked" ~content:"must not persist" in
-  let authorization_calls = ref 0 in
-  let result =
-    Runtime.keeper_memory_write_with_outcome
-      ~config
-      ~meta
-      ~authorize_external_effect:(fun ~operation ~input continue:_ ->
-        incr authorization_calls;
-        Alcotest.(check string)
-          "exact operation reaches authority"
-          Runtime.memory_write_gate_operation
-          operation;
-        Alcotest.check json "exact input reaches authority" args input;
-        Masc.Keeper_tool_execution.failure
-          ~class_:Tool_result.Workflow_rejection
-          ~effect_disposition:Tool_result.Proven_pre_effect
-          "blocked by test authority")
-      ~args
-  in
-  Alcotest.(check int) "authority called once" 1 !authorization_calls;
-  Alcotest.(check string)
-    "authority result returned"
-    "blocked by test authority"
-    result.raw_output;
-  Alcotest.(check int)
-    "blocked write persisted nothing"
-    0
-    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name))
-;;
-
 (* The source parser sits behind Safe_ops.json_string, which returns its
    default for both an absent key and a key holding a non-string. Before the
    fix {"source": ["memory"]} reached Memory while {"source": "memry"} was
@@ -422,10 +373,6 @@ let () =
             "tools isolate config BasePath from ambient decoy"
             `Quick
             test_tools_isolate_workspace_base_path_from_ambient_decoy
-        ; Alcotest.test_case
-            "authorization block prevents persistence"
-            `Quick
-            test_authorization_block_prevents_persistence
         ; Alcotest.test_case
             "search filters exact substring without ranking"
             `Quick

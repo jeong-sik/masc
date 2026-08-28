@@ -166,9 +166,6 @@ let network_read_operation = Keeper_tool_in_process_runtime.network_read_gate_op
 let connector_post_operation =
   Keeper_tool_in_process_runtime.connector_post_gate_operation
 ;;
-let memory_write_operation =
-  Keeper_tool_memory_runtime.memory_write_gate_operation
-;;
 
 let identity_operation = Keeper_identity_gate.gate_operation
 
@@ -189,9 +186,6 @@ let network_read_of_gate_input =
 let connector_post_of_gate_input =
   Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input
 ;;
-let memory_write_args_of_gate_input =
-  Keeper_tool_memory_runtime.replay_memory_write_args_of_gate_input
-;;
 
 let identity_of_gate_input = Keeper_identity_gate.replay_of_gate_input
 
@@ -204,7 +198,6 @@ type replayable =
   | Replay_execute
   | Replay_network_read
   | Replay_connector_post
-  | Replay_memory_write
   | Replay_identity
 
 let replayable_of_operation operation =
@@ -216,8 +209,6 @@ let replayable_of_operation operation =
   then Some Replay_network_read
   else if String.equal operation connector_post_operation
   then Some Replay_connector_post
-  else if String.equal operation memory_write_operation
-  then Some Replay_memory_write
   else if String.equal operation identity_operation
   then Some Replay_identity
   else None
@@ -798,7 +789,6 @@ let terminal_effect_receipt_of_durable_replay request replay_outcome =
   | ( ( Some Replay_write
       | Some Replay_execute
       | Some Replay_network_read
-      | Some Replay_memory_write
       | Some Replay_identity
       | None )
     , _ )
@@ -1033,16 +1023,6 @@ let replay_approved_effect_with_receipt
               ?gate_context
               ~gate_grant:grant
               connector_post)
-     | Some Replay_memory_write ->
-       replay memory_write_operation memory_write_args_of_gate_input (fun args ->
-         Keeper_tool_in_process_runtime.handle_memory_write_with_outcome
-           ~config
-           ~meta
-           ?continuation_channel
-           ?gate_context
-           ~gate_grant:grant
-           ~args
-           ())
      | Some Replay_identity ->
        replay identity_operation identity_of_gate_input (fun call ->
          Keeper_identity_gate.replay_call_with_outcome

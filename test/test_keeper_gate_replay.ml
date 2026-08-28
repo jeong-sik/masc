@@ -647,51 +647,14 @@ let test_dispatch_covers_all_replayable_operations () =
     (replayable_of_operation "connector_post" = Some Replay_connector_post);
   Alcotest.check
     Alcotest.bool
-    "an approved memory_write is host-replayed"
+    "memory_write is internal and never approval-replayed"
     true
-    (replayable_of_operation "memory_write" = Some Replay_memory_write);
+    (replayable_of_operation "memory_write" = None);
   Alcotest.check
     Alcotest.bool
     "an approved identity_call is host-replayed"
     true
     (replayable_of_operation "identity_call" = Some Replay_identity)
-;;
-
-let test_memory_write_replay_preserves_exact_input () =
-  let input =
-    `Assoc
-      [ "title", `String "approved title"
-      ; "content", `String "approved content"
-      ]
-  in
-  Alcotest.check
-    result_json
-    "approved memory write arguments stay exact"
-    (Ok input)
-    (Masc.Keeper_tool_memory_runtime.replay_memory_write_args_of_gate_input
-       input)
-;;
-
-let test_memory_write_replay_rejects_invalid_input () =
-  List.iter
-    (fun input ->
-       match
-         Masc.Keeper_tool_memory_runtime.replay_memory_write_args_of_gate_input
-           input
-       with
-       | Error _ -> ()
-       | Ok _ -> Alcotest.fail "invalid memory write became replayable")
-    [ `Assoc [ "title", `String "missing content" ]
-    ; `Assoc
-        [ "content", `String "exact"
-        ; "content", `String "duplicate"
-        ]
-    ; `Assoc
-        [ "content", `String "exact"
-        ; "unknown", `String "widened"
-        ]
-    ; `String "not an object"
-    ]
 ;;
 
 let test_dispatch_refuses_unknown_operations () =
@@ -1018,14 +981,6 @@ let () =
             "connector replay requires mention_user_ids"
             `Quick
             test_connector_post_replay_requires_mention_user_ids
-        ; Alcotest.test_case
-            "memory write replay keeps exact input"
-            `Quick
-            test_memory_write_replay_preserves_exact_input
-        ; Alcotest.test_case
-            "memory write replay rejects invalid input"
-            `Quick
-            test_memory_write_replay_rejects_invalid_input
         ; Alcotest.test_case
             "deferred payload states the replay contract"
             `Quick

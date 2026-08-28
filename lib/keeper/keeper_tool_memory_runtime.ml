@@ -411,61 +411,6 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
     else Memory_write_ok { body }
 ;;
 
-let memory_write_gate_operation = "memory_write"
-
-let replay_memory_write_args_of_gate_input = function
-  | `Assoc fields as args ->
-    let open Result.Syntax in
-    let unknown_fields =
-      fields
-      |> List.filter_map (fun (name, _) ->
-        if String.equal name "title" || String.equal name "content"
-        then None
-        else Some name)
-      |> List.sort_uniq String.compare
-    in
-    let* () =
-      match unknown_fields with
-      | [] -> Ok ()
-      | names ->
-        Error
-          (Printf.sprintf
-             "approved memory_write input has unknown field(s): %s"
-             (String.concat ", " names))
-    in
-    let unique_field name =
-      match
-        fields
-        |> List.filter_map (fun (candidate, value) ->
-          if String.equal candidate name then Some value else None)
-      with
-      | [] -> Ok None
-      | [ value ] -> Ok (Some value)
-      | _ -> Error (Printf.sprintf "approved memory_write input repeats %S" name)
-    in
-    let* title = unique_field "title" in
-    let* content = unique_field "content" in
-    let* () =
-      match title with
-      | None | Some (`String _) -> Ok ()
-      | Some _ -> Error "approved memory_write title must be a string"
-    in
-    let* () =
-      match content with
-      | None -> Error "approved memory_write input has no content"
-      | Some (`String _) -> Ok ()
-      | Some _ -> Error "approved memory_write content must be a string"
-    in
-    (match validate_memory_write_args args with
-     | Memory_write_ok _ -> Ok args
-     | Memory_write_invalid { error_kind; _ } ->
-       Error
-         (Printf.sprintf
-            "approved memory_write input is invalid: %s"
-            (memory_write_error_kind_to_string error_kind)))
-  | _ -> Error "approved memory_write input must be an object"
-;;
-
 (* An explicit write is a claim a later turn reads back; the current Memory OS
    snapshot is the only store it reaches.
 
@@ -510,7 +455,6 @@ let upsert_explicit_fact
 let keeper_memory_write_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
-      ~authorize_external_effect
       ~(args : Yojson.Safe.t)
   : Keeper_tool_execution.t
   =
@@ -528,10 +472,6 @@ let keeper_memory_write_with_outcome
   | Memory_write_invalid { error_kind; extras } ->
     respond ~ok:false ~error_kind extras
   | Memory_write_ok { body } ->
-    authorize_external_effect
-      ~operation:memory_write_gate_operation
-      ~input:args
-    @@ fun () ->
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path

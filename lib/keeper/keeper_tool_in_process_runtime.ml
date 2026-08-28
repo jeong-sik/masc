@@ -348,27 +348,11 @@ let handle_context_status ~config ~(meta : keeper_meta) ~ctx_work ~args:_ =
 let handle_memory_write_with_outcome
       ~config
       ~(meta : keeper_meta)
-      ?continuation_channel
-      ?gate_context
-      ?gate_grant
       ~args
-      ()
   =
-  let authorize_external_effect ~operation ~input continue =
-    with_external_gate_execution
-      ~config
-      ~meta
-      ?continuation_channel
-      ?gate_context
-      ?gate_grant
-      ~operation
-      ~input
-      continue
-  in
   Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
     ~config
     ~meta
-    ~authorize_external_effect
     ~args
 ;;
 

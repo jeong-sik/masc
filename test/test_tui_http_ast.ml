@@ -770,6 +770,17 @@ let test_operator_approvals_use_current_contract () =
      above stays exact -- a fourth [apply] is a fourth way to change the
      palette and the reader should be made to say why. Here more is the
      behaviour the rule wants, and only fewer is the failure. *)
+  (* The name column is measured, not chosen. Sixteen cells cut
+     "rw-e0-r9-20260820-review" to "rw-e0-r9-202608~", and two keepers whose
+     names share a long prefix then read alike -- which is the column's whole
+     job. The pre-pass that measures them is the [display_width] call; a
+     return to a fixed width takes it with it. *)
+  check bool "approval renderer measures its name column" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_approvals"
+       ~callee:"Message_layout.display_width"
+     >= 1);
   check bool "approval renderer sanitizes optional error text" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"

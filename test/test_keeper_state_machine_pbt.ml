@@ -34,9 +34,6 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
     return SM.Compaction_started;
     return SM.Compaction_completed;
     return (SM.Compaction_failed { reason = "pbt_test" });
-    return SM.Handoff_started;
-    return (SM.Handoff_completed { new_trace_id = "pbt_trace" });
-    return (SM.Handoff_failed { reason = "pbt_test" });
     return SM.Operator_pause;
     return SM.Operator_resume;
     return (SM.Operator_stop { remove_meta = false });
@@ -61,7 +58,6 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
           context_ratio = 0.5; message_count = 50; token_count = 5000;
           context_actions = { compact = false; handoff = false }};
         SM.Compaction_started;
-        SM.Handoff_started;
         SM.Operator_pause;
         SM.Stop_requested;
         SM.Operator_stop { remove_meta = false };
@@ -75,13 +71,6 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
     | SM.Compacting ->
       [ SM.Compaction_completed;
         SM.Compaction_failed { reason = "test" };
-        SM.Heartbeat_failed { consecutive = 1 };
-        SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
-        SM.Stop_requested;
-      ]
-    | SM.HandingOff ->
-      [ SM.Handoff_completed { new_trace_id = "t" };
-        SM.Handoff_failed { reason = "test" };
         SM.Heartbeat_failed { consecutive = 1 };
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
         SM.Stop_requested;

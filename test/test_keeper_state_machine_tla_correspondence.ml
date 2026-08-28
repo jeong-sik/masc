@@ -36,7 +36,6 @@ let tla_phase_names =
   ; "Running"
   ; "Failing"
   ; "Compacting"
-  ; "HandingOff"
   ; "Draining"
   ; "Paused"
   ; "Stopped"
@@ -53,7 +52,6 @@ let phase_to_tla_name : SM.phase -> string = function
   | Running -> "Running"
   | Failing -> "Failing"
   | Compacting -> "Compacting"
-  | HandingOff -> "HandingOff"
   | Draining -> "Draining"
   | Paused -> "Paused"
   | Stopped -> "Stopped"
@@ -83,7 +81,7 @@ let test_state_set_parity () =
      future OCaml-only phase (e.g. an internal substate not yet modelled
      in the spec) must not break the smoke.  When such drift appears,
      the spec gap should be tracked separately, not enforced here. *)
-  check int "TLA+ phase count" 10 (List.length tla_sorted);
+  check int "TLA+ phase count" 9 (List.length tla_sorted);
   (* OCaml ≥ TLA+ is implied by the per-name check above; we re-state it
      as an explicit inequality for readability. *)
   check
@@ -151,7 +149,7 @@ let test_running_to_draining_via_stop_requested () =
 
 (* Running → Compacting via Compaction_started.
    Mirrors TLA+ §CompactionStarted: [compaction_active' = TRUE] under
-   [~compaction_active /\ ~handoff_active]; DerivePhase priority 10
+   [~compaction_active]; DerivePhase priority 10
    then derives "Compacting". *)
 let test_running_to_compacting_via_compaction_started () =
   check_transition

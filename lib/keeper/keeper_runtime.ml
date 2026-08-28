@@ -631,7 +631,6 @@ let start_supervisor_sweep ctx =
               | Keeper_state_machine.Offline
               | Keeper_state_machine.Failing
               | Keeper_state_machine.Compacting
-              | Keeper_state_machine.HandingOff
               | Keeper_state_machine.Draining
               | Keeper_state_machine.Paused
               | Keeper_state_machine.Stopped

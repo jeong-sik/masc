@@ -234,35 +234,6 @@ let dispatch_compaction_completed
       ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
     applied
 
-let dispatch_post_turn_lifecycle_events
-    ~(config : Workspace.config)
-    ~keeper_name
-    (lifecycle : post_turn_lifecycle) =
-  match lifecycle.handoff_attempted, lifecycle.handoff_json with
-  | true, Some _json ->
-      dispatch_keeper_phase_event
-        ~config
-        ~origin:Keeper_registry.Post_turn_lifecycle
-        ~keeper_name
-        (Keeper_state_machine.Handoff_completed
-           {
-             new_trace_id =
-               Keeper_id.Trace_id.to_string
-                 lifecycle.updated_meta.runtime.trace_id;
-           })
-  | true, None ->
-      dispatch_keeper_phase_event
-        ~config
-        ~origin:Keeper_registry.Post_turn_lifecycle
-        ~keeper_name
-        (Keeper_state_machine.Handoff_failed
-           {
-             reason =
-               Option.value lifecycle.handoff_failure_reason
-                 ~default:"handoff_aborted";
-           })
-  | false, _ -> ()
-
 (* ================================================================ *)
 (* Remaining functions (not extracted — small utilities)              *)
 (* ================================================================ *)

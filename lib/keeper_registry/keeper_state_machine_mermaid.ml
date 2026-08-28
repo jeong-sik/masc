@@ -15,7 +15,6 @@ let phase_to_mermaid_id = function
   | Running -> "Running"
   | Failing -> "Failing"
   | Compacting -> "Compacting"
-  | HandingOff -> "HandingOff"
   | Draining -> "Draining"
   | Paused -> "Paused"
   | Stopped -> "Stopped"
@@ -34,7 +33,6 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Offline --> Stopped : stop while not started\n";
   p "    Running --> Failing : hb/turn/reconcile fail\n";
   p "    Running --> Compacting : compact start\n";
-  p "    Running --> HandingOff : handoff start\n";
   p "    Running --> Draining : stop requested\n";
   p "    Running --> Paused : operator pause\n";
   p "    Running --> Stopped : stop requested\n";
@@ -48,10 +46,6 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Compacting --> Failing : hb fail\n";
   p "    Compacting --> Crashed : fiber death\n";
   p "    Compacting --> Draining : stop requested\n";
-  p "    HandingOff --> Running : handoff done\n";
-  p "    HandingOff --> Failing : hb fail\n";
-  p "    HandingOff --> Crashed : fiber death\n";
-  p "    HandingOff --> Draining : stop requested\n";
   p "    Draining --> Stopped : drain done\n";
   p "    Draining --> Crashed : fiber death\n";
   p "    Paused --> Running : operator resume\n";
@@ -73,7 +67,7 @@ let phase_to_mermaid ~(current : phase) : string =
   (match current with
    | Stopped ->
      p "    class %s terminal\n" (phase_to_mermaid_id current)
-   | Failing | Compacting | HandingOff | Draining | Restarting | Crashed ->
+   | Failing | Compacting | Draining | Restarting | Crashed ->
      p "    class %s buffer\n" (phase_to_mermaid_id current)
    | Running | Offline | Paused ->
      p "    class %s active\n" (phase_to_mermaid_id current));

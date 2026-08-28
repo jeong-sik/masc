@@ -821,7 +821,6 @@ let start_keepalive
       | Keeper_state_machine.Stopped -> finished
       | Keeper_state_machine.Failing
       | Keeper_state_machine.Compacting
-      | Keeper_state_machine.HandingOff
       | Keeper_state_machine.Draining
       | Keeper_state_machine.Crashed -> finished
       | Keeper_state_machine.Running

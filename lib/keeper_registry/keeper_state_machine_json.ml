@@ -21,7 +21,6 @@ let conditions_to_json (c : conditions) =
     ; "turn_healthy", `Bool c.turn_healthy
     ; "context_handoff_needed", `Bool c.context_handoff_needed
     ; "compaction_active", `Bool c.compaction_active
-    ; "handoff_active", `Bool c.handoff_active
     ; "operator_paused", `Bool c.operator_paused
     ; "stop_requested", `Bool c.stop_requested
     ; "restart_requested", `Bool c.restart_requested
@@ -54,12 +53,6 @@ let event_to_json (ev : event) : Yojson.Safe.t =
   | Compaction_started -> obj "compaction_started" []
   | Compaction_completed -> obj "compaction_completed" []
   | Compaction_failed r -> obj "compaction_failed" [ "reason", `String r.reason ]
-  | Handoff_started -> obj "handoff_started" []
-  | Handoff_completed r ->
-    obj
-      "handoff_completed"
-      [ "new_trace_id", `String r.new_trace_id ]
-  | Handoff_failed r -> obj "handoff_failed" [ "reason", `String r.reason ]
   | Operator_pause -> obj "operator_pause" []
   | Operator_resume -> obj "operator_resume" []
   | Operator_stop r -> obj "operator_stop" [ "remove_meta", `Bool r.remove_meta ]

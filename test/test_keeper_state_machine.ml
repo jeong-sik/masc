@@ -101,11 +101,6 @@ let test_derive_paused () =
   check phase_t "paused" SM.Paused (SM.derive_phase c)
 ;;
 
-let test_derive_handingoff () =
-  let c = { running_conditions with handoff_active = true } in
-  check phase_t "handoff active = HandingOff" SM.HandingOff (SM.derive_phase c)
-;;
-
 let test_derive_compacting () =
   let c = { running_conditions with compaction_active = true } in
   check phase_t "compaction active = Compacting" SM.Compacting (SM.derive_phase c)
@@ -134,11 +129,6 @@ let test_derive_priority_stop_over_compact () =
   check phase_t "compaction blocks Stopped → Draining" SM.Draining (SM.derive_phase c);
   let c2 = { c with compaction_active = false } in
   check phase_t "no buffer ops → Stopped" SM.Stopped (SM.derive_phase c2)
-;;
-
-let test_derive_priority_handoff_over_compact () =
-  let c = { running_conditions with handoff_active = true; compaction_active = true } in
-  check phase_t "HandingOff beats Compacting" SM.HandingOff (SM.derive_phase c)
 ;;
 
 (* ── apply_event tests ─────────────────────────────────── *)
@@ -222,24 +212,6 @@ let test_apply_compaction_completed_returns_to_failing_health_lane () =
   check bool "compaction done" false tr.updated_conditions.compaction_active
 ;;
 
-let test_apply_handoff_lifecycle () =
-  (* Running -> HandingOff -> Running *)
-  let tr1 =
-    apply_ok
-      ~current_phase:SM.Running
-      ~conditions:running_conditions
-      ~event:SM.Handoff_started
-  in
-  check phase_t "-> HandingOff" SM.HandingOff tr1.new_phase;
-  let tr2 =
-    apply_ok
-      ~current_phase:SM.HandingOff
-      ~conditions:tr1.updated_conditions
-      ~event:(SM.Handoff_completed { new_trace_id = "abc" })
-  in
-  check phase_t "-> Running" SM.Running tr2.new_phase
-;;
-
 let test_apply_operator_pause_resume () =
   let tr1 =
     apply_ok
@@ -262,9 +234,6 @@ let test_operator_resume_from_paused_commits_latent_blockers () =
     [ ( "unhealthy turn"
       , { running_conditions with operator_paused = true; turn_healthy = false }
       , SM.Failing )
-    ; ( "handoff active"
-      , { running_conditions with operator_paused = true; handoff_active = true }
-      , SM.HandingOff )
     ; ( "restart backoff elapsed"
       , { SM.default_conditions with
           operator_paused = true
@@ -417,18 +386,6 @@ let test_apply_compacting_to_crashed () =
   check phase_t "Compacting + fiber death -> Crashed" SM.Crashed tr.new_phase
 ;;
 
-let test_apply_handingoff_to_crashed () =
-  (* Fiber dies during handoff -> Crashed *)
-  let handoff_conds = { running_conditions with handoff_active = true } in
-  let tr =
-    apply_ok
-      ~current_phase:SM.HandingOff
-      ~conditions:handoff_conds
-      ~event:(SM.Fiber_terminated { outcome = "crash during handoff"; provider_id = None; http_status = None })
-  in
-  check phase_t "HandingOff + fiber death -> Crashed" SM.Crashed tr.new_phase
-;;
-
 let test_apply_failing_to_draining () =
   (* Failing keeper receives stop request -> Draining *)
   let failing_conds = { running_conditions with heartbeat_healthy = false } in
@@ -511,11 +468,6 @@ let test_can_transition_running_to_buffer_states () =
     (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Compacting);
   check
     bool
-    "-> HandingOff"
-    true
-    (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.HandingOff);
-  check
-    bool
     "-> Draining"
     true
     (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Draining);
@@ -594,36 +546,12 @@ let test_can_transition_compacting_to_crashed () =
     (SM.can_transition ~from_phase:SM.Compacting ~to_phase:SM.Crashed)
 ;;
 
-let test_can_transition_handingoff_to_failing () =
-  check
-    bool
-    "-> Failing"
-    true
-    (SM.can_transition ~from_phase:SM.HandingOff ~to_phase:SM.Failing)
-;;
-
-let test_can_transition_handingoff_to_crashed () =
-  check
-    bool
-    "-> Crashed"
-    true
-    (SM.can_transition ~from_phase:SM.HandingOff ~to_phase:SM.Crashed)
-;;
-
 let test_can_transition_compacting_to_paused () =
   check
     bool
     "-> Paused"
     true
     (SM.can_transition ~from_phase:SM.Compacting ~to_phase:SM.Paused)
-;;
-
-let test_can_transition_handingoff_to_paused () =
-  check
-    bool
-    "-> Paused"
-    true
-    (SM.can_transition ~from_phase:SM.HandingOff ~to_phase:SM.Paused)
 ;;
 
 let test_can_transition_failing_to_draining () =
@@ -659,7 +587,7 @@ let test_can_transition_paused_to_latent_buffer_states () =
          ("Paused -> " ^ SM.phase_to_string to_phase)
          true
          (SM.can_transition ~from_phase:SM.Paused ~to_phase))
-    [ SM.Failing; SM.HandingOff; SM.Restarting; SM.Offline ]
+    [ SM.Failing; SM.Restarting; SM.Offline ]
 ;;
 
 let test_can_transition_paused_to_stopped () =
@@ -678,7 +606,7 @@ let test_can_execute_turn_work_capable_phases () =
          ("work-capable phase " ^ SM.phase_to_string phase)
          true
          (SM.can_execute_turn phase))
-    [ SM.Running; SM.Failing; SM.Compacting; SM.HandingOff ]
+    [ SM.Running; SM.Failing; SM.Compacting ]
 ;;
 
 let test_can_execute_turn_blocks_other_phases () =
@@ -745,7 +673,7 @@ let chain_apply ~init_phase ~init_conditions steps =
   go init_phase init_conditions 1000.0 steps
 ;;
 
-(** 1. Happy path: boot -> heartbeats -> compact -> handoff -> graceful stop.
+(** 1. Happy path: boot -> heartbeats -> compact -> graceful stop.
     The most common keeper lifecycle in production.
     9 transitions, 6 distinct phases visited. *)
 let test_chain_happy_path () =
@@ -760,8 +688,6 @@ let test_chain_happy_path () =
       ; SM.Compaction_started, SM.Compacting
       ; ( SM.Compaction_completed
         , SM.Running )
-      ; SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen2" }, SM.Running
       ; SM.Stop_requested, SM.Draining
       ; SM.Drain_complete, SM.Stopped
       ]
@@ -809,25 +735,23 @@ let test_chain_operator_intervention () =
   check phase_t "ends Stopped" SM.Stopped final_phase
 ;;
 
-(** 5. Compaction failure -> handoff fallback -> success.
-    When compaction fails to free enough context, the system falls back
-    to a full generation handoff. *)
-let test_chain_compaction_fail_handoff_fallback () =
+(** 5. Compaction failure -> recovery.
+    When compaction fails to free enough context the keeper returns to
+    Running and keeps serving. *)
+let test_chain_compaction_fail_recovery () =
   let final_phase, _ =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
       [ SM.Compaction_started, SM.Compacting
       ; SM.Compaction_failed { reason = "insufficient reduction" }, SM.Running
-      ; SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen3" }, SM.Running
       ; SM.Heartbeat_ok, SM.Running
       ]
   in
-  check phase_t "recovered via handoff" SM.Running final_phase
+  check phase_t "recovered after failed compaction" SM.Running final_phase
 ;;
 
-(** 7. Long-running keeper: multiple compaction + handoff cycles.
+(** 7. Long-running keeper: repeated compaction cycles.
     Simulates a keeper that runs for hours, going through several
     context management cycles before a clean shutdown.
     15 transitions across 5 context management cycles. *)
@@ -846,17 +770,11 @@ let test_chain_long_running_multi_cycle () =
         SM.Compaction_started, SM.Compacting
       ; ( SM.Compaction_completed
         , SM.Running )
-      ; (* Cycle 3: handoff (context still growing) *)
-        SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen2" }, SM.Running
       ; SM.Heartbeat_ok, SM.Running
       ; (* Cycle 4: compaction in new generation *)
         SM.Compaction_started, SM.Compacting
       ; ( SM.Compaction_completed
         , SM.Running )
-      ; (* Cycle 5: another handoff *)
-        SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen3" }, SM.Running
       ; (* Clean shutdown *)
         SM.Stop_requested, SM.Draining
       ; SM.Drain_complete, SM.Stopped
@@ -866,8 +784,7 @@ let test_chain_long_running_multi_cycle () =
 ;;
 
 (** 8. Crash during buffer state -> full recovery.
-    Fiber dies mid-compaction, supervisor recovers, then a successful
-    handoff completes the context management. *)
+    Fiber dies mid-compaction and the supervisor recovers it. *)
 let test_chain_crash_during_compaction_recovery () =
   let final_phase, _ =
     chain_apply
@@ -878,8 +795,6 @@ let test_chain_crash_during_compaction_recovery () =
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ; SM.Heartbeat_ok, SM.Running
-      ; SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen2" }, SM.Running
       ; SM.Heartbeat_ok, SM.Running
       ]
   in
@@ -937,7 +852,6 @@ let test_chain_terminal_permanence () =
     ; SM.Fiber_started
     ; SM.Operator_resume
     ; SM.Compaction_started
-    ; SM.Handoff_started
     ; SM.Supervisor_restart_attempt { attempt = 1 }
     ; SM.Stop_requested
     ; SM.Drain_complete
@@ -1009,23 +923,6 @@ let test_chain_restart_clears_stop () =
   check bool "stop_requested cleared" false final_conds.SM.stop_requested
 ;;
 
-(** 14. Handoff fails then retries successfully.
-    First handoff attempt fails, keeper recovers to Running, second succeeds. *)
-let test_chain_handoff_fail_retry () =
-  let final_phase, _ =
-    chain_apply
-      ~init_phase:SM.Running
-      ~init_conditions:running_conditions
-      [ SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_failed { reason = "target generation conflict" }, SM.Running
-      ; SM.Heartbeat_ok, SM.Running
-      ; SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen2" }, SM.Running
-      ]
-  in
-  check phase_t "handoff retry succeeded" SM.Running final_phase
-;;
-
 (** 16. Turn failures accumulate alongside heartbeat failures.
     Both turn_healthy=false AND heartbeat_healthy=false. Recovery requires
     both Turn_succeeded AND Heartbeat_ok. *)
@@ -1045,23 +942,23 @@ let test_chain_double_failure_recovery () =
   check phase_t "both failures must clear" SM.Running final_phase
 ;;
 
-(** 17. Operator stop during handoff.
-    Handoff is in progress when operator requests stop.
-    Stop has higher priority -> Draining, handoff abandoned. *)
-let test_chain_stop_during_handoff () =
-  (* TLA+ fix: handoff must finish before Stopped.
-     Drain_complete while handoff_active → stays Draining. *)
+(** 17. Operator stop during a buffer op.
+    A buffer op is in progress when the operator requests stop.
+    Stop has higher priority -> Draining, the buffer op still finishes. *)
+let test_chain_stop_during_buffer_op () =
+  (* TLA+ fix: the buffer op must finish before Stopped.
+     Drain_complete while compaction_active → stays Draining. *)
   let final_phase, _ =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ SM.Handoff_started, SM.HandingOff
+      [ SM.Compaction_started, SM.Compacting
       ; SM.Operator_stop { remove_meta = false }, SM.Draining
       ; SM.Drain_complete, SM.Draining
-      ; SM.Handoff_completed { new_trace_id = "t" }, SM.Stopped
+      ; SM.Compaction_completed, SM.Stopped
       ]
   in
-  check phase_t "handoff completes then Stopped" SM.Stopped final_phase
+  check phase_t "compaction completes then Stopped" SM.Stopped final_phase
 ;;
 
 (** 18. Repeated crashes remain recoverable; Stopped alone is terminal. *)
@@ -1113,7 +1010,7 @@ let test_chain_pause_while_failing_then_stop () =
 ;;
 
 (** 21. Maximum turbulence: every buffer state visited in one lifecycle.
-    Running -> Compacting -> Running -> HandingOff -> Running ->
+    Running -> Compacting -> Running ->
     Failing -> Running -> Paused -> Running -> Draining -> Stopped.
     10 transitions touching 7 distinct phases. *)
 let test_chain_maximum_turbulence () =
@@ -1125,9 +1022,6 @@ let test_chain_maximum_turbulence () =
         SM.Compaction_started, SM.Compacting
       ; ( SM.Compaction_completed
         , SM.Running )
-      ; (* Handoff cycle *)
-        SM.Handoff_started, SM.HandingOff
-      ; SM.Handoff_completed { new_trace_id = "gen2" }, SM.Running
       ; (* Failure cycle *)
         SM.Heartbeat_failed { consecutive = 2 }, SM.Failing
       ; SM.Heartbeat_ok, SM.Running
@@ -1156,7 +1050,6 @@ let test_chain_condition_snapshot_audit () =
   check bool "hb healthy" true tr1.updated_conditions.heartbeat_healthy;
   check bool "turn healthy" true tr1.updated_conditions.turn_healthy;
   check bool "no compaction" false tr1.updated_conditions.compaction_active;
-  check bool "no handoff" false tr1.updated_conditions.handoff_active;
   check bool "restart request reset" false tr1.updated_conditions.restart_requested;
   (* Step 2: crash *)
   let tr2 =
@@ -1188,7 +1081,6 @@ let test_chain_condition_snapshot_audit () =
   check bool "hb healthy (reset)" true tr4.updated_conditions.heartbeat_healthy;
   check bool "turn healthy (reset)" true tr4.updated_conditions.turn_healthy;
   check bool "compaction (reset)" false tr4.updated_conditions.compaction_active;
-  check bool "handoff (reset)" false tr4.updated_conditions.handoff_active;
   check bool "restart request reset" false tr4.updated_conditions.restart_requested;
   check bool "drain (reset)" false tr4.updated_conditions.drain_complete
 ;;
@@ -1240,11 +1132,10 @@ let test_invariant_terminal_absorbing () =
     | `Turn -> { c with turn_healthy = not c.turn_healthy }
     | `Hand_need -> { c with context_handoff_needed = not c.context_handoff_needed }
     | `Comp -> { c with compaction_active = not c.compaction_active }
-    | `Hand -> { c with handoff_active = not c.handoff_active }
   in
   (* Stopped: toggling non-critical fields should keep Stopped.
-     TLA+ fix: compaction_active and handoff_active are NOW critical for
-     Stopped — toggling them ON breaks the Stopped condition (→ Draining).
+     TLA+ fix: compaction_active is NOW critical for
+     Stopped — toggling it ON breaks the Stopped condition (→ Draining).
      This is correct: buffer ops block terminal entry. *)
   let stopped_non_critical = [ `Hb; `Turn; `Hand_need ] in
   List.iter
@@ -1253,19 +1144,13 @@ let test_invariant_terminal_absorbing () =
        let p = SM.derive_phase mutated in
        check phase_t "Stopped absorbs field toggle" SM.Stopped p)
     stopped_non_critical;
-  (* Sensitivity: toggling compaction/handoff ON must BREAK Stopped *)
+  (* Sensitivity: toggling compaction ON must BREAK Stopped *)
   let with_comp = toggle stopped_conds `Comp in
   check
     phase_t
     "compaction breaks Stopped → Draining"
     SM.Draining
-    (SM.derive_phase with_comp);
-  let with_hand = toggle stopped_conds `Hand in
-  check
-    phase_t
-    "handoff breaks Stopped → Draining"
-    SM.Draining
-    (SM.derive_phase with_hand)
+    (SM.derive_phase with_comp)
 ;;
 
 (** INV-3: Fiber_started resets are exhaustive.
@@ -1281,7 +1166,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
     ; turn_healthy = false
     ; context_handoff_needed = true
     ; compaction_active = true
-    ; handoff_active = true
     ; operator_paused = true
     ; stop_requested = true
     ; restart_requested = true
@@ -1305,7 +1189,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
   check bool "hb_healthy reset" true updated.heartbeat_healthy;
   check bool "turn_healthy reset" true updated.turn_healthy;
   check bool "compaction_active reset" false updated.compaction_active;
-  check bool "handoff_active reset" false updated.handoff_active;
   check bool "restart_requested reset" false updated.restart_requested;
   check bool "drain_complete reset" false updated.drain_complete;
   (* TLA+ liveness fix: stop_requested is now RESET on Fiber_started.
@@ -1397,7 +1280,7 @@ let test_invariant_no_cross_life_backoff_leakage () =
 ;;
 
 (** INV-6: No cross-life buffer state leakage.
-    compaction_active/handoff_active from life N must not persist in life N+1. *)
+    compaction_active from life N must not persist in life N+1. *)
 let test_invariant_no_cross_life_buffer_leakage () =
   let _, post_restart =
     chain_apply
@@ -1410,7 +1293,6 @@ let test_invariant_no_cross_life_buffer_leakage () =
       ]
   in
   check bool "compaction not leaked" false post_restart.compaction_active;
-  check bool "handoff not leaked" false post_restart.handoff_active;
   (* New life starts clean — should be Running, not Compacting *)
   check phase_t "clean Running" SM.Running (SM.derive_phase post_restart)
 ;;
@@ -1428,8 +1310,6 @@ let test_invariant_stop_requested_monotonic () =
     ; SM.Turn_failed { consecutive = 1 }
     ; SM.Compaction_started
     ; SM.Compaction_completed
-    ; SM.Handoff_started
-    ; SM.Handoff_completed { new_trace_id = "x" }
     ; SM.Operator_pause
     ; SM.Operator_resume
     ; (* Fiber_started intentionally OMITTED — it resets stop *)
@@ -1499,9 +1379,6 @@ let test_invariant_derive_matches_matrix () =
     ; SM.Compaction_started
     ; SM.Compaction_completed
     ; SM.Compaction_failed { reason = "test" }
-    ; SM.Handoff_started
-    ; SM.Handoff_completed { new_trace_id = "x" }
-    ; SM.Handoff_failed { reason = "test" }
     ; SM.Operator_pause
     ; SM.Operator_resume
     ; SM.Operator_stop { remove_meta = false }
@@ -1527,7 +1404,6 @@ let test_invariant_derive_matches_matrix () =
               | SM.Running -> running_conditions
               | SM.Failing -> { running_conditions with heartbeat_healthy = false }
               | SM.Compacting -> { running_conditions with compaction_active = true }
-              | SM.HandingOff -> { running_conditions with handoff_active = true }
               | SM.Draining ->
                 { running_conditions with stop_requested = true; drain_complete = false }
               | SM.Paused -> { running_conditions with operator_paused = true }
@@ -1577,7 +1453,6 @@ let test_invariant_priority_chain () =
     ; turn_healthy = true
     ; context_handoff_needed = true
     ; compaction_active = true
-    ; handoff_active = true
     ; operator_paused = true
     ; stop_requested = true
     ; restart_requested = true
@@ -1585,7 +1460,7 @@ let test_invariant_priority_chain () =
     ; credential_archived = false
     }
   in
-  (* TLA+ fix: all_true has compaction+handoff active, so Stopped is blocked → Draining.
+  (* TLA+ fix: all_true has compaction active, so Stopped is blocked → Draining.
      Clear buffer ops to reach Stopped. *)
   check
     phase_t
@@ -1593,7 +1468,7 @@ let test_invariant_priority_chain () =
     SM.Draining
     (SM.derive_phase all_true);
   let clean_stopped =
-    { all_true with compaction_active = false; handoff_active = false }
+    { all_true with compaction_active = false }
   in
   check phase_t "no buffer ops: Stopped" SM.Stopped (SM.derive_phase clean_stopped);
   (* Remove drain_complete: Draining wins *)
@@ -1606,18 +1481,15 @@ let test_invariant_priority_chain () =
   let no_paused =
     { no_stop with operator_paused = false }
   in
-  check phase_t "no paused: HandingOff" SM.HandingOff (SM.derive_phase no_paused);
-  (* Remove handoff: compaction wins *)
-  let no_handoff = { no_paused with handoff_active = false } in
-  check phase_t "no handoff: Compacting" SM.Compacting (SM.derive_phase no_handoff);
+  check phase_t "no paused: Compacting" SM.Compacting (SM.derive_phase no_paused);
   (* Remove compaction: healthy Running *)
-  let no_compact = { no_handoff with compaction_active = false } in
+  let no_compact = { no_paused with compaction_active = false } in
   check phase_t "no compact: Running" SM.Running (SM.derive_phase no_compact)
 ;;
 
 (* ── Property: derive_phase x apply_event consistency ──── *)
 
-let test_all_phases_covered () = check int "10 phases" 10 (List.length SM.all_phases)
+let test_all_phases_covered () = check int "9 phases" 9 (List.length SM.all_phases)
 
 (* ── Set/Clear Coverage ────────────────────────────────── *)
 
@@ -1639,7 +1511,6 @@ let test_setclear_coverage () =
     ; ("turn_healthy", fun c -> c.turn_healthy)
     ; ("context_handoff_needed", fun c -> c.context_handoff_needed)
     ; ("compaction_active", fun c -> c.compaction_active)
-    ; ("handoff_active", fun c -> c.handoff_active)
     ; ("operator_paused", fun c -> c.operator_paused)
     ; ("stop_requested", fun c -> c.stop_requested)
     ; ("restart_requested", fun c -> c.restart_requested)
@@ -1655,7 +1526,6 @@ let test_setclear_coverage () =
     ; turn_healthy = false
     ; context_handoff_needed = false
     ; compaction_active = false
-    ; handoff_active = false
     ; operator_paused = false
     ; stop_requested = false
     ; restart_requested = false
@@ -1671,7 +1541,6 @@ let test_setclear_coverage () =
     ; turn_healthy = true
     ; context_handoff_needed = true
     ; compaction_active = true
-    ; handoff_active = true
     ; operator_paused = true
     ; stop_requested = true
     ; restart_requested = true
@@ -1708,9 +1577,6 @@ let test_setclear_coverage () =
     ; ( "Compaction_completed"
       , SM.Compaction_completed )
     ; "Compaction_failed", SM.Compaction_failed { reason = "test" }
-    ; "Handoff_started", SM.Handoff_started
-    ; "Handoff_completed", SM.Handoff_completed { new_trace_id = "x" }
-    ; "Handoff_failed", SM.Handoff_failed { reason = "test" }
     ; "Operator_pause", SM.Operator_pause
     ; "Operator_resume", SM.Operator_resume
     ; "Operator_stop", SM.Operator_stop { remove_meta = true }
@@ -1840,7 +1706,6 @@ let () =
         ; test_case "Stopped" `Quick test_derive_stopped
         ; test_case "Draining" `Quick test_derive_draining
         ; test_case "Paused" `Quick test_derive_paused
-        ; test_case "HandingOff" `Quick test_derive_handingoff
         ; test_case "Compacting" `Quick test_derive_compacting
         ; test_case "Failing (heartbeat)" `Quick test_derive_failing_heartbeat
         ; test_case "Failing (turn)" `Quick test_derive_failing_turn
@@ -1848,10 +1713,6 @@ let () =
             "priority: Stop > Compact"
             `Quick
             test_derive_priority_stop_over_compact
-        ; test_case
-            "priority: Handoff > Compact"
-            `Quick
-            test_derive_priority_handoff_over_compact
         ] )
     ; ( "apply_event"
       , [ test_case "heartbeat ok stays" `Quick test_apply_heartbeat_ok_stays_running
@@ -1870,7 +1731,6 @@ let () =
             "compaction completed returns to failing health lane"
             `Quick
             test_apply_compaction_completed_returns_to_failing_health_lane
-        ; test_case "handoff lifecycle" `Quick test_apply_handoff_lifecycle
         ; test_case "pause/resume" `Quick test_apply_operator_pause_resume
         ; test_case
             "paused resume commits latent blockers"
@@ -1903,10 +1763,6 @@ let () =
             "Compacting + fiber death -> Crashed"
             `Quick
             test_apply_compacting_to_crashed
-        ; test_case
-            "HandingOff + fiber death -> Crashed"
-            `Quick
-            test_apply_handingoff_to_crashed
         ; test_case "Failing + stop -> Draining" `Quick test_apply_failing_to_draining
         ; test_case
             "Restarting + fiber death -> Crashed"
@@ -1941,15 +1797,6 @@ let () =
             `Quick
             test_can_transition_compacting_to_crashed
         ; test_case "Compacting -> Paused" `Quick test_can_transition_compacting_to_paused
-        ; test_case
-            "HandingOff -> Failing"
-            `Quick
-            test_can_transition_handingoff_to_failing
-        ; test_case
-            "HandingOff -> Crashed"
-            `Quick
-            test_can_transition_handingoff_to_crashed
-        ; test_case "HandingOff -> Paused" `Quick test_can_transition_handingoff_to_paused
         ; test_case "Failing -> Draining" `Quick test_can_transition_failing_to_draining
         ; test_case
             "Restarting -> Crashed"
@@ -1972,11 +1819,11 @@ let () =
         ] )
     ; ( "roundtrip"
       , [ test_case "phase string roundtrip" `Quick test_phase_string_roundtrip
-        ; test_case "10 phases" `Quick test_all_phases_covered
+        ; test_case "9 phases" `Quick test_all_phases_covered
         ] )
     ; ( "lifecycle_chain"
       , [ test_case
-            "happy path (boot->compact->handoff->stop)"
+            "happy path (boot->compactandoff->stop)"
             `Quick
             test_chain_happy_path
         ; test_case
@@ -1988,9 +1835,9 @@ let () =
             `Quick
             test_chain_operator_intervention
         ; test_case
-            "compaction fail -> handoff fallback"
+            "compaction fail -> recovery"
             `Quick
-            test_chain_compaction_fail_handoff_fallback
+            test_chain_compaction_fail_recovery
         ; test_case
             "long-running multi-cycle (5 cycles)"
             `Quick
@@ -2015,12 +1862,11 @@ let () =
             `Quick
             test_chain_restart_inherits_paused
         ; test_case "restart clears stop_requested" `Quick test_chain_restart_clears_stop
-        ; test_case "handoff fail then retry" `Quick test_chain_handoff_fail_retry
         ; test_case
             "double failure (hb+turn) recovery"
             `Quick
             test_chain_double_failure_recovery
-        ; test_case "operator stop during handoff" `Quick test_chain_stop_during_handoff
+        ; test_case "operator stop during handoff" `Quick test_chain_stop_during_buffer_op
         ; test_case "triple restart survives" `Quick test_chain_triple_restart_survives
         ; test_case
             "pause while failing then stop"
@@ -2102,10 +1948,6 @@ let () =
             "Operator_compact_requested requires ~compaction_active"
             `Quick
             KSP.test_pre_operator_compact_during_compaction
-        ; test_case
-            "Operator_compact_requested requires ~handoff_active"
-            `Quick
-            KSP.test_pre_operator_compact_during_handoff
         ; test_case
             "Operator_clear_requested is escape-hatch (no extra precondition)"
             `Quick

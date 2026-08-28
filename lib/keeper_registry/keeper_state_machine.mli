@@ -15,18 +15,17 @@
     Key invariant: given the same [conditions] and [event], [apply_event]
     always produces the same [transition_result]. *)
 
-(** {1 Phase (11-State Enum)} *)
+(** {1 Phase (10-State Enum)} *)
 
 (** Fine-grained keeper lifecycle phase.
-    Buffer states ([Failing], [Compacting], [HandingOff],
-    [Draining], [Restarting]) are observable intermediaries between
+    Buffer states ([Failing], [Compacting], [Draining], [Restarting])
+    are observable intermediaries between
     stable states. *)
 type phase =
   | Offline       (** Registered but no heartbeat fiber started *)
   | Running       (** Healthy heartbeat loop executing *)
   | Failing       (** Consecutive failures detected, probing recovery *)
   | Compacting    (** Context compaction in progress *)
-  | HandingOff    (** Generation rollover in progress *)
   | Draining      (** Graceful shutdown: completing current turn *)
   | Paused        (** Explicitly operator-paused; fiber sleeping *)
   | Stopped       (** Clean exit, terminal *)
@@ -60,8 +59,6 @@ type conditions = {
   context_handoff_needed : bool;
   compaction_active : bool;
   (** Set true on compaction entry, false on exit *)
-  handoff_active : bool;
-  (** Set true on handoff entry, false on exit *)
   operator_paused : bool;
   (** [meta.paused = true] *)
   stop_requested : bool;
@@ -90,8 +87,8 @@ type context_actions = {
 
     {2 Paired lifecycle event contract}
 
-    [Compaction_started] / [Handoff_started] / their matching
-    [_completed] / [_failed] events MUST be dispatched with an explicit
+    [Compaction_started] and its matching [_completed] / [_failed]
+    events MUST be dispatched with an explicit
     lifecycle origin through {!Keeper_registry}. Normal turn-owned events
     use [Post_turn_lifecycle], which runs synchronously at the tail of a
     keeper turn (inside [Keeper_unified_turn.run_keeper_cycle] or the
@@ -100,17 +97,17 @@ type context_actions = {
 
     The keepalive loop ({!Keeper_keepalive.run_heartbeat_loop}) does
     NOT explicitly gate dispatch on [phase]. It relies on the
-    structural property that [Compaction_started] and [Handoff_started]
-    are always paired with their [_completed] / [_failed] counterparts
-    inside a single [run_keeper_cycle] call, so the next keepalive
-    iteration can never observe the keeper in [Compacting] or
-    [HandingOff] phase at its dispatch decision point.
+    structural property that [Compaction_started] is always paired with
+    its [_completed] / [_failed] counterpart inside a single
+    [run_keeper_cycle] call, so the next keepalive iteration can never
+    observe the keeper in [Compacting] phase at its dispatch decision
+    point.
 
     Violating this rule — for example, by emitting [Compaction_started]
     from a separate async monitor fiber while a turn is still in flight
     — reopens the {b KeepalivePhaseConsistency} safety bug: the keepalive
-    loop then observes the keeper in [Compacting] or [HandingOff] at its
-    dispatch decision point, which is exactly what the structural pairing
+    loop then observes the keeper in [Compacting] at its dispatch
+    decision point, which is exactly what the structural pairing
     above rules out.
 
     If a future change needs another origin for these events, add it to
@@ -133,13 +130,6 @@ type event =
     (** Must fire after the matching [Compaction_started] and durable save. *)
   | Compaction_failed of { reason : string }
     (** Must fire in the same turn as the matching [Compaction_started]. *)
-  | Handoff_started
-    (** Emit only through the registry lifecycle origin guard. See the
-        paired lifecycle contract above. *)
-  | Handoff_completed of { new_trace_id : string }
-    (** Must fire in the same turn as the matching [Handoff_started]. *)
-  | Handoff_failed of { reason : string }
-    (** Must fire in the same turn as the matching [Handoff_started]. *)
   | Operator_pause
   | Operator_resume
   | Operator_stop of { remove_meta : bool }
@@ -173,7 +163,6 @@ val event_to_string : event -> string
       supervisor-owned work and are intentionally ignored by the registry. *)
 type entry_action =
   | Start_compaction
-  | Start_handoff
   | Start_drain
   | Schedule_restart of { delay_sec : float }
   | Publish_lifecycle of { event_name : string; detail : string }
@@ -211,22 +200,20 @@ val transition_error_to_string : transition_error -> string
 
     Priority (first match wins) — mirrors the [DerivePhase] action in
     [specs/keeper-state-machine/KeeperStateMachine.tla]:
-    2.  Stopped (stop_requested + drain_complete + ~compaction_active +
-                 ~handoff_active)
+    2.  Stopped (stop_requested + drain_complete + ~compaction_active)
         -- Checked first because a clean drain wins even if the fiber
         subsequently exits.  Buffer-state guards prevent a TLC deadlock
-        where Stopped is entered while compaction/handoff is still in
+        where Stopped is entered while compaction is still in
         flight (see comment on [keeper_state_machine.ml:derive_phase]).
     3.  Offline (launch_pending + ~fiber_alive) -- pre-start registration
     4.  Restarting (~fiber_alive + restart_requested)
     5.  Crashed (~fiber_alive)
     6.  Draining (stop_requested) -- in-progress stop
     7.  Paused (operator_paused)
-    8.  HandingOff (handoff_active)
-    9.  Compacting (compaction_active)
-    10. Failing (latest health failure or structural failure observation)
-    11. Running (fiber_alive)
-    12. Offline (default fallback for inconsistent zero-state)
+    8.  Compacting (compaction_active)
+    9.  Failing (latest health failure or structural failure observation)
+    10. Running (fiber_alive)
+    11. Offline (default fallback for inconsistent zero-state)
 
     The order above is the ground truth enforced by
     [keeper_state_machine.ml] and TLC. *)

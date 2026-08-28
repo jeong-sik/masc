@@ -4,7 +4,6 @@ type phase =
   | Running
   | Failing
   | Compacting
-  | HandingOff
   | Draining
   | Paused
   | Stopped
@@ -21,7 +20,6 @@ type conditions = {
   turn_healthy : bool;
   context_handoff_needed : bool;
   compaction_active : bool;
-  handoff_active : bool;
   operator_paused : bool;
   stop_requested : bool;
   restart_requested : bool;
@@ -44,9 +42,6 @@ type event =
   | Compaction_started
   | Compaction_completed
   | Compaction_failed of { reason : string; }
-  | Handoff_started
-  | Handoff_completed of { new_trace_id : string; }
-  | Handoff_failed of { reason : string; }
   | Operator_pause
   | Operator_resume
   | Operator_stop of { remove_meta : bool; }
@@ -63,7 +58,6 @@ type event =
 val event_to_string : event -> string
 type entry_action =
     Start_compaction
-  | Start_handoff
   | Start_drain
   | Schedule_restart of { delay_sec : float; }
   | Publish_lifecycle of { event_name : string; detail : string; }

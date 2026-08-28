@@ -429,7 +429,7 @@ let test_reconcile_predicate_stopped_resolved () =
      (* dominated_by_sweep logic: Stopped with resolved → NOT dominated *)
      let dominated = match e.phase with
        | KSM.Running | KSM.Paused | KSM.Crashed -> true
-       | KSM.Failing | KSM.Compacting | KSM.HandingOff
+       | KSM.Failing | KSM.Compacting
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
        | KSM.Stopped -> not (R.lane_has_exited e)
@@ -450,7 +450,7 @@ let test_reconcile_predicate_stopped_unresolved () =
        (Option.is_none (Eio.Promise.peek e.done_p));
      let dominated = match e.phase with
        | KSM.Running | KSM.Paused | KSM.Crashed -> true
-       | KSM.Failing | KSM.Compacting | KSM.HandingOff
+       | KSM.Failing | KSM.Compacting
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
        | KSM.Stopped -> not (R.lane_has_exited e)
@@ -4559,7 +4559,7 @@ let test_resolve_done_reports_prior_outcome () =
 
 module ES = Masc.Keeper_status_runtime
 
-(** Verify pipeline_stage_of_phase covers all 11 phases and produces
+(** Verify pipeline_stage_of_phase covers all 9 phases and produces
     the expected deterministic mapping. No heuristic, no timestamps. *)
 let test_pipeline_stage_of_phase_exhaustive () =
   let cases = [
@@ -4567,14 +4567,13 @@ let test_pipeline_stage_of_phase_exhaustive () =
     (KSM.Running, "idle");
     (KSM.Failing, "failing");
     (KSM.Compacting, "compacting");
-    (KSM.HandingOff, "handoff");
     (KSM.Draining, "draining");
     (KSM.Paused, "paused");
     (KSM.Stopped, "offline");
     (KSM.Crashed, "crashed");
     (KSM.Restarting, "restarting");
   ] in
-  check int "all 10 phases covered" 10 (List.length cases);
+  check int "all 9 phases covered" 9 (List.length cases);
   List.iter (fun (phase, expected) ->
     let actual = ES.pipeline_stage_of_phase phase in
     check string
@@ -4632,7 +4631,7 @@ let test_pipeline_stage_unregistered_is_offline () =
     distinguishes running/failing/compacting/etc. *)
 let test_pipeline_stage_sensitivity () =
   let non_offline_phases = [
-    KSM.Running; KSM.Failing; KSM.Compacting; KSM.HandingOff;
+    KSM.Running; KSM.Failing; KSM.Compacting;
     KSM.Draining; KSM.Paused; KSM.Crashed; KSM.Restarting;
   ] in
   List.iter (fun phase ->
@@ -4858,7 +4857,7 @@ let () =
         test_resolve_done_reports_prior_outcome;
     ];
     "pipeline_stage_phase", [
-      test_case "exhaustive 11-phase mapping" `Quick
+      test_case "exhaustive 9-phase mapping" `Quick
         test_pipeline_stage_of_phase_exhaustive;
 	      test_case "offline projection details remain distinct" `Quick
 	        test_pipeline_stage_detail_distinguishes_offline_projection;

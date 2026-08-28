@@ -9,7 +9,7 @@
 
     Three of the four tools [Keeper_tool_runtime_schemas] publishes stay in
     OCaml for now. keeper_artifact_read takes its max_bytes bounds and default
-    from [Keeper_artifact_read] and analyze_image takes its media-type enum from
+    from [Keeper_artifact_read] and keeper_analyze_image takes its media-type enum from
     [Keeper_vision_tool]; a TOML literal would cut that derivation, so each
     moves once it has a test pinning the file against its owner.
     masc_fusion_status emits an empty ["required"] list, which the loader omits
@@ -33,4 +33,4 @@ let schema_of_name name : Masc_domain.tool_schema =
 let fusion = schema_of_name "masc_fusion"
 let fusion_status = schema_of_name "masc_fusion_status"
 let artifact_read = schema_of_name "keeper_artifact_read"
-let analyze_image = schema_of_name "analyze_image"
+let keeper_analyze_image = schema_of_name "keeper_analyze_image"

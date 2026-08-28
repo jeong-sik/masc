@@ -36,7 +36,6 @@ test_keeper_fs_directory_durability          # durable commit observer: observer
 test_keeper_keepalive_helpers                # current_task_reconciliation
 test_keeper_tool_matrix                      # inventory: the AGENT_CORE bundle
 test_server_mcp_session_persist              # persistence: save/forget/load round-trip
-test_tools_coverage                          # analyze_image has no masc_/keeper_/tool_ namespace
 
 # --- cannot be exercised where it stands ----------------------------------
 # The defence is live: with_deepest_existing_parent descends one component at a

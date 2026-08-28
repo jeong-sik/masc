@@ -310,7 +310,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
   | "keeper_memory_write" ->
       `Assoc [ ("content", `String "tool matrix memory write content") ]
-  | "analyze_image" ->
+  | "keeper_analyze_image" ->
       `Assoc [ ("artifact", `String "tool-matrix-missing-query") ]
   | "keeper_ide_annotate" ->
       (* RFC-0378 §5.3: the anchor is the co-view vocabulary — a codebase
@@ -456,7 +456,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
    argument validation runs. *)
 let keeper_expectation_for_name name =
   match name with
-  | "analyze_image" -> Expect_refusal
+  | "keeper_analyze_image" -> Expect_refusal
   | _ -> Expect_success_or_refusal
 
 let case_for_name name =
@@ -495,7 +495,7 @@ let case_for_name name =
   else if
     string_starts_with ~prefix:"keeper_" runtime_name
     || string_starts_with ~prefix:"tool_" runtime_name
-    || String.equal runtime_name "analyze_image"
+    || String.equal runtime_name "keeper_analyze_image"
   then
     {
       init_mode = Init_joined;

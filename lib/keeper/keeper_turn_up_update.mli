@@ -17,6 +17,14 @@ val update_keeper :
   Keeper_meta_contract.keeper_meta ->
   Keeper_types_profile.tool_result
 
+val config_revision_conflict_code : string
+(** The wire code a CAS revision conflict carries — written by the tool-result
+    data here and by the dashboard's 409 body, matched by the TUI client and
+    the dashboard TS. One definition; consumers that restate the string drift
+    silently. (The tool-result data round trip itself is the Tool_result
+    boundary contract: the same update serves the keeper tool surface, which
+    only sees JSON.) *)
+
 val config_revision_conflict_of_result :
   Keeper_types_profile.tool_result ->
   Keeper_turn_up_config_persistence.conflict option

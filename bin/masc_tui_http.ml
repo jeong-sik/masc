@@ -1354,7 +1354,10 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
       | None -> false
     in
     (match status, code, parsed with
-     | 409, Some "keeper_config_revision_conflict", Some json ->
+     | 409, Some code, Some json
+       when String.equal
+              code
+              Masc.Keeper_turn_up_update.config_revision_conflict_code ->
        Error (Keeper_config_revision_conflict json)
      | ( 503
        , Some

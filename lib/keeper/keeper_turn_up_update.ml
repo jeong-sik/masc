@@ -144,11 +144,13 @@ let swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
     Ok (swap (), start_keepalive ctx updated)
 ;;
 
+let config_revision_conflict_code = "keeper_config_revision_conflict"
+
 let config_revision_conflict_data
       ({ expected; observed } : Keeper_turn_up_config_persistence.conflict)
   =
   `Assoc
-    [ "code", `String "keeper_config_revision_conflict"
+    [ "code", `String config_revision_conflict_code
     ; "expected", Keeper_turn_up_config_persistence.config_revision_to_yojson expected
     ; "observed", Keeper_turn_up_config_persistence.config_revision_to_yojson observed
     ]
@@ -158,7 +160,8 @@ let config_revision_conflict_of_result result =
   match Tool_result.data result with
   | `Assoc fields ->
     (match List.assoc_opt "code" fields with
-     | Some (`String "keeper_config_revision_conflict") ->
+     | Some (`String code)
+       when String.equal code config_revision_conflict_code ->
        (match
           List.assoc_opt "expected" fields,
           List.assoc_opt "observed" fields

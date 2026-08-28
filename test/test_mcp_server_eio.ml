@@ -2080,8 +2080,10 @@ let test_handle_request_tools_call_board_post_structured_content () =
   ]) in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   let structured = structured_content_exn response in
-  Alcotest.(check string) "board content" "hello board"
-    Yojson.Safe.Util.(structured |> member "content" |> to_string);
+  Alcotest.(check string) "canonical board body" "hello board"
+    Yojson.Safe.Util.(structured |> member "body" |> to_string);
+  Alcotest.(check bool) "legacy content field stays absent" true
+    Yojson.Safe.Util.(structured |> member "content" = `Null);
   Alcotest.(check string) "board author" "tester"
     Yojson.Safe.Util.(structured |> member "author" |> to_string);
   cleanup_dir base_path

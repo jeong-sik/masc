@@ -1196,7 +1196,7 @@ export interface Keeper {
   attention_reason?: string | null
   next_human_action?: string | null
   config_error?: KeeperProfileConfigError | null
-  sandbox_profile?: 'local' | 'docker' | null
+  sandbox_profile?: 'local' | 'docker' | 'microvm' | null
   sandbox_target?: string | null
   keeper_last_error?: string | null
   blocked_task_count?: number | null
@@ -1518,7 +1518,7 @@ export interface KeeperConfig {
    *  autonomous.wake_prompt. The resolved value a turn would use is
    *  prompt.unified_user_message_preview. */
   autonomous_wake_prompt: string | null
-  sandbox_profile?: 'local' | 'docker' | string
+  sandbox_profile?: 'local' | 'docker' | 'microvm' | string
   network_mode?: 'none' | 'inherit' | string
   keeper_last_error?: string | null
   allowed_paths: string[]

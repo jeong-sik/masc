@@ -414,7 +414,7 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
     .then(raw => normalizeKeeperConfig(raw, name))
 }
 
-export type SandboxProfile = 'local' | 'docker'
+export type SandboxProfile = 'local' | 'docker' | 'microvm'
 export type SandboxNetworkMode = 'none' | 'inherit'
 
 export type KeeperConfigUpdatePayload = {

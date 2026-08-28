@@ -259,12 +259,20 @@ describe('hookSlotDetails', () => {
 })
 
 describe('sandbox coerce helpers', () => {
-  it('coerceSandboxProfile maps docker, falls back to local otherwise', () => {
+  it('coerceSandboxProfile maps every known profile, falls back to local otherwise', () => {
     expect(coerceSandboxProfile('docker')).toBe('docker')
     expect(coerceSandboxProfile('local')).toBe('local')
     expect(coerceSandboxProfile('something_else')).toBe('local')
     expect(coerceSandboxProfile(undefined)).toBe('local')
     expect(coerceSandboxProfile('')).toBe('local')
+  })
+
+  // The fallback used to swallow every name the panel had not been taught,
+  // so a keeper declaring microvm was shown -- and saved back -- as running
+  // on the host. A profile that exists must survive the round trip; only a
+  // genuinely absent value becomes local.
+  it('coerceSandboxProfile keeps microvm rather than dropping it to local', () => {
+    expect(coerceSandboxProfile('microvm')).toBe('microvm')
   })
 
   it('coerceNetworkMode maps none, falls back to inherit otherwise', () => {

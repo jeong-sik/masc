@@ -1245,6 +1245,14 @@ type state = {
      is open. *)
   mutable answering_open: bool;
   mutable answering_scroll: int;
+  (* Cursor over the overlay's actionable rows (running / just finished);
+     Enter opens that keeper's chat. An index into the overlay's line list,
+     kept on a target row by the key handler. *)
+  mutable answering_cursor: int;
+  (* Keepers whose turn finished within the glow TTL, newest first, with
+     the poll time that saw them finish. Fed by comparing consecutive
+     keeper_turns polls; read by the footer glow and the overlay's ✓ rows. *)
+  mutable keeper_turn_finishes: (string * float) list;
   (* [/context] opens the last observed provider-input inspector. It is an
      overlay rather than another surface because it answers "what is in this
      Keeper's current head" from whichever Keeper surface raised the question.
@@ -1984,6 +1992,8 @@ let create_state
   agenda_scroll = 0;
   answering_open = false;
   answering_scroll = 0;
+  answering_cursor = 0;
+  keeper_turn_finishes = [];
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;

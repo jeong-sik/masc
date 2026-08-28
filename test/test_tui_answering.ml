@@ -1,8 +1,9 @@
 open Masc
 
 (* The [@] Answering overlay is the footer badge's "+N" unfolded. These pin
-   the projection: who leads, what an error adds, and what quiet looks like,
-   so the overlay's promises hold without a terminal. *)
+   the projection: who leads, what an error adds, what quiet looks like, how
+   a finished turn keeps its ✓ row for a while, and which rows Enter can act
+   on — so the overlay's promises hold without a terminal. *)
 
 let row name state : Tui_decode.keeper_turn_row =
   { Tui_decode.ktr_keeper_name = name; ktr_state = state }
@@ -20,7 +21,7 @@ let texts lines =
 let test_running_rows_lead_with_the_chat_target () =
   let lines =
     Masc_tui_answering.overlay ~now:1000.
-      ~chat_target:(Some "analyst") ~error:None
+      ~chat_target:(Some "analyst") ~error:None ~finishes:[]
       [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:866. "kidsnote"
       ; row "rondo" Tui_decode.Keeper_turn_idle
       ; running ~lane:Tui_decode.Turn_lane_chat_operation ~started:990.
@@ -47,6 +48,7 @@ let test_running_rows_lead_with_the_chat_target () =
 let test_quiet_fleet_says_so () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+      ~finishes:[]
       [ row "kidsnote" Tui_decode.Keeper_turn_idle
       ; row "analyst" Tui_decode.Keeper_turn_idle
       ]
@@ -62,7 +64,7 @@ let test_quiet_fleet_says_so () =
 let test_error_keeps_the_last_rows_and_says_why () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None
-      ~error:(Some "connection refused")
+      ~error:(Some "connection refused") ~finishes:[]
       [ running ~lane:Tui_decode.Turn_lane_maintenance ~started:999. "polisher" ]
   in
   match texts lines with
@@ -79,6 +81,7 @@ let test_error_keeps_the_last_rows_and_says_why () =
 let test_unavailable_reads_as_unknown_not_idle () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+      ~finishes:[]
       [ row "rondo" (Tui_decode.Keeper_turn_unavailable "owner_not_found") ]
   in
   match lines with
@@ -94,6 +97,90 @@ let test_unavailable_reads_as_unknown_not_idle () =
   | other -> Alcotest.failf "expected two lines, got %d" (List.length other)
 ;;
 
+let test_finished_turns_glow_then_expire () =
+  let finishes = [ ("kidsnote", 990.) ] in
+  let fresh =
+    Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+      ~finishes
+      [ row "kidsnote" Tui_decode.Keeper_turn_idle ]
+  in
+  (match fresh with
+   | [ done_line; idle ] ->
+       Alcotest.(check bool) "a finish inside the TTL keeps a ✓ row" true
+         (Astring.String.is_infix ~affix:"kidsnote"
+            done_line.Masc_tui_answering.text
+         && Astring.String.is_infix ~affix:"answered 10s ago"
+              done_line.Masc_tui_answering.text);
+       Alcotest.(check bool) "toned as done" true
+         (done_line.Masc_tui_answering.tone = Masc_tui_answering.Done);
+       Alcotest.(check bool) "and Enter can open it" true
+         (done_line.Masc_tui_answering.target = Some "kidsnote");
+       Alcotest.(check bool)
+         "a fleet with a fresh finish does not read as nobody" true
+         (Astring.String.is_infix ~affix:"idle"
+            idle.Masc_tui_answering.text)
+   | other -> Alcotest.failf "expected two lines, got %d" (List.length other));
+  let expired =
+    Masc_tui_answering.overlay
+      ~now:(990. +. Masc_tui_answering.finish_glow_ttl_seconds +. 1.)
+      ~chat_target:None ~error:None ~finishes
+      [ row "kidsnote" Tui_decode.Keeper_turn_idle ]
+  in
+  match texts expired with
+  | [ quiet; _idle ] ->
+      Alcotest.(check string) "past the TTL the glow is gone"
+        "nobody is answering right now" quiet
+  | other -> Alcotest.failf "expected two lines, got %d" (List.length other)
+;;
+
+let test_advance_finishes_tracks_the_transition () =
+  let previous =
+    [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "kidsnote"
+    ; running ~lane:Tui_decode.Turn_lane_chat_operation ~started:950. "analyst"
+    ; row "rondo" (Tui_decode.Keeper_turn_unavailable "owner_not_found")
+    ]
+  in
+  let current =
+    [ row "kidsnote" Tui_decode.Keeper_turn_idle
+    ; running ~lane:Tui_decode.Turn_lane_chat_operation ~started:950. "analyst"
+    ; row "rondo" Tui_decode.Keeper_turn_idle
+    ]
+  in
+  let finishes =
+    Masc_tui_answering.advance_finishes ~now:1000. ~previous_rows:previous
+      ~current_rows:current []
+  in
+  Alcotest.(check (list (pair string (float 0.001))))
+    "running→idle is a finish; unavailable→idle is not"
+    [ ("kidsnote", 1000.) ] finishes;
+  (* A keeper that starts running again drops its glow: the badge takes
+     over, and one keeper must not read as both answering and answered. *)
+  let running_again =
+    Masc_tui_answering.advance_finishes ~now:1010.
+      ~previous_rows:current
+      ~current_rows:
+        [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:1005.
+            "kidsnote"
+        ]
+      finishes
+  in
+  Alcotest.(check (list (pair string (float 0.001))))
+    "restarting clears the finish glow" [] running_again
+;;
+
+let test_target_indexes_skip_prose () =
+  let lines =
+    Masc_tui_answering.overlay ~now:1000. ~chat_target:None
+      ~error:(Some "boom") ~finishes:[ ("analyst", 995.) ]
+      [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:990. "kidsnote"
+      ; row "rondo" Tui_decode.Keeper_turn_idle
+      ]
+  in
+  (* error(2 lines) → running(1) → finished(1) → idle(1) *)
+  Alcotest.(check (list int)) "only actionable rows carry an index" [ 2; 3 ]
+    (Masc_tui_answering.target_indexes lines)
+;;
+
 let () =
   Alcotest.run "tui_answering"
     [ ( "tui-answering"
@@ -105,6 +192,12 @@ let () =
             `Quick test_error_keeps_the_last_rows_and_says_why
         ; Alcotest.test_case "unavailable reads as unknown, not idle" `Quick
             test_unavailable_reads_as_unknown_not_idle
+        ; Alcotest.test_case "finished turns glow then expire" `Quick
+            test_finished_turns_glow_then_expire
+        ; Alcotest.test_case "advance_finishes tracks the transition" `Quick
+            test_advance_finishes_tracks_the_transition
+        ; Alcotest.test_case "target indexes skip prose" `Quick
+            test_target_indexes_skip_prose
         ] )
     ]
 ;;

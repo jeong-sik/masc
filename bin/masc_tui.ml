@@ -6981,6 +6981,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   | Keeper_turns_loaded result ->
       (match result with
        | Ok rows ->
+           (* Two consecutive polls are what "just finished" is made of:
+              running in the previous, idle in this one. The glow list is
+              advanced before the rows are replaced, or the transition is
+              gone. *)
+           state.keeper_turn_finishes <-
+             Masc_tui_answering.advance_finishes
+               ~now:(Unix.gettimeofday ())
+               ~previous_rows:state.keeper_turns ~current_rows:rows
+               state.keeper_turn_finishes;
            state.keeper_turns <- rows;
            state.keeper_turns_error <- None
        | Error detail ->
@@ -9185,21 +9194,61 @@ and is loaded on demand through keeper_skill.
                 state.agenda_scroll <- move ~count ~height state.agenda_scroll
             | _ -> ())
        (* Modal like the agenda sheet: a panel answering "who is mid-turn"
-          should not have a surface binding fire underneath it. *)
+          should not have a surface binding fire underneath it. j/k walk the
+          actionable rows (running and just finished), not raw lines, and
+          Enter opens that keeper's chat through the same path the palette
+          uses. The scroll follows the cursor instead of moving on its own. *)
        | Some k when state.answering_open ->
+           let close () =
+             state.answering_open <- false;
+             state.answering_scroll <- 0;
+             state.answering_cursor <- 0
+           in
            (match k with
-            | "@" | "esc" ->
-                state.answering_open <- false;
-                state.answering_scroll <- 0
+            | "@" | "esc" -> close ()
             | "j" | "down" | "k" | "up" ->
-                let count, height = Masc_tui_render.answering_viewport state in
-                let move =
-                  match k with
-                  | "j" | "down" -> Masc_tui_scroll.down
-                  | _ -> Masc_tui_scroll.up
-                in
-                state.answering_scroll <-
-                  move ~count ~height state.answering_scroll
+                let lines = Masc_tui_render.answering_lines state in
+                let targets = Masc_tui_answering.target_indexes lines in
+                (match targets with
+                 | [] -> ()
+                 | _ ->
+                     let position =
+                       let rec find i = function
+                         | [] -> 0
+                         | index :: rest ->
+                             if index = state.answering_cursor then i
+                             else find (i + 1) rest
+                       in
+                       find 0 targets
+                     in
+                     let next_position =
+                       match k with
+                       | "j" | "down" ->
+                           min (List.length targets - 1) (position + 1)
+                       | _ -> max 0 (position - 1)
+                     in
+                     let cursor = List.nth targets next_position in
+                     state.answering_cursor <- cursor;
+                     let _, height =
+                       Masc_tui_render.answering_viewport state
+                     in
+                     (* Keep the cursor row on screen: scroll only as far as
+                        needed, in either direction. *)
+                     if cursor < state.answering_scroll then
+                       state.answering_scroll <- cursor
+                     else if cursor >= state.answering_scroll + height then
+                       state.answering_scroll <- cursor - height + 1)
+            | "\r" ->
+                let lines = Masc_tui_render.answering_lines state in
+                (match List.nth_opt lines state.answering_cursor with
+                 | Some { Masc_tui_answering.target = Some keeper_name; _ } ->
+                     close ();
+                     open_message_for_keeper
+                       ~return_to:Keeper_chat_return_list state keeper_name;
+                     launch_keeper_history_load state
+                       ~mailbox:async_messages ~keeper_name;
+                     state.view <- Keepers Keeper_message
+                 | Some _ | None -> ())
             | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
@@ -9828,7 +9877,17 @@ and is loaded on demand through keeper_skill.
            state.agenda_scroll <- 0
        | Some "@" ->
            state.answering_open <- true;
-           state.answering_scroll <- 0
+           state.answering_scroll <- 0;
+           (* Open with the cursor on the first actionable row (the badge's
+              lead keeper), so Enter straight after @ goes where the badge
+              was pointing. Prose-only sheets keep the cursor parked at 0. *)
+           state.answering_cursor <-
+             (match
+                Masc_tui_answering.target_indexes
+                  (Masc_tui_render.answering_lines state)
+              with
+              | index :: _ -> index
+              | [] -> 0)
        | Some ":" ->
            state.palette_open <- true;
            state.palette_query <- "";

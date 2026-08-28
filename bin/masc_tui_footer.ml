@@ -20,6 +20,14 @@ type status_item =
      message and walked to another surface reads the answer's progress here
      instead of standing on the chat pane. Empty list draws nothing. *)
   | Keeper_answering of string list
+  (* A turn that just finished: the other half of the walked-away question.
+     [seconds_ago] is derived by the caller against its own clock; [more]
+     counts further finishes folded behind this one. *)
+  | Keeper_answered of
+      { name : string
+      ; seconds_ago : int
+      ; more : int
+      }
   | Port of int
 
 (* Enough of the commit to tell two checkouts apart, which is the question
@@ -84,6 +92,17 @@ let status_item_projection = function
     Some
       { text =
           Printf.sprintf "\xe2\x97\x8c answering %s +%d" name (List.length rest)
+      ; retention = Live_activity
+      }
+  | Keeper_answered { name; seconds_ago; more } ->
+    let ago =
+      if seconds_ago < 60 then Printf.sprintf "%ds" (max 0 seconds_ago)
+      else Printf.sprintf "%dm" (seconds_ago / 60)
+    in
+    let tail = if more > 0 then Printf.sprintf " +%d" more else "" in
+    Some
+      { text =
+          Printf.sprintf "\xe2\x9c\x93 %s answered %s ago%s" name ago tail
       ; retention = Live_activity
       }
   | Port port when port > 0 ->

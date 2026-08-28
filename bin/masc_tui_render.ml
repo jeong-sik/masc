@@ -543,7 +543,29 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     in
     match running with [] -> [] | _ -> [ Masc_tui_footer.Keeper_answering running ]
   in
-  Masc_tui_footer.line ~status:(status @ identity @ conflict @ answering)
+  (* The glow after a finish: the newest one leads, the rest fold into +N.
+     [advance_finishes] already dropped expired entries and keepers that
+     started running again, but a footer drawn between polls still filters
+     by its own clock so the glow dies on time, not on the next poll. *)
+  let answered =
+    let now = Unix.gettimeofday () in
+    match
+      List.filter
+        (fun (_, finished_at) ->
+          now -. finished_at <= Masc_tui_answering.finish_glow_ttl_seconds)
+        state.keeper_turn_finishes
+    with
+    | [] -> []
+    | (name, finished_at) :: rest ->
+        [ Masc_tui_footer.Keeper_answered
+            { name
+            ; seconds_ago = int_of_float (Float.max 0. (now -. finished_at))
+            ; more = List.length rest
+            }
+        ]
+  in
+  Masc_tui_footer.line
+    ~status:(status @ identity @ conflict @ answering @ answered)
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
@@ -10542,6 +10564,7 @@ let answering_lines (state : state) =
     ~now:(Unix.gettimeofday ())
     ~chat_target:state.msg_target_keeper_name
     ~error:state.keeper_turns_error
+    ~finishes:state.keeper_turn_finishes
     state.keeper_turns
 
 let answering_viewport (state : state) =
@@ -10568,19 +10591,32 @@ let render_answering (state : state) =
       ~height:content_height
       state.answering_scroll
   in
-  let paint (line : Masc_tui_answering.line) =
-    match line.Masc_tui_answering.tone with
-    | Masc_tui_answering.Heading -> Ansi.bold ^ line.Masc_tui_answering.text ^ Ansi.reset
-    | Masc_tui_answering.Running -> Ansi.cyan ^ line.Masc_tui_answering.text ^ Ansi.reset
-    | Masc_tui_answering.Unknown -> (Theme.warn ()) ^ line.Masc_tui_answering.text ^ Ansi.reset
-    | Masc_tui_answering.Quiet -> Ansi.dim ^ line.Masc_tui_answering.text ^ Ansi.reset
+  let paint ~selected (line : Masc_tui_answering.line) =
+    let tone_prefix =
+      match line.Masc_tui_answering.tone with
+      | Masc_tui_answering.Heading -> Ansi.bold
+      | Masc_tui_answering.Running -> Ansi.cyan
+      | Masc_tui_answering.Done -> Theme.ok ()
+      | Masc_tui_answering.Unknown -> Theme.warn ()
+      | Masc_tui_answering.Quiet -> Ansi.dim
+    in
+    (* The cursor is a gutter caret, not a full-row band: the row keeps its
+       tone, and rows Enter cannot act on never wear the caret. *)
+    let caret =
+      if selected && Option.is_some line.Masc_tui_answering.target then "\xe2\x96\xb8 "
+      else "  "
+    in
+    caret ^ tone_prefix ^ line.Masc_tui_answering.text ^ Ansi.reset
   in
   lines
-  |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
-  |> List.iter (fun line -> framed_line buf cols (paint line));
+  |> List.mapi (fun i line -> (i, line))
+  |> List.filter (fun (i, _) -> i >= scroll && i < scroll + content_height)
+  |> List.iter (fun (i, line) ->
+         framed_line buf cols (paint ~selected:(i = state.answering_cursor) line));
   framed_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:move  Enter:open chat  Esc:close");
   finish_surface state ~surface_key:"answering" ~rows:terminal_rows ~cols buf
 ;;
 

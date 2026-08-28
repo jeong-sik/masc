@@ -110,10 +110,14 @@ val skill_capabilities : t -> skill_capability list
 val skill_snapshot_revision : t -> Skill_catalog_snapshot.snapshot_revision
 val candidates : t -> candidate list
 val digest_material_to_yojson : t -> Yojson.Safe.t
-(** Canonical digest input. Tool rows bind the exact input schema in addition
-    to their public discovery projection. *)
+(** Private canonical digest projection exposed for focused verification.
+    Tool rows bind the exact input schema. Skill rows bind logical source
+    identity and exact content revision while excluding resolved host paths,
+    OS error detail, and the path-dependent snapshot revision. Public
+    diagnostic projections remain unchanged. *)
 val digest : t -> string
-(** SHA-256 of the ordered, typed Tool and Skill capability projection. *)
+(** SHA-256 of the ordered, typed Tool and Skill capability projection. The
+    separately exposed Skill snapshot revision is not digest material. *)
 
 val capability_availability_to_string : capability_availability -> string
 val tool_capability_to_yojson : tool_capability -> Yojson.Safe.t

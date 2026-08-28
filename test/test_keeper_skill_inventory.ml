@@ -25,11 +25,11 @@ let parse_config text =
          (List.map Skill_source_config.diagnostic_to_string diagnostics))
 ;;
 
-let scans config candidates_by_source =
+let scans ?(base_path = "/workspace") config candidates_by_source =
   List.map2
     (fun source candidates ->
        let resolved =
-         Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+         Skill_source_config.resolve ~base_path ~user_home:None source
        in
        let resolved_path =
          match resolved.Skill_source_config.resolution with
@@ -45,14 +45,18 @@ let scans config candidates_by_source =
     candidates_by_source
 ;;
 
-let snapshot config candidates_by_source =
-  match Snapshot.configured ~config (scans config candidates_by_source) with
+let snapshot ?base_path config candidates_by_source =
+  match Snapshot.configured ~config (scans ?base_path config candidates_by_source) with
   | Ok snapshot -> snapshot
   | Error _ -> fail "fixture Skill snapshot was rejected"
 ;;
 
 let candidate ~directory source_text =
   Snapshot.Candidate_document { directory; source_text }
+;;
+
+let unreadable_candidate ~directory ~path ~detail =
+  Snapshot.Candidate_unreadable { directory; path; detail }
 ;;
 
 let instruction_document =
@@ -811,6 +815,131 @@ let test_surface_digest_binds_exact_tool_reference () =
     (String.equal (Masc.Keeper_capability_surface.digest surface) altered_digest)
 ;;
 
+let test_surface_digest_is_path_independent () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let left =
+    snapshot ~base_path:"/private/host-a" config
+      [ [ candidate ~directory:"release-checklist" instruction_document ] ]
+    |> capability_surface
+  in
+  let right =
+    snapshot ~base_path:"/different/host-b" config
+      [ [ candidate ~directory:"release-checklist" instruction_document ] ]
+    |> capability_surface
+  in
+  check bool "snapshot revisions retain host-specific scan identity" false
+    (Snapshot.equal_snapshot_revision
+       (Masc.Keeper_capability_surface.skill_snapshot_revision left)
+       (Masc.Keeper_capability_surface.skill_snapshot_revision right));
+  check string "logical capability digest ignores host base path"
+    (Masc.Keeper_capability_surface.digest left)
+    (Masc.Keeper_capability_surface.digest right)
+;;
+
+let test_unreadable_public_diagnostics_do_not_enter_digest () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let make_surface ~base_path ~path ~detail =
+    snapshot ~base_path config
+      [ [ unreadable_candidate ~directory:"broken" ~path ~detail ] ]
+    |> capability_surface
+  in
+  let left =
+    make_surface
+      ~base_path:"/private/host-a"
+      ~path:"/private/host-a/skills/broken/SKILL.md"
+      ~detail:"permission denied on host a"
+  in
+  let right =
+    make_surface
+      ~base_path:"/different/host-b"
+      ~path:"/different/host-b/skills/broken/SKILL.md"
+      ~detail:"operation not permitted on host b"
+  in
+  let public_error surface =
+    match Masc.Keeper_capability_surface.skill_capabilities surface with
+    | [ capability ] ->
+      Yojson.Safe.Util.(
+        Masc.Keeper_capability_surface.skill_capability_to_yojson capability
+        |> member "error"
+        |> member "reason")
+    | capabilities ->
+      failf "expected one invalid capability, got %d" (List.length capabilities)
+  in
+  let check_public ~path ~detail surface =
+    let error = public_error surface in
+    check string "public unreadable path retained" path
+      Yojson.Safe.Util.(error |> member "path" |> to_string);
+    check string "public unreadable detail retained" detail
+      Yojson.Safe.Util.(error |> member "detail" |> to_string)
+  in
+  check_public
+    ~path:"/private/host-a/skills/broken/SKILL.md"
+    ~detail:"permission denied on host a"
+    left;
+  check_public
+    ~path:"/different/host-b/skills/broken/SKILL.md"
+    ~detail:"operation not permitted on host b"
+    right;
+  check string "unreadable host diagnostics do not affect digest"
+    (Masc.Keeper_capability_surface.digest left)
+    (Masc.Keeper_capability_surface.digest right)
+;;
+
+let test_duplicate_public_diagnostic_retains_first_directory () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let changed =
+    "---\nname: release-checklist\ndescription: Changed.\n---\nchanged body\n"
+  in
+  let surface =
+    snapshot config
+      [ [ candidate ~directory:"release-checklist" instruction_document
+        ; candidate ~directory:"release-checklist" changed
+        ] ]
+    |> capability_surface
+  in
+  let duplicate =
+    Masc.Keeper_capability_surface.skill_capabilities surface
+    |> List.find_opt (fun capability ->
+      capability.Masc.Keeper_capability_surface.availability
+      = Masc.Keeper_capability_surface.Invalid_definition)
+    |> function
+    | Some capability -> capability
+    | None -> fail "duplicate invalid capability is absent"
+  in
+  check string "public duplicate keeps first_directory"
+    "release-checklist"
+    Yojson.Safe.Util.(
+      Masc.Keeper_capability_surface.skill_capability_to_yojson duplicate
+      |> member "error"
+      |> member "reason"
+      |> member "first_directory"
+      |> to_string)
+;;
+
+let test_surface_digest_changes_with_skill_content_revision () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let changed_document =
+    String.concat "\n"
+      [ "---"
+      ; "name: release-checklist"
+      ; "description: Check the release before shipping."
+      ; "---"
+      ; ""
+      ; "# Release checklist"
+      ; ""
+      ; "Read the exact release artifacts."
+      ]
+  in
+  let surface source_text =
+    snapshot config [ [ candidate ~directory:"release-checklist" source_text ] ]
+    |> capability_surface
+  in
+  check bool "exact Skill content revision changes surface digest" false
+    (String.equal
+       (Masc.Keeper_capability_surface.digest (surface instruction_document))
+       (Masc.Keeper_capability_surface.digest (surface changed_document)))
+;;
+
 let () =
   run
     "keeper_skill_inventory"
@@ -848,6 +977,14 @@ let () =
             test_surface_digest_binds_exact_tool_input_schema
         ; test_case "surface digest binds exact Tool reference" `Quick
             test_surface_digest_binds_exact_tool_reference
+        ; test_case "surface digest is path independent" `Quick
+            test_surface_digest_is_path_independent
+        ; test_case "unreadable diagnostics stay public only" `Quick
+            test_unreadable_public_diagnostics_do_not_enter_digest
+        ; test_case "duplicate diagnostic keeps first directory" `Quick
+            test_duplicate_public_diagnostic_retains_first_directory
+        ; test_case "Skill content revision changes surface digest" `Quick
+            test_surface_digest_changes_with_skill_content_revision
         ] )
     ]
 ;;

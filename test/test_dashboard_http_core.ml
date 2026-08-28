@@ -4197,14 +4197,6 @@ let test_skill_evidence_joins_activation_and_composition () =
     | Error _ -> fail "invalid Skill activation fixture"
   in
   let run_id = "composition-run-1" in
-  let run =
-    `Assoc
-      [ "record_kind", `String "composition_run"
-      ; "skill_reference", Skill_reference.to_yojson reference
-      ; "composition_run_id", `String run_id
-      ; "success", `Bool true
-      ]
-  in
   let node =
     `Assoc
       [ "record_kind", `String "tool_call"
@@ -4213,32 +4205,64 @@ let test_skill_evidence_joins_activation_and_composition () =
       ]
   in
   let json =
+    let composition =
+      `Assoc
+        [ "schema", `String "masc.skill-composition-evidence/v1"
+        ; "reference", Skill_reference.to_yojson reference
+        ; "composition_run_id", `String run_id
+        ; "parent_tool_use_id", `String "skill-call-1"
+        ; "parent_turn", `Int 1
+        ; "parent_planned_index", `Int 0
+        ; "request_id", `Null
+        ; "keeper", `String "rondo"
+        ; "composition_tool", `String "keeper_compose_release-checklist"
+        ; "composition_execution", `String "inline"
+        ; "executor_settlements", `List [ node ]
+        ; ( "result"
+          , `Assoc
+              [ "disposition", `String "completed"
+              ; "tool_name", `String "keeper_compose_release-checklist"
+              ; "duration_ms", `Float 1.0
+              ; "data", `Assoc [ "actions", `List [ node ] ]
+              ] )
+        ; "recorded_at", `Float 1.0
+        ]
+    in
     Server_skill_evidence.For_testing.to_yojson
       ~reference
-      ~rows:[ node; run ]
+      ~composition:(Some composition)
+      ~composition_records_read:1
+      ~composition_scope:`Exact_reference_latest_completed
       ~activation:(Some ("rondo", activation))
       ~ledgers_loaded:2
       ~unavailable:[ "sangsu: ledger_unreadable" ]
   in
   let open Yojson.Safe.Util in
-  check string "evidence schema" "masc.skill-evidence/v2"
+  check string "evidence schema" "masc.skill-evidence/v4"
     (json |> member "schema" |> to_string);
   check string "observed status" "observed" (json |> member "status" |> to_string);
   check string "activation keeper" "rondo"
     (json |> member "activation" |> member "keeper" |> to_string);
   check int "composition node count" 1
-    (json |> member "composition" |> member "nodes" |> to_list |> List.length);
+    (json |> member "composition" |> member "executor_settlements" |> to_list
+     |> List.length);
   check int "activation ledger coverage" 2
     (json |> member "coverage" |> member "activation_ledgers_loaded" |> to_int);
   check bool "bounded evidence coverage is incomplete" false
     (json |> member "coverage" |> member "coverage_complete" |> to_bool);
+  check string
+    "composition scan covers the exact-reference index"
+    "exact_reference_latest_completed"
+    (json |> member "coverage" |> member "composition_scope" |> to_string);
   check int "unavailable coverage" 1
     (json |> member "coverage" |> member "unavailable" |> to_list |> List.length)
   ;
   let not_observed =
     Server_skill_evidence.For_testing.to_yojson
       ~reference
-      ~rows:[]
+      ~composition:None
+      ~composition_records_read:0
+      ~composition_scope:`Exact_reference_latest_completed
       ~activation:None
       ~ledgers_loaded:0
       ~unavailable:[]

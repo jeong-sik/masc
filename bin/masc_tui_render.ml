@@ -8913,7 +8913,7 @@ let render_tools (state : state) =
               (match Tui_decode.decode_skill_evidence json with
                | Error _ ->
                  [ Theme.bad (), "     Latest evidence response is malformed" ]
-               | Ok _ ->
+               | Ok evidence ->
                let has_evidence_field name =
                  match json_assoc_member_opt name json with
                  | None | Some `Null -> false
@@ -8928,13 +8928,13 @@ let render_tools (state : state) =
                    json_assoc_member_opt "schema" json,
                    json_assoc_member_opt "status" json
                  with
-                | ( Some (`String "masc.skill-evidence/v2")
+                | ( Some (`String "masc.skill-evidence/v4")
                   , Some (`String "not_observed_in_current_coverage") )
                   when not has_evidence ->
                   [ Theme.warn (),
                     "     Latest evidence: not found in current coverage (not proof of never)"
                   ]
-                | Some (`String "masc.skill-evidence/v2"), Some (`String "observed")
+                | Some (`String "masc.skill-evidence/v4"), Some (`String "observed")
                   when has_evidence ->
                   let activation_lines =
                     match json_assoc_member_opt "activation" json with
@@ -8982,40 +8982,51 @@ let render_tools (state : state) =
                   let composition_lines =
                     match json_assoc_member_opt "composition" json with
                     | Some (`Assoc _ as composition) ->
-                      (match json_assoc_member_opt "run" composition with
-                       | Some (`Assoc _ as run) ->
+                      (match json_assoc_member_opt "result" composition with
+                       | Some (`Assoc _ as result) ->
                          let string_field name fallback =
-                           match json_assoc_member_opt name run with
+                           match json_assoc_member_opt name composition with
                            | Some (`String value) -> value
                            | _ -> fallback
                          in
                          let duration =
-                           match json_assoc_member_opt "duration_ms" run with
+                           match json_assoc_member_opt "duration_ms" result with
                            | Some (`Float value) -> Printf.sprintf "%.0fms" value
                            | Some (`Int value) -> Printf.sprintf "%dms" value
                            | _ -> "?ms"
                          in
                          let success =
-                           match json_assoc_member_opt "success" run with
-                           | Some (`Bool true) -> "✓ completed"
-                           | Some (`Bool false) -> "✗ failed"
-                           | _ -> "unknown"
+                           match json_assoc_member_opt "disposition" result with
+                           | Some (`String "completed") -> "✓ completed"
+                           | Some (`String "deferred") -> "◌ deferred"
+                           | Some (`String "failed") -> "✗ failed"
+                           | Some _ | None -> "unknown"
                          in
                          let output =
-                           match json_assoc_member_opt "output" run with
+                           match json_assoc_member_opt "data" result with
                            | Some (`String value) -> value
                            | Some value -> Yojson.Safe.to_string value
                            | None -> "no output"
                          in
+                         let settlement_count =
+                           match
+                             json_assoc_member_opt
+                               "executor_settlements"
+                               composition
+                           with
+                           | Some (`List values) -> List.length values
+                           | Some _ | None -> 0
+                         in
                          [ Ansi.bold,
                            Printf.sprintf
-                             "     Composition: %s · %s · keeper=%s · run=%s"
+                             "     Composition: %s · %s · keeper=%s · run=%s · settlements=%d"
                              success
                              duration
                              (Terminal_text.single_line
                                 (string_field "keeper" "?"))
                              (Terminal_text.single_line
                                 (string_field "composition_run_id" "?"))
+                             settlement_count
                          ; Ansi.dim, "       " ^ Terminal_text.single_line output
                          ]
                        | Some _ | None ->
@@ -9027,34 +9038,23 @@ let render_tools (state : state) =
                 | _ -> [ Theme.bad (), "     Latest evidence response is malformed" ]
                in
                let coverage_lines =
-                 match json_assoc_member_opt "coverage" json with
-                 | Some (`Assoc _ as coverage)
-                   when json_assoc_member_opt "coverage_complete" coverage
-                        = Some (`Bool false)
-                        && json_assoc_member_opt "activation_scope" coverage
-                           = Some (`String "current_keeper_sessions") ->
-                   let int_field name =
-                     match json_assoc_member_opt name coverage with
-                     | Some (`Int value) -> value
-                     | Some _ | None -> 0
-                   in
-                   let unavailable =
-                     match json_assoc_member_opt "unavailable" coverage with
-                     | Some (`List values) ->
-                       List.filter_map
-                         (function
-                           | `String value ->
-                             Some (Terminal_text.single_line value)
-                           | _ -> None)
-                         values
-                     | Some _ | None -> []
-                   in
+                 let coverage = evidence.Masc.Tui_decode.se_coverage in
+                 let composition_scope =
+                   match coverage.sec_composition_scope with
+                   | Masc.Tui_decode.Skill_evidence_exact_reference_latest_completed ->
+                     "latest_completed"
+                   | Masc.Tui_decode.Skill_evidence_composition_unavailable ->
+                     "unavailable"
+                 in
+                 let unavailable =
+                   List.map Terminal_text.single_line coverage.sec_unavailable
+                 in
                    [ Ansi.dim,
                      Printf.sprintf
-                       "       coverage current_ledgers=%d bounded_log_rows=%d/%d incomplete unavailable=%d"
-                       (int_field "activation_ledgers_loaded")
-                       (int_field "composition_rows_scanned")
-                       (int_field "composition_scan_limit")
+                       "       coverage current_ledgers=%d exact_reference=%s records_read=%d activation=incomplete unavailable=%d"
+                       coverage.sec_activation_ledgers_loaded
+                       composition_scope
+                       coverage.sec_composition_records_read
                        (List.length unavailable)
                    ]
                    @
@@ -9064,8 +9064,6 @@ let render_tools (state : state) =
                       [ Theme.warn (),
                         "       unavailable: " ^ String.concat " · " values
                       ])
-                 | Some _ | None ->
-                   [ Theme.warn (), "       evidence coverage is unavailable" ]
                in
                evidence_lines @ coverage_lines)
              | Some _ | None ->

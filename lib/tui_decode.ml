@@ -3600,6 +3600,8 @@ type gate_pending = {
   gp_operation : string;
   gp_display_tool : string;
   gp_input_preview : string option;
+  gp_execution_cwd : string option;
+  gp_execution_sandbox : string option;
   gp_waiting_s : float option;
 }
 
@@ -3640,6 +3642,100 @@ let gate_display_tool ~operation input =
         | Some _, None | None, None -> operation)
     | None -> operation
 
+(* What the operator is actually deciding on a tool_execute row.
+
+   [Keeper_tool_execute_runtime.execute_gate_input] wraps the tool arguments
+   in an envelope whose [cwd] and sandbox fields say where the approval was
+   granted. The server flattens that whole envelope into [input_preview], so
+   the cell opens with the schema URN and an absolute path and the command
+   runs off the right edge of the row -- at any terminal width, because the
+   path comes first. Seven rows read that way while this was written: an
+   operator pressing y/n could see the schema name and a directory, and not
+   the command they were authorising.
+
+   The arguments the producer stored verbatim under [input] are the decision,
+   so they lead. Nothing is recovered from the preview text: the structured
+   input is already here, and a shape this does not recognise keeps the
+   server's preview rather than inventing a summary. *)
+let json_string_list = function
+  | `List items ->
+    (* All or nothing. A non-string element that quietly vanished would show
+       a command missing one of its words, which is worse than showing the
+       envelope. *)
+    List.fold_right
+      (fun item acc ->
+        match item, acc with
+        | `String value, Some rest -> Some (value :: rest)
+        | _, _ -> None)
+      items (Some [])
+  | _ -> None
+
+let shell_word word =
+  let needs_quotes =
+    word = ""
+    || String.exists
+         (fun c -> c = ' ' || c = '\t' || c = '"' || c = '\'' || c = '\\')
+         word
+  in
+  if not needs_quotes then word
+  else "\"" ^ String.concat "\\\"" (String.split_on_char '"' word) ^ "\""
+
+let command_text argv = String.concat " " (List.map shell_word argv)
+
+let execute_gate_command envelope =
+  let stage_command args =
+    match json_string_list (member "argv" args) with
+    | Some (_ :: _ as argv) -> Some (command_text argv)
+    | Some [] | None -> None
+  in
+  match member "input" envelope with
+  | `Assoc _ as args -> (
+    match stage_command args with
+    | Some command -> Some command
+    | None -> (
+      (* A staged call carries no top-level argv; the tool takes one shape or
+         the other, never both. Stages read the way they run. *)
+      match member "pipeline" args with
+      | `List (_ :: _ as stages) ->
+        List.fold_right
+          (fun stage acc ->
+            match stage_command stage, acc with
+            | Some command, Some rest -> Some (command :: rest)
+            | _, _ -> None)
+          stages (Some [])
+        |> Option.map (String.concat " | ")
+      | _ -> None))
+  | _ -> None
+
+(* Where the command would run. The same envelope carries it, and it decides
+   what the command means: [git clone] into a container is not the decision
+   [git clone] onto the host is. It rode along inside the flattened preview
+   until the command took that cell, so it moves to the detail pane rather
+   than disappearing. *)
+let execute_gate_site envelope =
+  let field name =
+    match member name envelope with
+    | `String value when String.trim value <> "" -> Some value
+    | _ -> None
+  in
+  (field "cwd", field "sandbox_target")
+
+let gate_execution_site ~operation envelope =
+  if not (String.equal operation Keeper_tool_execute_runtime.gate_operation)
+  then (None, None)
+  else match envelope with Some envelope -> execute_gate_site envelope | None -> (None, None)
+
+let gate_input_preview ~operation ~server_preview envelope =
+  if not (String.equal operation Keeper_tool_execute_runtime.gate_operation)
+  then server_preview
+  else
+    match envelope with
+    | Some envelope -> (
+      match execute_gate_command envelope with
+      | Some command -> Some command
+      | None -> server_preview)
+    | None -> server_preview
+
 let decode_gate_pending json =
   let* gp_id = required_string_field json "id" in
   let* gp_keeper = required_string_field json "keeper_name" in
@@ -3662,7 +3758,12 @@ let decode_gate_pending json =
       gp_keeper;
       gp_operation;
       gp_display_tool = gate_display_tool ~operation:gp_operation input;
-      gp_input_preview;
+      gp_input_preview =
+        gate_input_preview ~operation:gp_operation
+          ~server_preview:gp_input_preview input;
+      gp_execution_cwd = fst (gate_execution_site ~operation:gp_operation input);
+      gp_execution_sandbox =
+        snd (gate_execution_site ~operation:gp_operation input);
       gp_waiting_s;
     }
 

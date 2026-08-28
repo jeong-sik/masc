@@ -4082,6 +4082,192 @@ let test_decode_gate_identity_row_reads_its_target () =
       | rows ->
           Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
+let execute_gate_row ~preview ~input =
+  `Assoc
+    [ ("id", `String "appr-1");
+      ("keeper_name", `String "rw-e0-r9-20260820-review");
+      ("tool_name", `String "tool_execute");
+      ("input_preview", `String preview);
+      ("waiting_s", `Int 57330);
+      ("input", input);
+    ]
+
+let decoded_execute_preview ~preview ~input =
+  match
+    Tui_decode.decode_gate_snapshot
+      (gate_snapshot_json ~queue:(`List [ execute_gate_row ~preview ~input ]) ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.gs_pending with
+      | [ pending ] -> pending.Tui_decode.gp_input_preview
+      | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
+
+(* The envelope opens with the schema URN and an absolute cwd, so the command
+   sat off the right edge of the row at every terminal width. This is the
+   shape and the preview text observed on screen with seven rows waiting. *)
+let observed_execute_preview =
+  "{\"schema\":\"masc.keeper_gate.request.v1\",\"input\":{\"cwd\":\"/Users/dancer/me/.masc/playground/docker/rw-e0-r9-20260820-review/.\",\"argv\":[\"git\",\"clone\"]}}"
+
+let test_decode_execute_gate_row_leads_with_the_command () =
+  let preview =
+    decoded_execute_preview ~preview:observed_execute_preview
+      ~input:
+        (`Assoc
+           [ ("schema", `String "masc.keeper_gate.request.v1");
+             ( "input",
+               `Assoc
+                 [ ("cwd", `String "/Users/dancer/me/.masc/playground/docker/rw-e0-r9-20260820-review/.");
+                   ( "argv",
+                     `List
+                       [ `String "git"; `String "clone"; `String "--depth";
+                         `String "1"; `String "https://github.com/jeong-sik/masc" ] );
+                 ] );
+             ("cwd", `String "/Users/dancer/me/.masc/playground/docker/rw-e0-r9-20260820-review/.");
+             ("sandbox_profile", `String "docker");
+             ("sandbox_target", `String "docker:masc-playground");
+           ])
+  in
+  Alcotest.check
+    Alcotest.(option string)
+    "the row names the command, not the envelope"
+    (Some "git clone --depth 1 https://github.com/jeong-sik/masc")
+    preview
+
+let test_decode_execute_gate_row_carries_where_it_would_run () =
+  (* The command alone does not say this, and it changes what the command
+     means: cloning into a container is not cloning onto the host. *)
+  match
+    Tui_decode.decode_gate_snapshot
+      (gate_snapshot_json
+         ~queue:
+           (`List
+              [ execute_gate_row ~preview:observed_execute_preview
+                  ~input:
+                    (`Assoc
+                       [ ("input", `Assoc [ ("argv", `List [ `String "ls" ]) ]);
+                         ("cwd", `String "/home/keeper/playground/polisher");
+                         ("sandbox_profile", `String "docker");
+                         ("sandbox_target", `String "docker:masc-playground");
+                       ]) ])
+         ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.gs_pending with
+      | [ pending ] ->
+          Alcotest.check
+            Alcotest.(option string)
+            "cwd" (Some "/home/keeper/playground/polisher")
+            pending.Tui_decode.gp_execution_cwd;
+          Alcotest.check
+            Alcotest.(option string)
+            "sandbox" (Some "docker:masc-playground")
+            pending.Tui_decode.gp_execution_sandbox
+      | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
+
+let test_decode_gate_row_of_another_operation_has_no_site () =
+  (* A memory_write input is not an execution envelope. A stray field named
+     cwd there is not a place this would run, so nothing reads it as one. *)
+  let row =
+    `Assoc
+      [ ("id", `String "appr-3");
+        ("keeper_name", `String "code-reviewer");
+        ("tool_name", `String "memory_write");
+        ("input_preview", `String "{}");
+        ("input", `Assoc [ ("cwd", `String "/somewhere") ]);
+      ]
+  in
+  match
+    Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:(`List [ row ]) ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.gs_pending with
+      | [ pending ] ->
+          Alcotest.check
+            Alcotest.(option string)
+            "no site" None pending.Tui_decode.gp_execution_cwd
+      | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
+
+let test_decode_execute_gate_row_reads_a_pipeline () =
+  (* A staged call carries no top-level argv. The stages read the way they
+     run rather than collapsing to the first one. *)
+  let stage argv =
+    `Assoc [ ("argv", `List (List.map (fun word -> `String word) argv)) ]
+  in
+  let preview =
+    decoded_execute_preview ~preview:"{\"schema\":\"masc.keeper_gate.request.v1\"}"
+      ~input:
+        (`Assoc
+           [ ( "input",
+               `Assoc
+                 [ ( "pipeline",
+                     `List [ stage [ "git"; "log"; "--oneline" ]; stage [ "head"; "-5" ] ] );
+                 ] );
+           ])
+  in
+  Alcotest.check
+    Alcotest.(option string)
+    "stages read the way they run"
+    (Some "git log --oneline | head -5") preview
+
+let test_decode_execute_gate_row_quotes_a_word_with_a_space () =
+  let preview =
+    decoded_execute_preview ~preview:"{}"
+      ~input:
+        (`Assoc
+           [ ( "input",
+               `Assoc
+                 [ ( "argv",
+                     `List [ `String "git"; `String "commit"; `String "-m";
+                             `String "fix the thing" ] );
+                 ] );
+           ])
+  in
+  Alcotest.check
+    Alcotest.(option string)
+    "a word carrying a space keeps its boundary"
+    (Some "git commit -m \"fix the thing\"") preview
+
+let test_decode_execute_gate_row_keeps_the_preview_on_an_unknown_shape () =
+  (* Inventing a summary from a shape the producer did not write would be
+     worse than showing the envelope: the operator would decide on a command
+     that is not the one about to run. *)
+  let preview =
+    decoded_execute_preview ~preview:observed_execute_preview
+      ~input:(`Assoc [ ("input", `Assoc [ ("argv", `List [ `Int 1 ]) ]) ])
+  in
+  Alcotest.check
+    Alcotest.(option string)
+    "an argv that is not words keeps the server preview"
+    (Some observed_execute_preview) preview
+
+let test_decode_gate_row_of_another_operation_keeps_its_preview () =
+  (* A memory_write row already leads with its title, and nothing here should
+     touch it. *)
+  let row =
+    `Assoc
+      [ ("id", `String "appr-2");
+        ("keeper_name", `String "code-reviewer");
+        ("tool_name", `String "memory_write");
+        ("input_preview", `String "{\"title\":\"PR #31279 turn 109\"}");
+        ("input", `Assoc [ ("title", `String "PR #31279 turn 109") ]);
+      ]
+  in
+  match
+    Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:(`List [ row ]) ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.gs_pending with
+      | [ pending ] ->
+          Alcotest.check
+            Alcotest.(option string)
+            "untouched" (Some "{\"title\":\"PR #31279 turn 109\"}")
+            pending.Tui_decode.gp_input_preview
+      | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
+
 let test_decode_gate_null_queue_is_empty_with_modes () =
   (* The server sends [null] when the queue store is unavailable; the lanes
      still say what they say, and the pane must show that rather than fail. *)
@@ -4667,6 +4853,20 @@ let () =
       [
         Alcotest.test_case "an identity row reads its target" `Quick
           test_decode_gate_identity_row_reads_its_target;
+        Alcotest.test_case "an execute row leads with the command" `Quick
+          test_decode_execute_gate_row_leads_with_the_command;
+        Alcotest.test_case "an execute row reads a pipeline" `Quick
+          test_decode_execute_gate_row_reads_a_pipeline;
+        Alcotest.test_case "an execute row carries where it would run" `Quick
+          test_decode_execute_gate_row_carries_where_it_would_run;
+        Alcotest.test_case "another operation has no execution site" `Quick
+          test_decode_gate_row_of_another_operation_has_no_site;
+        Alcotest.test_case "an execute row quotes a word with a space" `Quick
+          test_decode_execute_gate_row_quotes_a_word_with_a_space;
+        Alcotest.test_case "an unknown execute shape keeps the preview" `Quick
+          test_decode_execute_gate_row_keeps_the_preview_on_an_unknown_shape;
+        Alcotest.test_case "another operation keeps its preview" `Quick
+          test_decode_gate_row_of_another_operation_keeps_its_preview;
         Alcotest.test_case "a null queue is empty with modes" `Quick
           test_decode_gate_null_queue_is_empty_with_modes;
         Alcotest.test_case "an unreadable queue carries the detail" `Quick

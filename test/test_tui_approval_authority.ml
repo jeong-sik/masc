@@ -37,6 +37,8 @@ let gate approval_id =
       gp_operation = "identity_call";
       gp_display_tool = "atlassian \xc2\xb7 addCommentToJiraIssue";
       gp_input_preview = Some "{\"provider_id\":\"atlassian\"}";
+      gp_execution_cwd = None;
+      gp_execution_sandbox = None;
       gp_waiting_s = Some 12.;
     }
 

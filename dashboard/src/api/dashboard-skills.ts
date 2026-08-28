@@ -1041,7 +1041,7 @@ function parseStrictRfc3339(value: string): Rfc3339Instant | null {
   const second = Number(secondText)
   const offsetHour = Number(offsetHourText)
   const offsetMinute = Number(offsetMinuteText)
-  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 60
     || offsetHour > 23 || offsetMinute > 59) return null
   const monthBoundary = new Date(0)
   monthBoundary.setUTCFullYear(year, month, 0)
@@ -1107,7 +1107,7 @@ function isCanonicalSkillName(value: string): boolean {
     && canonical.toLowerCase() === canonical
 }
 
-function skillIdentityIsValid(identity: SkillIdentity): boolean {
+function skillReferenceIdentityIsValid(identity: SkillIdentity): boolean {
   return isPortableName(identity.source_id)
     && identity.package_id !== '.'
     && identity.package_id !== '..'
@@ -1115,7 +1115,10 @@ function skillIdentityIsValid(identity: SkillIdentity): boolean {
     && !identity.package_id.includes('/')
     && !identity.package_id.includes('\\')
     && !identity.package_id.includes('\0')
-    && isCanonicalSkillName(identity.name)
+}
+
+function skillIdentityIsValid(identity: SkillIdentity): boolean {
+  return skillReferenceIdentityIsValid(identity) && isCanonicalSkillName(identity.name)
 }
 
 function isTaskId(value: string): boolean {
@@ -1197,6 +1200,10 @@ function activationPayloadIsValid(
 
 export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse {
   const decoded = decodeWithSchema(SkillEvidenceResponseSchema, raw, 'invalid_response')
+  if (!skillReferenceIdentityIsValid(decoded.reference.identity)
+    || !isLowerHexRevision(decoded.reference.content_revision)) {
+    contractError('invalid_response', 'skill evidence reference is invalid')
+  }
   const observed = decoded.activation !== null || decoded.composition !== null
   if ((decoded.status === 'observed') !== observed) {
     contractError('invalid_response', 'skill evidence status disagrees with its observations')

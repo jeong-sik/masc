@@ -3267,7 +3267,7 @@ let runtime_probe_provider ?(status = "reachable") ?(reachable = `Bool true)
     ]
 
 let runtime_probe_surface_json ?(first_status = "reachable")
-    ?(first_reachable = `Bool true) () =
+    ?(probe_status = "degraded") ?(first_reachable = `Bool true) () =
   let providers =
     [ runtime_probe_provider ~status:first_status ~reachable:first_reachable
         "runtime-a"
@@ -3290,7 +3290,7 @@ let runtime_probe_surface_json ?(first_status = "reachable")
     ; ( "probe"
       , `Assoc
           [ "source", `String "runtime.toml"
-          ; "status", `String "degraded"
+          ; "status", `String probe_status
           ; "probe_ok", `Bool false
           ; "checked_at", `String "2026-08-24T10:20:00Z"
           ; ( "summary"
@@ -3400,6 +3400,67 @@ let test_decode_and_join_runtime_surface () =
            Alcotest.(check bool) "stale absence is unobserved" true
              (Option.is_none unobserved.rcr_probe)
        | rows -> Alcotest.failf "expected four candidate rows, got %d" (List.length rows))
+
+(* Every word the producer writes into the probe's own status.
+
+   [Server_dashboard_http_runtime_info] fills it from three places: the live
+   summary picks between ok / idle / degraded / unavailable, the failure
+   envelope writes unreachable, and the cold-start envelope writes
+   warming_up. Those six are the whole vocabulary.
+
+   This reader had "reachable" and "no_http_runtimes" instead of the first
+   two, and nothing writes those -- so every live response failed to decode
+   and the Runtime surface drew "probe unavailable / read failed" with all
+   twenty-nine candidates reading "unobserved". A dead column that looks like
+   an observation nobody made is worse than an empty one.
+
+   The surface fixture said "degraded" -- the one word both sides happened to
+   agree on -- so the suite passed the whole time. This aims at the reader
+   itself, where the drift was. *)
+let test_runtime_probe_status_reads_every_word_the_server_writes () =
+  List.iter
+    (fun word ->
+      match Tui_decode.runtime_probe_status_of_string word with
+      | Ok _ -> ()
+      | Error detail ->
+        Alcotest.failf "the server writes %S and this refused it: %s" word
+          detail)
+    [ "ok"; "idle"; "degraded"; "unavailable"; "unreachable"; "warming_up" ]
+;;
+
+(* Still closed. A word outside that set is a producer this reader has not
+   been taught, and reading it as some nearby status is how a surface comes
+   to answer a question nobody asked. The two it used to accept are in here
+   on purpose: nothing writes them, so accepting them would be surface kept
+   alive by nothing. *)
+let test_runtime_probe_status_refuses_words_nobody_writes () =
+  List.iter
+    (fun word ->
+      match Tui_decode.runtime_probe_status_of_string word with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.failf "%S decoded, and no producer writes it" word)
+    [ "reachable"; "no_http_runtimes"; "warming"; "healthy"; "" ]
+;;
+
+(* Read and written by one vocabulary. The badge is drawn from [to_string],
+   so a spelling that does not read back is a screen naming a status the
+   system never used. *)
+let test_runtime_probe_status_round_trips () =
+  List.iter
+    (fun status ->
+      let word = Tui_decode.runtime_probe_status_to_string status in
+      match Tui_decode.runtime_probe_status_of_string word with
+      | Ok back when back = status -> ()
+      | Ok _ -> Alcotest.failf "%S read back as a different status" word
+      | Error detail ->
+        Alcotest.failf "%S is written but not read: %s" word detail)
+    [ Tui_decode.Runtime_probe_reachable
+    ; Tui_decode.Runtime_probe_no_http_runtimes
+    ; Tui_decode.Runtime_probe_degraded
+    ; Tui_decode.Runtime_probe_unreachable
+    ; Tui_decode.Runtime_probe_warming
+    ]
+;;
 
 let test_runtime_probe_rejects_unknown_status () =
   match
@@ -4195,6 +4256,12 @@ let () =
           test_decode_and_join_runtime_surface
       ; Alcotest.test_case "rejects an unknown provider status" `Quick
           test_runtime_probe_rejects_unknown_status
+      ; Alcotest.test_case "probe status reads every word the server writes"
+          `Quick test_runtime_probe_status_reads_every_word_the_server_writes
+      ; Alcotest.test_case "probe status refuses words nobody writes" `Quick
+          test_runtime_probe_status_refuses_words_nobody_writes
+      ; Alcotest.test_case "probe status round-trips" `Quick
+          test_runtime_probe_status_round_trips
       ; Alcotest.test_case "rejects status/reachability disagreement" `Quick
           test_runtime_probe_rejects_status_reachability_disagreement
       ; Alcotest.test_case "rejects half a sticky preference" `Quick

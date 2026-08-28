@@ -2219,10 +2219,17 @@ let runtime_probe_refresh_state_to_string = function
   | Runtime_probe_served_stale -> "served_stale"
   | Runtime_probe_warming_up -> "warming_up"
 
+(* The word the wire uses, so the badge shows what the server said. This
+   spelled two of them "reachable" and "no_http_runtimes" while the producer
+   wrote "ok" and "idle", and the only caller is the status badge -- so the
+   screen would have named a reading the system never used. One vocabulary,
+   read and written. *)
 let runtime_probe_status_to_string = function
-  | Runtime_probe_reachable -> "reachable"
-  | Runtime_probe_no_http_runtimes -> "no_http_runtimes"
+  | Runtime_probe_reachable -> "ok"
+  | Runtime_probe_no_http_runtimes -> "idle"
   | Runtime_probe_degraded -> "degraded"
+  (* The producer writes both "unavailable" and "unreachable" for this
+     reading; one of them has to be the one written back. *)
   | Runtime_probe_unreachable -> "unreachable"
   | Runtime_probe_warming -> "warming_up"
 
@@ -2247,11 +2254,30 @@ let runtime_probe_refresh_state_of_string = function
   | "warming_up" -> Ok Runtime_probe_warming_up
   | value -> Error (Printf.sprintf "unknown runtime probe refresh_state %S" value)
 
+(* The words the producer writes, not a list that grew beside it.
+
+   [Server_dashboard_http_runtime_info] fills this field from three places:
+   the live summary picks between [Health_status.Ok], [Idle], [Degraded] and
+   [Unavailable]; the failure envelope writes ["unreachable"]; the cold-start
+   envelope writes ["warming_up"]. Those six are the whole vocabulary.
+
+   This list had ["reachable"] and ["no_http_runtimes"] instead of ["ok"] and
+   ["idle"], and nothing has written those two -- searched for the literals
+   across lib/ and bin/. So every response failed the decode and the surface
+   drew "probe unavailable / read failed" with all twenty-nine candidates
+   reading "unobserved". A dead column that looks like an observation nobody
+   made is worse than an empty one: it answers the question wrongly instead
+   of declining to.
+
+   The variant names stay: they say what the reading means, and the meaning
+   did not drift -- only the spelling the wire uses. *)
 let runtime_probe_status_of_string = function
-  | "reachable" -> Ok Runtime_probe_reachable
-  | "no_http_runtimes" -> Ok Runtime_probe_no_http_runtimes
+  | "ok" -> Ok Runtime_probe_reachable
+  | "idle" -> Ok Runtime_probe_no_http_runtimes
   | "degraded" -> Ok Runtime_probe_degraded
-  | "unreachable" -> Ok Runtime_probe_unreachable
+  (* Two spellings for one reading, both live: the summary path writes
+     ["unavailable"] and the failure envelope writes ["unreachable"]. *)
+  | "unavailable" | "unreachable" -> Ok Runtime_probe_unreachable
   | "warming_up" -> Ok Runtime_probe_warming
   | value -> Error (Printf.sprintf "unknown runtime probe status %S" value)
 

@@ -5915,6 +5915,11 @@ def standalone_lanes_response() -> HttpResponse:
                     "Compaction",
                     status="no_retained_observation",
                 ),
+                standalone_lane_fixture(
+                    "assembler_exact",
+                    "Assembler",
+                    status="no_retained_observation",
+                ),
                 standalone_lane_fixture("verifier_exact", "Verifier"),
             ],
         },

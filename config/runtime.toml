@@ -69,6 +69,11 @@ slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 
+# Read-only typed Tool-plan proposals. The Assembler never executes the plan;
+# execution remains an explicit keeper_plan_execute call.
+[runtime.exact_output_lanes.assembler_exact]
+slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
+
 # Verifier/completion-authority judgement lane (RFC-0361 D7(a)). Judgement
 # calls resolve only this lane and fail over in declared slot order, the same
 # frozen-order contract as the librarian/compaction lanes.

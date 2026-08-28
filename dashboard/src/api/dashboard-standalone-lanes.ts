@@ -6,6 +6,7 @@ export type StandaloneLaneId =
   | 'hitl_auto_judge'
   | 'librarian_exact'
   | 'compaction_exact'
+  | 'assembler_exact'
   | 'verifier_exact'
 
 export type StandaloneLaneStatus =
@@ -59,8 +60,8 @@ export interface StandaloneLanesSnapshot {
   lanes: StandaloneLaneSnapshotRow[]
 }
 
-// The four registry spellings come from Exact_lane_run_registry.lane_key and
-// the fifth from Runtime.verifier_exact_lane_id — the language-boundary copy,
+// The registry spellings come from Exact_lane_run_registry.lane_key and the
+// verifier from Runtime.verifier_exact_lane_id — the language-boundary copy,
 // pinned to those sources by standalone-lanes-parity.test.ts. `satisfies`
 // keeps this list and the StandaloneLaneId union from drifting apart.
 export const LANE_IDS = [
@@ -68,6 +69,7 @@ export const LANE_IDS = [
   'hitl_auto_judge',
   'librarian_exact',
   'compaction_exact',
+  'assembler_exact',
   'verifier_exact',
 ] as const satisfies readonly StandaloneLaneId[]
 const STATUSES: readonly string[] = ['running', 'idle', 'degraded', 'no_retained_observation', 'unavailable']

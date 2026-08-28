@@ -110,6 +110,30 @@ let invalid_plan_output =
     ]
 ;;
 
+let ordered_duplicate_plan_output =
+  `Assoc
+    [ "kind", `String "plan"
+    ; ( "plan"
+      , `Assoc
+          [ ( "nodes"
+            , `List
+                [ `Assoc
+                    [ "id", `String "clock-before"
+                    ; "tool", `String "keeper_time_now"
+                    ]
+                ; `Assoc
+                    [ "id", `String "context"
+                    ; "tool", `String "keeper_context_status"
+                    ]
+                ; `Assoc
+                    [ "id", `String "clock-after"
+                    ; "tool", `String "keeper_time_now"
+                    ]
+                ] )
+          ] )
+    ]
+;;
+
 let publish_lane fixtures =
   let snapshot =
     Fixture.resolver_snapshot
@@ -541,12 +565,13 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
       ~sw
       ~net
       ~clock
-      (Fixture.Reply (Fixture.openai_response plan_output))
+      (Fixture.Reply (Fixture.openai_response ordered_duplicate_plan_output))
   in
   publish_lane
     [ { Fixture.id = "assembler-tool-accepted"; base_url = accepted.base_url } ];
   let capability_surface = surface () in
-  let reference = reference capability_surface "keeper_time_now" in
+  let time_reference = reference capability_surface "keeper_time_now" in
+  let context_reference = reference capability_surface "keeper_context_status" in
   let meta = assembler_meta "assembler-tool-test" in
   let publication_recovery =
     { Keeper_publication_recovery_availability.provider =
@@ -577,7 +602,9 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
            ; "execution", `String "inline"
            ; ( "ordinary_tool_references"
              , `List
-                 [ Surface.ordinary_tool_reference_to_yojson reference ] )
+                 [ Surface.ordinary_tool_reference_to_yojson time_reference
+                 ; Surface.ordinary_tool_reference_to_yojson context_reference
+                 ] )
            ]
        in
        let output =
@@ -595,6 +622,24 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
          | Some (`String value) -> value
          | _ -> fail "Tool result omitted proposal_id"
        in
+       (match field "execution_request" output with
+        | Some (`Assoc fields) ->
+          check (option string) "execution request binds the proposal id"
+            (Some proposal_id)
+            (match List.assoc_opt "proposal_id" fields with
+             | Some (`String value) -> Some value
+             | _ -> None);
+          check (list string) "execution request preserves Tool order and duplicates"
+            [ "keeper_time_now"; "keeper_context_status"; "keeper_time_now" ]
+            (match List.assoc_opt "approval_tools" fields with
+             | Some (`List values) ->
+               List.map
+                 (function
+                   | `String value -> value
+                   | _ -> fail "execution request contains a non-string Tool")
+                 values
+             | _ -> fail "execution request omitted approval_tools")
+        | _ -> fail "Tool result omitted the exact execution request");
        let proposal_id =
          match Proposal.Proposal_id.of_string proposal_id with
          | Ok proposal_id -> proposal_id

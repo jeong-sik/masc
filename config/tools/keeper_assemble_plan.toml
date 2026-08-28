@@ -2,9 +2,10 @@ name = "keeper_assemble_plan"
 description = """
 Ask the configured Assembler exact-output lane to build one typed Tool DAG from \
 an objective and exact ordinary-Tool references frozen for this Keeper turn. \
-The result is a durable content-addressed proposal_id. This call never executes \
-the proposal or any referenced Tool; pass the proposal_id to the separate \
-proposal execution surface when execution is intended."""
+The result is a durable content-addressed proposal plus an exact \
+execution_request. This call never executes the proposal or any referenced \
+Tool; pass execution_request unchanged to the separate proposal execution \
+surface when execution is intended."""
 additional_properties = false
 
 [[params]]
@@ -52,5 +53,6 @@ key_constraints = [
   "References are exact identities from this Keeper turn's frozen capability surface.",
   "The call invokes only the Assembler exact-output lane and stores a proposal.",
   "No ordinary Tool and no proposal execution runs during assembly.",
+  "Pass the returned execution_request unchanged; it binds approval to the stored plan's exact Tool sequence.",
 ]
 alternatives = ["keeper_plan_execute"]

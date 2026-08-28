@@ -84,6 +84,7 @@ type t =
   ; execution : execution
   ; capability_surface_sha256 : string
   ; ordinary_tool_references : Surface.ordinary_tool_reference list
+  ; plan : Plan.t
   ; plan_json : Yojson.Safe.t
   ; canonical_bytes : string
   }
@@ -280,6 +281,7 @@ let create
       ; execution
       ; capability_surface_sha256
       ; ordinary_tool_references
+      ; plan
       ; plan_json
       ; canonical_bytes
       }
@@ -413,6 +415,7 @@ let objective proposal = proposal.objective
 let execution proposal = proposal.execution
 let capability_surface_sha256 proposal = proposal.capability_surface_sha256
 let ordinary_tool_references proposal = proposal.ordinary_tool_references
+let plan proposal = proposal.plan
 let plan_json proposal = proposal.plan_json
 let canonical_bytes proposal = proposal.canonical_bytes
 let to_yojson proposal = Yojson.Safe.from_string proposal.canonical_bytes

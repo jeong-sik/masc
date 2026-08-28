@@ -315,6 +315,36 @@ let test_config_revision_projection_assignment_missing () =
   Alcotest.(check bool) "assignment is explicitly missing" true
     (contains row "assignment=missing")
 
+(* The server answers {state:"unavailable", detail} in place of the revision
+   pair when it could not read it. The pane shows the server's own detail,
+   and the CAS picker refuses to post the marker as an expected value. *)
+let test_config_revision_projection_unavailable_shows_detail () =
+  let revision =
+    `Assoc
+      [ "state", `String "unavailable"
+      ; "detail", `String "manifest store offline"
+      ]
+  in
+  let row = row_of (with_config_revision revision) "Config revision" in
+  Alcotest.(check bool) "server detail is on the row" true
+    (contains row "revision unavailable: manifest store offline")
+
+let test_runtime_picker_refuses_unavailable_revision () =
+  let unavailable =
+    with_config_revision
+      (`Assoc
+         [ "state", `String "unavailable"
+         ; "detail", `String "manifest store offline"
+         ])
+  in
+  match expected_runtime_assignment_revision unavailable with
+  | Error detail ->
+    Alcotest.(check bool) "error names the server detail" true
+      (contains detail "manifest store offline")
+  | Ok revision ->
+    Alcotest.failf "picker accepted an unavailable revision: %s"
+      (Yojson.Safe.to_string revision)
+
 let test_config_revision_projection_runtime_missing () =
   let revision =
     `Assoc
@@ -548,6 +578,10 @@ let () =
             test_config_revision_projection_assignment_missing
         ; Alcotest.test_case "composite revision runtime missing" `Quick
             test_config_revision_projection_runtime_missing
+        ; Alcotest.test_case "unavailable revision shows the server detail" `Quick
+            test_config_revision_projection_unavailable_shows_detail
+        ; Alcotest.test_case "runtime picker refuses an unavailable revision" `Quick
+            test_runtime_picker_refuses_unavailable_revision
         ; Alcotest.test_case "composite revision malformed runtime" `Quick
             test_config_revision_projection_rejects_malformed_runtime
         ; Alcotest.test_case "strict composite revision" `Quick

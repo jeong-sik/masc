@@ -66,26 +66,59 @@ let exact_keys expected fields =
   List.length fields = List.length expected
   && List.for_all (fun key -> List.mem_assoc key fields) expected
 
-let validate_manifest_revision = function
-  | `Assoc [ ("state", `String "missing") ] -> Ok ()
+(* The wire shape is parsed ONCE into these closed types; validation is the
+   parser and rendering is a total function over the result. The previous
+   arrangement kept four validate_* and four render_* functions matching the
+   same JSON in parallel — the same value was matched up to three times, and
+   the render side re-decided validity with the diagnostics erased. *)
+type manifest_revision =
+  | Manifest_missing
+  | Manifest_sha256 of string
+
+type runtime_assignment =
+  | Assignment_absent
+  | Assignment_assigned of string
+
+type runtime_assignment_revision =
+  | Runtime_config_missing
+  | Runtime_config_present of
+      { source_revision : string
+      ; assignment : runtime_assignment
+      }
+
+type config_revision =
+  { manifest : manifest_revision
+  ; runtime_assignment : runtime_assignment_revision
+  }
+
+(* The server answers {state:"unavailable", detail} in place of the revision
+   pair when it could not read it (dashboard_http_keeper_snapshot). That is
+   an answer to show, not an invalid document. *)
+type config_revision_state =
+  | Revision of config_revision
+  | Revision_unavailable of string
+
+let manifest_revision_of_json = function
+  | `Assoc [ ("state", `String "missing") ] -> Ok Manifest_missing
   | `Assoc fields when exact_keys [ "state"; "value" ] fields ->
     (match List.assoc_opt "state" fields, List.assoc_opt "value" fields with
      | Some (`String "sha256"), Some (`String value)
-       when is_lowercase_sha256 value -> Ok ()
+       when is_lowercase_sha256 value -> Ok (Manifest_sha256 value)
      | _ -> Error "keeper config manifest revision is invalid")
   | _ -> Error "keeper config manifest revision is invalid"
 
-let validate_assignment = function
-  | `Assoc [ ("state", `String "missing") ] -> Ok ()
+let runtime_assignment_of_json = function
+  | `Assoc [ ("state", `String "missing") ] -> Ok Assignment_absent
   | `Assoc fields when exact_keys [ "state"; "runtime_id" ] fields ->
     (match List.assoc_opt "state" fields, List.assoc_opt "runtime_id" fields with
      | Some (`String "assigned"), Some (`String runtime_id)
-       when String.trim runtime_id <> "" -> Ok ()
+       when String.trim runtime_id <> "" -> Ok (Assignment_assigned runtime_id)
      | _ -> Error "keeper runtime assignment state is invalid")
   | _ -> Error "keeper runtime assignment state is invalid"
 
-let validate_runtime_assignment_revision = function
-  | `Assoc [ ("state", `String "runtime_config_missing") ] -> Ok ()
+let runtime_assignment_revision_of_json = function
+  | `Assoc [ ("state", `String "runtime_config_missing") ] ->
+    Ok Runtime_config_missing
   | `Assoc fields
     when exact_keys [ "state"; "source_revision"; "assignment" ] fields ->
     (match
@@ -97,11 +130,19 @@ let validate_runtime_assignment_revision = function
        , Some (`String source_revision)
        , Some assignment )
        when is_lowercase_sha256 source_revision ->
-       validate_assignment assignment
+       Result.map
+         (fun assignment ->
+           Runtime_config_present { source_revision; assignment })
+         (runtime_assignment_of_json assignment)
      | _ -> Error "keeper runtime assignment revision is invalid")
   | _ -> Error "keeper runtime assignment revision is invalid"
 
-let validate_config_revision = function
+let config_revision_state_of_json = function
+  | `Assoc fields when exact_keys [ "state"; "detail" ] fields ->
+    (match List.assoc_opt "state" fields, List.assoc_opt "detail" fields with
+     | Some (`String "unavailable"), Some (`String detail) ->
+       Ok (Revision_unavailable detail)
+     | _ -> Error "keeper config revision is invalid")
   | `Assoc fields
     when exact_keys [ "manifest"; "runtime_assignment" ] fields ->
     (match
@@ -110,15 +151,24 @@ let validate_config_revision = function
      with
      | Some manifest, Some runtime_assignment ->
        Result.bind
-         (validate_manifest_revision manifest)
-         (fun () -> validate_runtime_assignment_revision runtime_assignment)
+         (manifest_revision_of_json manifest)
+         (fun manifest ->
+           Result.map
+             (fun runtime_assignment -> Revision { manifest; runtime_assignment })
+             (runtime_assignment_revision_of_json runtime_assignment))
      | _ -> Error "keeper config revision is incomplete")
   | _ -> Error "keeper config revision is invalid"
 
 let expected_config_revision before =
   match member "config_revision" before with
   | Some revision ->
-    Result.map (fun () -> revision) (validate_config_revision revision)
+    (match config_revision_state_of_json revision with
+     | Ok (Revision _) -> Ok revision
+     | Ok (Revision_unavailable detail) ->
+       (* Posting the unavailable marker as a CAS expected value can only
+          fail later with a worse message; stop with the server's own. *)
+       Error ("keeper config revision is unavailable: " ^ detail)
+     | Error _ as error -> error)
   | None -> Error "keeper config revision was not observed"
 
 let expected_runtime_assignment_revision before =
@@ -151,7 +201,9 @@ let decode_unchanged_runtime_assignment_response = function
                    | _ -> false)
                 | _ -> false)
               warnings ->
-       Result.map (fun () -> revision) (validate_runtime_assignment_revision revision)
+       Result.map
+         (fun (_ : runtime_assignment_revision) -> revision)
+         (runtime_assignment_revision_of_json revision)
      | _ -> Error "runtime assignment response is not an unchanged write")
   | _ -> Error "runtime assignment response must be an object"
 
@@ -165,8 +217,15 @@ let config_write_warning_codes json =
        List.assoc_opt "warnings" fields
      with
      | Some revision, Some (`Bool _), Some (`List warnings) ->
+       (* A write receipt's revision is the pair the write produced; the
+          unavailable marker there is a contract violation, matching the
+          dashboard's reading of the same receipt. *)
        Result.bind
-         (validate_config_revision revision)
+         (match config_revision_state_of_json revision with
+          | Ok (Revision _) -> Ok ()
+          | Ok (Revision_unavailable detail) ->
+            Error ("config write revision is unavailable: " ^ detail)
+          | Error _ as error -> error)
          (fun () ->
            let rec decode acc = function
              | [] -> Ok (List.rev acc)
@@ -331,72 +390,34 @@ let counted = function
   | [ _ ] -> "1 line"
   | lines -> Printf.sprintf "%d lines" (List.length lines)
 
+(* Total renderers over the parsed types: the JSON was judged once by the
+   parser, so nothing here can fail or disagree with validation. *)
 let render_manifest_revision = function
-  | `Assoc [ ("state", `String "missing") ] -> Ok "manifest=missing"
-  | `Assoc fields when exact_keys [ "state"; "value" ] fields ->
-    (match List.assoc_opt "state" fields, List.assoc_opt "value" fields with
-     | Some (`String "sha256"), Some (`String value)
-       when is_lowercase_sha256 value -> Ok ("manifest=sha256:" ^ value)
-     | _ -> Error ())
-  | _ -> Error ()
+  | Manifest_missing -> "manifest=missing"
+  | Manifest_sha256 value -> "manifest=sha256:" ^ value
 
 let render_assignment = function
-  | `Assoc [ ("state", `String "missing") ] -> Ok "assignment=missing"
-  | `Assoc fields when exact_keys [ "state"; "runtime_id" ] fields ->
-    (match List.assoc_opt "state" fields, List.assoc_opt "runtime_id" fields with
-     | Some (`String "assigned"), Some (`String runtime_id)
-       when String.trim runtime_id <> "" -> Ok ("assignment=assigned:" ^ runtime_id)
-     | _ -> Error ())
-  | _ -> Error ()
+  | Assignment_absent -> "assignment=missing"
+  | Assignment_assigned runtime_id -> "assignment=assigned:" ^ runtime_id
 
 let render_runtime_assignment_revision = function
-  | `Assoc [ ("state", `String "runtime_config_missing") ] -> Ok "runtime=missing"
-  | `Assoc fields
-    when exact_keys [ "state"; "source_revision"; "assignment" ] fields ->
-    (match
-       List.assoc_opt "state" fields,
-       List.assoc_opt "source_revision" fields,
-       List.assoc_opt "assignment" fields
-     with
-     | ( Some (`String "runtime_config_present")
-       , Some (`String source_revision)
-       , Some assignment )
-       when is_lowercase_sha256 source_revision ->
-       Result.map
-         (fun rendered_assignment ->
-           Printf.sprintf "runtime=present source=sha256:%s %s"
-             source_revision rendered_assignment)
-         (render_assignment assignment)
-     | _ -> Error ())
-  | _ -> Error ()
-
-let render_config_revision = function
-  | `Assoc fields when exact_keys [ "manifest"; "runtime_assignment" ] fields ->
-    (match
-       List.assoc_opt "manifest" fields,
-       List.assoc_opt "runtime_assignment" fields
-     with
-     | Some manifest, Some runtime_assignment ->
-       Result.bind
-         (validate_config_revision (`Assoc fields)
-          |> Result.map_error (fun _detail -> ()))
-         (fun () ->
-           Result.bind
-             (render_manifest_revision manifest)
-             (fun rendered_manifest ->
-               Result.map
-                 (fun rendered_runtime ->
-                   rendered_manifest ^ " | " ^ rendered_runtime)
-                 (render_runtime_assignment_revision runtime_assignment)))
-     | _ -> Error ())
-  | _ -> Error ()
+  | Runtime_config_missing -> "runtime=missing"
+  | Runtime_config_present { source_revision; assignment } ->
+    Printf.sprintf "runtime=present source=sha256:%s %s"
+      source_revision
+      (render_assignment assignment)
 
 let config_revision_value = function
   | Some revision ->
-    (match render_config_revision revision with
-     | Ok rendered -> rendered
-     | Error () -> "invalid composite config revision")
-  | None -> "invalid composite config revision"
+    (match config_revision_state_of_json revision with
+     | Ok (Revision { manifest; runtime_assignment }) ->
+       render_manifest_revision manifest
+       ^ " | "
+       ^ render_runtime_assignment_revision runtime_assignment
+     | Ok (Revision_unavailable detail) ->
+       "revision unavailable: " ^ detail
+     | Error detail -> "invalid composite config revision: " ^ detail)
+  | None -> "invalid composite config revision: not observed"
 
 (* One document, but the reader has to be able to answer "will [e] change
    this?" without counting rows against the editor stem. The glyph answers it

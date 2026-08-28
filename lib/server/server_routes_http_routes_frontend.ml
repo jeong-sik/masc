@@ -328,14 +328,19 @@ let add_routes ?sw ?clock ~port router =
          | _ -> None
        in
        handle_get_mcp ?sse_kind request reqd)
+  |> Http.Router.get "/mcp/operator" handle_get_operator_mcp
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
   |> Http.Router.post "/mcp/managed"
        (handle_post_mcp ~profile:Server_mcp_transport_http.Managed_agent)
+  |> Http.Router.post "/mcp/operator"
+       (handle_post_mcp ~profile:Server_mcp_transport_http.Operator_remote)
   |> Http.Router.add ~path:"/mcp" ~methods:[`DELETE]
        ~handler:handle_delete_mcp
   |> Http.Router.add ~path:"/mcp/managed" ~methods:[`DELETE]
        ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Managed_agent)
+  |> Http.Router.add ~path:"/mcp/operator" ~methods:[`DELETE]
+       ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Operator_remote)
   |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST]
        ~handler:(fun request reqd ->
          with_read_auth (fun _state req reqd -> handle_graphql req reqd) request reqd)

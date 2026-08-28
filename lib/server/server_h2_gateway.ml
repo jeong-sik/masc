@@ -552,15 +552,19 @@ let h2_request_handler _client_addr h2_reqd =
       (* ─────────────────────────────────────────────────────────────────────
          MCP Endpoints
          ───────────────────────────────────────────────────────────────────── *)
-      | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/managed" ->
+      | `POST, "/mcp"
+      | `POST, "/"
+      | `POST, "/mcp/managed"
+      | `POST, "/mcp/operator" ->
           let session_id = match session_id_opt with
             | Some id -> id
             | None -> Mcp_session.generate ()
           in
           let profile =
-            if String.equal path "/mcp/managed"
-            then Server_mcp_transport_http.Managed_agent
-            else Server_mcp_transport_http.Full
+            match path with
+            | "/mcp/managed" -> Server_mcp_transport_http.Managed_agent
+            | "/mcp/operator" -> Server_mcp_transport_http.Operator_remote
+            | _ -> Server_mcp_transport_http.Full
           in
           (* HTTP-level auth check for MCP endpoints *)
           let base_path = match current_server_state () with
@@ -743,11 +747,14 @@ let h2_request_handler _client_addr h2_reqd =
                                    | json ->
                                        h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs)))))
 
-      | `DELETE, "/mcp" | `DELETE, "/mcp/managed" ->
+      | `DELETE, "/mcp"
+      | `DELETE, "/mcp/managed"
+      | `DELETE, "/mcp/operator" ->
           let profile =
-            if String.equal path "/mcp/managed"
-            then Server_mcp_transport_http.Managed_agent
-            else Server_mcp_transport_http.Full
+            match path with
+            | "/mcp/managed" -> Server_mcp_transport_http.Managed_agent
+            | "/mcp/operator" -> Server_mcp_transport_http.Operator_remote
+            | _ -> Server_mcp_transport_http.Full
           in
           let base_path = match current_server_state () with
             | Some s -> (Mcp_server.workspace_config s).base_path

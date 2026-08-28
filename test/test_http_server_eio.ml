@@ -164,6 +164,13 @@ let test_frontend_transport_routes_present () =
       (Router.routes routes)
   in
   Alcotest.(check bool) "GET /ws route" true (has_route `GET "/ws");
+  List.iter
+    (fun meth ->
+       Alcotest.(check bool)
+         "operator MCP route"
+         true
+         (has_route meth "/mcp/operator"))
+    [ `GET; `POST; `DELETE ];
   (* RFC-0281: /ws must be a typed WebSocket-upgrade route ([Router.Ws]),
      not a plain route.  Only a Ws route receives the Gluten [upgrade]
      capability and thus actually drives the post-101 connection.  A

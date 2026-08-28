@@ -271,6 +271,38 @@ const compositionEvidence = {
   recorded_at: 1,
 }
 
+const activationPayload = {
+  identity: reference.identity,
+  content_revision: reference.content_revision,
+  snapshot_revision: 'b'.repeat(64),
+  turn_ref: 'trace-proof#1',
+  runtime_id: 'codex.default',
+  activated_at: '2026-08-28T03:00:00Z',
+  skill_tool_use_id: 'skill-call-1',
+  agent_core_turn: 1,
+  invocation: {
+    kind: 'instruction' as const,
+    origin: { kind: 'session_instruction' as const },
+    served_content: {
+      kind: 'skill_body' as const,
+      bytes: 4,
+      sha256: 'c'.repeat(64),
+    },
+  },
+  delivery: null,
+  actions: [],
+}
+
+const activationEvidence = {
+  trace_id: 'trace-proof',
+  owner: {
+    status: 'known' as const,
+    claims: [{ keeper: 'rondo', source: 'current_meta' as const }],
+    gaps: [],
+  },
+  activation: activationPayload,
+}
+
 describe('skill evidence contract', () => {
   it('rejects the retired bounded-evidence schema', () => {
     expect(() => decodeSkillEvidenceResponse({
@@ -290,22 +322,7 @@ describe('skill evidence contract', () => {
       reference,
       activation: {
         selection: 'most_recent_observed',
-        evidence: {
-          trace_id: 'trace-proof',
-          owner: {
-            status: 'known',
-            claims: [{ keeper: 'rondo', source: 'current_meta' }],
-            gaps: [],
-          },
-          activation: {
-            identity: reference.identity,
-            content_revision: reference.content_revision,
-            activated_at: '2026-08-28T03:00:00Z',
-            skill_tool_use_id: 'skill-call-1',
-            delivery: null,
-            actions: [],
-          },
-        },
+        evidence: activationEvidence,
       },
       composition: compositionEvidence,
       coverage: { ...coverage, composition_records_read: 1 },
@@ -392,6 +409,56 @@ describe('skill evidence contract', () => {
     })
 
     expect(decoded.coverage.composition_scope).toBe(composition_scope)
+  })
+
+  it('rejects a timestamp tie with duplicate traces or different times', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v5',
+      status: 'observed',
+      reference,
+      activation: {
+        selection: 'most_recent_observed_timestamp_tie',
+        evidence: [
+          activationEvidence,
+          {
+            ...activationEvidence,
+            activation: { ...activationPayload, activated_at: '2026-08-28T04:00:00Z' },
+          },
+        ],
+      },
+      composition: null,
+      coverage,
+    })).toThrow(SkillsContractError)
+  })
+
+  it('rejects unknown activation gap codes', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v5',
+      status: 'not_observed_in_retained_coverage',
+      reference,
+      activation: null,
+      composition: null,
+      coverage: {
+        ...coverage,
+        activation_scope: 'incomplete_retained_trace_snapshot',
+        activation_gaps: [{ code: 'hologram' }],
+      },
+    })).toThrow(SkillsContractError)
+  })
+
+  it('rejects trace-store-unavailable with observed sessions', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v5',
+      status: 'not_observed_in_retained_coverage',
+      reference,
+      activation: null,
+      composition: null,
+      coverage: {
+        ...coverage,
+        activation_scope: 'trace_store_unavailable',
+        activation_gaps: [{ code: 'trace_root_unavailable' }],
+      },
+    })).toThrow(SkillsContractError)
   })
 })
 

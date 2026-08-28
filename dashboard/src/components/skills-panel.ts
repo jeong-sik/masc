@@ -229,7 +229,7 @@ function compositionCoverageLabel(scope: SkillEvidenceResponse['coverage']['comp
 }
 
 function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null }) {
-  if (!result) return html`<div class="ss-muted">Load the latest exact-revision result.</div>`
+  if (!result) return html`<div class="ss-muted">Load retained exact-revision evidence.</div>`
   const activationGapCount = result.coverage.activation_gaps.length
   const coverageSummary = html`${result.coverage.activation_sessions_inspected} retained sessions inspected · ${result.coverage.activation_ledgers_loaded} activation ledgers loaded · ${activationGapCount} activation gaps · ${result.coverage.activation_owner_gap_count} owner gaps · ${result.coverage.composition_records_read} composition records read · ${compositionCoverageLabel(result.coverage.composition_scope)}`
   if (result.status === 'not_observed_in_retained_coverage') {
@@ -244,22 +244,23 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
     : result.activation.selection === 'most_recent_observed'
       ? [result.activation.evidence]
       : result.activation.evidence
-  const primaryActivation = activationEvidence[0] ?? null
-  const activation = primaryActivation?.activation ?? null
-  const actions = Array.isArray(activation?.actions) ? activation.actions.length : 0
-  const delivered = activation?.delivery !== null && activation?.delivery !== undefined
-  const ownerClaims = primaryActivation?.owner.claims.map(claim => claim.keeper).join(', ') ?? 'unknown'
   const composition = result.composition
   const compositionNodeCount = composition ? compositionNodes(composition).length : 0
   const output = composition?.result.data
   return html`
-    <div class="space-y-2" data-testid="skill-latest-evidence">
-      ${activation ? html`
-        <div>
-          <div class="font-semibold">${delivered ? '✓ delivered' : '◌ invoked'} · ${ownerClaims} · ${actions} actions</div>
-          <div class="ss-muted mono">${runField(activation, 'activated_at')} · tool use ${runField(activation, 'skill_tool_use_id')} · trace ${primaryActivation?.trace_id} · owner ${primaryActivation?.owner.status}${activationEvidence.length > 1 ? ` · ${activationEvidence.length} equal-time candidates` : ''}</div>
-        </div>
-      ` : null}
+    <div class="space-y-2" data-testid="skill-retained-evidence">
+      ${activationEvidence.map((item, index) => {
+        const activation = item.activation
+        const actions = Array.isArray(activation.actions) ? activation.actions.length : 0
+        const delivered = activation.delivery !== null && activation.delivery !== undefined
+        const ownerClaims = item.owner.claims.map(claim => claim.keeper).join(', ') || 'unclaimed'
+        return html`
+          <div>
+            <div class="font-semibold">${delivered ? '✓ delivered' : '◌ invoked'} · ${ownerClaims} · ${actions} actions${activationEvidence.length > 1 ? ` · equal-time candidate ${index + 1}/${activationEvidence.length}` : ''}</div>
+            <div class="ss-muted mono">${runField(activation, 'activated_at')} · tool use ${runField(activation, 'skill_tool_use_id')} · trace ${item.trace_id} · owner ${item.owner.status}</div>
+          </div>
+        `
+      })}
       ${composition ? html`
         <div>
           <div class="font-semibold">
@@ -752,7 +753,7 @@ export function SkillsPanel() {
                   <div class="grid gap-3 p-2 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
                     <div><strong>Execution flow</strong>${row.surface && row.surface.kind !== 'unavailable' ? html`<${SkillFlowView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
                     <div>
-                      <div class="mb-2 flex items-center justify-between"><strong>Latest evidence</strong><button class="ss-btn" type="button" disabled=${evidenceLoading.value === rowKey} onClick=${async () => {
+                      <div class="mb-2 flex items-center justify-between"><strong>Retained evidence</strong><button class="ss-btn" type="button" disabled=${evidenceLoading.value === rowKey} onClick=${async () => {
                         if (!row.surface) return
                         evidenceLoading.value = rowKey
                         try { evidence.value = { ...evidence.value, [rowKey]: await fetchSkillEvidence(row.surface.reference) } }

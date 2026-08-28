@@ -179,6 +179,14 @@ def required_string(value: dict[str, Any], field: str, context: str) -> str:
     return cast(str, result)
 
 
+def required_sha256(value: dict[str, Any], field: str, context: str) -> str:
+    result = required_string(value, field, context)
+    require(
+        SHA256_RE.fullmatch(result) is not None, f"{context}.{field} is not SHA-256"
+    )
+    return result
+
+
 def required_number(value: dict[str, Any], field: str, context: str) -> float:
     result = value.get(field)
     require(
@@ -291,6 +299,18 @@ def validate_health(
     build = cast(dict[str, Any], build)
     paths = cast(dict[str, Any], paths)
     binary_commit = required_string(build, "binary_commit", "health.build")
+    source_fingerprint = required_sha256(build, "source_fingerprint", "health.build")
+    executable_sha256 = required_sha256(build, "executable_sha256", "health.build")
+    executable_provenance_path = required_string(
+        build, "executable_provenance_path", "health.build"
+    )
+    require(
+        Path(executable_provenance_path).is_absolute(),
+        "health.build.executable_provenance_path is not absolute",
+    )
+    executable_provenance_sha256 = required_sha256(
+        build, "executable_provenance_sha256", "health.build"
+    )
     require(binary_commit == source["head"], "server binary differs from source HEAD")
     require(
         build.get("binary_commit_source") == "embedded",
@@ -305,6 +325,10 @@ def validate_health(
     validate_runtime_instance_id(runtime_instance_id)
     return {
         "binary_commit": binary_commit,
+        "source_fingerprint": source_fingerprint,
+        "executable_sha256": executable_sha256,
+        "executable_provenance_path": executable_provenance_path,
+        "executable_provenance_sha256": executable_provenance_sha256,
         "runtime_instance_id": runtime_instance_id,
         "started_at": required_string(build, "started_at", "health.build"),
         "effective_base_path": effective_base_path,
@@ -372,9 +396,7 @@ class McpClient:
             headers["Mcp-Protocol-Version"] = self.protocol_version
         request = Request(self.endpoint, data=payload, headers=headers, method="POST")
         try:
-            with proof_http.open_no_redirect(
-                request, timeout=self.timeout
-            ) as response:
+            with proof_http.open_no_redirect(request, timeout=self.timeout) as response:
                 body = response.read()
                 session_id = response.headers.get("Mcp-Session-Id")
                 if session_id is not None:
@@ -416,9 +438,7 @@ class McpClient:
             method="POST",
         )
         try:
-            with proof_http.open_no_redirect(
-                request, timeout=self.timeout
-            ) as response:
+            with proof_http.open_no_redirect(request, timeout=self.timeout) as response:
                 response.read()
         except (HTTPError, URLError, OSError) as error:
             raise ProducerError(

@@ -513,6 +513,10 @@ describe('Tools', () => {
         ?.getAttribute('data-ledger-revision'),
     ).toBe('c'.repeat(64))
     expect(
+      container.querySelector('[data-testid="skill-activation-ledger"]')
+        ?.getAttribute('data-keeper-name'),
+    ).toBe('sangsu')
+    expect(
       Array.from(container.querySelectorAll('[data-testid="skill-activation-row"]'))
         .map(row => row.getAttribute('data-skill-tool-use-id')),
     ).toEqual(['call-skill-1'])

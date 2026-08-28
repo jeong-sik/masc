@@ -8,6 +8,16 @@ let source_root () =
 let run_local_script_path () =
   Filename.concat (Filename.concat (source_root ()) "scripts") "run-local.sh"
 
+let runtime_artifact_contract_script_path () =
+  Filename.concat
+    (Filename.concat (source_root ()) "scripts/lib")
+    "runtime-artifact-contract.sh"
+
+let run_local_executable_binding_script_path () =
+  Filename.concat
+    (Filename.concat (source_root ()) "scripts")
+    "run-local-executable-binding.py"
+
 let build_dashboard_if_needed_script_path () =
   Filename.concat
     (Filename.concat (source_root ()) "scripts")
@@ -112,33 +122,98 @@ let write_keeper_seed repo_root =
     (Filename.concat repo_root "config/keepers/alpha.toml")
     "[keeper]\nautoboot_enabled = true\ninstructions = \"Keep working autonomously.\"\n"
 
-let write_fake_eio_exe exe_path =
+let write_fake_eio_exe ~commit exe_path =
   mkdir_p (Filename.dirname exe_path);
   let content =
-    {|
+    Printf.sprintf
+      {|
 #!/bin/sh
 set -eu
+if [ "${1:-}" = "build-commit" ]; then
+  printf '%%s\n' %s
+  exit 0
+fi
 capture="${FAKE_CAPTURE_FILE:?}"
 {
-  printf 'MASC_BASE_PATH=%s\n' "${MASC_BASE_PATH:-}"
-  printf 'MASC_CONFIG_DIR=%s\n' "${MASC_CONFIG_DIR:-}"
-  printf 'MASC_GRPC_ENABLED=%s\n' "${MASC_GRPC_ENABLED:-}"
-  printf 'MASC_WS_ENABLED=%s\n' "${MASC_WS_ENABLED:-}"
-  printf 'ARGS=%s\n' "$*"
+  printf 'MASC_BASE_PATH=%%s\n' "${MASC_BASE_PATH:-}"
+  printf 'MASC_CONFIG_DIR=%%s\n' "${MASC_CONFIG_DIR:-}"
+  printf 'MASC_GRPC_ENABLED=%%s\n' "${MASC_GRPC_ENABLED:-}"
+  printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
+  printf 'ARGS=%%s\n' "$*"
 } >"$capture"
 exit 0
 |}
+      (Filename.quote commit)
   in
   write_executable exe_path content
+
+let run_git ~cwd args =
+  let argv = Array.of_list ("git" :: args) in
+  let code, stdout, stderr = run_process ~cwd "git" argv in
+  if code <> 0 then
+    failf "git %s failed (%d)\nstdout:\n%s\nstderr:\n%s"
+      (String.concat " " args) code stdout stderr;
+  String.trim stdout
+
+let git_commit_all repo_root message =
+  ignore (run_git ~cwd:repo_root [ "add"; "." ]);
+  ignore
+    (run_git ~cwd:repo_root
+       [ "-c"; "user.name=Run Local Test"; "-c";
+         "user.email=run-local@example.invalid"; "commit"; "-q"; "-m";
+       message ])
 
 let setup_fake_repo root =
   let repo_root = Filename.concat root "repo" in
   let scripts_dir = Filename.concat repo_root "scripts" in
+  let scripts_lib_dir = Filename.concat scripts_dir "lib" in
   let build_dir = Filename.concat repo_root "_build/default/bin" in
   mkdir_p scripts_dir;
+  mkdir_p scripts_lib_dir;
   ignore (make_config_root repo_root);
   copy_script (run_local_script_path ()) (Filename.concat scripts_dir "run-local.sh");
-  write_fake_eio_exe (Filename.concat build_dir "main_eio.exe");
+  copy_script
+    (runtime_artifact_contract_script_path ())
+    (Filename.concat scripts_lib_dir "runtime-artifact-contract.sh");
+  copy_script
+    (run_local_executable_binding_script_path ())
+    (Filename.concat scripts_dir "run-local-executable-binding.py");
+  write_executable
+    (Filename.concat scripts_dir "dune-build-input-fingerprint.py")
+    {|
+#!/bin/sh
+set -eu
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+build_dir="${DUNE_BUILD_DIR:-$repo_root/_build}"
+receipt=0
+for argument in "$@"; do
+  if [ "$argument" = "--receipt" ]; then receipt=1; fi
+done
+if [ -n "${FAKE_DUNE_INPUT_CHANGED_FILE:-}" ] && [ -f "$FAKE_DUNE_INPUT_CHANGED_FILE" ]; then
+  fingerprint="$(printf '%064d' 1 | tr '1' 'd')"
+else
+  fingerprint="$(printf '%064d' 1 | tr '1' 'b')"
+fi
+if [ "$receipt" = "1" ]; then
+  printf 'masc.dune-build-input-receipt.v1\n%s\n%s\n' \
+    "$build_dir/default/bin/main_eio.exe" "$fingerprint"
+else
+  printf '%s\n' "$fingerprint"
+fi
+|};
+  write_executable
+    (Filename.concat scripts_dir "dune-local.sh")
+    {|
+#!/bin/sh
+set -eu
+if [ -n "${FAKE_DUNE_BUILD_HOOK:-}" ]; then
+  "$FAKE_DUNE_BUILD_HOOK"
+fi
+|};
+  ignore (run_git ~cwd:repo_root [ "init"; "-q" ]);
+  git_commit_all repo_root "fixture";
+  let commit = run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ] in
+  write_fake_eio_exe ~commit (Filename.concat build_dir "main_eio.exe");
   repo_root
 
 let test_bootstraps_local_config_and_sets_http_only_env () =
@@ -176,7 +251,34 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
       check bool "ws disabled by default" true
         (String_util.contains_substring captured "MASC_WS_ENABLED=0");
       check bool "port passed through" true
-        (String_util.contains_substring captured "ARGS=--host=127.0.0.1 --port=9955"))
+        (String_util.contains_substring captured "ARGS=--host=127.0.0.1 --port=9955");
+      let private_root = Filename.concat repo_root ".git/masc-run-local-artifacts" in
+      let provenance_dir = Filename.concat private_root "provenance" in
+      let provenance_files = Sys.readdir provenance_dir |> Array.to_list in
+      let provenance_path =
+        match provenance_files with
+        | [ name ] -> Filename.concat provenance_dir name
+        | _ -> fail "run-local did not materialize exactly one provenance sidecar"
+      in
+      let provenance = Yojson.Safe.from_file provenance_path in
+      let open Yojson.Safe.Util in
+      check string
+        "sidecar commit matches exact worktree"
+        (run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ])
+        (provenance |> member "binary_commit" |> to_string);
+      check int
+        "sidecar has SHA-256 build-input fingerprint"
+        64
+        (provenance |> member "build_input_fingerprint" |> to_string |> String.length);
+      check bool
+        "launch uses content-addressed provenance path"
+        true
+        (String_util.contains_substring captured
+           ("--build-provenance-path=" ^ Unix.realpath provenance_path));
+      check bool
+        "sidecar binds executable inode"
+        true
+        (provenance |> member "executable_inode" |> to_int >= 0))
 
 let test_bootstrap_keepers_flag_is_opt_in () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -393,6 +495,339 @@ let test_bootstrap_only_materializes_state_without_exec () =
       check bool "bootstrap ready message" true
         (String_util.contains_substring stderr "[local-run] Bootstrap ready"))
 
+let setup_linked_worktree_fixture ?(advance_head = true) ?(dirty_common = false) root
+    ~local_binary =
+  let common_root = setup_fake_repo root in
+  let old_commit = run_git ~cwd:common_root [ "rev-parse"; "HEAD" ] in
+  let worktree_root = Filename.concat root "worktree" in
+  ignore
+    (run_git ~cwd:common_root
+       [ "worktree"; "add"; "-q"; "-b"; "feature"; worktree_root ]);
+  if advance_head then begin
+    mkdir_p (Filename.concat worktree_root "lib");
+    write_file (Filename.concat worktree_root "lib/feature.ml") "let exact = true\n";
+    git_commit_all worktree_root "feature source"
+  end;
+  if dirty_common then begin
+    mkdir_p (Filename.concat common_root "lib");
+    write_file (Filename.concat common_root "lib/dirty.ml") "let uncommitted = true\n";
+    write_fake_eio_exe ~commit:old_commit
+      (Filename.concat common_root "_build/default/bin/main_eio.exe")
+  end;
+  let exact_commit = run_git ~cwd:worktree_root [ "rev-parse"; "HEAD" ] in
+  let local_exe = Filename.concat worktree_root "_build/default/bin/main_eio.exe" in
+  (match local_binary with
+   | `Absent -> ()
+   | `Stale ->
+     write_fake_eio_exe ~commit:old_commit local_exe);
+  let built_exe = Filename.concat root "built-main-eio.exe" in
+  write_fake_eio_exe ~commit:exact_commit built_exe;
+  let build_marker = Filename.concat root "build.marker" in
+  write_executable
+    (Filename.concat worktree_root "scripts/dune-local.sh")
+    {|
+#!/bin/sh
+set -eu
+: "${FAKE_BUILD_EXE:?}"
+: "${BUILD_MARKER:?}"
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+mkdir -p "$repo_root/_build/default/bin"
+cp "$FAKE_BUILD_EXE" "$repo_root/_build/default/bin/main_eio.exe"
+printf 'built\n' >"$BUILD_MARKER"
+|};
+  common_root, worktree_root, exact_commit, built_exe, build_marker
+
+let check_worktree_binary_selected_after_build ?(advance_head = true)
+    ?(dirty_common = false) local_binary =
+  with_temp_dir "run-local-linked" (fun dir ->
+      let common_root, worktree_root, exact_commit, built_exe, build_marker =
+        setup_linked_worktree_fixture ~advance_head ~dirty_common dir ~local_binary
+      in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let script = Filename.concat worktree_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_process ~cwd:worktree_root script
+          ~env:[ ("FAKE_BUILD_EXE", built_exe); ("BUILD_MARKER", build_marker) ]
+          [| script; "--target-dir"; target; "--bootstrap-only" |]
+      in
+      if code <> 0 then
+        failf "linked run-local failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      let local_exe = Filename.concat worktree_root "_build/default/bin/main_eio.exe" in
+      let common_exe = Filename.concat common_root "_build/default/bin/main_eio.exe" in
+      check bool "build invoked" true (Sys.file_exists build_marker);
+      check bool "worktree binary selected" true
+        (String_util.contains_substring stderr ("Binary: " ^ local_exe));
+      check bool "common binary not selected" false
+        (String_util.contains_substring stderr ("Binary: " ^ common_exe));
+      check bool "bootstrap reports exact embedded commit" true
+        (String_util.contains_substring stderr ("Binary commit: " ^ exact_commit)))
+
+let test_common_binary_does_not_win_when_worktree_binary_is_absent () =
+  check_worktree_binary_selected_after_build `Absent
+
+let test_common_binary_does_not_win_when_worktree_binary_is_stale () =
+  check_worktree_binary_selected_after_build `Stale
+
+let test_same_commit_common_binary_is_not_worktree_authority () =
+  check_worktree_binary_selected_after_build ~advance_head:false ~dirty_common:true
+    `Absent
+
+let test_exact_local_binary_is_validated_by_dune () =
+  with_temp_dir "run-local-no-build" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let exact_commit = run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ] in
+      let code, stdout, stderr =
+        run_process ~cwd:repo_root script
+          [| script; "--target-dir"; target; "--bootstrap-only" |]
+      in
+      if code <> 0 then
+        failf "exact local run-local failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      check bool "Dune validation is explicit" true
+        (String_util.contains_substring stderr "Validating local binary with Dune");
+      check bool "bootstrap reports exact embedded commit" true
+        (String_util.contains_substring stderr ("Binary commit: " ^ exact_commit)))
+
+let test_custom_dune_build_dir_is_the_launch_authority () =
+  with_temp_dir "run-local-custom-build-dir" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let commit = run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ] in
+      let custom_build = Filename.concat dir "custom-build" in
+      let custom_exe = Filename.concat custom_build "default/bin/main_eio.exe" in
+      write_fake_eio_exe ~commit custom_exe;
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:[ "DUNE_BUILD_DIR", custom_build ]
+          [| script; "--target-dir"; target; "--bootstrap-only" |]
+      in
+      if code <> 0 then
+        failf "custom DUNE_BUILD_DIR failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      check bool "custom Dune target selected" true
+        (String_util.contains_substring stderr ("Binary: " ^ custom_exe)))
+
+let test_dune_dry_run_is_rejected_for_exact_launch () =
+  with_temp_dir "run-local-dry-run" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, _stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:[ "MASC_DUNE_DRY_RUN", "1" ]
+          [| script; "--target-dir"; target; "--bootstrap-only" |]
+      in
+      check bool "Dune dry-run rejected" true (code <> 0);
+      check bool "dry-run rejection is explicit" true
+        (String_util.contains_substring stderr
+           "does not accept MASC_DUNE_DRY_RUN=1"))
+
+let test_dune_input_change_before_exec_is_rejected () =
+  with_temp_dir "run-local-dune-input-race" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let changed = Filename.concat dir "dune-input-changed" in
+      let fake_bin = Filename.concat dir "bin" in
+      mkdir_p fake_bin;
+      write_executable
+        (Filename.concat fake_bin "lsof")
+        {|
+#!/bin/sh
+set -eu
+: >"${FAKE_DUNE_INPUT_CHANGED_FILE:?}"
+exit 1
+|};
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let path =
+        Printf.sprintf "%s:%s" fake_bin
+          (Option.value ~default:"" (Sys.getenv_opt "PATH"))
+      in
+      let code, stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:
+            [ "PATH", path
+            ; "FAKE_DUNE_INPUT_CHANGED_FILE", changed
+            ; "FAKE_CAPTURE_FILE", Filename.concat dir "capture"
+            ]
+          [| script; "--target-dir"; target |]
+      in
+      check bool "Dune input race rejected" true (code <> 0);
+      check bool "Dune identity error is explicit" true
+        (String_util.contains_substring stderr
+           "Dune input or executable identity changed before local server exec");
+      check bool "race marker materialized" true (Sys.file_exists changed);
+      ignore stdout)
+
+let test_mutable_build_path_replacement_blocks_exec () =
+  with_temp_dir "run-local-build-path-race" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let fake_bin = Filename.concat dir "bin" in
+      mkdir_p fake_bin;
+      let built_exe = Filename.concat repo_root "_build/default/bin/main_eio.exe" in
+      write_executable
+        (Filename.concat fake_bin "lsof")
+        {|
+#!/bin/sh
+set -eu
+cat >"${BUILT_RACE_PATH:?}" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = "build-commit" ]; then
+  printf 'foreign-commit\n'
+  exit 0
+fi
+exit 99
+EOF
+chmod 755 "$BUILT_RACE_PATH"
+exit 1
+|};
+      let capture = Filename.concat dir "captured-env.txt" in
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let path =
+        Printf.sprintf "%s:%s" fake_bin
+          (Option.value ~default:"" (Sys.getenv_opt "PATH"))
+      in
+      let code, _stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:
+            [ "PATH", path
+            ; "BUILT_RACE_PATH", built_exe
+            ; "FAKE_CAPTURE_FILE", capture
+            ]
+          [| script; "--target-dir"; target |]
+      in
+      check bool "build path race is rejected" true (code <> 0);
+      check bool "stale binary never executed" false (Sys.file_exists capture);
+      check bool "error names the changed build identity" true
+        (String_util.contains_substring stderr
+           "Built binary commit differs from source commit"))
+
+let test_same_commit_swap_before_binding_is_rejected_before_rebuild () =
+  with_temp_dir "run-local-binding-race" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let scripts_dir = Filename.concat repo_root "scripts" in
+      let binding_script = Filename.concat scripts_dir "run-local-executable-binding.py" in
+      let real_binding_script = binding_script ^ ".real" in
+      Sys.rename binding_script real_binding_script;
+      write_executable binding_script
+        {|
+#!/bin/sh
+set -eu
+cp "${SWAPPED_EXE_PATH:?}" "${BUILT_RACE_PATH:?}"
+chmod 755 "${BUILT_RACE_PATH}"
+exec "$(dirname "$0")/run-local-executable-binding.py.real" "$@"
+|};
+      let built_exe = Filename.concat repo_root "_build/default/bin/main_eio.exe" in
+      let original_exe = Filename.concat dir "original-main-eio.exe" in
+      let swapped_exe = Filename.concat dir "swapped-main-eio.exe" in
+      let commit = run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ] in
+      write_file original_exe (read_file built_exe);
+      Unix.chmod original_exe 0o755;
+      write_fake_eio_exe ~commit swapped_exe;
+      write_file swapped_exe (read_file swapped_exe ^ "\n# same commit, different bytes\n");
+      Unix.chmod swapped_exe 0o755;
+      let build_count = Filename.concat dir "build-count" in
+      let rebuild_hook = Filename.concat dir "rebuild-hook.sh" in
+      write_executable rebuild_hook
+        {|
+#!/bin/sh
+set -eu
+count=0
+if [ -f "${BUILD_COUNT_FILE:?}" ]; then count="$(cat "$BUILD_COUNT_FILE")"; fi
+count=$((count + 1))
+printf '%s\n' "$count" >"$BUILD_COUNT_FILE"
+if [ "$count" -ge 2 ]; then
+  cp "${ORIGINAL_EXE_PATH:?}" "${BUILT_RACE_PATH:?}"
+  chmod 755 "${BUILT_RACE_PATH}"
+fi
+|};
+      let capture = Filename.concat dir "captured-env.txt" in
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, _stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:
+            [ "BUILT_RACE_PATH", built_exe
+            ; "SWAPPED_EXE_PATH", swapped_exe
+            ; "ORIGINAL_EXE_PATH", original_exe
+            ; "BUILD_COUNT_FILE", build_count
+            ; "FAKE_DUNE_BUILD_HOOK", rebuild_hook
+            ; "FAKE_CAPTURE_FILE", capture
+            ]
+          [| script; "--target-dir"; target |]
+      in
+      check bool "same-commit byte swap rejected" true (code <> 0);
+      check bool "swapped executable never launched" false (Sys.file_exists capture);
+      check string "rebuild cannot erase the observed mismatch" "1" (String.trim (read_file build_count));
+      check bool "error names initial-to-binding mismatch" true
+        (String_util.contains_substring stderr
+           "Materialized executable differs from the initial Dune executable"))
+
+let test_malformed_binding_receipt_is_rejected () =
+  List.iter
+    (fun (corruption, label) ->
+       with_temp_dir ("run-local-receipt-" ^ corruption) (fun dir ->
+           let repo_root = setup_fake_repo dir in
+           let target = Filename.concat dir "target" in
+           mkdir_p target;
+           let scripts_dir = Filename.concat repo_root "scripts" in
+           let binding_script = Filename.concat scripts_dir "run-local-executable-binding.py" in
+           let real_binding_script = binding_script ^ ".real" in
+           Sys.rename binding_script real_binding_script;
+           write_executable binding_script
+             {|
+#!/bin/sh
+set -eu
+receipt="$(mktemp "${TMPDIR:-/tmp}/fake-launch-receipt.XXXXXX")"
+trap 'rm -f "$receipt"' EXIT
+"$(dirname "$0")/run-local-executable-binding.py.real" "$@" >"$receipt"
+{
+  IFS= read -r schema
+  IFS= read -r executable
+  IFS= read -r executable_sha
+  IFS= read -r provenance
+  IFS= read -r provenance_sha
+  IFS= read -r provenance_device
+  IFS= read -r provenance_inode
+} <"$receipt"
+case "${FAKE_RECEIPT_CORRUPTION:?}" in
+  schema) schema='masc.invalid-launch-binding.v1' ;;
+  metadata) provenance_device='not-an-integer' ;;
+  *) exit 2 ;;
+esac
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+  "$schema" "$executable" "$executable_sha" "$provenance" \
+  "$provenance_sha" "$provenance_device" "$provenance_inode"
+|};
+           let capture = Filename.concat dir "captured-env.txt" in
+           let script = Filename.concat repo_root "scripts/run-local.sh" in
+           let code, _stdout, stderr =
+             run_process ~cwd:repo_root script
+               ~env:
+                 [ "FAKE_RECEIPT_CORRUPTION", corruption
+                 ; "FAKE_CAPTURE_FILE", capture
+                 ]
+               [| script; "--target-dir"; target |]
+           in
+           check bool (label ^ " rejected") true (code <> 0);
+           check bool (label ^ " never launched") false (Sys.file_exists capture);
+           check bool (label ^ " exact error") true
+             (String_util.contains_substring stderr
+                "Executable binding did not return an exact launch receipt")))
+    [ "schema", "malformed schema"; "metadata", "malformed metadata" ]
+
 let () =
   run "run_local_script"
     [
@@ -415,5 +850,25 @@ let () =
             test_explicit_config_env_is_preserved_without_bootstrap;
           test_case "bootstrap-only materializes state without exec" `Quick
             test_bootstrap_only_materializes_state_without_exec;
+          test_case "common binary loses when worktree binary is absent" `Quick
+            test_common_binary_does_not_win_when_worktree_binary_is_absent;
+          test_case "common binary loses when worktree binary is stale" `Quick
+            test_common_binary_does_not_win_when_worktree_binary_is_stale;
+          test_case "same-commit common binary is not worktree authority" `Quick
+            test_same_commit_common_binary_is_not_worktree_authority;
+          test_case "exact local binary is validated by Dune" `Quick
+            test_exact_local_binary_is_validated_by_dune;
+          test_case "custom Dune build dir is launch authority" `Quick
+            test_custom_dune_build_dir_is_the_launch_authority;
+          test_case "Dune dry-run is rejected for exact launch" `Quick
+            test_dune_dry_run_is_rejected_for_exact_launch;
+          test_case "Dune input change before exec is rejected" `Quick
+            test_dune_input_change_before_exec_is_rejected;
+          test_case "mutable build path replacement blocks exec" `Quick
+            test_mutable_build_path_replacement_blocks_exec;
+          test_case "same-commit swap before binding is rejected before rebuild" `Quick
+            test_same_commit_swap_before_binding_is_rejected_before_rebuild;
+          test_case "malformed binding receipt is rejected" `Quick
+            test_malformed_binding_receipt_is_rejected;
         ] );
     ]

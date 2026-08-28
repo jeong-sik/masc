@@ -137,6 +137,10 @@ def fixture():
         "build": {
             "binary_commit": SHA,
             "binary_commit_source": "embedded",
+            "source_fingerprint": "f" * 64,
+            "executable_sha256": "a" * 64,
+            "executable_provenance_path": "/private/provenance.json",
+            "executable_provenance_sha256": "b" * 64,
             "runtime_instance_id": INSTANCE,
             "started_at": "2026-08-27T00:00:00Z",
         },
@@ -160,6 +164,18 @@ def refresh_projection(dashboard, ledger):
 
 
 class KeeperSkillUseProofTest(unittest.TestCase):
+    def test_dashboard_capture_rejects_same_head_server_restart(self):
+        health, _dashboard, _ledger = fixture()
+        restarted = copy.deepcopy(health)
+        restarted["build"]["runtime_instance_id"] = (
+            "018f1d5e-7b3c-7abc-8def-0123456789ac"
+        )
+
+        with self.assertRaisesRegex(
+            proof.ProofError, "server identity changed during Dashboard capture"
+        ):
+            proof.require_same_server(health, restarted)
+
     def test_dashboard_capture_uses_exact_keeper_and_ledger_scoped_rows(self):
         calls = []
 
@@ -187,12 +203,20 @@ class KeeperSkillUseProofTest(unittest.TestCase):
                 return True
 
         class Panel:
+            def __init__(self, keeper_after_screenshot=None):
+                self.keeper_name = "previous-keeper"
+                self.ledger_revision = "previous-revision"
+                self.keeper_after_screenshot = keeper_after_screenshot
+
             def wait_for(self, *, state, timeout):
                 calls.append(("wait_for", state, timeout))
 
             def get_attribute(self, name):
                 calls.append(("panel_attribute", name))
-                return "ledger-revision"
+                return {
+                    "data-keeper-name": self.keeper_name,
+                    "data-ledger-revision": self.ledger_revision,
+                }.get(name)
 
             def locator(self, selector):
                 calls.append(("panel_locator", selector))
@@ -200,6 +224,8 @@ class KeeperSkillUseProofTest(unittest.TestCase):
 
             def screenshot(self, *, path):
                 calls.append(("panel_screenshot", Path(path).name))
+                if self.keeper_after_screenshot is not None:
+                    self.keeper_name = self.keeper_after_screenshot
 
         class KeeperSelect:
             selected = ""
@@ -215,8 +241,9 @@ class KeeperSkillUseProofTest(unittest.TestCase):
                 return self.selected
 
         class Page:
-            def __init__(self):
+            def __init__(self, keeper_after_screenshot=None):
                 self.keeper_select = KeeperSelect()
+                self.panel = Panel(keeper_after_screenshot)
 
             def goto(self, url, *, wait_until, timeout):
                 calls.append(("goto", url, wait_until, timeout))
@@ -227,7 +254,12 @@ class KeeperSkillUseProofTest(unittest.TestCase):
 
             def locator(self, selector):
                 calls.append(("page_locator", selector))
-                return Panel()
+                return self.panel
+
+            def wait_for_function(self, expression, *, arg, timeout):
+                calls.append(("wait_for_function", tuple(arg), timeout))
+                self.panel.keeper_name = arg[1]
+                self.panel.ledger_revision = arg[2]
 
         with tempfile.TemporaryDirectory() as raw:
             proof.capture_dashboard_page(
@@ -253,6 +285,18 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         )
         self.assertIn(("get_by_role", "combobox", "Keeper", True), calls)
         self.assertIn(("select_option", "keeper-one"), calls)
+        self.assertIn(
+            (
+                "wait_for_function",
+                (
+                    '[data-testid="skill-activation-ledger"]',
+                    "keeper-one",
+                    "ledger-revision",
+                ),
+                30_000,
+            ),
+            calls,
+        )
         self.assertIn(("panel_locator", '[data-testid="skill-activation-row"]'), calls)
         self.assertIn(("scroll_row", "call-skill-1"), calls)
         self.assertIn(("row_visible", "call-skill-1"), calls)
@@ -260,9 +304,7 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         self.assertNotIn(
             ("page_locator", '[data-testid="skill-activation-row"]'), calls
         )
-        screenshot_index = calls.index(
-            ("panel_screenshot", "dashboard-skill-use.png")
-        )
+        screenshot_index = calls.index(("panel_screenshot", "dashboard-skill-use.png"))
         row_identity_checks = [
             index
             for index, call in enumerate(calls)
@@ -282,6 +324,29 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         ]
         self.assertTrue(any(index < screenshot_index for index in revision_checks))
         self.assertTrue(any(index > screenshot_index for index in revision_checks))
+        keeper_checks = [
+            index
+            for index, call in enumerate(calls)
+            if call == ("panel_attribute", "data-keeper-name")
+        ]
+        self.assertTrue(any(index < screenshot_index for index in keeper_checks))
+        self.assertTrue(any(index > screenshot_index for index in keeper_checks))
+
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaisesRegex(
+                proof.ProofError, "changed Keeper while taking the screenshot"
+            ):
+                proof.capture_dashboard_page(
+                    page=Page(keeper_after_screenshot="keeper-two"),
+                    dashboard_url=(
+                        "http://127.0.0.1:9934/dashboard/"
+                        f"{proof.DASHBOARD_SKILL_RECEIPTS_ROUTE}"
+                    ),
+                    keeper="keeper-one",
+                    skill_tool_use_id="call-skill-1",
+                    ledger_revision="ledger-revision",
+                    screenshot=Path(raw) / "dashboard-skill-use.png",
+                )
 
     def test_strict_http_reads_send_bearer_without_serializing_it(self):
         token = "strict-proof-token"
@@ -298,9 +363,7 @@ class KeeperSkillUseProofTest(unittest.TestCase):
 
         def open_request(request, timeout):
             self.assertEqual(timeout, 3.0)
-            self.assertEqual(
-                request.get_header("Authorization"), f"Bearer {token}"
-            )
+            self.assertEqual(request.get_header("Authorization"), f"Bearer {token}")
             return Response()
 
         with mock.patch.object(
@@ -485,6 +548,13 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         health["build"]["binary_commit"] = "0" * 64
 
         with self.assertRaisesRegex(proof.ProofError, "binary commit does not match"):
+            self.validate(health, dashboard, ledger)
+
+    def test_rejects_unbound_executable_identity(self):
+        health, dashboard, ledger = fixture()
+        health["build"]["source_fingerprint"] = None
+
+        with self.assertRaisesRegex(proof.ProofError, "source_fingerprint"):
             self.validate(health, dashboard, ledger)
 
     def test_rejects_non_full_health_response(self):

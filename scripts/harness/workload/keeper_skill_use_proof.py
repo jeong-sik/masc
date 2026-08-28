@@ -471,6 +471,30 @@ def validate_proof(
         string_field(build, "binary_commit", "health.build") == expected_source_sha,
         "live binary commit does not match expected source SHA",
     )
+    source_fingerprint = string_field(build, "source_fingerprint", "health.build")
+    require(
+        SHA256_RE.fullmatch(source_fingerprint) is not None,
+        "live source fingerprint is not SHA-256",
+    )
+    executable_sha256 = string_field(build, "executable_sha256", "health.build")
+    require(
+        SHA256_RE.fullmatch(executable_sha256) is not None,
+        "live executable digest is not SHA-256",
+    )
+    executable_provenance_path = string_field(
+        build, "executable_provenance_path", "health.build"
+    )
+    require(
+        Path(executable_provenance_path).is_absolute(),
+        "live executable provenance path is not absolute",
+    )
+    executable_provenance_sha256 = string_field(
+        build, "executable_provenance_sha256", "health.build"
+    )
+    require(
+        SHA256_RE.fullmatch(executable_provenance_sha256) is not None,
+        "live executable provenance digest is not SHA-256",
+    )
     runtime_instance_id(build, "health.build")
     string_field(build, "started_at", "health.build")
 
@@ -626,6 +650,10 @@ def validate_proof(
         "workspace_key": string_field(ledger, "workspace_key", "skill ledger"),
         "session_id": string_field(ledger, "session_id", "skill ledger"),
         "ledger_revision": string_field(ledger, "revision", "skill ledger"),
+        "source_fingerprint": source_fingerprint,
+        "executable_sha256": executable_sha256,
+        "executable_provenance_path": executable_provenance_path,
+        "executable_provenance_sha256": executable_provenance_sha256,
         "reference": {
             "source_id": reference_key(activation, "activation")[0],
             "package_id": reference_key(activation, "activation")[1],
@@ -641,6 +669,30 @@ def validate_proof(
         "actions": actions,
         "scoped_summary": scoped[0],
     }
+
+
+def server_identity(health: dict[str, Any]) -> dict[str, str]:
+    build = object_field(health, "build", "health")
+    return {
+        field: string_field(build, field, "health.build")
+        for field in (
+            "binary_commit",
+            "binary_commit_source",
+            "source_fingerprint",
+            "executable_sha256",
+            "executable_provenance_path",
+            "executable_provenance_sha256",
+            "runtime_instance_id",
+            "started_at",
+        )
+    }
+
+
+def require_same_server(before: dict[str, Any], after: dict[str, Any]) -> None:
+    require(
+        server_identity(after) == server_identity(before),
+        "server identity changed during Dashboard capture",
+    )
 
 
 def capture_dashboard_page(
@@ -665,6 +717,24 @@ def capture_dashboard_page(
     )
     panel = page.locator('[data-testid="skill-activation-ledger"]')
     panel.wait_for(state="visible", timeout=30_000)
+    page.wait_for_function(
+        """([selector, keeper, revision]) => {
+          const panel = document.querySelector(selector);
+          return panel !== null
+            && panel.getAttribute('data-keeper-name') === keeper
+            && panel.getAttribute('data-ledger-revision') === revision;
+        }""",
+        arg=[
+            '[data-testid="skill-activation-ledger"]',
+            keeper,
+            ledger_revision,
+        ],
+        timeout=30_000,
+    )
+    require(
+        panel.get_attribute("data-keeper-name") == keeper,
+        "Dashboard panel belongs to another Keeper after selection",
+    )
     require(
         panel.get_attribute("data-ledger-revision") == ledger_revision,
         "Dashboard advanced to another ledger revision during capture",
@@ -693,6 +763,10 @@ def capture_dashboard_page(
         "Dashboard exact Skill invocation row is not visible for capture",
     )
     require(
+        panel.get_attribute("data-keeper-name") == keeper,
+        "Dashboard panel changed Keeper before taking the screenshot",
+    )
+    require(
         panel.get_attribute("data-ledger-revision") == ledger_revision,
         "Dashboard ledger revision changed before taking the screenshot",
     )
@@ -701,6 +775,10 @@ def capture_dashboard_page(
         "Dashboard exact Skill invocation row changed before capture",
     )
     panel.screenshot(path=str(screenshot))
+    require(
+        panel.get_attribute("data-keeper-name") == keeper,
+        "Dashboard panel changed Keeper while taking the screenshot",
+    )
     require(
         panel.get_attribute("data-ledger-revision") == ledger_revision,
         "Dashboard ledger revision changed while taking the screenshot",
@@ -813,9 +891,7 @@ def main() -> int:
         expected_source_tree=source_before["tree"],
     )
 
-    health, health_raw = read_json(
-        f"{base_url}/health?full=1", args.timeout, token
-    )
+    health, health_raw = read_json(f"{base_url}/health?full=1", args.timeout, token)
     dashboard_url = (
         f"{base_url}/api/v1/dashboard/tools?keeper={quote(args.keeper, safe='')}"
     )
@@ -869,6 +945,10 @@ def main() -> int:
         output=args.out,
         token=token,
     )
+    health_after, _health_after_raw = read_json(
+        f"{base_url}/health?full=1", args.timeout, token
+    )
+    require_same_server(health, health_after)
     source_after = source_snapshot(repo)
     require(
         source_after == source_before,
@@ -888,6 +968,10 @@ def main() -> int:
             "binary_commit_source": object_field(health, "build", "health").get(
                 "binary_commit_source"
             ),
+            "source_fingerprint": proof["source_fingerprint"],
+            "executable_sha256": proof["executable_sha256"],
+            "executable_provenance_path": proof["executable_provenance_path"],
+            "executable_provenance_sha256": proof["executable_provenance_sha256"],
             "server_started_at": string_field(
                 object_field(health, "build", "health"),
                 "started_at",

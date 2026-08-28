@@ -150,6 +150,7 @@ function ActivationReceipt({
     <div
       class="grid gap-2"
       data-testid="skill-activation-ledger"
+      data-keeper-name=${projection.keeper_name}
       data-ledger-revision=${projection.ledger.revision}
     >
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="skill-use-summary">

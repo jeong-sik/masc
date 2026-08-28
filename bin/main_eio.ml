@@ -404,6 +404,22 @@ let run_base_path =
   in
   Arg.(value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc)
 
+let build_provenance_path =
+  let doc = "Absolute content-addressed executable provenance sidecar path" in
+  Arg.(value & opt (some string) None & info ["build-provenance-path"] ~docv:"PATH" ~doc)
+
+let build_provenance_sha256 =
+  let doc = "Expected SHA-256 of --build-provenance-path" in
+  Arg.(value & opt (some string) None & info ["build-provenance-sha256"] ~docv:"SHA256" ~doc)
+
+let build_provenance_device =
+  let doc = "Expected device number of --build-provenance-path" in
+  Arg.(value & opt (some int) None & info ["build-provenance-device"] ~docv:"DEVICE" ~doc)
+
+let build_provenance_inode =
+  let doc = "Expected inode number of --build-provenance-path" in
+  Arg.(value & opt (some int) None & info ["build-provenance-inode"] ~docv:"INODE" ~doc)
+
 let login_json =
   let doc = "Emit machine-readable JSON instead of text output" in
   Arg.(value & flag & info ["json"] ~doc)
@@ -836,9 +852,23 @@ let run_cmd host port cli_base_path =
             Masc.Shutdown.await_deadline_watchdog watchdog));
   Log.Server.info "MASC MCP: Shutdown complete."
 
-let run_cmd_exit host port base_path =
-  run_cmd host port base_path;
-  Cmd.Exit.ok
+let run_cmd_exit host port base_path provenance_path provenance_sha256 provenance_device provenance_inode =
+  match provenance_path, provenance_sha256, provenance_device, provenance_inode with
+  | None, None, None, None ->
+    run_cmd host port base_path;
+    Cmd.Exit.ok
+  | Some path, Some sha256, Some device, Some inode ->
+    (match Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode with
+     | Ok () ->
+       run_cmd host port base_path;
+       Cmd.Exit.ok
+     | Error message ->
+       Printf.eprintf "invalid build provenance: %s\n" message;
+       Cmd.Exit.some_error)
+  | _ ->
+    Printf.eprintf
+      "all build provenance path, SHA-256, device, and inode fields must be provided together\n";
+    Cmd.Exit.cli_error
 
 let login_cmd_exit base_path host port agent role client_env no_expiry
     expiry_hours as_json as_shell =
@@ -886,7 +916,8 @@ let start_cmd =
      subcommand; exposed as an explicit name for quick-start guides."
   in
   let info = Cmd.info "start" ~doc in
-  Cmd.v info Term.(const run_cmd_exit $ host $ port $ run_base_path)
+  Cmd.v info
+    Term.(const run_cmd_exit $ host $ port $ run_base_path $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
@@ -1211,6 +1242,19 @@ let keeper_github_cmd =
     (Cmd.info "keeper-github" ~doc:"Manage Keeper-specific GitHub CLI identity.")
     [ login; status; logout ]
 
+let build_commit_cmd_exit () =
+  match (Build_identity.current ()).binary_commit with
+  | Some commit ->
+      print_endline commit;
+      0
+  | None ->
+      prerr_endline "build commit is not embedded";
+      1
+
+let build_commit_cmd =
+  let doc = "Print the Git commit embedded in this server binary at build time." in
+  Cmd.v (Cmd.info "build-commit" ~doc) Term.(const build_commit_cmd_exit $ const ())
+
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
      main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
@@ -1230,7 +1274,9 @@ let setup_gc () =
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc" ~version:Runtime_build_version.current ~doc in
-  Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ run_base_path)
+  Cmd.group
+    ~default:
+      Term.(const run_cmd_exit $ host $ port $ run_base_path $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
     info
     [ init_cmd
     ; start_cmd
@@ -1239,6 +1285,7 @@ let cmd =
     ; runtime_wizard_catalog_cmd
     ; schedule_prune_cmd
     ; keeper_github_cmd
+    ; build_commit_cmd
     ]
 
 let () =

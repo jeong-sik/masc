@@ -141,14 +141,13 @@ let run_command_with_status ?turn_sandbox_factory
     match resolve_result with
     | Runtime _ -> false
     (* [Remote_ssh_profile]: no turn runtime exists (SSH runner is Phase 1
-    (* [Remote_ssh_profile]: no turn runtime exists (SSH runner is Phase 1
        task 6); the match below fails closed on it before the image guard
        or any Docker fallback can claim the call. *)
     | Backend_unimplemented _ | No_factory | Local_profile | Remote_ssh_profile -> true
   in
   match resolve_result with
   | Remote_ssh_profile -> Error remote_ssh_read_unavailable
-  | Runtime _ | No_factory | Local_profile ->
+  | Runtime _ | Backend_unimplemented _ | No_factory | Local_profile ->
   if no_runtime && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else if command_argv = [] then

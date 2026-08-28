@@ -193,7 +193,13 @@ let run_command_with_status ~config ~meta ~timeout_sec ~host ~backend =
     Error
       "remote_ssh_dispatch_unavailable: SSH runner not wired yet (Phase 1 \
        task 6); no fallback to docker or host dispatch"
-  | (Keeper_types_profile_sandbox.Docker | Keeper_types_profile_sandbox.Local), _
+  (* [Micro_vm] routes exactly as on main: [uses_backend] classifies it as
+     the sandbox backend, and the docker-shell entrypoints refuse the
+     profile themselves before building an argv. *)
+  | ( Keeper_types_profile_sandbox.Docker
+    | Keeper_types_profile_sandbox.Micro_vm
+    | Keeper_types_profile_sandbox.Local )
+    , _
     ->
     (match route_for ~config ~meta ~cwd:backend.route_cwd with
      | Sandbox_backend ->

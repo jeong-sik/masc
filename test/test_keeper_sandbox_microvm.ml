@@ -172,7 +172,9 @@ let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
        "factory still refuses Micro_vm; the turn runtime now carries the \
         profile and must be resolved"
    | No_factory | Local_profile ->
-     Alcotest.fail "expected a runtime for Micro_vm");
+     Alcotest.fail "expected a runtime for Micro_vm"
+   | Remote_ssh_profile ->
+     Alcotest.fail "microvm meta must never resolve to Remote_ssh_profile");
   Masc.Keeper_sandbox_factory.cleanup factory
 
 let test_turn_start_argv_shape () =

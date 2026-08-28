@@ -76,6 +76,30 @@ let env_array ~unset_env overrides =
     table []
   |> Array.of_list
 
+let dashboard_test_path () =
+  let ambient_path = Option.value ~default:"" (Sys.getenv_opt "PATH") in
+  let directories = String.split_on_char ':' ambient_path in
+  let find_directory command =
+    match directories |> List.find_map (fun directory ->
+           let directory = if String.equal directory "" then Sys.getcwd () else directory in
+           let candidate = Filename.concat directory command in
+           try
+             Unix.access candidate [ Unix.X_OK ];
+             Some (Unix.realpath directory)
+           with
+           | Unix.Unix_error _ -> None)
+    with
+    | Some directory -> directory
+    | None -> Alcotest.failf "required test command is missing: %s" command
+  in
+  [ "node"; "pnpm"; "python3"; "git"; "mkdir"; "bash" ]
+  |> List.map find_directory
+  |> List.fold_left
+       (fun unique directory ->
+          if List.mem directory unique then unique else unique @ [ directory ])
+       []
+  |> String.concat ":"
+
 let run_process ?(env = []) ?(unset_env = []) ~cwd prog argv =
   let out = Filename.temp_file "run-local-out" ".txt" in
   let err = Filename.temp_file "run-local-err" ".txt" in
@@ -170,7 +194,20 @@ let setup_fake_repo root =
   let build_dir = Filename.concat repo_root "_build/default/bin" in
   mkdir_p scripts_dir;
   mkdir_p scripts_lib_dir;
+  mkdir_p (Filename.concat repo_root "dashboard/node_modules/vite");
+  mkdir_p (Filename.concat repo_root "assets/dashboard");
   ignore (make_config_root repo_root);
+  write_file (Filename.concat repo_root "dashboard/.gitignore") "node_modules/\n";
+  write_file
+    (Filename.concat repo_root "dashboard/package.json")
+    {|{"name":"run-local-fixture","version":"1.0.0","devDependencies":{"vite":"7.3.5"}}|};
+  write_file (Filename.concat repo_root "dashboard/pnpm-lock.yaml") "lockfileVersion: '9.0'\n";
+  write_file (Filename.concat repo_root "dashboard/index.html") "source dashboard\n";
+  write_file
+    (Filename.concat repo_root "dashboard/node_modules/vite/package.json")
+    {|{"version":"7.3.5"}|};
+  write_file (Filename.concat repo_root "assets/dashboard/index.html") "built dashboard\n";
+  write_file (Filename.concat repo_root "assets/dashboard/.build-stamp") "fixture\n";
   copy_script (run_local_script_path ()) (Filename.concat scripts_dir "run-local.sh");
   copy_script
     (runtime_artifact_contract_script_path ())
@@ -270,6 +307,10 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
         "sidecar has SHA-256 build-input fingerprint"
         64
         (provenance |> member "build_input_fingerprint" |> to_string |> String.length);
+      check string
+        "sidecar binds exact source root"
+        (Unix.realpath repo_root)
+        (provenance |> member "source_root" |> to_string);
       check bool
         "launch uses content-addressed provenance path"
         true
@@ -354,13 +395,89 @@ let test_build_dashboard_flag_is_opt_in () =
       check bool "helper not invoked without flag" false (Sys.file_exists marker);
       let code_flag, stdout_flag, stderr_flag =
         run_process ~cwd:repo_root script
-          ~env:[ ("FAKE_CAPTURE_FILE", capture); ("DASHBOARD_MARKER", marker) ]
+          ~env:
+            [ ("FAKE_CAPTURE_FILE", capture)
+            ; ("DASHBOARD_MARKER", marker)
+            ; ("PATH", dashboard_test_path ())
+            ]
           [| script; "--target-dir"; target; "--port"; "9957"; "--build-dashboard" |]
       in
       if code_flag <> 0 then
         failf "run-local with flag failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code_flag stdout_flag stderr_flag;
       check bool "helper invoked with flag" true (Sys.file_exists marker))
+
+let test_dashboard_build_runs_after_binary_validation () =
+  with_temp_dir "run-local-dashboard-order" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let binary_marker = Filename.concat dir "binary-validated.marker" in
+      let receipt_tmp = Filename.concat dir "receipt-tmp" in
+      mkdir_p receipt_tmp;
+      let build_hook = Filename.concat dir "binary-build-hook.sh" in
+      write_executable build_hook
+        "#!/bin/sh\nset -eu\n: > \"${BINARY_VALIDATED_MARKER:?}\"\n";
+      let helper = Filename.concat repo_root "scripts/build-dashboard-if-needed.sh" in
+      write_executable helper
+        "#!/bin/sh\nset -eu\n[ -f \"${BINARY_VALIDATED_MARKER:?}\" ]\n";
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:
+            [ "BINARY_VALIDATED_MARKER", binary_marker
+            ; "FAKE_DUNE_BUILD_HOOK", build_hook
+            ; "PATH", dashboard_test_path ()
+            ; "TMPDIR", receipt_tmp
+            ]
+          [|
+            script;
+            "--target-dir";
+            target;
+            "--bootstrap-only";
+            "--build-dashboard";
+          |]
+      in
+      if code <> 0 then
+        failf "dashboard ordering launch failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      check bool "binary validation happened before dashboard build" true
+        (Sys.file_exists binary_marker);
+      let leaked_build_receipts =
+        Sys.readdir receipt_tmp
+        |> Array.to_list
+        |> List.filter (String.starts_with ~prefix:"masc-dashboard-build-receipt.")
+      in
+      check (list string) "bootstrap-only removes build receipt" [] leaked_build_receipts)
+
+let test_dashboard_build_precedes_launch_binding () =
+  with_temp_dir "run-local-dashboard-binding-order" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let provenance_dir =
+        Filename.concat repo_root ".git/masc-run-local-artifacts/provenance"
+      in
+      let helper = Filename.concat repo_root "scripts/build-dashboard-if-needed.sh" in
+      write_executable helper
+        "#!/bin/sh\nset -eu\nset -- \"${LAUNCH_PROVENANCE_DIR:?}\"/*.json\n[ ! -f \"$1\" ]\n";
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let capture = Filename.concat dir "captured-env.txt" in
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:
+            [ "LAUNCH_PROVENANCE_DIR", provenance_dir
+            ; "FAKE_CAPTURE_FILE", capture
+            ; "PATH", dashboard_test_path ()
+            ]
+          [| script; "--target-dir"; target; "--port"; "9972"; "--build-dashboard" |]
+      in
+      if code <> 0 then
+        failf "dashboard binding order launch failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      check bool "server launched after dashboard build" true (Sys.file_exists capture);
+      check bool "launch binding follows successful dashboard build" true
+        (Sys.file_exists provenance_dir))
 
 let test_dashboard_build_helper_rebuilds_remote_startup_resource_output () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -555,7 +672,10 @@ let check_worktree_binary_selected_after_build ?(advance_head = true)
       if code <> 0 then
         failf "linked run-local failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code stdout stderr;
-      let local_exe = Filename.concat worktree_root "_build/default/bin/main_eio.exe" in
+      let local_exe =
+        Filename.concat worktree_root "_build/default/bin/main_eio.exe"
+        |> Unix.realpath
+      in
       let common_exe = Filename.concat common_root "_build/default/bin/main_eio.exe" in
       check bool "build invoked" true (Sys.file_exists build_marker);
       check bool "worktree binary selected" true
@@ -574,6 +694,53 @@ let test_common_binary_does_not_win_when_worktree_binary_is_stale () =
 let test_same_commit_common_binary_is_not_worktree_authority () =
   check_worktree_binary_selected_after_build ~advance_head:false ~dirty_common:true
     `Absent
+
+let test_linked_worktree_launch_binds_worktree_dashboard_assets () =
+  with_temp_dir "run-local-linked-assets" (fun dir ->
+      let common_root, worktree_root, _exact_commit, built_exe, build_marker =
+        setup_linked_worktree_fixture dir ~local_binary:`Absent
+      in
+      let write_dashboard root marker =
+        let dashboard = Filename.concat root "assets/dashboard" in
+        mkdir_p dashboard;
+        write_file (Filename.concat dashboard "index.html") marker
+      in
+      write_dashboard common_root "common-dashboard";
+      write_dashboard worktree_root "worktree-dashboard";
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let capture = Filename.concat dir "captured-env.txt" in
+      let script = Filename.concat worktree_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_process ~cwd:worktree_root script
+          ~env:
+            [ "FAKE_BUILD_EXE", built_exe
+            ; "BUILD_MARKER", build_marker
+            ; "FAKE_CAPTURE_FILE", capture
+            ]
+          [| script; "--target-dir"; target; "--port"; "9971" |]
+      in
+      if code <> 0 then
+        failf "linked asset launch failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      let provenance_dir =
+        Filename.concat common_root ".git/masc-run-local-artifacts/provenance"
+      in
+      let provenance_path =
+        match Sys.readdir provenance_dir |> Array.to_list with
+        | [ name ] -> Filename.concat provenance_dir name
+        | _ -> fail "linked asset launch did not produce one provenance sidecar"
+      in
+      let source_root =
+        Yojson.Safe.from_file provenance_path
+        |> Yojson.Safe.Util.member "source_root"
+        |> Yojson.Safe.Util.to_string
+      in
+      check string "worktree is the bound source authority"
+        (Unix.realpath worktree_root) source_root;
+      check string "bound dashboard sentinel is the worktree sentinel"
+        "worktree-dashboard"
+        (read_file (Filename.concat source_root "assets/dashboard/index.html")))
 
 let test_exact_local_binary_is_validated_by_dune () =
   with_temp_dir "run-local-no-build" (fun dir ->
@@ -726,6 +893,9 @@ let test_same_commit_swap_before_binding_is_rejected_before_rebuild () =
         {|
 #!/bin/sh
 set -eu
+if [ "${1:-}" = "--inspect-source-root" ]; then
+  exec "$(dirname "$0")/run-local-executable-binding.py.real" "$@"
+fi
 cp "${SWAPPED_EXE_PATH:?}" "${BUILT_RACE_PATH:?}"
 chmod 755 "${BUILT_RACE_PATH}"
 exec "$(dirname "$0")/run-local-executable-binding.py.real" "$@"
@@ -790,6 +960,9 @@ let test_malformed_binding_receipt_is_rejected () =
              {|
 #!/bin/sh
 set -eu
+if [ "${1:-}" = "--inspect-source-root" ]; then
+  exec "$(dirname "$0")/run-local-executable-binding.py.real" "$@"
+fi
 receipt="$(mktemp "${TMPDIR:-/tmp}/fake-launch-receipt.XXXXXX")"
 trap 'rm -f "$receipt"' EXIT
 "$(dirname "$0")/run-local-executable-binding.py.real" "$@" >"$receipt"
@@ -839,6 +1012,10 @@ let () =
             test_print_port_is_stable_for_target_dir;
           test_case "build-dashboard flag is opt-in" `Quick
             test_build_dashboard_flag_is_opt_in;
+          test_case "dashboard build follows binary validation" `Quick
+            test_dashboard_build_runs_after_binary_validation;
+          test_case "dashboard build precedes launch binding" `Quick
+            test_dashboard_build_precedes_launch_binding;
           test_case "dashboard helper rebuilds stale remote startup resources"
             `Quick
             test_dashboard_build_helper_rebuilds_remote_startup_resource_output;
@@ -856,6 +1033,8 @@ let () =
             test_common_binary_does_not_win_when_worktree_binary_is_stale;
           test_case "same-commit common binary is not worktree authority" `Quick
             test_same_commit_common_binary_is_not_worktree_authority;
+          test_case "linked worktree launch binds its dashboard assets" `Quick
+            test_linked_worktree_launch_binds_worktree_dashboard_assets;
           test_case "exact local binary is validated by Dune" `Quick
             test_exact_local_binary_is_validated_by_dune;
           test_case "custom Dune build dir is launch authority" `Quick

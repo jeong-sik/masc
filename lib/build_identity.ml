@@ -337,12 +337,124 @@ let commit_resolution =
 type executable_provenance =
   { binary_commit : string
   ; build_input_fingerprint : string
+  ; source_root : string
+  ; source_root_device : int
+  ; source_root_inode : int
+  ; dashboard_assets : dashboard_assets_provenance option
   ; executable_sha256 : string
   ; executable_device : int
   ; executable_inode : int
   }
 
-let executable_provenance_schema = "masc.run-local-executable-identity.v1"
+and dashboard_asset_entry =
+  { relative_path : string
+  ; size : int
+  ; sha256 : string
+  }
+
+and dashboard_assets_provenance =
+  { source_root : string
+  ; snapshot_root : string
+  ; snapshot_device : int
+  ; snapshot_inode : int
+  ; tree_sha256 : string
+  ; build_source_commit : string
+  ; build_head_tree : string
+  ; build_index_tree : string
+  ; build_input_sha256 : string
+  ; build_input_file_count : int
+  ; build_input_matches_head : bool
+  ; build_lock_sha256 : string
+  ; build_mode : string
+  ; build_environment_path : string
+  ; build_environment_path_identity_sha256 : string
+  ; build_environment_path_executable_sha256 : string
+  ; build_environment_path_executable_count : int
+  ; build_environment_profile_sha256 : string
+  ; build_producer : string
+  ; build_node_executable : string
+  ; build_node_executable_sha256 : string
+  ; build_node_version : string
+  ; build_node_platform : string
+  ; build_node_arch : string
+  ; build_package_manager_kind : string
+  ; build_package_manager_executable : string
+  ; build_package_manager_executable_sha256 : string
+  ; build_pnpm_version : string
+  ; build_vite_version : string
+  ; build_installed_graph_metadata_sha256 : string
+  ; build_installed_graph_metadata_count : int
+  ; files : dashboard_asset_entry list
+  }
+
+type source_root_invalid_reason =
+  | Source_root_unreadable
+  | Source_root_not_canonical
+  | Source_root_not_directory
+  | Source_root_owner_differs
+  | Source_root_device_differs
+  | Source_root_inode_differs
+
+type launch_source_root_state =
+  | Unbound
+  | Bound_valid of string
+  | Bound_invalid of source_root_invalid_reason
+
+type dashboard_asset_invalid_reason =
+  | Dashboard_source_root_invalid of source_root_invalid_reason
+  | Dashboard_snapshot_unreadable
+  | Dashboard_snapshot_not_canonical
+  | Dashboard_snapshot_metadata_differs
+  | Dashboard_asset_metadata_differs
+
+type dashboard_asset_resolution =
+  | Dashboard_assets_unbound
+  | Dashboard_assets_invalid of dashboard_asset_invalid_reason
+  | Dashboard_assets_unavailable
+  | Dashboard_asset_not_manifested
+  | Dashboard_asset_bound of
+      { path : string
+      ; launch_source_root : string
+      ; launch_source_device : int
+      ; launch_source_inode : int
+      ; expected_size : int
+      ; expected_sha256 : string
+      ; tree_sha256 : string
+      ; snapshot_root : string
+      ; snapshot_device : int
+      ; snapshot_inode : int
+      ; file_count : int
+      ; build_source_commit : string
+      ; build_head_tree : string
+      ; build_index_tree : string
+      ; build_input_sha256 : string
+      ; build_input_file_count : int
+      ; build_input_matches_head : bool
+      ; build_lock_sha256 : string
+      ; build_mode : string
+      ; build_environment_path : string
+      ; build_environment_path_identity_sha256 : string
+      ; build_environment_path_executable_sha256 : string
+      ; build_environment_path_executable_count : int
+      ; build_environment_profile_sha256 : string
+      ; build_producer : string
+      ; build_node_executable : string
+      ; build_node_executable_sha256 : string
+      ; build_node_version : string
+      ; build_node_platform : string
+      ; build_node_arch : string
+      ; build_package_manager_kind : string
+      ; build_package_manager_executable : string
+      ; build_package_manager_executable_sha256 : string
+      ; build_pnpm_version : string
+      ; build_vite_version : string
+      ; build_installed_graph_metadata_sha256 : string
+      ; build_installed_graph_metadata_count : int
+      }
+
+
+let executable_provenance_schema = "masc.run-local-executable-identity.v2"
+let dashboard_assets_schema = "masc.run-local-dashboard-assets.v1"
 let sha256_hex_length = Digestif.SHA256.digest_size * 2
 
 let valid_sha256 value =
@@ -376,23 +488,350 @@ let parse_executable_provenance
     | [] -> Error (Printf.sprintf "executable provenance %s is missing" name)
     | _ -> Error (Printf.sprintf "executable provenance %s is duplicated" name)
   in
+  let required_bool fields name =
+    match List.find_all (fun (field, _) -> String.equal field name) fields with
+    | [ _, `Bool value ] -> Ok value
+    | [ _ ] -> Error (Printf.sprintf "executable provenance %s is not a boolean" name)
+    | [] -> Error (Printf.sprintf "executable provenance %s is missing" name)
+    | _ -> Error (Printf.sprintf "executable provenance %s is duplicated" name)
+  in
+  let required_assoc fields name =
+    match List.find_all (fun (field, _) -> String.equal field name) fields with
+    | [ _, `Assoc value ] -> Ok value
+    | [ _ ] -> Error (Printf.sprintf "executable provenance %s is not an object" name)
+    | [] -> Error (Printf.sprintf "executable provenance %s is missing" name)
+    | _ -> Error (Printf.sprintf "executable provenance %s is duplicated" name)
+  in
+  let required_list fields name =
+    match List.find_all (fun (field, _) -> String.equal field name) fields with
+    | [ _, `List value ] -> Ok value
+    | [ _ ] -> Error (Printf.sprintf "executable provenance %s is not a list" name)
+    | [] -> Error (Printf.sprintf "executable provenance %s is missing" name)
+    | _ -> Error (Printf.sprintf "executable provenance %s is duplicated" name)
+  in
+  let safe_relative_path value =
+    String.length value > 0
+    && Filename.is_relative value
+    && not (String.contains value '\\')
+    && not (String.contains value '\000')
+    && (String.split_on_char '/' value
+        |> List.for_all (fun segment ->
+          String.length segment > 0
+          && not (String.equal segment ".")
+          && not (String.equal segment "..")))
+  in
+  let valid_lower_hex ~length value =
+    String.length value = length
+    && String.for_all
+         (function
+           | '0' .. '9' | 'a' .. 'f' -> true
+           | _ -> false)
+         value
+  in
+  let has_exact_fields fields expected =
+    List.sort String.compare (List.map fst fields)
+    = List.sort String.compare expected
+  in
+  let dashboard_asset_fields =
+    [ "build_receipt"
+    ; "file_count"
+    ; "files"
+    ; "schema"
+    ; "snapshot_device"
+    ; "snapshot_inode"
+    ; "snapshot_root"
+    ; "source_root"
+    ; "state"
+    ; "tree_sha256"
+    ]
+  in
+  let dashboard_build_receipt_fields =
+    [ "build_mode"
+    ; "environment_path"
+    ; "environment_path_executable_count"
+    ; "environment_path_executable_sha256"
+    ; "environment_path_identity_sha256"
+    ; "environment_profile_sha256"
+    ; "head_tree"
+    ; "index_tree"
+    ; "input_file_count"
+    ; "input_matches_head"
+    ; "input_sha256"
+    ; "installed_graph_metadata_count"
+    ; "installed_graph_metadata_sha256"
+    ; "lock_sha256"
+    ; "node_arch"
+    ; "node_executable"
+    ; "node_executable_sha256"
+    ; "node_platform"
+    ; "node_version"
+    ; "output_file_count"
+    ; "output_tree_sha256"
+    ; "package_manager_executable"
+    ; "package_manager_executable_sha256"
+    ; "package_manager_kind"
+    ; "pnpm_version"
+    ; "producer"
+    ; "schema"
+    ; "source_commit"
+    ; "source_root"
+    ; "source_root_device"
+    ; "source_root_inode"
+    ; "vite_version"
+    ]
+  in
+  let executable_provenance_fields =
+    [ "binary_commit"
+    ; "build_input_fingerprint"
+    ; "dashboard_assets"
+    ; "executable_device"
+    ; "executable_inode"
+    ; "executable_sha256"
+    ; "schema"
+    ; "source_root"
+    ; "source_root_device"
+    ; "source_root_inode"
+    ]
+  in
+  let parse_dashboard_assets
+        ~launch_source_root
+        ~launch_source_device
+        ~launch_source_inode
+        fields
+    =
+    let* state = required_string fields "state" in
+    if String.equal state "unavailable"
+    then (
+      let* reason = required_string fields "reason" in
+      if has_exact_fields fields [ "reason"; "state" ]
+         && String.equal reason "build_receipt_missing"
+      then Ok None
+      else Error "executable provenance dashboard unavailable state is invalid")
+    else if not (String.equal state "available")
+    then Error "executable provenance dashboard asset state is unsupported"
+    else
+    let* schema = required_string fields "schema" in
+    let* source_root = required_string fields "source_root" in
+    let* snapshot_root = required_string fields "snapshot_root" in
+    let* snapshot_device = required_nonnegative_int fields "snapshot_device" in
+    let* snapshot_inode = required_nonnegative_int fields "snapshot_inode" in
+    let* tree_sha256 = required_string fields "tree_sha256" in
+    let* file_count = required_nonnegative_int fields "file_count" in
+    let* raw_files = required_list fields "files" in
+    let* build_receipt = required_assoc fields "build_receipt" in
+    let* build_schema = required_string build_receipt "schema" in
+    let* build_producer = required_string build_receipt "producer" in
+    let* build_source_root = required_string build_receipt "source_root" in
+    let* build_source_device = required_nonnegative_int build_receipt "source_root_device" in
+    let* build_source_inode = required_nonnegative_int build_receipt "source_root_inode" in
+    let* build_source_commit = required_string build_receipt "source_commit" in
+    let* build_head_tree = required_string build_receipt "head_tree" in
+    let* build_index_tree = required_string build_receipt "index_tree" in
+    let* build_input_sha256 = required_string build_receipt "input_sha256" in
+    let* build_input_file_count = required_nonnegative_int build_receipt "input_file_count" in
+    let* build_input_matches_head = required_bool build_receipt "input_matches_head" in
+    let* build_lock_sha256 = required_string build_receipt "lock_sha256" in
+    let* build_mode = required_string build_receipt "build_mode" in
+    let* build_environment_path = required_string build_receipt "environment_path" in
+    let* build_environment_path_identity_sha256 = required_string build_receipt "environment_path_identity_sha256" in
+    let* build_environment_path_executable_sha256 = required_string build_receipt "environment_path_executable_sha256" in
+    let* build_environment_path_executable_count = required_nonnegative_int build_receipt "environment_path_executable_count" in
+    let* build_environment_profile_sha256 = required_string build_receipt "environment_profile_sha256" in
+    let* build_node_executable = required_string build_receipt "node_executable" in
+    let* build_node_executable_sha256 = required_string build_receipt "node_executable_sha256" in
+    let* build_node_version = required_string build_receipt "node_version" in
+    let* build_node_platform = required_string build_receipt "node_platform" in
+    let* build_node_arch = required_string build_receipt "node_arch" in
+    let* build_package_manager_kind = required_string build_receipt "package_manager_kind" in
+    let* build_package_manager_executable = required_string build_receipt "package_manager_executable" in
+    let* build_package_manager_executable_sha256 = required_string build_receipt "package_manager_executable_sha256" in
+    let* build_pnpm_version = required_string build_receipt "pnpm_version" in
+    let* build_vite_version = required_string build_receipt "vite_version" in
+    let* build_installed_graph_metadata_sha256 = required_string build_receipt "installed_graph_metadata_sha256" in
+    let* build_installed_graph_metadata_count = required_nonnegative_int build_receipt "installed_graph_metadata_count" in
+    let* build_output_sha256 = required_string build_receipt "output_tree_sha256" in
+    let* build_output_count = required_nonnegative_int build_receipt "output_file_count" in
+    let parse_file = function
+      | `Assoc file_fields when has_exact_fields file_fields [ "path"; "sha256"; "size" ] ->
+        let* relative_path = required_string file_fields "path" in
+        let* size = required_nonnegative_int file_fields "size" in
+        let* sha256 = required_string file_fields "sha256" in
+        if not (safe_relative_path relative_path)
+        then Error "executable provenance dashboard asset path is invalid"
+        else if not (valid_sha256 sha256)
+        then Error "executable provenance dashboard asset digest is invalid"
+        else Ok { relative_path; size; sha256 }
+      | `Assoc _ -> Error "executable provenance dashboard asset has unsupported fields"
+      | _ -> Error "executable provenance dashboard asset is not an object"
+    in
+    let rec parse_files acc = function
+      | [] -> Ok (List.rev acc)
+      | raw_file :: rest ->
+        let* file = parse_file raw_file in
+        parse_files (file :: acc) rest
+    in
+    let* files = parse_files [] raw_files in
+    let unique_paths =
+      files
+      |> List.map (fun file -> file.relative_path)
+      |> List.sort_uniq String.compare
+    in
+    let ordered_paths = List.map (fun file -> file.relative_path) files in
+    let canonical_tree_sha256 =
+      `List
+        (List.map
+           (fun file ->
+             `Assoc
+               [ "path", `String file.relative_path
+               ; "sha256", `String file.sha256
+               ; "size", `Int file.size
+               ])
+           files)
+      |> Yojson.Safe.to_string
+      |> fun value -> Digestif.SHA256.(digest_string value |> to_hex)
+    in
+    let environment_paths = String.split_on_char ':' build_environment_path in
+    let environment_paths_are_valid =
+      environment_paths <> []
+      && List.for_all
+           (fun path -> String_util.trim_nonempty path <> None && not (Filename.is_relative path))
+           environment_paths
+      && List.length environment_paths
+         = List.length (List.sort_uniq String.compare environment_paths)
+    in
+    if not (has_exact_fields fields dashboard_asset_fields)
+    then Error "executable provenance dashboard assets has unsupported fields"
+    else if not (has_exact_fields build_receipt dashboard_build_receipt_fields)
+    then Error "executable provenance dashboard build receipt has unsupported fields"
+    else if not (String.equal schema dashboard_assets_schema)
+    then Error "executable provenance dashboard assets schema is unsupported"
+    else if not (String.equal build_schema "masc.run-local-dashboard-build.v1")
+    then Error "executable provenance dashboard build receipt schema is unsupported"
+    else if not (String.equal build_producer "scripts/build-dashboard-if-needed.sh --prepare-exact + --build-exact")
+    then Error "executable provenance dashboard build producer is unsupported"
+    else if not (String.equal build_mode "production")
+    then Error "executable provenance dashboard build mode is unsupported"
+    else if not environment_paths_are_valid
+    then Error "executable provenance dashboard build environment path is invalid"
+    else if Filename.is_relative source_root || Filename.is_relative snapshot_root
+    then Error "executable provenance dashboard asset root is not absolute"
+    else if not (valid_sha256 tree_sha256)
+    then Error "executable provenance dashboard tree digest is invalid"
+    else if not (String.equal canonical_tree_sha256 tree_sha256)
+    then Error "executable provenance dashboard tree digest differs from manifest"
+    else if not (valid_sha256 build_input_sha256)
+    then Error "executable provenance dashboard input digest is invalid"
+    else if not (valid_sha256 build_lock_sha256)
+            || not (valid_sha256 build_environment_path_identity_sha256)
+            || not (valid_sha256 build_environment_path_executable_sha256)
+            || not (valid_sha256 build_environment_profile_sha256)
+            || not (valid_sha256 build_node_executable_sha256)
+            || not (valid_sha256 build_package_manager_executable_sha256)
+            || not (valid_sha256 build_installed_graph_metadata_sha256)
+    then Error "executable provenance dashboard build identity digest is invalid"
+    else if Filename.is_relative build_node_executable
+            || Filename.is_relative build_package_manager_executable
+    then Error "executable provenance dashboard toolchain path is not absolute"
+    else if build_environment_path_executable_count = 0
+    then Error "executable provenance dashboard PATH executable inventory is empty"
+    else if List.exists
+              (fun value -> String_util.trim_nonempty value = None)
+              [ build_node_version
+              ; build_node_platform
+              ; build_node_arch
+              ; build_pnpm_version
+              ; build_vite_version
+              ]
+    then Error "executable provenance dashboard toolchain identity is blank"
+    else if not (String.equal build_package_manager_kind "pnpm"
+                 || String.equal build_package_manager_kind "corepack")
+    then Error "executable provenance dashboard package-manager kind is invalid"
+    else if not (valid_lower_hex ~length:40 build_head_tree)
+            || not (valid_lower_hex ~length:40 build_index_tree)
+    then Error "executable provenance dashboard source tree identity is invalid"
+    else if not (String.equal source_root (Filename.concat launch_source_root "assets/dashboard"))
+    then Error "executable provenance dashboard source asset root differs"
+    else if not (String.equal build_source_commit expected_binary_commit)
+    then Error "executable provenance dashboard source commit differs"
+    else if not (String.equal build_source_root launch_source_root)
+            || build_source_device <> launch_source_device
+            || build_source_inode <> launch_source_inode
+    then Error "executable provenance dashboard source identity differs"
+    else if not (String.equal build_output_sha256 tree_sha256)
+            || build_output_count <> file_count
+    then Error "executable provenance dashboard output identity differs"
+    else if file_count <> List.length files
+    then Error "executable provenance dashboard file count differs"
+    else if List.length unique_paths <> List.length files
+    then Error "executable provenance dashboard asset paths are duplicated"
+    else if ordered_paths <> List.sort String.compare ordered_paths
+    then Error "executable provenance dashboard asset paths are not ordered"
+    else if not (List.exists (fun file -> String.equal file.relative_path "index.html") files)
+    then Error "executable provenance dashboard index is missing"
+    else
+      Ok (Some
+        { source_root
+        ; snapshot_root
+        ; snapshot_device
+        ; snapshot_inode
+        ; tree_sha256
+        ; build_source_commit
+        ; build_head_tree
+        ; build_index_tree
+        ; build_input_sha256
+        ; build_input_file_count
+        ; build_input_matches_head
+        ; build_lock_sha256
+        ; build_mode
+        ; build_environment_path
+        ; build_environment_path_identity_sha256
+        ; build_environment_path_executable_sha256
+        ; build_environment_path_executable_count
+        ; build_environment_profile_sha256
+        ; build_producer
+        ; build_node_executable
+        ; build_node_executable_sha256
+        ; build_node_version
+        ; build_node_platform
+        ; build_node_arch
+        ; build_package_manager_kind
+        ; build_package_manager_executable
+        ; build_package_manager_executable_sha256
+        ; build_pnpm_version
+        ; build_vite_version
+        ; build_installed_graph_metadata_sha256
+        ; build_installed_graph_metadata_count
+        ; files
+        })
+  in
   match Yojson.Safe.from_string raw with
   | exception Yojson.Json_error message -> Error ("invalid executable provenance JSON: " ^ message)
-  | `Assoc fields ->
+  | `Assoc fields when has_exact_fields fields executable_provenance_fields ->
     let* schema = required_string fields "schema" in
     let* binary_commit = required_string fields "binary_commit" in
     let* build_input_fingerprint = required_string fields "build_input_fingerprint" in
+    let* source_root = required_string fields "source_root" in
+    let* source_root_device = required_nonnegative_int fields "source_root_device" in
+    let* source_root_inode = required_nonnegative_int fields "source_root_inode" in
+    let* dashboard_assets_fields = required_assoc fields "dashboard_assets" in
+    let* dashboard_assets =
+      parse_dashboard_assets
+        ~launch_source_root:source_root
+        ~launch_source_device:source_root_device
+        ~launch_source_inode:source_root_inode
+        dashboard_assets_fields
+    in
     let* executable_sha256 = required_string fields "executable_sha256" in
     let* executable_device = required_nonnegative_int fields "executable_device" in
     let* executable_inode = required_nonnegative_int fields "executable_inode" in
-    if List.length fields <> 6
-    then Error "executable provenance has unsupported fields"
-    else if not (String.equal schema executable_provenance_schema)
+    if not (String.equal schema executable_provenance_schema)
     then Error "executable provenance schema is unsupported"
     else if not (String.equal binary_commit expected_binary_commit)
     then Error "executable provenance binary commit differs"
     else if not (valid_sha256 build_input_fingerprint)
     then Error "executable provenance build-input fingerprint is invalid"
+    else if Filename.is_relative source_root
+    then Error "executable provenance source root is not absolute"
     else if not (valid_sha256 executable_sha256)
     then Error "executable provenance executable digest is invalid"
     else if not (String.equal executable_sha256 expected_executable_sha256)
@@ -405,10 +844,15 @@ let parse_executable_provenance
       Ok
         { binary_commit
         ; build_input_fingerprint
+        ; source_root
+        ; source_root_device
+        ; source_root_inode
+        ; dashboard_assets
         ; executable_sha256
         ; executable_device
         ; executable_inode
         }
+  | `Assoc _ -> Error "executable provenance has unsupported fields"
   | _ -> Error "executable provenance is not an object"
 ;;
 
@@ -423,6 +867,42 @@ let sha256_channel ic =
 ;;
 
 let sha256_string value = Digestif.SHA256.(digest_string value |> to_hex)
+
+let validate_source_root_identity provenance =
+  try
+    let canonical_source_root = Unix.realpath provenance.source_root in
+    let source_root_stat = Unix.stat canonical_source_root in
+    if not (String.equal canonical_source_root provenance.source_root)
+    then Bound_invalid Source_root_not_canonical
+    else if source_root_stat.st_kind <> Unix.S_DIR
+    then Bound_invalid Source_root_not_directory
+    else if source_root_stat.st_uid <> Unix.geteuid ()
+    then Bound_invalid Source_root_owner_differs
+    else if source_root_stat.st_dev <> provenance.source_root_device
+    then Bound_invalid Source_root_device_differs
+    else if source_root_stat.st_ino <> provenance.source_root_inode
+    then Bound_invalid Source_root_inode_differs
+    else Bound_valid provenance.source_root
+  with
+  | Sys_error _ | Unix.Unix_error _ -> Bound_invalid Source_root_unreadable
+;;
+
+let validate_dashboard_snapshot_identity dashboard_assets =
+  try
+    let canonical_root = Unix.realpath dashboard_assets.snapshot_root in
+    let snapshot_stat = Unix.stat canonical_root in
+    if not (String.equal canonical_root dashboard_assets.snapshot_root)
+    then Error Dashboard_snapshot_not_canonical
+    else if snapshot_stat.st_kind <> Unix.S_DIR
+            || snapshot_stat.st_uid <> Unix.geteuid ()
+            || snapshot_stat.st_perm <> 0o700
+            || snapshot_stat.st_dev <> dashboard_assets.snapshot_device
+            || snapshot_stat.st_ino <> dashboard_assets.snapshot_inode
+    then Error Dashboard_snapshot_metadata_differs
+    else Ok canonical_root
+  with
+  | Sys_error _ | Unix.Unix_error _ -> Error Dashboard_snapshot_unreadable
+;;
 
 let validate_executable_provenance_binding
       ~path
@@ -455,26 +935,59 @@ let validate_executable_provenance_binding
             if not (String.equal (sha256_string raw) expected_sidecar_sha256)
             then Error "executable provenance sidecar digest differs"
             else
-              parse_executable_provenance
-                ~expected_binary_commit
-                ~expected_executable_sha256
-                ~expected_executable_device
-                ~expected_executable_inode
-                raw
+              Result.bind
+                (parse_executable_provenance
+                   ~expected_binary_commit
+                   ~expected_executable_sha256
+                   ~expected_executable_device
+                   ~expected_executable_inode
+                   raw)
+                (fun provenance ->
+                match validate_source_root_identity provenance with
+                | Unbound -> Error "executable provenance source root is unbound"
+                | Bound_invalid Source_root_unreadable ->
+                  Error "executable provenance source root is unreadable"
+                | Bound_invalid Source_root_not_canonical ->
+                  Error "executable provenance source root is not canonical"
+                | Bound_invalid Source_root_not_directory ->
+                  Error "executable provenance source root is not a directory"
+                | Bound_invalid Source_root_owner_differs ->
+                  Error "executable provenance source root owner differs"
+                | Bound_invalid Source_root_device_differs ->
+                  Error "executable provenance source root device differs"
+                | Bound_invalid Source_root_inode_differs ->
+                  Error "executable provenance source root inode differs"
+                | Bound_valid _ ->
+                  (match provenance.dashboard_assets with
+                   | None -> Ok provenance
+                   | Some dashboard_assets ->
+                     (match validate_dashboard_snapshot_identity dashboard_assets with
+                      | Ok _ -> Ok provenance
+                      | Error _ -> Error "executable provenance dashboard snapshot differs")))
           | _ -> Error "executable provenance sidecar metadata differs")
     with
     | Sys_error _ | Unix.Unix_error _ ->
       Error "executable provenance sidecar is unreadable"
 ;;
 
+module String_map = Map.Make (String)
+
 type bound_executable_provenance =
   { path : string
   ; sidecar_sha256 : string
   ; provenance : executable_provenance
+  ; dashboard_asset_index : dashboard_asset_entry String_map.t
   }
 
 let executable_provenance_binding : bound_executable_provenance option Atomic.t =
   Atomic.make None
+;;
+
+let dashboard_asset_index provenance =
+  Option.fold ~none:[] ~some:(fun assets -> assets.files) provenance.dashboard_assets
+  |> List.fold_left
+       (fun index file -> String_map.add file.relative_path file index)
+       String_map.empty
 ;;
 
 let bind_executable_provenance ~path ~sha256 ~device ~inode =
@@ -510,7 +1023,8 @@ let bind_executable_provenance ~path ~sha256 ~device ~inode =
       ~expected_executable_device:executable_stat.st_dev
       ~expected_executable_inode:executable_stat.st_ino
   in
-  let binding = { path; sidecar_sha256 = sha256; provenance } in
+  let dashboard_asset_index = dashboard_asset_index provenance in
+  let binding = { path; sidecar_sha256 = sha256; provenance; dashboard_asset_index } in
   let rec publish () =
     match Atomic.get executable_provenance_binding with
     | Some existing when existing = binding -> Ok ()
@@ -524,14 +1038,121 @@ let bind_executable_provenance ~path ~sha256 ~device ~inode =
 ;;
 
 let resolved_repo_root = probe_repo_root ()
-let repo_root () = resolved_repo_root
-let repo_version = Option.bind resolved_repo_root probe_repo_version
+
+let launch_source_root_state () =
+  match Atomic.get executable_provenance_binding with
+  | None -> Unbound
+  | Some binding -> validate_source_root_identity binding.provenance
+;;
+
+let repo_root () =
+  match launch_source_root_state () with
+  | Unbound -> resolved_repo_root
+  | Bound_valid source_root -> Some source_root
+  | Bound_invalid _ -> None
+;;
+
+let resolve_dashboard_asset_in_binding binding relative_path =
+    (match validate_source_root_identity binding.provenance with
+     | Unbound -> Dashboard_assets_unbound
+     | Bound_invalid reason ->
+       Dashboard_assets_invalid (Dashboard_source_root_invalid reason)
+     | Bound_valid _ ->
+       (match binding.provenance.dashboard_assets with
+        | None -> Dashboard_assets_unavailable
+        | Some dashboard_assets ->
+       (match validate_dashboard_snapshot_identity dashboard_assets with
+        | Error reason -> Dashboard_assets_invalid reason
+        | Ok snapshot_root ->
+          (match String_map.find_opt relative_path binding.dashboard_asset_index with
+           | None -> Dashboard_asset_not_manifested
+           | Some file ->
+             let path = Filename.concat snapshot_root file.sha256 in
+             (try
+                let info = Unix.lstat path in
+                if info.st_kind <> Unix.S_REG
+                   || info.st_uid <> Unix.geteuid ()
+                   || info.st_perm <> 0o600
+                   || info.st_nlink <> 1
+                   || info.st_size <> file.size
+                then Dashboard_assets_invalid Dashboard_asset_metadata_differs
+                else
+                  Dashboard_asset_bound
+                    { path
+                    ; launch_source_root = binding.provenance.source_root
+                    ; launch_source_device = binding.provenance.source_root_device
+                    ; launch_source_inode = binding.provenance.source_root_inode
+                    ; expected_size = file.size
+                    ; expected_sha256 = file.sha256
+                    ; tree_sha256 = dashboard_assets.tree_sha256
+                    ; snapshot_root
+                    ; snapshot_device = dashboard_assets.snapshot_device
+                    ; snapshot_inode = dashboard_assets.snapshot_inode
+                    ; file_count = String_map.cardinal binding.dashboard_asset_index
+                    ; build_source_commit = dashboard_assets.build_source_commit
+                    ; build_head_tree = dashboard_assets.build_head_tree
+                    ; build_index_tree = dashboard_assets.build_index_tree
+                    ; build_input_sha256 = dashboard_assets.build_input_sha256
+                    ; build_input_file_count = dashboard_assets.build_input_file_count
+                    ; build_input_matches_head = dashboard_assets.build_input_matches_head
+                    ; build_lock_sha256 = dashboard_assets.build_lock_sha256
+                    ; build_mode = dashboard_assets.build_mode
+                    ; build_environment_path = dashboard_assets.build_environment_path
+                    ; build_environment_path_identity_sha256 = dashboard_assets.build_environment_path_identity_sha256
+                    ; build_environment_path_executable_sha256 = dashboard_assets.build_environment_path_executable_sha256
+                    ; build_environment_path_executable_count = dashboard_assets.build_environment_path_executable_count
+                    ; build_environment_profile_sha256 = dashboard_assets.build_environment_profile_sha256
+                    ; build_producer = dashboard_assets.build_producer
+                    ; build_node_executable = dashboard_assets.build_node_executable
+                    ; build_node_executable_sha256 = dashboard_assets.build_node_executable_sha256
+                    ; build_node_version = dashboard_assets.build_node_version
+                    ; build_node_platform = dashboard_assets.build_node_platform
+                    ; build_node_arch = dashboard_assets.build_node_arch
+                    ; build_package_manager_kind = dashboard_assets.build_package_manager_kind
+                    ; build_package_manager_executable = dashboard_assets.build_package_manager_executable
+                    ; build_package_manager_executable_sha256 = dashboard_assets.build_package_manager_executable_sha256
+                    ; build_pnpm_version = dashboard_assets.build_pnpm_version
+                    ; build_vite_version = dashboard_assets.build_vite_version
+                    ; build_installed_graph_metadata_sha256 = dashboard_assets.build_installed_graph_metadata_sha256
+                    ; build_installed_graph_metadata_count = dashboard_assets.build_installed_graph_metadata_count
+                    }
+              with
+              | Sys_error _ | Unix.Unix_error _ ->
+                Dashboard_assets_invalid Dashboard_asset_metadata_differs)))))
+;;
+
+let resolve_dashboard_asset relative_path =
+  match Atomic.get executable_provenance_binding with
+  | None -> Dashboard_assets_unbound
+  | Some binding -> resolve_dashboard_asset_in_binding binding relative_path
+;;
+
+let dashboard_manifest_identity () =
+  match Atomic.get executable_provenance_binding with
+  | None -> None
+  | Some binding -> binding.provenance.dashboard_assets
+;;
+
+
 let binary_commit_unix_ts = probe_commit_unix_ts commit_resolution.binary_commit
 let repo_head_commit_unix_ts = probe_commit_unix_ts commit_resolution.repo_head_commit
 
 let current () =
   let now = Unix.gettimeofday () in
   let provenance_binding = Atomic.get executable_provenance_binding in
+  let active_repo_root = repo_root () in
+  let repo_version = Option.bind active_repo_root probe_repo_version in
+  let repo_head_commit, repo_head_commit_source, repo_head_commit_unix_ts =
+    match provenance_binding with
+    | Some binding ->
+      ( Some binding.provenance.binary_commit
+      , Some runtime_repo_head_source
+      , binary_commit_unix_ts )
+    | None ->
+      ( commit_resolution.repo_head_commit
+      , commit_resolution.repo_head_commit_source
+      , repo_head_commit_unix_ts )
+  in
   { release_version = Runtime_build_version.current
   ; binary_version = Runtime_build_version.current
   ; repo_version
@@ -550,14 +1171,14 @@ let current () =
       Option.map (fun binding -> binding.sidecar_sha256) provenance_binding
   ; binary_commit_unix_ts
   ; binary_commit_age_seconds = age_seconds ~now binary_commit_unix_ts
-  ; repo_head_commit = commit_resolution.repo_head_commit
-  ; repo_head_commit_source = commit_resolution.repo_head_commit_source
+  ; repo_head_commit
+  ; repo_head_commit_source
   ; repo_head_commit_unix_ts
   ; repo_head_commit_age_seconds = age_seconds ~now repo_head_commit_unix_ts
   ; executable_path = resolved_executable_path
   ; executable_dir = resolved_executable_dir
   ; executable_in_worktree = resolved_executable_in_worktree
-  ; repo_root = resolved_repo_root
+  ; repo_root = active_repo_root
   ; runtime_instance_id
   ; started_at = started_at_iso
   ; uptime_seconds = max 0 (int_of_float (now -. started_at_unix))
@@ -569,6 +1190,14 @@ module For_testing = struct
   let observe_probe_failure = observe_probe_failure
   let probe_commit_unix_ts = probe_commit_unix_ts
   let runtime_cwd = runtime_cwd
+  let resolve_dashboard_asset provenance relative_path =
+    resolve_dashboard_asset_in_binding
+      { path = "<test>"
+      ; sidecar_sha256 = ""
+      ; provenance
+      ; dashboard_asset_index = dashboard_asset_index provenance
+      }
+      relative_path
 end
 
 (* [to_yojson] is generated by [ppx_deriving_yojson] from the type definition. *)

@@ -39,8 +39,6 @@
       ({!asset_content_type},
       {!read_file},
       {!playground_asset_path},
-      {!dashboard_asset_root},
-      {!dashboard_index_path},
       {!dashboard_etag_of_body},
       {!dashboard_index_cache_control},
       {!favicon_svg}).
@@ -107,17 +105,9 @@ val read_file : string -> (string, string) result
     as a string.  [Error msg] on [Sys_error] and similar
     OS failures.  [Eio.Cancel.Cancelled] re-raises. *)
 
-val playground_asset_path : string -> string
+val playground_asset_path : string -> string option
 (** Path to a Playground asset under the
     [.../playground/] resource root. *)
-
-val dashboard_asset_root : unit -> string
-(** Base directory for the legacy dashboard SPA
-    (Preact + HTM, built by Vite). *)
-
-val dashboard_index_path : unit -> string
-(** Resolved path to the legacy dashboard's
-    [index.html]. *)
 
 val dashboard_etag_hex_chars : int
 (** Number of hex digest characters included in the

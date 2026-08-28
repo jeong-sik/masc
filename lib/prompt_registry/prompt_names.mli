@@ -6,6 +6,9 @@
 val keeper : string
 (** The Keeper's standing rules. *)
 
+val assembler : string
+(** Read-only Tool-plan proposal assembly from exact capability references. *)
+
 val judge_board : string
 (** Relevance of one Board signal to one Keeper. *)
 

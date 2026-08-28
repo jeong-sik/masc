@@ -166,6 +166,78 @@ let test_rest_listing_serializes_because () =
                     : bool)))))
 ;;
 
+let test_rest_listing_includes_durable_approval_queue () =
+  let dir = Filename.temp_file "task846" ".dir" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove (Filename.concat dir "runtime.toml") with _ -> ())
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Workspace_utils.default_config dir in
+      Eio.Switch.run @@ fun sw ->
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env)
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw
+        (fun () ->
+          let request_authority =
+            match
+              Server_request_authority.of_host_port ~host:"localhost" ~port:8935
+            with
+            | Ok authority -> authority
+            | Error `Malformed -> Alcotest.fail "test authority must be valid"
+          in
+          Server_request_authority.with_current request_authority (fun () ->
+            ignore (Workspace.init config ~agent_name:None);
+            let state = Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+            match
+              Masc.Keeper_approval_queue.submit_pending
+                ~keeper_name:"fixture-keeper"
+                ~tool_name:"Execute"
+                ~input:(`Assoc [ ("cmd", `String "git push") ])
+                ~base_path:dir
+                ~task_id:"task-846"
+                ()
+            with
+            | Error err ->
+              Alcotest.failf
+                "submit_pending failed: %s"
+                (Masc.Keeper_approval_queue.storage_error_to_string err)
+            | Ok submission ->
+              let response = approvals_response ~state in
+              let body = body_of response in
+              let json =
+                match Yojson.Safe.from_string body with
+                | json -> json
+                | exception _ ->
+                  Alcotest.failf "listing body is not JSON: %S" body
+              in
+              let open Yojson.Safe.Util in
+              let rows = json |> member "pending" |> to_list in
+              Alcotest.(check int) "one durable approval is listed" 1 (List.length rows);
+              let row = List.hd rows in
+              Alcotest.(check string)
+                "row carries durable tool_call_id"
+                submission.approval_id
+                (row |> member "tool_call_id" |> to_string);
+              Alcotest.(check string)
+                "row carries keeper_name"
+                "fixture-keeper"
+                (row |> member "keeper" |> to_string);
+              Alcotest.(check string)
+                "row carries tool_name"
+                "Execute"
+                (row |> member "tool" |> to_string);
+              Alcotest.(check string)
+                "row carries because mentioning task"
+                "task task-846"
+                (row |> member "because" |> to_string))))
+;;
+
 let () =
   let open Alcotest in
   run "rest_approvals_because"
@@ -174,6 +246,10 @@ let () =
             test_approvals_route_is_registered ] )
     ; ( "listing"
       , [ test_case "rest approvals listing serializes because" `Quick
-            test_rest_listing_serializes_because ] )
+            test_rest_listing_serializes_because
+        ; test_case "rest approvals listing includes durable queue approvals" `Quick
+            test_rest_listing_includes_durable_approval_queue
+        ] )
     ]
 ;;
+

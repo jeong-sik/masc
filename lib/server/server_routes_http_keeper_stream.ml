@@ -295,16 +295,39 @@ let handle_keeper_tool_approval state request reqd =
         respond_json_value_with_cors ~status:`Not_found request reqd
           (keeper_chat_stream_error_json "keeper not registered")
       else (
-        let settled =
+        let settled_memory =
           Keeper_tool_approval_registry.settle
             (Keeper_tool_approval_registry.shared ())
             ~keeper_name ~tool_call_id decision
         in
+        let settled_queue =
+          if not settled_memory then
+            let queue_decision =
+              match decision with
+              | Keeper_tool_approval_registry.Approve ->
+                Keeper_approval_queue_rules_types.Decision.Approve
+              | Keeper_tool_approval_registry.Deny ->
+                Keeper_approval_queue_rules_types.Decision.Reject
+                  "denied via /api/v1/keepers/tool-approval"
+            in
+            match
+              Keeper_approval_queue.resolve_with_policy
+                ~base_path
+                ~id:tool_call_id
+                ~decision:queue_decision
+                ~source:Keeper_approval_queue_rules_types.Human_operator
+                ()
+            with
+            | Ok _ -> true
+            | Error _ -> false
+          else false
+        in
+        let settled = settled_memory || settled_queue in
         Log.Keeper.info
-          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s settled=%b"
+          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s settled=%b (memory=%b, queue=%b)"
           keeper_name tool_call_id
           (Keeper_tool_approval_registry.decision_to_string decision)
-          settled;
+          settled settled_memory settled_queue;
         respond_json_value_with_cors ~status:`OK request reqd
           (`Assoc
              [ ("settled", `Bool settled)
@@ -313,34 +336,71 @@ let handle_keeper_tool_approval state request reqd =
              ])))
 ;;
 
-(* The waits live only in the registry while their turns are parked, so this
-   is a projection of live state, not a store read. Listing them is what lets
-   an operator answer a turn whose owning stream watcher is gone — without
-   this, such a call could only time out (masc#30034). [asked_at] is the
-   registry clock's epoch reading; the consumer derives display age against
-   its own clock rather than trusting one computed here. *)
-let handle_keeper_tool_approvals_list _state request reqd =
+(* Lists the tool calls keepers are holding, merging live process-memory
+   registry waits and durable workspace approval queue pending requests.
+   Listing them is what lets an operator answer a turn whose owning stream
+   watcher is gone or an external effect awaiting Gate approval. [asked_at] is
+   the epoch reading when the request opened; the consumer derives display age
+   against its own clock rather than trusting one computed here. *)
+let handle_keeper_tool_approvals_list state request reqd =
   let held =
     Keeper_tool_approval_registry.pending
       (Keeper_tool_approval_registry.shared ())
   in
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  let queue_pending =
+    match Keeper_approval_queue.list_pending_entries_for_workspace ~base_path with
+    | Ok entries ->
+      List.filter_map
+        (fun (entry : Keeper_approval_queue_rules_types.pending_approval) ->
+          if List.exists
+               (fun (p : Keeper_tool_approval_registry.pending) ->
+                 String.equal p.tool_call_id entry.id)
+               held
+          then None
+          else
+            Some
+              (`Assoc
+                  [ ("keeper", `String entry.keeper_name)
+                  ; ("tool_call_id", `String entry.id)
+                  ; ("tool", `String entry.tool_name)
+                  ; ("args", `String (Yojson.Safe.to_string entry.input))
+                  ; ( "question"
+                    , `String
+                        (Printf.sprintf
+                           "Approval requested for %s (%s)"
+                           entry.tool_name
+                           entry.keeper_name) )
+                  ; ( "because"
+                    , `String
+                        (match entry.task_id with
+                         | Some t -> Printf.sprintf "task %s" t
+                         | None -> "gate_pending") )
+                  ; ("asked_at", `Float entry.requested_at)
+                  ; ("timeout_sec", `Float 0.0)
+                  ]))
+        entries
+    | Error _ -> []
+  in
+  let held_json =
+    List.map
+      (fun (p : Keeper_tool_approval_registry.pending) ->
+        `Assoc
+          [ ("keeper", `String p.keeper_name)
+          ; ("tool_call_id", `String p.tool_call_id)
+          ; ("tool", `String p.tool_name)
+          ; ("args", `String p.args)
+          ; ("question", `String p.question)
+          ; ("because", `String p.because)
+          ; ("asked_at", `Float p.asked_at)
+          ; ("timeout_sec", `Float p.timeout_sec)
+          ])
+      held
+  in
   respond_json_value_with_cors ~status:`OK request reqd
     (`Assoc
        [ ( "pending"
-         , `List
-             (List.map
-                (fun (p : Keeper_tool_approval_registry.pending) ->
-                  `Assoc
-                    [ ("keeper", `String p.keeper_name)
-                    ; ("tool_call_id", `String p.tool_call_id)
-                    ; ("tool", `String p.tool_name)
-                    ; ("args", `String p.args)
-                    ; ("question", `String p.question)
-                    ; ("because", `String p.because)
-                    ; ("asked_at", `Float p.asked_at)
-                    ; ("timeout_sec", `Float p.timeout_sec)
-                    ])
-                held) )
+         , `List (held_json @ queue_pending) )
        ])
 ;;
 

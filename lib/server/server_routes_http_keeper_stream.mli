@@ -148,14 +148,14 @@ val handle_keeper_tool_approvals_list :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [GET /api/v1/keepers/tool-approvals].
 
-    Projects every held tool call from the shared approval registry:
+    Projects every held tool call from the shared approval registry and
+    durable workspace approval queue:
     [{pending: [{keeper, tool_call_id, tool, args, question, because,
-    asked_at, timeout_sec}]}], oldest first. Live registry state only — a wait
-    exists exactly while its turn is parked on it. This is what lets an
-    operator answer a call whose owning stream watcher is gone; without it
-    such a call can only time out (masc#30034). [because] is the policy's
-    one-line reason for asking — the listing is the only place an operator
-    sees it, so it rides with the question. *)
+    asked_at, timeout_sec}]}], oldest first. This is what lets an operator
+    answer a call whose owning stream watcher is gone or an external effect
+    awaiting Gate approval; without it such a call could only time out (masc#30034).
+    [because] is the policy's one-line reason for asking — the listing is the
+    only place an operator sees it, so it rides with the question. *)
 
 val handle_keeper_tool_approval_mode_get :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit

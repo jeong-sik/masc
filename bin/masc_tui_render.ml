@@ -3693,12 +3693,31 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
      Idle and unavailable rows keep the health word -- unavailable is the
      owner lookup failing, which the health column describes better than a
      blank would. *)
+  (* A turn record that outlives the process it belongs to. The summary above
+     this table read "2 offline / not running: polisher, taskmaster" while
+     taskmaster's own row drew a turning mark and a climbing clock: its turn
+     had started and never been closed, and the process behind it had gone.
+     The row that most needed reading looked like the healthiest kind.
+
+     The elapsed stays -- a turn open two minutes is the fact -- but the mark
+     stops. Motion here means work is progressing, and for a keeper the health
+     reading calls offline or zombie, nothing is. *)
+  let turn_is_being_worked =
+    match Option.map Tui_decode.keeper_health_reading health with
+    | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> false
+    | Some
+        ( Tui_decode.Health_running | Tui_decode.Health_idle
+        | Tui_decode.Health_stale | Tui_decode.Health_degraded )
+    | None ->
+      true
+  in
   let glyph, status_word, status_color =
     match (turn : Tui_decode.keeper_turn_state option) with
     | Some (Tui_decode.Keeper_turn_running { started_at_unix; _ }) ->
-      ( Masc_tui_answering.running_glyph ~frame
+      ( Masc_tui_answering.running_glyph
+          ~frame:(if turn_is_being_worked then frame else -1)
       , Masc_tui_answering.elapsed_text ~now started_at_unix
-      , Ansi.cyan )
+      , if turn_is_being_worked then Ansi.cyan else (Theme.bad ()) )
     | Some Tui_decode.Keeper_turn_idle
     | Some (Tui_decode.Keeper_turn_unavailable _)
     | None ->

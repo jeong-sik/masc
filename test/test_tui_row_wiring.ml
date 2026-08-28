@@ -1,8 +1,11 @@
-(* The Approvals surface is where an operator authorises a command, and the
-   half of it that matters cannot be reached by a unit test: [render_approvals]
-   lives in the executable, so nothing links it (task-550). Three facts about
-   it were wrong at the same time, and each one typechecks either way. This is
-   the half the compiler does not hold.
+(* Rows the compiler cannot hold. Every binding asserted here lives in the TUI
+   executable, so nothing links it (task-550) -- and every fact asserted is one
+   that typechecks either way: which field a cell reads, whether a mark carries
+   what a colour carries, whether a column measures itself.
+
+   It began with the Approvals surface, where an operator authorises a command
+   and three facts about the row were wrong at once. The other surfaces joined
+   as the same shapes turned up on them.
 
    The measurement that found them, at 80, 140 and 200 columns with seven Gate
    rows waiting: the cell opened with the request schema name, then the
@@ -99,8 +102,39 @@ let test_a_lane_mark_says_what_its_colour_says () =
     ; ("\xc2\xb7", "nothing retained")
     ]
 
+(* The fleet summary above the Keepers table read "2 offline" and named
+   taskmaster among them, while taskmaster's own row drew a turning mark and a
+   climbing clock. Its turn had started and never been closed; the process
+   behind it had gone. A turn state that outlives its process is the row an
+   operator most needs to read, and it looked like the healthiest kind.
+
+   The elapsed stays -- a turn open two minutes is the fact. The motion does
+   not: it means work is progressing, and for a keeper the health reading calls
+   offline or zombie, none is. *)
+let test_a_turn_on_a_keeper_that_is_not_running_stops_moving () =
+  (* Counted as an identifier: the reading reaches the match through
+     [Option.map keeper_health_reading health], so it is passed rather than
+     applied and a call count sees nothing. *)
+  Alcotest.(check bool) "the row weighs the health reading against the turn"
+    true
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"keeper_row_content" ~callees:[]
+       ~identifiers:[ "Tui_decode.keeper_health_reading" ]
+     > 0);
+  (* Both halves, named: a match that reached only one of them would leave the
+     other drawing a live mark on a dead keeper. *)
+  List.iter
+    (fun reading ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s is one of the readings that stops the mark" reading)
+        true
+        (Ast_grep.count_constructors_in_value_binding ~module_path:render
+           ~binding_name:"keeper_row_content" ~constructors:[ reading ]
+         > 0))
+    [ "Tui_decode.Health_offline"; "Tui_decode.Health_zombie" ]
+
 let () =
-  Alcotest.run "masc_tui_approval_row_wiring"
+  Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
       , [ Alcotest.test_case "the detail pane says where the command would run"
             `Quick test_the_detail_pane_says_where_the_command_would_run
@@ -113,5 +147,7 @@ let () =
             test_a_lane_mark_says_what_its_colour_says
         ; Alcotest.test_case "the schedule subject is measured" `Quick
             test_the_schedule_subject_is_measured_not_given_the_line
+        ; Alcotest.test_case "a turn on a keeper that is not running stops"
+            `Quick test_a_turn_on_a_keeper_that_is_not_running_stops_moving
         ] )
     ]

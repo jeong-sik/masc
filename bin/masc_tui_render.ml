@@ -8557,37 +8557,75 @@ let render_tools (state : state) =
           | Some { Masc.Tui_decode.esp_flow = None; _ } ->
             [ Ansi.dim, "     Flow: instruction body loads on demand; the model orchestrates tools" ]
           | Some { Masc.Tui_decode.esp_flow = Some flow; _ } ->
-            let batch_line =
+            (* Grouped under the batch that runs them, rather than listed
+               flat with a batch=N to cross-reference. The batches are the
+               order; the nodes are what is in each one. Two readings, and
+               the old shape made the reader join them by hand.
+
+               A tree, not a graph: the dependencies are already named on the
+               node, and drawing edges between rows buys a picture at the
+               price of a screen nobody can scan. *)
+            let node_by_id id =
+              List.find_opt
+                (fun node -> String.equal node.sfn_id id)
+                flow.sf_nodes
+            in
+            let dependency_text node =
+              match node.sfn_dependencies with
+              | [] -> ""
+              | values ->
+                "  \xe2\x86\x90 "
+                ^ (values
+                   |> List.map (fun dependency ->
+                        dependency.sfd_node_id ^ ":" ^ dependency.sfd_kind)
+                   |> String.concat ", ")
+            in
+            let batch_count = List.length flow.sf_batches in
+            let batch_lines =
               flow.sf_batches
-              |> List.map (fun batch ->
-                Printf.sprintf
-                  "[%d %s: %s]"
-                  batch.sfb_index
-                  batch.sfb_execution_mode
-                  (String.concat " | " batch.sfb_node_ids))
-              |> String.concat "  →  "
+              |> List.mapi (fun batch_position batch ->
+                let last_batch = batch_position = batch_count - 1 in
+                let node_count = List.length batch.sfb_node_ids in
+                batch.sfb_node_ids
+                |> List.mapi (fun node_position node_id ->
+                  let first_node = node_position = 0 in
+                  let stem =
+                    if first_node then
+                      if last_batch then "\xe2\x94\x94" else "\xe2\x94\x9c"
+                    else if last_batch then " "
+                    else "\xe2\x94\x82"
+                  in
+                  let label =
+                    if first_node then
+                      Printf.sprintf "%d %s" batch.sfb_index
+                        (Terminal_text.single_line batch.sfb_execution_mode)
+                    else ""
+                  in
+                  let tool, dependencies =
+                    match node_by_id node_id with
+                    | None -> "(not in nodes)", ""
+                    | Some node ->
+                      ( Terminal_text.single_line node.sfn_tool_name
+                      , dependency_text node )
+                  in
+                  ( Ansi.dim
+                  , Printf.sprintf "     %s %-12s %-18s %s%s" stem label
+                      (Terminal_text.single_line node_id) tool dependencies ))
+                |> fun lines ->
+                if node_count = 0 then
+                  [ ( Ansi.dim
+                    , Printf.sprintf "     %s %d %s (no nodes)"
+                        (if last_batch then "\xe2\x94\x94" else "\xe2\x94\x9c")
+                        batch.sfb_index
+                        (Terminal_text.single_line batch.sfb_execution_mode) )
+                  ]
+                else lines)
+              |> List.concat
             in
-            let node_lines =
-              flow.sf_nodes
-              |> List.map (fun node ->
-                let dependencies =
-                  match node.sfn_dependencies with
-                  | [] -> "root"
-                  | values ->
-                    values
-                    |> List.map (fun dependency ->
-                      dependency.sfd_node_id ^ ":" ^ dependency.sfd_kind)
-                    |> String.concat ", "
-                in
-                Ansi.dim,
-                Printf.sprintf
-                  "       %s ─ %-30s batch=%d · depends %s"
-                  (Terminal_text.single_line node.sfn_id)
-                  (Terminal_text.single_line node.sfn_tool_name)
-                  node.sfn_batch_index
-                  (Terminal_text.single_line dependencies))
-            in
-            (Ansi.bold, "     Flow  " ^ batch_line) :: node_lines
+            ( Ansi.bold
+            , Printf.sprintf "     Flow  %d batches · %d nodes" batch_count
+                (List.length flow.sf_nodes) )
+            :: batch_lines
         in
         let selected_skill_evidence_lines =
           match List.nth_opt ets_skill_profiles state.tools_skill_cursor with

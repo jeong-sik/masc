@@ -622,8 +622,9 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
          | Some (`String value) -> value
          | _ -> fail "Tool result omitted proposal_id"
        in
-       (match field "execution_request" output with
-        | Some (`Assoc fields) ->
+       let execution_request =
+         match field "execution_request" output with
+         | Some (`Assoc fields as request) ->
           check (option string) "execution request binds the proposal id"
             (Some proposal_id)
             (match List.assoc_opt "proposal_id" fields with
@@ -638,8 +639,10 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
                    | `String value -> value
                    | _ -> fail "execution request contains a non-string Tool")
                  values
-             | _ -> fail "execution request omitted approval_tools")
-        | _ -> fail "Tool result omitted the exact execution request");
+             | _ -> fail "execution request omitted approval_tools");
+           request
+         | _ -> fail "Tool result omitted the exact execution request"
+       in
        let proposal_id =
          match Proposal.Proposal_id.of_string proposal_id with
          | Ok proposal_id -> proposal_id
@@ -682,7 +685,82 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
         | None -> fail "Tool run ledger omitted returned run_id");
        check bool "ordinary Tool dispatch log remains absent" false
          (Sys.file_exists
-            (Filename.concat (Workspace.masc_root_dir config) "tool_calls")))
+            (Filename.concat (Workspace.masc_root_dir config) "tool_calls"));
+       let proposal_tool =
+         find_agent_core_tool bundle.tools "keeper_proposal_execute"
+       in
+       let invocation tool_use_id =
+         Agent_core.Tool_contract.Invocation.create
+           ~tool_use_id
+           ~turn:1
+           ~schedule:
+             { Agent_core.Tool_contract.planned_index = 0
+             ; batch_index = 0
+             ; batch_size = 1
+             ; execution_mode = Agent_core.Tool_contract.Serial
+             }
+           ~completion:(Agent_core.Tool.completion proposal_tool)
+       in
+       let tampered_request =
+         match execution_request with
+         | `Assoc fields ->
+           `Assoc
+             (List.map
+                (fun (name, value) ->
+                   if String.equal name "approval_tools"
+                   then name, `List [ `String "keeper_context_status" ]
+                   else name, value)
+                fields)
+         | _ -> assert false
+       in
+       (match
+          Agent_core.Tool.execute
+            ~invocation:(invocation "assembler-proposal-tampered")
+            proposal_tool
+            tampered_request
+        with
+        | Ok _ -> fail "tampered approval sequence executed the proposal"
+        | Error error ->
+          let payload =
+            Yojson.Safe.from_string error.message
+            |> Yojson.Safe.Util.member "masc.payload"
+          in
+          check (option string) "tampered sequence is typed"
+            (Some "proposal_approval_tools_mismatch")
+            (match field "error" payload with
+             | Some (`String value) -> Some value
+             | _ -> None));
+       let execution_output =
+         match
+           Agent_core.Tool.execute
+             ~invocation:(invocation "assembler-proposal-execute")
+             proposal_tool
+             execution_request
+         with
+         | Error error ->
+           failf "keeper_proposal_execute failed: %s" error.message
+         | Ok output -> Yojson.Safe.from_string output.content
+       in
+       check (option string) "proposal execution returns its identity"
+         (Some (Proposal.Proposal_id.to_string proposal_id))
+         (match field "proposal_id" execution_output with
+          | Some (`String value) -> Some value
+          | _ -> None);
+       (match field "actions" execution_output with
+        | Some (`List actions) ->
+          check (list string) "stored plan executed the exact Tool sequence"
+            [ "keeper_time_now"; "keeper_context_status"; "keeper_time_now" ]
+            (List.map
+               (function
+                 | `Assoc action ->
+                   (match List.assoc_opt "tool_name" action with
+                    | Some (`String value) -> value
+                    | _ -> fail "proposal action omitted tool_name")
+                 | _ -> fail "proposal action was not an object")
+               actions)
+        | _ -> fail "proposal execution did not return typed actions");
+       check int "proposal execution does not recall the Assembler" 1
+         (Fixture.post_count accepted))
 ;;
 
 let test_compatibility_path_requires_frozen_surface () =

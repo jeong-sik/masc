@@ -15,6 +15,7 @@ type undescribed =
   | Control of verdict
   | Composition of string list
   | Ad_hoc_plan
+  | Stored_proposal
   | Attached_service of bool option
       (** A tool from a work service this Keeper is attached to, carrying
           what that service said about whether it only reads. *)
@@ -75,6 +76,21 @@ let ad_hoc_plan_nodes input =
                  | Some _ | None -> None)
               | _ -> None)
             nodes)
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+let stored_proposal_nodes input =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "approval_tools" fields with
+     | Some (`List tools) ->
+       let rec collect acc = function
+         | [] -> Some (List.rev acc)
+         | `String tool :: rest -> collect (tool :: acc) rest
+         | _ :: _ -> None
+       in
+       collect [] tools
      | Some _ | None -> None)
   | _ -> None
 ;;
@@ -174,6 +190,10 @@ and undescribed_kind ?composition_plan_index tool_name =
             tool_name
             Keeper_tool_composition_catalog.plan_execute_tool_name
   then Ad_hoc_plan
+  else if String.equal
+            tool_name
+            Keeper_tool_composition_catalog.proposal_execute_tool_name
+  then Stored_proposal
   else
     match
       Option.bind composition_plan_index (fun index ->
@@ -225,6 +245,14 @@ and verdict_for_undescribed ~composition_plan_index ~tool_name ~input =
            durable Gate treats that silence as a write and defers it"
       }
   | Composition node_tools -> verdict_of_nodes node_tools
+  | Stored_proposal ->
+    (match stored_proposal_nodes input with
+     | Some node_tools -> verdict_of_nodes node_tools
+     | None ->
+       Ask
+         { because =
+             "this proposal request does not carry its exact Tool sequence"
+         })
   | Ad_hoc_plan ->
     (match ad_hoc_plan_nodes input with
      (* A malformed plan is not a plan whose nodes are all reads. The tool
@@ -242,7 +270,8 @@ let classifies ~composition_plan_index ~tool_name =
   | Some _ -> true
   | None ->
     (match undescribed_kind ?composition_plan_index tool_name with
-     | Control _ | Composition _ | Ad_hoc_plan | Attached_service _ -> true
+     | Control _ | Composition _ | Ad_hoc_plan | Stored_proposal
+     | Attached_service _ -> true
      | Unknown -> false)
 ;;
 

@@ -64,6 +64,7 @@ let composition_tool_component_bytes entry =
     | Keeper_tool_composition_surface.Declared_composition (), tool ->
       Some (tool_component_bytes tool)
     | ( Keeper_tool_composition_surface.Plan_execute
+      | Keeper_tool_composition_surface.Proposal_execute
       | Keeper_tool_composition_surface.Async_status
       | Keeper_tool_composition_surface.Async_cancel ), _ ->
       None)

@@ -133,6 +133,7 @@ let skill_source_of_tool_name name =
   else None
 ;;
 let plan_execute_tool_name = "keeper_plan_execute"
+let proposal_execute_tool_name = "keeper_proposal_execute"
 let status_tool_name = "keeper_composition_status"
 let cancel_tool_name = "keeper_composition_cancel"
 let skill_tool_name = "keeper_skill"

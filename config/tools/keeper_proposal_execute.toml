@@ -1,0 +1,29 @@
+name = "keeper_proposal_execute"
+description = """
+Execute one durable Assembler proposal through the existing Keeper Tool plan \
+executor. Pass the execution_request returned by keeper_assemble_plan \
+unchanged. The runtime reloads the content-addressed proposal against this \
+turn's frozen capability surface and rejects any mismatch before execution."""
+additional_properties = false
+
+[[params]]
+name = "proposal_id"
+type = "string"
+required = true
+pattern = "^[0-9a-f]{64}$"
+
+[[params]]
+name = "approval_tools"
+type = "array"
+required = true
+min_items = 1
+items = { type = "string", min_length = 1 }
+
+[help]
+short_description = "Execute a stored Assembler proposal after exact approval binding."
+when_to_use = "Use only with execution_request returned by keeper_assemble_plan."
+key_constraints = [
+  "The proposal is loaded against the current frozen capability surface.",
+  "approval_tools must exactly match the stored typed plan node sequence.",
+  "Async proposals return a typed not_supported result until durable async execution is wired.",
+]

@@ -133,6 +133,7 @@ let expected_model_tool_names
   List.sort_uniq
     String.compare
     (Keeper_tool_composition_surface.plan_execute_tool_name
+     :: Keeper_tool_composition_surface.proposal_execute_tool_name
      :: (descriptor_names
          @ composition_names
          @ instruction_names

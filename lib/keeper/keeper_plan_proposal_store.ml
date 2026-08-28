@@ -10,7 +10,9 @@ type error =
   | Proposal_not_found of Proposal.Proposal_id.t
   | Tampered_existing_file of Proposal.Proposal_id.t
   | Read_failed of Fs_compat.owned_regular_file_read_error
-  | Write_failed of Keeper_fs.durable_write_error
+  | Directory_prepare_failed of Keeper_fs_durable_directory.failure
+  | Capability_filesystem_unavailable
+  | Exclusive_write_failed of Fs_compat.capability_write_error
 
 let store_dir config =
   Filename.concat (Workspace.masc_root_dir config) "keeper-plan-proposals"
@@ -51,7 +53,13 @@ let load_path ~descriptors config proposal_id =
   match Fs_compat.load_owned_regular_file ~ownership_root:masc_root path with
   | Error error -> Error (Read_failed error)
   | Ok None -> Error (Proposal_not_found proposal_id)
-  | Ok (Some content) -> parse_content ~descriptors ~expected_id:proposal_id content
+  | Ok (Some content) ->
+    (match parse_content ~descriptors ~expected_id:proposal_id content with
+     | Error _ as error -> error
+     | Ok proposal ->
+       if String.equal content (Proposal.canonical_bytes proposal)
+       then Ok proposal
+       else Error (Tampered_existing_file proposal_id))
 ;;
 
 let load ~descriptors config proposal_id =
@@ -66,7 +74,31 @@ let load_string_id ~descriptors config raw_id =
   | Ok proposal_id -> load ~descriptors config proposal_id
 ;;
 
-let save config proposal =
+let prepare_store_directory config =
+  Keeper_fs_durable_directory.ensure
+    ~before_prepare:(fun () -> ())
+    ~before_directory_fsync:(fun _ -> ())
+    ~ownership_root:(Workspace.masc_root_dir config)
+    (store_dir config)
+  |> Result.map_error (fun error -> Directory_prepare_failed error)
+;;
+
+let reread_collision config proposal =
+  let proposal_id = Proposal.id proposal in
+  match
+    Fs_compat.load_owned_regular_file
+      ~ownership_root:(Workspace.masc_root_dir config)
+      (proposal_path config proposal_id)
+  with
+  | Error error -> Error (Read_failed error)
+  | Ok None -> Error (Proposal_not_found proposal_id)
+  | Ok (Some content) ->
+    if String.equal content (Proposal.canonical_bytes proposal)
+    then Ok Already_present
+    else Error (Tampered_existing_file proposal_id)
+;;
+
+let save_with ~before_exclusive_create config proposal =
   let proposal_id = Proposal.id proposal in
   let path = proposal_path config proposal_id in
   with_path_lock path ~access:`Write (fun () ->
@@ -81,14 +113,50 @@ let save config proposal =
       then Ok Already_present
       else Error (Tampered_existing_file proposal_id)
     | Ok None ->
-      (match
-         Keeper_fs.save_bytes_durable_atomic
-           ~ownership_root:(Workspace.masc_root_dir config)
-           path
-           (Proposal.canonical_bytes proposal)
-       with
-       | Ok () -> Ok Stored
-       | Error error -> Error (Write_failed error)))
+      (match Fs_compat.get_fs_opt () with
+       | None -> Error Capability_filesystem_unavailable
+       | Some fs ->
+         (match prepare_store_directory config with
+          | Error _ as error -> error
+          | Ok _directory_lease ->
+            before_exclusive_create ~path;
+            let parent = Eio.Path.(fs / store_dir config) in
+            (match
+               Fs_compat.create_capability_file_exclusive
+                 ~parent
+                 ~leaf:(Filename.basename path)
+                 ~permissions:0o600
+                 (Proposal.canonical_bytes proposal)
+             with
+             | Ok () -> Ok Stored
+             | Error ({ Fs_compat.target_effect = Target_unchanged; _ } as error) ->
+               (match reread_collision config proposal with
+                | Error (Proposal_not_found _) ->
+                  Error (Exclusive_write_failed error)
+                | reread -> reread)
+             | Error error -> Error (Exclusive_write_failed error)))))
+;;
+
+let save = save_with ~before_exclusive_create:(fun ~path:_ -> ())
+
+module For_testing = struct
+  let save_after_absence_observed = save_with
+end
+
+let directory_chain_error_to_string = function
+  | Keeper_fs_durable_directory.Non_directory_ancestor { path } ->
+    Printf.sprintf "non-directory ancestor: %s" path
+  | Outside_ownership_root { ownership_root; path } ->
+    Printf.sprintf "path %s is outside ownership root %s" path ownership_root
+  | Missing_root { path } -> Printf.sprintf "missing ownership root: %s" path
+  | Creation_not_observed { path } ->
+    Printf.sprintf "directory creation not observed: %s" path
+;;
+
+let directory_prepare_failure_to_string = function
+  | Keeper_fs_durable_directory.Directory_chain_failed error ->
+    directory_chain_error_to_string error
+  | Operation_failed (exn, _) -> Printexc.to_string exn
 ;;
 
 let error_to_yojson = function
@@ -115,9 +183,16 @@ let error_to_yojson = function
       [ "kind", `String "read_failed"
       ; "detail", `String (Fs_compat.owned_regular_file_read_error_to_string error)
       ]
-  | Write_failed error ->
+  | Directory_prepare_failed error ->
     `Assoc
-      [ "kind", `String "write_failed"
-      ; "detail", `String (Keeper_fs.durable_write_error_to_string error)
+      [ "kind", `String "directory_prepare_failed"
+      ; "detail", `String (directory_prepare_failure_to_string error)
+      ]
+  | Capability_filesystem_unavailable ->
+    `Assoc [ "kind", `String "capability_filesystem_unavailable" ]
+  | Exclusive_write_failed error ->
+    `Assoc
+      [ "kind", `String "exclusive_write_failed"
+      ; "detail", `String (Fs_compat.capability_write_error_to_string error)
       ]
 ;;

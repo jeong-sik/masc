@@ -63,6 +63,10 @@ type error =
       ; value : string
       }
   | Plan_rejected of Request.error
+  | Async_tool_not_statically_read_only of
+      { descriptor_id : string
+      ; capability_id : string
+      }
   | Tampered_payload of
       { stored_digest : string
       ; computed_digest : string
@@ -182,6 +186,25 @@ let validate_references ~descriptors ~plan references =
   Ok references
 ;;
 
+let validate_execution ~execution ~plan =
+  match execution with
+  | Inline -> Ok ()
+  | Async ->
+    Plan.nodes plan
+    |> List.find_map (fun node ->
+      match Plan.descriptor plan node.Plan.id with
+      | Some descriptor
+        when Keeper_tool_descriptor.readonly_static_hint descriptor <> Some true ->
+        Some
+          (Error
+             (Async_tool_not_statically_read_only
+                { descriptor_id = descriptor.id
+                ; capability_id = descriptor.capability_id
+                }))
+      | Some _ | None -> None)
+    |> Option.value ~default:(Ok ())
+;;
+
 let digest_payload
       ~objective
       ~execution
@@ -227,6 +250,7 @@ let create
     let* ordinary_tool_references =
       validate_references ~descriptors ~plan ordinary_tool_references
     in
+    let* () = validate_execution ~execution ~plan in
     let payload =
       digest_payload
         ~objective
@@ -473,6 +497,12 @@ let error_to_yojson = function
   | Plan_rejected error ->
     `Assoc
       [ "kind", `String "plan_rejected"; "error", Request.error_to_json error ]
+  | Async_tool_not_statically_read_only { descriptor_id; capability_id } ->
+    `Assoc
+      [ "kind", `String "async_tool_not_statically_read_only"
+      ; "descriptor_id", `String descriptor_id
+      ; "capability_id", `String capability_id
+      ]
   | Tampered_payload { stored_digest; computed_digest } ->
     `Assoc
       [ "kind", `String "tampered_payload"

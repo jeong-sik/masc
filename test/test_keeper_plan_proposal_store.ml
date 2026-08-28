@@ -53,6 +53,24 @@ let reordered_time_plan () =
     ]
 ;;
 
+let single_tool_plan tool =
+  `Assoc
+    [ ( "nodes"
+      , `List
+          [ `Assoc [ "id", `String "operation"; "tool", `String tool ] ] )
+    ]
+;;
+
+let replace_assoc name replacement = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (field, value) ->
+            if String.equal field name then field, replacement else field, value)
+         fields)
+  | value -> value
+;;
+
 let create
       ?(objective = "Observe current time")
       ?(execution = Plan.Inline)
@@ -134,6 +152,64 @@ let test_arbitrary_or_unreferenced_plan_is_rejected () =
    | Ok _ -> fail "plan without its exact Tool reference was accepted")
 ;;
 
+let test_async_requires_every_descriptor_to_be_statically_read_only () =
+  let expect_async_rejection tool =
+    let exact_descriptor = descriptor tool in
+    match
+      Plan.create
+        ~descriptors:(descriptors ())
+        ~objective:"Reject an unsafe async proposal"
+        ~execution:Plan.Async
+        ~capability_surface_sha256:surface_digest
+        ~ordinary_tool_references:[ reference tool ]
+        ~plan_json:(single_tool_plan tool)
+    with
+    | Error
+        (Plan.Async_tool_not_statically_read_only
+          { descriptor_id; capability_id }) ->
+      check string "descriptor id" exact_descriptor.id descriptor_id;
+      check string "capability id" exact_descriptor.capability_id capability_id
+    | Error error ->
+      failf
+        "wrong async rejection for %s: %s"
+        tool
+        (Plan.error_to_yojson error |> Yojson.Safe.to_string)
+    | Ok _ -> failf "unsafe async descriptor %s was accepted" tool
+  in
+  check (option bool) "mutating fixture carries Some false" (Some false)
+    (Descriptor.readonly_static_hint (descriptor "keeper_memory_write"));
+  expect_async_rejection "keeper_memory_write";
+  check (option bool) "input-dependent fixture carries None" None
+    (Descriptor.readonly_static_hint (descriptor "Execute"));
+  expect_async_rejection "Execute";
+  let inline_mutation =
+    create
+      ~objective:"Inline mutation remains representable"
+      ~execution:Plan.Inline
+      ~references:[ reference "keeper_memory_write" ]
+      ~plan_json:(single_tool_plan "keeper_memory_write")
+      ()
+  in
+  let stored_async =
+    Plan.to_yojson inline_mutation
+    |> replace_assoc "execution" (`String "async")
+  in
+  (match
+     Plan.of_stored_yojson
+       ~descriptors:(descriptors ())
+       ~expected_id:(Plan.id inline_mutation)
+       stored_async
+   with
+   | Error (Plan.Async_tool_not_statically_read_only _) -> ()
+   | Error error ->
+     failf
+       "stored async mutation returned wrong error: %s"
+       (Plan.error_to_yojson error |> Yojson.Safe.to_string)
+   | Ok _ -> fail "stored async mutation loaded");
+  ignore
+    inline_mutation
+;;
+
 let temp_dir () =
   let path = Filename.temp_file "keeper-plan-proposal" "" in
   Unix.unlink path;
@@ -159,7 +235,9 @@ let with_store f =
        let config = Masc.Workspace.default_config_uncached base in
        let masc_root = Masc.Workspace.masc_root_dir config in
        Fs_compat.mkdir_p masc_root;
-       Eio_main.run (fun _env -> f config masc_root))
+       Eio_main.run (fun env ->
+         Fs_compat.set_fs (Eio.Stdenv.fs env);
+         f config masc_root))
 ;;
 
 let read_file path =
@@ -194,15 +272,6 @@ let test_store_roundtrip_deduplicates_without_dispatch () =
      | Error error -> fail (Store.error_to_yojson error |> Yojson.Safe.to_string));
     check bool "store did not dispatch an ordinary Tool" false
       (Sys.file_exists (Filename.concat masc_root "tool_calls")))
-;;
-
-let replace_assoc name replacement = function
-  | `Assoc fields ->
-    `Assoc
-      (List.map
-         (fun (field, value) -> if String.equal field name then field, replacement else field, value)
-         fields)
-  | value -> value
 ;;
 
 let test_tampered_content_and_filename_are_rejected_without_repair () =
@@ -242,6 +311,61 @@ let test_tampered_content_and_filename_are_rejected_without_repair () =
      | Error (Store.Invalid_proposal (Plan.Filename_digest_mismatch _)) -> ()
      | Error error -> failf "wrong filename error: %s" (Store.error_to_yojson error |> Yojson.Safe.to_string)
      | Ok _ -> fail "content under the wrong digest filename loaded"))
+;;
+
+let test_noncanonical_stored_bytes_are_rejected_as_tamper () =
+  with_store (fun config _masc_root ->
+    let proposal = create () in
+    let path = Store.proposal_path config (Plan.id proposal) in
+    Fs_compat.mkdir_p (Store.store_dir config);
+    let noncanonical = Plan.to_yojson proposal |> Yojson.Safe.pretty_to_string in
+    check bool "fixture bytes are noncanonical" false
+      (String.equal noncanonical (Plan.canonical_bytes proposal));
+    Fs_compat.save_file path noncanonical;
+    match Store.load ~descriptors:(descriptors ()) config (Plan.id proposal) with
+    | Error (Store.Tampered_existing_file id)
+      when Plan.Proposal_id.equal id (Plan.id proposal) -> ()
+    | Error error ->
+      failf
+        "wrong noncanonical tamper error: %s"
+        (Store.error_to_yojson error |> Yojson.Safe.to_string)
+    | Ok _ -> fail "semantically equivalent noncanonical bytes loaded")
+;;
+
+let test_exclusive_create_collision_never_clobbers () =
+  with_store (fun config _masc_root ->
+    let identical = create ~objective:"External identical publication" () in
+    (match
+       Store.For_testing.save_after_absence_observed
+         ~before_exclusive_create:(fun ~path ->
+           Fs_compat.save_file path (Plan.canonical_bytes identical))
+         config
+         identical
+     with
+     | Ok Store.Already_present -> ()
+     | Ok Stored -> fail "collision was reported as this writer's publication"
+     | Error error ->
+       failf
+         "identical collision failed: %s"
+         (Store.error_to_yojson error |> Yojson.Safe.to_string));
+    let conflicting = create ~objective:"External conflicting publication" () in
+    let conflicting_path = Store.proposal_path config (Plan.id conflicting) in
+    let external_bytes = "external-owner-bytes" in
+    (match
+       Store.For_testing.save_after_absence_observed
+         ~before_exclusive_create:(fun ~path ->
+           Fs_compat.save_file path external_bytes)
+         config
+         conflicting
+     with
+     | Error (Store.Tampered_existing_file id)
+       when Plan.Proposal_id.equal id (Plan.id conflicting) -> ()
+     | Error error ->
+       failf
+         "wrong conflicting collision error: %s"
+         (Store.error_to_yojson error |> Yojson.Safe.to_string)
+     | Ok _ -> fail "conflicting external publication was overwritten");
+    check string "external bytes retained" external_bytes (read_file conflicting_path))
 ;;
 
 let add_field field json =
@@ -289,6 +413,11 @@ let test_error_json_codecs_cover_every_top_level_sum () =
           { field = Plan.Capability_surface_sha256; value = "invalid" } )
     ; ( "plan_rejected"
       , Plan.Plan_rejected Masc.Keeper_tool_plan_request.Missing_nodes )
+    ; ( "async_tool_not_statically_read_only"
+      , Plan.Async_tool_not_statically_read_only
+          { descriptor_id = "agent.execute"
+          ; capability_id = "keeper.tool.execute"
+          } )
     ; ( "tampered_payload"
       , Plan.Tampered_payload
           { stored_digest = String.make 64 'a'
@@ -314,10 +443,23 @@ let test_error_json_codecs_cover_every_top_level_sum () =
     ; close_failure = None
     }
   in
-  let write_error : Masc.Keeper_fs.durable_write_error =
-    { renamed = false
-    ; stage = Masc.Keeper_fs.Directory_prepare
-    ; failure = Masc.Keeper_fs.Operation_failed "unavailable"
+  let directory_error =
+    Masc.Keeper_fs_durable_directory.Directory_chain_failed
+      (Masc.Keeper_fs_durable_directory.Missing_root { path = "/missing" })
+  in
+  let exclusive_error : Fs_compat.capability_write_error =
+    { operation = Fs_compat.Create_exclusive_operation
+    ; target_effect = Fs_compat.Target_unchanged
+    ; primary_failure =
+        Fs_compat.Write_primary_failure
+          { stage = Fs_compat.Create_target_entry
+          ; cause =
+              Fs_compat.Operation_failed
+                { exception_ = Failure "unavailable"
+                ; backtrace = Printexc.get_callstack 0
+                }
+          }
+    ; cleanup_failures = []
     }
   in
   let store_errors =
@@ -326,7 +468,9 @@ let test_error_json_codecs_cover_every_top_level_sum () =
     ; "proposal_not_found", Store.Proposal_not_found proposal_id
     ; "tampered_existing_file", Store.Tampered_existing_file proposal_id
     ; "read_failed", Store.Read_failed read_error
-    ; "write_failed", Store.Write_failed write_error
+    ; "directory_prepare_failed", Store.Directory_prepare_failed directory_error
+    ; "capability_filesystem_unavailable", Store.Capability_filesystem_unavailable
+    ; "exclusive_write_failed", Store.Exclusive_write_failed exclusive_error
     ]
   in
   List.iter
@@ -345,7 +489,8 @@ let test_nested_base_path_and_path_escape_contract () =
        let config = Masc.Workspace.default_config_uncached base in
        let masc_root = Masc.Workspace.masc_root_dir config in
        Fs_compat.mkdir_p masc_root;
-       Eio_main.run (fun _env ->
+       Eio_main.run (fun env ->
+         Fs_compat.set_fs (Eio.Stdenv.fs env);
          let proposal = create () in
          (match Store.save config proposal with
           | Ok Store.Stored -> ()
@@ -387,14 +532,39 @@ let test_missing_masc_root_returns_typed_write_failure () =
        let config = Masc.Workspace.default_config_uncached base in
        let masc_root = Masc.Workspace.masc_root_dir config in
        check bool "fixture masc_root is absent" false (Sys.file_exists masc_root);
-       Eio_main.run (fun _env ->
+       Eio_main.run (fun env ->
+         Fs_compat.set_fs (Eio.Stdenv.fs env);
          match Store.save config (create ()) with
-         | Error (Store.Write_failed { Masc.Keeper_fs.renamed = false; _ }) -> ()
+         | Error
+             (Store.Directory_prepare_failed
+               (Masc.Keeper_fs_durable_directory.Directory_chain_failed
+                 (Masc.Keeper_fs_durable_directory.Missing_root _))) -> ()
          | Error error ->
            failf
              "wrong missing-root error: %s"
              (Store.error_to_yojson error |> Yojson.Safe.to_string)
          | Ok _ -> fail "save created an absent ownership root"))
+;;
+
+let test_missing_capability_filesystem_fails_before_mutation () =
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base)
+    (fun () ->
+       let config = Masc.Workspace.default_config_uncached base in
+       let masc_root = Masc.Workspace.masc_root_dir config in
+       Fs_compat.mkdir_p masc_root;
+       Eio_main.run (fun _env ->
+         Fs_compat.clear_fs ();
+         match Store.save config (create ()) with
+         | Error Store.Capability_filesystem_unavailable ->
+           check bool "store directory was not created" false
+             (Sys.file_exists (Store.store_dir config))
+         | Error error ->
+           failf
+             "wrong missing capability fs error: %s"
+             (Store.error_to_yojson error |> Yojson.Safe.to_string)
+         | Ok _ -> fail "save proceeded without the installed capability filesystem"))
 ;;
 
 let () =
@@ -405,15 +575,19 @@ let () =
       , [ test_case "canonical payload has stable id" `Quick test_canonical_payload_has_stable_id
         ; test_case "semantic changes change id" `Quick test_semantic_changes_change_id
         ; test_case "arbitrary plans and missing references reject" `Quick test_arbitrary_or_unreferenced_plan_is_rejected
+        ; test_case "async requires static readonly descriptors" `Quick test_async_requires_every_descriptor_to_be_statically_read_only
         ; test_case "stored schema is closed and versioned" `Quick test_closed_stored_schema_rejects_duplicate_unknown_and_version
         ; test_case "error JSON covers typed sums" `Quick test_error_json_codecs_cover_every_top_level_sum
         ] )
     ; ( "store"
       , [ test_case "roundtrip deduplicates without dispatch" `Quick test_store_roundtrip_deduplicates_without_dispatch
         ; test_case "tamper and filename mismatch reject before mutation" `Quick test_tampered_content_and_filename_are_rejected_without_repair
+        ; test_case "noncanonical stored bytes reject as tamper" `Quick test_noncanonical_stored_bytes_are_rejected_as_tamper
+        ; test_case "exclusive create collision never clobbers" `Quick test_exclusive_create_collision_never_clobbers
         ; test_case "nested base path and path escape" `Quick test_nested_base_path_and_path_escape_contract
         ; test_case "symlink proposal rejects" `Quick test_symlink_proposal_is_rejected_by_owned_reader
         ; test_case "missing masc root returns write failure" `Quick test_missing_masc_root_returns_typed_write_failure
+        ; test_case "missing capability fs fails before mutation" `Quick test_missing_capability_filesystem_fails_before_mutation
         ] )
     ]
 ;;

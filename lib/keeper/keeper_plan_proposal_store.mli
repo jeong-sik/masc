@@ -12,7 +12,9 @@ type error =
   | Proposal_not_found of Proposal.Proposal_id.t
   | Tampered_existing_file of Proposal.Proposal_id.t
   | Read_failed of Fs_compat.owned_regular_file_read_error
-  | Write_failed of Keeper_fs.durable_write_error
+  | Directory_prepare_failed of Keeper_fs_durable_directory.failure
+  | Capability_filesystem_unavailable
+  | Exclusive_write_failed of Fs_compat.capability_write_error
 
 val store_dir : Workspace.config -> string
 val proposal_path : Workspace.config -> Proposal.Proposal_id.t -> string
@@ -32,3 +34,11 @@ val load_string_id
   -> (Proposal.t, error) result
 
 val error_to_yojson : error -> Yojson.Safe.t
+
+module For_testing : sig
+  val save_after_absence_observed
+    :  before_exclusive_create:(path:string -> unit)
+    -> Workspace.config
+    -> Proposal.t
+    -> (save_result, error) result
+end

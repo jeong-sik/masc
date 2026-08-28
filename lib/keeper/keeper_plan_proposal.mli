@@ -60,6 +60,10 @@ type error =
       ; value : string
       }
   | Plan_rejected of Keeper_tool_plan_request.error
+  | Async_tool_not_statically_read_only of
+      { descriptor_id : string
+      ; capability_id : string
+      }
   | Tampered_payload of
       { stored_digest : string
       ; computed_digest : string

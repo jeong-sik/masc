@@ -235,6 +235,21 @@ val field :
 val load_candidates :
   base_path:string -> keeper_name:string -> (candidate list, string) result
 
+val load_candidates_with_rejections
+  :  base_path:string
+  -> keeper_name:string
+  -> (candidate list * (int * string) list, string) result
+(** Same read as {!load_candidates}, plus the rows it could not decode as
+    [(line number, reason)].
+
+    One unreadable row used to fail the whole read, and the write path reads
+    before it writes, so compaction could never remove it. Measured 2026-08-28:
+    17 of 575 rows carried a field a hard cut had removed and stopped all 10
+    keeper ledgers, 402 WARN/day. This ledger is a projection — the board is
+    the source and [latest_candidates] keeps the newest row per candidate_id —
+    so the readable rows are worth more than refusing everything. The next
+    write compacts the rejected rows out. *)
+
 val record : base_path:string -> candidate -> record_result
 (** Validate the complete current candidate invariant before changing the
     durable ledger. *)

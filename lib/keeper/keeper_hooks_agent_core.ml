@@ -194,6 +194,28 @@ let make_hooks
            on_tool_stream_observation (Turn_closed_without_sources { turn }));
         on_after_turn_response ~response;
         record_progress "agent_core_after_turn";
+        (* Tail of this agent-core turn's visible text, for the same glance.
+           Exhaustive over content_block on purpose: a new text-bearing
+           variant must be a compile-time decision here, not a silent drop. *)
+        (let visible_text =
+           response.content
+           |> List.filter_map (fun (block : Agent_core.Types.content_block) ->
+                  match block with
+                  | Agent_core.Types.Text text -> Some text
+                  | Agent_core.Types.Thinking _
+                  | Agent_core.Types.ReasoningDetails _
+                  | Agent_core.Types.RedactedThinking _
+                  | Agent_core.Types.ToolUse _
+                  | Agent_core.Types.ToolResult _
+                  | Agent_core.Types.Image _
+                  | Agent_core.Types.Document _
+                  | Agent_core.Types.Audio _ -> None)
+           |> String.concat "\n"
+         in
+         Keeper_turn_preview.note_text
+           ~keeper_name:(!meta_ref).name
+           ~now:(Unix.gettimeofday ())
+           visible_text);
         let meta = !meta_ref in
         let model = resolve_after_turn_model ~keeper_name:meta.name ~response in
         let usage_trust =
@@ -472,6 +494,13 @@ let make_hooks
           ; _
           } ->
         record_progress ("tool_completed:" ^ tool_name);
+        (* The Answering overlay's live glance: the most recent tool this
+           turn ran. Written beside the progress stamp so the two facts
+           cannot drift apart. *)
+        Keeper_turn_preview.note_tool
+          ~keeper_name:(!meta_ref).name
+          ~now:(Unix.gettimeofday ())
+          (Some tool_name);
         incr tool_call_count_ref;
         (* AGENT_CORE exposes the provider-facing tool body here as text.  It is not a
            semantic authority: JSON-looking bytes must stay opaque.  A future

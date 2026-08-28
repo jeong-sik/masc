@@ -3669,9 +3669,18 @@ let keeper_turn_lane_of_string = function
   | "maintenance" -> Some Turn_lane_maintenance
   | _ -> None
 
+type keeper_turn_preview = {
+  ktp_text_tail : string;
+  ktp_current_tool : string option;
+}
+
 type keeper_turn_state =
   | Keeper_turn_idle
-  | Keeper_turn_running of { lane : keeper_turn_lane; started_at_unix : float }
+  | Keeper_turn_running of {
+      lane : keeper_turn_lane;
+      started_at_unix : float;
+      preview : keeper_turn_preview option;
+    }
   | Keeper_turn_unavailable of string
 
 type keeper_turn_row = {
@@ -3710,10 +3719,27 @@ let decode_keeper_turn_row json =
                      (Json_util.kind_name other))
             | None -> Error "turn is missing required field 'started_at_unix'"
           in
+          let* preview =
+            match Json_util.assoc_member_opt "preview" turn_json with
+            | None | Some `Null -> Ok None
+            | Some (`Assoc _ as preview_json) ->
+                let* ktp_text_tail =
+                  required_string_field preview_json "text_tail"
+                in
+                let* ktp_current_tool =
+                  required_nullable_string_field preview_json "current_tool"
+                in
+                Ok (Some { ktp_text_tail; ktp_current_tool })
+            | Some other ->
+                Error
+                  (Printf.sprintf
+                     "turn field 'preview' must be an object or null (received %s)"
+                     (Json_util.kind_name other))
+          in
           Ok
             {
               ktr_keeper_name;
-              ktr_state = Keeper_turn_running { lane; started_at_unix };
+              ktr_state = Keeper_turn_running { lane; started_at_unix; preview };
             }
       | Some other ->
           Error

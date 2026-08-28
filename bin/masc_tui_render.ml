@@ -10667,10 +10667,17 @@ let answering_lines (state : state) =
     ~finishes:state.keeper_turn_finishes
     state.keeper_turns
 
+(* The overlay ends in a fixed preview panel (divider + two lines): always
+   drawn, so the list height never shifts with what the cursor is on — the
+   fixed-chrome rule, applied before the panel exists rather than patched
+   after (see boxed_surface_chrome_rows for the precedent). *)
+let answering_preview_rows = 3
+
 let answering_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  (List.length (answering_lines state), framed_content_height ~rows)
+  ( List.length (answering_lines state)
+  , max 1 (framed_content_height ~rows - answering_preview_rows) )
 
 let render_answering (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -10684,7 +10691,9 @@ let render_answering (state : state) =
    ^ Ansi.reset);
   framed_divider buf cols;
   let lines = answering_lines state in
-  let content_height = framed_content_height ~rows in
+  let content_height =
+    max 1 (framed_content_height ~rows - answering_preview_rows)
+  in
   let scroll =
     Masc_tui_scroll.normalize
       ~count:(List.length lines)
@@ -10713,6 +10722,47 @@ let render_answering (state : state) =
   |> List.filter (fun (i, _) -> i >= scroll && i < scroll + content_height)
   |> List.iter (fun (i, line) ->
          framed_line buf cols (paint ~selected:(i = state.answering_cursor) line));
+  (* The fixed preview panel: what the cursor's keeper is doing right now,
+     from the turns poll's live glance. Drawn empty rather than omitted so
+     the list above never reflows with the cursor. *)
+  framed_divider buf cols;
+  let preview_lines =
+    let cursor_preview =
+      match List.nth_opt lines state.answering_cursor with
+      | Some { Masc_tui_answering.target = Some keeper_name; _ } ->
+          List.find_map
+            (fun (row : Tui_decode.keeper_turn_row) ->
+              if String.equal row.ktr_keeper_name keeper_name then
+                match row.ktr_state with
+                | Tui_decode.Keeper_turn_running { preview = Some preview; _ }
+                  ->
+                    Some (keeper_name, preview)
+                | Tui_decode.Keeper_turn_running { preview = None; _ }
+                | Tui_decode.Keeper_turn_idle
+                | Tui_decode.Keeper_turn_unavailable _ -> None
+              else None)
+            state.keeper_turns
+      | Some _ | None -> None
+    in
+    match cursor_preview with
+    | Some (keeper_name, preview) ->
+        let doing =
+          match preview.Tui_decode.ktp_current_tool with
+          | Some tool_name -> "â¶ " ^ tool_name
+          | None -> "â¶ writing"
+        in
+        [ Ansi.bold ^ keeper_name ^ Ansi.reset ^ "  " ^ Ansi.cyan ^ doing
+          ^ Ansi.reset
+        ; Ansi.dim
+          ^ Terminal_text.single_line preview.Tui_decode.ktp_text_tail
+          ^ Ansi.reset
+        ]
+    | None ->
+        [ Ansi.dim ^ "live preview â none for this row" ^ Ansi.reset
+        ; ""
+        ]
+  in
+  List.iter (fun line -> framed_line buf cols line) preview_lines;
   framed_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

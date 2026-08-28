@@ -2867,6 +2867,50 @@ let test_decode_keeper_turns () =
            Alcotest.fail "an owner lookup failure decoded as a turn state")
   | Ok rows -> Alcotest.failf "expected three rows, got %d" (List.length rows)
 
+let test_decode_keeper_turns_reads_the_preview () =
+  let with_preview =
+    `Assoc
+      [ ("schema", `String "masc.keeper_turns.v1")
+      ; ( "keepers"
+        , `List
+            [ `Assoc
+                [ ("keeper_name", `String "kidsnote")
+                ; ("status", `String "ok")
+                ; ( "turn"
+                  , `Assoc
+                      [ ("lane", `String "autonomous")
+                      ; ("started_at_unix", `Float 1.0)
+                      ; ( "preview"
+                        , `Assoc
+                            [ ("text_tail", `String "PR body \xeb\xa7\x88\xeb\xac\xb4\xeb\xa6\xac")
+                            ; ("current_tool", `String "Execute")
+                            ; ("updated_at_unix", `Float 2.0)
+                            ] )
+                      ] )
+                ]
+            ] )
+      ]
+  in
+  (match Tui_decode.decode_keeper_turns with_preview with
+   | Error err -> Alcotest.fail err
+   | Ok [ { ktr_state = Tui_decode.Keeper_turn_running { preview = Some p; _ }; _ } ] ->
+     Alcotest.(check bool) "text tail rides" true
+       (Astring.String.is_infix ~affix:"PR body" p.Tui_decode.ktp_text_tail);
+     Alcotest.(check (option string)) "current tool rides" (Some "Execute")
+       p.Tui_decode.ktp_current_tool
+   | Ok _ -> Alcotest.fail "preview did not decode as running+Some");
+  (* An older server sends no preview field at all: running still decodes. *)
+  match Tui_decode.decode_keeper_turns keeper_turns_json with
+  | Error err -> Alcotest.fail err
+  | Ok (first :: _) ->
+    (match first.Tui_decode.ktr_state with
+     | Tui_decode.Keeper_turn_running { preview = None; _ } -> ()
+     | Tui_decode.Keeper_turn_running { preview = Some _; _ } ->
+       Alcotest.fail "an absent preview decoded as Some"
+     | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _ ->
+       Alcotest.fail "fixture no longer leads with a running row")
+  | Ok [] -> Alcotest.fail "fixture decoded empty"
+
 let test_decode_keeper_turns_rejects_unknown_lane () =
   let unknown_lane =
     `Assoc
@@ -3951,6 +3995,8 @@ let () =
     ( "decode_keeper_turns",
       [ Alcotest.test_case "running, idle, and unavailable rows" `Quick
           test_decode_keeper_turns
+      ; Alcotest.test_case "reads the preview when the server sends one" `Quick
+          test_decode_keeper_turns_reads_the_preview
       ; Alcotest.test_case "rejects an unknown lane" `Quick
           test_decode_keeper_turns_rejects_unknown_lane
       ; Alcotest.test_case "rejects an unknown schema" `Quick

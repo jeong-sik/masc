@@ -628,6 +628,52 @@ let test_profile_parses_tools_native () =
     ; "full", Runtime_native_tools.Native_full
     ]
 
+let test_profile_parses_claude_setting_sources () =
+  let input =
+    "[keeper.tools]\nclaude-setting-sources = [\"project\", \"user\"]\n"
+  in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check bool "declared layers parse in order" true
+         (d.claude_setting_sources
+          = Some
+              [ Runtime_native_tools.Settings_project
+              ; Runtime_native_tools.Settings_user
+              ]))
+
+let test_profile_rejects_bad_claude_setting_sources () =
+  let expect_rejected label input needle =
+    match TL.parse_toml input with
+    | Error error -> fail error
+    | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok _ -> fail (label ^ " must fail closed")
+       | Error detail ->
+         check bool (label ^ " names the key") true
+           (String_util.contains_substring detail needle))
+  in
+  expect_rejected "a typo layer"
+    "[keeper.tools]\nclaude-setting-sources = [\"projcet\"]\n"
+    "claude-setting-sources";
+  expect_rejected "a repeated layer"
+    "[keeper.tools]\nclaude-setting-sources = [\"project\", \"project\"]\n"
+    "repeat"
+
+let test_profile_absent_claude_setting_sources_is_none () =
+  let input = "[keeper]\nproactive_enabled = true\n" in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check bool "absent claude-setting-sources is None" true
+         (d.claude_setting_sources = None))
+
 let test_profile_absent_tools_native_is_none () =
   let input = "[keeper]\nproactive_enabled = true\n" in
   match TL.parse_toml input with
@@ -1698,6 +1744,12 @@ let () =
             test_profile_rejects_a_typo_in_the_tools_table;
           test_case "absent tools.native is None" `Quick
             test_profile_absent_tools_native_is_none;
+          test_case "parses tools.claude-setting-sources" `Quick
+            test_profile_parses_claude_setting_sources;
+          test_case "rejects bad tools.claude-setting-sources" `Quick
+            test_profile_rejects_bad_claude_setting_sources;
+          test_case "absent tools.claude-setting-sources is None" `Quick
+            test_profile_absent_claude_setting_sources_is_none;
           test_case "rejects invalid tools.native" `Quick
             test_profile_rejects_invalid_tools_native;
           test_case "rejects unknown [keeper.tools] sibling" `Quick

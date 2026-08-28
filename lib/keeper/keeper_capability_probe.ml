@@ -399,6 +399,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                ; cwd = base_path
                ; model = exec.model
                ; native = Runtime_native_tools.claude_code_default
+               ; setting_sources = []
                ; system_prompt = None
                ; admission_timeout_s = exec.timeout_s
                ; timeout_s =

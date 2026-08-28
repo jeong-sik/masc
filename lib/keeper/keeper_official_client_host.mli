@@ -295,6 +295,25 @@ val host_stop_result :
     here made every host-stopped turn classify as [Runtime_not_observed],
     which the operator disposition surfaced as "unmapped_runtime_state". *)
 
+val admit_claude_setting_sources :
+  sources:Runtime_native_tools.claude_setting_source list ->
+  approval_mode:Keeper_tool_approval_mode.mode ->
+  client_label:string ->
+  (unit, string) result
+(** Pure admission rule for [keeper.tools.claude-setting-sources]: the empty
+    list always passes; a non-empty list needs the yolo approval mode, since
+    a loaded settings layer can carry skills and hooks that execute inside
+    the vendor loop, outside the MASC approval gate. *)
+
+val resolve_claude_setting_sources :
+  base_path:string ->
+  keeper_name:string ->
+  client_label:string ->
+  (Runtime_native_tools.claude_setting_source list, Agent_core.Error.t) result
+(** Profile-declared setting sources for this keeper, degraded to the empty
+    list (with a log line, never silently) when admission refuses them.
+    Profile load failures stay fail-closed. *)
+
 val admit_native_posture :
   posture:Runtime_native_tools.posture ->
   approval_mode:Keeper_tool_approval_mode.mode ->

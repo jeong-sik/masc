@@ -279,20 +279,32 @@ let test_answering_names_the_first_keeper () =
   check_string "one keeper answering reads by name"
     "<dim>  q:quit  | \xe2\x97\x8c answering kidsnote | Port: 8935<reset>\n"
     (Masc_tui_footer.line
-       ~status:[ Masc_tui_footer.Keeper_answering [ "kidsnote" ] ]
+       ~status:[ Masc_tui_footer.Keeper_answering { names = [ "kidsnote" ]; lead_elapsed_s = None } ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ());
   check_string "more keepers ride as a count behind the first"
     "<dim>  q:quit  | \xe2\x97\x8c answering kidsnote +2 | Port: 8935<reset>\n"
     (Masc_tui_footer.line
        ~status:
-         [ Masc_tui_footer.Keeper_answering [ "kidsnote"; "analyst"; "rondo" ] ]
+         [ Masc_tui_footer.Keeper_answering
+             { names = [ "kidsnote"; "analyst"; "rondo" ]; lead_elapsed_s = None } ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ());
   check_string "nobody answering says nothing"
     "<dim>  q:quit  | Port: 8935<reset>\n"
     (Masc_tui_footer.line
-       ~status:[ Masc_tui_footer.Keeper_answering [] ]
+       ~status:[ Masc_tui_footer.Keeper_answering { names = []; lead_elapsed_s = Some 3 } ]
+       ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
+       ~hints:"q:quit" ())
+
+let test_answering_carries_the_lead_elapsed_time () =
+  check_string "the lead keeper's runtime rides the badge"
+    "<dim>  q:quit  | \xe2\x97\x8c answering kidsnote 14m +1 | Port: 8935<reset>\n"
+    (Masc_tui_footer.line
+       ~status:
+         [ Masc_tui_footer.Keeper_answering
+             { names = [ "kidsnote"; "analyst" ]; lead_elapsed_s = Some 850 }
+         ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ())
 
@@ -338,6 +350,58 @@ let test_worktree_server_warning_survives_narrow_widths () =
   check_bool "the build fact went first" false (contains ~needle:"9.9.9" narrow);
   check_bool "the warning stayed" true (contains ~needle:"WORKTREE" narrow)
 
+let test_build_mismatch_names_the_older_side () =
+  let item =
+    Masc_tui_footer.build_mismatch_item
+      ~tui_commit:(Some "aaaaaaa1111111") ~tui_age_s:(Some 5000.)
+      ~server_commit:"bbbbbbb2222222" ~server_age_s:(Some 100.)
+  in
+  (match item with
+   | Some item ->
+     check_string "an older TUI is told to restart"
+       "<dim>  q:quit  | TUI aaaaaaa \xe2\x89\xa0 server bbbbbbb (restart masc) | Port: 8935<reset>\n"
+       (Masc_tui_footer.line ~status:[ item ] ~dim:"<dim>" ~reset:"<reset>"
+          ~max_cells:120 ~port:8935 ~hints:"q:quit" ())
+   | None -> Alcotest.fail "a differing pair produced no item");
+  (match
+     Masc_tui_footer.build_mismatch_item
+       ~tui_commit:(Some "aaaaaaa1111111") ~tui_age_s:(Some 100.)
+       ~server_commit:"bbbbbbb2222222" ~server_age_s:(Some 5000.)
+   with
+   | Some item ->
+     check_bool "an older server is told to redeploy" true
+       (contains ~needle:"server is older"
+          (Masc_tui_footer.line ~status:[ item ] ~dim:"" ~reset:""
+             ~max_cells:120 ~port:8935 ~hints:"q" ()))
+   | None -> Alcotest.fail "a differing pair produced no item");
+  match
+    Masc_tui_footer.build_mismatch_item
+      ~tui_commit:(Some "aaaaaaa1111111") ~tui_age_s:None
+      ~server_commit:"bbbbbbb2222222" ~server_age_s:(Some 5000.)
+  with
+  | Some item ->
+    check_bool "one unknown age blames neither lane" true
+      (contains ~needle:"generations differ"
+         (Masc_tui_footer.line ~status:[ item ] ~dim:"" ~reset:""
+            ~max_cells:120 ~port:8935 ~hints:"q" ()))
+  | None -> Alcotest.fail "a differing pair produced no item"
+
+let test_build_mismatch_is_silent_without_testimony () =
+  check_bool "matching commits say nothing" true
+    (Masc_tui_footer.build_mismatch_item
+       ~tui_commit:(Some "aaaaaaa1111111") ~tui_age_s:(Some 1.)
+       ~server_commit:"aaaaaaa1111111" ~server_age_s:(Some 2.)
+     = None);
+  check_bool "a TUI with no embedded commit says nothing" true
+    (Masc_tui_footer.build_mismatch_item ~tui_commit:None ~tui_age_s:None
+       ~server_commit:"bbbbbbb2222222" ~server_age_s:None
+     = None);
+  check_bool "a server that sent no commit says nothing" true
+    (Masc_tui_footer.build_mismatch_item
+       ~tui_commit:(Some "aaaaaaa1111111") ~tui_age_s:None ~server_commit:""
+       ~server_age_s:None
+     = None)
+
 let test_answering_outlives_the_build_fact () =
   (* At a width with no room for everything, the live-activity fact stays on
      the row after refresh and build have been dropped. *)
@@ -347,7 +411,7 @@ let test_answering_outlives_the_build_fact () =
         [ Masc_tui_footer.Refresh_interval 2.0
         ; Masc_tui_footer.Server_build
             { version = "9.9.9"; commit = "abcdef0123456" }
-        ; Masc_tui_footer.Keeper_answering [ "kidsnote" ]
+        ; Masc_tui_footer.Keeper_answering { names = [ "kidsnote" ]; lead_elapsed_s = None }
         ]
       ~dim:"" ~reset:"" ~max_cells:46 ~port:8935 ~hints:"q:quit" ()
   in
@@ -387,8 +451,14 @@ let tests =
           test_answering_names_the_first_keeper
       ; Alcotest.test_case "answered glow reads by name" `Quick
           test_answered_glow_reads_by_name
+      ; Alcotest.test_case "answering carries the lead elapsed time" `Quick
+          test_answering_carries_the_lead_elapsed_time
       ; Alcotest.test_case "worktree server warning survives narrow widths"
           `Quick test_worktree_server_warning_survives_narrow_widths
+      ; Alcotest.test_case "build mismatch names the older side" `Quick
+          test_build_mismatch_names_the_older_side
+      ; Alcotest.test_case "build mismatch is silent without testimony" `Quick
+          test_build_mismatch_is_silent_without_testimony
       ; Alcotest.test_case "answering outlives the build fact" `Quick
           test_answering_outlives_the_build_fact
       ] )

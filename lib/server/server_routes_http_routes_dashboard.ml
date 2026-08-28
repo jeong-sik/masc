@@ -996,6 +996,25 @@ let handle_gate_keeper_mode_body state operator_name request reqd body_str =
       with
       | Error message -> refuse message
       | Ok mode -> (
+        (* Same admission bar as the workspace lane: an auto_judge override
+           is a promise that a judge topology exists to drain it, and this
+           route is the entry point of the override-only-auto_judge state
+           the sweeps now serve. *)
+        let readiness =
+          match mode with
+          | Some Keeper_gate_mode.Auto_judge ->
+            Hitl_summary_worker.snapshot_topology_readiness ()
+          | Some (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow)
+          | None -> Ok ()
+        in
+        match readiness with
+        | Error detail ->
+          respond_json_value_with_cors
+            ~status:`Service_unavailable
+            request
+            reqd
+            (operator_error_json ("Auto Judge unavailable: " ^ detail))
+        | Ok () -> (
         let config = Mcp_server.workspace_config state in
         match
           Keeper_gate_mode.set_for_keeper config ~actor:operator_name
@@ -1016,7 +1035,7 @@ let handle_gate_keeper_mode_body state operator_name request reqd body_str =
                ]);
           respond_json_value_with_cors request reqd
             (match Keeper_gate_mode.keeper_change_json change with
-             | `Assoc fields -> `Assoc fields)))
+             | `Assoc fields -> `Assoc fields))))
     | Some _ | None -> refuse "keeper_name is required"
   with Yojson.Json_error message -> refuse message
 ;;

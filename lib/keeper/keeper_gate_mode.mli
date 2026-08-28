@@ -49,9 +49,9 @@ val set :
     Only upward. An override that asks for less than the workspace is kept on
     disk and ignored on read, so turning the workspace stricter cannot be
     undone one keeper at a time by an older row nobody remembers writing.
-    Downward is also a wider change than it looks: the auto-judge drains ask
-    the workspace whether to run at all, so a keeper that were alone in
-    [Auto_judge] would queue approvals with nothing sweeping them. *)
+    A keeper alone in [Auto_judge] above a looser workspace is a supported
+    state: the drains and boot recovery admit owners by {!resolve}, so its
+    queue is swept like any other. *)
 
 type keeper_override = {
   keeper_name : string;
@@ -83,9 +83,11 @@ val resolve : base_path:string -> keeper_name:string -> (t, string) result
 (** The mode one keeper's call is decided under: the stricter of the
     workspace mode and this keeper's override.
 
-    This is the one to ask about a call. {!read} answers what the workspace
-    chose, which is the right question for the drains that decide whether the
-    auto-judge machinery runs at all, and the wrong one for a call. *)
+    This is the one to ask about a call, and the one the drains ask per
+    owner: an override can hold a single keeper in auto_judge above a
+    looser workspace, and that owner's queue still needs sweeping. {!read}
+    answers only what the workspace chose — the right question for "is the
+    mode store readable", the wrong one for any keeper-scoped decision. *)
 
 val set_for_keeper :
   Workspace.config ->

@@ -102,6 +102,33 @@ let test_a_lane_mark_says_what_its_colour_says () =
     ; ("\xc2\xb7", "nothing retained")
     ]
 
+(* A lane that cannot admit work said so and not why. The cell read "no
+   admitted slot", which restates the status word beside it, while the
+   projection carried the reason -- and an unconfigured lane and a lane whose
+   registry could not be read are different problems.
+
+   [sl_admission_error] is a [required_nullable_string_field]: the server
+   sends it on every lane, so a decoder that reads it and a screen that does
+   not is the whole of the gap. *)
+let test_a_lane_that_cannot_admit_says_why () =
+  Alcotest.(check bool) "the row reads the reason the projection carries" true
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"standalone_lane_row" ~callees:[]
+       ~fields:[ "sl_admission_error" ]
+     > 0);
+  (* Reading the field is not drawing it: an arm that matches [Some _] and
+     then prints the old sentence passes a read count. What the cell must not
+     say any more is the sentence that only restated the status word, and it
+     is kept for the case that really has no reason to give -- so the arm that
+     has one is asserted by the [reason] it binds reaching the cell. *)
+  (* Twice: the lane with no admitted slot reads as its reason, and the lane
+     that has slots and a reason reads as both. An arm that matched [Some _]
+     and printed the old sentence would pass the read count above. *)
+  Alcotest.(check int) "the reason is what the cell becomes, on both arms" 2
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"standalone_lane_row" ~callees:[]
+       ~identifiers:[ "reason" ])
+
 (* The fleet summary above the Keepers table read "2 offline" and named
    taskmaster among them, while taskmaster's own row drew a turning mark and a
    climbing clock. Its turn had started and never been closed; the process
@@ -149,5 +176,7 @@ let () =
             test_the_schedule_subject_is_measured_not_given_the_line
         ; Alcotest.test_case "a turn on a keeper that is not running stops"
             `Quick test_a_turn_on_a_keeper_that_is_not_running_stops_moving
+        ; Alcotest.test_case "a lane that cannot admit says why" `Quick
+            test_a_lane_that_cannot_admit_says_why
         ] )
     ]

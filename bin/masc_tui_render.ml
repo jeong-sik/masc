@@ -9148,7 +9148,15 @@ let render_code (state : state) =
   let total = List.length entries in
   let cursor = max 0 (min state.code_cursor (total - 1)) in
   let span = lexed_span in
-  let list_pane pane_buf pane_cols =
+  let list_pane ~framed pane_buf pane_cols =
+    (* Beside the file pane the box is the pane separator; alone on a narrow
+       terminal it is the redundant outer frame every other surface dropped
+       (same rule as keeper_detail_pane). *)
+    let framed_top = if framed then framed_top else box_top in
+    let framed_divider = if framed then framed_divider else box_divider in
+    let framed_line = if framed then framed_line else box_line in
+    let framed_empty = if framed then framed_empty else box_empty in
+    let framed_bottom = if framed then framed_bottom else box_bottom in
     framed_top pane_buf pane_cols;
     let list_focused = state.code_focus_file = Left_pane in
     let where = if String.equal state.code_dir "" then "/" else state.code_dir in
@@ -9601,13 +9609,13 @@ let render_code (state : state) =
      let right_cols = cols - left_cols in
      let left_buf = Buffer.create 1024 in
      let right_buf = Buffer.create 4096 in
-     list_pane left_buf left_cols;
+     list_pane ~framed:true left_buf left_cols;
      content_pane right_buf right_cols;
      write_two_panes buf ~left_cols:left_cols ~left:left_buf
        ~right:right_buf
    end
    else if state.code_focus_file = Right_pane then content_pane buf cols
-   else list_pane buf cols);
+   else list_pane ~framed:false buf cols);
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
@@ -9643,7 +9651,15 @@ let render_resources (state : state) =
   in
   let total = List.length rows_list in
   let cursor = max 0 (min state.resources_cursor (total - 1)) in
-  let list_pane pane_buf pane_cols =
+  let list_pane ~framed pane_buf pane_cols =
+    (* Same rule as the code surface: beside the content pane the box is the
+       pane separator; alone on a narrow terminal it is the redundant outer
+       frame every other surface dropped. *)
+    let framed_top = if framed then framed_top else box_top in
+    let framed_divider = if framed then framed_divider else box_divider in
+    let framed_line = if framed then framed_line else box_line in
+    let framed_empty = if framed then framed_empty else box_empty in
+    let framed_bottom = if framed then framed_bottom else box_bottom in
     framed_top pane_buf pane_cols;
     let list_focused = state.resource_focus = Left_pane in
     framed_line pane_buf pane_cols
@@ -9738,13 +9754,13 @@ let render_resources (state : state) =
      let right_cols = cols - left_cols in
      let left_buf = Buffer.create 1024 in
      let right_buf = Buffer.create 4096 in
-     list_pane left_buf left_cols;
+     list_pane ~framed:true left_buf left_cols;
      content_pane right_buf right_cols;
      write_two_panes buf ~left_cols:left_cols ~left:left_buf
        ~right:right_buf
    end
    else if state.resource_focus = Right_pane then content_pane buf cols
-   else list_pane buf cols);
+   else list_pane ~framed:false buf cols);
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:

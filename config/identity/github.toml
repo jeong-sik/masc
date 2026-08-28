@@ -1,15 +1,23 @@
 # GitHub's remote MCP server.
 #
 # GitHub publishes no registration endpoint, so this needs an OAuth app or
-# GitHub App made by hand: create one, then POST its client id and secret to
-# /api/v1/keepers/oauth/client.
+# GitHub App made by hand: create one with its callback set to this install's
+# <base URL>/api/v1/keepers/oauth/callback, then POST its client id and secret
+# to /api/v1/keepers/oauth/client.
 #
 # Measured 2026-08-27: the MCP endpoint refuses an initialize with 401 and
 # names its metadata, and the authorization server offers S256.
 #
-# Not measured: a completed exchange. GitHub issues an expiry and a refresh
-# token only where the app has token expiration turned on, and masc refuses
-# an answer carrying neither.
+# Measured 2026-08-29: a GitHub token already on the host reaches this MCP
+# endpoint directly -- initialize answered 200 with the tool list -- so the
+# app below buys per-Keeper attachment and renewal, not reachability.
+#
+# Not measured: a completed exchange, so what GitHub returns for each app
+# setting is unverified here. Either answer attaches. One carrying no expiry
+# and no refresh token is stored as a credential lasting until the provider
+# revokes it, not as a failed login (keeper_oauth_session.ml, `Never`); one
+# carrying a refresh token is renewed. Prefer token expiration turned on --
+# that is the shape masc can renew.
 
 id = "github"
 label = "GitHub"

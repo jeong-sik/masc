@@ -1355,6 +1355,34 @@ let test_x10_and_sgr_agree_on_the_wheel () =
          (Printf.sprintf "button %d" button) sgr x10)
     [ (64, "<64;10;5"); (65, "<65;10;5"); (0, "<0;10;5"); (66, "<66;10;5") ]
 
+(* The left press is the one report a surface can map to a row. Only the
+   unmodified press answers -- a release would act twice per click, and a
+   chord or drag is a gesture, not a choice. *)
+let test_sgr_left_press_reports_the_row_and_column () =
+  match Tui_decode.sgr_left_press "<0;10;5" 'M' with
+  | Some (5, 10) -> ()
+  | Some (row, column) ->
+      Alcotest.failf "expected row 5 column 10, got %d;%d" row column
+  | None -> Alcotest.fail "a plain left press should report its position"
+
+let test_sgr_left_press_ignores_releases_chords_and_wheel () =
+  let cases =
+    [ ("<0;10;5", 'm') (* release *)
+    ; ("<4;10;5", 'M') (* shift chord *)
+    ; ("<32;10;5", 'M') (* drag *)
+    ; ("<64;10;5", 'M') (* wheel *)
+    ; ("<0;10", 'M') (* short span *)
+    ]
+  in
+  List.iter
+    (fun (params, final) ->
+       match Tui_decode.sgr_left_press params final with
+       | None -> ()
+       | Some (row, column) ->
+           Alcotest.failf "report %S should stay unclaimed, got %d;%d" params
+             row column)
+    cases
+
 type parent_node = {
   node_id : string;
   parent_id : string option;
@@ -4148,6 +4176,11 @@ let () =
         Alcotest.test_case "clicks, releases, horizontal wheel stay unclaimed"
           `Quick
           test_sgr_click_and_horizontal_wheel_stay_unclaimed;
+        Alcotest.test_case "left press reports the row and column" `Quick
+          test_sgr_left_press_reports_the_row_and_column;
+        Alcotest.test_case "left press ignores releases, chords and wheel"
+          `Quick
+          test_sgr_left_press_ignores_releases_chords_and_wheel;
       ] );
     ( "x10_mouse",
       [

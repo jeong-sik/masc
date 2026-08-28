@@ -4956,7 +4956,7 @@ let test_decode_skill_evidence_requires_every_coverage_field () =
     required
 ;;
 
-let test_decode_skill_evidence_reads_typed_activation_owner () =
+let skill_evidence_observed_fixture () =
   let reference =
     `Assoc
       [ ( "identity"
@@ -5014,18 +5014,19 @@ let test_decode_skill_evidence_reads_typed_activation_owner () =
             ] )
       ]
   in
-  let json =
-    match skill_evidence_fixture () with
-    | `Assoc fields ->
-      `Assoc
-        (fields
-         |> List.remove_assoc "status"
-         |> List.remove_assoc "activation"
-         |> fun fields ->
-         ("status", `String "observed") :: ("activation", activation) :: fields)
-    | _ -> Alcotest.fail "Skill evidence fixture is not an object"
-  in
-  match Tui_decode.decode_skill_evidence json with
+  match skill_evidence_fixture () with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> List.remove_assoc "status"
+       |> List.remove_assoc "activation"
+       |> fun fields ->
+       ("status", `String "observed") :: ("activation", activation) :: fields)
+  | _ -> Alcotest.fail "Skill evidence fixture is not an object"
+;;
+
+let test_decode_skill_evidence_reads_typed_activation_owner () =
+  match Tui_decode.decode_skill_evidence (skill_evidence_observed_fixture ()) with
   | Error detail -> Alcotest.fail detail
   | Ok
       { se_activation =
@@ -5038,6 +5039,103 @@ let test_decode_skill_evidence_reads_typed_activation_owner () =
       [ "rondo" ]
       (List.map (fun claim -> claim.Tui_decode.seo_keeper) item.sea_owner_claims)
   | Ok _ -> Alcotest.fail "typed activation selection was not preserved"
+;;
+
+let map_skill_evidence_coverage f = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (name, value) -> name, if String.equal name "coverage" then f value else value)
+         fields)
+  | json -> json
+;;
+
+let test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation () =
+  let open_gap =
+    skill_evidence_fixture ()
+    |> map_skill_evidence_coverage (function
+         | `Assoc fields ->
+           `Assoc
+             (("activation_scope", `String "incomplete_retained_trace_snapshot")
+              :: ("activation_gaps", `List [ `Assoc [ "code", `String "ledger_unreadable" ] ])
+              :: (fields
+                  |> List.remove_assoc "activation_scope"
+                  |> List.remove_assoc "activation_gaps"))
+         | json -> json)
+  in
+  Alcotest.(check bool)
+    "known code without variant fields is rejected"
+    true
+    (Tui_decode.decode_skill_evidence open_gap |> Result.is_error);
+  let without_loaded_ledger =
+    skill_evidence_observed_fixture ()
+    |> map_skill_evidence_coverage (function
+         | `Assoc fields ->
+           `Assoc
+             (List.map
+                (fun (name, value) ->
+                   if String.equal name "activation_ledgers_loaded"
+                   then name, `Int 0
+                   else name, value)
+                fields)
+         | json -> json)
+  in
+  Alcotest.(check bool)
+    "activation requires a loaded ledger"
+    true
+    (Tui_decode.decode_skill_evidence without_loaded_ledger |> Result.is_error)
+;;
+
+let test_decode_skill_evidence_tie_compares_rfc3339_instants () =
+  let first = skill_evidence_observed_fixture () in
+  let first_evidence =
+    first |> Yojson.Safe.Util.member "activation" |> Yojson.Safe.Util.member "evidence"
+  in
+  let second_evidence =
+    match first_evidence with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              match name, value with
+              | "trace_id", _ -> name, `String "trace-proof-2"
+              | "activation", `Assoc activation ->
+                ( name
+                , `Assoc
+                    (List.map
+                       (fun (field, value) ->
+                          match field with
+                          | "turn_ref" -> field, `String "trace-proof-2#1"
+                          | "activated_at" ->
+                            field, `String "2026-08-29T09:00:00+09:00"
+                          | _ -> field, value)
+                       activation) )
+              | _ -> name, value)
+           fields)
+    | _ -> Alcotest.fail "activation evidence fixture is not an object"
+  in
+  let tie =
+    match first with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "activation"
+              then
+                ( name
+                , `Assoc
+                    [ "selection", `String "most_recent_observed_timestamp_tie"
+                    ; "evidence", `List [ first_evidence; second_evidence ]
+                    ] )
+              else name, value)
+           fields)
+    | _ -> Alcotest.fail "Skill evidence fixture is not an object"
+  in
+  match Tui_decode.decode_skill_evidence tie with
+  | Ok { se_activation = Some (Skill_evidence_most_recent_observed_timestamp_tie rows); _ } ->
+    Alcotest.(check int) "two equal instants" 2 (List.length rows)
+  | Ok _ -> Alcotest.fail "timestamp tie lost its typed selection"
+  | Error detail -> Alcotest.fail detail
 ;;
 
 let () =
@@ -5489,5 +5587,9 @@ let () =
           test_decode_skill_evidence_requires_every_coverage_field
       ; Alcotest.test_case "reads typed activation owner" `Quick
           test_decode_skill_evidence_reads_typed_activation_owner
+      ; Alcotest.test_case "rejects open gaps and unbacked activations" `Quick
+          test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation
+      ; Alcotest.test_case "timestamp ties compare parsed instants" `Quick
+          test_decode_skill_evidence_tie_compares_rfc3339_instants
       ] );
   ]

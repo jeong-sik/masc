@@ -5573,39 +5573,126 @@ let decode_skill_evidence_string_list field json =
   | _ -> Error ("Skill evidence " ^ field ^ " must be a list")
 ;;
 
-let skill_evidence_owner_gap_code = function
-  | "keeper_catalog_unavailable"
-  | "keeper_catalog_changed_during_resolution"
-  | "invalid_persisted_keeper_name"
-  | "keeper_meta_name_mismatch"
-  | "keeper_meta_unavailable"
-  | "runtime_manifest_unreadable" -> true
+let skill_evidence_exact_fields expected fields =
+  let actual = List.map fst fields in
+  List.length actual = List.length expected
+  && List.sort_uniq String.compare actual = List.sort String.compare expected
+;;
+
+let skill_evidence_string_field field json =
+  match member field json with `String _ -> true | _ -> false
+;;
+
+let skill_evidence_positive_int_field field json =
+  match member field json with `Int value -> value > 0 | _ -> false
+;;
+
+let skill_evidence_manifest_cause = function
+  | `Assoc fields as cause ->
+    (match member "code" cause with
+     | `String "manifest_read_failed" ->
+       skill_evidence_exact_fields [ "code"; "detail" ] fields
+       && skill_evidence_string_field "detail" cause
+     | `String "manifest_empty" ->
+       skill_evidence_exact_fields [ "code" ] fields
+     | `String ("manifest_invalid_json" | "manifest_invalid_row") ->
+       skill_evidence_exact_fields [ "code"; "line_number"; "detail" ] fields
+       && skill_evidence_positive_int_field "line_number" cause
+       && skill_evidence_string_field "detail" cause
+     | `String "manifest_identity_mismatch" ->
+       skill_evidence_exact_fields
+         [ "code"; "line_number"; "observed_keeper"; "observed_trace" ]
+         fields
+       && skill_evidence_positive_int_field "line_number" cause
+       && skill_evidence_string_field "observed_keeper" cause
+       && skill_evidence_string_field "observed_trace" cause
+     | _ -> false)
   | _ -> false
 ;;
 
-let skill_evidence_activation_gap_code = function
-  | "trace_root_unavailable"
-  | "trace_root_not_directory"
-  | "trace_entry_unreadable"
-  | "invalid_trace_directory"
-  | "symlink_trace_entry"
-  | "trace_entry_not_directory"
-  | "trace_inventory_changed_during_discovery"
-  | "trace_root_changed_during_discovery"
-  | "ledger_changed_during_discovery"
-  | "ledger_unreadable" -> true
+let skill_evidence_owner_gap = function
+  | `Assoc fields as gap ->
+    (match member "code" gap with
+     | `String "keeper_catalog_unavailable" ->
+       skill_evidence_exact_fields [ "code"; "detail" ] fields
+       && skill_evidence_string_field "detail" gap
+     | `String "keeper_catalog_changed_during_resolution" ->
+       skill_evidence_exact_fields [ "code" ] fields
+     | `String "invalid_persisted_keeper_name" ->
+       skill_evidence_exact_fields [ "code"; "keeper" ] fields
+       && skill_evidence_string_field "keeper" gap
+     | `String "keeper_meta_name_mismatch" ->
+       skill_evidence_exact_fields [ "code"; "keeper"; "metadata_name" ] fields
+       && skill_evidence_string_field "keeper" gap
+       && skill_evidence_string_field "metadata_name" gap
+     | `String "keeper_meta_unavailable" ->
+       skill_evidence_exact_fields [ "code"; "keeper"; "detail" ] fields
+       && skill_evidence_string_field "keeper" gap
+       && skill_evidence_string_field "detail" gap
+     | `String "runtime_manifest_unreadable" ->
+       skill_evidence_exact_fields [ "code"; "keeper"; "cause" ] fields
+       && skill_evidence_string_field "keeper" gap
+       && skill_evidence_manifest_cause (member "cause" gap)
+     | _ -> false)
   | _ -> false
 ;;
 
-let skill_evidence_gaps_are_known accepts gaps =
-  List.for_all
-    (function
-      | `Assoc _ as gap ->
-        (match member "code" gap with
-         | `String code -> accepts code
-         | _ -> false)
-      | _ -> false)
-    gaps
+let skill_evidence_filesystem_gap expected_code = function
+  | `Assoc fields as gap ->
+    skill_evidence_exact_fields [ "code"; "operation"; "path"; "detail" ] fields
+    && member "code" gap = `String expected_code
+    && (match member "operation" gap with
+        | `String ("open_directory" | "read_directory" | "close_directory" | "stat_entry") -> true
+        | _ -> false)
+    && skill_evidence_string_field "path" gap
+    && skill_evidence_string_field "detail" gap
+  | _ -> false
+;;
+
+let skill_evidence_file_kind = function
+  | `String
+      ( "regular"
+      | "directory"
+      | "character_device"
+      | "block_device"
+      | "symbolic_link"
+      | "fifo"
+      | "socket" ) -> true
+  | _ -> false
+;;
+
+let skill_evidence_activation_gap = function
+  | `Assoc fields as gap ->
+    (match member "code" gap with
+     | `String ("trace_root_unavailable" as code)
+     | `String ("trace_entry_unreadable" as code) ->
+       skill_evidence_filesystem_gap code gap
+     | `String "trace_root_not_directory" ->
+       skill_evidence_exact_fields [ "code"; "kind" ] fields
+       && skill_evidence_file_kind (member "kind" gap)
+     | `String ("invalid_trace_directory" | "symlink_trace_entry") ->
+       skill_evidence_exact_fields [ "code"; "entry" ] fields
+       && skill_evidence_string_field "entry" gap
+     | `String "trace_entry_not_directory" ->
+       skill_evidence_exact_fields [ "code"; "trace_id"; "kind" ] fields
+       && skill_evidence_string_field "trace_id" gap
+       && skill_evidence_file_kind (member "kind" gap)
+     | `String
+         ( "trace_inventory_changed_during_discovery"
+         | "trace_root_changed_during_discovery" ) ->
+       skill_evidence_exact_fields [ "code" ] fields
+     | `String "ledger_changed_during_discovery" ->
+       skill_evidence_exact_fields [ "code"; "trace_id" ] fields
+       && skill_evidence_string_field "trace_id" gap
+     | `String "ledger_unreadable" ->
+       skill_evidence_exact_fields
+         [ "code"; "trace_id"; "cause_code"; "detail" ]
+         fields
+       && skill_evidence_string_field "trace_id" gap
+       && skill_evidence_string_field "cause_code" gap
+       && skill_evidence_string_field "detail" gap
+     | _ -> false)
+  | _ -> false
 ;;
 
 let decode_skill_evidence_activation_item reference = function
@@ -5654,10 +5741,7 @@ let decode_skill_evidence_activation_item reference = function
         in
         let* gaps =
           match member "gaps" owner with
-          | `List gaps
-            when skill_evidence_gaps_are_known
-                   skill_evidence_owner_gap_code
-                   gaps ->
+          | `List gaps when List.for_all skill_evidence_owner_gap gaps ->
             Ok gaps
           | _ -> Error "Skill activation owner gaps must be objects"
         in
@@ -5731,10 +5815,13 @@ let decode_skill_evidence_activation reference json =
            evidence
          |> Result.map List.rev
        in
-       let exact_timestamps =
+       let parsed_timestamps =
          evidence
-         |> List.map (fun item -> member "activated_at" item.sea_activation)
-         |> List.sort_uniq Stdlib.compare
+         |> List.filter_map (fun item ->
+              match member "activated_at" item.sea_activation with
+              | `String value -> Time_codec.parse_rfc3339_opt value
+              | _ -> None)
+         |> List.sort_uniq Float.compare
        in
        let distinct_traces =
          evidence
@@ -5743,7 +5830,7 @@ let decode_skill_evidence_activation reference json =
        in
        if
          List.length evidence >= 2
-         && List.length exact_timestamps = 1
+         && List.length parsed_timestamps = 1
          && List.length distinct_traces = List.length evidence
        then
          Ok
@@ -5829,15 +5916,13 @@ let decode_skill_evidence json =
           "activation_ledgers_loaded"
           coverage
       in
-      let* sec_activation_gap_count =
+      let* activation_gaps =
         match member "activation_gaps" coverage with
-        | `List gaps
-          when skill_evidence_gaps_are_known
-                 skill_evidence_activation_gap_code
-                 gaps ->
-          Ok (List.length gaps)
+        | `List gaps when List.for_all skill_evidence_activation_gap gaps ->
+          Ok gaps
         | _ -> Error "Skill evidence activation gaps must be objects"
       in
+      let sec_activation_gap_count = List.length activation_gaps in
       let* sec_activation_owner_gap_count =
         decode_skill_evidence_nonnegative_int
           "activation_owner_gap_count"
@@ -5864,9 +5949,17 @@ let decode_skill_evidence json =
         | Some (Skill_evidence_most_recent_observed_timestamp_tie evidence) ->
           List.fold_left (fun total row -> total + row.sea_owner_gap_count) 0 evidence
       in
+      let activation_count =
+        match se_activation with
+        | None -> 0
+        | Some (Skill_evidence_most_recent_observed _) -> 1
+        | Some (Skill_evidence_most_recent_observed_timestamp_tie evidence) ->
+          List.length evidence
+      in
       let* () =
         if
           sec_activation_ledgers_loaded <= sec_activation_sessions_inspected
+          && activation_count <= sec_activation_ledgers_loaded
           && owner_gap_count = sec_activation_owner_gap_count
           &&
           (match sec_activation_scope with
@@ -5874,7 +5967,11 @@ let decode_skill_evidence json =
            | "incomplete_retained_trace_snapshot" ->
              sec_activation_gap_count > 0
            | "trace_store_unavailable" ->
-             sec_activation_gap_count > 0
+             (match activation_gaps with
+              | [ gap ] ->
+                member "code" gap = `String "trace_root_unavailable"
+                || member "code" gap = `String "trace_root_not_directory"
+              | _ -> false)
              && Option.is_none se_activation
              && sec_activation_sessions_inspected = 0
              && sec_activation_ledgers_loaded = 0

@@ -36,3 +36,39 @@ val image_present : image:string -> timeout_sec:float -> (unit, string) result
 (** Gate the run on the image already being in container's store. container
     has no [--pull=never]: without this, a missing image is fetched from a
     registry rather than refused. *)
+
+(** Turn-container argv. Same lifecycle as the Docker turn lane: detached
+    guest holding [tail -f /dev/null], commands by [exec], removed on
+    [stop] via [--rm]. A microvm turn mounts the playground and nothing
+    else — no secret projection, no GitHub identity, no config or
+    workspace-state mounts; keepers needing those stay on [Docker]. *)
+
+val turn_start_argv :
+  container_name:string ->
+  label_args:string list ->
+  uid:int ->
+  gid:int ->
+  memory:string ->
+  host_root:string ->
+  container_root:string ->
+  network_args:string list ->
+  image:string ->
+  string list
+
+val exec_argv :
+  container_name:string ->
+  uid:int ->
+  gid:int ->
+  container_cwd:string ->
+  stdin:bool ->
+  command_argv:string list ->
+  string list
+
+val stop_argv : container_name:string -> string list
+(** [--rm] makes stop also remove; observed live 2026-08-28. *)
+
+val inspect_argv : container_name:string -> string list
+
+val running_of_inspect_json : string -> (bool, string) result
+(** [Ok true] iff [.[0].status.state = "running"]. The caller maps a
+    non-zero inspect exit to absent before calling this. *)

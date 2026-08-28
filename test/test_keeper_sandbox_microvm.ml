@@ -142,27 +142,78 @@ let with_eio_fs f =
     ~clock:(Eio.Stdenv.clock env);
   Fun.protect ~finally:Process_eio.reset_for_testing f
 
-let test_factory_resolves_microvm_to_backend_unimplemented () =
+let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
   with_eio_fs @@ fun () ->
-  let base = temp_dir "microvm_refuse_factory_" in
+  let base = temp_dir "microvm_factory_" in
   let config = Masc.Workspace.default_config base in
-  let meta = microvm_meta ~name:"vm-refuse-factory" in
+  let meta = microvm_meta ~name:"vm-runtime-factory" in
   let factory = Masc.Keeper_sandbox_factory.create ~config ~meta ~turn_id:7 () in
   (match
      Masc.Keeper_sandbox_factory.resolve
        factory
        ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
    with
-   | Backend_unimplemented Profile.Micro_vm -> ()
-   | Backend_unimplemented _ ->
-     Alcotest.fail "refused, but not with the Micro_vm profile"
    | Runtime _ ->
+     (* The runtime carries the profile; every CLI it builds branches on
+        it, which the argv pins below and the docker-entrypoint refusals
+        keep honest. *)
+     ()
+   | Backend_unimplemented _ ->
      Alcotest.fail
-       "factory resolved a Micro_vm keeper to a runtime — that runtime is \
-        docker's, the substitution the profile forbids"
+       "factory still refuses Micro_vm; the turn runtime now carries the \
+        profile and must be resolved"
    | No_factory | Local_profile ->
-     Alcotest.fail "expected Backend_unimplemented for Micro_vm");
+     Alcotest.fail "expected a runtime for Micro_vm");
   Masc.Keeper_sandbox_factory.cleanup factory
+
+let test_turn_start_argv_shape () =
+  let a =
+    M.turn_start_argv
+      ~container_name:"masc-keeper-turn-probe"
+      ~label_args:[ "--label"; "masc.mcp.kind=turn" ]
+      ~uid:501
+      ~gid:20
+      ~memory:"2g"
+      ~host_root:"/base/.masc/playground/microvm/probe"
+      ~container_root:"/home/keeper/playground/probe"
+      ~network_args:(M.network_args ~dns:None Profile.Network_none)
+      ~image:"masc-keeper-sandbox:local"
+  in
+  List.iter
+    (fun flag ->
+       if contains flag a
+       then Alcotest.failf "turn_start_argv passes %s (container rejects it)" flag)
+    M.unsupported_docker_flags;
+  (match List.rev a with
+   | "/dev/null" :: "-f" :: "tail" :: image :: _ ->
+     Alcotest.(check string) "detached hold process follows the image"
+       "masc-keeper-sandbox:local" image
+   | rest ->
+     Alcotest.failf
+       "turn_start_argv must end with <image> tail -f /dev/null, got: %s"
+       (String.concat " " (List.rev rest)));
+  List.iter
+    (fun needle ->
+       if not (contains needle a)
+       then Alcotest.failf "turn_start_argv is missing %s" needle)
+    [ "-d"; "--rm"; "--read-only"; "--label" ]
+
+let test_inspect_state_parser () =
+  let running =
+    {|[{"configuration":{"id":"x"},"status":{"state":"running","startedDate":"now"}}]|}
+  in
+  let stopped =
+    {|[{"configuration":{"id":"x"},"status":{"state":"stopped"}}]|}
+  in
+  (match M.running_of_inspect_json running with
+   | Ok true -> ()
+   | Ok false | Error _ -> Alcotest.fail "running JSON must parse as running");
+  (match M.running_of_inspect_json stopped with
+   | Ok false -> ()
+   | Ok true | Error _ -> Alcotest.fail "stopped JSON must parse as not running");
+  match M.running_of_inspect_json "not json" with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "garbage must be an Error, not a state"
 
 let test_docker_shell_entrypoint_refuses_microvm () =
   let base = temp_dir "microvm_refuse_shell_" in
@@ -202,6 +253,57 @@ let test_docker_bash_entrypoint_refuses_microvm () =
       "bash entrypoint did not refuse with the shared sentence; got: %s"
       response
 
+(* Live smoke: starts a real guest through the turn runtime and runs one
+   command in it. Opt-in via MASC_MICROVM_LIVE=1 — it needs Apple's
+   [container] CLI, the sandbox image in container's store, and ~5s for
+   the VM boot, none of which a CI runner has. *)
+let test_live_turn_runtime_cat () =
+  match Sys.getenv_opt "MASC_MICROVM_LIVE" with
+  | None | Some "" -> ()
+  | Some _ ->
+    with_eio_fs @@ fun () ->
+    let base = temp_dir "microvm_live_" in
+    let config = Masc.Workspace.default_config base in
+    let meta = microvm_meta ~name:"vm-live" in
+    let host_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+    let rec mkdir_p dir =
+      if not (Sys.file_exists dir)
+      then (
+        mkdir_p (Filename.dirname dir);
+        Unix.mkdir dir 0o755)
+    in
+    mkdir_p host_root;
+    let oc = open_out (Filename.concat host_root "probe.txt") in
+    output_string oc "hello-from-microvm\n";
+    close_out oc;
+    let runtime =
+      Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:99 ()
+    in
+    Fun.protect
+      ~finally:(fun () -> Masc.Keeper_turn_sandbox_runtime.cleanup runtime)
+      (fun () ->
+         match
+           Masc.Keeper_turn_sandbox_runtime.run_command_with_status
+             ~timeout_sec:60.0
+             runtime
+             ~cwd:host_root
+             ~command_argv:[ "cat"; "probe.txt" ]
+             ~max_bytes:4096
+             ()
+         with
+         | Ok (Unix.WEXITED 0, out) ->
+           if not (Astring.String.is_infix ~affix:"hello-from-microvm" out)
+           then Alcotest.failf "guest cat returned unexpected output: %s" out
+         | Ok (st, out) ->
+           Alcotest.failf
+             "guest cat failed: %s: %s"
+             (match st with
+              | Unix.WEXITED n -> Printf.sprintf "exit %d" n
+              | Unix.WSIGNALED n -> Printf.sprintf "signal %d" n
+              | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+             out
+         | Error message -> Alcotest.failf "guest cat errored: %s" message)
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -218,11 +320,19 @@ let () =
             test_image_and_shell_come_last
         ] )
     ; ( "refusal"
-      , [ Alcotest.test_case "factory resolves to Backend_unimplemented" `Quick
-            test_factory_resolves_microvm_to_backend_unimplemented
-        ; Alcotest.test_case "docker shell entrypoint refuses" `Quick
+      , [ Alcotest.test_case "docker shell entrypoint refuses" `Quick
             test_docker_shell_entrypoint_refuses_microvm
         ; Alcotest.test_case "docker bash entrypoint refuses" `Quick
             test_docker_bash_entrypoint_refuses_microvm
+        ] )
+    ; ( "turn"
+      , [ Alcotest.test_case "factory resolves to a profile-carrying runtime" `Quick
+            test_factory_resolves_microvm_to_a_profile_carrying_runtime
+        ; Alcotest.test_case "turn start argv shape" `Quick
+            test_turn_start_argv_shape
+        ; Alcotest.test_case "inspect state parser" `Quick
+            test_inspect_state_parser
+        ; Alcotest.test_case "live guest cat (MASC_MICROVM_LIVE=1)" `Slow
+            test_live_turn_runtime_cat
         ] )
     ]

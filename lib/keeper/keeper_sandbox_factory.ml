@@ -72,15 +72,11 @@ let resolve (t : t) ~cwd =
     in
     match effective_profile with
     | Keeper_types_profile_sandbox.Local -> Local_profile
-    (* Refused, not substituted: the microvm argv builder exists
-       ([Keeper_sandbox_microvm]) but nothing starts its runtime yet, and
-       resolving to the Docker runtime here would run docker commands for a
-       keeper that declared a VM (#31225's mislabel class, #31178's
-       wrong-backend class). The wiring change that starts the guest replaces
-       this arm with a microvm runtime. *)
-    | Keeper_types_profile_sandbox.Micro_vm ->
-      Backend_unimplemented Keeper_types_profile_sandbox.Micro_vm
-    | Keeper_types_profile_sandbox.Docker ->
+    (* Both guest profiles share the runtime value; the runtime itself
+       branches on [meta.sandbox_profile] for every CLI it builds (start,
+       exec, inspect, stop), so a VM keeper's commands run under Apple's
+       [container] and are never handed to docker (#31225, #31178). *)
+    | Keeper_types_profile_sandbox.Micro_vm | Keeper_types_profile_sandbox.Docker ->
       let host_root =
         Keeper_sandbox.host_root_abs_of_meta ~config:t.config meta
         |> normalize

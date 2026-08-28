@@ -575,6 +575,27 @@ describe('skill evidence contract', () => {
     })).toThrow(SkillsContractError)
   })
 
+  it('accepts the fractional Ptime maximum boundary', () => {
+    const decoded = decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v5',
+      status: 'observed',
+      reference,
+      activation: {
+        selection: 'most_recent_observed',
+        evidence: {
+          ...activationEvidence,
+          activation: {
+            ...activationPayload,
+            activated_at: '9999-12-31T23:59:59.999999999999Z',
+          },
+        },
+      },
+      composition: null,
+      coverage,
+    })
+    expect(decoded.activation?.selection).toBe('most_recent_observed')
+  })
+
   it('rejects activation candidates not backed by loaded ledgers', () => {
     expect(() => decodeSkillEvidenceResponse({
       schema: 'masc.skill-evidence/v5',

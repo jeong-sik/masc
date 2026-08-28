@@ -1,8 +1,9 @@
 (* P7: Pipeline-Native Dispatch
    Execute Shell_ir.t directly via Process_eio without going through
    /bin/bash. Simple commands use argv-based spawn. Redirect-free host
-   and Docker pipelines use streaming process pipes; unsupported shapes
-   fall back to deterministic stdout->stdin chaining. *)
+   pipelines use streaming process pipes; redirect-free sandboxed
+   (Docker/Ssh) pipelines stream through the injected pipeline runner.
+   Unsupported shapes fall back to deterministic stdout->stdin chaining. *)
 
 type dispatch_result = {
   status : Unix.process_status;

@@ -26,8 +26,8 @@ type simple = {
   redirects : Redirect_scope.t list;
   sandbox : Sandbox_target.t;
   (** Dispatch target — defaults to [Sandbox_target.host ()].  Keeper
-      callers override with a Docker runner closure built from
-      [Keeper_turn_sandbox_runtime]. *)
+      callers override with a Docker or Ssh runner closure over the
+      keeper-side runtime (Docker via [Keeper_turn_sandbox_runtime]). *)
 }
 
 (** How the next command depends on the one before it. *)

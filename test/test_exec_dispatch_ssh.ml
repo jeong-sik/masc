@@ -18,6 +18,17 @@ let with_eio f =
     ~clock:(Eio.Stdenv.clock env);
   f ()
 
+let has_infix ~affix s =
+  let n = String.length affix in
+  let rec scan i =
+    if i + n > String.length s
+    then false
+    else if String.sub s i n = affix
+    then true
+    else scan (i + 1)
+  in
+  scan 0
+
 let test_endpoint : Masc_exec.Sandbox_target.ssh_endpoint =
   { name = "builder-a"
   ; host = "builder-a.internal"
@@ -56,13 +67,13 @@ let () =
     Masc_exec.Sandbox_target.ssh ~endpoint:test_endpoint ~runner:mock_runner ()
   in
   let ir =
-      { bin
-      ; args = [ Lit ("hello", default_meta); Lit ("world", default_meta) ]
-      ; env = []
-      ; cwd = None
-      ; redirects = []
-      ; sandbox = ssh_sandbox
-      }
+    { bin
+    ; args = [ Lit ("hello", default_meta); Lit ("world", default_meta) ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = ssh_sandbox
+    }
   in
   let result = Masc_exec.Exec_dispatch.dispatch_simple ~stdin_content:"typed" ir in
   (match !runner_calls with
@@ -83,6 +94,48 @@ let () =
        assert (endpoint.port = 22)
    | Masc_exec.Sandbox_target.Host | Masc_exec.Sandbox_target.Docker _ ->
        assert false)
+
+(* --- dispatch_simple refuses an untranslated redirect before spawning --- *)
+
+(* Mirrors the Docker refusal in test_exec_dispatch_file_redirect.ml: an
+   [In_command_namespace] target names a path on the remote host, and opening
+   it here would touch whatever this host happens to have at that path, so
+   dispatch refuses and the runner never runs. *)
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
+  let runner_called = ref false in
+  let remote_target =
+    Masc_exec.Path_scope.classify ~raw:"/tmp/exec-dispatch-ssh-out" ~cwd:"/tmp"
+  in
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+    runner_called := true;
+    Unix.WEXITED 0, "stdout", "stderr"
+  in
+  let ssh_sandbox =
+    Masc_exec.Sandbox_target.ssh ~endpoint:test_endpoint ~runner:mock_runner ()
+  in
+  let ir =
+    { bin
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects =
+        [ Masc_exec.Redirect_scope.File
+            { fd = 1
+            ; target = Masc_exec.Redirect_scope.In_command_namespace remote_target
+            ; mode = Masc_exec.Redirect_scope.Write
+            }
+        ]
+    ; sandbox = ssh_sandbox
+    }
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch_simple ir in
+  assert (not !runner_called);
+  assert (result.status = Unix.WEXITED 1);
+  assert (result.stdout = "");
+  assert (has_infix ~affix:"not carried out for a sandboxed stage" result.stderr)
 
 (* --- pipeline with pipeline_runner = None decomposes per stage --- *)
 

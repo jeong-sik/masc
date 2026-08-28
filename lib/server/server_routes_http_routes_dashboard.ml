@@ -613,7 +613,7 @@ let parse_runtime_assignment_body body_str =
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
 
 let runtime_config_path_error_status message =
-  if String.equal message "runtime config path not found"
+  if String.equal message Runtime.runtime_config_path_missing_message
   then `Not_found
   else `Internal_server_error
 

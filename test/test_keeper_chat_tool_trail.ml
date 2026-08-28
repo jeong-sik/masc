@@ -40,6 +40,50 @@ let test_subject_pattern_before_path () =
    ([keeper_tasks_audit {"limit":20}], [masc_agent_timeline
    {"agent_name":…,"limit":5,…}], [masc_agent_card {}]) and scrolled back
    saying only that some tool ran. *)
+(* [keeper_skill] carries its identity one level down, and the whole-object
+   fallback below could not reach it: the envelope
+   [{"identity":{"source_id":"…","package_id":"…"] spends the 72-cell budget
+   before the [name] value begins, so two skills published from one source
+   scrolled back as the same row.
+
+   The name is what a reader of the conversation is after -- which skill ran
+   -- so the descent names it. *)
+let test_subject_reaches_a_nested_identity () =
+  check_subject
+    "a skill call names the skill, not its envelope"
+    ~args:
+      {|{"identity":{"source_id":"project-masc","package_id":"masc-keeper-autonomy","name":"turn-opening"},"content_revision":"a1b2c3"}|}
+    (Some "turn-opening")
+;;
+
+(* Two skills from one source used to render alike: the shared prefix is what
+   the budget spent itself on. This is the pair that made it visible. *)
+let test_two_skills_from_one_source_read_apart () =
+  let subject_of args =
+    subject ~name:"keeper_skill" ~args
+  in
+  let first =
+    subject_of
+      {|{"identity":{"source_id":"project-masc","package_id":"masc-keeper-autonomy","name":"turn-opening"}}|}
+  in
+  let second =
+    subject_of
+      {|{"identity":{"source_id":"project-masc","package_id":"masc-keeper-autonomy","name":"work-intake"}}|}
+  in
+  Alcotest.(check bool)
+    "the two calls do not read the same" false
+    (Option.equal String.equal first second)
+;;
+
+(* The descent does not outrank a key the object carries itself. A tool that
+   names its own subject keeps naming it. *)
+let test_a_direct_key_still_wins () =
+  check_subject
+    "the object's own key comes first"
+    ~args:{|{"file_path":"lib/a.ml","identity":{"name":"turn-opening"}}|}
+    (Some "lib/a.ml")
+;;
+
 let test_subject_absent_keys () =
   check_subject
     "an argument shape with no known key is named by its arguments"
@@ -306,6 +350,12 @@ let () =
         ; Alcotest.test_case "file_path" `Quick test_subject_file_path
         ; Alcotest.test_case "pattern before path" `Quick test_subject_pattern_before_path
         ; Alcotest.test_case "unknown keys" `Quick test_subject_absent_keys
+        ; Alcotest.test_case "a nested identity is reached" `Quick
+            test_subject_reaches_a_nested_identity
+        ; Alcotest.test_case "two skills from one source read apart" `Quick
+            test_two_skills_from_one_source_read_apart
+        ; Alcotest.test_case "a direct key still wins" `Quick
+            test_a_direct_key_still_wins
         ; Alcotest.test_case "empty object" `Quick test_subject_empty_object
         ; Alcotest.test_case "live masc shapes" `Quick
             test_subject_names_the_live_masc_shapes

@@ -166,6 +166,9 @@ const SUBJECT_KEYS = [
   'url',
   'target',      // delegate
   'task_id',
+  'goal_id',
+  'agent_name', // MASC agent/keeper tools: whose record was read
+  'keeper_name',
   'post_id',
   'operation_id',
   'sha256',      // artifact read
@@ -174,6 +177,15 @@ const SUBJECT_KEYS = [
   'status',      // task list filters
   'content',
 ] as const
+
+/** Objects whose own subject is one level down. Mirrors nested_subject_keys in
+ *  lib/keeper/keeper_chat_tool_trail.ml. */
+const NESTED_SUBJECT_KEYS = ['identity', 'reference', 'arguments', 'args'] as const
+
+/** Inside one of those, `name` is the subject. Deliberately not in
+ *  SUBJECT_KEYS: many tools declare a top-level `name` parameter and promoting
+ *  it there would rename their rows too. */
+const NESTED_FIRST_KEYS = ['name'] as const
 
 /** Render one argument value as the row's subject text. */
 function subjectValue(v: unknown): string | null {
@@ -227,5 +239,25 @@ export function toolSubject(args: Record<string, unknown> | string | undefined |
     const rendered = subjectValue(args[key])
     if (rendered) return truncateSubject(rendered)
   }
-  return null
+  // One level down, for objects whose subject is nested. keeper_skill takes an
+  // `identity` of {source_id, package_id, name}, and the whole-object fallback
+  // below spends the 72-char budget on the envelope -- the `name` value starts
+  // past it, so two skills from one source read alike.
+  for (const key of NESTED_SUBJECT_KEYS) {
+    const inner = args[key]
+    if (!inner || typeof inner !== 'object' || Array.isArray(inner)) continue
+    const fields = inner as Record<string, unknown>
+    for (const innerKey of [...NESTED_FIRST_KEYS, ...SUBJECT_KEYS]) {
+      if (!(innerKey in fields)) continue
+      const rendered = subjectValue(fields[innerKey])
+      if (rendered) return truncateSubject(rendered)
+    }
+  }
+  // The same whole-object fallback the OCaml side has. Without it a row with
+  // no known key scrolled back saying only that some tool ran, and the two
+  // implementations answered opposite things for the same input -- pinned in
+  // opposite directions by their own tests.
+  const named = Object.entries(args).filter(([, value]) => subjectValue(value))
+  if (named.length === 0) return null
+  return truncateSubject(JSON.stringify(Object.fromEntries(named)))
 }

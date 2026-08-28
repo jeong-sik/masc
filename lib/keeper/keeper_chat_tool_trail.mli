@@ -60,11 +60,27 @@ val tool_result_digest : result:string -> string option
     that answered nothing, which a row can leave blank rather than pad. *)
 
 val tool_subject : name:string -> args:string -> string option
-(** The one argument a reader identifies a call by, or [None] when the
-    argument shape carries none of the known keys.
+(** The one argument a reader identifies a call by.
+
+    Three passes, in order: a known key at the top level, then the same keys
+    (and [name]) one level inside an identity-shaped object, then the whole
+    argument object. [None] only when nothing in it carries text — an empty
+    object, or one whose every value is blank.
+
+    The second pass exists for [keeper_skill], whose identity is
+    {{i source_id, package_id, name}} one level down: the third pass reaches
+    it but spends the width on the envelope, so two skills published from one
+    source scrolled back as the same row.
+
+    This doc said [None] "when the argument shape carries none of the known
+    keys" for as long as the third pass has existed, which is longer than it
+    was true.
 
     Public because the terminal UI names the calls in its live turn view and
     has to name them the same way. The key order this walks already exists
     twice — here and in [SUBJECT_KEYS] in
     [dashboard/src/components/tool-call-shared.ts] — and a third copy is how
-    the three surfaces would start naming the same call differently. *)
+    the three surfaces would start naming the same call differently. The two
+    that exist had already drifted: the TypeScript list was missing
+    [goal_id], [agent_name] and [keeper_name], it had no third pass at all,
+    and each side's tests pinned the opposite answer for one input. *)

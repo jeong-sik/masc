@@ -1051,7 +1051,7 @@ max_context_override	= 200000
 AGENT_CORE_OPENAI_BASE_URL = "http://127.0.0.1:1"
 |};
   (match
-     TL.edit_keeper_toml_fields
+     TL.edit_keeper_toml_fields_strict_staged
        ~path
        [ "proactive_enabled", TL.Set (TL.Toml_bool false)
        ; "sandbox_image", TL.Set (TL.Toml_string "keeper:test")
@@ -1059,7 +1059,7 @@ AGENT_CORE_OPENAI_BASE_URL = "http://127.0.0.1:1"
        ; "max_context_override", TL.Remove
        ]
    with
-   | Error error -> fail error
+   | Error error -> fail (Fs_compat.atomic_replace_failure_to_string error)
    | Ok () -> ());
   let content =
     match Safe_ops.read_file_safe path with
@@ -1093,9 +1093,10 @@ let test_keeper_toml_writer_rejects_table_assignment_shapes () =
   List.iter
     (fun (label, value) ->
       let path = Filename.concat dir (String.map (function ' ' -> '-' | c -> c) label ^ ".toml") in
-      match TL.create_keeper_toml_file ~path [ "invalid", value ] with
+      match TL.create_keeper_toml_file_strict_staged ~path [ "invalid", value ] with
       | Ok () -> failf "%s must not be rendered as a key assignment" label
-      | Error message ->
+      | Error failure ->
+        let message = Fs_compat.atomic_replace_failure_to_string failure in
         check bool (label ^ " error is explicit") true
           (String_util.contains_substring message "cannot be rendered");
         check bool (label ^ " file is not created") false (Sys.file_exists path))
@@ -1112,11 +1113,11 @@ let test_keeper_toml_writer_round_trips_control_escapes () =
     ^ "after"
   in
   (match
-     TL.edit_keeper_toml_fields
+     TL.edit_keeper_toml_fields_strict_staged
        ~path
        [ "instructions", TL.Set (TL.Toml_string value) ]
    with
-   | Error error -> fail error
+   | Error error -> fail (Fs_compat.atomic_replace_failure_to_string error)
    | Ok () -> ());
   match Safe_ops.read_file_safe path with
   | Error error -> fail error
@@ -1144,13 +1145,13 @@ let test_keeper_toml_writer_edits_multiline_assignments () =
   let update_path = Filename.concat dir "update.toml" in
   write_file update_path (fixture ());
   (match
-     TL.edit_keeper_toml_fields
+     TL.edit_keeper_toml_fields_strict_staged
        ~path:update_path
        [ "instructions", TL.Set (TL.Toml_string "updated\ninstructions")
        ; "allowed_paths", TL.Set (TL.Toml_string_array [ "/tmp/new-a" ])
        ]
    with
-   | Error error -> fail error
+   | Error error -> fail (Fs_compat.atomic_replace_failure_to_string error)
    | Ok () -> ());
   (match Safe_ops.read_file_safe update_path with
    | Error error -> fail error
@@ -1166,11 +1167,11 @@ let test_keeper_toml_writer_edits_multiline_assignments () =
   let remove_path = Filename.concat dir "remove.toml" in
   write_file remove_path (fixture ());
   (match
-     TL.edit_keeper_toml_fields
+     TL.edit_keeper_toml_fields_strict_staged
        ~path:remove_path
        [ "instructions", TL.Remove ]
    with
-   | Error error -> fail error
+   | Error error -> fail (Fs_compat.atomic_replace_failure_to_string error)
    | Ok () -> ());
   match Safe_ops.read_file_safe remove_path with
   | Error error -> fail error

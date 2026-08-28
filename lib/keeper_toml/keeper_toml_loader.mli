@@ -53,20 +53,10 @@ type toml_edit =
   | Set of toml_value
   | Remove
 
-(** Atomically apply typed edits under [[keeper]]. [Remove] is idempotent and
-    deletes the field when present. Comments and unrelated fields survive. *)
-val edit_keeper_toml_fields :
-  path:string -> (string * toml_edit) list -> (unit, string) result
-
 val edit_keeper_toml_fields_strict_staged :
   path:string ->
   (string * toml_edit) list ->
   (unit, Fs_compat.atomic_replace_failure) result
-
-(** Create a new declarative keeper TOML. Refuses to overwrite an existing
-    path. *)
-val create_keeper_toml_file :
-  path:string -> (string * toml_value) list -> (unit, string) result
 
 val create_keeper_toml_file_strict_staged :
   path:string ->

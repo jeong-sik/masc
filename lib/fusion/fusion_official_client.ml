@@ -136,6 +136,7 @@ let antigravity_config ~base_dir ~runtime_id ~override_s
   =
   { cli_path = execution.cli_path
   ; cwd = base_dir
+  ; add_dirs = []
   ; model = execution.model
   ; agent = execution.agent
   ; effort = execution.effort

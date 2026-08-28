@@ -549,6 +549,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let client_config : Runtime_antigravity.config =
       { cli_path = config.cli_path
       ; cwd = base_path
+      ; add_dirs = config.add_dirs
       ; model = config.model
       ; agent = config.agent
       ; effort = config.effort

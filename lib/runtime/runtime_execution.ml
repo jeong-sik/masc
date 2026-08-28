@@ -11,6 +11,7 @@ type antigravity_cli =
   ; effort : Runtime_antigravity.effort option
   ; oauth_source : string
   ; timeout_s : float
+  ; add_dirs : string list
   }
 
 type claude_code =

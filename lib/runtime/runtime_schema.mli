@@ -48,6 +48,10 @@ type antigravity_cli_options =
   { agent : string option
   ; effort : antigravity_effort option
   ; timeout_s : float
+  ; add_dirs : string list
+        (** [add-dirs] — extra absolute directories the CLI may read beside
+            the keeper base path, each passed as its own [--add-dir]. Empty
+            means the base path stays the only workspace root. *)
   }
 [@@deriving show, eq]
 

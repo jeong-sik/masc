@@ -20,6 +20,9 @@ type antigravity_cli =
   ; effort : Runtime_antigravity.effort option
   ; oauth_source : string
   ; timeout_s : float
+  ; add_dirs : string list
+        (** Extra absolute [--add-dir] roots beside the keeper base path,
+            from the provider's [add-dirs]. *)
   }
 
 type claude_code =

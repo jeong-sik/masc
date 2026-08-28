@@ -662,6 +662,7 @@ let antigravity_cli_execution (provider : Runtime_schema.provider)
             ; effort = Option.map runtime_antigravity_effort options.effort
             ; oauth_source
             ; timeout_s = options.timeout_s
+            ; add_dirs = options.add_dirs
             }))
 ;;
 

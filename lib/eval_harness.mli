@@ -5,13 +5,9 @@
     summary helpers used by the eval CLI and dashboard. METR Task
     Standard / OpenAI Harness inspired.
 
-    Internal helpers (the [grader_result_to_json] / [eval_run_to_json] /
-    [eval_result_to_json] / [suite_result_to_json] write-side encoders
-    that callers consume only via {!report_to_string} /
-    {!write_results_jsonl}, and the [score_std_dev] aggregator) are
-    hidden — callers consume the typed records, the deterministic
-    grader / tool-expectation runners, the pass@k / summary
-    builders, and the IO entry points only.
+    The [score_std_dev] aggregator is hidden. Callers consume the typed
+    records, deterministic grader / tool-expectation runners, pass@k /
+    summary builders, scenario loader, and {!report_to_string}.
 
     @since 2.73.0 *)
 
@@ -176,4 +172,3 @@ val scenario_pass_at_k_threshold : float
 val report_to_string : eval_suite_result -> string
 (** Pretty-print a suite result as a human-readable report
     (overall pass rate, per-scenario score breakdown). *)
-

@@ -4228,25 +4228,54 @@ let test_skill_evidence_joins_activation_and_composition () =
         ; "recorded_at", `Float 1.0
         ]
     in
+    let activation =
+      `Assoc
+        [ "selection", `String "most_recent_observed"
+        ; ( "evidence"
+          , `Assoc
+              [ "trace_id", `String "trace-evidence"
+              ; ( "owner"
+                , `Assoc
+                    [ "status", `String "known"
+                    ; ( "claims"
+                      , `List
+                          [ `Assoc
+                              [ "keeper", `String "rondo"
+                              ; "source", `String "current_meta"
+                              ]
+                          ] )
+                    ; "gaps", `List []
+                    ] )
+              ; ( "activation"
+                , Lib.Keeper_skill_activation_ledger.activation_to_yojson
+                    activation )
+              ] )
+        ]
+    in
     Server_skill_evidence.For_testing.to_yojson
       ~reference
       ~composition:(Some composition)
       ~composition_records_read:1
       ~composition_scope:`Exact_reference_latest_completed
-      ~activation:(Some ("rondo", activation))
-      ~ledgers_loaded:2
-      ~unavailable:[ "sangsu: ledger_unreadable" ]
+      ~composition_unavailable:[]
+      ~activation:(Some activation)
+      ~activation_scope:Incomplete_retained_trace_snapshot
+      ~activation_sessions_inspected:187
+      ~activation_ledgers_loaded:10
+      ~activation_gaps:[]
+      ~activation_owner_gap_count:0
   in
   let open Yojson.Safe.Util in
-  check string "evidence schema" "masc.skill-evidence/v4"
+  check string "evidence schema" "masc.skill-evidence/v5"
     (json |> member "schema" |> to_string);
   check string "observed status" "observed" (json |> member "status" |> to_string);
   check string "activation keeper" "rondo"
-    (json |> member "activation" |> member "keeper" |> to_string);
+    (json |> member "activation" |> member "evidence" |> member "owner"
+     |> member "claims" |> index 0 |> member "keeper" |> to_string);
   check int "composition node count" 1
     (json |> member "composition" |> member "executor_settlements" |> to_list
      |> List.length);
-  check int "activation ledger coverage" 2
+  check int "activation ledger coverage" 10
     (json |> member "coverage" |> member "activation_ledgers_loaded" |> to_int);
   check bool "bounded evidence coverage is incomplete" false
     (json |> member "coverage" |> member "coverage_complete" |> to_bool);
@@ -4254,21 +4283,25 @@ let test_skill_evidence_joins_activation_and_composition () =
     "composition scan covers the exact-reference index"
     "exact_reference_latest_completed"
     (json |> member "coverage" |> member "composition_scope" |> to_string);
-  check int "unavailable coverage" 1
-    (json |> member "coverage" |> member "unavailable" |> to_list |> List.length)
-  ;
+  check int "activation sessions inspected" 187
+    (json |> member "coverage" |> member "activation_sessions_inspected"
+     |> to_int);
   let not_observed =
     Server_skill_evidence.For_testing.to_yojson
       ~reference
       ~composition:None
       ~composition_records_read:0
       ~composition_scope:`Exact_reference_latest_completed
+      ~composition_unavailable:[]
       ~activation:None
-      ~ledgers_loaded:0
-      ~unavailable:[]
+      ~activation_scope:Complete_retained_trace_snapshot
+      ~activation_sessions_inspected:0
+      ~activation_ledgers_loaded:0
+      ~activation_gaps:[]
+      ~activation_owner_gap_count:0
   in
   check string "bounded absence is not proof of never"
-    "not_observed_in_current_coverage"
+    "not_observed_in_retained_coverage"
     (not_observed |> member "status" |> to_string)
 ;;
 

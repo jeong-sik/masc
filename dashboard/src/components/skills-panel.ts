@@ -230,16 +230,25 @@ function compositionCoverageLabel(scope: SkillEvidenceResponse['coverage']['comp
 
 function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null }) {
   if (!result) return html`<div class="ss-muted">Load the latest exact-revision result.</div>`
-  if (result.status === 'not_observed_in_current_coverage') {
+  const activationGapCount = result.coverage.activation_gaps.length
+  const coverageSummary = html`${result.coverage.activation_sessions_inspected} retained sessions inspected · ${result.coverage.activation_ledgers_loaded} activation ledgers loaded · ${activationGapCount} activation gaps · ${result.coverage.activation_owner_gap_count} owner gaps · ${result.coverage.composition_records_read} composition records read · ${compositionCoverageLabel(result.coverage.composition_scope)}`
+  if (result.status === 'not_observed_in_retained_coverage') {
     return html`
-      <div class="text-[var(--color-status-warn)]">No exact-revision run was found in the current coverage. This is not proof that it never ran.</div>
-      <div class="ss-muted text-3xs">${result.coverage.activation_ledgers_loaded} current-session activation ledgers · ${result.coverage.composition_records_read} composition records read · ${compositionCoverageLabel(result.coverage.composition_scope)} · activation coverage incomplete</div>
-      ${result.coverage.unavailable.length > 0 ? html`<div class="text-[var(--color-status-warn)] text-3xs">Unavailable: ${result.coverage.unavailable.join(' · ')}</div>` : null}
+      <div class="text-[var(--color-status-warn)]">No exact-revision run was found in the retained coverage. This is not proof that it never ran.</div>
+      <div class="ss-muted text-3xs">${coverageSummary} · ${result.coverage.activation_scope}</div>
+      ${result.coverage.composition_unavailable.length > 0 ? html`<div class="text-[var(--color-status-warn)] text-3xs">Composition unavailable: ${result.coverage.composition_unavailable.join(' · ')}</div>` : null}
     `
   }
-  const activation = result.activation?.activation ?? null
+  const activationEvidence = result.activation === null
+    ? []
+    : result.activation.selection === 'most_recent_observed'
+      ? [result.activation.evidence]
+      : result.activation.evidence
+  const primaryActivation = activationEvidence[0] ?? null
+  const activation = primaryActivation?.activation ?? null
   const actions = Array.isArray(activation?.actions) ? activation.actions.length : 0
   const delivered = activation?.delivery !== null && activation?.delivery !== undefined
+  const ownerClaims = primaryActivation?.owner.claims.map(claim => claim.keeper).join(', ') ?? 'unknown'
   const composition = result.composition
   const compositionNodeCount = composition ? compositionNodes(composition).length : 0
   const output = composition?.result.data
@@ -247,8 +256,8 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
     <div class="space-y-2" data-testid="skill-latest-evidence">
       ${activation ? html`
         <div>
-          <div class="font-semibold">${delivered ? '✓ delivered' : '◌ invoked'} · ${result.activation?.keeper} · ${actions} actions</div>
-          <div class="ss-muted mono">${runField(activation, 'activated_at')} · tool use ${runField(activation, 'skill_tool_use_id')}</div>
+          <div class="font-semibold">${delivered ? '✓ delivered' : '◌ invoked'} · ${ownerClaims} · ${actions} actions</div>
+          <div class="ss-muted mono">${runField(activation, 'activated_at')} · tool use ${runField(activation, 'skill_tool_use_id')} · trace ${primaryActivation?.trace_id} · owner ${primaryActivation?.owner.status}${activationEvidence.length > 1 ? ` · ${activationEvidence.length} equal-time candidates` : ''}</div>
         </div>
       ` : null}
       ${composition ? html`
@@ -263,8 +272,8 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
         </div>
       ` : null}
       <div class="ss-muted text-3xs">
-        coverage ${result.coverage.activation_ledgers_loaded} current-session activation ledgers · ${result.coverage.composition_records_read} composition records read · ${compositionCoverageLabel(result.coverage.composition_scope)} · activation coverage incomplete
-        ${result.coverage.unavailable.length > 0 ? html` · ⚠ ${result.coverage.unavailable.join(' · ')}` : null}
+        coverage ${coverageSummary} · ${result.coverage.activation_scope}
+        ${result.coverage.composition_unavailable.length > 0 ? html` · ⚠ ${result.coverage.composition_unavailable.join(' · ')}` : null}
       </div>
     </div>
   `

@@ -20,93 +20,6 @@ let with_tool_kind_field kind = function
   | json -> json
 ;;
 
-let plan_execute_input_schema =
-  let node_schema =
-    `Assoc
-      [ "type", `String "object"
-      ; ( "properties"
-        , `Assoc
-            [ "id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-            ; "tool", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-            ; ( "after"
-              , `Assoc
-                  [ "type", `String "array"
-                  ; "items", `Assoc [ "type", `String "string" ]
-                  ] )
-              (* The four template shapes were spelled out in the tool's
-                 description because the schema said only "object". A reader
-                 had to learn them from prose while the validator knew them
-                 exactly. Stating them here puts the shape where a model
-                 reads structure rather than prose. It does not make them
-                 enforced: [validate_args] descends no further than the
-                 top-level schema, so [Keeper_tool_plan] is still what refuses
-                 a malformed template. Recursive shapes are named
-                 through [$ref] so [object] and [array] can hold any input. *)
-            ; ( "input"
-              , `Assoc
-                  [ "type", `String "object"
-                  ; ( "oneOf"
-                    , `List
-                        [ `Assoc
-                            [ "required", `List [ `String "kind"; `String "value" ]
-                            ; ( "properties"
-                              , `Assoc
-                                  [ ( "kind"
-                                    , `Assoc
-                                        [ "const", `String "literal" ] )
-                                  ] )
-                            ]
-                        ; `Assoc
-                            [ ( "required"
-                              , `List
-                                  [ `String "kind"
-                                  ; `String "node"
-                                  ; `String "pointer"
-                                  ] )
-                            ; ( "properties"
-                              , `Assoc
-                                  [ "kind", `Assoc [ "const", `String "output" ]
-                                  ; "node", `Assoc [ "type", `String "string" ]
-                                  ; ( "pointer"
-                                    , `Assoc [ "type", `String "string" ] )
-                                  ] )
-                            ]
-                        ; `Assoc
-                            [ ( "required"
-                              , `List [ `String "kind"; `String "fields" ] )
-                            ; ( "properties"
-                              , `Assoc
-                                  [ "kind", `Assoc [ "const", `String "object" ]
-                                  ; ( "fields"
-                                    , `Assoc [ "type", `String "array" ] )
-                                  ] )
-                            ]
-                        ; `Assoc
-                            [ ( "required"
-                              , `List [ `String "kind"; `String "items" ] )
-                            ; ( "properties"
-                              , `Assoc
-                                  [ "kind", `Assoc [ "const", `String "array" ]
-                                  ; ( "items"
-                                    , `Assoc [ "type", `String "array" ] )
-                                  ] )
-                            ]
-                        ] )
-                  ] )
-            ] )
-      ; "required", `List [ `String "id"; `String "tool" ]
-      ; "additionalProperties", `Bool false
-      ]
-  in
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc [ "nodes", `Assoc [ "type", `String "array"; "items", node_schema ] ] )
-    ; "required", `List [ `String "nodes" ]
-    ; "additionalProperties", `Bool false
-    ]
-;;
-
 (* What it buys, then how to say it. Measured over 2026-08-21..23: this tool
    sat in all 87 tool surfaces of 368 turns and was chosen zero times, while
    [keeper_compose_mission-snapshot] -- 254 bytes that open "Read clock,
@@ -243,7 +156,7 @@ let schema_tool_rows ?(skill_compositions = []) () =
     , schema_tool
         ~name:plan_execute_tool_name
         ~description:plan_execute_description
-        ~input_schema:plan_execute_input_schema )
+        ~input_schema:Keeper_tool_plan_request.input_schema )
   in
   if
     List.exists
@@ -1817,12 +1730,12 @@ let make_tools_with_authority
       ?on_externalization_error
       ~name:tool_name
       ~description:plan_execute_description
-      ~input_schema:plan_execute_input_schema
+      ~input_schema:Keeper_tool_plan_request.input_schema
       (fun execution_env input ->
         let start_time = Time_compat.now () in
         match
           Tool_input_validation.validate_args
-            ~schema:plan_execute_input_schema
+            ~schema:Keeper_tool_plan_request.input_schema
             ~name:tool_name
             ~args:input
             ()

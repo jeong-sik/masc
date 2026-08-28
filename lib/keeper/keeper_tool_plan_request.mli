@@ -50,6 +50,11 @@ type error =
   | Unknown_request_field of { field : string }
   | Plan_rejected of Keeper_tool_plan.error
 
+val input_schema : Yojson.Safe.t
+(** Canonical model-visible schema for the JSON grammar parsed by
+    {!plan_of_json}. The nested template shapes are advertised here; semantic
+    validation remains owned by {!Keeper_tool_plan.create}. *)
+
 val error_message : error -> string
 val error_to_json : error -> Yojson.Safe.t
 

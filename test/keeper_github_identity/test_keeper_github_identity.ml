@@ -484,8 +484,18 @@ let test_tool_projection_uses_safe_existing_identity () =
     ; "GH_CONFIG_DIR=" ^ container_dir
     ; "-v"
     ; docker_snapshot ^ ":" ^ container_dir ^ ":ro"
+    ; "--env"
+    ; "GIT_CONFIG_GLOBAL=" ^ Filename.concat container_dir "gitconfig"
     ]
     docker_projection.args;
+  (* task-847: the snapshot carries the wiring [gh auth setup-git] would
+     write, derived from the hosts this identity holds — git alone never
+     reads hosts.yml, and without a helper an https push dies prompting for
+     a username no sandbox terminal can answer. *)
+  Alcotest.(check string) "the snapshot wires git to the gh credential helper"
+    ("[credential \"https://github.com\"]\n\thelper = \n\thelper = !gh auth git-credential\n"
+     ^ "[credential \"https://gist.github.com\"]\n\thelper = \n\thelper = !gh auth git-credential\n")
+    (read_file (Filename.concat docker_snapshot "gitconfig"));
   write_file
     hosts
     "github.com:\n  user: changed-after-dispatch\n  users:\n    changed-after-dispatch:\n      oauth_token: changed-token\n";

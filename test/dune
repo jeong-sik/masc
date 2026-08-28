@@ -3750,6 +3750,21 @@
   unix))
 
 (test
+ (name test_keeper_skill_activation_discovery)
+ (modules test_keeper_skill_activation_discovery)
+ (libraries
+  alcotest
+  digestif
+  fs_compat
+  masc
+  masc.keeper_registry
+  masc.masc_types
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot
+  unix))
+
+(test
  (name test_keeper_skill_activation_projection)
  (modules test_keeper_skill_activation_projection)
  (libraries

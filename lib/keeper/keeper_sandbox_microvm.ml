@@ -172,6 +172,14 @@ let exec_argv ~container_name ~uid ~gid ~container_cwd ~stdin ~command_argv =
 
 let stop_argv ~container_name = command_argv () @ [ "stop"; container_name ]
 
+let delete_force_argv ~container_name =
+  command_argv () @ [ "delete"; "--force"; container_name ]
+;;
+
+(** Label value distinguishing a keeper-lifetime guest from turn
+    containers. The guest outlives turns, so it carries no turn id. *)
+let keeper_vm_container_kind = "keeper-vm"
+
 (** [container inspect] answers JSON; state lives at [.[0].status.state]
     ("running" observed live). A missing container exits 1, which the
     caller maps to absent before parsing. *)

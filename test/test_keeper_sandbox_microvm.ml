@@ -276,33 +276,69 @@ let test_live_turn_runtime_cat () =
     let oc = open_out (Filename.concat host_root "probe.txt") in
     output_string oc "hello-from-microvm\n";
     close_out oc;
-    let runtime =
-      Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:99 ()
+    let cat runtime =
+      match
+        Masc.Keeper_turn_sandbox_runtime.run_command_with_status
+          ~timeout_sec:60.0
+          runtime
+          ~cwd:host_root
+          ~command_argv:[ "cat"; "probe.txt" ]
+          ~max_bytes:4096
+          ()
+      with
+      | Ok (Unix.WEXITED 0, out) ->
+        if not (Astring.String.is_infix ~affix:"hello-from-microvm" out)
+        then Alcotest.failf "guest cat returned unexpected output: %s" out
+      | Ok (st, out) ->
+        Alcotest.failf
+          "guest cat failed: %s: %s"
+          (match st with
+           | Unix.WEXITED n -> Printf.sprintf "exit %d" n
+           | Unix.WSIGNALED n -> Printf.sprintf "signal %d" n
+           | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+          out
+      | Error message -> Alcotest.failf "guest cat errored: %s" message
     in
     Fun.protect
-      ~finally:(fun () -> Masc.Keeper_turn_sandbox_runtime.cleanup runtime)
+      ~finally:(fun () ->
+        match
+          Masc.Keeper_turn_sandbox_runtime.teardown_keeper_vm ~config ~meta ()
+        with
+        | Ok () -> ()
+        | Error message -> Alcotest.failf "teardown failed: %s" message)
       (fun () ->
-         match
-           Masc.Keeper_turn_sandbox_runtime.run_command_with_status
-             ~timeout_sec:60.0
-             runtime
-             ~cwd:host_root
-             ~command_argv:[ "cat"; "probe.txt" ]
-             ~max_bytes:4096
-             ()
-         with
-         | Ok (Unix.WEXITED 0, out) ->
-           if not (Astring.String.is_infix ~affix:"hello-from-microvm" out)
-           then Alcotest.failf "guest cat returned unexpected output: %s" out
-         | Ok (st, out) ->
+         (* Turn 1 pays the boot. *)
+         let turn1 =
+           Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:99 ()
+         in
+         let boot_started = Unix.gettimeofday () in
+         cat turn1;
+         let booted_in = Unix.gettimeofday () -. boot_started in
+         Masc.Keeper_turn_sandbox_runtime.cleanup turn1;
+         (* Turn 2 must adopt the surviving guest, not boot a second one. *)
+         let turn2 =
+           Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:100 ()
+         in
+         let reuse_started = Unix.gettimeofday () in
+         cat turn2;
+         let reused_in = Unix.gettimeofday () -. reuse_started in
+         Masc.Keeper_turn_sandbox_runtime.cleanup turn2;
+         (* The boot dominates turn 1 (>=2s VM start); adoption must not
+            pay it again. Generous bounds — this pins reuse, not speed. *)
+         if reused_in >= booted_in
+         then
            Alcotest.failf
-             "guest cat failed: %s: %s"
-             (match st with
-              | Unix.WEXITED n -> Printf.sprintf "exit %d" n
-              | Unix.WSIGNALED n -> Printf.sprintf "signal %d" n
-              | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
-             out
-         | Error message -> Alcotest.failf "guest cat errored: %s" message)
+             "turn 2 (%.1fs) was not faster than turn 1 (%.1fs); the guest \
+              was rebooted instead of adopted"
+             reused_in
+             booted_in);
+    (* After teardown the stable name must be gone. *)
+    (match
+       Masc.Keeper_turn_sandbox_runtime.teardown_keeper_vm ~config ~meta ()
+     with
+     | Ok () -> ()
+     | Error message ->
+       Alcotest.failf "teardown of an absent guest must be Ok: %s" message)
 
 let () =
   Alcotest.run

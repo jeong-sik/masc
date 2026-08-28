@@ -119,3 +119,17 @@ val run_bash_with_status :
   cmd:string ->
   unit ->
   (Unix.process_status * string, string) result
+
+val teardown_keeper_vm :
+  ?timeout_sec:float ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  unit ->
+  (unit, string) result
+(** Remove the keeper-lifetime microvm guest for [meta], if any. Turn
+    cleanup deliberately leaves the guest running (the 4-second VM boot is
+    paid once per keeper, not per turn); this is the remove path, for
+    keeper teardown and operators. A missing guest is a successful
+    teardown. Not yet wired to keeper_down — until that lands, a deleted
+    keeper's guest stays resident (~400 MB) and this function (or
+    [container stop <masc-keeper-vm-...>]) collects it. *)

@@ -67,6 +67,12 @@ val exec_argv :
 val stop_argv : container_name:string -> string list
 (** [--rm] makes stop also remove; observed live 2026-08-28. *)
 
+val delete_force_argv : container_name:string -> string list
+(** For a guest that survived as stopped (e.g. the host rebooted out from
+    under [--rm]); running guests are taken down with {!stop_argv}. *)
+
+val keeper_vm_container_kind : string
+
 val inspect_argv : container_name:string -> string list
 
 val running_of_inspect_json : string -> (bool, string) result

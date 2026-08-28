@@ -27,25 +27,41 @@ let parse_error_raw_excerpt raw =
    2,700+ clean frames, so the evidence has to come from the client that sees
    the break.
 
-   Redaction runs before the write, same SSOT as the excerpt. Failures here are
-   swallowed on purpose: a diagnostic sink must not turn a provider error into
-   a second, different error on the way out. *)
+   Redaction runs before the write, same SSOT as the excerpt — but it has to
+   answer for itself here, because [Secret_redactor] substitutes a fixed
+   "[REDACTED]" marker whose length differs from what it replaces. One match
+   shifts every offset after it, and then the "bytes 41-75" in the accompanying
+   error no longer points at the same place in this file, which is the one
+   question the sink exists to answer.
+
+   So the row carries whether redaction changed anything. A stream frame is
+   model output and normally holds no credential, so [verbatim=true] is the
+   ordinary case and those rows are byte-exact against the reported offsets.
+   A [verbatim=false] row still shows the shape of the break; it just cannot be
+   measured against them. Nothing about the frame is withheld that the redactor
+   would not also withhold from the log.
+
+   Failures here are swallowed on purpose: a diagnostic sink must not turn a
+   provider error into a second, different error on the way out. *)
 let dump_refused_frame ~label ~reason raw =
   match Sys.getenv_opt "MASC_WIRE_PARSE_DUMP" with
   | None | Some "" -> ()
   | Some path ->
     (try
+       let scrubbed = Secret_redactor.redact_string raw in
+       let verbatim = String.equal scrubbed raw in
        let oc = open_out_gen [ Open_append; Open_creat ] 0o600 path in
        Fun.protect
          ~finally:(fun () -> close_out_noerr oc)
          (fun () ->
             Printf.fprintf
               oc
-              "%s\t%s\t%d\t%s\n"
+              "%s\t%s\t%d\tverbatim=%b\t%s\n"
               label
               reason
               (String.length raw)
-              (String.escaped (Secret_redactor.redact_string raw)))
+              verbatim
+              (String.escaped scrubbed))
      with
      | Sys_error _ -> ())
 ;;

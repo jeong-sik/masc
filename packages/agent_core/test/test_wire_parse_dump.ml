@@ -48,6 +48,17 @@ let () =
     (Option.is_some (String.index_opt written 'L'));
   check "payload survives past the 256-byte excerpt bound" true
     (String.length written > 900);
+  (* No credential in the frame, so the row is byte-exact and the offsets in
+     the reason still address this text. *)
+  check "an untouched frame is marked verbatim" true
+    (Option.is_some
+       (let n = String.length "verbatim=true" in
+        let rec go i =
+          if i + n > String.length written then None
+          else if String.sub written i n = "verbatim=true" then Some i
+          else go (i + 1)
+        in
+        go 0));
 
   (* A credential in the refused frame is redacted before it reaches disk. *)
   let secret_path = tmp_path "secret" in
@@ -66,6 +77,8 @@ let () =
   check "secret does not reach the file" false
     (contains "sk-live-abcdefghijklmnopqrstuvwxyz" dumped);
   check "redaction marker is present" true (contains "REDACTED" dumped);
+  check "a redacted row is marked not verbatim" true
+    (contains "verbatim=false" dumped);
 
   List.iter
     (fun p -> if Sys.file_exists p then Sys.remove p)

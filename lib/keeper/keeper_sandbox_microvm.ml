@@ -2,9 +2,16 @@
 
     One lightweight VM per container through Virtualization.framework, so a
     guest runs its own Linux kernel instead of sharing the host's. Measured
-    2026-08-28 on macOS 26.6.1 / M3 Max with container CLI 1.3.0: 4.0-4.4s to
-    start against Docker's 0.6-0.9s, about 400 MB of host memory per running
-    container, and the guest reporting [Linux <uuid> 6.18.35].
+    2026-08-28 on macOS 26.6.1 / M3 Max with container CLI 1.3.0: about
+    460 MB of host memory per running guest, and the guest reporting
+    [Linux <uuid> 6.18.35].
+
+    Cost is per keeper, not per call. Booting a guest takes 1.3-2.4s, but
+    #31340 made the guest keeper-lifetime, so a turn pays [container exec]
+    at 0.06-0.10s -- under Docker's 0.6-0.9s per-call container start. An
+    earlier version of this comment quoted 4.0-4.4s per call: that was
+    measured before guests were adopted across turns, and stayed here after
+    the number stopped being true.
 
     This module builds the command and nothing else. Dispatch still refuses
     [Micro_vm] until a later change routes it here, so the argv is covered by

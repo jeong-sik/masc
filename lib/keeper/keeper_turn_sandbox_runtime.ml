@@ -470,7 +470,7 @@ let resolve_image (t : t) =
    Docker sweep's; a leaked microvm guest is collected by hand until a
    sweep lands ([container list --format json] carries the same labels). *)
 (* One guest per keeper, not per turn: the name is stable, an already
-   running guest is adopted instead of booted (amortising the 4.0-4.4s VM
+   running guest is adopted instead of booted (amortising the 1.3-2.4s VM
    start to once per keeper), and turn cleanup leaves it running. State
    accumulated inside the guest between turns belongs to the same keeper.
    Teardown is [teardown_keeper_vm], which shutdown finalization runs after

@@ -49,9 +49,9 @@ type run =
   ; status : run_status
   }
 
-(* Exhaustive by construction: [lane_key] below matches every constructor,
-   so a lane added to the variant without a row here fails to compile via
-   that match — keep the two adjacent. *)
+(* [lane_key] is exhaustive for the wire spelling. [all_lanes] is separately
+   covered by replay and OCaml-to-Dashboard parity tests, because a list cannot
+   be made exhaustive by the type checker. Keep the two adjacent. *)
 let all_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Compaction; Assembler ]
 
 let lane_key = function
@@ -496,6 +496,10 @@ let run_summary_fields run =
   let base =
     [ "run_id", `String run.run_id
     ; "lane", `String (lane_key run.lane)
+    ; ( "subject_id"
+      , `Null
+        (* This registry has no generic subject identity. Keep absence explicit
+           instead of deriving one from a lane-specific payload. *) )
     ; "actor", `String run.actor
     ; "started_at", `Float run.started_at
     ; "status", `String (status_label run.status)

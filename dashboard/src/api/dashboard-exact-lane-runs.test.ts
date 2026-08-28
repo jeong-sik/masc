@@ -11,7 +11,7 @@ describe('parseExactLaneRunsResponse', () => {
       runs: [{
         run_id: 'exact-assembler-1',
         lane: 'assembler_exact',
-        subject_id: 'trace-1',
+        subject_id: null,
         actor: 'keeper-a',
         started_at: 1,
         status: 'succeeded',
@@ -21,6 +21,7 @@ describe('parseExactLaneRunsResponse', () => {
     })
     expect(parsed.runs[0]).toMatchObject({
       lane: 'assembler_exact',
+      subjectId: null,
       status: 'succeeded',
       selectedSlot: 'assembler-primary',
     })

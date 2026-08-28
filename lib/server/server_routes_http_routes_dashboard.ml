@@ -1422,7 +1422,7 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   (* One bounded, read-only join of lane admission and retained observations.
-     Unlike the paged run endpoint below this always names all five standalone
+     Unlike the paged run endpoint below this always names every standalone
      lanes, including configured lanes with no currently retained run. *)
   |> Http.Router.get "/api/v1/dashboard/standalone-lanes" (fun request reqd ->
        with_token_permission_auth ~permission:exact_lane_run_permission

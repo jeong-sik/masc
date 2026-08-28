@@ -157,7 +157,7 @@ function actor(row: Row): string {
 function subject(row: Row): string {
   if (row.source === 'verification') return row.run.taskId
   if (row.source === 'fusion') return row.run.runId
-  return row.run.subjectId
+  return row.run.subjectId ?? '—'
 }
 
 function startedAt(row: Row): number {
@@ -452,7 +452,7 @@ function ExactRunDetail({ runId }: { runId: string }) {
                 <${JsonViewerCard} title="After memory + change · typed" data=${memoryEvidence.after} expandAll=${true} />
               </div>
             </div>`}
-        ${run.lane === 'librarian_exact'
+        ${run.lane === 'librarian_exact' && run.subjectId !== null
           ? html`<div class="ia-evi">
               <${LibrarianJournal}
                 keeper=${run.actor}
@@ -460,7 +460,9 @@ function ExactRunDetail({ runId }: { runId: string }) {
                 revision=${librarianRevision(run.output)}
               />
             </div>`
-          : null}
+          : run.lane === 'librarian_exact'
+            ? html`<p class="ia-note">이 exact-run registry 세대는 subject_id를 기록하지 않아 Memory journal을 trace로 결합하지 않습니다.</p>`
+            : null}
       </div>
     `
 }

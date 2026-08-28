@@ -4784,7 +4784,7 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
 
 let skill_evidence_fixture () =
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v2"
+    [ "schema", `String "masc.skill-evidence/v4"
     ; "status", `String "not_observed_in_current_coverage"
     ; ( "reference"
       , `Assoc
@@ -4800,8 +4800,8 @@ let skill_evidence_fixture () =
     ; "composition", `Null
     ; ( "coverage"
       , `Assoc
-          [ "composition_scan_limit", `Int 5000
-          ; "composition_rows_scanned", `Int 17
+          [ "composition_scope", `String "exact_reference_latest_completed"
+          ; "composition_records_read", `Int 0
           ; "coverage_complete", `Bool false
           ; "activation_scope", `String "current_keeper_sessions"
           ; "activation_ledgers_loaded", `Int 2
@@ -4810,7 +4810,7 @@ let skill_evidence_fixture () =
     ]
 ;;
 
-let test_decode_skill_evidence_reads_exact_v2_coverage () =
+let test_decode_skill_evidence_reads_exact_v4_coverage () =
   match Tui_decode.decode_skill_evidence (skill_evidence_fixture ()) with
   | Error detail -> Alcotest.fail detail
   | Ok evidence ->
@@ -4828,6 +4828,43 @@ let test_decode_skill_evidence_reads_exact_v2_coverage () =
       evidence.se_coverage.sec_unavailable
 ;;
 
+let test_decode_skill_evidence_accepts_declared_composition_scopes () =
+  let with_scope scope = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if name = "coverage"
+              then
+                ( name
+                , match value with
+                  | `Assoc coverage ->
+                    `Assoc (("composition_scope", `String scope)
+                            :: List.remove_assoc "composition_scope" coverage)
+                  | _ -> value )
+              else name, value)
+           fields)
+    | json -> json
+  in
+  List.iter
+    (fun (scope, expected) ->
+       match
+         skill_evidence_fixture ()
+         |> with_scope scope
+         |> Tui_decode.decode_skill_evidence
+       with
+       | Error detail -> Alcotest.fail detail
+       | Ok evidence ->
+         Alcotest.(check bool)
+           scope
+           true
+           (evidence.se_coverage.sec_composition_scope = expected))
+    [ ( "exact_reference_latest_completed"
+      , Tui_decode.Skill_evidence_exact_reference_latest_completed )
+    ; "unavailable", Tui_decode.Skill_evidence_composition_unavailable
+    ]
+;;
+
 let test_decode_skill_evidence_rejects_v1_and_status_disagreement () =
   let replace field value = function
     | `Assoc fields ->
@@ -4838,7 +4875,7 @@ let test_decode_skill_evidence_rejects_v1_and_status_disagreement () =
     "v1 rejected"
     true
     (skill_evidence_fixture ()
-     |> replace "schema" (`String "masc.skill-evidence/v1")
+     |> replace "schema" (`String "masc.skill-evidence/v2")
      |> Tui_decode.decode_skill_evidence
      |> Result.is_error);
   Alcotest.(check bool)
@@ -4869,8 +4906,8 @@ let test_decode_skill_evidence_requires_observation_fields () =
 
 let test_decode_skill_evidence_requires_every_coverage_field () =
   let required =
-    [ "composition_scan_limit"
-    ; "composition_rows_scanned"
+    [ "composition_scope"
+    ; "composition_records_read"
     ; "coverage_complete"
     ; "activation_scope"
     ; "activation_ledgers_loaded"
@@ -5342,8 +5379,10 @@ let () =
           test_decode_skills_catalog_rejects_a_wrong_kind_type;
       ] );
     ( "skill_evidence",
-      [ Alcotest.test_case "reads exact v2 coverage" `Quick
-          test_decode_skill_evidence_reads_exact_v2_coverage
+      [ Alcotest.test_case "reads exact v4 coverage" `Quick
+          test_decode_skill_evidence_reads_exact_v4_coverage
+      ; Alcotest.test_case "accepts declared composition scopes" `Quick
+          test_decode_skill_evidence_accepts_declared_composition_scopes
       ; Alcotest.test_case "rejects v1 and status disagreement" `Quick
           test_decode_skill_evidence_rejects_v1_and_status_disagreement
       ; Alcotest.test_case "requires observation fields" `Quick

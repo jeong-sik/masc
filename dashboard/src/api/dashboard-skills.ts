@@ -5,6 +5,7 @@
 // parser-derived surface of each effective Skill.
 
 import { Either, ParseResult, Schema } from 'effect'
+import { validate as isUuid, version as uuidVersion } from 'uuid'
 import { ApiRequestError, get, post, postControlPlane, type GetOptions } from './core'
 
 export interface SkillIdentity {
@@ -114,8 +115,8 @@ export interface SkillProfile {
 export type SkillSurfaceProfile = Omit<SkillProfile, 'reference' | 'kind'>
 
 export interface SkillEvidenceCoverage {
-  composition_scan_limit: number
-  composition_rows_scanned: number
+  composition_scope: 'exact_reference_latest_completed' | 'unavailable'
+  composition_records_read: number
   coverage_complete: false
   activation_scope: 'current_keeper_sessions'
   activation_ledgers_loaded: number
@@ -128,12 +129,23 @@ export interface SkillActivationEvidence {
 }
 
 export interface SkillCompositionEvidence {
-  run: Record<string, unknown>
-  nodes: readonly Record<string, unknown>[]
+  schema: 'masc.skill-composition-evidence/v1'
+  reference: SkillReference
+  composition_run_id: string
+  parent_tool_use_id: string
+  parent_turn: number
+  parent_planned_index: number
+  request_id: string | null
+  keeper: string
+  composition_tool: string
+  composition_execution: 'inline' | 'async'
+  result: Record<string, unknown>
+  executor_settlements: readonly Record<string, unknown>[]
+  recorded_at: number
 }
 
 export interface SkillEvidenceResponse {
-  schema: 'masc.skill-evidence/v2'
+  schema: 'masc.skill-evidence/v4'
   status: 'observed' | 'not_observed_in_current_coverage'
   reference: SkillReference
   activation: SkillActivationEvidence | null
@@ -334,8 +346,60 @@ const UnknownRecordSchema = Schema.Record({
   value: Schema.Unknown,
 })
 
+const ToolOutputResultSchema = Schema.Struct({
+  disposition: Schema.Literal('completed', 'deferred'),
+  data: Schema.Unknown,
+  tool_name: Schema.NonEmptyString,
+  duration_ms: Schema.Number,
+  metadata: Schema.optional(Schema.Unknown),
+})
+
+const ToolFailedResultSchema = Schema.Struct({
+  disposition: Schema.Literal('failed'),
+  data: Schema.Unknown,
+  tool_name: Schema.NonEmptyString,
+  duration_ms: Schema.Number,
+  failure_class: Schema.Literal(
+    'dependency_unavailable',
+    'policy_rejection',
+    'runtime_failure',
+    'workflow_rejection',
+    'operator_cancelled',
+  ),
+  message: Schema.String,
+  metadata: Schema.optional(Schema.Unknown),
+})
+
+const ToolResultSchema = Schema.Union(ToolOutputResultSchema, ToolFailedResultSchema)
+
+const CompositionNodeSchema = Schema.Struct({
+  node_id: Schema.NonEmptyString,
+  execution_id: Schema.NonEmptyString,
+  tool_name: Schema.NonEmptyString,
+  input: Schema.Unknown,
+  schedule: Schema.Struct({
+    planned_index: NonNegativeSafeIntegerSchema,
+    batch_index: NonNegativeSafeIntegerSchema,
+    batch_size: PositiveSafeIntegerSchema,
+    execution_mode: Schema.Literal('serial', 'concurrent'),
+  }),
+  result: ToolResultSchema,
+  tool_use_id: Schema.String,
+  failure_effect_disposition: Schema.NullOr(Schema.Literal(
+    'proven_pre_effect',
+    'proven_post_effect',
+    'effect_outcome_unknown',
+  )),
+  deferred_kind: Schema.NullOr(Schema.Literal(
+    'generic_deferred',
+    'external_effect_deferred',
+  )),
+  result_bytes: NonNegativeSafeIntegerSchema,
+  truncated_to: Schema.NullOr(NonNegativeSafeIntegerSchema),
+})
+
 const SkillEvidenceResponseSchema = Schema.Struct({
-  schema: Schema.Literal('masc.skill-evidence/v2'),
+  schema: Schema.Literal('masc.skill-evidence/v4'),
   status: Schema.Literal('observed', 'not_observed_in_current_coverage'),
   reference: SkillReferenceSchema,
   activation: Schema.NullOr(Schema.Struct({
@@ -343,12 +407,26 @@ const SkillEvidenceResponseSchema = Schema.Struct({
     activation: UnknownRecordSchema,
   })),
   composition: Schema.NullOr(Schema.Struct({
-    run: UnknownRecordSchema,
-    nodes: Schema.Array(UnknownRecordSchema),
+    schema: Schema.Literal('masc.skill-composition-evidence/v1'),
+    reference: SkillReferenceSchema,
+    composition_run_id: Schema.NonEmptyString,
+    parent_tool_use_id: Schema.String,
+    parent_turn: NonNegativeSafeIntegerSchema,
+    parent_planned_index: NonNegativeSafeIntegerSchema,
+    request_id: Schema.NullOr(Schema.NonEmptyString),
+    keeper: Schema.NonEmptyString,
+    composition_tool: Schema.NonEmptyString,
+    composition_execution: Schema.Literal('inline', 'async'),
+    result: ToolResultSchema,
+    executor_settlements: Schema.Array(CompositionNodeSchema),
+    recorded_at: Schema.Number,
   })),
   coverage: Schema.Struct({
-    composition_scan_limit: PositiveSafeIntegerSchema,
-    composition_rows_scanned: NonNegativeSafeIntegerSchema,
+    composition_scope: Schema.Literal(
+      'exact_reference_latest_completed',
+      'unavailable',
+    ),
+    composition_records_read: NonNegativeSafeIntegerSchema,
     coverage_complete: Schema.Literal(false),
     activation_scope: Schema.Literal('current_keeper_sessions'),
     activation_ledgers_loaded: NonNegativeSafeIntegerSchema,
@@ -664,6 +742,42 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
   const observed = decoded.activation !== null || decoded.composition !== null
   if ((decoded.status === 'observed') !== observed) {
     contractError('invalid_response', 'skill evidence status disagrees with its observations')
+  }
+  if (decoded.composition !== null) {
+    if (referenceKey(decoded.composition.reference) !== referenceKey(decoded.reference)) {
+      contractError('invalid_response', 'composition reference disagrees with evidence envelope')
+    }
+    if (!isUuid(decoded.composition.composition_run_id)
+      || uuidVersion(decoded.composition.composition_run_id) !== 7) {
+      contractError('invalid_response', 'composition_run_id must be UUIDv7')
+    }
+    const requestIdentityAgrees = decoded.composition.composition_execution === 'inline'
+      ? decoded.composition.request_id === null
+      : decoded.composition.request_id !== null && decoded.composition.request_id.trim() !== ''
+    if (!requestIdentityAgrees) {
+      contractError('invalid_response', 'composition execution disagrees with request_id')
+    }
+    const validResultDuration = Number.isFinite(decoded.composition.result.duration_ms)
+      && decoded.composition.result.duration_ms >= 0
+      && decoded.composition.result.tool_name === decoded.composition.composition_tool
+      && Number.isFinite(decoded.composition.recorded_at)
+    const validNodes = decoded.composition.executor_settlements.every(node =>
+      Number.isFinite(node.result.duration_ms)
+      && node.result.duration_ms >= 0
+      && node.result.tool_name === node.tool_name
+      && node.schedule.batch_index < node.schedule.batch_size
+      && (node.truncated_to === null
+        || (node.truncated_to >= 0 && node.truncated_to <= node.result_bytes)))
+    if (!validResultDuration || !validNodes) {
+      contractError('invalid_response', 'composition result violates typed numeric invariants')
+    }
+  }
+  const { composition_scope: scope, composition_records_read: read } = decoded.coverage
+  const coverageAgrees = scope === 'exact_reference_latest_completed'
+    ? (decoded.composition === null ? read === 0 : read === 1)
+    : decoded.composition === null && read === 0 && decoded.coverage.unavailable.length > 0
+  if (!coverageAgrees) {
+    contractError('invalid_response', 'composition coverage disagrees with its record')
   }
   return decoded
 }

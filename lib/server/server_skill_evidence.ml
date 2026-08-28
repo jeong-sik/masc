@@ -3,8 +3,6 @@ type activation_evidence =
   ; activation : Keeper_skill_activation_ledger.activation
   }
 
-let scan_limit = 5_000
-
 let activation_reference
       (activation : Keeper_skill_activation_ledger.activation) =
   Skill_reference.make
@@ -69,52 +67,37 @@ let latest_activation ~config reference =
     latest, loaded, List.rev unavailable
 ;;
 
-let composition_evidence ~reference rows =
-  let exact_parent =
-    rows
-    |> List.rev
-    |> List.find_opt (fun row ->
-      match Json_util.assoc_member_opt "record_kind" row,
-            Json_util.assoc_member_opt "skill_reference" row
-      with
-      | Some (`String "composition_run"), Some reference_json ->
-        (match Skill_reference.of_yojson reference_json with
-         | Ok observed -> Skill_reference.equal observed reference
-         | Error _ -> false)
-      | _ -> false)
-  in
-  Option.map
-    (fun parent ->
-       let run_id =
-         match Json_util.assoc_member_opt "composition_run_id" parent with
-         | Some (`String value) -> Some value
-         | _ -> None
-       in
-       let nodes =
-         match run_id with
-         | None -> []
-         | Some expected ->
-           List.filter
-             (fun row ->
-                match Json_util.assoc_member_opt "composition_run_id" row,
-                      Json_util.assoc_member_opt "record_kind" row
-                with
-                | Some (`String observed), Some (`String "tool_call") ->
-                  String.equal expected observed
-                | _ -> false)
-             rows
-       in
-       `Assoc [ "run", parent; "nodes", `List nodes ])
-    exact_parent
+type composition_coverage =
+  { scope : [ `Exact_reference_latest_completed | `Unavailable ]
+  ; records_read : int
+  }
+
+let composition_scope_to_string = function
+  | `Exact_reference_latest_completed -> "exact_reference_latest_completed"
+  | `Unavailable -> "unavailable"
+;;
+
+let composition_evidence ~config reference =
+  match Keeper_skill_composition_evidence.load_latest config reference with
+  | Error error ->
+    ( None
+    , { scope = `Unavailable; records_read = 0 }
+    , [ Keeper_skill_composition_evidence.error_to_string error ] )
+  | Ok None ->
+    None, { scope = `Exact_reference_latest_completed; records_read = 0 }, []
+  | Ok (Some evidence) ->
+    ( Some (Keeper_skill_composition_evidence.to_yojson evidence)
+    , { scope = `Exact_reference_latest_completed; records_read = 1 }
+    , [] )
 ;;
 
 let to_yojson
       ~reference
-      ~rows
+      ~composition
+      ~composition_coverage
       ~activation
       ~ledgers_loaded
       ~unavailable =
-  let composition = composition_evidence ~reference rows in
   let activation =
     Option.map
       (fun evidence ->
@@ -128,7 +111,7 @@ let to_yojson
   in
   let observed = Option.is_some activation || Option.is_some composition in
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v2"
+    [ "schema", `String "masc.skill-evidence/v4"
     ; ( "status"
       , `String
           (if observed then "observed" else "not_observed_in_current_coverage") )
@@ -137,8 +120,9 @@ let to_yojson
     ; "composition", Option.value ~default:`Null composition
     ; ( "coverage"
       , `Assoc
-          [ "composition_scan_limit", `Int scan_limit
-          ; "composition_rows_scanned", `Int (List.length rows)
+          [ ( "composition_scope"
+            , `String (composition_scope_to_string composition_coverage.scope) )
+          ; "composition_records_read", `Int composition_coverage.records_read
           ; "coverage_complete", `Bool false
           ; "activation_scope", `String "current_keeper_sessions"
           ; "activation_ledgers_loaded", `Int ledgers_loaded
@@ -148,22 +132,27 @@ let to_yojson
 ;;
 
 let project ~config reference =
-  let rows = Keeper_tool_call_log.read_recent_rows ~n:scan_limit () in
   let activation, ledgers_loaded, unavailable =
     latest_activation ~config reference
   in
+  let composition, composition_coverage, composition_unavailable =
+    composition_evidence ~config reference
+  in
   to_yojson
     ~reference
-    ~rows
+    ~composition
+    ~composition_coverage
     ~activation
     ~ledgers_loaded
-    ~unavailable
+    ~unavailable:(unavailable @ composition_unavailable)
 ;;
 
 module For_testing = struct
   let to_yojson
         ~reference
-        ~rows
+        ~composition
+        ~composition_records_read
+        ~composition_scope
         ~activation
         ~ledgers_loaded
         ~unavailable =
@@ -174,7 +163,9 @@ module For_testing = struct
     in
     to_yojson
       ~reference
-      ~rows
+      ~composition
+      ~composition_coverage:
+        { scope = composition_scope; records_read = composition_records_read }
       ~activation
       ~ledgers_loaded
       ~unavailable

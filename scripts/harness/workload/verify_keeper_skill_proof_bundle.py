@@ -25,7 +25,7 @@ import capture_keeper_skill_tui_proof as tui_capture
 SCHEMA = "masc.keeper-skill-proof-verification/v1"
 JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v2"
 PROOF_SCHEMA = "masc.keeper-skill-use-proof.v2"
-TUI_SCHEMA = "masc.keeper-skill-tui-proof.v2"
+TUI_SCHEMA = "masc.keeper-skill-tui-proof.v3"
 BUILD_SCHEMA = "masc.tui-build-evidence/v1"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -49,7 +49,6 @@ PROOF_ARTIFACTS = {
     "tui-build-evidence.json",
     "masc_tui.exe",
 }
-EXPECTED_VERIFIED_ARTIFACTS = 18
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 PNG_DEPTHS_BY_COLOR_TYPE = {
     0: {1, 2, 4, 8, 16},
@@ -430,6 +429,23 @@ def receipt_matches_activation(
     except tui_capture.CaptureError:
         return False
     return lines == expected
+
+
+def receipt_rows_are_covered_in_order(
+    frame_texts: list[str], expected_rows: list[str]
+) -> bool:
+    covered = 0
+    for visible_text in frame_texts:
+        try:
+            next_covered = tui_capture.receipt_frame_progress(
+                visible_text, expected_rows, covered
+            )
+        except tui_capture.CaptureError:
+            return False
+        if next_covered is None:
+            return False
+        covered = next_covered
+    return covered == len(expected_rows)
 
 
 def server_from_proof(evidence: dict[str, Any]) -> dict[str, str]:
@@ -924,11 +940,54 @@ def verify_bundle(
         and len(set(visited_tools_panes)) == len(visited_tools_panes),
         "TUI Tools pane selection path differs",
     )
-    visible_text = string_field(tui, "visible_text", "TUI proof")
     require(
-        tui.get("visible_text_sha256") == digest(visible_text.encode()),
-        "TUI visible text SHA differs",
+        {"visible_text", "visible_text_sha256", "screenshot"}.isdisjoint(tui),
+        "TUI proof contains removed single-frame fields",
     )
+    frame_values = list_field(tui, "frames", "TUI proof")
+    require(frame_values != [], "TUI proof has no frames")
+    frame_texts: list[str] = []
+    frame_screenshots: dict[str, dict[str, Any]] = {}
+    frame_screenshot_paths: list[Path] = []
+    for frame_index, frame_value in enumerate(frame_values):
+        frame_context = f"TUI frame {frame_index}"
+        require(isinstance(frame_value, dict), f"{frame_context} is not an object")
+        frame = cast(dict[str, Any], frame_value)
+        require(
+            set(frame) == {"visible_text", "visible_text_sha256", "screenshot"},
+            f"{frame_context} field set differs",
+        )
+        visible_text = string_field(frame, "visible_text", frame_context)
+        require(
+            frame.get("visible_text_sha256") == digest(visible_text.encode()),
+            f"{frame_context} visible text SHA differs",
+        )
+        require(
+            tui_capture.tools_surface_is_connected(visible_text),
+            f"{frame_context} Tools surface is not connected",
+        )
+        screenshot = object_field(frame, "screenshot", frame_context)
+        require(
+            set(screenshot) == {"path", "bytes", "sha256"},
+            f"{frame_context} screenshot field set differs",
+        )
+        screenshot_name = string_field(
+            screenshot, "path", f"{frame_context} screenshot"
+        )
+        require(
+            screenshot_name not in frame_screenshots,
+            "TUI frame screenshot paths are not distinct",
+        )
+        screenshot_identity, screenshot_payload = verify_file(
+            root=tui_root,
+            name=screenshot_name,
+            expected=screenshot,
+            context=f"{frame_context} screenshot",
+        )
+        validate_png(screenshot_payload, f"{frame_context} screenshot")
+        frame_texts.append(visible_text)
+        frame_screenshots[screenshot_name] = screenshot_identity
+        frame_screenshot_paths.append(tui_root / screenshot_name)
     observations = object_field(tui, "observations", "TUI proof")
     require(
         set(observations) == {"skill_header", "session_line", "receipt_block"},
@@ -958,44 +1017,35 @@ def verify_bundle(
         receipt_matches_activation(receipt_block, durable_activation, proof_actions),
         "TUI exact receipt observation differs",
     )
+    expected_receipt_rows = tui_capture.expected_receipt_lines(
+        durable_activation, proof_actions
+    )
     require(
-        receipt_block in visible_text,
-        "TUI screenshot viewport does not contain the exact receipt observation",
+        receipt_rows_are_covered_in_order(frame_texts, expected_receipt_rows),
+        "TUI frames do not cover the exact receipt rows in order",
     )
-    screenshot = object_field(tui, "screenshot", "TUI proof")
-    tui_screenshot_name = string_field(screenshot, "path", "TUI screenshot")
-    require(
-        tui_screenshot_name == "tui-skill-use.png",
-        "TUI screenshot path is not the exact capture artifact",
-    )
-    tui_screenshot_identity, tui_screenshot_payload = verify_file(
-        root=tui_root,
-        name=tui_screenshot_name,
-        expected=screenshot,
-        context="TUI screenshot",
-    )
-    validate_png(tui_screenshot_payload, "TUI screenshot")
 
-    verified_count = len(join_artifacts) + len(proof_artifacts_with_dashboard) + 1
+    verified_count = (
+        len(join_artifacts)
+        + len(proof_artifacts_with_dashboard)
+        + len(frame_screenshots)
+    )
     artifact_paths = [
         *(join_root / name for name in JOIN_ARTIFACTS),
         *(proof_root / name for name in PROOF_ARTIFACTS),
         proof_root / dashboard_name,
-        tui_root / tui_screenshot_name,
+        *frame_screenshot_paths,
     ]
     require(
-        len({path.resolve(strict=True) for path in artifact_paths})
-        == EXPECTED_VERIFIED_ARTIFACTS,
+        len(artifact_paths) == verified_count
+        and len({path.resolve(strict=True) for path in artifact_paths})
+        == verified_count,
         "verified artifact paths are not distinct",
     )
     require(
         len({(path.stat().st_dev, path.stat().st_ino) for path in artifact_paths})
-        == EXPECTED_VERIFIED_ARTIFACTS,
+        == verified_count,
         "verified artifacts contain hardlink aliases",
-    )
-    require(
-        verified_count == EXPECTED_VERIFIED_ARTIFACTS,
-        "verified artifact count is not exactly 18",
     )
     matrix = {
         "natural_keeper_messages": 1,
@@ -1007,7 +1057,7 @@ def verify_bundle(
         "later_model_selected_actions": len(proof_actions),
         "invalid_transitions": 0,
         "dashboard_exact_row_screenshots": 1,
-        "tui_exact_row_screenshots": 1,
+        "tui_exact_row_screenshots": len(frame_values),
         "source_server_identity_changes": 0,
         "incomplete_markers": 0,
     }
@@ -1025,7 +1075,7 @@ def verify_bundle(
             "mismatch_count": 0,
             "join": join_artifacts,
             "proof": proof_artifacts_with_dashboard,
-            "tui": {tui_screenshot_name: tui_screenshot_identity},
+            "tui": frame_screenshots,
         },
     }
 

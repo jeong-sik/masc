@@ -435,20 +435,36 @@ def make_bundle(root: Path):
         "dashboard-skill-use.png": file_identity(dashboard_png),
     }
 
-    tui_png = png(1200, 800)
-    (tui_root / "tui-skill-use.png").write_bytes(tui_png)
     exact_durable_activation = durable["activations"][0]
-    receipt_block = "\n".join(
-        verifier.tui_capture.expected_receipt_lines(
-            exact_durable_activation, exact_durable_activation["actions"]
-        )
+    receipt_rows = verifier.tui_capture.expected_receipt_lines(
+        exact_durable_activation, exact_durable_activation["actions"]
     )
-    visible_text = "\n".join(
+    receipt_block = "\n".join(receipt_rows)
+    split_at = len(receipt_rows) // 2
+    frame_rows = (
+        ["MASC Tools 14:10:47 [connected]", *receipt_rows[:split_at]],
         [
-            "MASC Tools 14:10:47 [connected]",
-            receipt_block,
-        ]
+            "MASC Tools 14:10:48 [connected]",
+            *receipt_rows[split_at - 1 :],
+            "q quit  ↑↓ scroll",
+        ],
     )
+    frames = []
+    for index, rows in enumerate(frame_rows, start=1):
+        screenshot_name = f"tui-skill-use-{index:03d}.png"
+        screenshot_payload = png(1200, 800 + index)
+        (tui_root / screenshot_name).write_bytes(screenshot_payload)
+        visible_text = "\n".join(rows)
+        frames.append(
+            {
+                "visible_text": visible_text,
+                "visible_text_sha256": verifier.digest(visible_text.encode()),
+                "screenshot": {
+                    "path": screenshot_name,
+                    **file_identity(screenshot_payload),
+                },
+            }
+        )
     tui = {
         "schema": verifier.TUI_SCHEMA,
         "source": {
@@ -484,10 +500,8 @@ def make_bundle(root: Path):
             "session_line": f"session=trace-one  ledger={durable['revision']}",
             "receipt_block": receipt_block,
         },
-        "visible_text": visible_text,
-        "screenshot": {"path": "tui-skill-use.png", **file_identity(tui_png)},
+        "frames": frames,
     }
-    tui["visible_text_sha256"] = verifier.digest(tui["visible_text"].encode())
     tui_raw = write_json(tui_root / "tui-evidence.json", tui)
     return {
         "join_root": join_root,
@@ -549,17 +563,18 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             manifest = json.loads((output / "verification.json").read_text())
             self.assertEqual(manifest["schema"], verifier.SCHEMA)
             self.assertEqual(manifest["status"], "passed")
-            self.assertEqual(manifest["artifacts"]["verified_count"], 18)
+            self.assertEqual(manifest["artifacts"]["verified_count"], 19)
 
     def test_complete_bundle_emits_quantitative_matrix(self):
         with tempfile.TemporaryDirectory() as raw:
             result = verify(make_bundle(Path(raw)))
 
         self.assertEqual(result["status"], "passed")
-        self.assertEqual(result["artifacts"]["verified_count"], 18)
+        self.assertEqual(result["artifacts"]["verified_count"], 19)
         self.assertEqual(result["matrix"]["natural_keeper_messages"], 1)
         self.assertEqual(result["matrix"]["exact_turn_skill_activations"], 1)
         self.assertEqual(result["matrix"]["later_model_selected_actions"], 1)
+        self.assertEqual(result["matrix"]["tui_exact_row_screenshots"], 2)
         self.assertEqual(result["matrix"]["incomplete_markers"], 0)
 
     def test_each_exact_identity_field_tamper_is_rejected(self):
@@ -758,18 +773,131 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
     def test_visible_text_hash_tamper_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
-            bundle["tui"]["visible_text_sha256"] = "0" * 64
+            bundle["tui"]["frames"][0]["visible_text_sha256"] = "0" * 64
             with self.assertRaisesRegex(verifier.VerificationError, "visible text SHA"):
                 verify(bundle)
 
     def test_tui_screenshot_tamper_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
-            (bundle["tui_root"] / "tui-skill-use.png").write_bytes(b"tampered")
+            screenshot = bundle["tui"]["frames"][0]["screenshot"]
+            (bundle["tui_root"] / screenshot["path"]).write_bytes(b"tampered")
             with self.assertRaisesRegex(
                 verifier.VerificationError, "byte count differs"
             ):
                 verify(bundle)
+
+    def test_each_tui_frame_requires_a_connected_tools_surface(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            frame = bundle["tui"]["frames"][0]
+            frame["visible_text"] = frame["visible_text"].replace(
+                "[connected]", "[disconnected]"
+            )
+            frame["visible_text_sha256"] = verifier.digest(
+                frame["visible_text"].encode()
+            )
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "Tools surface is not connected"
+            ):
+                verify(bundle)
+
+    def test_tui_frames_are_nonempty_and_closed(self):
+        cases = (
+            ("empty", lambda tui: tui.update({"frames": []}), "no frames"),
+            (
+                "frame",
+                lambda tui: tui["frames"][0].update({"unexpected": True}),
+                "frame 0 field set",
+            ),
+            (
+                "screenshot",
+                lambda tui: tui["frames"][0]["screenshot"].update({"unexpected": True}),
+                "screenshot field set",
+            ),
+        )
+        for name, mutate, message in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as raw:
+                bundle = make_bundle(Path(raw))
+                mutate(bundle["tui"])
+                with self.assertRaisesRegex(verifier.VerificationError, message):
+                    verify(bundle)
+
+    def test_tui_v3_rejects_removed_single_frame_fields(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            bundle["tui"]["visible_text"] = "legacy"
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "removed single-frame fields"
+            ):
+                verify(bundle)
+
+    def test_tui_frames_must_cover_receipt_rows_in_order(self):
+        mutations = {
+            "gap": lambda frames: frames[0].update(
+                {
+                    "visible_text": frames[0]["visible_text"].replace(
+                        "package_id=review", "package_id=missing", 1
+                    )
+                }
+            ),
+            "missing_overlap": lambda frames: frames[1].update(
+                {
+                    "visible_text": "\n".join(
+                        [
+                            frames[1]["visible_text"].splitlines()[0],
+                            *frames[1]["visible_text"].splitlines()[2:],
+                        ]
+                    )
+                }
+            ),
+            "reversed": lambda frames: frames.reverse(),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as raw:
+                bundle = make_bundle(Path(raw))
+                frames = bundle["tui"]["frames"]
+                mutate(frames)
+                for frame in frames:
+                    frame["visible_text_sha256"] = verifier.digest(
+                        frame["visible_text"].encode()
+                    )
+                with self.assertRaisesRegex(
+                    verifier.VerificationError, "cover the exact receipt rows in order"
+                ):
+                    verify(bundle)
+
+    def test_verified_artifact_count_tracks_frame_count(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            receipt_rows = bundle["tui"]["observations"]["receipt_block"].splitlines()
+            boundaries = (0, len(receipt_rows) // 3, 2 * len(receipt_rows) // 3)
+            slices = (
+                receipt_rows[boundaries[0] : boundaries[1]],
+                receipt_rows[boundaries[1] - 1 : boundaries[2]],
+                receipt_rows[boundaries[2] - 1 :],
+            )
+            frames = []
+            for index, rows in enumerate(slices, start=1):
+                name = f"tui-three-frame-{index:03d}.png"
+                payload = png(1200, 900 + index)
+                (bundle["tui_root"] / name).write_bytes(payload)
+                visible_text = "\n".join(rows)
+                visible_text = "MASC Tools 14:10:47 [connected]\n" + visible_text
+                frames.append(
+                    {
+                        "visible_text": visible_text,
+                        "visible_text_sha256": verifier.digest(visible_text.encode()),
+                        "screenshot": {"path": name, **file_identity(payload)},
+                    }
+                )
+            bundle["tui"]["frames"] = frames
+
+            result = verify(bundle)
+
+            self.assertEqual(result["matrix"]["tui_exact_row_screenshots"], 3)
+            self.assertEqual(result["artifacts"]["verified_count"], 20)
+            self.assertEqual(len(result["artifacts"]["tui"]), 3)
 
     def test_fabricated_raw_join_authority_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -904,12 +1032,37 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
             dashboard = bundle["proof_root"] / "dashboard-skill-use.png"
-            tui_screenshot = bundle["tui_root"] / "tui-skill-use.png"
+            screenshot = bundle["tui"]["frames"][0]["screenshot"]
+            tui_screenshot = bundle["tui_root"] / screenshot["path"]
             tui_screenshot.unlink()
             os.link(dashboard, tui_screenshot)
-            bundle["tui"]["screenshot"].update(file_identity(dashboard.read_bytes()))
+            screenshot.update(file_identity(dashboard.read_bytes()))
             with self.assertRaisesRegex(verifier.VerificationError, "hardlink aliases"):
                 verify(bundle)
+
+    def test_tui_frame_screenshots_cannot_share_a_path_or_inode(self):
+        cases = ("path", "inode")
+        for alias_kind in cases:
+            with (
+                self.subTest(alias_kind=alias_kind),
+                tempfile.TemporaryDirectory() as raw,
+            ):
+                bundle = make_bundle(Path(raw))
+                first = bundle["tui"]["frames"][0]["screenshot"]
+                second = bundle["tui"]["frames"][1]["screenshot"]
+                first_path = bundle["tui_root"] / first["path"]
+                second_path = bundle["tui_root"] / second["path"]
+                if alias_kind == "path":
+                    second["path"] = first["path"]
+                    second.update(file_identity(first_path.read_bytes()))
+                    expected = "paths are not distinct"
+                else:
+                    second_path.unlink()
+                    os.link(first_path, second_path)
+                    second.update(file_identity(first_path.read_bytes()))
+                    expected = "hardlink aliases"
+                with self.assertRaisesRegex(verifier.VerificationError, expected):
+                    verify(bundle)
 
     def test_png_zero_dimension_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -927,13 +1080,14 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
     def test_visible_text_requires_the_exact_receipt_observation(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
-            visible = bundle["tui"]["visible_text"].replace(
+            frame = bundle["tui"]["frames"][-1]
+            visible = frame["visible_text"].replace(
                 "call=call-action-1", "call=foreign-action"
             )
-            bundle["tui"]["visible_text"] = visible
-            bundle["tui"]["visible_text_sha256"] = verifier.digest(visible.encode())
+            frame["visible_text"] = visible
+            frame["visible_text_sha256"] = verifier.digest(visible.encode())
             with self.assertRaisesRegex(
-                verifier.VerificationError, "screenshot viewport"
+                verifier.VerificationError, "cover the exact receipt rows in order"
             ):
                 verify(bundle)
 
@@ -962,12 +1116,6 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                 receipt = bundle["tui"]["observations"]["receipt_block"]
                 mutated = receipt.replace(old, new, 1)
                 bundle["tui"]["observations"]["receipt_block"] = mutated
-                bundle["tui"]["visible_text"] = bundle["tui"]["visible_text"].replace(
-                    receipt, mutated
-                )
-                bundle["tui"]["visible_text_sha256"] = verifier.digest(
-                    bundle["tui"]["visible_text"].encode()
-                )
                 with self.assertRaisesRegex(
                     verifier.VerificationError, "exact receipt observation"
                 ):

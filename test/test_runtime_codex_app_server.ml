@@ -54,6 +54,18 @@ let rec drop count values =
     | _ :: rest -> drop (count - 1) rest
 ;;
 
+(* macOS charges a one-time check on the first exec of every freshly written
+   executable — measured at 0.26-0.33s (tail past 0.5s under load) on the
+   reference machine, against 5-16ms for a re-run of the same file. The
+   sub-100ms admission timeouts in this suite sat under that cost and timed
+   out during the handshake (#31220). Every fixture script therefore takes a
+   [--masc-warmup] first argument that exits before touching stdin, and is
+   executed once with it right after creation, so the measured run pays only
+   the re-run cost. *)
+let warm_fresh_executable path =
+  ignore (Sys.command (Filename.quote path ^ " --masc-warmup") : int)
+;;
+
 let fixture_script ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) ?before_final_stdin_drain_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
@@ -74,6 +86,7 @@ let fixture_script ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
       capture_path
   in
   output_string output "#!/bin/sh\n";
+  output_string output "case \"$1\" in --masc-warmup) exit 0 ;; esac\n";
   read_request ~expect_version:true ();
   Option.iter
     (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
@@ -101,6 +114,7 @@ let fixture_script ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
   output_string output "while IFS= read -r ignored; do :; done\n";
   close_out output;
   Unix.chmod path 0o700;
+  warm_fresh_executable path;
   path
 ;;
 
@@ -126,6 +140,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
   let path = Filename.temp_file "masc-codex-fixture-sequence-" ".sh" in
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
+  output_string output "case \"$1\" in --masc-warmup) exit 0 ;; esac\n";
   output_string output "count=0\n";
   output_string output
     ("if [ -f " ^ shell_quote counter_path ^ " ]; then\n"
@@ -142,6 +157,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
      ^ "fi\n");
   close_out output;
   Unix.chmod path 0o700;
+  warm_fresh_executable path;
   Fun.protect
     ~finally:(fun () ->
       List.iter
@@ -962,26 +978,26 @@ let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
 
 let test_no_deadline_keeps_handshake_bounded () =
   with_fixture
-    ~initial_line_delay_s:0.2
+    ~initial_line_delay_s:0.75
     [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
     (fun path ->
        match
          run_fixture
-           ~admission_timeout_s:0.05
+           ~admission_timeout_s:0.3
            ~no_turn_deadline:true
            path
        with
        | Error
            (Runtime_codex_app_server.Timeout
               { seconds; turn_accepted = false }) ->
-         check (float 0.001) "admission timeout" 0.05 seconds
+         check (float 0.001) "admission timeout" 0.3 seconds
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "an unbounded turn disabled the app-server handshake bound")
 ;;
 
 let test_no_deadline_starts_after_turn_acceptance () =
   with_fixture
-    ~terminal_line_delay_s:0.2
+    ~terminal_line_delay_s:0.75
     ~terminal_line_delay_start_index:1
     [ init_result
     ; account_chatgpt
@@ -993,7 +1009,7 @@ let test_no_deadline_starts_after_turn_acceptance () =
     (fun path ->
        match
          run_fixture
-           ~admission_timeout_s:0.05
+           ~admission_timeout_s:0.3
            ~no_turn_deadline:true
            path
        with
@@ -1005,12 +1021,12 @@ let test_state_callback_timeout_is_typed () =
   with_fixture [ init_result; account_chatgpt; thread_result ] (fun path ->
     match
       run_fixture
-        ~timeout_s:0.05
-        ~on_thread_ready_delay_s:0.2
+        ~timeout_s:0.3
+        ~on_thread_ready_delay_s:0.75
         path
     with
     | Error (Runtime_codex_app_server.Timeout { seconds; _ }) ->
-      check (float 0.001) "exact callback timeout" 0.05 seconds
+      check (float 0.001) "exact callback timeout" 0.3 seconds
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
     | Ok _ -> fail "blocking app-server callback ignored its timeout")
 ;;
@@ -1023,7 +1039,7 @@ let test_no_deadline_keeps_admission_bounded () =
         let config =
           { (Runtime_codex_app_server.default_config ()) with
             cli_path = path
-          ; admission_timeout_s = 0.05
+          ; admission_timeout_s = 0.3
           ; timeout_s = None
           }
         in
@@ -1032,7 +1048,7 @@ let test_no_deadline_keeps_admission_bounded () =
           ~clock
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
           ~on_thread_ready:(fun ~thread_id:_ ->
-            Eio.Time.sleep clock 0.2;
+            Eio.Time.sleep clock 0.75;
             Ok ())
           config
           ~prompt:"fixture"
@@ -1040,7 +1056,7 @@ let test_no_deadline_keeps_admission_bounded () =
     in
     match outcome with
     | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = false }) ->
-      check (float 0.001) "admission timeout" 0.05 seconds
+      check (float 0.001) "admission timeout" 0.3 seconds
     | Error (Runtime_codex_app_server.Timeout { turn_accepted = true; _ }) ->
       fail "pre-dispatch admission timeout was marked turn-accepted"
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -1049,7 +1065,7 @@ let test_no_deadline_keeps_admission_bounded () =
 
 let test_no_deadline_begins_after_turn_dispatch () =
   with_fixture
-    ~terminal_line_delay_s:0.1
+    ~terminal_line_delay_s:0.75
     [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
     (fun path ->
        let outcome =
@@ -1057,7 +1073,7 @@ let test_no_deadline_begins_after_turn_dispatch () =
            let config =
              { (Runtime_codex_app_server.default_config ()) with
                cli_path = path
-             ; admission_timeout_s = 0.05
+             ; admission_timeout_s = 0.3
              ; timeout_s = None
              }
            in
@@ -1080,15 +1096,15 @@ let test_no_deadline_keeps_turn_started_callback_bounded () =
     (fun path ->
        match
          run_fixture
-           ~admission_timeout_s:0.05
+           ~admission_timeout_s:0.3
            ~no_turn_deadline:true
-           ~on_turn_started_delay_s:0.2
+           ~on_turn_started_delay_s:0.75
            path
        with
        | Error
            (Runtime_codex_app_server.Timeout
               { seconds; turn_accepted = true }) ->
-         check (float 0.001) "host callback timeout" 0.05 seconds
+         check (float 0.001) "host callback timeout" 0.3 seconds
        | Error
            (Runtime_codex_app_server.Timeout
               { turn_accepted = false; _ }) ->
@@ -1111,20 +1127,20 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
     }
   in
   with_fixture
-    ~before_final_stdin_drain_s:0.2
+    ~before_final_stdin_drain_s:0.75
     [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request ]
     (fun path ->
        match
          run_fixture
            ~dynamic_tools:[ tool ]
-           ~admission_timeout_s:0.05
+           ~admission_timeout_s:0.3
            ~no_turn_deadline:true
            path
        with
        | Error
            (Runtime_codex_app_server.Timeout
               { seconds; turn_accepted = true }) ->
-         check (float 0.001) "post-accept write timeout" 0.05 seconds
+         check (float 0.001) "post-accept write timeout" 0.3 seconds
        | Error
            (Runtime_codex_app_server.Timeout
               { turn_accepted = false; _ }) ->

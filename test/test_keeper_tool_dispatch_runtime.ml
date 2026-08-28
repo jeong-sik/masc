@@ -3723,7 +3723,7 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
           ]
       in
       let run () =
-        KET.execute_keeper_tool_call
+        KET.Compatibility.execute_keeper_tool_call
           ~config ~meta ~publication_recovery ~ctx_work
           ~name:"tool_execute" ~input ()
       in
@@ -3756,7 +3756,7 @@ let test_tool_execute_script_form_is_admitted_and_runs () =
         `Assoc [ "script", `String "printf begin- && printf end" ]
       in
       let raw =
-        KET.execute_keeper_tool_call
+        KET.Compatibility.execute_keeper_tool_call
           ~config ~meta ~publication_recovery ~ctx_work
           ~name:"tool_execute" ~input ()
       in
@@ -3770,7 +3770,7 @@ let test_tool_execute_empty_input_names_all_three_forms () =
   with_exec_fixture "tool_execute_empty_input_names_forms"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let raw =
-        KET.execute_keeper_tool_call
+        KET.Compatibility.execute_keeper_tool_call
           ~config ~meta ~publication_recovery ~ctx_work
           ~name:"tool_execute" ~input:(`Assoc []) ()
       in

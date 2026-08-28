@@ -307,33 +307,33 @@ module Compatibility = struct
     execute_keeper_tool_call_with_authority
       ~capability_authority:Keeper_tool_runtime.Compatibility_meta
   ;;
-end
 
-let execute_keeper_tool_call
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(publication_recovery :
-          Keeper_publication_recovery_availability.turn_context)
-      ~(ctx_work : working_context)
-      ?turn_sandbox_factory
-      ~(name : string)
-      ~(input : Yojson.Safe.t)
-      ()
-  : string
-  =
-  let result =
-    Compatibility.execute_keeper_tool_call_with_outcome
-      ~config
-      ~meta
-      ~publication_recovery
-      ~ctx_work
-                  ?turn_sandbox_factory
-      ~name
-      ~input
-      ()
-  in
-  result.Keeper_tool_execution.raw_output
-;;
+  let execute_keeper_tool_call
+        ~(config : Workspace.config)
+        ~(meta : keeper_meta)
+        ~(publication_recovery :
+            Keeper_publication_recovery_availability.turn_context)
+        ~(ctx_work : working_context)
+        ?turn_sandbox_factory
+        ~(name : string)
+        ~(input : Yojson.Safe.t)
+        ()
+    : string
+    =
+    let result =
+      execute_keeper_tool_call_with_outcome
+        ~config
+        ~meta
+        ~publication_recovery
+        ~ctx_work
+        ?turn_sandbox_factory
+        ~name
+        ~input
+        ()
+    in
+    result.Keeper_tool_execution.raw_output
+  ;;
+end
 
 module For_testing = struct
   type descriptor_route_kind =

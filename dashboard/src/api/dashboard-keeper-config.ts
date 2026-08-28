@@ -214,7 +214,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     autonomous_wake_prompt: asNullableString(data.autonomous_wake_prompt),
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
-    sandbox_last_error: asNullableString(data.sandbox_last_error),
+    keeper_last_error: asNullableString(data.keeper_last_error),
     allowed_paths: normalizeStringList(data.allowed_paths),
     effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),
     prompt: {

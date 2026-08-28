@@ -2134,10 +2134,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />
     `}
 
-    ${c.sandbox_last_error ? html`
+    ${c.keeper_last_error ? html`
       <${Callout}
         title="샌드박스 오류"
-        body=${c.sandbox_last_error}
+        body=${c.keeper_last_error}
         tone="warn"
       />
     ` : null}

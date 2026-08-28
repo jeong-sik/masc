@@ -1201,7 +1201,7 @@ export interface Keeper {
   config_error?: KeeperProfileConfigError | null
   sandbox_profile?: 'local' | 'docker' | null
   sandbox_target?: string | null
-  sandbox_last_error?: string | null
+  keeper_last_error?: string | null
   blocked_task_count?: number | null
   goal_progress?: {
     linked_task_count?: number
@@ -1488,7 +1488,7 @@ export interface KeeperConfig {
   autonomous_wake_prompt: string | null
   sandbox_profile?: 'local' | 'docker' | string
   network_mode?: 'none' | 'inherit' | string
-  sandbox_last_error?: string | null
+  keeper_last_error?: string | null
   allowed_paths: string[]
   effective_allowed_paths: string[]
   prompt: KeeperConfigPrompt

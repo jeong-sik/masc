@@ -445,10 +445,10 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                     `
                     : null}
                 </div>
-                ${row.sandbox_last_error
+                ${row.keeper_last_error
                   ? html`
-                    <div class="max-w-60 truncate text-3xs text-[var(--bad-light)]" title=${row.sandbox_last_error}>
-                      ${row.sandbox_last_error}
+                    <div class="max-w-60 truncate text-3xs text-[var(--bad-light)]" title=${row.keeper_last_error}>
+                      ${row.keeper_last_error}
                     </div>
                   `
                   : null}

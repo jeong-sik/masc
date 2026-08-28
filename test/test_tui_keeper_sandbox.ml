@@ -9,7 +9,7 @@ let observed =
   Yojson.Safe.from_string
     {|{
       "name": "alpha",
-      "sandbox_last_error": null,
+      "keeper_last_error": null,
       "sandbox_live": {
         "keeper": "alpha",
         "sandbox_profile": "docker",
@@ -64,7 +64,7 @@ let test_live_container_and_errors_are_visible () =
   let json =
     Yojson.Safe.from_string
       {|{
-        "sandbox_last_error": "previous launch failed",
+        "keeper_last_error": "previous launch failed",
         "sandbox_live": {
           "sandbox_profile": "docker",
           "configured_network_mode": "none",

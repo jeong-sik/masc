@@ -1109,7 +1109,7 @@ let test_status_reads_live_registry_each_call () =
       Alcotest.(check (option string))
         "first registry observation"
         (Some "first live error")
-        (json_string_field "sandbox_last_error" (status ()));
+        (json_string_field "keeper_last_error" (status ()));
       Masc.Keeper_registry.set_last_error_entry
         ~base_path:config.base_path
         ~name
@@ -1117,7 +1117,7 @@ let test_status_reads_live_registry_each_call () =
       Alcotest.(check (option string))
         "second registry observation is not frozen by a response cache"
         (Some "second live error")
-        (json_string_field "sandbox_last_error" (status ())))
+        (json_string_field "keeper_last_error" (status ())))
 
 let test_status_surfaces_chat_operation_runtime () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->

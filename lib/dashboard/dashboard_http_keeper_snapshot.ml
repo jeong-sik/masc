@@ -303,7 +303,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
         Keeper_state_machine_mermaid.phase_to_mermaid
           ~current:(Option.value ~default:Keeper_state_machine.Offline current_phase)
       in
-      let sandbox_last_error =
+      let keeper_last_error =
         match Keeper_registry.get ~base_path:config.base_path m.name with
         | Some entry -> entry.last_error
         | None -> None
@@ -328,7 +328,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
          , `String
              (Keeper_types_profile_sandbox.network_mode_to_string
                 m.network_mode) );
-         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
+         ("keeper_last_error", Json_util.string_opt_to_json keeper_last_error);
          ( "allowed_paths"
          , `List (List.map (fun s -> `String s) m.allowed_paths) );
          ( "effective_allowed_paths"

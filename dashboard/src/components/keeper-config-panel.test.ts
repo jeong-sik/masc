@@ -39,7 +39,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     autonomous_wake_prompt: null,
     sandbox_profile: 'local',
     network_mode: 'inherit',
-    sandbox_last_error: null,
+    keeper_last_error: null,
     allowed_paths: ['/tmp/workspace'],
     effective_allowed_paths: ['/tmp/workspace'],
     prompt: {

@@ -24,7 +24,7 @@ type t =
   ; containers : container list option
   ; container_error : string option
   ; why_no_container : string option
-  ; sandbox_last_error : string option
+  ; keeper_last_error : string option
   ; identity : identity option
   }
 
@@ -147,8 +147,8 @@ let decode_identity ~sanitize fields =
 let decode ~sanitize json =
   let open Result.Syntax in
   let* root = assoc "keeper status" json in
-  let* sandbox_last_error =
-    string_opt ~sanitize ~path:"sandbox_last_error" root
+  let* keeper_last_error =
+    string_opt ~sanitize ~path:"keeper_last_error" root
   in
   let* live =
     match field "sandbox_live" root with
@@ -184,7 +184,7 @@ let decode ~sanitize json =
     ; containers
     ; container_error
     ; why_no_container
-    ; sandbox_last_error
+    ; keeper_last_error
     ; identity
     }
 
@@ -273,9 +273,16 @@ let view_lines ~width reading =
     [ Option.map
         (fun detail -> wrapped_rows ~width ~label:"Container error" ~tone:`Bad detail)
         reading.container_error
+      (* Not the sandbox's error. [Keeper_registry] records the keeper's last
+         error whatever its source, so a Board ledger decode failure lands
+         here too. It sat under "Last error" one line below "Container
+         error", and a reader took a schema-version complaint about an
+         unrelated ledger as proof the sandbox was broken. The label names
+         whose error it is; "Container error" above stays the sandbox one. *)
     ; Option.map
-        (fun detail -> wrapped_rows ~width ~label:"Last error" ~tone:`Bad detail)
-        reading.sandbox_last_error
+        (fun detail ->
+           wrapped_rows ~width ~label:"Keeper last error" ~tone:`Bad detail)
+        reading.keeper_last_error
     ]
     |> List.filter_map Fun.id
     |> List.concat

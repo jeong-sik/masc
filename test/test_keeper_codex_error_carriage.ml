@@ -73,6 +73,9 @@ let test_every_variant_lands_in_its_class () =
     "internal";
   check "turn_interrupted (deliberate stop stays internal)"
     Codex.Turn_interrupted
+    "internal";
+  check "runtime shutdown stays internal"
+    Codex.Runtime_shutting_down
     "internal"
 
 (* The durable recovery failure follows the same activity axis as the
@@ -101,6 +104,11 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
     (recovery (Codex.Turn_failed "stream disconnected")
      = Masc.Keeper_official_client_session_store.Provider_rejected)
     true
+  ; Alcotest.(check bool)
+      "runtime shutdown records transport interruption"
+      (recovery Codex.Runtime_shutting_down
+       = Masc.Keeper_official_client_session_store.Transport_interrupted)
+      true
 ;;
 
 let () =

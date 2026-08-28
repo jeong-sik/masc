@@ -88,7 +88,14 @@ type kind =
       (** What an autonomous turn said after its trace. A blank reply remains
           a row, but callers can mark it instead of drawing an empty keeper
           message. *)
-  | Delivery_failed of { origin_request_id : string option }
+  | Delivery_failed of
+      { origin_request_id : string option
+      ; recovered_at : float option
+            (** A later keeper utterance in this transcript, when a typed
+                runtime interruption was followed by one. Presentation
+                evidence only: it does not claim the failed operation itself
+                was replayed. *)
+      }
       (** An assistant row the server marked [transport_failure]: the reply
           did not reach its destination. Not keeper speech.
 
@@ -113,6 +120,12 @@ type kind =
 val tool_rows : Masc_tui_keeper_chat_transcript.tool_block -> string list
 (** The current full-detail rows for a typed history block. This delegates to
     the shared projector; it does not own another formatter. *)
+
+val present_delivery_failure :
+  ?recovered_at:float -> string -> (string * bool) option
+(** Compact a typed runtime/provider interruption into a lifecycle sentence.
+    The boolean is [true] only when [recovered_at] supplied later-reply
+    evidence. Unknown failures return [None] and keep their original text. *)
 
 type attachment_note =
   { att_name : string

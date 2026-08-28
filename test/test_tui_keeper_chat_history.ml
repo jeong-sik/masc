@@ -66,7 +66,7 @@ let tool_transcript_slot execution_id ordinal =
     ]
 
 let origin_request_id = function
-  | History.Delivery_failed { origin_request_id } -> origin_request_id
+  | History.Delivery_failed { origin_request_id; _ } -> origin_request_id
   | History.Addressed_to_keeper _ | History.Said_by_keeper
   | History.Autonomous_reply
   | History.Tool_calls _ | History.Reasoning _ | History.Memory_activity -> None
@@ -176,6 +176,90 @@ let test_a_failed_turn_names_the_request_it_came_from () =
   check (list (option string)) "an operation key is the request, anything else is not"
     [ Some "tui-28e58beb"; None; None ]
     (List.map (fun r -> origin_request_id r.History.kind) decoded.History.rows)
+;;
+
+let fenced_failure diagnostic =
+  Printf.sprintf
+    "Keeper request failed: Internal error: [masc_agent_core_error] {\"kind\":\"provider_attempt_effect_fenced\",\"runtime_id\":\"codex_subscription.gpt-5.6-luna\",\"effect_disposition\":\"effect_attempted\",\"diagnostic\":%s}"
+    (Yojson.Safe.to_string (`String diagnostic))
+;;
+
+let test_runtime_interruption_becomes_a_recovered_lifecycle () =
+  let failure =
+    fenced_failure "MASC runtime shutdown interrupted the active Codex turn"
+  in
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"user" "brief me"
+         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure" failure
+         ; autonomous_turn ~ts:3.0 ~content:(`String "briefing complete") []
+         ])
+  in
+  let failed = List.nth decoded.History.rows 1 in
+  match failed.History.kind with
+  | History.Delivery_failed { recovered_at; _ } ->
+    check (option (float 0.0)) "later reply is recovery evidence" (Some 3.0)
+      recovered_at;
+    (match History.present_delivery_failure ?recovered_at failed.History.text with
+     | None -> fail "typed runtime interruption was not presented"
+     | Some (text, recovered) ->
+       check bool "no longer a live error" true recovered;
+       check string "compact lifecycle"
+         "Runtime shutdown interrupted this turn · lane recovered in a later Keeper reply · same-turn replay blocked to avoid duplicate tool calls · details in Logs"
+         text)
+  | _ -> fail "expected a delivery failure"
+;;
+
+let test_stdout_close_stays_pending_without_a_later_reply () =
+  let failure =
+    fenced_failure "Provider 'codex_app_server' unavailable: stdout closed"
+  in
+  let decoded =
+    decode (`List [ row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure" failure ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Delivery_failed { recovered_at; _ }; text; _ } ] ->
+    check (option (float 0.0)) "no recovery was invented" None recovered_at;
+    (match History.present_delivery_failure ?recovered_at text with
+     | None -> fail "provider EOF was not presented"
+     | Some (presented, recovered) ->
+       check bool "still pending" false recovered;
+       check string "compact pending lifecycle"
+         "Provider connection closed during this turn · recovery pending · same-turn replay blocked to avoid duplicate tool calls · details in Logs"
+         presented)
+  | _ -> fail "expected one delivery failure"
+;;
+
+let test_unfenced_runtime_shutdown_is_still_typed () =
+  match
+    History.present_delivery_failure
+      "Keeper request failed: MASC runtime shutdown interrupted the active Codex turn"
+  with
+  | None -> fail "direct shutdown cause was not presented"
+  | Some (presented, recovered) ->
+    check bool "still pending" false recovered;
+    check string "no duplicate-call claim without effect evidence"
+      "Runtime shutdown interrupted this turn · recovery pending · details in Logs"
+      presented
+;;
+
+let test_unrelated_failure_is_not_marked_recovered () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"assistant" ~kind:"transport_failure"
+             "Keeper request failed: auth denied"
+         ; row ~ts:2.0 ~role:"assistant" "a later reply"
+         ])
+  in
+  match decoded.History.rows with
+  | { History.kind = History.Delivery_failed { recovered_at; _ }; text; _ } :: _ ->
+    check (option (float 0.0)) "unrelated failure stays a failure" None recovered_at;
+    check string "raw detail remains visible" "Keeper request failed: auth denied" text;
+    check (option (pair string bool)) "no lifecycle was invented" None
+      (History.present_delivery_failure text)
+  | _ -> fail "expected the unrelated delivery failure first"
 ;;
 
 let test_rows_retain_the_exact_turn_identity () =
@@ -1006,6 +1090,14 @@ let () =
             test_roles_map_to_what_the_pane_draws
         ; test_case "a failed turn names the request it came from" `Quick
             test_a_failed_turn_names_the_request_it_came_from
+        ; test_case "runtime interruption becomes a recovered lifecycle" `Quick
+            test_runtime_interruption_becomes_a_recovered_lifecycle
+        ; test_case "stdout close stays pending without a later reply" `Quick
+            test_stdout_close_stays_pending_without_a_later_reply
+        ; test_case "unfenced runtime shutdown stays typed" `Quick
+            test_unfenced_runtime_shutdown_is_still_typed
+        ; test_case "unrelated failure is not marked recovered" `Quick
+            test_unrelated_failure_is_not_marked_recovered
         ; test_case "rows retain the exact turn identity" `Quick
             test_rows_retain_the_exact_turn_identity
         ; test_case "different turns do not merge their tool blocks" `Quick

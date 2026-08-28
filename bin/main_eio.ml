@@ -644,6 +644,7 @@ let run_cmd host port cli_base_path =
   let shutdown_watchdog : Masc.Shutdown.watchdog option Atomic.t = Atomic.make None in
   let request_shutdown signal =
     Masc.Shutdown.mark_shutting_down ();
+    Runtime_host_lifecycle.mark_shutting_down ();
     if Option.is_none (Atomic.get pending_shutdown_signal) then
       Atomic.set pending_shutdown_signal (Some signal)
   in

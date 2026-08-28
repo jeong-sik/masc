@@ -165,6 +165,7 @@ type error =
   | Turn_failed of string
   | Stopped_by_host of host_stop
   | Turn_interrupted
+  | Runtime_shutting_down
   | Process_exited of string
   | Timeout of
       { seconds : float
@@ -212,6 +213,8 @@ let error_to_string = function
   | Stopped_by_host (Terminal_tool_boundary { tool_name; _ }) ->
     Printf.sprintf "Codex app-server stopped at terminal tool boundary: tool=%s" tool_name
   | Turn_interrupted -> "Codex app-server turn was interrupted"
+  | Runtime_shutting_down ->
+    "MASC runtime shutdown interrupted the active Codex turn"
   | Process_exited detail -> "Codex app-server exited before completion: " ^ detail
   | Timeout { seconds; turn_accepted } ->
     if turn_accepted
@@ -233,6 +236,7 @@ let error_kind = function
   | Turn_failed _ -> "turn_failed"
   | Stopped_by_host _ -> "stopped_by_host"
   | Turn_interrupted -> "turn_interrupted"
+  | Runtime_shutting_down -> "runtime_shutting_down"
   | Process_exited _ -> "process_exited"
   | Timeout _ -> "timeout"
 ;;
@@ -1205,8 +1209,11 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
         |> parse_wire_line
       with
       | End_of_file ->
-        let detail = String.trim !stderr_tail in
-        Error (Process_exited (if detail = "" then "stdout closed" else detail))
+        if Runtime_host_lifecycle.is_shutting_down ()
+        then Error Runtime_shutting_down
+        else
+          let detail = String.trim !stderr_tail in
+          Error (Process_exited (if detail = "" then "stdout closed" else detail))
       | Idle_timeout seconds ->
         (* The transport cannot know whether turn/start was already accepted;
            the entry points rewrap with the observed turn state. *)

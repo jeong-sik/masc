@@ -3604,7 +3604,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
     List.filter_map
       (fun (row : Keeper_chat_history.row) ->
         match row.Keeper_chat_history.kind with
-        | Keeper_chat_history.Delivery_failed { origin_request_id } ->
+        | Keeper_chat_history.Delivery_failed { origin_request_id; _ } ->
             origin_request_id
         | Keeper_chat_history.Addressed_to_keeper _
         | Keeper_chat_history.Said_by_keeper
@@ -3653,7 +3653,15 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
         ( Message_autonomous
         , (if String.trim row.text = "" then "\xc2\xb7" else row.text)
         , None )
-    | Keeper_chat_history.Delivery_failed _ -> (Message_error, row.text, None)
+    | Keeper_chat_history.Delivery_failed { recovered_at; _ } ->
+        let text, recovered =
+          match
+            Keeper_chat_history.present_delivery_failure ?recovered_at row.text
+          with
+          | Some presented -> presented
+          | None -> row.text, false
+        in
+        ((if recovered then Message_status else Message_error), text, None)
     | Keeper_chat_history.Tool_calls block ->
         ( Message_tool
         , String.concat "\n" (Keeper_chat_history.tool_rows block)
@@ -4643,6 +4651,11 @@ let apply_keeper_chat_result state request result =
                  Printf.sprintf
                    "Outcome unverified for %s; the turn may still be running. The transcript reload will show it. %s"
                    request.request_id detail
+           in
+           let detail =
+             match Keeper_chat_history.present_delivery_failure detail with
+             | Some (presented, _) -> presented
+             | None -> detail
            in
            append_chat_history state request Message_error detail;
            add_event state "error"

@@ -883,20 +883,29 @@ let () =
 ;;
 
 let () =
-  test "dispatch_status_treats_keeper_internal_auth_as_credential" (fun () ->
-    Fun.protect ~finally:Fs_compat.clear_fs
+  test "dispatch_status_treats_registered_keeper_internal_auth_as_credential" (fun () ->
+    let previous = Atomic.get Workspace_hooks.keeper_registered_fn in
+    Fun.protect
+      ~finally:(fun () ->
+        Fs_compat.clear_fs ();
+        Atomic.set Workspace_hooks.keeper_registered_fn previous)
     @@ fun () ->
     Eio_main.run
     @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     let ctx = { (make_test_ctx ()) with agent_name = "keeper-alpha-agent" } in
+    Atomic.set Workspace_hooks.keeper_registered_fn (fun ~base_path ~agent_name ->
+      String.equal base_path ctx.config.base_path
+      && String.equal agent_name ctx.agent_name);
     let _ = Workspace.init ctx.config ~agent_name:(Some "keeper-alpha-agent") in
     ignore (Auth.enable_auth ctx.config.base_path ~require_token:true ~agent_name:"admin");
     ignore (Auth.ensure_internal_keeper_token ctx.config.base_path);
     ignore (Workspace.add_task ctx.config ~title:"Keeper work" ~priority:3 ~description:"");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some r -> let result = status_message r in let success = Tool_result.is_success r in
+    | Some r ->
+      let result = status_message r in
+      let success = Tool_result.is_success r in
       assert success;
       assert (
         str_contains

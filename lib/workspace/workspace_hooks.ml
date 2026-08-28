@@ -53,6 +53,10 @@ let runtime_agents_fn
   : (Workspace_utils_backend_setup.config -> Masc_domain.agent list) Atomic.t
   = Atomic.make (fun _config -> [])
 
+let keeper_registered_fn
+  : (base_path:string -> agent_name:string -> bool) Atomic.t
+  = Atomic.make (fun ~base_path:_ ~agent_name:_ -> false)
+
 (* Default allows every target so embedded contexts without the runtime wiring
    keep creating schedules; the runtime installs the durable-metadata reader at
    boot. Tool_schedule stays free of static keeper dependencies (RFC-0194). *)

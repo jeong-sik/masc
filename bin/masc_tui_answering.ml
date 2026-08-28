@@ -31,6 +31,28 @@ type line =
    the overlay stays "right now", not a log. *)
 let finish_glow_ttl_seconds = 60.
 
+(* The mark a running turn wears, and the only thing on a masc screen that
+   moves. Motion is a claim -- it says "this is changing while you look at
+   it" -- so it is spent on the one state where that is true and withheld
+   everywhere else. A paused keeper, a stale heartbeat, a queued approval:
+   none of those are working, and a spinner on them would say they were.
+
+   The frames are the half-filled circles already used for a task in
+   progress, so a reader who has seen the task list has seen this mark. The
+   circle family is the vocabulary the rest of the marks come from too
+   ([Masc_tui_keeper_mark]: filled is alive, hollow is stopped).
+
+   [still] is the same fact without the motion, for a surface that does not
+   repaint fast enough to animate. A mark that changes once every two
+   seconds is not a spinner, it is a flicker. *)
+let running_frames = [| "\xe2\x97\x90"; "\xe2\x97\x93"; "\xe2\x97\x91"; "\xe2\x97\x92" |]
+let running_still = "\xe2\x97\x8c" (* ◌ *)
+
+let running_glyph ~frame =
+  if frame < 0 then running_still
+  else running_frames.(frame mod Array.length running_frames)
+;;
+
 (* Wire spelling from [Keeper_owner.turn_lane_to_string], not a local
    re-spelling: the overlay names the lane the server named. *)
 let lane_word = function
@@ -103,7 +125,7 @@ let advance_finishes ~now ~previous_rows ~current_rows finishes =
   fresh @ kept
 ;;
 
-let overlay ~(now : float) ~(chat_target : string option)
+let overlay ?(frame = -1) ~(now : float) ~(chat_target : string option)
     ~(error : string option) ~(finishes : (string * float) list)
     (rows : Tui_decode.keeper_turn_row list) : line list =
   let running, unavailable, idle_count =
@@ -175,7 +197,8 @@ let overlay ~(now : float) ~(chat_target : string option)
         List.map
           (fun (name, lane, started_at) ->
             { text =
-                Printf.sprintf "\xe2\x97\x8c %-*s  %-14s  %s" name_width name
+                Printf.sprintf "%s %-*s  %-14s  %s" (running_glyph ~frame)
+                  name_width name
                   (lane_word lane)
                   (elapsed_text ~now started_at)
             ; tone = Running

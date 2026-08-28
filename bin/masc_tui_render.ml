@@ -3410,20 +3410,37 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
    name cannot push the columns to its right out of the frame and the style
    bytes never count toward the width. *)
 let keeper_row_content ~(columns : Render_schedule.keeper_columns)
-    ~yolo ~paused ~health ~turn ~next_action ~keeper ~runtime =
+    ~now ~frame ~yolo ~paused ~health ~turn ~next_action ~keeper ~runtime =
   let status_color = keeper_action_color next_action in
-  let glyph = keeper_state_glyph ~paused ~health in
-  (* A running turn takes the status word: "answering" is the fact the
-     operator scans this table for, and health returns the cell the moment
-     the turn ends. Idle and unavailable rows keep the health word —
-     unavailable is the owner lookup failing, which the health column
-     already describes better than a blank would. *)
-  let status_word, status_color =
+  (* A running turn takes the cell whole -- both the mark and the word.
+     Splitting them is what this column used to do, and it produced rows
+     that argued with themselves: the mark came from the heartbeat and the
+     word from the turn, so a keeper answering on a stale heartbeat drew
+     "? answering". One of those was wrong and the reader could not tell
+     which.
+
+     The word is the elapsed time rather than "answering". The mark already
+     says it is answering, and it says so by moving; spending eight columns
+     to repeat that leaves no room for the fact the mark cannot carry, which
+     is how long. Eight seconds and forty minutes are different situations
+     and they used to be the same row. It also ends the truncation: this
+     column is cut for "healthy", and "answering" never fit in it.
+
+     Idle and unavailable rows keep the health word -- unavailable is the
+     owner lookup failing, which the health column describes better than a
+     blank would. *)
+  let glyph, status_word, status_color =
     match (turn : Tui_decode.keeper_turn_state option) with
-    | Some (Tui_decode.Keeper_turn_running _) -> ("answering", Ansi.cyan)
+    | Some (Tui_decode.Keeper_turn_running { started_at_unix; _ }) ->
+      ( Masc_tui_answering.running_glyph ~frame
+      , Masc_tui_answering.elapsed_text ~now started_at_unix
+      , Ansi.cyan )
     | Some Tui_decode.Keeper_turn_idle
     | Some (Tui_decode.Keeper_turn_unavailable _)
-    | None -> (keeper_health_word health, status_color)
+    | None ->
+      ( keeper_state_glyph ~paused ~health
+      , keeper_health_word health
+      , status_color )
   in
   (* Selection is the full-row band the caller draws (box_line_selected over
      a strip_sgr'd copy of this row), so the row itself carries no marker.
@@ -3743,6 +3760,8 @@ let render_keeper_list (state : state) =
           in
           let row =
             keeper_row_content ~columns
+              ~now:(Unix.gettimeofday ())
+              ~frame:state.activity_frame
               ~yolo:(List.mem keeper.k_name state.keeper_yolo_names)
               ~paused:reading.Keeper_control.paused
               ~health:(Keeper_control.health reading)

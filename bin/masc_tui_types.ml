@@ -1278,6 +1278,12 @@ type state = {
   (* Derived display phase for the selected long name in the narrow roster.
      The main loop advances it only while that roster is visible. *)
   mutable roster_marquee_frame: int;
+  (* The frame the running-turn mark is on. The main loop advances it only
+     while some turn is actually running, so a screen with nothing running
+     is a screen that stops repainting -- the animation costs nothing when
+     there is nothing to say. [-1] is "not animating": the mark falls back
+     to its still form rather than freezing on an arbitrary quarter. *)
+  mutable activity_frame: int;
   mutable keeper_detail_focus: pane_focus;
   mutable keeper_message_focus: pane_focus;
   (* Current successful /health identity. Every HTTP refresh revalidates it so
@@ -2022,6 +2028,7 @@ let create_state
   context_inspector_exact = None;
   roster_pane_hidden = false;
   roster_marquee_frame = 0;
+  activity_frame = -1;
   keeper_detail_focus = Right_pane;
   keeper_message_focus = Right_pane;
   server_identity = None;

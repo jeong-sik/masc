@@ -36,6 +36,11 @@ let json_assoc_member_opt name = function
     terminal's first changed frame. *)
 let frame_interval_ns = 16_000_000L
 let roster_marquee_interval_ns = 150_000_000L
+
+(* Four frames at 150ms is one turn of the mark per 600ms: fast enough to
+   read as alive, slow enough not to strobe. The same cadence as the marquee
+   above, so the two moving things on a masc screen move at one speed. *)
+let activity_interval_ns = 150_000_000L
 (* What one wheel detent moves. Terminals report three lines per detent, so a
    notch here is worth what a notch is worth in a pager. *)
 let wheel_notch_rows = 3
@@ -8198,6 +8203,7 @@ let main () =
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
   let roster_marquee_target = ref None in
   let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
+  let activity_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   (* A datum that is fetched only while its surface is open has nothing to draw
      the moment that surface opens, and waiting out the refresh interval would
      read as "there is nothing here". What is watched is the set of data the
@@ -12296,6 +12302,37 @@ and is loaded on demand through keeper_skill.
         state.roster_marquee_frame <-
           if state.roster_marquee_frame = max_int then 0
           else state.roster_marquee_frame + 1;
+        Render_schedule.request render_schedule Render_schedule.Background
+      end;
+      (* The running-turn mark, advanced on its own clock rather than the
+         poll's. The poll is two seconds; a mark that changed on it would
+         read as a stall rather than as work. Nothing is fetched here -- the
+         frame is derived and the presenter writes only the cells that
+         differ, so a repaint that changes one glyph costs one glyph.
+
+         It runs only while a turn is running, and returns to [-1] when none
+         is. A screen with nothing to say stops repainting entirely, which
+         is also what makes the elapsed seconds honest: they tick because
+         this is what redraws them. *)
+      let any_turn_running =
+        List.exists Masc_tui_answering.is_running state.keeper_turns
+      in
+      if not any_turn_running then begin
+        if state.activity_frame >= 0 then begin
+          state.activity_frame <- -1;
+          Render_schedule.request render_schedule Render_schedule.Background
+        end
+      end
+      else if
+        Int64.compare
+          (Int64.sub now_ns !activity_last_step_ns)
+          activity_interval_ns
+        >= 0
+      then begin
+        activity_last_step_ns := now_ns;
+        state.activity_frame <-
+          (if state.activity_frame < 0 || state.activity_frame = max_int then 0
+           else state.activity_frame + 1);
         Render_schedule.request render_schedule Render_schedule.Background
       end;
       if

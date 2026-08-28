@@ -318,6 +318,20 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             with self.assertRaisesRegex(capture.CaptureError, "surface cycle"):
                 capture.goto_tools(Page(), 1.0)
 
+    def test_exact_keeper_selection_does_not_require_offscreen_receipts(self):
+        with (
+            mock.patch.object(
+                capture,
+                "screen_text",
+                return_value="Effective Keeper Surface — keeper-one (94 tools)",
+            ),
+            mock.patch.object(capture, "wait_screen") as wait_screen,
+        ):
+            visited = capture.select_exact_keeper(object(), "keeper-one", 1.0)
+
+        self.assertEqual(visited, ["keeper-one"])
+        wait_screen.assert_not_called()
+
     def test_action_must_be_inside_exact_receipt_block(self):
         same = "\n".join(
             [

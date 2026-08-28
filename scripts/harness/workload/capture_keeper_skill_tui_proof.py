@@ -743,7 +743,6 @@ def select_exact_keeper(page: Any, keeper: str, timeout: float) -> list[str]:
         visited.append(next_keeper)
         current = next_keeper
     require(current == keeper, "TUI did not select the exact Keeper before timeout")
-    wait_screen(page, f"Skill Use — {keeper}", max(0.001, deadline - time.monotonic()))
     return visited
 
 

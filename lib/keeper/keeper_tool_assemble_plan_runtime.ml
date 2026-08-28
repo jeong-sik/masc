@@ -63,14 +63,26 @@ let store_result_to_string = function
 
 let success_data (success : Flow.success) =
   let proposal = success.proposal in
+  let proposal_id =
+    Proposal.id proposal |> Proposal.Proposal_id.to_string
+  in
+  let approval_tools =
+    Proposal.plan proposal
+    |> Keeper_tool_plan.nodes
+    |> List.map (fun (node : Keeper_tool_plan.node) -> `String node.tool_name)
+  in
   `Assoc
     [ "ok", `Bool true
-    ; ( "proposal_id"
-      , `String (Proposal.id proposal |> Proposal.Proposal_id.to_string) )
+    ; "proposal_id", `String proposal_id
     ; "proposal_digest", `String (Proposal.digest proposal)
     ; "run_id", `String success.run_id
     ; "selected_slot", `String success.selected_slot
     ; "store_result", `String (store_result_to_string success.store_result)
+    ; ( "execution_request"
+      , `Assoc
+          [ "proposal_id", `String proposal_id
+          ; "approval_tools", `List approval_tools
+          ] )
     ]
 ;;
 

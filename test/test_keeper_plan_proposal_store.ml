@@ -268,7 +268,12 @@ let test_store_roundtrip_deduplicates_without_dispatch () =
     (match Store.load ~descriptors:(descriptors ()) config (Plan.id proposal) with
      | Ok loaded ->
        check string "roundtrip id" (proposal_id proposal) (proposal_id loaded);
-       check string "roundtrip bytes" (Plan.canonical_bytes proposal) (Plan.canonical_bytes loaded)
+       check string "roundtrip bytes" (Plan.canonical_bytes proposal) (Plan.canonical_bytes loaded);
+       (match Plan.plan loaded |> Masc.Keeper_tool_plan.nodes with
+        | [ node ] ->
+          check string "roundtrip typed plan node" "keeper_time_now" node.tool_name
+        | nodes ->
+          failf "roundtrip typed plan has %d nodes" (List.length nodes))
      | Error error -> fail (Store.error_to_yojson error |> Yojson.Safe.to_string));
     check bool "store did not dispatch an ordinary Tool" false
       (Sys.file_exists (Filename.concat masc_root "tool_calls")))

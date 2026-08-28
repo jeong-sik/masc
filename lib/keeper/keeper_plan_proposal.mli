@@ -106,6 +106,9 @@ val ordinary_tool_references
   :  t
   -> Keeper_capability_surface.ordinary_tool_reference list
 
+val plan : t -> Keeper_tool_plan.t
+(** The validated in-process plan reconstructed on both create and load. *)
+
 val plan_json : t -> Yojson.Safe.t
 val to_yojson : t -> Yojson.Safe.t
 val canonical_bytes : t -> string

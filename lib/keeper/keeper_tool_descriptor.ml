@@ -1189,6 +1189,18 @@ let time_now_output_schema =
 ;;
 
 let assemble_plan_output_schema =
+  let execution_request =
+    object_output_schema
+      ~properties:
+        [ "proposal_id", `Assoc [ "type", `String "string" ]
+        ; ( "approval_tools"
+          , `Assoc
+              [ "type", `String "array"
+              ; "items", `Assoc [ "type", `String "string" ]
+              ] )
+        ]
+      ~required:[ "proposal_id"; "approval_tools" ]
+  in
   object_output_schema
     ~properties:
       [ "ok", `Assoc [ "type", `String "boolean" ]
@@ -1197,6 +1209,7 @@ let assemble_plan_output_schema =
       ; "run_id", `Assoc [ "type", `String "string" ]
       ; "selected_slot", `Assoc [ "type", `String "string" ]
       ; "store_result", `Assoc [ "type", `String "string" ]
+      ; "execution_request", execution_request
       ]
     ~required:
       [ "ok"
@@ -1205,6 +1218,7 @@ let assemble_plan_output_schema =
       ; "run_id"
       ; "selected_slot"
       ; "store_result"
+      ; "execution_request"
       ]
 ;;
 

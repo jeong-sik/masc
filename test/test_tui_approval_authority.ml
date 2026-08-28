@@ -40,6 +40,7 @@ let gate approval_id =
       gp_execution_cwd = None;
       gp_execution_sandbox = None;
       gp_waiting_s = Some 12.;
+      gp_phase = Tui_decode.Gate_human_required;
     }
 
 let effect_row = function

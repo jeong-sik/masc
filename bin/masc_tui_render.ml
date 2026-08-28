@@ -1896,18 +1896,24 @@ let render_approvals (state : state) =
                 ^ Terminal_text.single_line_or ~default:"(not provided)"
                     held.kta_because)
           | Gate_row pending ->
-              (* The age, not a countdown: a durable Gate row keeps until
-                 somebody answers it, and what an operator weighs is how
-                 long it has been waiting. *)
-              let waited =
+              (* The age is not worker duration. A durable row survives after
+                 Auto Judge hands off to a human or fails, so pair age with
+                 the canonical phase instead of calling every row waiting. *)
+              let age =
                 match pending.Tui_decode.gp_waiting_s with
                 | Some seconds ->
-                  (* Not raw seconds. This cell read "41989s waiting", and
-                     the line above says what an operator does with it --
-                     weigh it. Eleven hours and thirty-nine minutes is a
-                     weight; five figures of seconds is arithmetic homework. *)
-                  Masc_tui_answering.duration_text seconds ^ " waiting"
-                | None -> "waiting"
+                  Masc_tui_answering.duration_text seconds
+                | None -> "?"
+              in
+              let phase, tone =
+                match pending.Tui_decode.gp_phase with
+                | Gate_queued -> "queued", (Theme.warn ())
+                | Gate_judging -> "judging", Ansi.cyan
+                | Gate_human_required -> "human", (Theme.warn ())
+                | Gate_blocked -> "blocked", (Theme.bad ())
+              in
+              let phase_cell =
+                tone ^ fit_width (age ^ " " ^ phase) 16 ^ Ansi.reset
               in
               Printf.sprintf "  %s  %s  %s  %s"
                 (fit_width
@@ -1918,7 +1924,7 @@ let render_approvals (state : state) =
                    ^ Terminal_text.single_line
                        pending.Tui_decode.gp_display_tool)
                    20)
-                (fit_width waited 16)
+                phase_cell
                 (Terminal_text.single_line_or ~default:"(no input preview)"
                    pending.Tui_decode.gp_input_preview)
         in
@@ -1993,12 +1999,21 @@ let render_approvals (state : state) =
         let keeper =
           Terminal_text.single_line pending.Tui_decode.gp_keeper
         in
-        Printf.sprintf "  %s%s → %s%s"
-          (Theme.warn ())
+        let phase, tone =
+          match pending.Tui_decode.gp_phase with
+          | Gate_queued -> "QUEUED", (Theme.warn ())
+          | Gate_judging -> "JUDGING", Ansi.cyan
+          | Gate_human_required -> "HUMAN REQUIRED", (Theme.warn ())
+          | Gate_blocked -> "AUTO JUDGE BLOCKED", (Theme.bad ())
+        in
+        Printf.sprintf "  %s%s → %s · %s%s"
+          tone
           keeper
           (fit_width
              (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
-             (max 8 (cols - 28 - Message_layout.display_width keeper)))
+             (max 8 (cols - 32 - Message_layout.display_width keeper
+                     - Message_layout.display_width phase)))
+          phase
           Ansi.reset
     | None -> ""
   in

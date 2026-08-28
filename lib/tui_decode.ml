@@ -3593,6 +3593,12 @@ let decode_tool_approval_mode_overrides json =
   in
   loop [] items
 
+type gate_pending_phase =
+  | Gate_queued
+  | Gate_judging
+  | Gate_human_required
+  | Gate_blocked
+
 type gate_pending = {
   gp_id : string;
   gp_keeper : string;
@@ -3602,6 +3608,7 @@ type gate_pending = {
   gp_execution_cwd : string option;
   gp_execution_sandbox : string option;
   gp_waiting_s : float option;
+  gp_phase : gate_pending_phase;
 }
 
 type gate_lane_modes = {
@@ -3745,6 +3752,49 @@ let gate_input_preview ~operation ~server_preview envelope =
       | None -> server_preview)
     | None -> server_preview
 
+(* The queue row is durable after Auto Judge stops. Calling every such row
+   "waiting" made a completed [require_human] judgment look like a worker that
+   had been computing for hours, and hid quarantined/failed attempts behind
+   the same word. Project only the closed backend states already carried by
+   the row; absent legacy fields remain queued rather than gaining invented
+   success. *)
+let gate_pending_phase_of_json json =
+  let summary = member "summary_status" json in
+  let disposition = member "summary_attempt_disposition" json in
+  let disposition_code =
+    match member "code" disposition with
+    | `String value -> value
+    | _ -> ""
+  in
+  let pre_worker_reason =
+    match member "reason_code" disposition with
+    | `String value -> value
+    | _ -> ""
+  in
+  let summary_status =
+    match summary with
+    | `String value -> value
+    | `Assoc _ ->
+      (match member "status" summary with
+       | `String value -> value
+       | _ -> "")
+    | _ -> ""
+  in
+  let judgment =
+    match member "summary" summary |> member "judgment" with
+    | `String value -> value
+    | _ -> ""
+  in
+  match disposition_code, pre_worker_reason, summary_status, judgment with
+  | ("identity_unbound" | "persistence_uncertain"), _, _, _ -> Gate_blocked
+  | "pre_worker_unavailable", "start_reserved", _, _ -> Gate_judging
+  | "pre_worker_unavailable", _, _, _ -> Gate_blocked
+  | _, _, "failed", _ -> Gate_blocked
+  | _, _, "available", "require_human" -> Gate_human_required
+  | "in_flight", _, _, _ | _, _, "pending", _ -> Gate_judging
+  | "settled", _, "available", ("approve" | "deny") -> Gate_judging
+  | _ -> Gate_queued
+
 let decode_gate_pending json =
   let* gp_id = required_string_field json "id" in
   let* gp_keeper = required_string_field json "keeper_name" in
@@ -3774,6 +3824,7 @@ let decode_gate_pending json =
       gp_execution_sandbox =
         snd (gate_execution_site ~operation:gp_operation input);
       gp_waiting_s;
+      gp_phase = gate_pending_phase_of_json json;
     }
 
 let decode_gate_lane_modes json =

@@ -355,6 +355,7 @@ function ApHistory({
 
 function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: string; value: string }> {
   const disposition = item.summary_attempt_disposition.code
+  const phase = approvalPhase(item)
   const exact =
     item.exact_attempt.state === 'bound'
       ? `${item.exact_attempt.slot_id} · ${item.exact_attempt.status}`
@@ -366,7 +367,7 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
     toolDisplay !== item.tool_name
       ? { label: 'operation', value: item.tool_name }
       : null,
-    { label: '상태', value: 'Human 판단 대기 · Keeper lane nonblocking' },
+    { label: '상태', value: `${phase.detail} · Keeper lane nonblocking` },
     { label: '대기', value: apAge(item.waiting_s) },
     { label: '연결 작업', value: approvalWorkSummary(item) },
     { label: '턴', value: typeof item.turn_id === 'number' ? `turn ${item.turn_id}` : null },
@@ -375,6 +376,74 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
     { label: 'Auto Judge', value: disposition },
     { label: 'Exact attempt', value: exact },
   ].filter((row): row is { label: string; value: string } => Boolean(row?.value))
+}
+
+type ApprovalPhase = {
+  key: 'queued' | 'judging' | 'human_required' | 'blocked'
+  label: string
+  detail: string
+  severity: 'sev-info' | 'sev-warn' | 'sev-bad'
+}
+
+// A durable queue row can remain for hours after Auto Judge has already
+// stopped. Project the closed summary/disposition states instead of calling
+// every row "Human HITL": age is queue age, never model execution duration.
+function approvalPhase(item: KeeperApprovalQueueItem): ApprovalPhase {
+  const disposition = item.summary_attempt_disposition
+  const summary = item.summary_status
+  const blocked =
+    disposition.code === 'identity_unbound'
+    || disposition.code === 'persistence_uncertain'
+    || (
+      disposition.code === 'pre_worker_unavailable'
+      && disposition.reason_code !== 'start_reserved'
+    )
+    || summary.status === 'failed'
+  if (blocked) {
+    return {
+      key: 'blocked',
+      label: '● Auto Judge blocked',
+      detail: 'Auto Judge 종료 실패 · 재개나 Human 판단 필요',
+      severity: 'sev-bad',
+    }
+  }
+  if (
+    summary.status === 'available'
+    && summary.summary.judgment === 'require_human'
+  ) {
+    return {
+      key: 'human_required',
+      label: '● Human required',
+      detail: 'Auto Judge 완료 · Human 판단 필요',
+      severity: 'sev-warn',
+    }
+  }
+  const judging =
+    disposition.code === 'in_flight'
+    || summary.status === 'pending'
+    || (
+      disposition.code === 'pre_worker_unavailable'
+      && disposition.reason_code === 'start_reserved'
+    )
+    || (
+      disposition.code === 'settled'
+      && summary.status === 'available'
+      && summary.summary.judgment !== 'require_human'
+    )
+  if (judging) {
+    return {
+      key: 'judging',
+      label: '● Auto Judging',
+      detail: 'Auto Judge 판정 중',
+      severity: 'sev-info',
+    }
+  }
+  return {
+    key: 'queued',
+    label: '● Queue waiting',
+    detail: '판정 시작 대기',
+    severity: 'sev-warn',
+  }
 }
 
 // Open this keeper's workspace conversation (work.ts idiom).
@@ -542,21 +611,23 @@ function ApprovalCard({
   const anyBusy = Boolean(actingId)
   const title = approvalTitle(item)
   const rearmExpectation = summaryRearmExpectation(item)
+  const phase = approvalPhase(item)
 
   return html`
     <article
-      class="ap-card sev-info"
+      class=${`ap-card ${phase.severity}`}
       data-testid="approval-card"
       data-approval-id=${item.id}
       data-selected=${selected ? 'true' : 'false'}
+      data-approval-phase=${phase.key}
     >
       <div class="ap-rail"></div>
       <div class="ap-main">
         <div class="ap-h">
-          <span class="ap-kind sev-info">● Human HITL</span>
+          <span class=${`ap-kind ${phase.severity}`}>${phase.label}</span>
           <span class="ap-tool mono">${approvalToolDisplay(item)}</span>
           <span class="ap-id mono">${item.id}</span>
-          <span class="ap-age sev-info">${apAge(item.waiting_s)}</span>
+          <span class=${`ap-age ${phase.severity}`}>${apAge(item.waiting_s)}</span>
           <button
             type="button"
             class="ap-detail-toggle"
@@ -566,7 +637,7 @@ function ApprovalCard({
           >상세</button>
         </div>
         <h3 class="ap-title">${title}</h3>
-        <p class="ap-detail">Keeper lane은 계속 진행하며 이 요청만 판단을 기다립니다.</p>
+        <p class="ap-detail">Keeper lane은 계속 진행 · ${phase.detail}</p>
         ${approvalSummaryBlock(item)}
         <div class="ap-req">
           <${AgentAvatar} name=${item.keeper_name} size="sm" />
@@ -646,6 +717,7 @@ function ApprovalDetailPanel({
 }) {
   if (!item) return null
   const rows = approvalDetailRows(item)
+  const phase = approvalPhase(item)
 
   return html`
     <aside
@@ -654,7 +726,7 @@ function ApprovalDetailPanel({
       data-approval-id=${item.id}
     >
       <div class="ap-detail-panel-head">
-        <span class="ap-kind sev-info">● Gate request</span>
+        <span class=${`ap-kind ${phase.severity}`}>${phase.label}</span>
         <div class="ap-detail-panel-title">
           <strong>${approvalTitle(item)}</strong>
           <span class="mono">${item.id}</span>

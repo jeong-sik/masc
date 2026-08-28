@@ -906,6 +906,15 @@ val decode_tool_approval_mode_overrides :
 (** Decode [GET /api/v1/keepers/tool-approval-mode]'s
     [{overrides: [{keeper, mode}]}] into (keeper, mode) pairs. *)
 
+type gate_pending_phase =
+  | Gate_queued
+  | Gate_judging
+  | Gate_human_required
+  | Gate_blocked
+(** Operator-facing phase projected from the durable Auto Judge summary and
+    exact-attempt state. This distinguishes model work from terminal human
+    handoff and failed automation; all four remain nonblocking to the Keeper. *)
+
 type gate_pending = {
   gp_id : string;
   gp_keeper : string;
@@ -929,6 +938,7 @@ type gate_pending = {
           it was granted against. The command alone does not say this, and it
           changes what the command means. *)
   gp_waiting_s : float option;
+  gp_phase : gate_pending_phase;
 }
 
 type gate_lane_modes = {

@@ -307,12 +307,12 @@ describe('ApprovalsSurface', () => {
     expect(cards.length).toBe(4)
     expect(container.textContent).toContain('masc-improver')
     expect(container.textContent).toContain('filesystem_write')
-    expect(container.textContent).toContain('Human HITL')
+    expect(container.textContent).toContain('Queue waiting')
     expect(container.textContent).toContain('nonblocking')
-    expect(container.querySelector('[data-approval-id="appr-1"]')?.className).toContain('sev-info')
-    expect(container.querySelector('[data-approval-id="appr-3"]')?.className).toContain('sev-info')
-    expect(container.querySelector('[data-approval-id="appr-4"]')?.className).toContain('sev-info')
-    expect(container.querySelector('[data-approval-id="appr-2"]')?.className).toContain('sev-info')
+    expect(container.querySelector('[data-approval-id="appr-1"]')?.className).toContain('sev-warn')
+    expect(container.querySelector('[data-approval-id="appr-3"]')?.className).toContain('sev-warn')
+    expect(container.querySelector('[data-approval-id="appr-4"]')?.className).toContain('sev-warn')
+    expect(container.querySelector('[data-approval-id="appr-2"]')?.className).toContain('sev-warn')
     // the three live decisions are exposed; the prototype's defer/undo are not
     expect(container.textContent).toContain('승인')
     expect(container.textContent).toContain('항상 승인')
@@ -375,6 +375,10 @@ describe('ApprovalsSurface', () => {
     expect(container.textContent).toContain('Is there a verified backup?')
     expect(container.textContent).toContain('A Human should confirm the intended target.')
     expect(container.textContent).toContain('Human 판단 필요')
+    expect(container.querySelector('[data-approval-id="appr-summary"]')?.getAttribute('data-approval-phase'))
+      .toBe('human_required')
+    expect(container.querySelector('[data-approval-id="appr-summary"]')?.className)
+      .toContain('sev-warn')
   }, 20000)
 
   it('surfaces in-flight and terminal summary states rather than hiding them', async () => {
@@ -410,6 +414,12 @@ describe('ApprovalsSurface', () => {
     expect(states).toContain('failed')
     expect(container.textContent).toContain('exact attempt quarantined')
     expect(container.textContent).toContain('Human 판단 필요')
+    expect(container.querySelector('[data-approval-id="appr-pending"]')?.getAttribute('data-approval-phase'))
+      .toBe('judging')
+    expect(container.querySelector('[data-approval-id="appr-failed"]')?.getAttribute('data-approval-phase'))
+      .toBe('blocked')
+    expect(container.querySelector('[data-approval-id="appr-failed"]')?.className)
+      .toContain('sev-bad')
   }, 20000)
 
   it('rearms only operator-retryable typed Auto Judge states after an explicit click', async () => {

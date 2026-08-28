@@ -12,6 +12,7 @@ val deferred_kind_to_string : deferred_kind -> string
 
 type terminal_effect_receipt =
   | Surface_post_completed of Keeper_surface_post.post_target
+  | Memory_write_completed of { revision : int }
 (** Producer-owned proof of the concrete terminal effect that completed. *)
 
 (** [disposition] uses the canonical {!Tool_result.disposition}; this module
@@ -70,6 +71,9 @@ val with_gate_authorization : Keeper_gate.authorization -> t -> t
 
 val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t
 (** Attach the resolved post target only to a completed execution. *)
+
+val with_memory_write_receipt : revision:int -> t -> t
+(** Attach the committed Memory OS revision only to a completed execution. *)
 
 val with_file_change_evidence : Keeper_file_change_evidence.t -> t -> t
 (** Attach producer-recorded line evidence only to a completed execution. *)

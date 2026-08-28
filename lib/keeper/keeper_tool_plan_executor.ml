@@ -17,6 +17,7 @@ let execution_mode_of_descriptor descriptor =
   | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
     Agent_core.Tool_contract.Concurrent
   | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial
+  | Keeper_tool_descriptor.Direct_terminal
   | Keeper_tool_descriptor.Terminal -> Agent_core.Tool_contract.Serial
 ;;
 
@@ -43,6 +44,7 @@ let unscheduled_layer plan nodes =
        | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
          build batches ((node, descriptor) :: concurrent) rest
        | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial
+       | Keeper_tool_descriptor.Direct_terminal
        | Keeper_tool_descriptor.Terminal ->
          let batches = flush_concurrent batches concurrent in
          build (Unscheduled_serial (node, descriptor) :: batches) [] rest)
@@ -99,6 +101,7 @@ let outer_completion plan =
                    (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent)
              ; _
              }
+         | Some { execution = Keeper_tool_descriptor.Direct_terminal; _ }
          | None -> false)
       (Keeper_tool_plan.nodes plan)
   then
@@ -488,7 +491,8 @@ let execute_keeper_with_authority
       match descriptor.Keeper_tool_descriptor.execution with
       | Keeper_tool_descriptor.Terminal -> on_completed, on_failed
       | Keeper_tool_descriptor.Ordinary
-          (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent) -> None, None
+          (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent)
+       | Keeper_tool_descriptor.Direct_terminal -> None, None
     in
     let execution_evidence = ref None in
     let make_handler =

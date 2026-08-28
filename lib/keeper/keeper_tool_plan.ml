@@ -1089,6 +1089,7 @@ let validate_terminal_dependency_boundary descriptors nodes =
                    (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent)
              ; _
              }
+         | Some { execution = Keeper_tool_descriptor.Direct_terminal; _ }
          | None -> false)
       nodes
   in

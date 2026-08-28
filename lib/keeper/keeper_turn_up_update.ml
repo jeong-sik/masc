@@ -238,7 +238,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
     updated_at = now_iso ();
   } in
   match
-    validate_sandbox_settings ~allowed_paths
+    validate_sandbox_settings_with_profile ~sandbox_profile ~allowed_paths
   with
   | Error err ->
       Otel_metric_store.inc_counter

@@ -3,7 +3,7 @@ rfc: "0213"
 title: "Keeper sandbox/playground isolation model (fix sandbox_repo_not_ready + macOS-viable containment)"
 status: Draft
 created: 2026-06-03
-updated: 2026-06-03
+updated: 2026-08-27
 author: jeong-sik
 supersedes: []
 related: ["0001", "0208"]
@@ -134,6 +134,10 @@ latency, cost). Only sensible if/when keeper execution is relocated off-host.
    the fallback if the deprecated-API risk is judged unacceptable. State plainly
    in code + docs that the `local` path-gate is *advisory*, not containment,
    until B lands — so no one over-trusts it.
+   > **Superseded (2026-08-27, RFC-0394):** the B1 seatbelt track is dropped —
+   > deprecated API, and it still shares the host kernel. The durable target is
+   > option C (off-host execution), phased SSH-then-microVM; until then the
+   > `local` profile is fail-closed by default.
 3. **C only on relocation:** if keepers ever run on a Linux fleet, microVM is the
    strongest answer; on the current macOS host it is not available.
 

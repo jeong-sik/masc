@@ -246,6 +246,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0391 | Shell IR 세미콜론(;) 순차 실행 커맨드 체이닝 지원 | Draft | - |
 | 0392 | Keeper 신원을 provider 로 매개변수화 — provider 추가가 OCaml 을 늘리지 않는다 | Draft | - |
 | 0393 | 이름 안에 인코딩된 keeper 신원을 제거한다 — 관계는 데이터로, 이름은 하나로 | Draft | - |
+| 0394 | Local playground fail-closed; execution relocates off-host (SSH, then microVM) | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |

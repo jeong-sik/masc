@@ -33,7 +33,7 @@ Keeper 는 MASC 가 띄우고 지켜보고 기록하는 상주 에이전트입�
 [keeper]
 autoboot_enabled = true
 proactive_enabled = true
-sandbox_profile = "local"
+sandbox_profile = "docker"
 mention_targets = ["reviewer", "리뷰어"]
 allowed_paths = ["workspace/yousleepwhen/masc"]
 
@@ -52,7 +52,7 @@ instructions = """
 |---|---:|---|
 | `autoboot_enabled` | 11/11 | 서버가 켜질 때 이 Keeper 도 같이 띄울지 |
 | `instructions` | 11/11 | Keeper 의 프롬프트 전부. 비면 거부됩니다 |
-| `sandbox_profile` | 11/11 | `local` 은 내 컴퓨터에서, `docker` 는 컨테이너에서 실행 |
+| `sandbox_profile` | 11/11 | `docker` 는 컨테이너에서 실행. `local`(호스트 실행)은 기본 비활성 — fail-closed, RFC-0394 |
 | `proactive_enabled` | 9/11 | 스스로 턴을 돌지, 불렸을 때만 움직일지 |
 | `mention_targets` | 7/11 | 보드에서 이 Keeper 를 부르는 이름들 |
 | `network_mode` | 6/11 | 샌드박스에서 네트워크가 닿는 범위 |
@@ -62,6 +62,10 @@ instructions = """
 
 앞의 셋은 그 런타임의 모든 Keeper 가 씁니다. 나머지는 실제로 겪어 본 문제에 대한
 답일 때만 넣으세요.
+
+`local` 프로필이 꼭 필요한 개발·테스트 프로세스만 `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1` 로
+게이트를 해제할 수 있습니다. 해제 상태에서 실행이 디스패치되면 Keeper 이름이 들어간
+경고 로그를 남깁니다.
 
 모르는 키가 있으면 거부합니다. 항목 전체 규칙은
 [`docs/KEEPER-FILE-MODEL.md`](KEEPER-FILE-MODEL.md) 에 있습니다.

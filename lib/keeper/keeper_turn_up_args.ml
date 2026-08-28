@@ -287,9 +287,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       Error (tool_result_error ~class_:Tool_result.Policy_rejection (keeper_toml_load_error_to_string error))
     | Ok profile_defaults ->
     (* An explicit profile must be valid. When neither the call nor keeper TOML states
-       one, creation uses the local sandbox with playground-only writes. This is the
-       narrow safe bootstrap: a fresh keeper can start without a hand-authored TOML,
-       while docker remains an explicit opt-in. *)
+       one, resolution falls back to [Local] (playground-only writes) — which
+       create/update validation rejects unless the MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
+       dev/test hatch is set. Docker remains an explicit opt-in. *)
     let sandbox_profile_error =
       match sandbox_profile_opt, profile_defaults.sandbox_profile,
         profile_defaults.manifest_path
@@ -359,8 +359,10 @@ let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
   in
   raw |> List.filter_map String_util.trim_nonempty |> dedupe_keep_order
 
-(* An explicit request wins over the TOML default. Without either source, use the
-   canonical local sandbox; creation pairs it with playground-only writes. *)
+(* An explicit request wins over the TOML default. Without either source, the
+   fallback resolves to [Local] — which keeper-up create/update validation
+   rejects fail-closed unless the MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1 dev/test
+   hatch is set (config-load gating follows in the same plan). *)
 let resolve_sandbox_profile ?requested ~fallback () =
   match Option.bind requested sandbox_profile_of_string with
   | Some stated -> stated
@@ -368,6 +370,14 @@ let resolve_sandbox_profile ?requested ~fallback () =
     (match fallback with
      | Some stated -> stated
      | None -> default_sandbox_profile)
+
+(* Fail-closed gate: the local playground is off unless the operator sets the
+   hatch.  See [Env_config_sandbox.Gate] for the SSOT. *)
+let validate_sandbox_profile_allowed ~profile =
+  match profile with
+  | Local when not (Env_config_sandbox.Gate.allow_local_playground ()) ->
+    Error Env_config_sandbox.Gate.disabled_message
+  | _ -> Ok ()
 
 let resolve_network_mode ~sandbox_profile ~fallback =
   fallback
@@ -402,3 +412,11 @@ let validate_sandbox_settings ~allowed_paths =
              "allowed_paths entries may not contain globs or traversal segments \
               (rejected: %s)"
              (String.concat ", " rejected))
+
+(* Gate first, then the path checks: a rejected profile must not be masked by
+   an [allowed_paths] error, and an allowed profile falls through to the
+   unchanged path validation. *)
+let validate_sandbox_settings_with_profile ~sandbox_profile ~allowed_paths =
+  match validate_sandbox_profile_allowed ~profile:sandbox_profile with
+  | Error _ as err -> err
+  | Ok () -> validate_sandbox_settings ~allowed_paths

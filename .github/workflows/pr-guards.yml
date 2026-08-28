@@ -33,6 +33,13 @@
 # Sum: 12.5s of guard work. ci.yml stays workflow_dispatch-only, so nothing
 # here re-adds the 15-minute build that #30827 removed.
 #
+# Measured on the runner, first live run (33198632548): 33s wall clock, of
+# which checkout is 20s and apt is 9s. The guards themselves are noise.
+#
+# Every guard carries `if: ${{ !cancelled() }}` so one red guard does not hide
+# the other ten. A PR that breaks three of them says so once, not over three
+# round trips.
+#
 # Guards deliberately left out, and why:
 #
 #   check-pr-hygiene.sh, check-pr-sync.sh   require PR arguments
@@ -92,37 +99,48 @@ jobs:
 
       # Caught #31256, #31435, #31481 only after they had already merged.
       - name: Keeper tool boundary matrix
+        if: ${{ !cancelled() }}
         run: bash scripts/audit-keeper-tool-boundary-matrix.sh
 
       # Caught #31347 only after it had already merged.
       - name: OCaml structure ratchet
+        if: ${{ !cancelled() }}
         run: bash scripts/ocaml-structure-ratchet.sh
 
       - name: odoc references
+        if: ${{ !cancelled() }}
         run: python3 scripts/audit-odoc-refs.py
 
       - name: Code smell ratchet
+        if: ${{ !cancelled() }}
         run: bash scripts/audit-code-smell.sh
 
       - name: OCaml phase count
+        if: ${{ !cancelled() }}
         run: bash scripts/audit-ocaml-phase-count.sh
 
       - name: TLA phase count
+        if: ${{ !cancelled() }}
         run: bash scripts/audit-tla-phase-count.sh
 
       - name: TLA annotation drift
+        if: ${{ !cancelled() }}
         run: bash scripts/audit-tla-annotation-drift.sh
 
       - name: TLA line references
+        if: ${{ !cancelled() }}
         run: bash scripts/audit-tla-ml-line-refs.sh
 
       - name: ignore without comment
+        if: ${{ !cancelled() }}
         run: python3 scripts/lint-ignore-without-comment.py
 
       - name: Release train guard
+        if: ${{ !cancelled() }}
         run: bash scripts/check-release-train-guard.sh
 
       # Last, so it counts the guards this file wires. A guard CI does not run
       # cannot fail, so it does not guard anything.
       - name: Unwired audits
+        if: ${{ !cancelled() }}
         run: bash scripts/audit-unwired-audits.sh

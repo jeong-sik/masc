@@ -511,6 +511,22 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
         (match identity.Tui_decode.sid_executable_in_worktree with
          | Some true -> [ Masc_tui_footer.Server_worktree_binary ]
          | Some false | None -> [])
+        @
+        (* This TUI's own embedded commit against the server's: the pair
+           that told "restart masc" apart from "the feature is not merged"
+           by hand every time. Silent when either side cannot testify. *)
+        (let self = Masc.Build_identity.current () in
+         match
+           Masc_tui_footer.build_mismatch_item
+             ~tui_commit:self.Masc.Build_identity.binary_commit
+             ~tui_age_s:
+               (Option.map float_of_int
+                  self.Masc.Build_identity.binary_commit_age_seconds)
+             ~server_commit:identity.Tui_decode.sid_binary_commit
+             ~server_age_s:identity.Tui_decode.sid_binary_commit_age_s
+         with
+         | Some item -> [ item ]
+         | None -> [])
   in
   (* A workspace disagreement rides the footer every surface already draws,
      rather than replacing the screen. The reads that would be wrong under a
@@ -536,18 +552,34 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
       List.filter_map
         (fun (row : Tui_decode.keeper_turn_row) ->
           match row.ktr_state with
-          | Tui_decode.Keeper_turn_running _ -> Some row.ktr_keeper_name
+          | Tui_decode.Keeper_turn_running { started_at_unix; _ } ->
+              Some (row.ktr_keeper_name, started_at_unix)
           | Tui_decode.Keeper_turn_idle
           | Tui_decode.Keeper_turn_unavailable _ -> None)
         state.keeper_turns
     in
     let running =
       match state.msg_target_keeper_name with
-      | Some target when List.mem target running ->
-          target :: List.filter (fun name -> name <> target) running
+      | Some target when List.mem_assoc target running ->
+          (target, List.assoc target running)
+          :: List.filter (fun (name, _) -> name <> target) running
       | Some _ | None -> running
     in
-    match running with [] -> [] | _ -> [ Masc_tui_footer.Keeper_answering running ]
+    match running with
+    | [] -> []
+    | (_, lead_started_at) :: _ ->
+        (* The lead keeper's elapsed time rides the badge: a turn that has
+           been running for twenty minutes reads as the stall it probably
+           is, from every surface. Clamped so clock skew never counts up
+           from the future. *)
+        let lead_elapsed_s =
+          Some
+            (int_of_float
+               (Float.max 0. (Unix.gettimeofday () -. lead_started_at)))
+        in
+        [ Masc_tui_footer.Keeper_answering
+            { names = List.map fst running; lead_elapsed_s }
+        ]
   in
   (* The glow after a finish: the newest one leads, the rest fold into +N.
      [advance_finishes] already dropped expired entries and keepers that

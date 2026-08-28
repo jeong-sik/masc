@@ -296,6 +296,26 @@ let test_answering_names_the_first_keeper () =
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ())
 
+let test_answered_glow_reads_by_name () =
+  check_string "one finish reads by name with its age"
+    "<dim>  q:quit  | \xe2\x9c\x93 kidsnote answered 12s ago | Port: 8935<reset>\n"
+    (Masc_tui_footer.line
+       ~status:
+         [ Masc_tui_footer.Keeper_answered
+             { name = "kidsnote"; seconds_ago = 12; more = 0 }
+         ]
+       ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
+       ~hints:"q:quit" ());
+  check_string "older finishes fold behind the newest"
+    "<dim>  q:quit  | \xe2\x9c\x93 kidsnote answered 3m ago +2 | Port: 8935<reset>\n"
+    (Masc_tui_footer.line
+       ~status:
+         [ Masc_tui_footer.Keeper_answered
+             { name = "kidsnote"; seconds_ago = 200; more = 2 }
+         ]
+       ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
+       ~hints:"q:quit" ())
+
 let test_answering_outlives_the_build_fact () =
   (* At a width with no room for everything, the live-activity fact stays on
      the row after refresh and build have been dropped. *)
@@ -343,6 +363,8 @@ let tests =
           test_a_workspace_mismatch_outlives_the_port
       ; Alcotest.test_case "answering names the first keeper" `Quick
           test_answering_names_the_first_keeper
+      ; Alcotest.test_case "answered glow reads by name" `Quick
+          test_answered_glow_reads_by_name
       ; Alcotest.test_case "answering outlives the build fact" `Quick
           test_answering_outlives_the_build_fact
       ] )

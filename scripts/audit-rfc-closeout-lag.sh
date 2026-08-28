@@ -70,7 +70,18 @@ git log --oneline origin/main --since="$since" 2>/dev/null \
   | while read -r rfc; do
       # Find a frontmatter file for this RFC. Multi-phase RFCs may have
       # several files sharing the number; we only need the main spec.
-      spec=$(ls "docs/rfc/${rfc}"-*.md 2>/dev/null | head -1)
+      #
+      # Not `ls`: with no match it exits non-zero, and under `set -e` with
+      # `pipefail` that failure propagates through the command substitution
+      # and aborts the whole audit. `2>/dev/null` hides the message, not the
+      # status. Commit subjects mention identifiers that never became files
+      # (RFC-0000 is the first one `git log` yields here), so the run ended
+      # before it checked a single RFC — the audit reported nothing and
+      # exited 1, which read as "no findings" to anyone not watching $?.
+      shopt -s nullglob
+      spec_matches=( "docs/rfc/${rfc}"-*.md )
+      shopt -u nullglob
+      spec="${spec_matches[0]:-}"
       [[ -z "$spec" ]] && continue
 
       # Only flag entries that are still Draft. Active and Implemented

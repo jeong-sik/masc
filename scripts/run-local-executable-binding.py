@@ -15,6 +15,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 
 
 RECEIPT_SCHEMA = "masc.run-local-launch-binding.v1"
@@ -1043,6 +1044,52 @@ def dashboard_tree_sha256(entries: list[dict[str, object]]) -> str:
     return digest_bytes(payload)
 
 
+def require_snapshot_tree(
+    snapshot_root: Path, entries: list[dict[str, object]]
+) -> os.stat_result:
+    root_info = snapshot_root.lstat()
+    if (
+        not stat.S_ISDIR(root_info.st_mode)
+        or root_info.st_uid != os.geteuid()
+        or stat.S_IMODE(root_info.st_mode) != 0o700
+    ):
+        raise BindingError(f"dashboard snapshot root metadata differs: {snapshot_root}")
+    expected_blobs = {str(entry["sha256"]): entry for entry in entries}
+    for digest, expected in expected_blobs.items():
+        path = snapshot_root / digest
+        payload, info = read_regular_file_exact(path)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+            or info.st_size != expected["size"]
+            or digest_bytes(payload) != expected["sha256"]
+        ):
+            raise BindingError(f"dashboard blob differs: {digest}")
+    return root_info
+
+
+def materialize_dashboard_snapshot(
+    private_root: Path,
+    entries: list[dict[str, object]],
+    payloads: dict[str, bytes],
+) -> tuple[Path, str, os.stat_result]:
+    tree_sha256 = dashboard_tree_sha256(entries)
+    snapshot_root = private_root / "dashboard-blobs"
+    ensure_private_directory(snapshot_root)
+    fsync_directory(private_root)
+    for entry in entries:
+        payload = payloads[str(entry["path"])]
+        if len(payload) != entry["size"] or digest_bytes(payload) != entry["sha256"]:
+            raise BindingError(
+                f"dashboard source changed while snapshotting: {entry['path']}"
+            )
+        write_once(snapshot_root / str(entry["sha256"]), payload, 0o600)
+    fsync_directory(snapshot_root)
+    return snapshot_root, tree_sha256, require_snapshot_tree(snapshot_root, entries)
+
+
 def require_trusted_parent(path: Path) -> None:
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
@@ -1103,40 +1150,27 @@ def require_artifact_info(
 
 
 def write_once(path: Path, payload: bytes, mode: int) -> os.stat_result:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-    try:
-        descriptor = os.open(path, flags, mode)
-    except FileExistsError:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        with os.fdopen(descriptor, "rb", closefd=True) as handle:
-            info = require_artifact_info(path, os.fstat(handle.fileno()), mode)
-            observed = handle.read()
-        if observed != payload:
-            raise BindingError(f"content-addressed launch artifact differs: {path}")
-        return info
-    opened_info = os.fstat(descriptor)
-    created_info: os.stat_result | None = None
+    descriptor, staged_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    staged_path = Path(staged_name)
     try:
         with os.fdopen(descriptor, "wb", closefd=True) as handle:
             os.fchmod(handle.fileno(), mode)
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-            created_info = require_artifact_info(path, os.fstat(handle.fileno()), mode)
-    except BaseException:
+            require_artifact_info(staged_path, os.fstat(handle.fileno()), mode)
         try:
-            current = path.lstat()
-            if (current.st_dev, current.st_ino) == (
-                opened_info.st_dev,
-                opened_info.st_ino,
-            ):
-                path.unlink()
-        except FileNotFoundError:
+            os.link(staged_path, path, follow_symlinks=False)
+        except FileExistsError:
             pass
-        raise
-    if created_info is None:
-        raise BindingError(f"launch artifact was not materialized: {path}")
-    return created_info
+    finally:
+        staged_path.unlink(missing_ok=True)
+    payload_on_disk, info = read_regular_file_exact(path)
+    require_artifact_info(path, info, mode)
+    if payload_on_disk != payload:
+        raise BindingError(f"content-addressed launch artifact differs: {path}")
+    fsync_directory(path.parent)
+    return info
 
 
 def materialize(

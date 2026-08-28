@@ -634,6 +634,48 @@ class RunLocalExecutableBindingTest(unittest.TestCase):
             )
             self.assertNotEqual(0, rejected.returncode)
 
+    def test_dashboard_blob_replacement_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            source_root, _pnpm, _node = self.dashboard_build_fixture(root)
+            private_root = root / "private"
+            private_root.mkdir(mode=0o700)
+            _dashboard_root, entries, payloads = binding.dashboard_source_entries(
+                source_root
+            )
+            snapshot_root, _tree, _info = binding.materialize_dashboard_snapshot(
+                private_root, entries, payloads
+            )
+            blob = snapshot_root / str(entries[0]["sha256"])
+            blob.chmod(0o600)
+            blob.write_bytes(b"x" * int(entries[0]["size"]))
+            blob.chmod(0o600)
+            with self.assertRaisesRegex(binding.BindingError, "blob differs"):
+                binding.require_snapshot_tree(snapshot_root, entries)
+
+    def test_concurrent_dashboard_snapshot_materialization_converges(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            source_root, _pnpm, _node = self.dashboard_build_fixture(root)
+            private_root = root / "private"
+            private_root.mkdir(mode=0o700)
+            _dashboard_root, entries, payloads = binding.dashboard_source_entries(
+                source_root
+            )
+
+            def materialize():
+                return binding.materialize_dashboard_snapshot(
+                    private_root, entries, payloads
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                first, second = executor.map(lambda _index: materialize(), range(2))
+            self.assertEqual(first[0], second[0])
+            self.assertEqual(first[1], second[1])
+            binding.require_snapshot_tree(first[0], entries)
+
     def test_input_inventory_supports_newline_path_and_nul_bytes(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

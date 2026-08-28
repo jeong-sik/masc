@@ -9498,8 +9498,7 @@ let render_keeper_calls (state : state) =
   box_line_styled buf cols ~style:Ansi.bold header;
   box_divider buf cols;
   let col_hdr =
-    Printf.sprintf "  %-8s %s %-24s %-8s %-6s %s" "Time" " " "Tool" "Dur"
-      "Turn" "Subject"
+    "  j/k rows · exact fields: tool | input | assembler | proposal | provenance | output"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -9531,33 +9530,78 @@ let render_keeper_calls (state : state) =
   in
   let chrome_rows = 8 + extra_rows in
   let content_height = max 1 (rows - chrome_rows) in
-  (* Digested once, for the bound and for the drawing both. Working it out
-     twice would let the scroll bound believe in a different table than the
-     one on screen. *)
+  (* The scroll unit is one rendered row, not one call. A canonical proposal
+     identity plus its input and output cannot fit a two-row short viewport;
+     compressing those fields into the two rows made the rightmost identity
+     disappear permanently. Each exact field therefore owns rows that j/k can
+     reach independently. *)
+  let inner_cells = max 1 (framed_inner_width cols) in
+  let labeled_rows ~call_index ~style ~label value =
+    let prefix = Printf.sprintf "  #%d %s " (call_index + 1) label in
+    let body_cells = max 1 (inner_cells - Message_layout.display_width prefix) in
+    let value = Terminal_text.single_line value in
+    match Message_layout.split_cells ~max_cells:body_cells value with
+    | [] -> [ call_index, style, prefix ^ "(empty)" ]
+    | first :: rest ->
+      (call_index, style, prefix ^ first)
+      :: List.map (fun part -> call_index, style, prefix ^ part) rest
+  in
   let rows =
-    List.map
-      (fun (call : Masc.Tui_decode.keeper_call) ->
-        ( call
-        , Option.bind call.Masc.Tui_decode.kc_output (fun result ->
-              Masc.Keeper_chat_tool_trail.tool_result_digest ~result)
-        , call.Masc.Tui_decode.kc_proposal_execution ))
-      entries
+    entries
+    |> List.mapi (fun call_index (call : Masc.Tui_decode.keeper_call) ->
+         let open Masc.Tui_decode in
+         let glyph, style =
+           if call.kc_success then ("✓", Ansi.reset)
+           else ("✗", (Theme.bad ()))
+         in
+         let duration =
+           match call.kc_duration_ms with
+           | Some ms -> Masc_tui_acting.elapsed_text ms
+           | None -> "-"
+         in
+         let turn =
+           match call.kc_turn with Some value -> string_of_int value | None -> "-"
+         in
+         let summary =
+           Printf.sprintf "  #%d %s %s · %s · turn %s"
+             (call_index + 1)
+             (Terminal_text.clock_timestamp
+                (Masc_domain.iso8601_of_unix_seconds call.kc_at))
+             glyph duration turn
+         in
+         let exact_rows =
+           labeled_rows ~call_index ~style:Ansi.dim ~label:"tool" call.kc_tool
+           @ labeled_rows ~call_index ~style:Ansi.dim ~label:"input" call.kc_input
+         in
+         let proposal_rows =
+           match call.kc_proposal_execution with
+           | None -> []
+           | Some identity ->
+             labeled_rows ~call_index ~style:Ansi.dim ~label:"assembler"
+               identity.pei_assembler_run_id
+             @ labeled_rows ~call_index ~style:Ansi.dim ~label:"proposal"
+                 identity.pei_proposal_id
+             @ labeled_rows ~call_index ~style:Ansi.dim ~label:"provenance"
+                 (proposal_provenance_status_label
+                    identity.pei_provenance_status)
+         in
+         let output_rows =
+           match
+             Option.bind call.kc_output (fun result ->
+               Masc.Keeper_chat_tool_trail.tool_result_digest ~result)
+           with
+           | None -> []
+           | Some digest ->
+             labeled_rows ~call_index
+               ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
+               ~label:"output" digest
+         in
+         (call_index, style, summary) :: exact_rows @ proposal_rows @ output_rows)
+    |> List.concat
   in
-  let max_scroll =
-    Message_layout.last_page_start ~height:content_height
-      (List.map
-         (fun (_, digest, proposal) ->
-            match proposal, digest with
-            | None, None -> 1
-            | None, Some _ -> min 2 content_height
-            | Some _, None -> min 3 content_height
-            | Some _, Some _ -> min 4 content_height)
-         rows)
-  in
+  let total_rows = List.length rows in
+  let max_scroll = max 0 (total_rows - content_height) in
   let scroll = max 0 (min state.keeper_calls_scroll max_scroll) in
-  (* How many calls the rows below actually reached. Filled by the drawing so
-     the count under the table cannot disagree with the table. *)
-  let drawn = ref 0 in
   if shown = 0 then begin
     let empty =
       match (state.keeper_calls, state.keeper_calls_error) with
@@ -9571,164 +9615,23 @@ let render_keeper_calls (state : state) =
     done
   end
   else begin
-    (* Rows are spent, not indexed: a call draws one row and, when it answered
-       something, a second for what it said. Walking the height rather than
-       looping over it keeps [scroll] counting calls, so j/k still moves by
-       call and the footer's count still means what it says. *)
-    let remaining = ref content_height in
-    let idx = ref scroll in
-    while !remaining > 0 do
-      match List.nth_opt rows !idx with
-      | None ->
-          box_empty buf cols;
-          decr remaining
-      | Some (call, digest, proposal) ->
-          let call_block_rows =
-            match proposal, digest with
-            | None, None -> 1
-            | None, Some _ -> min 2 content_height
-            | Some _, None -> min 3 content_height
-            | Some _, Some _ -> min 4 content_height
-          in
-          if !remaining < call_block_rows
-          then (
-            while !remaining > 0 do
-              box_empty buf cols;
-              decr remaining
-            done)
-          else (
-            incr idx;
-            let open Masc.Tui_decode in
-            let glyph, style =
-              if call.kc_success then ("✓", Ansi.reset)
-              else ("✗", (Theme.bad ()))
-            in
-          (* The Acting feed already spells a call's duration, from the same
-             milliseconds. This was a second spelling of the first two rungs
-             with no third: a call past a minute would have read [312.4s]
-             where the feed reads [5m12s]. No call in 471 sampled reached
-             that -- the longest was 18.1s -- so this removes a duplicate
-             rather than a wrong reading. Duplicated ladders are how the two
-             that were wrong got that way. *)
-            let duration =
-              match call.kc_duration_ms with
-              | Some ms -> Masc_tui_acting.elapsed_text ms
-              | None -> "-"
-            in
-            let turn =
-              match call.kc_turn with Some t -> string_of_int t | None -> "-"
-            in
-            let subject =
-              match
-                Masc.Keeper_chat_tool_trail.tool_subject ~name:call.kc_tool
-                  ~args:call.kc_input
-              with
-              | Some subject -> subject
-              | None -> ""
-            in
-            let line =
-              Printf.sprintf "  %-8s %s %-24s %-8s %-6s %s"
-                (Terminal_text.clock_timestamp
-                   (Masc_domain.iso8601_of_unix_seconds call.kc_at))
-                glyph
-                (fit_width (Terminal_text.single_line call.kc_tool) 24)
-                duration turn
-                (Terminal_text.single_line subject)
-            in
-            let draw_line ~style text =
-              box_line_styled buf cols ~style text;
-              decr remaining
-            in
-            let digest_text =
-              Option.map
-                (fun value ->
-                   Terminal_text.single_line ("\xe2\x86\x92 " ^ value))
-                digest
-            in
-            let with_digest line =
-              Option.fold ~none:line
-                ~some:(fun value -> line ^ " · " ^ value)
-                digest_text
-            in
-            let digest_style =
-              if call.kc_success then Ansi.dim else (Theme.bad ())
-            in
-            (match proposal, content_height with
-             | Some _, 1 ->
-               draw_line ~style:(Theme.warn ())
-                 "  proposal identity needs at least two content rows"
-             | Some identity, 2 ->
-               let compact_summary =
-                 match digest_text with
-                 | Some value ->
-                   Printf.sprintf
-                     "  %s %s · %s · %s · asm %s"
-                     glyph
-                     (Terminal_text.single_line call.kc_tool)
-                     value
-                     (proposal_provenance_status_label
-                        identity.pei_provenance_status)
-                     identity.pei_assembler_run_id
-                 | None ->
-                   Printf.sprintf
-                     "  %s %s · %s · asm %s"
-                     glyph
-                     (Terminal_text.single_line call.kc_tool)
-                     (proposal_provenance_status_label
-                        identity.pei_provenance_status)
-                     identity.pei_assembler_run_id
-               in
-               draw_line ~style compact_summary;
-               draw_line ~style:Ansi.dim
-                 (Printf.sprintf "    proposal %s" identity.pei_proposal_id)
-             | Some identity, 3 ->
-               draw_line ~style line;
-               draw_line ~style:Ansi.dim
-                 (with_digest
-                    (Printf.sprintf
-                       "             ↳ assembler %s · %s"
-                       identity.pei_assembler_run_id
-                       (proposal_provenance_status_label
-                          identity.pei_provenance_status)));
-               draw_line ~style:Ansi.dim
-                 (Printf.sprintf "               proposal %s" identity.pei_proposal_id)
-             | Some identity, _ ->
-               draw_line ~style line;
-               draw_line ~style:Ansi.dim
-                 (Printf.sprintf
-                    "             ↳ assembler %s · %s"
-                    identity.pei_assembler_run_id
-                    (proposal_provenance_status_label
-                       identity.pei_provenance_status));
-               draw_line ~style:Ansi.dim
-                 (Printf.sprintf "               proposal %s" identity.pei_proposal_id)
-             | None, 1 -> draw_line ~style (with_digest line)
-             | None, _ -> draw_line ~style line);
-          (* What the call answered. The row above says one ran and what it
-             was called with; this is the only place that says what came
-             back, which is the question a failed call leaves open. It takes
-             a failed call's colour so a reason does not read as ordinary
-             output. A call that answered nothing draws no row rather than an
-             empty one. *)
-            let draw_digest digest =
-              draw_line ~style:digest_style
-                (Printf.sprintf "  %-8s %s   %s" "" " " digest)
-            in
-            (match proposal, digest_text, content_height with
-             | Some _, Some digest, height when height >= 4 ->
-               draw_digest digest
-             | None, Some digest, height when height >= 2 ->
-               draw_digest digest
-             | Some _, Some _, _ | None, Some _, _ | _, None, _ -> ()))
-    done;
-    (* How many calls the height actually reached, not how many would fit if
-       each took one row. A call that answered something takes two, so
-       counting rows as calls hid the hint exactly when the screen needed it. *)
-    drawn := !idx - scroll
+    let visible_rows =
+      rows
+      |> List.filteri (fun index _ ->
+           index >= scroll && index < scroll + content_height)
+    in
+    List.iter
+      (fun (_, style, text) -> box_line_styled buf cols ~style text)
+      visible_rows;
+    for _ = List.length visible_rows + 1 to content_height do
+      box_empty buf cols
+    done
   end;
-  if scroll > 0 || !drawn < shown then
+  if scroll > 0 || total_rows > content_height then
+    let last_visible = min total_rows (scroll + content_height) in
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d calls, showing %d from %d]" shown !drawn scroll)
+      (Printf.sprintf "[%d calls · rows %d-%d of %d]" shown (scroll + 1)
+         last_visible total_rows)
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf

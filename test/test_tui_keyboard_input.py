@@ -5512,9 +5512,11 @@ def keeper_calls_interaction() -> Interaction:
         for needle, what in (
             (b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 calls (2)", "the count"),
             ("ok \u00b7 latest 8s ago".encode(), "the freshness verdict"),
-            ("\u2713 Read".encode(), "the returned call"),
+            ("\u2713".encode(), "the returned-call verdict"),
+            (b"#1 tool Read", "the returned-call tool"),
             (b"28ms", "its duration"),
-            ("\u2717 tool_execute".encode(), "the failed call"),
+            ("\u2717".encode(), "the failed-call verdict"),
+            (b"#2 tool tool_execute", "the failed-call tool"),
             (b"14.5s", "the failure's duration"),
             (b"lib/a.ml", "the subject the trail names"),
             (b"exact-assembler-run-42", "the Assembler producer run"),
@@ -5531,9 +5533,37 @@ def keeper_calls_interaction() -> Interaction:
 
 
 def keeper_calls_constrained_fixture() -> SequencedHttpResponse:
-    status, payload = keeper_calls_fixture()
-    assert status == 200 and isinstance(payload, dict)
-    entries = list(cast(list[dict[str, object]], payload["entries"]))
+    provenance_statuses = (
+        "retained_match",
+        "retained_unconfirmed",
+        "not_retained",
+        "retained_contradiction",
+    )
+    entries: list[dict[str, object]] = []
+    for index, provenance_status in enumerate(provenance_statuses):
+        marker = chr(ord("a") + index)
+        output = provenance_status + "-" + marker * (71 - len(provenance_status))
+        entries.append(
+            {
+                "ts": 1787534998.4 + index,
+                "keeper": "alpha",
+                "tool": "keeper_proposal_execute",
+                "input": (
+                    '{"request":"input-'
+                    + provenance_status
+                    + "-"
+                    + marker * 120
+                    + "\x1b[31m한🙂-tail" + '"}'
+                ),
+                "output": output,
+                "success": True,
+                "duration_ms": 28.4,
+                "turn": 2143 + index,
+                "assembler_run_id": "exact-assembler-" + marker * 32,
+                "proposal_id": marker * 64,
+                "proposal_provenance_status": provenance_status,
+            }
+        )
     entries.append(
         {
             "ts": 1787535020.0,
@@ -5544,8 +5574,14 @@ def keeper_calls_constrained_fixture() -> SequencedHttpResponse:
             "duration_ms": 1.0,
         }
     )
-    stale_payload = dict(payload)
-    stale_payload.update({"count": 3, "health": "stale", "entries": entries})
+    stale_payload = {
+        "keeper": "alpha",
+        "count": len(entries),
+        "health": "stale",
+        "latest_age_s": 8.0,
+        "stale_reason": "fixture-stale",
+        "entries": entries,
+    }
     return SequencedHttpResponse(
         [
             (200, stale_payload),
@@ -5555,7 +5591,7 @@ def keeper_calls_constrained_fixture() -> SequencedHttpResponse:
 
 
 def keeper_calls_constrained_interaction() -> Interaction:
-    """Proposal identity stays atomic under the supported short stale pane."""
+    """Every exact proposal field remains reachable in the short stale pane."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -5585,31 +5621,98 @@ def keeper_calls_constrained_interaction() -> Interaction:
             output,
             rows=15,
             columns=100,
-            needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 calls (2)",
+            needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 calls (4)",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
-        plain = CSI_RE.sub(b"", pane)
+        initial_plain = CSI_RE.sub(b"", pane)
         for needle, what in (
-            (b"exact-assembler-run-42", "the Assembler producer run"),
-            (b"a" * 64, "the full proposal identity"),
-            (b"retained_match", "the provenance verdict"),
-            (b"sentinel-digest-31506", "the returned proposal output"),
             (b"fixture keeper-call refresh failed", "the retained refresh failure"),
             (b"named another keeper", "the foreign-row mismatch"),
         ):
-            if needle not in plain:
+            if needle not in initial_plain:
                 raise AssertionError(
                     f"Constrained Keeper Calls did not draw {what}: {pane!r}"
                 )
-        send_and_wait(process, master_fd, output, b"j", b"tool_execute")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"k",
-            b"sentinel-digest-31506",
+
+        provenance_statuses = (
+            "retained_match",
+            "retained_unconfirmed",
+            "not_retained",
+            "retained_contradiction",
         )
+        expected: set[bytes] = {b"keeper_proposal_execute", b"\\x1B[31m"}
+        for index, provenance_status in enumerate(provenance_statuses):
+            marker = chr(ord("a") + index)
+            expected.update(
+                {
+                    ("exact-assembler-" + marker * 32).encode(),
+                    (marker * 64).encode(),
+                    provenance_status.encode(),
+                    (
+                        provenance_status
+                        + "-"
+                        + marker * (71 - len(provenance_status))
+                    ).encode(),
+                    ("input-" + provenance_status).encode(),
+                    "한🙂-tail".encode(),
+                }
+            )
+        seen: set[bytes] = set()
+
+        footer_re = re.compile(rb"rows ([0-9]+)-([0-9]+) of ([0-9]+)")
+
+        def observe(frame: bytes) -> tuple[int, int, int]:
+            plain = CSI_RE.sub(b"", frame)
+            if b"~" in plain:
+                raise AssertionError(
+                    f"Constrained Keeper Calls truncated a reachable row: {frame!r}"
+                )
+            seen.update(value for value in expected if value in plain)
+            matches = list(footer_re.finditer(plain))
+            if not matches:
+                raise AssertionError(
+                    f"Constrained Keeper Calls omitted its row bounds: {frame!r}"
+                )
+            match = matches[-1]
+            return tuple(int(value) for value in match.groups())
+
+        first, last, total = observe(pane)
+        if (first, last) != (1, 2):
+            raise AssertionError(
+                f"Constrained Keeper Calls started at {(first, last)!r}, expected (1, 2)"
+            )
+        while last < total:
+            frame_start = len(output)
+            send_and_wait(process, master_fd, output, b"j", b"rows ")
+            pane = bytes(output[frame_start:])
+            first, last, current_total = observe(pane)
+            if current_total != total:
+                raise AssertionError(
+                    f"Constrained Keeper Calls row total changed: {current_total} != {total}"
+                )
+        if (first, last) != (total - 1, total):
+            raise AssertionError(
+                f"Constrained Keeper Calls ended at {(first, last)!r}, total={total}"
+            )
+        missing = expected - seen
+        if missing:
+            raise AssertionError(
+                f"Constrained Keeper Calls left exact values unreachable: {missing!r}"
+            )
+        while first > 1:
+            frame_start = len(output)
+            send_and_wait(process, master_fd, output, b"k", b"rows ")
+            pane = bytes(output[frame_start:])
+            first, last, current_total = observe(pane)
+            if current_total != total:
+                raise AssertionError(
+                    f"Constrained Keeper Calls row total changed on return: {current_total} != {total}"
+                )
+        if (first, last) != (1, 2):
+            raise AssertionError(
+                f"Constrained Keeper Calls did not return to top: {(first, last)!r}"
+            )
         send_and_wait(
             process,
             master_fd,

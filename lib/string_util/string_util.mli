@@ -138,3 +138,8 @@ val escape_xml : string -> string
 (** Escape the five XML 1.0 predefined entities: ampersand,
     less-than, greater-than, double-quote, and apostrophe.
     Order is safe for round-trip use: ampersand is replaced first. *)
+
+val is_lowercase_sha256_hex : string -> bool
+(** Whether [value] is exactly 64 lowercase hex characters — the canonical
+    stored spelling of a SHA-256 across config revisions. The one
+    definition; a surface that restates the triple guard drifts silently. *)

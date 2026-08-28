@@ -77,11 +77,8 @@ let revision_of_yojson = function
   | `Assoc
       ([ ("state", `String "sha256"); ("value", `String value) ]
       | [ ("value", `String value); ("state", `String "sha256") ])
-    when String.length value = 64
-         && String.equal value (String.lowercase_ascii value) ->
-    (match Digestif.SHA256.of_hex_opt value with
-     | Some _ -> Ok (Sha256 value)
-     | None -> Error "config_revision.manifest.value must be lowercase SHA-256 hex")
+    when String_util.is_lowercase_sha256_hex value ->
+    Ok (Sha256 value)
   | `Assoc fields ->
     (match List.assoc_opt "state" fields with
      | Some (`String "missing") ->

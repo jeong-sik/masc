@@ -379,6 +379,21 @@ let test_trim_nonempty_rejects_whitespace_only () =
   check (option string) "trims both ends" (Some "a b") (SU.trim_nonempty "  a b  ")
 ;;
 
+let test_is_lowercase_sha256_hex () =
+  let hex64 = String.concat "" (List.init 8 (fun _ -> "0123abcd")) in
+  Alcotest.(check bool) "64 lowercase hex accepted" true
+    (String_util.is_lowercase_sha256_hex hex64);
+  Alcotest.(check bool) "uppercase rejected" false
+    (String_util.is_lowercase_sha256_hex (String.uppercase_ascii hex64));
+  Alcotest.(check bool) "63 chars rejected" false
+    (String_util.is_lowercase_sha256_hex (String.sub hex64 0 63));
+  Alcotest.(check bool) "65 chars rejected" false
+    (String_util.is_lowercase_sha256_hex (hex64 ^ "0"));
+  Alcotest.(check bool) "non-hex letter rejected" false
+    (String_util.is_lowercase_sha256_hex ("z" ^ String.sub hex64 1 63));
+  Alcotest.(check bool) "empty rejected" false
+    (String_util.is_lowercase_sha256_hex "")
+
 let test_is_valid_utf8_basic () =
   check bool "ascii" true (String_util.is_valid_utf8 "abc");
   check bool "empty" true (String_util.is_valid_utf8 "");
@@ -474,6 +489,9 @@ let () =
             test_option_trim_passes_none_through;
           test_case "whitespace-only is None" `Quick
             test_trim_nonempty_rejects_whitespace_only ] );
+      ( "sha256_hex",
+        [ test_case "canonical spelling test" `Quick
+            test_is_lowercase_sha256_hex ] );
       ( "utf8_boundary",
         [ test_case "is_valid_utf8 basics" `Quick test_is_valid_utf8_basic;
           test_case "Korean 50-byte cut regression" `Quick

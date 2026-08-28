@@ -60,13 +60,7 @@ let editor_stem json =
 
 let editable_field_names = List.map editable_field_name editable_fields
 
-let is_lowercase_sha256 value =
-  String.length value = 64
-  && String.for_all
-       (function
-         | '0' .. '9' | 'a' .. 'f' -> true
-         | _ -> false)
-       value
+let is_lowercase_sha256 = String_util.is_lowercase_sha256_hex
 
 let exact_keys expected fields =
   List.length fields = List.length expected

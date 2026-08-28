@@ -123,10 +123,7 @@ let keeper_assignment_revision_of_yojson = function
   | `Assoc fields ->
     let source_revision =
       match List.assoc_opt "source_revision" fields with
-      | Some (`String value)
-        when String.length value = 64
-             && String.equal value (String.lowercase_ascii value)
-             && Option.is_some (Digestif.SHA256.of_hex_opt value) ->
+      | Some (`String value) when String_util.is_lowercase_sha256_hex value ->
         Ok (Config_source_revision value)
       | Some _ -> Error "runtime assignment source_revision must be lowercase SHA-256 hex"
       | None -> Error "runtime assignment source_revision is required"

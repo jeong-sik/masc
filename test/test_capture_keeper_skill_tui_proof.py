@@ -430,6 +430,37 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         self.assertEqual(capture.exact_receipt_block(screen, "call skill 1"), receipt)
 
+    def test_receipt_progress_accumulates_ordered_overlapping_frames(self):
+        expected = [f"row-{index}" for index in range(40)]
+        frames = (
+            expected[0:12],
+            expected[11:23],
+            expected[22:34],
+            expected[33:40],
+        )
+        next_index = 0
+        for frame in frames:
+            progress = capture.receipt_frame_progress(
+                "chrome\n" + "\n".join(frame) + "\nfooter",
+                expected,
+                next_index,
+            )
+            self.assertIsNotNone(progress)
+            next_index = progress or next_index
+
+        self.assertEqual(next_index, len(expected))
+
+    def test_receipt_progress_does_not_cross_a_foreign_row(self):
+        expected = ["begin id=one", "action one", "action two", "end id=one"]
+        visible = "\n".join(
+            ["begin id=one", "action one", "foreign", "action two", "end id=one"]
+        )
+
+        self.assertEqual(capture.receipt_frame_progress(visible, expected, 0), 2)
+        self.assertIsNone(
+            capture.receipt_frame_progress("action two\nend id=one", expected, 2)
+        )
+
     def test_exact_receipt_block_ignores_unrelated_clock_change(self):
         before = "\n".join(
             [
@@ -561,19 +592,20 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 *capture.expected_receipt_lines(activation, [action]),
             ]
         )
-        screens = iter([top, middle, middle, receipt, receipt])
+        screens = iter([top, middle, middle, receipt, receipt, receipt])
         with (
             mock.patch.object(capture, "screen_text", side_effect=screens),
             mock.patch.object(capture, "press") as press,
         ):
-            visible, observations = capture.scroll_to_skill_receipt(
+            captured_frames = []
+            visible, observations, visible_frames = capture.scroll_to_skill_receipt(
                 Page(),
                 keeper="keeper-one",
                 session_id="trace-one",
                 ledger_revision="abcdef0123456789",
-                skill_tool_use_id="call-skill-1",
                 activation=activation,
                 actions=[action],
+                capture_frame=captured_frames.append,
                 timeout=1.0,
             )
 
@@ -582,6 +614,8 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             observations["skill_header"], "Skill Use — keeper-one (8 receipts)"
         )
         self.assertIn("id=call-skill-1", observations["receipt_block"])
+        self.assertEqual(visible_frames, [receipt])
+        self.assertEqual(captured_frames, [0])
         self.assertEqual([call.args[1] for call in press.call_args_list], ["j", "j"])
 
     def test_tools_surface_connection_rejects_disconnected(self):

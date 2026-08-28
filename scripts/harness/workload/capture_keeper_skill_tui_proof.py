@@ -16,7 +16,7 @@ import socket
 import stat
 import subprocess
 import time
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request
 
@@ -819,6 +819,39 @@ def exact_receipt_block(value: str, skill_tool_use_id: str) -> str | None:
     return "\n".join(lines[start : ends[0] + 1])
 
 
+def receipt_frame_progress(
+    value: str, expected_lines: list[str], next_index: int
+) -> int | None:
+    require(expected_lines != [], "expected TUI Skill receipt is empty")
+    require(
+        0 <= next_index < len(expected_lines),
+        "TUI Skill receipt progress is outside the expected rows",
+    )
+    visible_lines = [line.strip(" │") for line in value.splitlines()]
+    furthest: int | None = None
+    overlap_index = 0 if next_index == 0 else next_index - 1
+    for visible_start, visible_line in enumerate(visible_lines):
+        for expected_start in range(overlap_index + 1):
+            if visible_line != expected_lines[expected_start]:
+                continue
+            visible_index = visible_start
+            expected_index = expected_start
+            while (
+                visible_index < len(visible_lines)
+                and expected_index < len(expected_lines)
+                and visible_lines[visible_index] == expected_lines[expected_index]
+            ):
+                visible_index += 1
+                expected_index += 1
+            if expected_start <= overlap_index and next_index < expected_index:
+                furthest = (
+                    expected_index
+                    if furthest is None
+                    else max(furthest, expected_index)
+                )
+    return furthest
+
+
 def expected_receipt_lines(activation: dict[str, Any], actions: list[Any]) -> list[str]:
     identity = object_field(activation, "identity", "Skill activation")
     invocation = object_field(activation, "invocation", "Skill activation")
@@ -965,13 +998,16 @@ def scroll_to_skill_receipt(
     keeper: str,
     session_id: str,
     ledger_revision: str,
-    skill_tool_use_id: str,
     activation: dict[str, Any],
     actions: list[Any],
+    capture_frame: Callable[[int], None],
     timeout: float,
-) -> tuple[str, dict[str, str]]:
+) -> tuple[str, dict[str, str], list[str]]:
     deadline = time.monotonic() + timeout
     observations: dict[str, str] = {}
+    expected = expected_receipt_lines(activation, actions)
+    next_receipt_index = 0
+    frames: list[str] = []
     while time.monotonic() < deadline:
         visible = screen_text(page)
         normalized_lines = [line.strip(" │") for line in visible.splitlines()]
@@ -998,13 +1034,36 @@ def scroll_to_skill_receipt(
             )
             if session_line is not None:
                 observations["session_line"] = session_line
-        receipt = exact_receipt_block(visible, skill_tool_use_id)
-        if receipt is not None and receipt_matches_activation(
-            receipt, activation, actions
-        ):
-            observations["receipt_block"] = receipt
-        if len(observations) == 3 and receipt is not None:
-            return visible, observations
+        progress = (
+            receipt_frame_progress(visible, expected, next_receipt_index)
+            if next_receipt_index < len(expected)
+            else None
+        )
+        if progress is not None:
+            require(
+                tools_surface_is_connected(visible),
+                "TUI Tools surface disconnected before capturing an advancing frame",
+            )
+            capture_frame(len(frames))
+            captured_visible = screen_text(page)
+            require(
+                tools_surface_is_connected(captured_visible),
+                "TUI Tools surface disconnected while capturing an advancing frame",
+            )
+            captured_progress = receipt_frame_progress(
+                captured_visible, expected, next_receipt_index
+            )
+            if captured_progress is None or captured_progress < progress:
+                raise CaptureError(
+                    "TUI Skill receipt changed while capturing an advancing frame"
+                )
+            frames.append(captured_visible)
+            visible = captured_visible
+            next_receipt_index = captured_progress
+            if next_receipt_index == len(expected):
+                observations["receipt_block"] = "\n".join(expected)
+        if len(observations) == 3 and next_receipt_index == len(expected):
+            return visible, observations, frames
         press(page, "j")
         page.wait_for_timeout(25)
         advanced = screen_text(page)
@@ -1092,7 +1151,7 @@ def main() -> int:
         "This directory is not evidence until tui-evidence.json exists and this marker is removed.\n",
         encoding="utf-8",
     )
-    screenshot = args.out / "tui-skill-use.png"
+    screenshot_paths: list[Path] = []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
@@ -1114,37 +1173,34 @@ def main() -> int:
                     page, selected["keeper"], args.timeout
                 )
                 visited_tools_panes = select_tools_activations(page, args.timeout)
-                visible, observations = scroll_to_skill_receipt(
+                screen = page.locator(".xterm-screen")
+
+                def capture_frame(index: int) -> None:
+                    screenshot = args.out / f"tui-skill-use-{index:03d}.png"
+                    screen.screenshot(path=str(screenshot))
+                    screenshot_paths.append(screenshot)
+
+                visible, observations, visible_frames = scroll_to_skill_receipt(
                     page,
                     keeper=selected["keeper"],
                     session_id=selected["session_id"],
                     ledger_revision=selected["ledger_revision"],
-                    skill_tool_use_id=selected["skill_tool_use_id"],
                     activation=selected["activation"],
                     actions=selected["actions"],
+                    capture_frame=capture_frame,
                     timeout=args.timeout,
                 )
                 require(
                     tools_surface_is_connected(visible),
                     "TUI Tools surface is not connected before screenshot",
                 )
-                receipt_before = exact_receipt_block(
-                    visible, selected["skill_tool_use_id"]
-                )
                 require(
-                    receipt_before is not None, "exact TUI Skill receipt is missing"
+                    screenshot_paths != [], "exact TUI Skill receipt frames are missing"
                 )
-                screen = page.locator(".xterm-screen")
-                screen.screenshot(path=str(screenshot))
                 after_screenshot = screen_text(page)
                 require(
                     tools_surface_is_connected(after_screenshot),
                     "TUI Tools surface disconnected while taking the screenshot",
-                )
-                require(
-                    exact_receipt_block(after_screenshot, selected["skill_tool_use_id"])
-                    == receipt_before,
-                    "exact TUI Skill receipt changed while taking the screenshot",
                 )
                 terminal = page.evaluate(
                     "() => ({cols: window.term.cols, rows: window.term.rows})"
@@ -1167,9 +1223,22 @@ def main() -> int:
         "capture source checkout changed during TUI proof",
     )
 
-    screenshot_payload = screenshot.read_bytes()
+    frame_evidence = []
+    for visible_frame, screenshot in zip(visible_frames, screenshot_paths, strict=True):
+        screenshot_payload = screenshot.read_bytes()
+        frame_evidence.append(
+            {
+                "visible_text": visible_frame,
+                "visible_text_sha256": digest_bytes(visible_frame.encode()),
+                "screenshot": {
+                    "path": screenshot.name,
+                    "bytes": len(screenshot_payload),
+                    "sha256": digest_bytes(screenshot_payload),
+                },
+            }
+        )
     result = {
-        "schema": "masc.keeper-skill-tui-proof.v2",
+        "schema": "masc.keeper-skill-tui-proof.v3",
         "captured_at": utc_now(),
         "source": {
             "expected_sha": selected["expected_sha"],
@@ -1202,13 +1271,7 @@ def main() -> int:
         "producer_artifacts": verified_producer_artifacts,
         "terminal": terminal,
         "observations": observations,
-        "visible_text": visible,
-        "visible_text_sha256": digest_bytes(visible.encode()),
-        "screenshot": {
-            "path": screenshot.name,
-            "bytes": len(screenshot_payload),
-            "sha256": digest_bytes(screenshot_payload),
-        },
+        "frames": frame_evidence,
     }
     result_payload = write_json(args.out / "tui-evidence.json", result)
     require(

@@ -1748,28 +1748,34 @@ let render_approvals (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let approvals = approval_items state in
-  let scope, visible_count, total_count, hidden_count =
-    match state.approval_snapshot with
-    | None -> "-", "?", "?", "?"
-     | Some snapshot ->
-        ( (if snapshot.aps_filter_active then
-             Terminal_text.single_line_or ~default:"?"
-               snapshot.aps_actor_filter
-           else "all")
-        , string_of_int snapshot.aps_visible_count
-        , string_of_int snapshot.aps_total_count
-        , string_of_int snapshot.aps_hidden_count )
-  in
   let count = List.length approvals in
+  (* The count is what is on screen. It used to be the pending-confirm queue's
+     own visible/total pair, and that queue is one of the three lists this
+     screen draws: with seven Gate rows waiting and no confirm entries, the
+     title read "(0/0, hidden 0)" while the tab beside it read "7".
+
+     The filter clause stays -- an actor filter really does hide confirm
+     entries, and [visible_entries]/[hidden_entries] partition the same list,
+     so the hidden count is the whole of what the old total said. It now
+     reads as a note about that queue rather than as the screen's count. *)
+  let queue_note =
+    match state.approval_snapshot with
+    | None -> ", confirm queue unread"
+    | Some snapshot ->
+      if snapshot.aps_hidden_count = 0 then ""
+      else
+        Printf.sprintf ", %d hidden from %s" snapshot.aps_hidden_count
+          (Terminal_text.single_line_or ~default:"?" snapshot.aps_actor_filter)
+  in
   let action_inflight =
     Masc_tui_operator_projection.Flow.action_inflight state.approval_flow
   in
   let action_badge = if action_inflight then "  [submitting]" else "" in
   let header =
     Printf.sprintf
-      "%s (%s/%s, hidden %s, actor %s)  %s  %s%s"
+      "%s (%d%s)  %s  %s%s"
       (screen_title " MASC Approvals")
-      visible_count total_count hidden_count scope timestamp
+      count queue_note timestamp
       (connection_badge state) action_badge
   in
 
@@ -2027,20 +2033,45 @@ let render_approvals (state : state) =
                (max 8 (cols - 9)))
             Ansi.reset )
     | Some (Gate_row pending) ->
-        (* Same rule as the line above: the keeper name goes out whole and the
-           approval id, which is a uuid nobody reads off a screen, takes what
-           is left. *)
-        let keeper =
-          Terminal_text.single_line pending.Tui_decode.gp_keeper
+        (* The keeper name is not repeated here: the line directly above is
+           "<keeper> -> <what it wants>", so this line spends its width on
+           what that line cannot say. Where the command would run comes first
+           among those -- the same command means different things on the host
+           and in a container -- and the approval id, a uuid nobody reads off
+           a screen, takes what is left. *)
+        (* Ordered by what survives a narrow window. The sandbox is short and
+           decides the most -- host or container -- so it goes first; the
+           working directory refines it and is long, so it truncates first.
+           At eighty columns the old order lost the sandbox entirely. *)
+        let site =
+          match
+            pending.Tui_decode.gp_execution_sandbox,
+            pending.Tui_decode.gp_execution_cwd
+          with
+          | None, None -> ""
+          | sandbox, cwd ->
+            Printf.sprintf "sandbox=%s  at=%s"
+              (Terminal_text.single_line_or ~default:"?" sandbox)
+              (Terminal_text.single_line_or ~default:"?" cwd)
         in
-        ( Printf.sprintf "  %skeeper=%s  operation=%s  approval=%s%s" Ansi.dim
-            keeper
-            (fit_width
-               (Terminal_text.single_line pending.Tui_decode.gp_operation)
-               20)
+        (* The operation is already the right-hand side of the line above
+           whenever the two agree, which is every operation but an identity
+           call. Repeating it there costs the width this line needs. *)
+        let operation =
+          let name = Terminal_text.single_line pending.Tui_decode.gp_operation in
+          if String.equal name
+               (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
+          then ""
+          else Printf.sprintf "operation=%s" (fit_width name 20)
+        in
+        let described =
+          List.filter (fun part -> part <> "") [ operation; site ]
+          |> String.concat "  "
+        in
+        ( Printf.sprintf "  %s%s  approval=%s%s" Ansi.dim
+            described
             (fit_width (Terminal_text.single_line pending.Tui_decode.gp_id)
-               (max 8
-                  (cols - 52 - Message_layout.display_width keeper)))
+               (max 8 (cols - 22 - Message_layout.display_width described)))
             Ansi.reset
         , Printf.sprintf "  %sinput=%s%s" Ansi.dim
             (fit_width

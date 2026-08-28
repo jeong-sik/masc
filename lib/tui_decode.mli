@@ -917,6 +917,17 @@ type gate_pending = {
           the remote tool name read out of the stored input; otherwise the
           operation itself. *)
   gp_input_preview : string option;
+      (** What the row shows about the request. A [tool_execute] row shows the
+          command it would run, read out of the arguments the producer stored;
+          every other operation, and any shape this does not recognise, shows
+          the server's flattened preview. *)
+  gp_execution_cwd : string option;
+      (** The working directory a [tool_execute] request would run in.
+          [None] for operations that carry no execution context. *)
+  gp_execution_sandbox : string option;
+      (** Where a [tool_execute] request would run -- [host], or the container
+          it was granted against. The command alone does not say this, and it
+          changes what the command means. *)
   gp_waiting_s : float option;
 }
 

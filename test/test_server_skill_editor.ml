@@ -285,6 +285,142 @@ let test_create_publishes_without_host_path_input () =
    | Ok _ -> fail "create-only path overwrote an existing package")
 ;;
 
+let read_file path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+;;
+
+let test_delete_exact_reference_and_publish () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  (match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+   | Ok (Editor.Deleted_and_published { reference = deleted; _ }) ->
+     check bool "deleted exact reference" true (Skill_reference.equal reference deleted)
+   | Ok (Deleted_but_unpublished _) -> fail "deleted Skill was not published"
+   | Error error -> fail (Editor.error_to_string error));
+  check bool "SKILL.md removed" false (Sys.file_exists skill_path);
+  (match Editor.load ~base_path reference with
+   | Error Editor.Reference_not_current -> ()
+   | Error error -> fail ("wrong post-delete error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "published snapshot retained the deleted reference")
+;;
+
+let test_delete_stale_revision_does_not_mutate () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  let external_text = skill_text "External edit." "# External" in
+  write_file skill_path external_text;
+  (match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+   | Error (Editor.Revision_conflict _) -> ()
+   | Error error -> fail ("wrong stale error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "stale reference deleted the externally edited Skill");
+  check string "external edit survives" external_text (read_file skill_path)
+;;
+
+let test_delete_stale_published_revision_does_not_mutate () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  let replacement = skill_text "Published replacement." "# Replacement" in
+  (match Editor.save ~base_path ~reference ~source_text:replacement ~refresh with
+   | Ok (Editor.Saved_and_published _) -> ()
+   | Error error -> fail (Editor.error_to_string error)
+   | Ok (Unchanged _ | Saved_but_unpublished _) ->
+     fail "replacement revision was not published");
+  (match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+   | Error (Editor.Revision_conflict { actual }) ->
+     check
+       string
+       "published actual revision"
+       (Skill_reference.content_revision_of_source_text replacement
+        |> Skill_reference.content_revision_to_string)
+       (Skill_reference.content_revision_to_string actual)
+   | Error error -> fail ("wrong published stale error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "stale published reference deleted the replacement Skill");
+  check string "published replacement survives" replacement (read_file skill_path)
+;;
+
+let test_delete_requires_confirmation () =
+  with_workspace @@ fun base_path ->
+  let skill_path, original, reference, refresh =
+    setup base_path ~access:"read-write"
+  in
+  (match Editor.delete ~base_path ~reference ~confirmed:false ~refresh with
+   | Error Editor.Confirmation_required -> ()
+   | Error error -> fail ("wrong confirmation error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "unconfirmed delete mutated the Skill");
+  check string "unconfirmed Skill survives" original (read_file skill_path)
+;;
+
+let test_delete_read_only_source_does_not_mutate () =
+  with_workspace @@ fun base_path ->
+  let skill_path, original, reference, refresh = setup base_path ~access:"read-only" in
+  (match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+   | Error Editor.Source_read_only -> ()
+   | Error error -> fail ("wrong read-only error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "read-only source accepted deletion");
+  check string "read-only Skill survives" original (read_file skill_path)
+;;
+
+let test_delete_missing_file_is_not_found_without_mutation () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  Unix.unlink skill_path;
+  match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+  | Error Editor.Source_file_missing -> ()
+  | Error error -> fail ("wrong missing-file error: " ^ Editor.error_to_string error)
+  | Ok _ -> fail "missing file was reported as deleted"
+;;
+
+let test_delete_rejects_symlink_leaf () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  let outside_path = Filename.concat base_path "outside-skill.md" in
+  let outside_text = skill_text "Outside." "# Outside" in
+  write_file outside_path outside_text;
+  Unix.unlink skill_path;
+  Unix.symlink outside_path skill_path;
+  (match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+   | Error (Editor.Source_path_rejected _) -> ()
+   | Error error -> fail ("wrong symlink error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "symlink leaf was accepted for deletion");
+  check string "symlink target survives" outside_text (read_file outside_path);
+  check bool "symlink leaf survives" true (Sys.file_exists skill_path)
+;;
+
+let test_delete_rejects_symlink_directory_escape () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  let package_dir = Filename.dirname skill_path in
+  let outside_dir = Filename.concat base_path "outside-package" in
+  let outside_path = Filename.concat outside_dir "SKILL.md" in
+  Unix.mkdir outside_dir 0o700;
+  let outside_text = skill_text "Outside package." "# Outside" in
+  write_file outside_path outside_text;
+  Unix.unlink skill_path;
+  Unix.rmdir package_dir;
+  Unix.symlink outside_dir package_dir;
+  (match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+   | Error (Editor.Source_path_rejected _) -> ()
+   | Error error -> fail ("wrong directory escape error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "symlink directory escape was accepted for deletion");
+  check string "escaped target survives" outside_text (read_file outside_path)
+;;
+
+let test_deleted_but_unpublished_is_explicit () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, _ = setup base_path ~access:"read-write" in
+  let refresh () = Error "injected publication failure" in
+  (match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+   | Ok (Editor.Deleted_but_unpublished { reason; _ }) ->
+     check string "failure is preserved" "injected publication failure" reason
+   | Error error -> fail (Editor.error_to_string error)
+   | Ok (Deleted_and_published _) ->
+     fail "publication failure was reported as published");
+  check bool "durable deletion is not hidden" false (Sys.file_exists skill_path)
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   run
@@ -302,6 +438,23 @@ let () =
             test_saved_but_unpublished_is_explicit
         ; test_case "create publishes without host path input" `Quick
             test_create_publishes_without_host_path_input
+        ; test_case "delete exact reference and publish" `Quick
+            test_delete_exact_reference_and_publish
+        ; test_case "delete stale revision does not mutate" `Quick
+            test_delete_stale_revision_does_not_mutate
+        ; test_case "delete stale published revision does not mutate" `Quick
+            test_delete_stale_published_revision_does_not_mutate
+        ; test_case "delete requires confirmation" `Quick
+            test_delete_requires_confirmation
+        ; test_case "delete read-only source does not mutate" `Quick
+            test_delete_read_only_source_does_not_mutate
+        ; test_case "delete missing file is not found" `Quick
+            test_delete_missing_file_is_not_found_without_mutation
+        ; test_case "delete rejects symlink leaf" `Quick test_delete_rejects_symlink_leaf
+        ; test_case "delete rejects symlink directory escape" `Quick
+            test_delete_rejects_symlink_directory_escape
+        ; test_case "deleted but unpublished is explicit" `Quick
+            test_deleted_but_unpublished_is_explicit
         ] )
     ]
 ;;

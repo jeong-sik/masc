@@ -1,5 +1,11 @@
 type access = Read_only | Read_write
 
+type path_rejection =
+  | Outside_source
+  | Non_directory_component
+  | Non_regular_file
+  | Identity_changed
+
 type loaded =
   { reference : Skill_reference.t
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
@@ -39,6 +45,16 @@ type create_outcome =
       ; reason : string
       }
 
+type delete_outcome =
+  | Deleted_and_published of
+      { reference : Skill_reference.t
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      }
+  | Deleted_but_unpublished of
+      { reference : Skill_reference.t
+      ; reason : string
+      }
+
 type error =
   | Invalid_workspace
   | Snapshot_not_registered
@@ -47,13 +63,19 @@ type error =
   | Source_not_ready
   | Source_file_missing
   | Source_read_failed
+  | Source_path_rejected of path_rejection
   | Source_read_only
+  | Confirmation_required
   | Package_already_exists
   | Invalid_package_id of string
   | Revision_conflict of { actual : Skill_reference.content_revision }
   | Source_too_large of { bytes : int; max_bytes : int }
   | Validation_failed of string
   | Write_failed of string
+  | Remove_failed of
+      { removed : bool
+      ; detail : string
+      }
 
 type target =
   { snapshot : Skill_catalog_snapshot.t
@@ -70,6 +92,13 @@ let access_to_string = function
   | Read_write -> "read_write"
 ;;
 
+let path_rejection_to_string = function
+  | Outside_source -> "outside_source"
+  | Non_directory_component -> "non_directory_component"
+  | Non_regular_file -> "non_regular_file"
+  | Identity_changed -> "identity_changed"
+;;
+
 let error_code = function
   | Invalid_workspace -> "invalid_workspace"
   | Snapshot_not_registered -> "snapshot_not_registered"
@@ -78,13 +107,16 @@ let error_code = function
   | Source_not_ready -> "source_not_ready"
   | Source_file_missing -> "source_file_missing"
   | Source_read_failed -> "source_read_failed"
+  | Source_path_rejected _ -> "source_path_rejected"
   | Source_read_only -> "source_read_only"
+  | Confirmation_required -> "confirmation_required"
   | Package_already_exists -> "package_already_exists"
   | Invalid_package_id _ -> "invalid_package_id"
   | Revision_conflict _ -> "revision_conflict"
   | Source_too_large _ -> "source_too_large"
   | Validation_failed _ -> "validation_failed"
   | Write_failed _ -> "write_failed"
+  | Remove_failed _ -> "remove_failed"
 ;;
 
 let error_to_string = function
@@ -95,7 +127,10 @@ let error_to_string = function
   | Source_not_ready -> "Skill source is not ready"
   | Source_file_missing -> "SKILL.md is missing"
   | Source_read_failed -> "SKILL.md could not be read safely"
+  | Source_path_rejected rejection ->
+    "Skill path was rejected: " ^ path_rejection_to_string rejection
   | Source_read_only -> "Skill source is read-only"
+  | Confirmation_required -> "Skill deletion requires explicit confirmation"
   | Package_already_exists -> "Skill package already exists"
   | Invalid_package_id detail -> "Invalid Skill package id: " ^ detail
   | Revision_conflict { actual } ->
@@ -105,6 +140,8 @@ let error_to_string = function
     Printf.sprintf "SKILL.md is too large: %d bytes (maximum %d)" bytes max_bytes
   | Validation_failed detail -> "Skill validation failed: " ^ detail
   | Write_failed detail -> "Skill durable write failed: " ^ detail
+  | Remove_failed { removed; detail = _ } ->
+    Printf.sprintf "Skill durable delete failed after file removal=%b" removed
 ;;
 
 let current_snapshot ~base_path =
@@ -120,7 +157,10 @@ let resolve_target ~base_path reference =
   let* entry =
     match Skill_catalog_snapshot.resolve_reference snapshot reference with
     | Ok entry -> Ok entry
-    | Error _ -> Error Reference_not_current
+    | Error (Skill_catalog_snapshot.Identity_not_found _) ->
+      Error Reference_not_current
+    | Error (Content_revision_mismatch { observed; _ }) ->
+      Error (Revision_conflict { actual = observed })
   in
   let* source_scan =
     match List.nth_opt (Skill_catalog_snapshot.sources snapshot) entry.source_index with
@@ -153,7 +193,19 @@ let read_current target =
       ~ownership_root:target.source_root
       target.path
   with
-  | Error _ -> Error Source_read_failed
+  | Error { Fs_compat.failure; _ } ->
+    (match failure with
+     | Ownership_boundary_rejected { rejection; _ } ->
+       (match rejection with
+        | Fs_compat.Owned_path_outside_root _ ->
+          Error (Source_path_rejected Outside_source)
+        | Owned_path_non_directory _ ->
+          Error (Source_path_rejected Non_directory_component))
+     | Path_is_not_regular_file _ ->
+       Error (Source_path_rejected Non_regular_file)
+     | Filesystem_identity_changed _ ->
+       Error (Source_path_rejected Identity_changed)
+     | Owned_file_operation_failed _ -> Error Source_read_failed)
   | Ok None -> Error Source_file_missing
   | Ok (Some source_text) ->
     let actual = Skill_reference.content_revision_of_source_text source_text in
@@ -444,6 +496,57 @@ let create ~base_path ~source_id ~package_id ~source_text ~refresh =
                       })))))
 ;;
 
+let delete ~base_path ~reference ~confirmed ~refresh =
+  if not confirmed
+  then Error Confirmation_required
+  else
+    let* initial_target = resolve_target ~base_path reference in
+    if initial_target.access = Read_only
+    then Error Source_read_only
+    else
+      with_path_lock initial_target.path (fun () ->
+        let* target = resolve_target ~base_path reference in
+        if target.access = Read_only
+        then Error Source_read_only
+        else
+          let* _, actual = read_current target in
+          let* () = require_expected_revision reference actual in
+          match
+            Keeper_fs.remove_file_durable
+              ~ownership_root:target.source_root
+              target.path
+          with
+          | Error error ->
+            Error
+              (Remove_failed
+                 { removed = error.removed
+                 ; detail = Keeper_fs.durable_remove_error_to_string error
+                 })
+          | Ok () ->
+            (match refresh () with
+             | Error reason -> Ok (Deleted_but_unpublished { reference; reason })
+             | Ok publication ->
+               (match published_snapshot publication with
+                | Error reason ->
+                  Ok (Deleted_but_unpublished { reference; reason })
+                | Ok snapshot ->
+                  (match Skill_catalog_snapshot.resolve_reference snapshot reference with
+                   | Error _ ->
+                     Ok
+                       (Deleted_and_published
+                          { reference
+                          ; snapshot_revision =
+                              Skill_catalog_snapshot.snapshot_revision snapshot
+                          })
+                   | Ok _ ->
+                     Ok
+                       (Deleted_but_unpublished
+                          { reference
+                          ; reason =
+                              "deleted reference remained present after publication"
+                          })))))
+;;
+
 let preview_to_yojson (preview : preview) =
   `Assoc
     [ "reference", Skill_reference.to_yojson preview.reference
@@ -506,4 +609,42 @@ let create_outcome_to_yojson = function
       ; "preview", preview_to_yojson preview
       ; "reason", `String reason
       ]
+;;
+
+let delete_outcome_to_yojson = function
+  | Deleted_and_published { reference; snapshot_revision } ->
+    `Assoc
+      [ "status", `String "deleted_and_published"
+      ; "reference", Skill_reference.to_yojson reference
+      ; ( "snapshot_revision"
+        , `String (Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision) )
+      ]
+  | Deleted_but_unpublished { reference; reason } ->
+    `Assoc
+      [ "status", `String "deleted_but_unpublished"
+      ; "reference", Skill_reference.to_yojson reference
+      ; "reason", `String reason
+      ]
+;;
+
+let error_to_yojson error =
+  `Assoc
+    ([ "ok", `Bool false
+     ; "code", `String (error_code error)
+     ; "error", `String (error_to_string error)
+     ]
+     @ match error with
+       | Revision_conflict { actual } ->
+         [ ( "actual_revision"
+           , `String (Skill_reference.content_revision_to_string actual) )
+         ]
+       | Source_path_rejected rejection ->
+         [ "path_rejection", `String (path_rejection_to_string rejection) ]
+       | Remove_failed { removed; detail = _ } -> [ "removed", `Bool removed ]
+       | Invalid_workspace | Snapshot_not_registered | Snapshot_uninitialized
+       | Reference_not_current | Source_not_ready | Source_file_missing
+       | Source_read_failed | Source_read_only
+       | Confirmation_required | Package_already_exists | Invalid_package_id _
+       | Source_too_large _ | Validation_failed _ | Write_failed _ ->
+         [])
 ;;

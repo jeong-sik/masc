@@ -435,6 +435,7 @@ let parse_runtime_config_raw_body body_str =
 type skill_editor_body =
   { reference : Skill_reference.t
   ; source_text : string option
+  ; confirmed : bool option
   }
 
 let parse_skill_editor_body body_str =
@@ -447,11 +448,20 @@ let parse_skill_editor_body body_str =
          (match Skill_reference.of_yojson reference_json with
           | Error _ -> Error "reference must be an exact Skill reference"
           | Ok reference ->
-            (match Json_util.assoc_member_opt "source_text" json with
-             | None -> Ok { reference; source_text = None }
-             | Some (`String source_text) ->
-               Ok { reference; source_text = Some source_text }
-             | Some _ -> Error "source_text must be a string")))
+            let ( let* ) = Result.bind in
+            let* source_text =
+              match Json_util.assoc_member_opt "source_text" json with
+              | None -> Ok None
+              | Some (`String source_text) -> Ok (Some source_text)
+              | Some _ -> Error "source_text must be a string"
+            in
+            let* confirmed =
+              match Json_util.assoc_member_opt "confirmed" json with
+              | None -> Ok None
+              | Some (`Bool confirmed) -> Ok (Some confirmed)
+              | Some _ -> Error "confirmed must be a boolean"
+            in
+            Ok { reference; source_text; confirmed }))
     | _ -> Error "JSON object body required"
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
@@ -499,20 +509,18 @@ let skill_editor_error_status = function
   | Snapshot_not_registered | Snapshot_uninitialized | Reference_not_current
   | Source_not_ready | Source_file_missing ->
     `Not_found
-  | Invalid_workspace | Source_read_failed | Write_failed _ ->
+  | Invalid_workspace | Source_read_failed | Write_failed _ | Remove_failed _ ->
     `Internal_server_error
   | Source_too_large _ -> `Payload_too_large
-  | Invalid_package_id _ | Validation_failed _ -> `Bad_request
+  | Source_path_rejected _ | Confirmation_required | Invalid_package_id _
+  | Validation_failed _ ->
+    `Bad_request
 
 let respond_skill_editor_error ~request reqd error =
   Http.Response.json_value
     ~status:(skill_editor_error_status error)
     ~request
-    (`Assoc
-      [ "ok", `Bool false
-      ; "code", `String (Server_skill_editor.error_code error)
-      ; "error", `String (Server_skill_editor.error_to_string error)
-      ])
+    (Server_skill_editor.error_to_yojson error)
     reqd
 ;;
 
@@ -752,6 +760,25 @@ let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome 
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Dashboard.warn "Skill write audit failed: %s" (Printexc.to_string exn)
+;;
+
+let audit_skill_delete state agent_name ~reference ~status ~outcome =
+  try
+    Audit_log.log_action
+      (Mcp_server.workspace_config state)
+      ~agent_id:agent_name
+      ~action:(Audit_log.Custom "skill_delete")
+      ~details:
+        (`Assoc
+          [ "reference", Skill_reference.to_yojson reference
+          ; "status", `String status
+          ])
+      ~outcome
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Dashboard.warn "Skill delete audit failed: %s" (Printexc.to_string exn)
 ;;
 
 let respond_runtime_config_commit
@@ -1610,7 +1637,7 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = _ } ->
+             | Ok { reference; source_text = _; confirmed = _ } ->
                Http.Response.json_value
                  ~compress:true
                  ~request:req
@@ -1678,6 +1705,56 @@ let add_routes ~sw ~clock router =
                     (Server_skill_editor.create_outcome_to_yojson outcome)
                     reqd)))
          request reqd)
+  |> Http.Router.add
+       ~path:"/api/v1/skills/editor"
+       ~methods:[ `DELETE ]
+       ~handler:(fun request reqd ->
+         with_token_permission_auth ~permission:Masc_domain.CanAdmin
+           (fun state agent_name req reqd ->
+             Http.Request.read_body_async reqd (fun body_str ->
+               match parse_skill_editor_body body_str with
+               | Error message ->
+                 respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+               | Ok { reference; source_text = _; confirmed } ->
+                 let base_path = (Mcp_server.workspace_config state).base_path in
+                 let refresh () =
+                   match Runtime.load_config_observation () with
+                   | Error message -> Error message
+                   | Ok observation ->
+                     Server_skill_snapshot_runtime.refresh_from_observation
+                       ~base_path
+                       observation
+                     |> Result.map_error Server_skill_snapshot_runtime.error_to_string
+                 in
+                 (match
+                    Server_skill_editor.delete
+                      ~base_path
+                      ~reference
+                      ~confirmed:(Option.value confirmed ~default:false)
+                      ~refresh
+                  with
+                  | Error error ->
+                    audit_skill_delete state agent_name ~reference
+                      ~status:(Server_skill_editor.error_code error)
+                      ~outcome:
+                        (Audit_log.Failure (Server_skill_editor.error_to_string error));
+                    respond_skill_editor_error ~request:req reqd error
+                  | Ok outcome ->
+                    let status, audit_outcome =
+                      match outcome with
+                      | Server_skill_editor.Deleted_and_published _ ->
+                        "deleted_and_published", Audit_log.Success
+                      | Deleted_but_unpublished { reason; _ } ->
+                        "deleted_but_unpublished", Audit_log.Failure reason
+                    in
+                    audit_skill_delete state agent_name ~reference ~status
+                      ~outcome:audit_outcome;
+                    Http.Response.json_value
+                      ~compress:true
+                      ~request:req
+                      (Server_skill_editor.delete_outcome_to_yojson outcome)
+                      reqd)))
+           request reqd)
   |> Http.Router.post "/api/v1/skills/editor/read" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
@@ -1685,7 +1762,7 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = _ } ->
+             | Ok { reference; source_text = _; confirmed = _ } ->
                (match
                   Server_skill_editor.load
                     ~base_path:(Mcp_server.workspace_config state).base_path
@@ -1706,13 +1783,13 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = None } ->
+             | Ok { reference; source_text = None; confirmed = _ } ->
                respond_dashboard_error
                  ~status:`Bad_request
                  ~request:req
                  reqd
                  "source_text required"
-             | Ok { reference; source_text = Some source_text } ->
+             | Ok { reference; source_text = Some source_text; confirmed = _ } ->
                (match
                   Server_skill_editor.preview
                     ~base_path:(Mcp_server.workspace_config state).base_path
@@ -1738,13 +1815,13 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = None } ->
+             | Ok { reference; source_text = None; confirmed = _ } ->
                respond_dashboard_error
                  ~status:`Bad_request
                  ~request:req
                  reqd
                  "source_text required"
-             | Ok { reference; source_text = Some source_text } ->
+             | Ok { reference; source_text = Some source_text; confirmed = _ } ->
                let base_path = (Mcp_server.workspace_config state).base_path in
                let refresh () =
                  match Runtime.load_config_observation () with

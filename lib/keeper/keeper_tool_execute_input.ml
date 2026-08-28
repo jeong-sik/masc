@@ -8,15 +8,6 @@
    Extracted from [Keeper_tool_execute_runtime] (godfile decomp). Pure mapping
    over typed input + Stdlib. *)
 
-let has_typed_execute_input_key = function
-  | `Assoc fields ->
-    List.exists
-      (fun (key, _) ->
-         String.equal key "argv" || String.equal key "pipeline")
-      fields
-  | _ -> false
-;;
-
 let assoc_upsert key value = function
   | `Assoc fields ->
     `Assoc ((key, value) :: List.filter (fun (k, _) -> not (String.equal k key)) fields)

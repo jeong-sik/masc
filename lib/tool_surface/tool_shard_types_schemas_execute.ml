@@ -2,13 +2,15 @@
     schema, decoded from [config/tools/tool_execute.toml].
 
     The public descriptor exposes one command SSOT: a non-empty [argv] process
-    vector for a single process, or [pipeline] containing stages for explicit
-    Shell IR pipelines. Either form is a program of one or more stages, and a
-    stage owns its own redirections. Raw [cmd] strings and the retired
-    duplicate [executable] field are intentionally absent from the schema.
+    vector for a single process, [pipeline] containing stages for explicit
+    Shell IR pipelines, or [script] — one command line parsed by the bash
+    subset into the same Shell IR, never handed to a shell. Every form is a
+    program of one or more stages, and a stage owns its own redirections. Raw
+    [cmd] strings and the retired duplicate [executable] field are
+    intentionally absent from the schema.
 
-    Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout,
-    stderr. This sentence is the contract line checked by
+    Accepted fields: argv, pipeline, script, env, cwd, timeout_sec, stdin,
+    stdout, stderr. This sentence is the contract line checked by
     scripts/check-execute-async-surface.sh — update both together.
 
     The builders this file used to hold carried a [prose] type that decided,

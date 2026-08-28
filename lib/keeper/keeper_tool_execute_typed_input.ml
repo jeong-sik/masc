@@ -463,10 +463,19 @@ let source_of_fields ~path fields =
             itself"
            path
        else Ok (Script script))
-  | false, _ ->
+  | false, true ->
     let* program = program_of_fields ~path fields in
     let* next = optional_next ~path fields in
     Ok (Staged { program; next })
+  | false, false ->
+    (* Nothing named a source. [program_of_fields] would say "argv or
+       pipeline is required", which is the truth for a nested [then] entry
+       but omits the third form this top level accepts. *)
+    result_errorf
+      "%s.argv, %s.pipeline or %s.script is required"
+      path
+      path
+      path
 ;;
 
 let of_json (json : Yojson.Safe.t) =

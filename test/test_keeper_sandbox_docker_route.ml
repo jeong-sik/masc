@@ -1951,7 +1951,7 @@ let test_execute_blocks_file_redirect_before_docker () =
    | Some false | None -> ());
   Alcotest.(check (option string))
     "typed boundary error"
-    (Some "Typed Shell IR input is required. Provide non-empty argv or pipeline.")
+    (Some "cmd is not a field of this tool; the shell form is named script")
     (parse_string_field raw "error");
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)

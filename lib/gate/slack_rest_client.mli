@@ -154,12 +154,6 @@ val conversations_info :
     [groups:read] (private) on the token; without them Slack answers
     [missing_scope], which is a typed {!Slack_api} error and not a crash. *)
 
-val build_conversations_info_request :
-  token:string -> channel_id:string -> string * (string * string) list * string
-
-val parse_conversations_info_response :
-  status:int -> body:string -> (conversation_info_ok, error) result
-
 val users_info :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->

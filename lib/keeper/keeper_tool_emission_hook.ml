@@ -112,11 +112,6 @@ let accumulator_for_keeper (keeper_name : string) : accumulator =
 let capture_typed_result_for_keeper ~keeper_name data =
   capture_typed_result (accumulator_for_keeper keeper_name) data
 
-let registered_keeper_names () : string list =
-  Stdlib.Mutex.lock registry_mutex;
-  let names = Hashtbl.fold (fun k _ acc -> k :: acc) registry [] in
-  Stdlib.Mutex.unlock registry_mutex;
-  List.sort String.compare names
 
 let drop_keeper_accumulator (keeper_name : string) : unit =
   Stdlib.Mutex.lock registry_mutex;

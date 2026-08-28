@@ -290,12 +290,6 @@ val agent_rl_key_of_request : Httpun.Request.t -> string option
     bearer token (SHA-256 prefix) over the declared agent-name header.
     Returns [None] for anonymous requests. *)
 
-val check_agent_rate_limit :
-  Httpun.Request.t -> Httpun.Reqd.t -> (unit, unit) result
-(** Check the per-agent rate limit.  Returns [Ok ()] if allowed.
-    Sends a 429 response and returns [Error ()] if rate-limited.
-    Anonymous requests (no token, no agent header) are always allowed. *)
-
 (** {1 Handler combinators}
 
     Each [with_*_auth] takes a handler that expects an authorised

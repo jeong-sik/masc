@@ -4,7 +4,6 @@
     module performs no per-Keeper or per-turn policy filtering. *)
 
 (** Complete descriptor-declared model surface. *)
-val all_keeper_model_tool_schemas : unit -> Masc_domain.tool_schema list
 val keeper_model_tool_schemas : unit -> Masc_domain.tool_schema list
 
 (** Narrowed surface for a keeper that declares [tool_groups].

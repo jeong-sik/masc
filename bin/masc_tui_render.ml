@@ -4114,7 +4114,7 @@ let keeper_lane_phase_style (phase : Tui_decode.keeper_lane_phase) =
   match phase with
   | Lane_phase_running -> ((Theme.ok ()), "\xe2\x97\x8f")
   | Lane_phase_failing | Lane_phase_crashed -> ((Theme.bad ()), "\xc3\x97")
-  | Lane_phase_compacting | Lane_phase_handing_off | Lane_phase_draining
+  | Lane_phase_compacting | Lane_phase_draining
   | Lane_phase_restarting ->
       ((Theme.warn ()), "\xe2\x97\x90")
   | Lane_phase_paused -> ((Theme.warn ()), "\xe2\x97\x8b")

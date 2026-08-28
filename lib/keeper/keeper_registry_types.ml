@@ -291,10 +291,7 @@ let lifecycle_event_origin_to_string = function
 let is_paired_lifecycle_event = function
   | Keeper_state_machine.Compaction_started
   | Keeper_state_machine.Compaction_completed
-  | Keeper_state_machine.Compaction_failed _
-  | Keeper_state_machine.Handoff_started
-  | Keeper_state_machine.Handoff_completed _
-  | Keeper_state_machine.Handoff_failed _ -> true
+  | Keeper_state_machine.Compaction_failed _ -> true
   | _ -> false
 ;;
 

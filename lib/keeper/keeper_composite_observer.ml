@@ -193,7 +193,6 @@ let live_turn_phase (entry : Keeper_registry.registry_entry) =
       (match entry.phase with
        | Keeper_state_machine.Compacting ->
            Keeper_registry.Packed Turn_compacting
-       | Keeper_state_machine.HandingOff
        | Keeper_state_machine.Draining ->
            Keeper_registry.Packed Turn_finalizing
        | Keeper_state_machine.Running
@@ -252,7 +251,6 @@ let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Failing
   | Keeper_state_machine.Compacting
-  | Keeper_state_machine.HandingOff
   | Keeper_state_machine.Draining
   | Keeper_state_machine.Paused
   | Keeper_state_machine.Stopped
@@ -555,7 +553,7 @@ let phase_condition_rows (c : Keeper_state_machine.conditions) : phase_condition
   [
     row "stopped_clean_drain" "Stopped: clean drain complete" 2
       (c.stop_requested && c.drain_complete
-       && not c.compaction_active && not c.handoff_active)
+       && not c.compaction_active)
       Keeper_state_machine.Stopped;
     row "offline_launch_pending" "Offline: launch pending without fiber" 3
       (c.launch_pending && not c.fiber_alive)
@@ -572,9 +570,6 @@ let phase_condition_rows (c : Keeper_state_machine.conditions) : phase_condition
     row "paused_operator" "Paused: explicit operator pause" 8
       c.operator_paused
       Keeper_state_machine.Paused;
-    row "handing_off_active" "HandingOff: handoff active" 9
-      c.handoff_active
-      Keeper_state_machine.HandingOff;
     row "compacting_active" "Compacting: compaction active" 10
       c.compaction_active
       Keeper_state_machine.Compacting;

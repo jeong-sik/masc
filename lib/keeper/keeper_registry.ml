@@ -249,7 +249,7 @@ let is_running ~base_path name =
      its in-flight turn before the recovery transition; [is_running]
      answers the operator-facing question "is this keeper currently
      running?" and treats only [Running] as such. The 10 other phases
-     (Offline, Failing, Compacting, HandingOff, Draining,
+     (Offline, Failing, Compacting, Draining,
      Paused, Stopped, Crashed, Restarting) yield [false]
      here. A future phase variant (e.g. a hypothetical [Migrating] or
      [Healing]) would silently inherit [false] under the previous
@@ -266,7 +266,6 @@ let is_running ~base_path name =
           ( Offline
           | Failing
           | Compacting
-          | HandingOff
           | Draining
           | Paused
           | Stopped
@@ -424,7 +423,6 @@ let wakeup_running_entry ~intent (entry : registry_entry) =
      | Keeper_state_machine.Restarting
      (* no live fiber to receive the hint *)
      | Keeper_state_machine.Compacting
-     | Keeper_state_machine.HandingOff
      | Keeper_state_machine.Draining
      (* a fiber is mid-operation; waking races it *)
      | Keeper_state_machine.Paused
@@ -535,7 +533,7 @@ let fiber_health_of ~base_path name =
      | Stopped ->
        if lane_has_exited entry then Fiber_unknown else Fiber_alive
      | Offline -> Fiber_unknown
-     | Running | Paused | Failing | Compacting | HandingOff | Draining ->
+     | Running | Paused | Failing | Compacting | Draining ->
        (match Eio.Promise.peek entry.done_p with
         | None -> Fiber_alive
         | Some `Stopped ->

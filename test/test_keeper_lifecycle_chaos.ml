@@ -44,10 +44,7 @@ let get_phase name =
 let paired_lifecycle_origin = function
   | KSM.Compaction_started
   | KSM.Compaction_completed
-  | KSM.Compaction_failed _
-  | KSM.Handoff_started
-  | KSM.Handoff_completed _
-  | KSM.Handoff_failed _ -> R.Post_turn_lifecycle
+  | KSM.Compaction_failed _ -> R.Post_turn_lifecycle
   | _ -> R.Generic_dispatch
 
 let dispatch name event =
@@ -143,16 +140,6 @@ let test_graceful_shutdown () =
   dispatch_expect_rejected "shutdown" KSM.Heartbeat_ok;
   dispatch_expect_rejected "shutdown" KSM.Fiber_started
 
-let test_handoff_success () =
-  setup "handoff";
-
-  let tr = dispatch "handoff" KSM.Handoff_started in
-  check phase_t "handing off" KSM.HandingOff tr.new_phase;
-
-  let tr = dispatch "handoff"
-    (KSM.Handoff_completed { new_trace_id = "trace-2" }) in
-  check phase_t "back to running" KSM.Running tr.new_phase
-
 let test_pause_resume () =
   setup "pause";
 
@@ -177,15 +164,9 @@ let test_full_chaos_sequence () =
     KSM.Compaction_completed in
   check phase_t "post-compact → running" KSM.Running tr.new_phase;
 
-  let tr = dispatch "chaos" KSM.Handoff_started in
-  check phase_t "handoff" KSM.HandingOff tr.new_phase;
-  (* Handoff completes but fiber crashes immediately after *)
   let tr = dispatch "chaos"
-    (KSM.Handoff_completed { new_trace_id = "trace-fail" }) in
-  check phase_t "handoff complete → running" KSM.Running tr.new_phase;
-  let tr = dispatch "chaos"
-    (KSM.Fiber_terminated { outcome = "handoff target unreachable"; provider_id = None; http_status = None }) in
-  check phase_t "post-handoff crash" KSM.Crashed tr.new_phase;
+    (KSM.Fiber_terminated { outcome = "provider unreachable"; provider_id = None; http_status = None }) in
+  check phase_t "post-compact crash" KSM.Crashed tr.new_phase;
 
   restart_keeper "chaos" ~attempt:1;
 
@@ -241,7 +222,6 @@ let () =
       , [ eio_test "graceful shutdown → Stopped" test_graceful_shutdown ] )
     ; ( "buffer_states"
       , [ eio_test "compaction crash → recovery" test_compaction_crash_recovery
-        ; eio_test "handoff success" test_handoff_success
         ; eio_test "pause and resume" test_pause_resume ] )
     ; ( "chaos"
       , [ eio_test "6-phase interleaved faults" test_full_chaos_sequence

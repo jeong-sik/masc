@@ -7,7 +7,6 @@ type phase = Keeper_state_machine_phase.phase =
   | Running
   | Failing
   | Compacting
-  | HandingOff
   | Draining
   | Paused
   | Stopped
@@ -27,7 +26,6 @@ type conditions =
   ; turn_healthy : bool
   ; context_handoff_needed : bool
   ; compaction_active : bool
-  ; handoff_active : bool
   ; operator_paused : bool
   ; stop_requested : bool
   ; restart_requested : bool
@@ -42,7 +40,6 @@ let default_conditions =
   ; turn_healthy = true
   ; context_handoff_needed = false
   ; compaction_active = false
-  ; handoff_active = false
   ; operator_paused = false
   ; stop_requested = false
   ; restart_requested = false
@@ -74,11 +71,6 @@ type event =
   | Compaction_started
   | Compaction_completed
   | Compaction_failed of { reason : string }
-  | Handoff_started
-  | Handoff_completed of
-      { new_trace_id : string
-      }
-  | Handoff_failed of { reason : string }
   | Operator_pause
   | Operator_resume
   | Operator_stop of { remove_meta : bool }
@@ -107,9 +99,6 @@ let event_to_string = function
   | Compaction_started -> "compaction_started"
   | Compaction_completed -> "compaction_completed"
   | Compaction_failed r -> Printf.sprintf "compaction_failed(%s)" r.reason
-  | Handoff_started -> "handoff_started"
-  | Handoff_completed _ -> "handoff_completed"
-  | Handoff_failed r -> Printf.sprintf "handoff_failed(%s)" r.reason
   | Operator_pause -> "operator_pause"
   | Operator_resume -> "operator_resume"
   | Operator_stop r -> Printf.sprintf "operator_stop(remove_meta=%b)" r.remove_meta
@@ -148,7 +137,6 @@ let event_to_string = function
       explicit phase-entry intent until that integration is unified. *)
 type entry_action =
   | Start_compaction
-  | Start_handoff
   | Start_drain
   | Schedule_restart of { delay_sec : float }
   | Publish_lifecycle of
@@ -224,7 +212,6 @@ let can_transition ~from_phase ~to_phase =
     , ( Offline
       | Failing
           | Compacting
-      | HandingOff
       | Paused
       | Crashed
       | Restarting ) ) -> false
@@ -232,7 +219,6 @@ let can_transition ~from_phase ~to_phase =
   | ( Running
     , ( Failing
       | Compacting
-      | HandingOff
       | Draining
       | Paused
       | Stopped
@@ -245,7 +231,7 @@ let can_transition ~from_phase ~to_phase =
      is still set). *)
   | Failing, (Running | Compacting | Crashed | Draining | Paused) -> true
   | ( Failing
-    , (Offline | Failing | HandingOff | Stopped | Restarting) ) ->
+    , (Offline | Failing | Stopped | Restarting) ) ->
     false
   (* Compacting -> Running (done or failed; the durable Keeper Lane owns any
      exact-source retry after failure)
@@ -253,14 +239,7 @@ let can_transition ~from_phase ~to_phase =
      | Failing (hb fail / guardrail during)
      | Crashed (fatal) | Draining (operator stop during). *)
   | Compacting, (Running | Failing | Crashed | Draining | Paused) -> true
-  | Compacting, (Offline | Compacting | HandingOff | Stopped | Restarting) -> false
-  (* HandingOff -> Running (done) | Failing | Crashed
-     | Draining (operator stop during handoff)
-     | Paused (operator pause during handoff) *)
-  | HandingOff, (Running | Failing | Crashed | Draining | Paused) -> true
-  | ( HandingOff
-    , (Offline | Compacting | HandingOff | Stopped | Restarting) )
-    -> false
+  | Compacting, (Offline | Compacting | Stopped | Restarting) -> false
   (* Draining -> Stopped (done) | Crashed (fatal during drain) *)
   | Draining, (Stopped | Crashed) -> true
   | ( Draining
@@ -268,17 +247,16 @@ let can_transition ~from_phase ~to_phase =
       | Running
       | Failing
           | Compacting
-      | HandingOff
       | Draining
       | Paused
       | Restarting ) ) -> false
   (* Paused -> Running (resume) | latent states exposed by resume
-     (Failing/HandingOff/Restarting/Offline) | Draining (stop)
+     (Failing/Restarting/Offline) | Draining (stop)
      | Stopped (remove) | Crashed (fiber can die while keeper is paused)
      | Compacting (operator invoked masc_keeper_compact on a paused keeper).
 
      Operator_resume only clears [operator_paused]; it intentionally does not
-     erase already-observed launch, health, handoff, or restart conditions.
+     erase already-observed launch, health, or restart conditions.
      If one of those latches still derives a non-running phase, accepting the
      transition lets the registry commit the resume intent and surface the real
      blocker instead of rejecting the event and leaving the keeper permanently
@@ -287,7 +265,6 @@ let can_transition ~from_phase ~to_phase =
     , ( Running
       | Failing
           | Compacting
-      | HandingOff
       | Draining
       | Stopped
       | Crashed
@@ -301,7 +278,6 @@ let can_transition ~from_phase ~to_phase =
       | Running
       | Failing
           | Compacting
-      | HandingOff
       | Draining
       | Paused
       | Stopped
@@ -310,12 +286,12 @@ let can_transition ~from_phase ~to_phase =
      | Draining (stop_requested persists) | Paused (operator_paused persists) *)
   | Restarting, (Running | Crashed | Draining | Paused) -> true
   | ( Restarting
-    , (Offline | Failing | Compacting | HandingOff | Stopped | Restarting) )
+    , (Offline | Failing | Compacting | Stopped | Restarting) )
     -> false
 ;;
 
 let can_execute_turn = function
-  | Running | Failing | Compacting | HandingOff -> true
+  | Running | Failing | Compacting -> true
   | Offline
   | Draining
   | Paused

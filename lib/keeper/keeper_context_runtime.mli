@@ -145,12 +145,6 @@ val dispatch_compaction_completed
   -> keeper_name:string
   -> (unit, lifecycle_dispatch_error) result
 
-val dispatch_post_turn_lifecycle_events
-  :  config:Workspace.config
-  -> keeper_name:string
-  -> post_turn_lifecycle
-  -> unit
-
 (** {1 Trace and Board Utilities} *)
 
 val generate_trace_id : ?now:float -> unit -> string

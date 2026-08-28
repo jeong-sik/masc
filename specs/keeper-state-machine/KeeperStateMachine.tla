@@ -3,8 +3,8 @@
 \*
 \* This model contains only typed intent and durable lifecycle state.
 \* Runtime observations may select an observable phase, but only explicit
-\* operator intent may pause or stop a Keeper. Failing,
-\* Compacting, and HandingOff remain work-capable; they do not grant or deny
+\* operator intent may pause or stop a Keeper. Failing and
+\* Compacting remain work-capable; they do not grant or deny
 \* effects. External effects are authorized independently by the Gate.
 \*
 \* Mirrors the lifecycle authority subset of
@@ -27,7 +27,6 @@ PhaseSet == {
     "Running",
     "Failing",
     "Compacting",
-    "HandingOff",
     "Draining",
     "Paused",
     "Stopped",
@@ -38,7 +37,7 @@ PhaseSet == {
 \* These phases remain eligible to continue lane-local work. The set has no
 \* effect-authorization meaning; the Gate owns that boundary.
 WorkCapable == {
-    "Running", "Failing", "Compacting", "HandingOff"
+    "Running", "Failing", "Compacting"
 }
 
 Terminal == {"Stopped"}
@@ -126,8 +125,8 @@ ContextOverflowObserved ==
     /\ phase \notin Terminal
     /\ UNCHANGED vars
 
-\* Compaction and handoff are explicit lifecycle events. Their phases remain
-\* work-capable and do not suppress unrelated lane activity.
+\* Compaction is an explicit lifecycle event. Its phase remains
+\* work-capable and does not suppress unrelated lane activity.
 CompactionStarted ==
     /\ phase \in WorkCapable
     /\ phase' = "Compacting"
@@ -136,18 +135,6 @@ CompactionStarted ==
 
 CompactionFinished ==
     /\ phase = "Compacting"
-    /\ phase' = "Running"
-    /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested >>
-
-HandoffStarted ==
-    /\ phase \in WorkCapable
-    /\ phase' = "HandingOff"
-    /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested >>
-
-HandoffFinished ==
-    /\ phase = "HandingOff"
     /\ phase' = "Running"
     /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
                     restart_requested >>
@@ -169,8 +156,6 @@ Next ==
     \/ ContextOverflowObserved
     \/ CompactionStarted
     \/ CompactionFinished
-    \/ HandoffStarted
-    \/ HandoffFinished
     \/ TerminalStutter
 
 Spec == Init /\ [][Next]_vars

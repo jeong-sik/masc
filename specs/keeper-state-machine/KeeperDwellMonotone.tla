@@ -83,7 +83,6 @@ PhaseSet == {
     "Running",
     "Failing",
     "Compacting",
-    "HandingOff",
     "Draining",
     "Paused",
     "Stopped",

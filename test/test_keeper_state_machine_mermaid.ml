@@ -69,7 +69,7 @@ let test_mermaid_active_class () =
 
 let test_mermaid_buffer_class () =
   let buffer_phases =
-    [ SM.Failing; SM.Compacting; SM.HandingOff; SM.Draining; SM.Restarting ]
+    [ SM.Failing; SM.Compacting; SM.Draining; SM.Restarting ]
   in
   List.iter
     (fun phase ->

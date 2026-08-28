@@ -22,19 +22,6 @@ let apply_lifecycle
   let lifecycle : KEC.post_turn_lifecycle =
     KEC.apply_post_turn_lifecycle ~meta ~checkpoint:result.checkpoint
   in
-  KTP.run_best_effort
-    ~terminal_effect:KTP.Lifecycle_projection
-    ~on_error:(fun exn ->
-      Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
-        ~config
-        ~keeper_name:meta.name
-        ~side_effect:(KTP.effect_label KTP.Lifecycle_projection)
-        (Printexc.to_string exn))
-    (fun () ->
-       KEC.dispatch_post_turn_lifecycle_events
-         ~config
-         ~keeper_name:meta.name
-         lifecycle);
   lifecycle
 ;;
 

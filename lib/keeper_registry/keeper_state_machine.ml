@@ -21,7 +21,6 @@ let is_terminal = function
   | Running
   | Failing
   | Compacting
-  | HandingOff
   | Draining
   | Paused
   | Crashed
@@ -44,17 +43,16 @@ let derive_phase (c : conditions) : phase =
      This is also correct: the drain did not complete.
 
      TLA+ model checking (TLC) found a deadlock where Stopped is entered
-     while compaction_active or handoff_active is still TRUE. This is a
+     while compaction_active is still TRUE. This is a
      semantic contradiction: drain_complete means ALL work is finished,
      which includes buffer operations. Guard Stopped against active buffer
-     ops so the keeper stays in Draining until compaction/handoff exits. *)
+     ops so the keeper stays in Draining until compaction exits. *)
 
   (* 1. Completed stop — drain succeeded AND no buffer ops in flight *)
   if
     c.stop_requested
     && c.drain_complete
     && (not c.compaction_active)
-    && not c.handoff_active
   then Stopped (* 2. Pre-start registration. This is the only path into Offline. *)
   else if c.launch_pending && not c.fiber_alive
   then Offline (* 3. Fiber lifecycle — Restarting / Crashed *)
@@ -68,8 +66,6 @@ let derive_phase (c : conditions) : phase =
        observations and retry counts never synthesize operator authority. *)
   else if c.operator_paused
   then Paused (* 8. Buffer states: in-progress operations *)
-  else if c.handoff_active
-  then HandingOff
   else if c.compaction_active
   then Compacting
   else if
@@ -109,9 +105,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
        observable through turn health and receipts while this
        buffer-operation latch is released. *)
     { c with compaction_active = false }
-  | Handoff_started -> { c with handoff_active = true }
-  | Handoff_completed _ -> { c with handoff_active = false }
-  | Handoff_failed _ -> { c with handoff_active = false }
   | Operator_pause -> { c with operator_paused = true }
   | Operator_resume -> { c with operator_paused = false }
   | Operator_stop _ -> { c with stop_requested = true }
@@ -136,7 +129,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     ; heartbeat_healthy = true
     ; turn_healthy = true
     ; compaction_active = false
-    ; handoff_active = false
     ; restart_requested = false
     ; drain_complete = false
     ; stop_requested = false
@@ -175,7 +167,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
   let lifecycle name detail = Publish_lifecycle { event_name = name; detail } in
   match new_phase with
   | Compacting -> [ Start_compaction; lifecycle "compaction_started" "" ]
-  | HandingOff -> [ Start_handoff; lifecycle "handoff_started" "" ]
   | Draining -> [ Start_drain; lifecycle "draining" "" ]
   | Stopped ->
     [ Cleanup_and_unregister
@@ -192,9 +183,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Compaction_started
          | Compaction_completed
          | Compaction_failed _
-         | Handoff_started
-         | Handoff_completed _
-         | Handoff_failed _
          | Operator_pause
          | Operator_resume
          | Stop_requested
@@ -218,9 +206,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
       | Compaction_started
       | Compaction_completed
       | Compaction_failed _
-      | Handoff_started
-      | Handoff_completed _
-      | Handoff_failed _
       | Operator_resume
       | Operator_stop _
       | Stop_requested
@@ -244,7 +229,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
      | Running
      | Failing
         | Compacting
-     | HandingOff
      | Draining
      | Paused
      | Stopped
@@ -271,9 +255,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Context_measured _
          | Compaction_started
          | Compaction_failed _
-         | Handoff_started
-         | Handoff_completed _
-         | Handoff_failed _
          | Operator_stop _
          | Operator_pause
          | Stop_requested
@@ -291,7 +272,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
      | Offline
      | Running
         | Compacting
-     | HandingOff
      | Draining
      | Stopped
      | Crashed ->
@@ -363,16 +343,6 @@ let check_event_precondition (c : conditions) (ev : event)
                 buffer op duplicates the work and confuses the retry latch \
                 that OperatorCompactRequested clears as a side-effect"
            })
-    else if c.handoff_active
-    then
-      Error
-        (Precondition_violation
-           { event = event_to_string ev
-           ; reason =
-               "TLA+ §OperatorCompactRequested requires ~handoff_active; \
-                handoff already owns the buffer, so a concurrent operator \
-                compaction would race on the same keeper context"
-           })
     else Ok ()
   | Operator_clear_requested _ ->
     (* TLA+ §OperatorClearRequested deliberately requires only NotTerminal
@@ -401,9 +371,6 @@ let check_event_precondition (c : conditions) (ev : event)
   | Compaction_started
   | Compaction_completed
   | Compaction_failed _
-  | Handoff_started
-  | Handoff_completed _
-  | Handoff_failed _
   | Operator_pause
   | Operator_resume
   | Operator_stop _
@@ -432,7 +399,6 @@ let apply_event ~current_phase ~conditions ~event ~now =
   | Running
   | Failing
   | Compacting
-  | HandingOff
   | Draining
   | Paused
   | Crashed

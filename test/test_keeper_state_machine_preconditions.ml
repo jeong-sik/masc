@@ -54,9 +54,6 @@ let event_tag : SM.event -> string = function
   | SM.Compaction_started -> "compaction_started"
   | SM.Compaction_completed -> "compaction_completed"
   | SM.Compaction_failed _ -> "compaction_failed"
-  | SM.Handoff_started -> "handoff_started"
-  | SM.Handoff_completed _ -> "handoff_completed"
-  | SM.Handoff_failed _ -> "handoff_failed"
   | SM.Operator_pause -> "operator_pause"
   | SM.Operator_resume -> "operator_resume"
   | SM.Operator_stop _ -> "operator_stop"
@@ -84,9 +81,6 @@ let all_events : SM.event list =
   ; SM.Compaction_started
   ; SM.Compaction_completed
   ; SM.Compaction_failed { reason = "probe" }
-  ; SM.Handoff_started
-  ; SM.Handoff_completed { new_trace_id = "trace" }
-  ; SM.Handoff_failed { reason = "probe" }
   ; SM.Operator_pause
   ; SM.Operator_resume
   ; SM.Operator_stop { remove_meta = false }
@@ -104,8 +98,8 @@ let all_events : SM.event list =
 
 (* A coverage list shorter than the variant would silently test less. *)
 let test_event_witnesses_cover_the_variant () =
-  check int "one witness per event constructor" 22 (List.length all_events);
-  check int "witness tags are distinct" 22
+  check int "one witness per event constructor" 19 (List.length all_events);
+  check int "witness tags are distinct" 19
     (List.length (List.sort_uniq String.compare (List.map event_tag all_events)))
 ;;
 
@@ -143,7 +137,6 @@ let test_only_operator_compact_reacts_to_buffer_flags () =
           then failf "operator_compact_requested did not reject under %s" label)
         all_events)
     [ "compaction_active", { running_conditions with SM.compaction_active = true }
-    ; "handoff_active", { running_conditions with SM.handoff_active = true }
     ]
 ;;
 
@@ -284,17 +277,6 @@ let test_pre_operator_compact_during_compaction () =
   let err =
     apply_err
       ~current_phase:SM.Compacting
-      ~conditions:c
-      ~event:SM.Operator_compact_requested
-  in
-  assert_precondition_violation ~event_name:"operator_compact_requested" err
-;;
-
-let test_pre_operator_compact_during_handoff () =
-  let c = { running_conditions with handoff_active = true } in
-  let err =
-    apply_err
-      ~current_phase:SM.HandingOff
       ~conditions:c
       ~event:SM.Operator_compact_requested
   in

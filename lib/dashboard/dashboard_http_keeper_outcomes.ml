@@ -21,10 +21,8 @@ let compute_outcomes_rollup
     ~(registry_entry : Keeper_registry.registry_entry option) : Yojson.Safe.t =
   let succ_turns = ref 0 in
   let succ_compactions = ref 0 in
-  let succ_handoffs = ref 0 in
   let fail_turn = ref 0 in
   let fail_compaction = ref 0 in
-  let fail_handoff = ref 0 in
   let completed_turns =
     Keeper_transition_audit.recent_completed_turns ~keeper_name ~limit:50
   in
@@ -42,8 +40,6 @@ let compute_outcomes_rollup
       match tr.selected_event with
       | Keeper_state_machine.Compaction_completed -> incr succ_compactions
       | Compaction_failed _ -> incr fail_compaction
-      | Handoff_completed _ -> incr succ_handoffs
-      | Handoff_failed _ -> incr fail_handoff
       | _ -> Log.Dashboard.debug "ignored transition event")
     transitions;
   let observed_turns = List.length completed_turns in
@@ -105,14 +101,12 @@ let compute_outcomes_rollup
           [
             ("substantive_turns", `Int !succ_turns);
             ("compactions_ok", `Int !succ_compactions);
-            ("handoffs_ok", `Int !succ_handoffs);
           ] );
       ( "failures",
         `Assoc
           [
             ("turn_failed", `Int !fail_turn);
             ("compaction_failed", `Int !fail_compaction);
-            ("handoff_failed", `Int !fail_handoff);
             ("crashes", `Int recent_crash_count);
             ("restarts", `Int restarts);
             ("consecutive_fail_current", `Int consecutive_fail);

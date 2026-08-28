@@ -779,6 +779,16 @@ export interface DashboardFullHealthSnapshot {
   component_timed_out: boolean
 }
 
+/** `dashboard_surface` block of /health (masc.dashboard_surface.v1): the
+ *  server's own verdict on whether the bundle it serves — the very UI the
+ *  reader is looking at — is current, stale, or missing its build stamp. */
+export interface DashboardSurfaceHealth {
+  status?: string
+  next_action?: string
+  build_stamp_at?: string
+  binary_built_at?: string
+}
+
 export interface DashboardFullHealthResponse {
   health_detail?: string
   overall_status?: string | null
@@ -787,6 +797,7 @@ export interface DashboardFullHealthResponse {
   full_health_snapshot?: DashboardFullHealthSnapshot | null
   schedule_runner?: DashboardScheduleRunnerStatus | null
   keeper_event_queue?: DashboardKeeperEventQueueHealth | null
+  dashboard_surface?: DashboardSurfaceHealth | null
 }
 
 // --- Runtime provider reachability probe ---

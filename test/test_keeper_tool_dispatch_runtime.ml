@@ -1,6 +1,9 @@
 open Alcotest
 
-module KET = Masc.Keeper_tool_dispatch_runtime
+module KET = struct
+  include Masc.Keeper_tool_dispatch_runtime
+  include Masc.Keeper_tool_dispatch_runtime.Compatibility
+end
 module KTE = Masc.Keeper_tool_execution
 module KES = Masc.Keeper_tool_shared_runtime
 module KTD = Masc.Keeper_tool_descriptor
@@ -1430,7 +1433,7 @@ let test_manual_gate_deferral_stays_deferred_through_agent_core_bridge () =
          | _ :: _ :: _ -> fail "duplicate tool_write_file descriptors"
        in
        let handler =
-         Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler
+         Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
            ~name:"Write"
            ~input_schema
            ~config
@@ -3847,7 +3850,7 @@ let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
                    ~data:delegated_data
                    ()));
           let handler =
-            Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler
+            Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
               ~name:"masc_keeper_delegate"
               ~input_schema:(keeper_delegate_input_schema ())
               ~config
@@ -6779,6 +6782,7 @@ let test_composition_runtime_uses_canonical_descriptor () =
        in
        match
          Masc.Keeper_tool_plan_executor.execute_keeper
+           ~capability_authority:Masc.Keeper_tool_runtime.Compatibility_meta
            ~plan
            ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
            ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
@@ -6822,6 +6826,7 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
        in
        match
          Masc.Keeper_tool_plan_executor.execute_keeper
+           ~capability_authority:Masc.Keeper_tool_runtime.Compatibility_meta
            ~plan
            ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
            ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())

@@ -7,7 +7,10 @@
 
 open Alcotest
 
-module KET = Masc.Keeper_tool_dispatch_runtime
+module KET = struct
+  include Masc.Keeper_tool_dispatch_runtime
+  include Masc.Keeper_tool_dispatch_runtime.Compatibility
+end
 module KTE = Masc.Keeper_tool_execution
 module Workspace = Masc.Workspace
 module AR = Masc.Task.Anti_rationalization

@@ -1767,10 +1767,23 @@ let config_path () : string option =
   | Invalid_env | Missing -> None
 ;;
 
-let runtime_config_path_result ?runtime_config_path () =
+(* The one spelling of "no runtime config path resolves". Two producers
+   (this resolver and the assignment transaction below) and the dashboard
+   route's 404 mapping share it; a consumer that needs to BRANCH on the
+   condition asks [runtime_config_path_opt] instead of matching the
+   sentence. *)
+let runtime_config_path_missing_message = "runtime config path not found"
+
+let runtime_config_path_opt ?runtime_config_path () =
   match runtime_config_path with
-  | Some path -> Ok path
-  | None -> Option.to_result (config_path ()) ~none:"runtime config path not found"
+  | Some path -> Some path
+  | None -> config_path ()
+;;
+
+let runtime_config_path_result ?runtime_config_path () =
+  Option.to_result
+    (runtime_config_path_opt ?runtime_config_path ())
+    ~none:runtime_config_path_missing_message
 ;;
 
 let load_file_result path =
@@ -2299,11 +2312,13 @@ let with_keeper_assignment_transaction_using ~with_lock ?runtime_config_path
   else if contains_newline keeper_name
   then Error "keeper_name must not contain newlines"
   else
-    match runtime_config_path_result ?runtime_config_path () with
-    | Error "runtime config path not found" ->
+    (* Ask the condition, not the sentence: the old arm matched the error
+       string exactly, so rewording the message would have silently turned
+       every benign missing-config read into a hard error. *)
+    match runtime_config_path_opt ?runtime_config_path () with
+    | None ->
       Ok { value = f (Missing_runtime_config { keeper_name }); warnings = [] }
-    | Error detail -> Error detail
-    | Ok path ->
+    | Some path ->
       let* locked =
         with_lock path (fun () ->
           if not (Fs_compat.file_exists path)
@@ -2350,7 +2365,7 @@ let commit_keeper_assignment_using ~commit_text transaction ~runtime_id =
   | Missing_runtime_config _ ->
     (match requested with
      | Assignment_missing -> Ok (Assignment_unchanged Runtime_config_missing)
-     | Assignment_present _ -> Error "runtime config path not found")
+     | Assignment_present _ -> Error runtime_config_path_missing_message)
   | Present_runtime_config transaction ->
   let current_assignment =
     match transaction.revision with

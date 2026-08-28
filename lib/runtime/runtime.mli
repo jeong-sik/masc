@@ -623,6 +623,12 @@ val config_path : unit -> string option
     deleted [Runtime.config_path] (delegates to
     [Config_dir_resolver]). *)
 
+val runtime_config_path_missing_message : string
+(** The one spelling of "no runtime config path resolves", shared by both
+    error producers and the dashboard route that maps it to 404. Consumers
+    that need to BRANCH on the condition use {!config_path} (or the typed
+    results) rather than matching this sentence. *)
+
 val load_config_observation :
   ?runtime_config_path:string -> unit -> (config_observation, string) result
 (** Load one immutable runtime.toml observation, including its exact source

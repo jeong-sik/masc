@@ -12,6 +12,7 @@ import {
   filterHookSlots,
   hookSlotDetails,
   initRuntimeDraftFromConfig,
+  rebaseRuntimeDraftOnFreshConfig,
   KCF_TAB_IDS,
   keeperConfigControlContractStatus,
   keeperConfigControlInventory,
@@ -543,6 +544,46 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
     const draft = initRuntimeDraftFromConfig(c)
     expect(draft.sandbox_profile).toBe('local')
     expect(draft.network_mode).toBe('inherit')
+  })
+})
+
+describe('rebaseRuntimeDraftOnFreshConfig — conflict rebase', () => {
+  const seen = makeKeeperConfigForSandbox({
+    allowed_paths: ['/old/base'],
+    autonomous_wake_prompt: null,
+  })
+  const fresh = makeKeeperConfigForSandbox({
+    // The other writer changed this field; the user never touched it.
+    allowed_paths: ['/remote/writer/change'],
+    autonomous_wake_prompt: 'remote prompt',
+  })
+
+  it('keeps the user-edited field and adopts remote changes on untouched fields', () => {
+    const draft = {
+      ...initRuntimeDraftFromConfig(seen),
+      // The user edited only the wake prompt.
+      autonomous_wake_prompt: 'user prompt',
+    }
+    const rebased = rebaseRuntimeDraftOnFreshConfig(draft, seen, fresh)
+    expect(rebased.autonomous_wake_prompt).toBe('user prompt')
+    // NOT the stale base value: the untouched field follows the fresh config,
+    // so a re-save cannot silently revert the other writer's change.
+    expect(rebased.allowed_paths_text).toBe('/remote/writer/change')
+  })
+
+  it('preserves a skill-selection mode change', () => {
+    const draft = {
+      ...initRuntimeDraftFromConfig(seen),
+      skill_selection: { mode: 'names' as const, names_text: 'a\nb' },
+    }
+    const rebased = rebaseRuntimeDraftOnFreshConfig(draft, seen, fresh)
+    expect(rebased.skill_selection).toEqual({ mode: 'names', names_text: 'a\nb' })
+  })
+
+  it('returns the fresh draft untouched when the user changed nothing', () => {
+    const draft = initRuntimeDraftFromConfig(seen)
+    const rebased = rebaseRuntimeDraftOnFreshConfig(draft, seen, fresh)
+    expect(rebased).toEqual(initRuntimeDraftFromConfig(fresh))
   })
 })
 
@@ -1882,6 +1923,60 @@ describe('KeeperConfigPanel', () => {
     )
     expect(mocks.showToast).not.toHaveBeenCalledWith(
       expect.stringContaining('다른 화면에서 변경'),
+      'warning',
+    )
+  })
+
+  it('keeps the user edit and reloads authority when the current owner hits a revision conflict', async () => {
+    const config = makeKeeperConfig({ name: 'keeper-sangsu', skills: { names: null } })
+    const fresh = makeKeeperConfig({
+      name: 'keeper-sangsu',
+      skills: { names: ['remote-skill'] },
+      config_revision: {
+        manifest: { state: 'sha256', value: 'b'.repeat(64) },
+        runtime_assignment: { state: 'runtime_config_missing' },
+      },
+    })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(config)
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(fresh)
+    let rejectSave: ((error: ApiRequestError) => void) | undefined
+    mocks.patchKeeperConfig.mockReturnValueOnce(new Promise<KeeperConfig>((_, reject) => {
+      rejectSave = reject
+    }))
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    const mode = container.querySelector('select[aria-label="Skill 선택 방식"]') as HTMLSelectElement
+    mode.value = 'names'
+    mode.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+    const names = container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement
+    names.value = 'my-skill'
+    names.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    const save = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('Keeper 설정 저장'))
+    save!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    rejectSave?.(new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/keepers/keeper-sangsu/config',
+      status: 409,
+      errorCode: 'keeper_config_revision_conflict',
+    }))
+    await flush()
+    await flush()
+
+    // The 409 path reloads the authority but must keep the user's edit
+    // (rebased onto the fresh config), not discard it.
+    expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
+    expect((container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement).value)
+      .toBe('my-skill')
+    expect(mocks.showToast).toHaveBeenCalledWith(
+      expect.stringContaining('편집한 내용은 남겨뒀으니'),
       'warning',
     )
   })

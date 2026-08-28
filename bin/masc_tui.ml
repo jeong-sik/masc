@@ -1398,6 +1398,7 @@ type async_msg =
       string * (Masc.Tui_decode.goal_timeline, string) result
   | Task_history_loaded of
       string * (Masc.Tui_decode.task_history_event list, string) result
+  | Task_cancel_done of string * (string, string) result
   | Keeper_config_view_loaded of string * (string list, string) result
   | Keeper_sandbox_view_loaded of
       string * (Masc_tui_keeper_sandbox.t, string) result
@@ -2027,6 +2028,53 @@ let launch_task_history_load state ~mailbox task_id =
   | None ->
       enqueue_async mailbox
         (Task_history_loaded (task_id, Error "Eio switch is unavailable"))
+
+(* Cancel one task through the same MCP tool the keepers use
+   (masc_transition action=cancel). Cancel is an exit-class action, so the
+   contract wants both [reason] and a non-empty [handoff_context.summary];
+   the one operator-typed reason serves as both. Opens its own MCP session,
+   like the resource browser: a human-cadence action does not earn a held
+   connection. The server's task FSM stays the judge of whether this task
+   can still be cancelled. *)
+let launch_task_cancel state ~mailbox ~task_id ~reason =
+  let host = server_peer_host in
+  let port = state.port in
+  let request_id = Printf.sprintf "tui-cancel-%.6f" (Unix.gettimeofday ()) in
+  let run () =
+    let result =
+      try
+        match
+          Masc_tui_http.open_mcp_session ~host ~port
+            ~client_version:Runtime_build_version.current
+        with
+        | Error detail -> Error detail
+        | Ok session_id -> (
+            let arguments =
+              Masc_tui_mcp.task_cancel_arguments ~task_id ~reason
+            in
+            match
+              Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id
+                ~tool:"masc_transition" ~arguments
+            with
+            | Error detail -> Error detail
+            | Ok outcome ->
+                if outcome.Masc_tui_mcp.is_error then
+                  Error outcome.Masc_tui_mcp.text
+                else Ok outcome.Masc_tui_mcp.text)
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Task_cancel_done (task_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Task_cancel_done (task_id, Error "Eio switch is unavailable"))
 
 (* The detail pane's two non-Info tabs. Same discipline as the call log:
    the answer names the keeper it is for, so a stale load cannot be drawn
@@ -6773,6 +6821,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error err ->
           state.goal_action_armed <- None;
           state.goal_action_error <- Some err)
+  | Task_cancel_done (task_id, result) ->
+      (match result with
+       | Ok _ ->
+           add_event state "system"
+             (Printf.sprintf "task %s cancelled" task_id);
+           (* The backlog row and the detail's history both changed; refresh
+              re-reads the backlog, and the history reload draws the cancel
+              the operator just performed. *)
+           state.task_history <- None;
+           launch_task_history_load state ~mailbox task_id;
+           start_http_refresh state ~host:server_peer_host ~port:state.port
+             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox
+       | Error err -> add_event state "error" ("task cancel failed: " ^ err))
   | Goal_timeline_loaded (goal_id, result) ->
       (* Drawn only while the operator still has this goal open; a stale
          answer for a goal already left is dropped, same as the call log. *)
@@ -8692,6 +8755,44 @@ let main () =
                       start_verification_verdict state
                         ~mailbox:async_messages ~task_id
                         ~verdict:(`Reject reason))))
+  in
+  (* Task cancel: same form discipline as the verification reject — the
+     reason is required, $EDITOR is the form, and a non-zero exit or an
+     empty reason leaves the task untouched. The server's FSM decides
+     whether the task is still cancellable. *)
+  let handle_task_cancel () =
+    match state.task_detail_id with
+    | None -> ()
+    | Some task_id -> (
+        match Masc_tui_editor.editor_command () with
+        | None ->
+            add_event state "error"
+              "no $EDITOR set; export EDITOR to cancel here"
+        | Some _ -> (
+            let stem = "{\n  \"reason\": \"\"\n}\n" in
+            match
+              Masc_tui_editor.roundtrip ~restore:restore_terminal
+                ~reenter:reenter_terminal stem
+            with
+            | None -> add_event state "system" "cancel cancelled"
+            | Some body -> (
+                match Yojson.Safe.from_string body with
+                | exception Yojson.Json_error e ->
+                    add_event state "error" ("cancel: body is not JSON: " ^ e)
+                | json ->
+                    let reason =
+                      match json with
+                      | `Assoc fields -> (
+                          match List.assoc_opt "reason" fields with
+                          | Some (`String s) -> String.trim s
+                          | Some _ | None -> "")
+                      | _ -> ""
+                    in
+                    if String.equal reason "" then
+                      add_event state "system" "cancel cancelled (empty reason)"
+                    else
+                      launch_task_cancel state ~mailbox:async_messages
+                        ~task_id ~reason)))
   in
   let handle_runtime_config_edit () =
     match state.runtime_config_view with
@@ -12331,6 +12432,11 @@ and is loaded on demand through keeper_skill.
               names the schedule, the second cancels it. Whether the row is
               still cancellable is the server's store rules to say. *)
            handle_schedule_cancel_key state ~mailbox:async_messages
+       | Some "x" | Some "X"
+         when state.view = Overview && state.task_detail_id <> None ->
+           (* Cancel wants a reason, and $EDITOR is the form we already
+              have; the editor itself is the confirmation step. *)
+           handle_task_cancel ()
        | Some "x" | Some "X" when state.view = Verification ->
            (* Reject wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)

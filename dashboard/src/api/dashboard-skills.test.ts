@@ -492,6 +492,52 @@ describe('skill evidence contract', () => {
     expect(decoded.activation?.selection).toBe('most_recent_observed_timestamp_tie')
   })
 
+  it('accepts a leap-second tie with the next civil minute', () => {
+    const decoded = decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v5',
+      status: 'observed',
+      reference,
+      activation: {
+        selection: 'most_recent_observed_timestamp_tie',
+        evidence: [
+          {
+            ...activationEvidence,
+            activation: {
+              ...activationPayload,
+              activated_at: '2026-12-31T23:59:60Z',
+            },
+          },
+          {
+            ...activationEvidence,
+            trace_id: 'trace-proof-2',
+            activation: {
+              ...activationPayload,
+              turn_ref: 'trace-proof-2#1',
+              activated_at: '2027-01-01T00:00:00Z',
+            },
+          },
+        ],
+      },
+      composition: null,
+      coverage,
+    })
+    expect(decoded.activation?.selection).toBe('most_recent_observed_timestamp_tie')
+  })
+
+  it('rejects an invalid reference without an activation', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v5',
+      status: 'not_observed_in_retained_coverage',
+      reference: {
+        identity: { ...reference.identity, source_id: '.' },
+        content_revision: 'short',
+      },
+      activation: null,
+      composition: null,
+      coverage,
+    })).toThrow(SkillsContractError)
+  })
+
   it('rejects activation semantics that the canonical ledger rejects', () => {
     const invalidActivations = [
       { ...activationPayload, turn_ref: 'trace-proof#1e0' },

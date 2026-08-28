@@ -2271,11 +2271,9 @@ let render_board_list (state : state) =
           ^ Ansi.reset
         in
         let score =
-          (* %+d prints the sign, so a negative tally reads "-3" where "+%d"
-             wrote "+-3". *)
           (board_score_style p.bp_votes)
           ^ Printf.sprintf "%-*s" board_score_w
-              (Printf.sprintf "%+d" p.bp_votes)
+              (Masc_tui_board_score.text p.bp_votes)
           ^ Ansi.reset
         in
         let replies =
@@ -2869,9 +2867,7 @@ let planning_detail_pane (state : state)
       (fun (label, value) ->
          Option.map
            (fun iso ->
-              (* The field is one wider than the longest label ("reviewed:")
-                 so every value keeps one gap after its colon. *)
-              Printf.sprintf "  %-10s%s" (label ^ ":")
+              Planning_detail.timestamp_line ~label
                 (Terminal_text.short_timestamp (Terminal_text.single_line iso)))
            value)
       [ "created", goal.pg_created_at
@@ -4427,7 +4423,7 @@ let render_lane_run_list (state : state) ~lane_id =
               (lane_run_clock run.lrs_started_at)
               (fit_width (Terminal_text.single_line run.lrs_actor) 16)
               (lane_run_status_style run.lrs_status)
-              (Tui_decode.lane_run_status_label run.lrs_status)
+              (fit_width (Tui_decode.lane_run_status_label run.lrs_status) 11)
               Ansi.reset elapsed
               (fit_width
                  (Terminal_text.single_line_or ~default:"—"

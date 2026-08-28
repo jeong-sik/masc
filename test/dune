@@ -3298,6 +3298,11 @@
  (libraries alcotest masc_tui_board_detail))
 
 (test
+ (name test_tui_board_score)
+ (modules test_tui_board_score)
+ (libraries alcotest masc_tui_board_score))
+
+(test
  (name test_tui_link)
  (modules test_tui_link)
  (libraries alcotest base64 masc_tui_link))

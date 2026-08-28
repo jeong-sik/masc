@@ -7684,7 +7684,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.lanes <- Some snapshot;
           state.keeper_secrets <- secrets;
           state.lanes_error <- None;
-          state.lanes_action_error <- None;
           let lanes = snapshot.Tui_decode.kls_lanes in
           let fallback_cursor =
             max 0 (min state.lanes_cursor (List.length lanes - 1))
@@ -7725,7 +7724,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match result with
         | Ok snapshot ->
             state.standalone_lanes <- Some snapshot;
-            state.standalone_lanes_error <- None
+            state.standalone_lanes_error <- None;
+            (* A refresh may shrink the matrix; the cursor has to stay a valid
+               row of the snapshot now in state. The matrix rows never scroll,
+               so there is no window to follow. *)
+            state.lanes_standalone_cursor <-
+              max 0
+                (min state.lanes_standalone_cursor
+                   (List.length snapshot.Tui_decode.sls_lanes - 1))
         | Error detail -> state.standalone_lanes_error <- Some detail)
   | Lane_runs_loaded (lane_id, result) ->
       (match state.lanes_mode with

@@ -79,6 +79,20 @@ let test_a_narrow_pane_still_produces_rows () =
   let rows = Detail.body ~width:0 (Proof.Proof_refuted (Some "why")) None in
   check_bool "width 0 does not loop or vanish" true (rows <> [])
 
+let test_a_timestamp_value_never_starts_at_the_colon () =
+  (* "reviewed:" is the longest label the pane prints; at one past its width
+     the value used to start immediately after the colon. *)
+  List.iter
+    (fun label ->
+      let line = Detail.timestamp_line ~label "2026-08-27 20:36" in
+      check_bool (label ^ ": keeps a gap before its value") true
+        (let colon = String.index line ':' in
+         colon + 1 < String.length line && line.[colon + 1] = ' '))
+    [ "created"; "updated"; "reviewed" ];
+  check_string "the longest label still leaves one gap"
+    "  reviewed: 2026-08-27 20:36"
+    (Detail.timestamp_line ~label:"reviewed" "2026-08-27 20:36")
+
 let () =
   Alcotest.run "tui_planning_detail"
     [ ( "body"
@@ -93,5 +107,7 @@ let () =
             test_tone_separates_a_refusal_from_a_proof
         ; Alcotest.test_case "a narrow pane still produces rows" `Quick
             test_a_narrow_pane_still_produces_rows
+        ; Alcotest.test_case "a timestamp value never starts at the colon" `Quick
+            test_a_timestamp_value_never_starts_at_the_colon
         ] )
     ]

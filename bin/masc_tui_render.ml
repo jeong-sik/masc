@@ -917,13 +917,23 @@ let surface_chrome (state : state) ~terminal_rows ~cols ~surface_key ~title
   let contract_rows = 5 in
   let budget = max 1 (rows - contract_rows) in
   let used = ref 0 in
+  (* A push past the budget draws nothing. The alternative — drawing it —
+     shoves the bottom gap and the footer off screen, which breaks every
+     row below the surface for the whole frame. Rows a body offers past
+     its budget read as cut at the bottom edge, the same truncation a
+     scrolled list already means; bodies that need them all paginate
+     against ~budget, as the migrated surfaces do. *)
+  let counted draw arg =
+    if !used < budget then begin incr used; draw arg end
+  in
   let body_pushers =
-    { push = (fun line -> incr used; box_line buf cols line)
+    { push = counted (fun line -> box_line buf cols line)
     ; push_styled =
-        (fun ~style line -> incr used; box_line_styled buf cols ~style line)
-    ; push_selected = (fun line -> incr used; box_line_selected buf cols line)
-    ; push_divider = (fun () -> incr used; box_divider buf cols)
-    ; push_empty = (fun () -> incr used; box_empty buf cols)
+        (fun ~style line ->
+          counted (fun line -> box_line_styled buf cols ~style line) line)
+    ; push_selected = counted (fun line -> box_line_selected buf cols line)
+    ; push_divider = counted (fun () -> box_divider buf cols)
+    ; push_empty = counted (fun () -> box_empty buf cols)
     }
   in
   body ~budget body_pushers;
@@ -1945,7 +1955,7 @@ let render_approvals (state : state) =
           (Theme.warn ())
           (fit_width
              (Terminal_text.single_line held.kta_question)
-             (max 8 (cols - 26)))
+             (max 8 (cols - 8)))
           Ansi.reset
           Ansi.dim
           (fit_width
@@ -11230,11 +11240,16 @@ let render_answering (state : state) =
           | Some tool_name -> "â¶ " ^ tool_name
           | None -> "â¶ writing"
         in
+        let tail =
+          match
+            Terminal_text.single_line preview.Tui_decode.ktp_text_tail
+          with
+          | "" -> "(no text yet \xe2\x80\x94 tool calls only)"
+          | tail -> tail
+        in
         [ Ansi.bold ^ keeper_name ^ Ansi.reset ^ "  " ^ Ansi.cyan ^ doing
           ^ Ansi.reset
-        ; Ansi.dim
-          ^ Terminal_text.single_line preview.Tui_decode.ktp_text_tail
-          ^ Ansi.reset
+        ; Ansi.dim ^ tail ^ Ansi.reset
         ]
     | None ->
         [ Ansi.dim ^ "live preview â none for this row" ^ Ansi.reset

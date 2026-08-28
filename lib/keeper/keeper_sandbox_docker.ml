@@ -237,12 +237,9 @@ let cleanup_oneshot_container ~container_name =
 let ensure_shell_image_available ~(meta : keeper_meta) ~image ~timeout_sec =
   match meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Micro_vm ->
-    (match Keeper_sandbox_microvm.network_args meta.network_mode with
-     | Error detail -> Error ("microvm_shell_failed: " ^ detail)
-     | Ok _ ->
-       (match Keeper_sandbox_microvm.image_present ~image ~timeout_sec with
-        | Ok () -> Ok ()
-        | Error detail -> Error ("microvm_shell_failed: " ^ detail)))
+    (match Keeper_sandbox_microvm.image_present ~image ~timeout_sec with
+     | Ok () -> Ok ()
+     | Error detail -> Error ("microvm_shell_failed: " ^ detail))
   | Keeper_types_profile_sandbox.Local | Keeper_types_profile_sandbox.Docker ->
   match
     Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
@@ -326,7 +323,9 @@ let docker_run_argv
        "network host not found". The profile-aware args are validated before
        this argv is built, so this cannot be reached with an unsupported
        mode. *)
-    @ Result.value ~default:[] (Keeper_sandbox_microvm.network_args meta.network_mode)
+    @ Keeper_sandbox_microvm.network_args
+        ~dns:(Some (Env_config_sandbox.Runtime.microvm_dns ()))
+        meta.network_mode
     @ identity_mounts
     @ [ image; "bash"; "-l"; "-s" ]
   | Keeper_types_profile_sandbox.Local | Keeper_types_profile_sandbox.Docker ->

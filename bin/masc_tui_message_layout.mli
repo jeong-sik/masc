@@ -370,8 +370,18 @@ val last_page_start : height:int -> int list -> int
     taller than the whole height is still reachable -- it is drawn as far as
     the height allows rather than skipped. *)
 
+val span_text : float -> string
+(** A span of seconds in the largest unit that still carries a remainder:
+    [42s], [2m14s], [11h39m], [8d15h]. At most seven cells, so a column sized
+    for the longest reading holds every shorter one. A negative span reads as
+    [0s]; a caller that would rather say nothing checks first.
+
+    One ladder. Two callers used to keep their own, with different ceilings,
+    and the one that stopped at minutes drew [12045m] for a nine-day-old
+    Fusion run. *)
+
 val age_text : now:float -> since:float -> string option
-(** How long something has been outstanding, as [12s] or [3m07s].
+(** How long something has been outstanding, as {!span_text}.
 
     An age, not a countdown: it says how long a thing has been going so a
     reader can tell slow from stuck. Rendered from a clock the caller passes

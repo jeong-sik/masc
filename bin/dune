@@ -326,7 +326,8 @@
  (name masc_tui_answering)
  (wrapped false)
  (modules masc_tui_answering)
- (libraries masc))
+ ; masc_tui_message_layout owns the span ladder both this and [age_text] read.
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_keys)

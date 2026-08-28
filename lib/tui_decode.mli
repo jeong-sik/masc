@@ -535,9 +535,6 @@ type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
-  vr_kind : string;  (** What is being asked for, e.g. a review or a proof. *)
-  vr_summary : string;
-  vr_next_action : string option;
       (** What would move it forward, when the server can say. *)
   vr_submitted_by : string;
   vr_created_at : string;

@@ -1424,16 +1424,12 @@ let system_log_snapshot_json entries =
 (* Verification requests. The shape is [Dashboard_verification.request_to_json]
    -- fields are asserted against what that writer emits, not against a shape
    invented here. *)
-let verification_request_json ?(next_action = `Null)
-    ?(evidence = [ "artifact:reports/proof.json" ])
+let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
     ?(evidence_error = `Null) () =
   `Assoc
     [ ("request_id", `String "vr-1")
     ; ("task_id", `String "task-470")
     ; ("task_title", `String "wire the approval gate")
-    ; ("request_kind", `String "task_completion")
-    ; ("request_summary", `String "tests green, gate installed")
-    ; ("next_action", next_action)
     ; ("created_at", `String "2026-08-23T09:00:00Z")
     ; ("submitted_by", `String "keeper.one")
     ; ("completion_contract", `List [ `String "tests pass" ])
@@ -2862,8 +2858,12 @@ let test_decode_verification_snapshot_reads_the_live_shape () =
            Alcotest.(check (list string)) "what it must produce"
              [ "artifact:reports/proof.json" ]
              request.Tui_decode.vr_required_artifacts;
-           Alcotest.(check (option string)) "no next action offered" None
-             request.Tui_decode.vr_next_action
+           (* What the queue draws in the column that used to be empty. The
+              producer wrote "" into request_summary and next_action as
+              literals, so the queue read the one field beside them that is
+              actually filled. *)
+           Alcotest.(check string) "the title the queue reads"
+             "wire the approval gate" request.Tui_decode.vr_task_title
        | requests ->
            Alcotest.failf "expected one request, got %d" (List.length requests))
 
@@ -2895,20 +2895,6 @@ let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   Alcotest.(check (option string)) "the reason survives"
     (Some "artifact path escapes the producer root")
     unreadable.Tui_decode.vr_evidence_error
-
-let test_decode_verification_carries_a_next_action () =
-  match
-    Tui_decode.decode_verification_snapshot
-      (verification_snapshot_json
-         [ verification_request_json
-             ~next_action:(`String "attach the missing artifact") ()
-         ])
-  with
-  | Ok { Tui_decode.vs_requests = [ r ]; _ } ->
-      Alcotest.(check (option string)) "what would move it forward"
-        (Some "attach the missing artifact") r.Tui_decode.vr_next_action
-  | Ok _ -> Alcotest.fail "expected one request"
-  | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_system_log_snapshot_reads_the_live_shape () =
   match
@@ -4733,8 +4719,6 @@ let () =
           test_decode_verification_snapshot_reads_the_live_shape;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
-        Alcotest.test_case "carries a next action" `Quick
-          test_decode_verification_carries_a_next_action;
       ] );
     ( "decode_system_logs",
       [

@@ -6549,28 +6549,20 @@ let verification_detail_lines ~width
                     Ansi.reset, (if index = 0 then "    - " else "      ") ^ line))
           items
   in
-  let summary =
-    if String.equal (String.trim request.vr_summary) "" then
-      "No request summary was recorded. Read the required artifacts and submitted evidence below."
-    else request.vr_summary
-  in
-  let next_action =
-    match request.vr_next_action with
-    | Some action when not (String.equal (String.trim action) "") -> action
-    | Some _ | None -> "No next action was recorded."
-  in
   [ Ansi.bold, "  VERIFICATION REQUEST"
   ; field "Request" request.vr_request_id
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
-  ; field "Kind" request.vr_kind
   ; field "Submitted by" request.vr_submitted_by
   ; field "Created" request.vr_created_at
   ; Ansi.dim, ""
   ]
-  @ wrapped_block "What is being judged" summary
-  @ [ Ansi.dim, "" ]
-  @ wrapped_block "What moves it forward" next_action
+  (* [Kind], [What is being judged] and [What moves it forward] stood here.
+     Their three fields were literals in the producer -- "normal", "" and "" --
+     so the three rows read the same on every request this pane has ever
+     drawn, two of them as "No X was recorded". The pane already tells a
+     reader how to read the request from its artifacts and evidence, which is
+     what those rows were pointing away from. *)
   @ [ Ansi.dim, ""
     ; Ansi.bold, "  HOW TO READ THIS"
     ; ( Ansi.dim

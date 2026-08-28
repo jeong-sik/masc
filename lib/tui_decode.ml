@@ -1802,9 +1802,6 @@ type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
-  vr_kind : string;
-  vr_summary : string;
-  vr_next_action : string option;
   vr_submitted_by : string;
   vr_created_at : string;
   vr_required_artifacts : string list;
@@ -2882,8 +2879,6 @@ let decode_verification_request json =
   let* vr_request_id = required_string_field json "request_id" in
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
-  let* vr_kind = required_string_field json "request_kind" in
-  let* vr_summary = required_string_field json "request_summary" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
   let* vr_created_at = required_string_field json "created_at" in
   let* vr_required_artifacts =
@@ -2892,7 +2887,6 @@ let decode_verification_request json =
   let* vr_submitted_evidence =
     decode_string_name_list json "submitted_evidence"
   in
-  let* vr_next_action = optional_string_field json "next_action" in
   let* vr_evidence_error =
     optional_string_field json "evidence_projection_error"
   in
@@ -2900,9 +2894,6 @@ let decode_verification_request json =
     { vr_request_id
     ; vr_task_id
     ; vr_task_title
-    ; vr_kind
-    ; vr_summary
-    ; vr_next_action
     ; vr_submitted_by
     ; vr_created_at
     ; vr_required_artifacts

@@ -8560,6 +8560,57 @@ let render_tools (state : state) =
                @ skill_action_lines activation.actions)
             sap_activations
         in
+        let timeline_lines =
+          (* Newest-first event stream over the loaded ledger: one line per
+             delivery or observed action, so "what just ran" reads top-down
+             without walking per-activation receipts. *)
+          let time_of ts =
+            let clean = Terminal_text.single_line ts in
+            let len = String.length clean in
+            if len >= 19 then String.sub clean 11 8 else clean
+          in
+          let events =
+            List.concat_map
+              (fun (activation :
+                     Masc.Keeper_skill_activation_ledger.activation) ->
+                 let skill =
+                  Terminal_text.single_line activation.identity.name
+                 in
+                 (match activation.delivery with
+                  | Some delivery ->
+                    [ ( delivery.delivered_at,
+                        Printf.sprintf
+                          "%-8s delivery  %-20s %5.1fKB turn#%d %s"
+                          (time_of delivery.delivered_at)
+                          skill
+                          (float_of_int delivery.content_bytes /. 1024.)
+                          activation.agent_core_turn
+                          (Terminal_text.single_line delivery.runtime_id) ) ]
+                  | None -> [])
+                 @ List.map
+                     (fun (act :
+                             Masc.Keeper_skill_activation_ledger.action) ->
+                        ( act.observed_at,
+                          Printf.sprintf "%-8s action    %-20s turn#%d %s"
+                            (time_of act.observed_at)
+                            (Terminal_text.single_line act.tool_name)
+                            act.agent_core_turn
+                            (Terminal_text.single_line act.runtime_id) ))
+                     activation.actions)
+              sap_activations
+            |> List.sort (fun (left, _) (right, _) ->
+                   String.compare right left)
+          in
+          let total = List.length events in
+          let capped =
+            List.filteri (fun index _ -> index < 15) events
+          in
+          [ Ansi.bold,
+            Printf.sprintf " Skill Timeline — %d event%s (newest first)"
+              total
+              (if total = 1 then "" else "s") ]
+          @ List.map (fun (_, line) -> (Ansi.dim, "   " ^ line)) capped
+        in
         [ Ansi.bold,
           Printf.sprintf " Skill Use — %s (%d receipts)"
             (Terminal_text.single_line sap_keeper_name)
@@ -8594,6 +8645,7 @@ let render_tools (state : state) =
           ^ (Masc.Keeper_skill_activation_ledger.workspace_key sap_ledger
              |> Terminal_text.single_line)
         ]
+        @ timeline_lines
         @ scoped_lines
         @ receipt_lines
   in
@@ -8640,10 +8692,54 @@ let render_tools (state : state) =
                   (Terminal_text.single_line surfaces) ))
         registered_rows
   in
+  let usage_matrix_lines =
+    match state.skills_catalog with
+    | None ->
+        [ Ansi.dim, " Skill Usage — loading workspace catalog…" ]
+    | Some { Masc.Tui_decode.sc_state; _ } when not (String.equal sc_state "ready") ->
+        [ Ansi.dim,
+          Printf.sprintf " Skill Usage — catalog %s"
+            (Terminal_text.single_line sc_state) ]
+    | Some { Masc.Tui_decode.sc_surfaces; _ } ->
+        let used =
+          List.filter
+            (fun (surface : Masc.Tui_decode.skills_catalog_surface) ->
+               surface.scs_usage <> [])
+            sc_surfaces
+        in
+        let heading =
+          [ Ansi.bold,
+            Printf.sprintf " Skill Usage — %d skill%s in use across keepers"
+              (List.length used)
+              (if List.length used = 1 then "" else "s")
+          ; Ansi.dim,
+            Printf.sprintf "   %-24s %s" "Skill" "Keeper  inv/delivered/actions" ]
+        in
+        let rows =
+          List.concat_map
+            (fun (surface : Masc.Tui_decode.skills_catalog_surface) ->
+               let keepers =
+                 surface.scs_usage
+                 |> List.map (fun (row : Masc.Tui_decode.skill_usage_row) ->
+                        Printf.sprintf "%s %d/%d/%d"
+                          (Terminal_text.single_line row.su_keeper)
+                          row.su_invocations row.su_deliveries row.su_actions)
+                 |> String.concat " · "
+               in
+               [ ( Ansi.bold,
+                   Printf.sprintf "   %-24s"
+                     (Terminal_text.single_line surface.scs_name) )
+               ; (Ansi.dim, "     " ^ keepers) ])
+            used
+        in
+        heading @ rows
+  in
   let display_lines =
     effective_lines
     @ [ Ansi.dim, "" ]
     @ activation_lines
+    @ [ Ansi.dim, "" ]
+    @ usage_matrix_lines
     @ [ Ansi.dim, "" ]
     @ catalog_lines
   in

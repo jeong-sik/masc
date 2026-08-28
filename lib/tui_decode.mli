@@ -234,6 +234,26 @@ type skill_flow = {
   sf_batches : skill_flow_batch list;
 }
 
+type skill_usage_row = {
+  su_keeper : string;
+  su_invocations : int;
+  su_deliveries : int;
+  su_actions : int;
+  su_last_used_at : string option;
+}
+
+type skills_catalog_surface = {
+  scs_name : string;
+  scs_kind : string;
+  scs_usage : skill_usage_row list;
+  scs_flow : skill_flow option;
+}
+
+type skills_catalog = {
+  sc_state : string;
+  sc_surfaces : skills_catalog_surface list;
+}
+
 type effective_skill_profile = {
   esp_reference : Skill_reference.t;
   esp_name : string;
@@ -1182,6 +1202,9 @@ val decode_transport_health :
 
 val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
 (** Reads [tool_inventory] out of the /dashboard/tools envelope. *)
+
+val decode_skills_catalog : Yojson.Safe.t -> (skills_catalog, string) result
+(** Reads the /api/v1/skills snapshot: per-skill usage rows and flows. *)
 
 val decode_connector_snapshot :
   Yojson.Safe.t -> (connector_snapshot, string) result

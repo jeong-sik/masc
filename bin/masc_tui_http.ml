@@ -1399,6 +1399,12 @@ let fetch_connectors ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/gate/connectors"
 
+(** Fetch the workspace skills catalog (/api/v1/skills): per-skill usage
+    rows and execution-plan flows for the Tools screen tracking views. *)
+let fetch_skills_catalog ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/skills"
+
 (** Fetch the current composite lane snapshot for every registered Keeper. *)
 let fetch_keeper_lanes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

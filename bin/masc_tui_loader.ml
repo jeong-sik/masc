@@ -878,6 +878,13 @@ let load_tools ~(host : string) ~(port : int) ?keeper () :
   | Error err -> Error ("tool inventory load failed: " ^ err)
   | Ok json -> Tui_decode.decode_tool_snapshot json
 
+(** Load the workspace skills catalog for the Tools screen tracking views. *)
+let load_skills_catalog ~(host : string) ~(port : int) :
+    (Tui_decode.skills_catalog, string) result =
+  match fetch_skills_catalog ~host ~port with
+  | Error err -> Error ("skills catalog load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_skills_catalog json
+
 (** Load connector status from /api/v1/gate/connectors *)
 let load_connectors ~(host : string) ~(port : int) :
     (Tui_decode.connector_snapshot, string) result =

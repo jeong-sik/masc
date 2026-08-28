@@ -258,6 +258,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
                     true
                     (Agent_core.Tool.completion tool
                      = Agent_core.Tool_contract.Continue_after_success)
+                | Keeper_tool_descriptor.Direct_terminal
                 | Keeper_tool_descriptor.Terminal ->
                   check bool
                     (name ^ " terminal tools are serial")

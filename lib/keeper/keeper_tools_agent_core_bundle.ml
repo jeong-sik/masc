@@ -281,6 +281,7 @@ let make_tool_bundle_for_descriptors_with_policy
              Some
                (Agent_core.Tool.ordinary_descriptor
                   Agent_core.Tool_contract.Concurrent)
+           | Keeper_tool_descriptor.Direct_terminal
            | Keeper_tool_descriptor.Terminal ->
              Some
                (Agent_core.Tool.terminal_descriptor
@@ -288,6 +289,7 @@ let make_tool_bundle_for_descriptors_with_policy
          in
          let on_completed, on_failed, on_externalization_error =
            match descriptor.execution with
+           | Keeper_tool_descriptor.Direct_terminal
            | Keeper_tool_descriptor.Terminal ->
              ( Some
                  (function
@@ -297,7 +299,7 @@ let make_tool_bundle_for_descriptors_with_policy
                        { failure_class = Tool_result.Runtime_failure
                        ; effect_disposition = Tool_result.Effect_outcome_unknown
                        ; diagnostic =
-                           "terminal surface post completed without a typed target receipt"
+                           "terminal tool completed without a typed effect receipt"
                        })
              , Some mark_terminal_effect_failed
              , Some mark_completed_terminal_externalization_failed )

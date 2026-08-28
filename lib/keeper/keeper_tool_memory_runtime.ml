@@ -458,19 +458,39 @@ let keeper_memory_write_with_outcome
       ~(args : Yojson.Safe.t)
   : Keeper_tool_execution.t
   =
-  let respond ~ok ~error_kind extras =
+  let respond
+        ?memory_revision
+        ?(effect_disposition = Tool_result.Effect_outcome_unknown)
+        ~ok
+        ~error_kind
+        extras
+    =
     let error_kind = memory_write_error_kind_to_string error_kind in
     let payload =
       Yojson.Safe.to_string
         (`Assoc ([ "ok", `Bool ok; "error_kind", `String error_kind ] @ extras))
     in
     if ok
-    then Keeper_tool_execution.success payload
-    else Keeper_tool_execution.failure ~class_:Tool_result.Workflow_rejection payload
+    then
+      let completed = Keeper_tool_execution.success payload in
+      Option.fold
+        ~none:completed
+        ~some:(fun revision ->
+          Keeper_tool_execution.with_memory_write_receipt ~revision completed)
+        memory_revision
+    else
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Workflow_rejection
+        ~effect_disposition
+        payload
   in
   match validate_memory_write_args args with
   | Memory_write_invalid { error_kind; extras } ->
-    respond ~ok:false ~error_kind extras
+    respond
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      ~ok:false
+      ~error_kind
+      extras
   | Memory_write_ok { body } ->
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path
@@ -479,6 +499,7 @@ let keeper_memory_write_with_outcome
     (match upsert_explicit_fact ~keepers_dir ~meta ~body with
      | Ok snapshot ->
        respond
+         ~memory_revision:snapshot.revision
          ~ok:true
          ~error_kind:No_memory_write_error
          [ "rows_written", `Int 1

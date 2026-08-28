@@ -52,11 +52,13 @@ type ordinary_execution_mode =
 
 type execution =
   | Ordinary of ordinary_execution_mode
+  | Direct_terminal
   | Terminal
 
 let execution_to_string = function
   | Ordinary Serial -> "serial"
   | Ordinary Concurrent -> "concurrent"
+  | Direct_terminal -> "direct_terminal"
   | Terminal -> "terminal"
 ;;
 
@@ -498,6 +500,7 @@ let descriptor
   let execution =
     match runtime_handler with
     | Tool_surface_post -> Terminal
+    | Tool_memory_write -> Direct_terminal
     | ( Tool_execute
       | Tool_keeper_code_query_dispatch
       | Tool_search_files
@@ -510,7 +513,6 @@ let descriptor
       | Tool_context_status
       | Tool_artifact_read
       | Tool_memory_search
-      | Tool_memory_write
       | Tool_library_search
       | Tool_library_read
       | Tool_surface_read
@@ -554,7 +556,7 @@ let descriptor
           "descriptor %S declares Concurrent execution without a static \
            read-only policy hint"
           internal_name)
-   | Ordinary Serial, _ | Terminal, _ -> ());
+   | Ordinary Serial, _ | Direct_terminal, _ | Terminal, _ -> ());
   let receipt_labels =
     [ "descriptor_id", id
     ; "capability_id", capability_id

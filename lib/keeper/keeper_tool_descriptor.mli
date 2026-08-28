@@ -61,10 +61,12 @@ type ordinary_execution_mode =
 
 type execution =
   | Ordinary of ordinary_execution_mode
+  | Direct_terminal
   | Terminal
 (** Descriptor-owned execution contract. Read-only classification does not
-    imply concurrency safety, and terminal concurrent execution is not
-    representable. *)
+    imply concurrency safety. [Direct_terminal] ends a direct model tool turn
+    after success but remains a serial, non-terminal node inside a composition;
+    [Terminal] ends both. Terminal concurrent execution is not representable. *)
 
 (** Closed execution-semantics classification of one tool call: whether the
     call is itself a multi-call execution unit (RFC-0386). [Atomic_tool] runs

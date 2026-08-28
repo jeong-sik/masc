@@ -158,7 +158,7 @@ let test_write_comes_back_through_recall () =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
-  let response =
+  let execution =
     Runtime.keeper_memory_write_with_outcome
       ~config
       ~meta
@@ -166,8 +166,9 @@ let test_write_comes_back_through_recall () =
         (make_args
            ~title:""
            ~content:"reasoning_content must be replayed unmodified")
-    |> fun result -> result.Masc.Keeper_tool_execution.raw_output
-    |> Yojson.Safe.from_string
+  in
+  let response =
+    execution.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
   in
   Alcotest.(check bool)
     "write succeeds"
@@ -179,6 +180,17 @@ let test_write_comes_back_through_recall () =
     "routed to the current snapshot"
     "current_memory_snapshot"
     (string_field "store" response);
+  let response_revision = int_field "revision" response in
+  (match execution.Masc.Keeper_tool_execution.terminal_effect_receipt with
+   | Some
+       (Masc.Keeper_tool_execution.Memory_write_completed { revision }) ->
+     Alcotest.(check int)
+       "terminal receipt names the committed revision"
+       response_revision
+       revision
+   | Some (Masc.Keeper_tool_execution.Surface_post_completed _) ->
+     Alcotest.fail "memory write returned a surface-post receipt"
+   | None -> Alcotest.fail "successful memory write has no terminal receipt");
   let facts = current_facts ~keepers_dir ~keeper_id:meta.name in
   Alcotest.(check int) "one durable claim" 1 (List.length facts);
   let fact = List.hd facts in
@@ -190,6 +202,33 @@ let test_write_comes_back_through_recall () =
     "producer timestamp recorded"
     true
     (fact.Masc.Keeper_memory_os_types.first_seen > 0.0)
+;;
+
+let test_invalid_write_is_proven_pre_effect () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let result =
+    Runtime.keeper_memory_write_with_outcome
+      ~config
+      ~meta:(make_meta "invalid-write")
+      ~args:(make_args ~title:"" ~content:"")
+  in
+  (match result.Masc.Keeper_tool_execution.disposition with
+   | Tool_result.Failed Tool_result.Workflow_rejection -> ()
+   | Tool_result.Completed () | Tool_result.Deferred () ->
+     Alcotest.fail "invalid memory write did not fail"
+   | Tool_result.Failed _ ->
+     Alcotest.fail "invalid memory write used the wrong failure class");
+  Alcotest.(check bool)
+    "validation failure is known to precede persistence"
+    true
+    (result.Masc.Keeper_tool_execution.failure_effect_disposition
+     = Tool_result.Proven_pre_effect);
+  Alcotest.(check bool)
+    "validation failure has no terminal receipt"
+    true
+    (Option.is_none result.Masc.Keeper_tool_execution.terminal_effect_receipt)
 ;;
 
 let test_search_filters_exact_substring_without_ranking () =
@@ -359,6 +398,10 @@ let () =
     "keeper_memory_write"
     [ ( "validation"
       , [ Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy
+        ; Alcotest.test_case
+            "runtime validation is proven pre-effect"
+            `Quick
+            test_invalid_write_is_proven_pre_effect
         ; Alcotest.test_case
             "valid input composes the stored body"
             `Quick

@@ -160,6 +160,19 @@ val event_queue_turn_started_seen_for_source_result :
     rows do not become positive evidence; read failures remain explicit so
     callers can conservatively replay. *)
 
+val event_queue_delivery_seen_for_source_result :
+  base_path:string ->
+  keeper_name:string ->
+  post_id:string ->
+  stimulus_kind:stimulus_kind ->
+  (bool, event_queue_reaction_evidence_error) result
+(** Return [true] when the exact durable source has either started a turn or
+    reached an accepted queue terminal (ACK, transfer, or cancellation).
+    This is the restart fence for one-shot delivery producers: a terminally
+    cancelled or transferred source must not be recreated on startup. Invalid
+    matching rows do not become positive evidence; read failures remain
+    explicit so callers can conservatively replay. *)
+
 val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t
 (** Summarize the recent ledger rows for a keeper.  The summary is intentionally

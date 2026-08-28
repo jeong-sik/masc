@@ -3589,7 +3589,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
             ~decision:Rule_types.Decision.Approve
         with
         | Ok () -> ()
-       | Error error ->
+        | Error error ->
           Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
          match
@@ -3681,8 +3681,118 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
             ( AQ.Consumption_already_committed
             | AQ.Consumption_not_matching ) ->
           Alcotest.fail "preserved exact grant was not consumable"
-        | Error error ->
+       | Error error ->
           Alcotest.fail (AQ.grant_error_to_string error)))
+;;
+
+let test_cancelled_delivery_preserves_grant_without_replaying_wake () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-cancelled-replay-origin" in
+  let input = `Assoc [ "target", `String "cancelled-replay" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id = submit ~base_path ~keeper_name ~input in
+       (match
+          aq_resolve
+            ~base_path
+            ~id
+            ~decision:Rule_types.Decision.Approve
+        with
+        | Ok () -> ()
+        | Error error ->
+          Alcotest.fail (AQ.resolve_error_to_string error));
+       let resolution =
+         durable_resolution_opt
+           ~base_path
+           ~keeper_name
+           ~approval_id:id
+         |> require_some "HITL wake was not durably queued"
+       in
+       let selection =
+         Event_queue_persistence.select_when_result
+           ~base_path
+           ~keeper_name
+           ~ready:(fun _ -> true)
+         |> function
+         | Ok (Some selection) -> selection
+         | Ok None -> Alcotest.fail "HITL wake was not selectable"
+         | Error detail -> Alcotest.fail detail
+       in
+       let cancellation : Keeper_event_queue_state.accepted_cancellation =
+         { source = selection.source
+         ; source_incarnation = selection.admitted_revision
+         ; operator_operation_id = "cancel-approved-wake"
+         ; reason = "source Keeper was removed"
+         }
+       in
+       let receipt =
+         match
+           Event_queue_persistence.cancel_pending_accepted_result
+             ~base_path
+             ~keeper_name
+             ~applied_at:(Unix.gettimeofday ())
+             ~cancellation
+             ()
+         with
+         | Ok (Event_queue_persistence.Transition_applied receipt)
+         | Ok (Event_queue_persistence.Transition_already_applied receipt) ->
+           receipt
+         | Ok
+             (Event_queue_persistence.Transition_committed_followup_failed
+                { detail; _ }) ->
+           Alcotest.fail detail
+         | Error detail -> Alcotest.fail detail
+       in
+       (match
+          Reaction_ledger.project_event_queue_transition_outbox_result
+            ~base_path
+            ~keeper_name
+            ~expected_transition_id:receipt.transition_id
+        with
+        | Ok () -> ()
+        | Error detail -> Alcotest.fail detail);
+       let post_id =
+         Keeper_event_queue.hitl_resolution_post_id resolution
+       in
+       (match
+          Reaction_ledger.event_queue_delivery_seen_for_source_result
+            ~base_path
+            ~keeper_name
+            ~post_id
+            ~stimulus_kind:Reaction_ledger.Hitl_resolved
+        with
+        | Ok true -> ()
+        | Ok false ->
+          Alcotest.fail "accepted cancellation was not delivery evidence"
+        | Error error ->
+          Alcotest.fail
+            (Reaction_ledger.event_queue_reaction_evidence_error_to_string
+               error));
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int)
+         "cancelled wake is not replayed"
+         0
+         report.replayed_deliveries;
+       Alcotest.(check bool)
+         "cancelled wake stays absent after restart"
+         true
+         (Option.is_none
+            (durable_resolution_opt
+               ~base_path
+               ~keeper_name
+               ~approval_id:id));
+       match AQ.approved_resolution_state ~base_path ~id with
+       | Ok AQ.Resolution_unconsumed -> ()
+       | Ok AQ.Resolution_consumed ->
+         Alcotest.fail "wake cancellation consumed the exact grant"
+       | Error error ->
+         Alcotest.fail (AQ.grant_error_to_string error))
 ;;
 
 let test_one_delivery_replay_failure_does_not_stop_others () =
@@ -4566,6 +4676,10 @@ let () =
             "observed delivery preserves grant without replaying wake"
             `Quick
             test_observed_delivery_preserves_grant_without_replaying_wake
+        ; Alcotest.test_case
+            "cancelled delivery preserves grant without replaying wake"
+            `Quick
+            test_cancelled_delivery_preserves_grant_without_replaying_wake
         ; Alcotest.test_case
             "one replay failure does not stop others"
             `Quick

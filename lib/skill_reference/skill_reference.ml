@@ -139,10 +139,25 @@ let equal left right =
    them may contain one: a package id with a separator is rejected at
    construction ([Package_id_contains_separator]). *)
 let identity_key identity =
-  String.concat "/"
-    [ Skill_source_config.source_id_to_string identity.source_id
-    ; (identity.package_id :> string)
-    ; identity.name
+  (* Length-prefixed, not delimiter-joined.
+
+     The three parts are already unique as a tuple -- the snapshot keys on
+     exactly that and refuses a second document with the same one
+     ([Exact_identity_duplicate]) -- and this has to stay unique as one
+     string. A separator cannot promise that: [package_id] rejects [/] at
+     construction but [name] is taken as written, so [a/b] + [c] and [a] +
+     [b/c] would join to the same key and one Skill would shadow the other
+     with nothing said.
+
+     Counting the bytes instead makes the encoding injective whatever the
+     parts contain. It is offered to a model as a closed choice and matched
+     back by equality; nothing splits it, so readability of the separator
+     buys nothing and the ambiguity costs a silent collision. *)
+  let part text = string_of_int (String.length text) ^ ":" ^ text in
+  String.concat ""
+    [ part (Skill_source_config.source_id_to_string identity.source_id)
+    ; part (identity.package_id :> string)
+    ; part identity.name
     ]
 ;;
 

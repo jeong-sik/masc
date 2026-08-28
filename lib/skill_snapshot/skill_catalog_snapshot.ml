@@ -158,11 +158,11 @@ let digest_fields fields =
 let content_revision = Skill_reference.content_revision_of_source_text
 let config_source_revision source_text = digest_fields [ "skill_config_source", source_text ]
 
-let identity_key (identity : identity) =
-  ( Skill_source_config.source_id_to_string identity.source_id
-  , Skill_reference.package_id_to_string identity.package_id
-  , identity.name )
-;;
+(* One key, defined beside the identity it keys. This held a second one -- a
+   tuple of the same three parts -- and two spellings of "which Skill is this"
+   is how they come to disagree. Used here as a Hashtbl key and an equality,
+   which a string serves as well as a tuple. *)
+let identity_key = Skill_reference.identity_key
 
 let identity_to_yojson = Skill_reference.identity_to_yojson
 

@@ -557,6 +557,41 @@ let test_exact_reference_consumer_rejects_name_fallback () =
     (String_util.contains_substring absent_output "EXACT_BODY")
 ;;
 
+(* The key has to be one-to-one with the identity, because the model is
+   offered a set of them and the server matches one back.
+
+   A separator cannot promise that. [package_id] rejects [/] at construction
+   but [name] is taken as written, so joining with one would fold
+   ("a/b", "c") and ("a", "b/c") onto the same key and one Skill would shadow
+   the other with nothing said. Length prefixes are injective whatever the
+   parts contain. *)
+let test_the_key_cannot_fold_two_identities_together () =
+  let source text =
+    match Skill_source_config.source_id_of_string text with
+    | Ok id -> id
+    | Error _ -> fail "fixture source id is invalid"
+  in
+  let key source_text package_text name =
+    Reference.identity_key
+      (Reference.make_identity
+         ~source_id:(source source_text)
+         ~package_id:(package package_text)
+         ~name)
+  in
+  (* The package half of that pair is already unrepresentable --
+     [Package_id_contains_separator] refuses it at construction -- so the
+     collision a separator would allow has to be built the way it could
+     actually arrive: a name that eats the boundary. *)
+  check bool
+    "a name that looks like two parts stays one"
+    false
+    (String.equal (key "s" "a" "b/c") (key "s" "a" "b/c/"));
+  check bool
+    "a shared prefix across two parts does not collide"
+    false
+    (String.equal (key "s" "ab" "c") (key "s" "a" "bc"))
+;;
+
 (* What this change was for. The catalogue used to carry the whole
    [Skill_reference] JSON per Skill -- a 64-hex content revision inside a
    nested envelope -- because the tool took one and the model had to be able
@@ -864,6 +899,8 @@ let () =
             test_resolved_body_stays_frozen_after_new_snapshot
         ; Alcotest.test_case "the catalogue costs a key, not a reference" `Quick
             test_the_catalogue_costs_a_key_not_a_reference
+        ; Alcotest.test_case "the key cannot fold two identities together"
+            `Quick test_the_key_cannot_fold_two_identities_together
         ; test_case "resource read is exact and deferred" `Quick
             test_resource_is_read_only_when_exact_file_is_requested
         ; test_case "revision mismatch remains typed" `Quick

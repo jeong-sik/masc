@@ -14,6 +14,12 @@ type terminal_kind =
 type observed_terminal =
   { kind : terminal_kind
   ; elapsed_s : float
+  ; elapsed_measured : bool
+    (** [false] when the duration was synthesised rather than measured — a
+        server-restart orphan is written back as Failed with
+        [now - started_at], an arbitrarily large value that must not enter
+        the latency percentile (lane audit W7). It still bounds
+        [last_terminal_at]. *)
   ; selected_slot : string option
   }
 
@@ -81,21 +87,37 @@ let observed_exact_run (run : Exact_lane_run_registry.run) =
     match run.status with
     | Exact_lane_run_registry.Running -> Running
     | Exact_lane_run_registry.Completed { outcome; elapsed_s; selected_slot; _ } ->
-      Terminal { kind = terminal_of_exact_outcome outcome; elapsed_s; selected_slot }
+      let elapsed_measured =
+        match outcome with
+        | Exact_lane_run_registry.Failed { code; _ } ->
+          not (String.equal code "server_restarted")
+        | Exact_lane_run_registry.Succeeded
+        | Exact_lane_run_registry.Cancelled -> true
+      in
+      Terminal
+        { kind = terminal_of_exact_outcome outcome
+        ; elapsed_s
+        ; elapsed_measured
+        ; selected_slot
+        }
     | Exact_lane_run_registry.Completion_persistence_failed
         { elapsed_s; selected_slot; _ } ->
-      Terminal { kind = Failed; elapsed_s; selected_slot }
+      Terminal { kind = Failed; elapsed_s; elapsed_measured = true; selected_slot }
   in
   { lane_id = Exact_lane_run_registry.lane_key run.lane; started_at = run.started_at; status }
 ;;
 
+(* Success for this lane means A VERDICT WAS PRODUCED. [Not_reviewed] is
+   emitted when every evaluator slot was exhausted without a verdict
+   (Evaluator_unavailable / Invalid_verdict) — counting it as succeeded made
+   the panel unreadable as a judgement metric (lane audit W5). *)
 let terminal_of_verification_outcome = function
   | Verification_run_registry.Infrastructure_unavailable _
   | Verification_run_registry.Commit_failed _
-  | Verification_run_registry.Raised _ -> Failed
+  | Verification_run_registry.Raised _
+  | Verification_run_registry.Not_reviewed _ -> Failed
   | Verification_run_registry.Approved
-  | Verification_run_registry.Rejected _
-  | Verification_run_registry.Not_reviewed _ -> Succeeded
+  | Verification_run_registry.Rejected _ -> Succeeded
 ;;
 
 let observed_verification_run (run : Verification_run_registry.run) =
@@ -107,6 +129,7 @@ let observed_verification_run (run : Verification_run_registry.run) =
       Terminal
         { kind = terminal_of_verification_outcome outcome
         ; elapsed_s
+        ; elapsed_measured = true
         ; selected_slot = evaluator_runtime
         }
   in
@@ -114,10 +137,10 @@ let observed_verification_run (run : Verification_run_registry.run) =
 ;;
 
 let terminal_of_goal_verification_outcome = function
-  | Goal_verification_run_registry.Raised _ -> Failed
+  | Goal_verification_run_registry.Raised _
+  | Goal_verification_run_registry.Deferred _ -> Failed
   | Goal_verification_run_registry.Reviewed
-  | Goal_verification_run_registry.Committed
-  | Goal_verification_run_registry.Deferred _ -> Succeeded
+  | Goal_verification_run_registry.Committed -> Succeeded
 ;;
 
 let observed_goal_verification_run (run : Goal_verification_run_registry.run) =
@@ -129,6 +152,7 @@ let observed_goal_verification_run (run : Goal_verification_run_registry.run) =
       Terminal
         { kind = terminal_of_goal_verification_outcome outcome
         ; elapsed_s
+        ; elapsed_measured = true
         ; selected_slot = evaluator_runtime
         }
   in
@@ -214,7 +238,12 @@ let lane_json
   let succeeded_count = count_kind Succeeded in
   let failed_count = count_kind Failed in
   let cancelled_count = count_kind Cancelled in
-  let elapsed_values = List.map (fun (_, terminal) -> terminal.elapsed_s) terminal_runs in
+  let elapsed_values =
+    List.filter_map
+      (fun (_, terminal) ->
+         if terminal.elapsed_measured then Some terminal.elapsed_s else None)
+      terminal_runs
+  in
   let latest = latest_run runs in
   let latest_terminal = latest_terminal_run terminal_runs in
   let latest_terminal_kind =

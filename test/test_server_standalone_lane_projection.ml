@@ -126,6 +126,87 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
   | _ -> fail "expected one selected HITL slot"
 ;;
 
+(* Lane audit W5+W7: the verifier lane's success means A VERDICT WAS
+   PRODUCED — an exhausted evaluator (Not_reviewed) counts as failed — and a
+   server-restart orphan's synthesised duration (now - started_at) must not
+   enter the latency percentile, while still bounding last_terminal_at. *)
+let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
+  let exact_runs =
+    [ exact_run
+        ~run_id:"librarian-measured"
+        ~lane:Exact.Librarian
+        ~started_at:80.
+        ~status:
+          (Exact.Completed
+             { outcome = Exact.Failed { code = "provider"; detail = "offline" }
+             ; elapsed_s = 8.
+             ; output = `Null
+             ; selected_slot = None
+             })
+    ; exact_run
+        ~run_id:"librarian-restart-orphan"
+        ~lane:Exact.Librarian
+        ~started_at:10.
+        ~status:
+          (Exact.Completed
+             { outcome =
+                 Exact.Failed { code = "server_restarted"; detail = "orphan" }
+             ; elapsed_s = 100000.
+             ; output = `Null
+             ; selected_slot = None
+             })
+    ]
+  in
+  let verification_runs : Verification.run list =
+    [ { verification_id = "verify-exhausted"
+      ; task_id = "task-2"
+      ; producer = "keeper-test"
+      ; authority_kind = "completion"
+      ; authority_actor = "operator"
+      ; started_at = 70.
+      ; status =
+          Verification.Completed
+            { outcome = Verification.Not_reviewed { gate = "Evaluator_unavailable"; detail = "exhausted" }
+            ; evaluator_runtime = None
+            ; elapsed_s = 2.
+            ; tools = []
+            }
+      }
+    ]
+  in
+  let resolve_lane _lane_id =
+    Projection.Configured { admitted_slots = [ "slot" ]; admission_error = None }
+  in
+  let json =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane
+      ~exact_runs_total:(List.length exact_runs)
+      ~exact_runs
+      ~verification_runs
+      ~goal_verification_runs:[]
+  in
+  let field lane_id name =
+    lane_by_id json lane_id |> Yojson.Safe.Util.member name
+  in
+  check int
+    "an exhausted evaluator counts as a lane failure"
+    1
+    (field Runtime.verifier_exact_lane_id "failed_count"
+     |> Yojson.Safe.Util.to_int);
+  check int
+    "no verdict means no lane success"
+    0
+    (field Runtime.verifier_exact_lane_id "succeeded_count"
+     |> Yojson.Safe.Util.to_int);
+  check bool
+    "p50 comes from measured durations only"
+    true
+    (match field "librarian_exact" "p50_elapsed_s" with
+     | `Float value -> Float.equal value 8.
+     | _ -> false)
+;;
+
 let test_latest_terminal_uses_completion_time () =
   let exact_runs =
     [ exact_run
@@ -204,6 +285,10 @@ let () =
             "latest terminal is ordered by completion time"
             `Quick
             test_latest_terminal_uses_completion_time
+        ; test_case
+            "no verdict is failed; synthetic elapsed skips p50"
+            `Quick
+            test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50
         ] )
     ]
 ;;

@@ -9037,10 +9037,16 @@ let render_tools (state : state) =
                   | Some delivery ->
                     [ ( delivery.delivered_at,
                         Printf.sprintf
-                          "%-8s delivery  %-20s %5.1fKB turn#%d %s"
+                          (* The same size the Context inspector spells, and
+                             the attachment notes beside it: this cell divided
+                             by 1024 itself and so had no rung above KB, while
+                             the resource bound that caps the body is a config
+                             value rather than a guarantee. *)
+                          "%-8s delivery  %-20s %9s turn#%d %s"
                           (time_of delivery.delivered_at)
                           skill
-                          (float_of_int delivery.content_bytes /. 1024.)
+                          (Masc_tui_context_inspector.format_bytes
+                             delivery.content_bytes)
                           activation.agent_core_turn
                           (Terminal_text.single_line delivery.runtime_id) ) ]
                   | None -> [])
@@ -9353,10 +9359,16 @@ let render_keeper_calls (state : state) =
             if call.kc_success then ("✓", Ansi.reset)
             else ("✗", (Theme.bad ()))
           in
+          (* The Acting feed already spells a call's duration, from the same
+             milliseconds. This was a second spelling of the first two rungs
+             with no third: a call past a minute would have read [312.4s]
+             where the feed reads [5m12s]. No call in 471 sampled reached
+             that -- the longest was 18.1s -- so this removes a duplicate
+             rather than a wrong reading. Duplicated ladders are how the two
+             that were wrong got that way. *)
           let duration =
             match call.kc_duration_ms with
-            | Some ms when ms < 1000. -> Printf.sprintf "%.0fms" ms
-            | Some ms -> Printf.sprintf "%.1fs" (ms /. 1000.)
+            | Some ms -> Masc_tui_acting.elapsed_text ms
             | None -> "-"
           in
           let turn =

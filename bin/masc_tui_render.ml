@@ -1957,14 +1957,23 @@ let render_approvals (state : state) =
         (* A durable Gate ask: it keeps until answered, and the answer goes
            through the dashboard resolve route. What the eye needs is who
            wants to touch what, and that the decision spends here. *)
+        (* The name is not padded here. This is one line with nothing under
+           it to line up with, so a fixed twenty both cut
+           "rw-e0-r9-20260820-review" and left short names trailing spaces.
+           The list above it now sizes its column to the names it holds and
+           this line disagreed with it three rows apart.
+
+           What follows absorbs the difference, which is the same order the
+           list uses: the identifier is why the line exists. *)
+        let keeper =
+          Terminal_text.single_line pending.Tui_decode.gp_keeper
+        in
         Printf.sprintf "  %s%s → %s%s"
           (Theme.warn ())
-          (fit_width
-             (Terminal_text.single_line pending.Tui_decode.gp_keeper)
-             20)
+          keeper
           (fit_width
              (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
-             (max 8 (cols - 48)))
+             (max 8 (cols - 28 - Message_layout.display_width keeper)))
           Ansi.reset
     | None -> ""
   in
@@ -1999,12 +2008,20 @@ let render_approvals (state : state) =
                (max 8 (cols - 9)))
             Ansi.reset )
     | Some (Gate_row pending) ->
+        (* Same rule as the line above: the keeper name goes out whole and the
+           approval id, which is a uuid nobody reads off a screen, takes what
+           is left. *)
+        let keeper =
+          Terminal_text.single_line pending.Tui_decode.gp_keeper
+        in
         ( Printf.sprintf "  %skeeper=%s  operation=%s  approval=%s%s" Ansi.dim
-            (fit_width (Terminal_text.single_line pending.Tui_decode.gp_keeper) 20)
+            keeper
             (fit_width
                (Terminal_text.single_line pending.Tui_decode.gp_operation)
                20)
-            (fit_width (Terminal_text.single_line pending.Tui_decode.gp_id) 30)
+            (fit_width (Terminal_text.single_line pending.Tui_decode.gp_id)
+               (max 8
+                  (cols - 52 - Message_layout.display_width keeper)))
             Ansi.reset
         , Printf.sprintf "  %sinput=%s%s" Ansi.dim
             (fit_width
@@ -7936,6 +7953,21 @@ let runtime_column width text =
       (max 0 (width - Message_layout.display_width clipped))
       ' '
 
+(* A column that holds names rather than prose. Lane and candidate ids share
+   long prefixes -- glm-coding-…-a, glm-coding-…-b -- and at eighty columns
+   the lane column is ten cells, so cutting from the end drew four different
+   lanes as four identical "glm-codin~". The tail is what tells them apart,
+   which is the same reason the Keepers table fits its names from the middle.
+
+   Padded to the column afterwards, like {!runtime_column}, so the columns to
+   the right do not move. *)
+let runtime_name_column width text =
+  let clipped = Message_layout.fit_middle width text in
+  clipped
+  ^ String.make
+      (max 0 (width - Message_layout.display_width clipped))
+      ' '
+
 (* Lane candidates come from /runtime/resolved; reachability comes from the
    cached runtime-probe document. Exact runtime-id joining happened in the
    decoder module, so drawing never parses ids or reconstructs a lane. *)
@@ -8107,9 +8139,9 @@ let render_runtime (state : state) =
           in
           let line =
             "  "
-            ^ runtime_column runtime_lane_width
+            ^ runtime_name_column runtime_lane_width
                 (Terminal_text.single_line candidate.rcr_lane_id)
-            ^ " " ^ runtime_column runtime_candidate_width candidate_label
+            ^ " " ^ runtime_name_column runtime_candidate_width candidate_label
             ^ " " ^ runtime_column runtime_identity_width provider_model
             ^ " " ^ runtime_column runtime_status_width route_probe
             ^ " " ^ detail

@@ -472,7 +472,22 @@ type runtime_surface_snapshot = {
 }
 
 val runtime_probe_refresh_state_to_string : runtime_probe_refresh_state -> string
+val runtime_probe_status_of_string :
+  string -> (runtime_probe_status, string) result
+(** The probe's own status, as [Server_dashboard_http_runtime_info] writes it:
+    the live summary picks between ["ok"], ["idle"], ["degraded"] and
+    ["unavailable"], the failure envelope writes ["unreachable"], and the
+    cold-start envelope writes ["warming_up"].
+
+    Exported so the contract can be pinned against that list. It drifted from
+    it once -- this read ["reachable"] and ["no_http_runtimes"], which nothing
+    writes, so every live response failed to decode and the Runtime surface
+    drew every candidate as unobserved. *)
+
 val runtime_probe_status_to_string : runtime_probe_status -> string
+(** The word the wire uses, so a badge drawn from this names the reading the
+    server named. Many-to-one: ["unavailable"] and ["unreachable"] read as one
+    status and write back as ["unreachable"]. *)
 val runtime_provider_status_to_string : runtime_provider_status -> string
 
 (** A repository the workspace tracks. *)

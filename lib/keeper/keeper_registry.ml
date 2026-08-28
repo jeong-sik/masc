@@ -404,33 +404,26 @@ let wakeup_running_entry ~intent (entry : registry_entry) =
     record_lifecycle_wakeup_denial ~intent entry denial;
     Deferred_lifecycle denial
   | Keeper_lifecycle_admission.Autonomous_admitted ->
-    (* Exhaustive on purpose: a new phase must state whether a wake reaches it.
-       [Running] and [Failing] are the two phases [derive_phase] can produce
-       while [fiber_alive] holds, so they are the two that can receive the
-       hint. Every other phase either has no fiber to signal or is mid-operation.
+    (* [can_execute_turn] already decides which phases may run a turn. Waking
+       is telling a keeper to start one, so the two must agree; a second
+       hand-written list here is how they drift apart.
 
-       [Failing] is derived from [turn_healthy = false] — the record of a turn
-       that already ended. Refusing the wake on it deadlocks the keeper: only a
-       turn can set [turn_healthy] back, and only a wake starts a turn. Measured
-       2026-08-28: one upstream 500 left taskmaster refusing 181 wakes over 18
-       hours, recoverable only by an operator calling keeper_up. *)
-    (match entry.phase with
-     | Keeper_state_machine.Running | Keeper_state_machine.Failing ->
-       (* tla-lint: allow-mutation: lifecycle-admitted fiber hint signal *)
-       Atomic.set entry.fiber_wakeup true;
-       Signaled
-     | Keeper_state_machine.Offline
-     | Keeper_state_machine.Crashed
-     | Keeper_state_machine.Restarting
-     (* no live fiber to receive the hint *)
-     | Keeper_state_machine.Compacting
-     | Keeper_state_machine.HandingOff
-     | Keeper_state_machine.Draining
-     (* a fiber is mid-operation; waking races it *)
-     | Keeper_state_machine.Paused
-     | Keeper_state_machine.Stopped ->
-       (* operator authority, and the terminal phase *)
-       Deferred_not_running entry.phase)
+       They disagreed. This site admitted [Running] only, while
+       [can_execute_turn] admits [Failing] too — a keeper in [Failing] was
+       allowed to run a turn but could not be told to start one. That closes:
+       [Failing] is derived from [turn_healthy = false], only a turn sets
+       [turn_healthy] back, and only a wake starts a turn. Measured 2026-08-28:
+       one upstream 500 left taskmaster refusing 181 wakes over 18 hours,
+       recoverable only by an operator calling keeper_up.
+
+       [fiber_wakeup] is a hint the fiber reads on its own tick, not a
+       preemption, so signalling a mid-operation phase cannot interrupt it. *)
+    if not (Keeper_state_machine.can_execute_turn entry.phase)
+    then Deferred_not_running entry.phase
+    else (
+      (* tla-lint: allow-mutation: lifecycle-admitted fiber hint signal *)
+      Atomic.set entry.fiber_wakeup true;
+      Signaled)
 ;;
 
 let wakeup_running ~intent ~base_path name =

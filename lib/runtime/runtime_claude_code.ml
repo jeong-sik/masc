@@ -11,6 +11,7 @@ type config =
   ; system_prompt : string option
   ; admission_timeout_s : float
   ; native : Runtime_native_tools.posture
+  ; setting_sources : Runtime_native_tools.claude_setting_source list
   ; timeout_s : float option
   ; wall_clock_ceiling_s : float option
   }
@@ -32,6 +33,7 @@ let default_config ~cwd =
   ; model = None
   ; system_prompt = None
   ; native = Runtime_native_tools.claude_code_default
+  ; setting_sources = []
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
   ; wall_clock_ceiling_s = None
@@ -1173,7 +1175,11 @@ let command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id =
     @ (match mcp_config dynamic_tools with
        | None -> []
        | Some value -> [ "--mcp-config"; value; "--strict-mcp-config" ])
-    @ [ "--setting-sources=" ]
+    (* Empty renders the historical [--setting-sources=]: no settings layer,
+       so disk-level skills/hooks/subagents/CLAUDE.md stay off. A non-empty
+       list arrives only through keeper-profile opt-in gated on the yolo
+       approval mode ([Keeper_official_client_host.admit_claude_setting_sources]). *)
+    @ [ Runtime_native_tools.claude_setting_sources_arg config.setting_sources ]
     @ reasoning_args
     @ [ "--input-format"; "stream-json" ]
   in

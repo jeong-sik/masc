@@ -1030,6 +1030,39 @@ let expect_admit label expected result =
   | Error _ -> check bool label expected false
 ;;
 
+(* keeper.tools.claude-setting-sources shares the RFC-0390 admission bar:
+   a loaded settings layer can carry skills/hooks the CLI executes outside
+   the MASC approval gate, so a non-empty declaration needs yolo. *)
+let test_setting_sources_require_yolo () =
+  let sources = [ Runtime_native_tools.Settings_project ] in
+  (match
+     Host.admit_claude_setting_sources
+       ~sources:[]
+       ~approval_mode:Keeper_tool_approval_mode.Auto
+       ~client_label:"Claude Code"
+   with
+   | Ok () -> ()
+   | Error _ -> fail "an empty declaration must pass under Auto");
+  (match
+     Host.admit_claude_setting_sources
+       ~sources
+       ~approval_mode:Keeper_tool_approval_mode.Auto
+       ~client_label:"Claude Code"
+   with
+   | Ok () -> fail "a non-empty declaration must be refused under Auto"
+   | Error detail ->
+     check bool "refusal names the yolo requirement" true
+       (String_util.contains_substring detail "yolo"));
+  match
+    Host.admit_claude_setting_sources
+      ~sources
+      ~approval_mode:Keeper_tool_approval_mode.Yolo
+      ~client_label:"Claude Code"
+  with
+  | Ok () -> ()
+  | Error _ -> fail "a non-empty declaration must be admitted under Yolo"
+;;
+
 let test_native_full_requires_yolo () =
   expect_admit "full under Auto is refused" false
     (Host.admit_native_posture
@@ -1525,6 +1558,10 @@ let () =
             "full requires yolo"
             `Quick
             test_native_full_requires_yolo
+        ; Alcotest.test_case
+            "setting sources require yolo"
+            `Quick
+            test_setting_sources_require_yolo
         ; test_case
             "none needs client support"
             `Quick

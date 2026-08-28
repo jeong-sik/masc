@@ -1493,6 +1493,43 @@ let stub_dynamic_tool =
   }
 ;;
 
+(* The settings layers are part of the same argv contract: empty renders the
+   historical bare [--setting-sources=] so nothing loads, and a declared list
+   renders comma-joined in declaration order. *)
+let test_setting_sources_render_in_argv () =
+  let argv sources =
+    let config =
+      { (Runtime_claude_code.default_config ~cwd:"/tmp") with
+        setting_sources = sources
+      }
+    in
+    match
+      Runtime_claude_code.command
+        config
+        ~dynamic_tools:[]
+        ~reasoning_effort:None
+        ~session_mode:Runtime_claude_code.Start
+        ~session_id:"11111111-1111-4111-8111-111111111111"
+    with
+    | Ok argv -> argv
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+  in
+  check bool "default keeps the bare no-layer token" true
+    (List.mem "--setting-sources=" (argv []));
+  check bool "declared layers render comma-joined in order" true
+    (List.mem
+       "--setting-sources=project,user"
+       (argv
+          [ Runtime_native_tools.Settings_project
+          ; Runtime_native_tools.Settings_user
+          ]));
+  check bool "a declared list drops the bare token" true
+    (not
+       (List.mem
+          "--setting-sources="
+          (argv [ Runtime_native_tools.Settings_local ])))
+;;
+
 let test_native_posture_selects_tools_flag () =
   let argv posture = native_argv ~native:posture ~dynamic_tools:[] in
   check (option string) "none disables the built-in set" (Some "")
@@ -1534,6 +1571,10 @@ let () =
             "posture selects --tools"
             `Quick
             test_native_posture_selects_tools_flag
+        ; Alcotest.test_case
+            "setting sources render in argv"
+            `Quick
+            test_setting_sources_render_in_argv
         ; test_case
             "read pre-approves its read set"
             `Quick

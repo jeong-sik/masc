@@ -23,6 +23,11 @@ type config =
         (RFC-0390). Built-in calls run inside the client and never reach the
         MASC approval gate, so the keeper layer admits [Native_full] only
         for Yolo keepers. *)
+  ; setting_sources : Runtime_native_tools.claude_setting_source list
+    (** Which settings layers the CLI may load ([--setting-sources]). Empty —
+        the default — keeps the historical no-layer stance; a loaded layer
+        can carry skills and hooks that execute outside the MASC gate, so the
+        keeper layer admits a non-empty list only for Yolo keepers. *)
   ; timeout_s : float option
     (** [None] removes the deadline after the user message is written: the
         spawned client decides when its own turn ends. Initialization remains

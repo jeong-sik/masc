@@ -107,6 +107,7 @@ let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s
   ; cwd = base_dir
   ; model = execution.model
   ; native = Runtime_native_tools.claude_code_default
+  ; setting_sources = []
   ; system_prompt
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =

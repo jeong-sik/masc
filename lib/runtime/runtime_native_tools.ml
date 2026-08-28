@@ -97,3 +97,34 @@ let claude_code_tools_arg = function
   | Native_read -> String.concat "," claude_code_read_tool_names
   | Native_full -> "default"
 ;;
+
+(* Which Claude Code settings layers the CLI may load. The empty list — the
+   default everywhere — keeps the historical [--setting-sources=] (no layer at
+   all), so skills, hooks, subagents, and CLAUDE.md from disk stay off unless
+   a keeper profile opts in. Closed variant rather than pass-through strings:
+   a typo like "projcet" must fail the profile load, not silently select no
+   layer. *)
+type claude_setting_source =
+  | Settings_user
+  | Settings_project
+  | Settings_local
+
+let claude_setting_source_to_string = function
+  | Settings_user -> "user"
+  | Settings_project -> "project"
+  | Settings_local -> "local"
+;;
+
+let claude_setting_source_of_string = function
+  | "user" -> Some Settings_user
+  | "project" -> Some Settings_project
+  | "local" -> Some Settings_local
+  | _ -> None
+;;
+
+let valid_claude_setting_source_strings = [ "user"; "project"; "local" ]
+
+let claude_setting_sources_arg sources =
+  "--setting-sources="
+  ^ String.concat "," (List.map claude_setting_source_to_string sources)
+;;

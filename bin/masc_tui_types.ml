@@ -1003,6 +1003,7 @@ type surface_needs = {
   needs_planning : bool;
   needs_system_logs : bool;
   needs_keeper_chat : bool;
+  needs_operator_approvals : bool;
   needs_asks : bool;
 }
 
@@ -1014,6 +1015,7 @@ let nothing =
     needs_planning = false;
     needs_system_logs = false;
     needs_keeper_chat = false;
+    needs_operator_approvals = false;
     needs_asks = false;
   }
 
@@ -1049,11 +1051,56 @@ let surface_needs : surface -> surface_needs = function
      to one belong on the same surface: an operator should not have to know
      that "may I run this" and "which way should I go" arrived through
      different machinery. *)
-  | Approvals -> { nothing with needs_asks = true }
+  | Approvals ->
+      { nothing with needs_operator_approvals = true; needs_asks = true }
   | Lanes | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
   | Tools ->
       nothing
+
+let surface_needs_delta ~previous ~next =
+  { needs_transport = next.needs_transport && not previous.needs_transport
+  ; needs_keeper_roster =
+      next.needs_keeper_roster && not previous.needs_keeper_roster
+  ; needs_fleet_safety =
+      next.needs_fleet_safety && not previous.needs_fleet_safety
+  ; needs_board = next.needs_board && not previous.needs_board
+  ; needs_planning = next.needs_planning && not previous.needs_planning
+  ; needs_system_logs =
+      next.needs_system_logs && not previous.needs_system_logs
+  ; needs_keeper_chat =
+      next.needs_keeper_chat && not previous.needs_keeper_chat
+  ; needs_operator_approvals =
+      next.needs_operator_approvals
+      && not previous.needs_operator_approvals
+  ; needs_asks = next.needs_asks && not previous.needs_asks
+  }
+
+let surface_needs_any needs = needs <> nothing
+
+let full_refresh_needs ~scoped_refresh_inflight surface =
+  if scoped_refresh_inflight then nothing else surface_needs surface
+
+type full_refresh_intent = Cadence | Revalidate
+
+type scoped_refresh_followup =
+  | No_scoped_followup
+  | Revalidate_after_scoped
+
+let note_full_refresh_intent ~intent ~full_refresh_inflight
+    ~scoped_refresh_inflight followup =
+  match intent with
+  | Revalidate when full_refresh_inflight || scoped_refresh_inflight ->
+      Revalidate_after_scoped
+  | Cadence | Revalidate -> followup
+
+let take_scoped_refresh_followup ~full_refresh_inflight
+    ~scoped_refresh_inflight = function
+  | Revalidate_after_scoped
+    when (not full_refresh_inflight) && not scoped_refresh_inflight ->
+      (No_scoped_followup, true)
+  | (No_scoped_followup | Revalidate_after_scoped) as followup ->
+      (followup, false)
 
 (** How far a surface's list can scroll, given the terminal's height.
 

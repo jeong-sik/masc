@@ -58,7 +58,10 @@ type kind =
       }
   | Said_by_keeper
   | Autonomous_reply
-  | Delivery_failed of { origin_request_id : string option }
+  | Delivery_failed of
+      { origin_request_id : string option
+      ; recovered_at : float option
+      }
   | Tool_calls of Transcript.tool_block
   | Reasoning of string list
   | Memory_activity
@@ -99,6 +102,96 @@ let string_field fields name =
   match List.assoc_opt name fields with
   | Some (`String value) -> Some value
   | Some _ | None -> None
+
+let find_substring ~needle text =
+  let needle_len = String.length needle in
+  let text_len = String.length text in
+  let rec loop offset =
+    if offset + needle_len > text_len then None
+    else if String.sub text offset needle_len = needle then Some offset
+    else loop (offset + 1)
+  in
+  if needle_len = 0 then Some 0 else loop 0
+;;
+
+type interruption_cause =
+  | Host_shutdown
+  | Provider_connection_closed
+
+let interruption_of_failure text =
+  let direct_cause () =
+    if
+      Option.is_some
+        (find_substring
+           ~needle:"MASC runtime shutdown interrupted the active Codex turn"
+           text)
+    then Some (Host_shutdown, false)
+    else if
+      Option.is_some
+        (find_substring
+           ~needle:"Provider 'codex_app_server' unavailable: stdout closed"
+           text)
+    then Some (Provider_connection_closed, false)
+    else None
+  in
+  let marker = "[masc_agent_core_error]" in
+  match find_substring ~needle:marker text with
+  | None -> direct_cause ()
+  | Some marker_at ->
+    let after_marker = marker_at + String.length marker in
+    (match String.index_from_opt text after_marker '{' with
+     | None -> direct_cause ()
+     | Some json_at ->
+       let json = String.sub text json_at (String.length text - json_at) in
+       (match Yojson.Safe.from_string json with
+        | exception Yojson.Json_error _ -> direct_cause ()
+        | `Assoc fields
+          when string_field fields "kind" = Some "provider_attempt_effect_fenced" ->
+          let diagnostic = Option.value ~default:"" (string_field fields "diagnostic") in
+          let cause =
+            if
+              Option.is_some
+                (find_substring ~needle:"runtime shutdown interrupted" diagnostic)
+            then Some Host_shutdown
+            else if
+              Option.is_some
+                (find_substring
+                   ~needle:"Provider 'codex_app_server' unavailable: stdout closed"
+                   diagnostic)
+            then Some Provider_connection_closed
+            else None
+          in
+          Option.map
+            (fun cause ->
+               ( cause
+               , string_field fields "effect_disposition" = Some "effect_attempted" ))
+            cause
+        | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _
+        | `Null | `String _ -> direct_cause ()))
+;;
+
+let present_delivery_failure ?recovered_at text =
+  match interruption_of_failure text with
+  | None -> None
+  | Some (cause, effect_attempted) ->
+    let subject =
+      match cause with
+      | Host_shutdown -> "Runtime shutdown interrupted this turn"
+      | Provider_connection_closed ->
+        "Provider connection closed during this turn"
+    in
+    let lifecycle, recovered =
+      match recovered_at with
+      | Some _ -> "lane recovered in a later Keeper reply", true
+      | None -> "recovery pending", false
+    in
+    let replay =
+      if effect_attempted then
+        " · same-turn replay blocked to avoid duplicate tool calls"
+      else ""
+    in
+    Some (Printf.sprintf "%s · %s%s · details in Logs" subject lifecycle replay, recovered)
+;;
 
 let float_field fields name =
   match List.assoc_opt name fields with
@@ -682,7 +775,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
               [ Utterance
                   { at
                   ; turn_id
-                  ; kind = Delivery_failed { origin_request_id }
+                  ; kind = Delivery_failed { origin_request_id; recovered_at = None }
                   ; text = content
                   ; attachments = []
                   }
@@ -784,12 +877,48 @@ let fold_tool_blocks parsed_rows =
   in
   loop [] [] parsed_rows
 
+(* A delivery failure remains a failure record, but a later real keeper
+   utterance answers the operator's practical question: the lane recovered.
+   Scan the append order backwards so the evidence comes from a row after the
+   interruption, never merely from a healthy badge or a newer timestamp.
+
+   Only failures this reader can classify are annotated. A later reply must
+   not turn an unrelated timeout/auth/config error into a recovered restart. *)
+let annotate_recovered_interruptions rows =
+  let rec loop later_reply_at acc = function
+    | [] -> acc
+    | row :: rest ->
+      let row, later_reply_at =
+        match row.kind with
+        | Said_by_keeper | Autonomous_reply
+          when String.trim row.text <> "" ->
+          row, Some row.at
+        | Delivery_failed failure ->
+          let recognized = Option.is_some (present_delivery_failure row.text) in
+          let recovered_at = if recognized then later_reply_at else None in
+          { row with
+            kind =
+              Delivery_failed
+                { origin_request_id = failure.origin_request_id; recovered_at }
+          }, later_reply_at
+        | Addressed_to_keeper _ | Said_by_keeper | Autonomous_reply
+        | Tool_calls _ | Reasoning _ | Memory_activity ->
+          row, later_reply_at
+      in
+      loop later_reply_at (row :: acc) rest
+  in
+  loop None [] (List.rev rows)
+;;
+
 let rows_of_json (payload : Yojson.Safe.t) =
   match payload with
   | `List entries ->
       let parsed = List.map parse_row entries in
       let dropped = List.length (List.filter (fun rows -> rows = []) parsed) in
-      Ok { rows = fold_tool_blocks (List.concat parsed); dropped }
+      let rows =
+        fold_tool_blocks (List.concat parsed) |> annotate_recovered_interruptions
+      in
+      Ok { rows; dropped }
   | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ ->
       Error "keeper chat history did not come back as an array of rows"
 

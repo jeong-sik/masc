@@ -79,6 +79,7 @@ let codex_failure_status = function
   | Protocol_error _ | Rpc_error _ | Unsupported_server_request _ ->
     "protocol_error"
   | Context_window_exceeded _ | Turn_failed _ | Turn_interrupted
+  | Runtime_shutting_down
   (* The host raises [Stopped_by_host] to abort a repeated tool loop mid-turn,
      and this probe measures [initialize] plus login only — see "The probe
      never starts a turn" at runtime_codex_app_server.ml. It joins the other

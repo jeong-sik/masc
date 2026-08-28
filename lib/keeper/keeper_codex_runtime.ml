@@ -425,6 +425,10 @@ let codex_error_to_core_error = function
   | Runtime_codex_app_server.Turn_interrupted ->
     Agent_core.Error.Internal
       (Runtime_codex_app_server.error_to_string Runtime_codex_app_server.Turn_interrupted)
+  | Runtime_codex_app_server.Runtime_shutting_down ->
+    Agent_core.Error.Internal
+      (Runtime_codex_app_server.error_to_string
+         Runtime_codex_app_server.Runtime_shutting_down)
   | Runtime_codex_app_server.Stopped_by_host _ ->
     Agent_core.Error.Internal
       "Codex host stop escaped the typed checkpoint boundary"
@@ -434,6 +438,7 @@ let recovery_failure_of_client_error = function
   | Runtime_codex_app_server.Spawn_failed _ ->
     Keeper_official_client_session_store.Transient_spawn_failed
   | Runtime_codex_app_server.Turn_interrupted
+  | Runtime_codex_app_server.Runtime_shutting_down
   | Runtime_codex_app_server.Process_exited _
   | Runtime_codex_app_server.Timeout _ ->
     Keeper_official_client_session_store.Transport_interrupted

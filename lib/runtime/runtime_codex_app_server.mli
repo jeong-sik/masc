@@ -155,6 +155,10 @@ type error =
   | Turn_failed of string
   | Stopped_by_host of host_stop
   | Turn_interrupted
+  | Runtime_shutting_down
+      (** The MASC host entered graceful shutdown while this client was
+          active. Kept distinct from {!Process_exited}: EOF is only the
+          transport symptom here; host shutdown is the observed cause. *)
   | Process_exited of string
   | Timeout of
       { seconds : float

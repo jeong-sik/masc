@@ -1,0 +1,63 @@
+# The compile gate that ci.yml cannot be.
+#
+# ci.yml runs on workflow_dispatch only. Over the 25 hours to 2026-08-27
+# 14:00 the repository merged 253 pull requests while that workflow ran on
+# 49 branches, and of the 25 branches whose run concluded failure, every one
+# that had a pull request merged anyway. A check that runs on a fifth of the
+# changes and blocks none of them is not a gate.
+#
+# The reason it is not on pull_request is recorded in ci.yml's Full
+# validation job: "repeating a cold 15-minute toolchain build on every
+# synchronization cost more runner time than the failures it prevented."
+# That is true of that job. It is not true of the compile alone: measured on
+# run 33133860559, `dune build @check` finishes in 2.6 minutes against the
+# 11.7 that `@default @check @install` takes on the same cold runner. The
+# difference is linking, not typechecking.
+#
+# So this workflow takes the part that is cheap enough to run on everything
+# and leaves the rest where it is. It does not replace ci.yml, and ci.yml is
+# unchanged by it.
+name: Compile Gate
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compile-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+
+      # @check compiles every library, executable and test without linking or
+      # running any of them. ci.yml's Build step already documents it as the
+      # widest alias: @default alone leaves test dirs outside the executed
+      # runtest subset uncompiled, which is how #23196/#23211/#23353 landed
+      # green on 2026-07-04~06. What this does not cover is failures that
+      # appear only at link time; ci.yml's Full validation still does.
+      - name: Typecheck the tree
+        env:
+          DUNE_JOBS: "4"
+        run: opam exec -- dune build --root . @check

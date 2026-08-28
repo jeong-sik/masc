@@ -512,7 +512,7 @@ let cleanup_stale_containers
     }
 ;;
 
-let docker_filter_args ?keeper_name ?container_kind ?owner_pid ?turn_id ~base_path () =
+let docker_filter_args ?keeper_name ?container_kind ?owner_pid ~base_path () =
   let label_filter key value = [ "--filter"; "label=" ^ key ^ "=" ^ value ] in
   label_filter sandbox_component_label_key sandbox_component_label_value
   @ label_filter sandbox_base_path_hash_label_key (base_path_hash base_path)
@@ -527,20 +527,16 @@ let docker_filter_args ?keeper_name ?container_kind ?owner_pid ?turn_id ~base_pa
   @ (match owner_pid with
      | Some pid -> label_filter sandbox_owner_pid_label_key (string_of_int pid)
      | None -> [])
-  @
-  match turn_id with
-  | Some id -> label_filter sandbox_turn_id_label_key (string_of_int id)
-  | None -> []
 ;;
 
 let list_container_ids
-      ?keeper_name ?container_kind ?owner_pid ?turn_id ~base_path ~timeout_sec ()
+      ?keeper_name ?container_kind ?owner_pid ~base_path ~timeout_sec ()
   =
   try
     let argv =
       docker_command_argv ()
       @ [ "ps"; "-aq"; "--no-trunc" ]
-      @ docker_filter_args ?keeper_name ?container_kind ?owner_pid ?turn_id ~base_path ()
+      @ docker_filter_args ?keeper_name ?container_kind ?owner_pid ~base_path ()
     in
     let st, out =
       run_docker_argv_with_status

@@ -16,11 +16,9 @@ val create :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   ?network_mode:Keeper_types_profile_sandbox.network_mode ->
-  turn_id:int ->
   unit ->
   t
 
-val turn_id : t -> int
 val host_root : t -> string
 val prepare_github_identity_secret_files :
   ?timeout_sec:float -> t -> (string list, string) result

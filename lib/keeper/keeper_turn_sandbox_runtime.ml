@@ -23,7 +23,6 @@ let no_github_identity_snapshots = { current = None; retired = [] }
 type t =
   { config : Workspace.config
   ; meta : keeper_meta
-  ; turn_id : int
   ; raw_host_root : string
   ; host_root : string
   ; container_root : string
@@ -57,7 +56,6 @@ let github_identity_secret_files t =
   List.map (fun snapshot -> Filename.concat snapshot.host_dir "hosts.yml") snapshots
 ;;
 
-let turn_id t = t.turn_id
 let host_root t = t.host_root
 let normalize_path path = Keeper_alerting_path.normalize_path_for_check_stripped path
 
@@ -65,7 +63,6 @@ let create
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?(network_mode = Network_none)
-      ~turn_id
       ()
   =
   let raw_host_root =
@@ -74,7 +71,6 @@ let create
   in
   { config
   ; meta
-  ; turn_id
   ; raw_host_root
   ; host_root = raw_host_root |> normalize_path
   ; container_root =
@@ -118,7 +114,6 @@ module For_testing = struct
   let create_minimal ~config ~meta ~state =
     { config
     ; meta
-    ; turn_id = 0
     ; raw_host_root = ""
     ; host_root = ""
     ; container_root = ""

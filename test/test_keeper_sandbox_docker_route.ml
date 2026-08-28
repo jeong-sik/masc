@@ -843,6 +843,9 @@ let test_execute_legacy_skips_docker () =
 let fake_docker_echo_script =
   "#!/bin/sh\n\
 log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+state_inspect_count_file=\"$(dirname \"$0\")/echo-state-inspect.count\"\n\
+read_count() { if [ -f \"$1\" ]; then cat \"$1\"; else printf '0'; fi }\n\
+write_count() { printf '%s' \"$2\" > \"$1\"; }\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -856,7 +859,17 @@ if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
 fi\n\
 if [ \"$1\" = \"inspect\" ]; then\n\
   case \"$3\" in\n\
-    *State.Running*) printf 'true\\n' ;;\n\
+    *State.Running*)\n\
+      count=$(read_count \"$state_inspect_count_file\")\n\
+      count=$((count + 1))\n\
+      write_count \"$state_inspect_count_file\" \"$count\"\n\
+      if [ \"$count\" = \"1\" ]; then\n\
+        printf 'no such container\\n' >&2\n\
+        exit 1\n\
+      fi\n\
+      printf 'true\\n'\n\
+      exit 0\n\
+      ;;\n\
     *) printf 'fake-container-id\\n' ;;\n\
   esac\n\
   exit 0\n\
@@ -1739,6 +1752,11 @@ let test_turn_runtime_projects_keeper_secret_dir () =
     | Ok path -> path
     | Error message -> Alcotest.fail message
   in
+  (* A configured identity is what makes the persistent container mount the
+    stable directory; an unconfigured keeper mounts nothing. *)
+  let hosts_path = Filename.concat github_config_dir "hosts.yml" in
+  write_file hosts_path "github.com:\n  user: keeper-user\n  oauth_token: stable-token\n";
+  Unix.chmod hosts_path 0o600;
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   let github_snapshot_path = ref None in
@@ -1771,28 +1789,28 @@ let test_turn_runtime_projects_keeper_secret_dir () =
       ~container_masc_dir
       ~keeper_name:meta.name
   in
-  let github_snapshot =
-    match mount_source_for_destination log github_container_dir with
-    | None -> Alcotest.fail "missing turn-scoped Keeper GitHub snapshot mount"
-    | Some path -> path
-  in
-  github_snapshot_path := Some github_snapshot;
-  Alcotest.(check bool) "turn container does not mount operator identity" true
-    (not (String.equal github_snapshot github_config_dir));
-  Alcotest.(check bool) "turn GitHub snapshot lives with its container" true
-    (Sys.file_exists github_snapshot);
+  (* The container is keeper-lifetime: it mounts the stable GitHub config
+     directory itself, read-only, so a host login reaches a running
+     container through the bind mount and no per-turn snapshot directory
+     exists. *)
+  (match mount_source_for_destination log github_container_dir with
+   | None -> Alcotest.fail "missing stable Keeper GitHub config mount"
+   | Some mount_source ->
+     Alcotest.(check bool) "turn container mounts the stable identity dir" true
+       (String.equal mount_source github_config_dir);
+     github_snapshot_path := Some mount_source);
   (match env_file_path_from_docker_line log with
    | None -> Alcotest.fail "missing --env-file path in docker log"
    | Some env_file ->
      Alcotest.(check bool) "env-file cleaned after container start" false
        (Sys.file_exists env_file)));
   match !github_snapshot_path with
-  | None -> Alcotest.fail "turn-scoped GitHub snapshot was not recorded"
-  | Some github_snapshot ->
-    Alcotest.(check bool) "turn GitHub snapshot is cleaned with its container" false
-      (Sys.file_exists github_snapshot)
+  | None -> Alcotest.fail "stable GitHub config mount was not recorded"
+  | Some github_config_dir ->
+    Alcotest.(check bool) "stable identity dir survives turn cleanup" true
+      (Sys.file_exists github_config_dir)
 
-let test_turn_runtime_redacts_the_mounted_github_snapshot () =
+let test_turn_runtime_redacts_the_stable_identity_mount () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -1827,31 +1845,32 @@ let test_turn_runtime_redacts_the_mounted_github_snapshot () =
       ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ value ])
       ()
   in
+  (* Redaction tracks the live identity file: the token hosts.yml currently
+     holds never reaches a response, and rotation reaches the running
+     container through the mount with no per-turn snapshot to retire.
+     Superseded tokens are no longer redacted -- that defense came from
+     retired snapshot directories, and a persistent container has none. *)
   ignore (execute "hello");
   write_file
     hosts_path
     ("github.com:\n  user: keeper-user\n  oauth_token: " ^ rotated_token ^ "\n");
   Unix.chmod hosts_path 0o600;
-  let raw = execute snapshot_token in
-  Alcotest.(check bool) "superseded snapshot token never reaches response" false
-    (String_util.contains_substring raw snapshot_token);
-  if not (String_util.contains_substring raw "[REDACTED]")
-  then Alcotest.failf "superseded snapshot token was not redacted: %s" raw;
   let rotated_raw = execute rotated_token in
-  Alcotest.(check bool) "current snapshot token never reaches response" false
+  Alcotest.(check bool) "current token never reaches response" false
     (String_util.contains_substring rotated_raw rotated_token);
+  if not (String_util.contains_substring rotated_raw "[REDACTED]")
+  then Alcotest.failf "current token was not redacted: %s" rotated_raw;
   write_file hosts_path "{}\n";
   Unix.chmod hosts_path 0o600;
-  let logout_raw = execute rotated_token in
-  Alcotest.(check bool) "logout retains previous token redaction" false
-    (String_util.contains_substring logout_raw rotated_token);
   write_file
     hosts_path
     ("github.com:\n  user: keeper-user\n  oauth_token: " ^ relogin_token ^ "\n");
   Unix.chmod hosts_path 0o600;
   let relogin_raw = execute relogin_token in
-  Alcotest.(check bool) "re-login snapshot token never reaches response" false
+  Alcotest.(check bool) "re-login token never reaches response" false
     (String_util.contains_substring relogin_raw relogin_token);
+  if not (String_util.contains_substring relogin_raw "[REDACTED]")
+  then Alcotest.failf "re-login token was not redacted: %s" relogin_raw;
   let container_root = Keeper_sandbox.container_root meta.name in
   let container_masc_dir =
     Keeper_sandbox_runtime.container_masc_config_dir ~container_root
@@ -1862,21 +1881,21 @@ let test_turn_runtime_redacts_the_mounted_github_snapshot () =
       ~container_masc_dir
       ~keeper_name:meta.name
   in
+  (* One keeper-lifetime mount: rotation, logout, and re-login all happen on
+     the host side of the stable directory and reach the running container
+     through the bind mount. There is nothing per-turn to create or clean. *)
   snapshots :=
     mount_sources_for_destination (read_file log_path) github_container_dir
     |> List.sort_uniq String.compare;
-  Alcotest.(check int) "rotation logout and re-login each mount a fresh snapshot" 4
+  Alcotest.(check int) "one stable mount across the whole rotation" 1
     (List.length !snapshots);
-  List.iter
-    (fun snapshot ->
-       Alcotest.(check bool) "turn retains snapshot for redaction" true
-         (Sys.file_exists snapshot))
-    !snapshots);
-  List.iter
-    (fun snapshot ->
-       Alcotest.(check bool) "turn cleanup removes every identity snapshot" false
-         (Sys.file_exists snapshot))
-    !snapshots
+  (match !snapshots with
+   | [ stable ] ->
+     Alcotest.(check bool) "the stable config dir is the mount" true
+       (String.equal stable github_config_dir);
+     Alcotest.(check bool) "stable identity dir survives turn cleanup" true
+       (Sys.file_exists stable)
+   | _ -> Alcotest.fail "expected exactly the stable identity mount"))
 
 let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->
@@ -2284,7 +2303,7 @@ let () =
             `Quick test_turn_runtime_projects_keeper_secret_dir;
           Alcotest.test_case
             "turn runtime redacts its mounted GitHub snapshot"
-            `Quick test_turn_runtime_redacts_the_mounted_github_snapshot;
+            `Quick test_turn_runtime_redacts_the_stable_identity_mount;
           Alcotest.test_case
             "docker run does not retry generic timeout"
             `Quick

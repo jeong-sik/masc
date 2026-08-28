@@ -4058,17 +4058,17 @@ let render_lanes_overview (state : state) =
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
-(* Status colours for exact-lane runs. The strings are the producer's
-   [status_label] vocabulary, matched in full; anything new reads muted until
+(* Status colours for exact-lane runs, keyed on the decoded variant; a label
+   the producer adds later decodes to [Lane_run_other] and reads muted until
    it is named here. *)
 let lane_run_status_style = function
-  | "succeeded" -> Theme.ok ()
-  | "cancelled" -> Theme.warn ()
-  | "failed"
-  | "completion_persistence_failed"
-  | "completion_durability_unknown" -> Theme.bad ()
-  | "running" -> Theme.info ()
-  | _ -> Theme.muted ()
+  | Tui_decode.Lane_run_succeeded -> Theme.ok ()
+  | Tui_decode.Lane_run_cancelled -> Theme.warn ()
+  | Tui_decode.Lane_run_failed
+  | Tui_decode.Lane_run_completion_persistence_failed
+  | Tui_decode.Lane_run_completion_durability_unknown -> Theme.bad ()
+  | Tui_decode.Lane_run_running -> Theme.info ()
+  | Tui_decode.Lane_run_other _ -> Theme.muted ()
 
 let lane_run_clock started_at =
   let tm = Unix.localtime started_at in
@@ -4158,7 +4158,8 @@ let render_lane_run_list (state : state) ~lane_id =
               (lane_run_clock run.lrs_started_at)
               (fit_width (Terminal_text.single_line run.lrs_actor) 16)
               (lane_run_status_style run.lrs_status)
-              run.lrs_status Ansi.reset elapsed
+              (Tui_decode.lane_run_status_label run.lrs_status)
+              Ansi.reset elapsed
               (fit_width
                  (Terminal_text.single_line_or ~default:"—"
                     run.lrs_selected_slot)
@@ -4217,7 +4218,7 @@ let lane_run_detail_lines (detail : Tui_decode.lane_run_detail) =
   ; Ansi.reset, "  Actor: " ^ Terminal_text.single_line detail.lrd_actor
   ; Ansi.dim, "  Started: " ^ lane_run_clock detail.lrd_started_at
   ; ( lane_run_status_style detail.lrd_status
-    , "  Status: " ^ detail.lrd_status ^ elapsed_slot )
+    , "  Status: " ^ Tui_decode.lane_run_status_label detail.lrd_status ^ elapsed_slot )
   ; Ansi.dim, ""
   ; Ansi.bold, "  INPUT (prompt payload)"
   ]

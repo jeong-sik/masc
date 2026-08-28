@@ -3481,6 +3481,35 @@ let test_decode_lane_run_page_running_run_has_no_completion_fields () =
              None page.Tui_decode.lrpg_next
        | _ -> Alcotest.fail "expected exactly one run")
 
+let test_decode_lane_run_status_is_typed () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool false
+      ; ( "runs"
+        , `List
+            [ lane_run_summary_json ~status:"succeeded" "lib-ok"
+            ; lane_run_summary_json ~status:"completion_durability_unknown"
+                "lib-dubious"
+            ; lane_run_summary_json ~status:"exploded" "lib-new"
+            ] )
+      ]
+  in
+  match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok page ->
+      (match page.Tui_decode.lrpg_runs with
+       | [ ok; dubious; novel ] ->
+           Alcotest.(check string) "known label" "succeeded"
+             (Tui_decode.lane_run_status_label ok.Tui_decode.lrs_status);
+           Alcotest.(check bool) "durability variant" true
+             (dubious.Tui_decode.lrs_status
+              = Tui_decode.Lane_run_completion_durability_unknown);
+           (* A label the producer adds later must survive the decode, not
+              vanish into a default. *)
+           Alcotest.(check string) "unknown label is preserved" "exploded"
+             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status)
+       | _ -> Alcotest.fail "expected three runs")
+
 let lane_run_detail_json ?(output = true) run_id =
   `Assoc
     [ ( "run"
@@ -3999,6 +4028,8 @@ let () =
           test_decode_lane_run_page_filters_to_one_lane;
         Alcotest.test_case "running run has no completion fields" `Quick
           test_decode_lane_run_page_running_run_has_no_completion_fields;
+        Alcotest.test_case "status decodes to a variant, unknown preserved" `Quick
+          test_decode_lane_run_status_is_typed;
         Alcotest.test_case "detail carries prompt and output" `Quick
           test_decode_lane_run_detail_carries_prompt_and_output;
         Alcotest.test_case "running detail has no output" `Quick

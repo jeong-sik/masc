@@ -3965,12 +3965,45 @@ let decode_librarian_actual_input ~run_id json =
    never the payloads (the payloads are why the listing omits them — see
    Exact_lane_run_registry.run_summary_fields). Completion fields are absent
    while the run is still running. *)
+
+(* The producer's [Exact_lane_run_registry.status_label] vocabulary, decoded
+   back into a variant so consumers match on the type rather than the string.
+   An unrecognized label keeps its text under [Lane_run_other] — dropping the
+   word would be a silent decode, rejecting it would fail the whole page on
+   one unfamiliar run. *)
+type lane_run_status =
+  | Lane_run_running
+  | Lane_run_succeeded
+  | Lane_run_cancelled
+  | Lane_run_failed
+  | Lane_run_completion_persistence_failed
+  | Lane_run_completion_durability_unknown
+  | Lane_run_other of string
+
+let lane_run_status_of_string = function
+  | "running" -> Lane_run_running
+  | "succeeded" -> Lane_run_succeeded
+  | "cancelled" -> Lane_run_cancelled
+  | "failed" -> Lane_run_failed
+  | "completion_persistence_failed" -> Lane_run_completion_persistence_failed
+  | "completion_durability_unknown" -> Lane_run_completion_durability_unknown
+  | other -> Lane_run_other other
+
+let lane_run_status_label = function
+  | Lane_run_running -> "running"
+  | Lane_run_succeeded -> "succeeded"
+  | Lane_run_cancelled -> "cancelled"
+  | Lane_run_failed -> "failed"
+  | Lane_run_completion_persistence_failed -> "completion_persistence_failed"
+  | Lane_run_completion_durability_unknown -> "completion_durability_unknown"
+  | Lane_run_other other -> other
+
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_lane : string
   ; lrs_actor : string
   ; lrs_started_at : float
-  ; lrs_status : string
+  ; lrs_status : lane_run_status
   ; lrs_elapsed_s : float option
   ; lrs_selected_slot : string option
   }
@@ -3985,7 +4018,7 @@ type lane_run_detail =
   ; lrd_lane : string
   ; lrd_actor : string
   ; lrd_started_at : float
-  ; lrd_status : string
+  ; lrd_status : lane_run_status
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
   ; lrd_input_payload : Yojson.Safe.t
@@ -4005,7 +4038,7 @@ let decode_lane_run_summary json =
     ; lrs_lane
     ; lrs_actor
     ; lrs_started_at
-    ; lrs_status
+    ; lrs_status = lane_run_status_of_string lrs_status
     ; lrs_elapsed_s
     ; lrs_selected_slot
     }

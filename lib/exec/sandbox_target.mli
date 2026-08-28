@@ -3,11 +3,12 @@
     See [sandbox_target.ml] for the rationale. The short version: this
     type lets [Shell_ir.simple] carry the sandbox decision as data while
     keeping [lib/exec] independent of [lib/keeper] (the keeper layer
-    injects its Docker runtime via the [runner] closure).
+    injects its Docker or SSH runtime via the [runner] closure).
 
     [t] is a variant rather than a record so that the [Host] case needs
     no runner.  The dispatch path in [Exec_dispatch] routes [Host]
-    directly to [Process_eio]. *)
+    directly to [Process_eio], and [Docker] / [Ssh] via the carried
+    [runner]. *)
 
 (** A runner closure executes an argv with the given env / cwd and returns
     the raw process status plus stdout/stderr buffers. Exceptions are
@@ -34,9 +35,27 @@ type pipeline_runner =
   stages:pipeline_stage list ->
   Unix.process_status * string * string
 
+(** SSH endpoint identity carried by an [Ssh] target.  Deliberately a
+    standalone record, not [Exec_ssh_endpoint.t]: [lib/exec] stays
+    dependency-clean and the keeper layer converts its config-layer record
+    into this one at target construction.  [max_concurrent_sessions] and
+    [capabilities] are keeper-side runner/preflight concerns and stay out. *)
+type ssh_endpoint = {
+  name : string;
+  host : string;
+  user : string;
+  port : int;
+  identity_file : string;
+  known_hosts_file : string;
+  remote_root : string;
+  connect_timeout_sec : int;
+  env_allowlist : string list;
+}
+
 type t =
   | Host
   | Docker of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
+  | Ssh of { endpoint : ssh_endpoint; runner : runner; pipeline_runner : pipeline_runner option }
 
 (** Default host target.  The dispatch path routes this directly to
     [Process_eio]; no runner is carried. *)
@@ -46,3 +65,8 @@ val host : unit -> t
     the runner closure; this keeps [lib/exec] from having to know about
     [Keeper_turn_sandbox_runtime] or any other keeper-side construct. *)
 val docker : image:string -> runner:runner -> ?pipeline_runner:pipeline_runner -> unit -> t
+
+(** Build an SSH target.  As with {!docker}, the caller (the keeper layer)
+    supplies the runner closure over its own SSH runtime; [lib/exec] only
+    sees the [endpoint] as data for labeling and the shape of the closure. *)
+val ssh : endpoint:ssh_endpoint -> runner:runner -> ?pipeline_runner:pipeline_runner -> unit -> t

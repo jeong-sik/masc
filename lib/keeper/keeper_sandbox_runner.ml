@@ -129,6 +129,11 @@ let uses_backend ~config:_ ~meta ~cwd:_ =
      entrypoints refuse the profile before building an argv. *)
   | Keeper_types_profile_sandbox.Micro_vm, _ -> true
   | Keeper_types_profile_sandbox.Local, _ -> false
+  (* remote_ssh does not route through the (Docker) sandbox backend —
+     answering [true] would silently downgrade it to Docker and [false]
+     only means "not the Docker backend": the typed Execute dispatch
+     fails closed on Remote_ssh before any Host route can claim it. *)
+  | Keeper_types_profile_sandbox.Remote_ssh, _ -> false
 
 let route_for ~config ~meta ~cwd =
   if uses_backend ~config ~meta ~cwd then Sandbox_backend else Host
@@ -179,6 +184,24 @@ let run_backend_command ~config ~meta ~timeout_sec (backend : backend_command) =
     }
 
 let run_command_with_status ~config ~meta ~timeout_sec ~host ~backend =
-  match route_for ~config ~meta ~cwd:backend.route_cwd with
-  | Sandbox_backend -> run_backend_command ~config ~meta ~timeout_sec backend
-  | Host -> run_host_command ~timeout_sec host
+  match effective_sandbox_profile ~meta with
+  (* Fail closed, never a silent host route (RFC-0001): [route_for]
+     classifies Remote_ssh as "not the Docker backend", which would
+     otherwise fall through to [run_host_command] here. The SSH runner
+     lands in Phase 1 task 6. *)
+  | Keeper_types_profile_sandbox.Remote_ssh, _ ->
+    Error
+      "remote_ssh_dispatch_unavailable: SSH runner not wired yet (Phase 1 \
+       task 6); no fallback to docker or host dispatch"
+  (* [Micro_vm] routes exactly as on main: [uses_backend] classifies it as
+     the sandbox backend, and the docker-shell entrypoints refuse the
+     profile themselves before building an argv. *)
+  | ( Keeper_types_profile_sandbox.Docker
+    | Keeper_types_profile_sandbox.Micro_vm
+    | Keeper_types_profile_sandbox.Local )
+    , _
+    ->
+    (match route_for ~config ~meta ~cwd:backend.route_cwd with
+     | Sandbox_backend ->
+       Ok (run_backend_command ~config ~meta ~timeout_sec backend)
+     | Host -> Ok (run_host_command ~timeout_sec host))

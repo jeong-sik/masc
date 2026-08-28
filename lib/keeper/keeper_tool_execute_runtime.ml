@@ -53,6 +53,7 @@ let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
 let sandbox_target_label = function
   | Masc_exec.Sandbox_target.Host -> "host"
   | Masc_exec.Sandbox_target.Docker { image; _ } -> "docker:" ^ image
+  | Masc_exec.Sandbox_target.Ssh { endpoint; _ } -> "ssh:" ^ endpoint.host
 ;;
 
 (* The Gate operation name this runtime submits under. Shared with the replay
@@ -349,6 +350,18 @@ let handle_tool_execute_typed
                 (Keeper_sandbox_shell_ir_target.target_error
                    ("local_playground_disabled: "
                     ^ Env_config_sandbox.Gate.disabled_message))
+          (* Fail closed, never a silent Docker/host fallthrough
+             (RFC-0001): the SSH runner is Phase 1 task 6. *)
+          | Remote_ssh ->
+            Error
+              (Keeper_sandbox_shell_ir_target.target_error
+                 ~class_:Tool_result.Policy_rejection
+                 ~fields:
+                   [ "requested_sandbox", `String "remote_ssh"
+                   ; "sandbox_profile", `String "remote_ssh"
+                   ]
+                 "remote_ssh_dispatch_unavailable: SSH runner not wired yet \
+                  (Phase 1 task 6); no fallback to docker or host dispatch")
           (* Both guest profiles enter the same target constructor, but a
              [Micro_vm] keeper never reaches a docker runtime: the factory
              resolves it to [Backend_unimplemented] and the constructor
@@ -417,7 +430,7 @@ let handle_tool_execute_typed
               normalize_path_for_keeper_tool_execute_shell_ir_containment cwd
             in
             model_execute_location_fields ~config ~meta:local_meta ~args ~cwd:local_cwd
-          | Docker _ -> model_location_fields
+          | Docker _ | Ssh _ -> model_location_fields
         in
         (* Lower the validated typed input exactly once. The resulting Shell IR
            is the neutral dispatch representation; it carries no product or
@@ -429,6 +442,12 @@ let handle_tool_execute_typed
         let redirect_namespace =
           match dispatch_sandbox with
           | Masc_exec.Sandbox_target.Host ->
+            Keeper_tool_execute_typed_input.Command_filesystem
+          | Masc_exec.Sandbox_target.Ssh _ ->
+            (* No shared mount maps a remote path onto this host, so a
+               redirect target stays in the command's namespace and dispatch
+               refuses to open it here rather than touching a same-named
+               local file. *)
             Keeper_tool_execute_typed_input.Command_filesystem
           | Masc_exec.Sandbox_target.Docker _ ->
             Keeper_tool_execute_typed_input.Bound_mount
@@ -705,7 +724,7 @@ let handle_tool_execute_typed
               Keeper_external_resource_lease.with_lease
                 (Keeper_external_resource_lease.Host_cwd cwd)
                 dispatch
-            | Docker _ -> dispatch ()
+            | Docker _ | Ssh _ -> dispatch ()
           in
           match dispatch_result with
           | Error (Keeper_tooling.Execute_shell_ir.Gate_reject diagnostic) ->

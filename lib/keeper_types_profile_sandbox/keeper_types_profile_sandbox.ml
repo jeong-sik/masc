@@ -17,12 +17,21 @@ type sandbox_profile =
         memory per running guest, a 1.3-2.4s boot paid once per keeper
         (#31340 adopts the guest across turns), and 0.06-0.10s per call
         after that. Network defaults to [Network_none]. *)
+  | Remote_ssh
+    (** Execution on a remote host over SSH (Phase 1 lane,
+        docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md
+        {e 4.2}). Transport-only: the Docker container knobs are not
+        reproduced, [network_mode = "none"] is rejected at config load
+        ([remote_ssh_no_network_mode]), and the only accepted network
+        mode is [Network_inherit] (the default). The runner lands in
+        Phase 1 task 6; every dispatch arm fails closed until then. *)
 
 module Sandbox_profile_tla = struct
   type t = sandbox_profile =
     | Local [@tla.symbol "Local"]
     | Docker [@tla.symbol "Docker"]
     | Micro_vm [@tla.symbol "Micro_vm"]
+    | Remote_ssh [@tla.symbol "Remote_ssh"]
   [@@deriving tla]
 end
 (** TLA+ dispatch symbols for {!sandbox_profile}. Kept in a submodule
@@ -40,11 +49,13 @@ let sandbox_profile_to_config = function
   | Local -> Keeper_sandbox_config.Local
   | Docker -> Keeper_sandbox_config.Docker
   | Micro_vm -> Keeper_sandbox_config.Micro_vm
+  | Remote_ssh -> Keeper_sandbox_config.Remote_ssh
 
 let sandbox_profile_of_config = function
   | Keeper_sandbox_config.Local -> Local
   | Keeper_sandbox_config.Docker -> Docker
   | Keeper_sandbox_config.Micro_vm -> Micro_vm
+  | Keeper_sandbox_config.Remote_ssh -> Remote_ssh
 
 let sandbox_profile_to_string profile =
   profile
@@ -52,8 +63,8 @@ let sandbox_profile_to_string profile =
   |> Keeper_sandbox_config.sandbox_profile_to_string
 ;;
 
-(** Parse a sandbox profile string. Canonical values are ["local"] and
-    ["docker"], ["microvm"]. *)
+(** Parse a sandbox profile string. Canonical values are ["local"],
+    ["docker"], ["microvm"] and ["remote_ssh"]. *)
 let sandbox_profile_of_string raw =
   raw
   |> Keeper_sandbox_config.sandbox_profile_of_string
@@ -64,7 +75,7 @@ let sandbox_profile_of_string raw =
    forces [sandbox_profile_to_string] exhaustiveness AND extends
    [valid_sandbox_profile_strings] so [keeper_schema] picks it up via
    the mirror declared there. *)
-let all_sandbox_profiles = [ Local; Docker; Micro_vm ]
+let all_sandbox_profiles = [ Local; Docker; Micro_vm; Remote_ssh ]
 let valid_sandbox_profile_strings = Keeper_sandbox_config.valid_sandbox_profile_strings
 
 let network_mode_to_string = function
@@ -90,6 +101,7 @@ let default_network_mode_for_profile = function
   (* Same default as Docker: the guest is a boundary, and opening it is a
      separate decision the keeper TOML states outright. *)
   | Micro_vm -> Network_none
+  | Remote_ssh -> Network_inherit
 ;;
 
 let backend_unimplemented_message profile =

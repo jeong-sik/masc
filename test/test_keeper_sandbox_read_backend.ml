@@ -308,6 +308,41 @@ let test_run_command_empty_image_errors () =
          in
          loop 0)
 
+let test_run_command_remote_ssh_named_error_before_image_guard () =
+  (* A remote_ssh keeper with an empty sandbox_image must see the named
+     read-unavailable error, not the empty-image complaint: the
+     Remote_ssh_profile arm is hoisted above the image guard. *)
+  let base, config, meta = setup_config "remote-ssh" in
+  let meta =
+    { meta with
+      sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
+    ; sandbox_image = Some ""
+    }
+  in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_factory.cleanup factory;
+      cleanup_dir base)
+  @@ fun () ->
+  match
+    Keeper_sandbox_read_backend.run_command_with_status
+      ~turn_sandbox_factory:factory ~config ~meta
+      ~command_argv:[ "ls"; "/" ] ~max_bytes:4096 ~timeout_sec:5.0 ()
+  with
+  | Ok _ -> Alcotest.fail "expected remote_ssh_read_unavailable"
+  | Error msg ->
+      Alcotest.(check bool) "named read error, not image guard" true
+        (let needle = "remote_ssh_read_unavailable" in
+         let nlen = String.length needle in
+         let mlen = String.length msg in
+         let rec loop i =
+           if i + nlen > mlen then false
+           else if String.sub msg i nlen = needle then true
+           else loop (i + 1)
+         in
+         loop 0)
+
 let fake_docker_exit_1_script =
   "#!/bin/sh\n\
 if [ \"$1\" = \"info\" ]; then\n\
@@ -2196,6 +2231,8 @@ let run_tests ~clock () =
             test_run_command_empty_argv_errors;
           Alcotest.test_case "empty image configuration errors" `Quick
             test_run_command_empty_image_errors;
+          Alcotest.test_case "remote_ssh named error precedes image guard" `Quick
+            test_run_command_remote_ssh_named_error_before_image_guard;
           Alcotest.test_case "nonzero exit errors by default" `Quick
             test_run_command_nonzero_exit_errors_by_default;
           Alcotest.test_case "configured nonzero exit is allowed" `Quick

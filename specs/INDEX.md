@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-08-24T14:26:14Z (HEAD: 76b114dee9)
+Generated: 2026-08-27T21:45:58Z (HEAD: 7628e6f39d)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -46,7 +46,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | AuditLogDurableBeforeAck.tla | AuditLogDurableBeforeAck | manual | 2 | 1 | clean={inv:TypeOK, inv:Durability} buggy={inv:Durability} | 2e72a23b081e |
 | Cancellation.tla | Cancellation | manual | 2 | 1 | clean={inv:TypeOK, inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} buggy={inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} | bbed415483ac |
 | ContinuationCorrelation.tla | ContinuationCorrelation | manual | 3 | 2 | clean={inv:TypeOK, inv:ContinuationPreservesCorrelation, inv:ContinuationNeverAuthorizesOperation} correlation-buggy={inv:ContinuationPreservesCorrelation} decision-buggy={inv:ContinuationNeverAuthorizesOperation} | 65c3b699244a |
-| SandboxDispatch.tla | SandboxDispatch | manual | 2 | 1 | clean={inv:TypeOK, inv:DockerImpliesDockerVia} buggy={inv:DockerImpliesDockerVia} | 716cc822d7fb |
+| SandboxDispatch.tla | SandboxDispatch | manual | 2 | 1 | clean={inv:TypeOK, inv:DockerImpliesDockerVia, inv:RemoteSshImpliesSshVia} buggy={inv:DockerImpliesDockerVia, inv:RemoteSshImpliesSshVia} | 791d665d143c |
 | TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:AgentCoreBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | ae0c4b3f330f |
 
 ### specs/bug-models (13 specs)

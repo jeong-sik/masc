@@ -1,0 +1,6 @@
+(include_subdirs no)
+
+(library
+ (name exec_ssh_protocol)
+ (modules exec_ssh_protocol)
+ (libraries yojson base64))

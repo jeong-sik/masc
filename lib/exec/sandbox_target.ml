@@ -21,7 +21,7 @@
 
    [t] is a variant rather than a record so that the [Host] case needs
    no runner closure.  [Exec_dispatch] routes [Host] directly to
-   [Process_eio], and [Docker] via the carried [runner]. *)
+   [Process_eio], and [Docker] / [Ssh] via the carried [runner]. *)
 
 type runner =
   on_stdout_chunk:(string -> unit) option ->
@@ -44,11 +44,33 @@ type pipeline_runner =
   stages:pipeline_stage list ->
   Unix.process_status * string * string
 
+(* A standalone copy of the keeper-side endpoint identity, NOT
+   [Exec_ssh_endpoint.t]: [lib/exec] cannot depend on [lib/runtime], so the
+   keeper layer converts its config record into this one at target
+   construction.  [max_concurrent_sessions] and [capabilities] are consumed
+   by the keeper-side runner/preflight, not by the dispatch path, so they
+   stay out of this record. *)
+type ssh_endpoint = {
+  name : string;
+  host : string;
+  user : string;
+  port : int;
+  identity_file : string;
+  known_hosts_file : string;
+  remote_root : string;
+  connect_timeout_sec : int;
+  env_allowlist : string list;
+}
+
 type t =
   | Host
   | Docker of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
+  | Ssh of { endpoint : ssh_endpoint; runner : runner; pipeline_runner : pipeline_runner option }
 
 let host () : t = Host
 
 let docker ~image ~runner ?pipeline_runner () : t = Docker { image; runner; pipeline_runner }
+
+let ssh ~endpoint ~runner ?pipeline_runner () : t =
+  Ssh { endpoint; runner; pipeline_runner }
 

@@ -1,0 +1,9 @@
+(include_subdirs no)
+
+(library
+ (name exec_shim)
+ (modules exec_shim)
+ (libraries exec_ssh_protocol unix)
+ (foreign_stubs
+  (language c)
+  (names prctl_stub)))

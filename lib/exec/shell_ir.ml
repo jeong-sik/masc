@@ -19,10 +19,10 @@ type simple = {
   redirects : Redirect_scope.t list;
   (* PR-2 root-fix family 3/3 (2026-04-28):
      [sandbox] carries the dispatch decision through the IR so
-     [Exec_dispatch.dispatch_simple] can route to host or Docker
+     [Exec_dispatch.dispatch_simple] can route to host, Docker, or SSH
      without a separate keeper-only code path. The default
      [Sandbox_target.host ()] preserves the historical behavior; the
-     keeper layer overrides it when a Docker runtime is available. *)
+     keeper layer overrides it when a Docker or SSH runtime is available. *)
   sandbox : Sandbox_target.t;
 }
 

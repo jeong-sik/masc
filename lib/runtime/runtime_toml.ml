@@ -3,11 +3,12 @@
     Re-homed from the deleted [Runtime_declarative_parser]. Parses RFC-0058
     layers 1-3 plus [[runtime].default] into a self-standing
     {!Runtime_schema.config}. Reserved top-level namespaces: providers,
-    models, runtime, web_search. Dropped routing namespaces system, routes, and
-    profiles are rejected rather than ignored. A top-level table whose name
-    [\[providers\]] declares carries that provider's model bindings as
-    sub-tables; every other top-level table belongs to a different parser and is
-    left alone.
+    models, runtime, web_search, exec (the [\[exec.ssh.endpoints.*\]] SSH
+    endpoint registry, Phase 1 SSH lane spec §4.2). Dropped routing namespaces
+    system, routes, and profiles are rejected rather than ignored. A top-level
+    table whose name [\[providers\]] declares carries that provider's model
+    bindings as sub-tables; every other top-level table belongs to a different
+    parser and is left alone.
 
     Routing layers are intentionally NOT parsed (see {!Runtime_toml} mli):
     Layer 4 aliases, Layer 5 routes/system/profiles, and the
@@ -249,6 +250,7 @@ let active_top_level_namespaces =
   ; "models"
   ; "runtime"
   ; "web_search"
+  ; "exec"
   ; Skill_source_config.top_level_namespace
   ]
 ;;
@@ -1159,6 +1161,307 @@ let parse_models (toml : Otoml.t)
          entries)
 ;;
 
+(* --- [exec.ssh.endpoints] registry (Phase 1 SSH lane, spec §4.2) --- *)
+
+let exec_ssh_endpoint_keys =
+  [ "host"
+  ; "user"
+  ; "port"
+  ; "identity_file"
+  ; "known_hosts_file"
+  ; "remote_root"
+  ; "connect_timeout_sec"
+  ; "max_concurrent_sessions"
+  ; "env_allowlist"
+  ; "capabilities"
+  ]
+;;
+
+(* Required endpoint strings reject surrounding whitespace rather than
+   storing padding verbatim — symmetric with [exact_non_empty_string_opt_field]
+   on the optional fields of the same record. *)
+let exec_ssh_required_string ~(path : string) (tbl : Otoml.t) ~(key : string)
+  : (string, parse_error list) result
+  =
+  match
+    required_non_empty_string
+      tbl
+      ~path
+      ~key
+      ~message:(Printf.sprintf "endpoint requires non-empty '%s'" key)
+  with
+  | Error _ as error -> error
+  | Ok value when value <> String.trim value ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (key ^ " must not have leading or trailing whitespace"))
+  | Ok value -> Ok value
+;;
+
+(* The shim maps keeper paths under [remote_root] (spec §4.2 path mapping); a
+   relative root would make that translation cwd-dependent, so the value is
+   rejected at load — the same fail-closed shape as the [healthcheck.path must
+   be absolute] check in [parse_provider]. *)
+let exec_ssh_remote_root_field ~(path : string) (tbl : Otoml.t)
+  : (string, parse_error list) result
+  =
+  (* Non-emptiness is proven by [exec_ssh_required_string], so the [0] index
+     cannot raise. *)
+  match exec_ssh_required_string ~path tbl ~key:"remote_root" with
+  | Error _ as error -> error
+  | Ok remote_root when Char.equal remote_root.[0] '/' -> Ok remote_root
+  | Ok remote_root ->
+    Error
+      (error
+         (path ^ ".remote_root")
+         (Printf.sprintf "remote_root must be absolute, got %S" remote_root))
+;;
+
+(* ssh accepts ports 1..65535; [positive_int_opt_field] covers the lower
+   bound, this adds the upper one so a typo is a load error instead of a
+   dispatch-time ssh failure. *)
+let exec_ssh_port_field ~(path : string) (tbl : Otoml.t)
+  : (int option, parse_error list) result
+  =
+  match positive_int_opt_field ~path ~key:"port" tbl with
+  | Error _ as error -> error
+  | Ok (Some port) when port > 65535 ->
+    Error
+      (error
+         (path ^ ".port")
+         (Printf.sprintf "port must be in 1..65535; got %d" port))
+  | Ok port -> Ok port
+;;
+
+(** Parse one [\[exec.ssh.endpoints.<name>\]] table. Every key must be one of
+    {!exec_ssh_endpoint_keys}; any other key fails the load so a misspelled
+    knob is never silently dropped. [host], [user], and [remote_root] are
+    required non-empty strings and reject surrounding whitespace (padding is
+    a typo, not a value); [remote_root] must additionally be absolute, since
+    the shim's path mapping is defined against it. [port] must be in
+    1..65535; every other key carries the spec default. The two file defaults
+    resolve here, where the endpoint name is in scope, to base-relative paths
+    with the name substituted (see {!Exec_ssh_endpoint}). Unknown
+    [capabilities] values warn-and-ignore per the spec table — they are
+    Phase 2 reservations, not Phase 1 knobs. *)
+let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
+  : (Exec_ssh_endpoint.t, parse_error list) result
+  =
+  let path = "exec.ssh.endpoints." ^ name in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key exec_ssh_endpoint_keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown exec ssh endpoint key %S; expected %s"
+                  key
+                  (String.concat ", " exec_ssh_endpoint_keys)))
+        entries
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+    | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+    | Otoml.TomlTableArray _ -> error path "endpoint must be a TOML table"
+  in
+  let host_result = exec_ssh_required_string ~path tbl ~key:"host" in
+  let user_result = exec_ssh_required_string ~path tbl ~key:"user" in
+  let remote_root_result = exec_ssh_remote_root_field ~path tbl in
+  let port_result = exec_ssh_port_field ~path tbl in
+  let identity_file_result = exact_non_empty_string_opt_field ~path tbl "identity_file" in
+  let known_hosts_file_result =
+    exact_non_empty_string_opt_field ~path tbl "known_hosts_file"
+  in
+  let connect_timeout_sec_result =
+    positive_int_opt_field ~path ~key:"connect_timeout_sec" tbl
+  in
+  let max_concurrent_sessions_result =
+    positive_int_opt_field ~path ~key:"max_concurrent_sessions" tbl
+  in
+  let string_array_field key =
+    Result.map
+      (Option.value ~default:[])
+      (typed_find
+         "an array of strings"
+         path
+         tbl
+         key
+         (Otoml.get_array Otoml.get_string))
+  in
+  let env_allowlist_result = string_array_field "env_allowlist" in
+  let capabilities_result = string_array_field "capabilities" in
+  let errs = function Ok _ -> [] | Error errs -> errs in
+  let field_errors =
+    errs host_result
+    @ errs user_result
+    @ errs remote_root_result
+    @ errs port_result
+    @ errs identity_file_result
+    @ errs known_hosts_file_result
+    @ errs connect_timeout_sec_result
+    @ errs max_concurrent_sessions_result
+    @ errs env_allowlist_result
+    @ errs capabilities_result
+  in
+  match unknown_key_errors with
+  | _ :: _ -> Error (unknown_key_errors @ field_errors)
+  | [] ->
+    (match
+       ( host_result
+       , user_result
+       , remote_root_result
+       , port_result
+       , identity_file_result
+       , known_hosts_file_result
+       , connect_timeout_sec_result
+       , max_concurrent_sessions_result
+       , env_allowlist_result
+       , capabilities_result )
+     with
+     | ( Ok host
+       , Ok user
+       , Ok remote_root
+       , Ok port
+       , Ok identity_file
+       , Ok known_hosts_file
+       , Ok connect_timeout_sec
+       , Ok max_concurrent_sessions
+       , Ok env_allowlist
+       , Ok declared_capabilities ) ->
+       let capabilities =
+         List.filter
+           (fun capability ->
+              if List.mem capability Exec_ssh_endpoint.known_capabilities
+              then true
+              else (
+                Log.Runtime.warn
+                  "runtime_toml: %s.capabilities — unknown capability %S, ignoring"
+                  path
+                  capability;
+                false))
+           declared_capabilities
+       in
+       Ok
+         { Exec_ssh_endpoint.name
+         ; host
+         ; user
+         ; port = Option.value ~default:Exec_ssh_endpoint.default_port port
+         ; identity_file =
+             Option.value
+               ~default:(Exec_ssh_endpoint.default_identity_file ~name)
+               identity_file
+         ; known_hosts_file =
+             Option.value
+               ~default:(Exec_ssh_endpoint.default_known_hosts_file ~name)
+               known_hosts_file
+         ; remote_root
+         ; connect_timeout_sec =
+             Option.value
+               ~default:Exec_ssh_endpoint.default_connect_timeout_sec
+               connect_timeout_sec
+         ; max_concurrent_sessions =
+             Option.value
+               ~default:Exec_ssh_endpoint.default_max_concurrent_sessions
+               max_concurrent_sessions
+         ; env_allowlist
+         ; capabilities
+         }
+     (* [field_errors] is non-empty exactly when some field result is [Error],
+        so this arm always carries at least one error. *)
+     | _ -> Error field_errors)
+;;
+
+(* [exec] owns exactly [ssh] and [exec.ssh] owns exactly [endpoints]: the
+   namespace is closed, so any sibling key is a typo the load names rather
+   than silently dropping — the same fail-closed posture as unknown provider
+   capabilities keys. *)
+let exec_single_child ~(path : string) ~(child_key : string) (value : Otoml.t)
+  : (Otoml.t option, parse_error list) result
+  =
+  match value with
+  | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+    let stray, children =
+      List.partition (fun (key, _) -> not (String.equal key child_key)) entries
+    in
+    let stray_errors =
+      List.concat_map
+        (fun (key, _) ->
+           error
+             (path ^ "." ^ key)
+             (Printf.sprintf
+                "unknown [%s] key %S; expected only [%s.%s]"
+                path
+                key
+                path
+                child_key))
+        stray
+    in
+    (match stray_errors, children with
+     | _ :: _, _ -> Error stray_errors
+     | [], [] -> Ok None
+     | [], [ (_, child) ] -> Ok (Some child)
+     (* A repeated table key is rejected by the TOML parser itself, so more
+        than one [child_key] entry cannot reach here; fail loud rather than
+        silently picking one if that invariant ever breaks. *)
+     | [], _ :: _ :: _ ->
+       Error
+         (error
+            (path ^ "." ^ child_key)
+            (Printf.sprintf "duplicate [%s.%s] table" path child_key)))
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ ->
+    Error (error path (Printf.sprintf "[%s] must be a TOML table" path))
+;;
+
+(** Walk [\[exec.ssh.endpoints.*\]] tables into the endpoint registry. Each
+    endpoint name passes {!validate_runtime_id_component} dot-free, matching
+    provider ids. Absent [\[exec\]] section yields an empty registry. *)
+let parse_exec_endpoints (toml : Otoml.t)
+  : (Exec_ssh_endpoint.t list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ "exec" ] with
+  | None -> Ok []
+  | Some exec_value ->
+    (match exec_single_child ~path:"exec" ~child_key:"ssh" exec_value with
+     | Error _ as error -> error
+     | Ok None -> Ok []
+     | Ok (Some ssh_value) ->
+       (match exec_single_child ~path:"exec.ssh" ~child_key:"endpoints" ssh_value with
+        | Error _ as error -> error
+        | Ok None -> Ok []
+        | Ok (Some endpoints_value) ->
+          (match endpoints_value with
+           | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+             partition_results
+               (List.map
+                  (fun (name, tbl) ->
+                     match
+                       validate_runtime_id_component
+                         ~allow_dot:false
+                         ~kind:"exec ssh endpoint"
+                         ~path:("exec.ssh.endpoints." ^ name)
+                         name
+                     with
+                     | Error _ as error -> error
+                     | Ok () -> parse_exec_ssh_endpoint ~name tbl)
+                  entries)
+           | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+           | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+           | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+           | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
+             Error
+               (error
+                  "exec.ssh.endpoints"
+                  "[exec.ssh.endpoints] must be a TOML table of endpoint tables"))))
+;;
+
 (* --- Reserved namespace detection --- *)
 
 let reject_obsolete_top_level_namespaces (toml : Otoml.t)
@@ -1745,6 +2048,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let bindings_result = parse_bindings toml in
   let lanes_result = parse_lanes toml in
   let exact_output_lanes_result = parse_exact_output_lanes toml in
+  let exec_ssh_endpoints_result = parse_exec_endpoints toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs obsolete_namespaces_result
@@ -1755,6 +2059,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs bindings_result
     @ errs lanes_result
     @ errs exact_output_lanes_result
+    @ errs exec_ssh_endpoints_result
   in
   if all_errors <> []
   then Error all_errors
@@ -1780,6 +2085,11 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
         ~label:"exact_output_lanes"
         exact_output_lanes_result
     in
+    let exec_ssh_endpoints =
+      extract_after_all_errors_guard
+        ~label:"exec_ssh_endpoints"
+        exec_ssh_endpoints_result
+    in
     (* Cross-table Gate: a binding field only reaches the wire through its
        provider's request builder, so whether it is carriable is a fact about
        the provider, not about the binding table it was written in. *)
@@ -1795,6 +2105,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
         ; media_failover = runtime_section.media_failover
         ; lane_decls
         ; exact_output_lane_decls
+        ; exec_ssh_endpoints
         })
 ;;
 

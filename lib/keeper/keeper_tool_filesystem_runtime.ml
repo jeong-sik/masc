@@ -1331,8 +1331,10 @@ let check_invariant_sandbox_isolation
     let cwd = Filename.dirname target in
     (match Keeper_sandbox_factory.resolve_opt (Some factory) ~cwd with
      (* No guest root to check against; the call itself is refused where it
-        would run. *)
-     | Backend_unimplemented _ | No_factory | Local_profile -> Ok ()
+        would run. No turn runtime exists to scope the isolation invariant to
+        ([Remote_ssh_profile] included: the SSH turn runtime lands with
+        Phase 1 task 6 and dispatch fails closed until then). *)
+     | Backend_unimplemented _ | No_factory | Local_profile | Remote_ssh_profile -> Ok ()
      | Runtime runtime ->
        let host_root = Keeper_turn_sandbox_runtime.host_root runtime in
        Keeper_invariant.sandbox_isolation

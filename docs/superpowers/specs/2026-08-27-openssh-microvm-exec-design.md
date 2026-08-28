@@ -216,53 +216,150 @@ like `Docker`. `Exec_dispatch` routes `Ssh` to its runner the same way.
 `keeper_sandbox_docker.ml`) that:
 
 - spawns the OpenSSH client via the existing `Process_eio` substrate;
+- isolates client config: `-F none` (ignore `/etc/ssh/ssh_config` and
+  `~/.ssh/config`), `ForwardAgent=no`, `ClearAllForwardings=yes`;
 - reuses connections: `ControlMaster=auto`, `ControlPersist=120`,
-  `ControlPath=<base>/.masc/run/ssh/%C`;
+  `ControlPath=<base>/.masc/run/ssh/%C`, `ServerAliveInterval=15`
+  `ServerAliveCountMax=2` (a dead master is detected, not hung on);
 - pins trust: `BatchMode=yes IdentitiesOnly=yes IdentityFile=<dedicated key>`
-  `StrictHostKeyChecking=yes UserKnownHostsFile=<pinned file>`;
-- reproduces the `dispatch_result` contract: `on_output_chunk` streaming from
-  ssh stdout/stderr, per-bucket timeouts (`Env_config_sandbox.Shell_timeout`),
-  cancellation = kill local ssh client → channel teardown → remote shim reaps
-  the child process group (no orphan processes on the remote).
+  `StrictHostKeyChecking=yes UserKnownHostsFile=<endpoint known_hosts>`
+  `ConnectTimeout=<connect_timeout_sec>`;
+- reproduces the `dispatch_result` contract: split `on_stdout_chunk`/
+  `on_stderr_chunk` streaming from the ssh channel, per-bucket timeouts
+  (`Env_config_sandbox.Shell_timeout`);
+- budgets wall-clock as `connect_timeout_sec + timeout_sec + drain grace`, so
+  a cold ControlMaster connect cannot eat the command's budget; the shim also
+  enforces `timeout_sec` server-side and reports `timed_out` in its trailer,
+  so local-timeout vs remote-timeout vs transport failure stay three distinct
+  named errors;
+- cancellation = kill the local ssh client → channel EOF → the shim's watchdog
+  reaps the child process group. No pty anywhere (`-T`): a pty merges stderr
+  into stdout and would break the split-stream contract;
+- logs a first-SSH-dispatch-per-endpoint info line (observability parity with
+  the Phase 0 hatch warning).
 
-**Remote shim.** A small static binary/script `masc-exec-shim` installed on the
-remote host. The ssh command is `ssh <opts> <endpoint> masc-exec-shim <request>`,
-where `<request>` is a base64-encoded JSON `{argv, env, cwd, timeout_sec}`.
-Rationale:
+**Remote shim.** A small **static Linux binary** `masc-exec-shim` installed on
+the remote host (pinned: a binary, not a script). The ssh remote command is
+the fixed literal `masc-exec-shim` — the request NEVER travels as an argv
+token: sshd runs remote commands via the login shell, a single argv string is
+capped at 128 KiB (`MAX_ARG_STRLEN`), and argv is visible in the remote
+process table. The request is framed on stdin instead:
 
-- argv/env/cwd never pass through a remote shell — no quoting/injection class of
-  bugs;
-- the shim re-applies the path jail server-side (defense in depth against a
-  compromised keeper);
-- the shim starts the child in its own process group and kills the group on
-  SIGHUP — this is what makes cancellation semantics hold;
+```
+[8-byte big-endian length][request JSON][stdin_len raw bytes]
+```
+
+```json
+{ "v": 1,
+  "argv": ["<base64>", "..."],
+  "env": [["<base64 name>", "<base64 value>"]],
+  "cwd": "<base64>",
+  "timeout_sec": 300.0,
+  "stdin_len": 0 }
+```
+
+Binary-suspect fields are base64 *inside* the JSON, so hostile bytes
+(invalid-UTF-8 filenames, arbitrary stdin) round-trip losslessly; `v` versions
+the protocol. The shim:
+
+- re-applies the path jail server-side (defense in depth against a compromised
+  keeper);
+- synthesizes a documented minimal base env (`PATH`, `HOME`, `USER`, `TMPDIR`)
+  and overlays only endpoint-allowlisted request entries, minus a
+  reserved-name denylist (`PATH`, `HOME`, `LD_PRELOAD`, `LD_LIBRARY_PATH`,
+  `DYLD_*`, `BASH_ENV`, `ENV`) that is never accepted from the wire;
+- `setsid()` the child into its own process group and sets
+  `PR_SET_PDEATHSIG=SIGKILL` pre-exec (covers the shim dying first);
+- while the child runs, selects on the child's stdout/stderr pipes, shim stdin
+  (channel EOF/HUP), and the `timeout_sec` timer; on EOF or timeout it sends
+  SIGTERM to the process group, waits a grace, then SIGKILLs the group — no
+  remote orphans, including for quiet payloads (`sleep 600`);
+- reports the result as a framed trailer appended after the child's stderr,
+  delimited by `\x1e` (a control byte that cannot appear in valid UTF-8):
+  `\x1e{"masc_exec_result":{"v":1,"exit":0,"signal":null,"timed_out":false,"shim_error":null}}\x1e`.
+  This is how WEXITED vs WSIGNALED vs shim/transport errors stay distinct —
+  ssh alone cannot tell them apart (ssh exits 255 for its own errors);
+- answers `masc-exec-shim --probe` with `{name, version, capabilities}`;
+  preflight compares major version and fails with `remote_shim_version_skew`;
 - in Phase 2 the same shim runs *inside* each microVM unchanged.
 
 **Path mapping.** Today the path gate validates host paths under
 `.masc/playground/<keeper>/` (`keeper_sandbox_config.ml:75`,
-`playground_paths.ml`). For `Remote_ssh`, introduce a playground location
-concept: keeper-visible logical paths stay unchanged; the dispatch boundary
-translates to the remote root (e.g. `/home/masc/playground/<keeper>/`). All
-translation lives in one module — no scattered string rewriting. Workspace read
-ops (`lib/keeper/keeper_workspace_read_ops.ml:71`) route through the shim too.
+`playground_paths.ml`). For `Remote_ssh`, keeper-visible logical paths stay
+unchanged and ONE translation module owns both directions: host→remote on
+dispatch (`remote_root/<keeper>/`), and remote→keeper-logical on streamed
+stdout/stderr and error text — tool output contains absolute remote paths
+(compiler errors, `rg` hits), and a keeper that sees them will feed them back
+into the next call. Workspace read ops route through the shim too: the
+host-side `Sys.file_exists` preflight in `keeper_workspace_read_ops.ml` is
+wrong for remote targets, so existence checks gain an SSH backend behind the
+`Keeper_sandbox_read_runner` seam. Host-FS call sites
+(`host_root_abs_of_meta`, ~27 users: telemetry, filesystem-runtime
+normalization, dashboard workspace views) are enumerated in the plan and
+classified as logical-path, remote-proxied, or explicitly-divergent.
 
-**Provisioning.** `masc_keeper_up` preflight (extends
-`Env_config_sandbox.Preflight`) gains remote readiness: ssh reachable, shim
-present, playground root exists, repo checkouts present (clone/rsync over ssh on
-first up). Unready ⇒ `keeper_up` fails with a named error — no local fallback.
+**Provisioning.** A new operator tool (`bin/masc_exec_ssh_bootstrap.ml`):
+generates the dedicated keypair under `<base>/.masc/ssh/` (0600, never
+committed); `ssh-keyscan`s the host and writes the pinned `known_hosts` only
+after an out-of-band fingerprint confirmation (runbook step); installs or
+upgrades `masc-exec-shim` and records its version; creates `remote_root`; and
+provisions the per-keeper remote GitHub identity (see Secret policy).
+
+`masc_keeper_up` preflight (extends `Env_config_sandbox.Preflight`) gains
+remote readiness: ssh reachable, shim present and version-compatible, remote
+`git --version`, playground root exists with a disk-free floor, repo checkouts
+present (clone/rsync over ssh on first up), per-keeper remote gh identity
+present, local ControlPath dir creatable. Unready ⇒ `keeper_up` fails with a
+named error — **no fallback to any other lane** (a silent downgrade to
+`docker` violates RFC-0001 exactly like a downgrade to local). Boot checks
+config validity only; endpoint readiness is checked at keeper_up and
+re-checked with a short TTL cache at dispatch — an endpoint that degrades
+mid-session fails the tool call with a named error.
 
 **Config surface.** Per-keeper TOML: `sandbox_profile = "remote_ssh"` +
 `remote_endpoint = "<name>"`. Endpoint registry in runtime config (new
-`[exec.ssh.endpoints.<name>]` tables: `host`, `user`, `port`, `identity_file`,
-`remote_root`, `capabilities`). Dedicated keypair generated under
-`<base>/.masc/ssh/` (0600, not committed; `config/identity/` conventions apply).
+`[exec.ssh.endpoints.<name>]` tables):
+
+| key | default | meaning |
+|---|---|---|
+| `host` | — (required) | remote host |
+| `user` | — (required) | remote unix user |
+| `port` | 22 | ssh port |
+| `identity_file` | `<base>/.masc/ssh/<name>.key` | dedicated key — a path *reference*; key material at 0600, `config/identity/` conventions |
+| `known_hosts_file` | `<base>/.masc/ssh/known_hosts.d/<name>` | pinned host keys (public; may be committed) |
+| `remote_root` | — (required) | remote playground root |
+| `connect_timeout_sec` | 10 | → `ConnectTimeout` |
+| `max_concurrent_sessions` | 8 | sessions multiplex onto one ControlMaster connection; sshd `MaxSessions` defaults to 10, so the ceiling must be explicit |
+| `env_allowlist` | `[]` | request env names allowed to cross the wire |
+| `capabilities` | `[]` | reserved: `kvm`, `firecracker` (Phase 2); unknown values warn-and-ignore |
+
+Unknown registry keys and unknown `remote_endpoint` names in keeper TOML are
+config-load errors (fail-closed).
 
 **Secret policy.** `Keeper_secret_projection` currently projects host env into
 local exec. Over SSH the default inverts: **no host secrets cross the wire**.
-An explicit per-endpoint allowlist is the only path (e.g. none initially; GitHub
-auth happens via a remote-side `gh` login, not forwarded tokens).
-`keeper_tool_execute_runtime.ml:268-330` (local identity/env projection) is
-skipped entirely for the SSH branch.
+GitHub auth is per-keeper remote-side: the bootstrap provisions
+`<remote_root>/<keeper>/.config/gh` per keeper (never per-call over the wire),
+preflight checks `gh auth status` for it (`remote_github_identity_missing`),
+and the bootstrap registers the remote token *value* in the host redaction set
+so a leak into output is still scrubbed. The SSH dispatch branch skips the
+local identity/env projection (`keeper_tool_execute_runtime.ml:268-330`) but
+STILL runs `Keeper_github_identity.validate_local_tool_env` on typed env — or
+rejects typed env exactly like the Docker arm — so a model cannot smuggle
+`GH_TOKEN`/`LD_PRELOAD` onto the wire past the allowlist.
+
+**Docker-parity hardening table.** `remote_ssh` does not reproduce the Docker
+container knobs; the delta is declared, not discovered in review:
+
+| Docker knob (`keeper_sandbox_runtime_setup`) | `remote_ssh` disposition |
+|---|---|
+| per-command timeout | shim-enforced (server-side) + local budget |
+| `network_mode = "none"` | **rejected at config load** (`remote_ssh_no_network_mode`; Phase 2 honors it via per-VM egress policy) |
+| memory / pids-limit / read-only rootfs / cap-drop / seccomp | deferred to Phase 2 (microVM); documented as not enforced |
+| path jail | enforced host-side (first layer) AND shim-side (defense in depth) |
+
+`network_mode = "inherit"` is the only accepted mode for `remote_ssh` in
+Phase 1, and it is the profile's default (matching `Local`).
 
 ### 4.3 Phase 2 — microVM backend (Firecracker on remote Linux)
 
@@ -326,9 +423,12 @@ differ:
 
 - Trust boundary moves from "path strings on a shared host" to "SSH channel to a
   remote machine" to "hardware VM boundary on a remote Linux host".
-- Host key pinning (`StrictHostKeyChecking=yes`, committed known_hosts per
-  endpoint); dedicated, non-reused keypair; `IdentitiesOnly=yes` so the agent
-  never leaks other keys.
+- Host key pinning (`StrictHostKeyChecking=yes`, per-endpoint `known_hosts`
+  file — public keys, so the file MAY be committed). The private key is a
+  dedicated, non-reused keypair at 0600, never committed; `IdentitiesOnly=yes`
+  so the agent never leaks other keys. `-F none` isolates the client from
+  `/etc/ssh/ssh_config` and `~/.ssh/config`, so the operator's own ssh config
+  cannot silently weaken any of these flags.
 - No agent forwarding (`ForwardAgent=no`, explicit).
 - Secrets never cross by default (§4.2).
 - Fail-closed everywhere: gate off + Local requested → error; endpoint
@@ -341,9 +441,20 @@ differ:
 - Phase 0: gate tests — Local rejected at config/tool-arg/dispatch layers;
   escape-hatch tests prove the hatch works and warns.
 - Phase 1: unit tests for shim request encoding (round-trip argv/env/cwd,
-  hostile bytes), path translation, timeout mapping, cancellation. Integration
-  test against a local Linux sshd fixture (Docker container running sshd +
-  shim) exercising Execute end-to-end, including mid-command cancel.
+  hostile bytes — invalid UTF-8, NULs in stdin, 10 MiB payload), **result
+  trailer parsing** (exit vs signal vs `shim_error` vs transport failure map to
+  four distinct named errors; malformed/absent trailer → transport error, never
+  a fake exit 0), path translation in BOTH directions (host→remote on dispatch,
+  remote→logical on output), timeout mapping, env allowlist/denylist (wire
+  `PATH`/`LD_PRELOAD` rejected; allowlisted entry survives), `network_mode =
+  "none"` rejected for `remote_ssh` (`remote_ssh_no_network_mode`), shim
+  version skew (`--probe` major mismatch → `remote_shim_version_skew`), and
+  cancellation. Integration test against a local Linux sshd fixture (Docker
+  container running sshd + shim) exercising Execute end-to-end, including
+  mid-command cancel of a QUIET payload (`sleep 600`) asserting **no remote
+  process survives** (ssh into the fixture and `pgrep`), and an automated
+  host-side invariant: after the run, `ps` on the masc host shows the payload
+  argv nowhere (only `ssh` client transports).
 - Phase 2: VM lifecycle tests on a Linux CI runner (or manual gated runbook if
   CI lacks KVM); shim-in-VM Execute parity test reusing the Phase 1 suite.
 - TLA: extend `specs/boundary/SandboxDispatch.tla` `ProfileSet`; existing
@@ -368,7 +479,9 @@ differ:
 - A `remote_ssh` keeper's `Execute` output contains the remote hostname; cancel
   mid-command leaves no remote process (verified by integration test).
 - `ps`/`lsof` on the masc host shows no keeper *payload* processes — only the
-  `ssh` client transports spawned by the runner (Phase 1+).
+  `ssh` client transports spawned by the runner (Phase 1+). This is not a
+  manual checklist item: §6's integration test asserts it automatically on
+  every run.
 - Phase 2: two keepers execute in distinct VMs; compromising one VM's shim
   cannot see the other keeper's playground (isolation test on the Linux host).
 

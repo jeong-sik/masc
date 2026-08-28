@@ -6,7 +6,7 @@
 \* Keeper_sandbox_runner.effective_sandbox_profile):
 \*
 \*   - [meta_profile] is the keeper's declared sandbox preference
-\*     (Local | Docker).
+\*     (Local | Docker | Remote_ssh).
 \*   - [in_playground] gates whether playground-host fallback is even a
 \*     candidate route. The runtime decides this by effective profile
 \*     (Local -> host, Docker -> container), not by testing whether the
@@ -14,7 +14,8 @@
 \*     predicate that did the latter had no caller and was deleted.
 \*   - [dispatched_via] records how the most recent typed Execute request was
 \*     resolved: None (no dispatch yet), Host, DockerReuse (existing
-\*     container), DockerColdstart (new container).
+\*     container), DockerColdstart (new container), Ssh (Phase 1 remote
+\*     lane).
 \*
 \* The contract this spec proves:
 \*   meta_profile = Docker => dispatched_via ∉ {None, Host} once a
@@ -33,8 +34,9 @@
 \*
 \* Bug Model (memory: TLA+ Bug Model pattern):
 \*   - Spec       (clean): all dispatches respect the profile contract.
-\*   - SpecBuggy:  ExecuteHostFallback action lets a Docker-declared
-\*     keeper resolve to Host. DockerImpliesDockerVia MUST flag it.
+\*   - SpecBuggy:  ExecuteHostFallback action lets a Docker- or
+\*     Remote_ssh-declared keeper resolve to Host. DockerImpliesDockerVia
+\*     or RemoteSshImpliesSshVia MUST flag it.
 \*
 \* Reference: issue #11611 part 2.
 
@@ -48,8 +50,8 @@ VARIABLES
 
 vars == << meta_profile, in_playground, request_pending, dispatched_via >>
 
-ProfileSet == {"Local", "Docker"}
-ViaSet == {"None", "Host", "DockerReuse", "DockerColdstart"}
+ProfileSet == {"Local", "Docker", "Remote_ssh"}
+ViaSet == {"None", "Host", "DockerReuse", "DockerColdstart", "Ssh"}
 
 TypeOK ==
     /\ meta_profile \in ProfileSet
@@ -81,8 +83,9 @@ SubmitExecute ==
     /\ UNCHANGED << meta_profile, in_playground >>
 
 \* Clean dispatch: routing matches the profile contract.
-\*   Local  => Host
-\*   Docker => DockerReuse | DockerColdstart
+\*   Local      => Host
+\*   Docker     => DockerReuse | DockerColdstart
+\*   Remote_ssh => Ssh
 \* DockerColdstart is the cold-path branch when no reusable container
 \* is present; DockerReuse is the warm-path branch.
 DispatchClean(via) ==
@@ -93,6 +96,8 @@ DispatchClean(via) ==
           /\ via = "Host"
        \/ /\ meta_profile = "Docker"
           /\ via \in {"DockerReuse", "DockerColdstart"}
+       \/ /\ meta_profile = "Remote_ssh"
+          /\ via = "Ssh"
     /\ dispatched_via' = via
     /\ request_pending' = FALSE
     /\ UNCHANGED << meta_profile, in_playground >>
@@ -119,17 +124,26 @@ DockerImpliesDockerVia ==
     (meta_profile = "Docker" /\ ~ request_pending) =>
         dispatched_via \in {"None", "DockerReuse", "DockerColdstart"}
 
+\* I2: RemoteSshImpliesSshVia. Same contract for the Phase 1 SSH lane:
+\* a Remote_ssh-declared keeper whose request has resolved MUST dispatch
+\* via Ssh (or not have dispatched yet); never Host (the local-playground
+\* route) and never the Docker vias — a silent lane swap violates
+\* RFC-0001 exactly like the host fallback does.
+RemoteSshImpliesSshVia ==
+    (meta_profile = "Remote_ssh" /\ ~ request_pending) =>
+        dispatched_via \in {"None", "Ssh"}
+
 \* ── Bug actions (used only by SpecBuggy) ──────────────────────────────────
 
-\* B1: ExecuteHostFallback. The regression class: a Docker-declared
-\* keeper hits a legacy host-fallback path in the typed Execute dispatch layer
-\* and resolves the request via Host. This is the silent fallback that
-\* makes Docker isolation a soft contract; the spec catches it as an
-\* invariant violation in <=3 steps.
+\* B1: ExecuteHostFallback. The regression class: a Docker- or
+\* Remote_ssh-declared keeper hits a legacy host-fallback path in the
+\* typed Execute dispatch layer and resolves the request via Host. This
+\* is the silent fallback that makes containment a soft contract; the
+\* spec catches it as an invariant violation in <=3 steps.
 ExecuteHostFallback ==
     /\ request_pending
     /\ dispatched_via = "None"
-    /\ meta_profile = "Docker"
+    /\ meta_profile \in {"Docker", "Remote_ssh"}
     /\ dispatched_via' = "Host"
     /\ request_pending' = FALSE
     /\ UNCHANGED << meta_profile, in_playground >>

@@ -901,6 +901,11 @@
  (libraries alcotest astring masc_test_deps eio_main))
 
 (test
+ (name test_exec_dispatch_ssh)
+ (modules test_exec_dispatch_ssh)
+ (libraries masc_test_deps eio_main))
+
+(test
  (name test_process_file_redirects)
  (modules test_process_file_redirects)
  (libraries alcotest astring masc_test_deps eio_main))
@@ -3787,3 +3792,23 @@
  (name test_keeper_local_playground_gate)
  (modules test_keeper_local_playground_gate)
  (libraries masc_test_deps))
+
+(test
+ (name test_keeper_remote_ssh_profile)
+ (modules test_keeper_remote_ssh_profile)
+ (libraries masc_test_deps))
+
+(test
+ (name test_exec_ssh_endpoints)
+ (modules test_exec_ssh_endpoints)
+ (libraries masc_test_deps))
+
+(test
+ (name test_exec_ssh_protocol)
+ (modules test_exec_ssh_protocol)
+ (libraries masc_test_deps exec_ssh_protocol))
+
+(test
+ (name test_exec_shim)
+ (modules test_exec_shim)
+ (libraries masc_test_deps exec_ssh_protocol exec_shim))

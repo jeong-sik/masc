@@ -114,6 +114,7 @@ let effective_sandbox_profile ~(meta : keeper_meta) =
   | Docker -> Docker, meta.network_mode
   | Micro_vm -> Micro_vm, meta.network_mode
   | Local -> Local, meta.network_mode
+  | Remote_ssh -> Remote_ssh, meta.network_mode
 ;;
 
 (* ── Sandbox runtime preflight ─────────────────────────── *)
@@ -240,6 +241,15 @@ let ensure_shell_image_available ~(meta : keeper_meta) ~image ~timeout_sec =
     (match Keeper_sandbox_microvm.image_present ~image ~timeout_sec with
      | Ok () -> Ok ()
      | Error detail -> Error ("microvm_shell_failed: " ^ detail))
+  (* Fail closed: a remote_ssh keeper has no host-side shell image store,
+     and falling through to the docker daemon check would be the silent
+     substitution the profile exists to rule out. The SSH runner lands in
+     Phase 1 task 6; dispatch refuses this profile upstream until then. *)
+  | Keeper_types_profile_sandbox.Remote_ssh ->
+    Error
+      "remote_ssh_dispatch_unavailable: sandbox_profile=remote_ssh has no \
+       host-side shell image; SSH runner not wired yet (Phase 1 task 6); \
+       no fallback to docker or host image stores"
   | Keeper_types_profile_sandbox.Local | Keeper_types_profile_sandbox.Docker ->
   match
     Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
@@ -328,6 +338,15 @@ let docker_run_argv
         meta.network_mode
     @ identity_mounts
     @ [ image; "bash"; "-l"; "-s" ]
+  (* Unreachable: [ensure_shell_image_available] refuses remote_ssh before
+     argv construction, and typed dispatch fails closed on the profile
+     further upstream. Fail closed rather than improvise a docker or
+     container argv for a remote_ssh keeper (RFC-0001). *)
+  | Keeper_types_profile_sandbox.Remote_ssh ->
+    failwith
+      "remote_ssh_dispatch_unavailable: docker_run_argv called for \
+       sandbox_profile=remote_ssh; SSH runner not wired yet (Phase 1 \
+       task 6); no fallback to docker or host dispatch"
   | Keeper_types_profile_sandbox.Local | Keeper_types_profile_sandbox.Docker ->
   Keeper_sandbox_runtime.docker_command_argv ()
   @ [ "run"; "--rm"; "--name"; container_name ]

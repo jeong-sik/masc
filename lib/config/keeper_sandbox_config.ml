@@ -8,6 +8,7 @@ type sandbox_profile =
   | Local
   | Docker
   | Micro_vm
+  | Remote_ssh
 
 exception Invalid_keeper_sandbox_config of string
 
@@ -15,16 +16,18 @@ let sandbox_profile_to_string = function
   | Local -> "local"
   | Docker -> "docker"
   | Micro_vm -> "microvm"
+  | Remote_ssh -> "remote_ssh"
 
 let sandbox_profile_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "local" -> Some Local
   | "docker" -> Some Docker
   | "microvm" -> Some Micro_vm
+  | "remote_ssh" -> Some Remote_ssh
   | _ -> None
 
 let valid_sandbox_profile_strings =
-  List.map sandbox_profile_to_string [ Local; Docker; Micro_vm ]
+  List.map sandbox_profile_to_string [ Local; Docker; Micro_vm; Remote_ssh ]
 
 let default_sandbox_profile = Local
 
@@ -81,6 +84,12 @@ let host_root_rel_of_profile profile name =
       Printf.sprintf "%s/microvm/%s/"
         Playground_paths.all_playgrounds_prefix
         (Playground_paths.sanitize_keeper_name name)
+  | Remote_ssh ->
+      (* Host-side bookkeeping bundle (telemetry, workspace views). The
+         keeper's working files live on the remote endpoint; dispatch and
+         remote path translation land with the SSH runner (Phase 1 task 6+)
+         and fail closed until then. *)
+      Playground_paths.bundle_root name
 
 let host_root_rel_of_agent ~base_path ~agent_name =
   sandbox_profile_of_agent ~base_path ~agent_name

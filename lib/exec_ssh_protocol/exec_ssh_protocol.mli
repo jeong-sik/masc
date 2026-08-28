@@ -1,0 +1,198 @@
+(** Protocol codec for the Phase 1 SSH remote execution lane.
+
+    Single source of truth (SSOT) shared by the keeper-side SSH runner
+    (encodes requests, parses trailers/probes) and the remote
+    [masc-exec-shim] binary (parses requests, emits trailers/probes).
+    Pure OCaml, no I/O — the module only transforms strings, so both
+    sides can never drift on the wire format.
+
+    Normative spec:
+    docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md §4.2
+    ("Remote shim"). *)
+
+(** {1 Error codes}
+
+    Every [Error] string returned by this module starts with one of
+    these snake_case codes, followed by [": "] and a human-readable
+    detail.  Callers (Tasks 5/6) match on the code prefix:
+
+    - ["remote_ssh_transport_error"] — malformed framing, unterminated
+      JSON, base64 failure, length-prefix mismatch, [stdin_len]
+      mismatch, absent or malformed trailer, trailer invariant
+      violation.  A transport error means the peer's bytes could not be
+      trusted; the caller MUST surface it as a transport failure and
+      MUST NOT fabricate an exit code (never "exit 0").
+
+    - ["remote_ssh_version_error"] — a request frame or trailer whose
+      [v] field differs from {!protocol_version}. *)
+
+val protocol_version : int
+(** [= 1].  Current protocol version; [v] fields are gated against it. *)
+
+(** {1 Request frame} *)
+
+type request =
+  { v : int  (** protocol version; must be {!protocol_version} *)
+  ; argv : string list  (** remote argv; each entry base64 on the wire *)
+  ; env : (string * string) list
+    (** environment overlay; names and values base64 on the wire *)
+  ; cwd : string  (** remote working directory; base64 on the wire *)
+  ; timeout_sec : float
+    (** payload wall-clock budget, enforced server-side by the shim *)
+  ; stdin_len : int64
+    (** declared byte length of the raw stdin payload *)
+  }
+
+(** Wire layout (§4.2):
+
+    {v
+    [0        8              8+json_len            8+json_len+stdin_len]
+    [ 8-byte  ][ request JSON ][        raw stdin bytes               ]
+    [ BE  L   ]
+    v}
+
+    The 8-byte big-endian length L covers BOTH the request JSON and the
+    raw stdin bytes: [L = json_len + stdin_len].  (The spec's
+    "[len][JSON][stdin_len raw bytes]" layout; this file is the
+    contract, and {!decode_request} agrees.)
+
+    The request JSON is a compact object:
+    {[
+      { "v": 1,
+        "argv": ["<base64>", "..."],
+        "env": [["<base64 name>", "<base64 value>"]],
+        "cwd": "<base64>",
+        "timeout_sec": 300.0,
+        "stdin_len": 0 }
+    ]}
+
+    Binary-suspect fields ([argv] entries, [env] names and values,
+    [cwd]) are base64-encoded (RFC 4648, standard alphabet, WITH
+    padding) INSIDE the JSON, so invalid UTF-8 and control bytes
+    round-trip losslessly.  [stdin] is NOT base64: it travels as raw
+    bytes after the JSON, delimited by the length prefix. *)
+
+val encode_request : request -> stdin:string -> (string, string) result
+(** [encode_request req ~stdin] renders one complete frame
+    (length prefix + JSON + raw stdin).
+
+    Fails with [remote_ssh_transport_error] when:
+    - [req.timeout_sec] is not finite ([nan]/[infinity] do not survive
+      JSON — caught here instead of raising);
+    - [req.stdin_len] differs from the byte length of [stdin] — the
+      caller inconsistency is rejected at the source rather than
+      producing a frame the peer would reject as a truncated read. *)
+
+val decode_request : string -> (request * string, string) result
+(** [decode_request frame] parses exactly one frame: [frame] must be
+    precisely [8 + L] bytes (trailing bytes are an error).  Returns the
+    decoded {!request} and the raw stdin payload.
+
+    Errors:
+    - shorter than the 8-byte prefix, length-prefix mismatch,
+      unterminated or invalid JSON, bad base64, missing/mistyped
+      fields, negative [stdin_len], or declared [stdin_len] not equal
+      to the number of bytes actually present after the JSON →
+      [remote_ssh_transport_error];
+    - non-finite [timeout_sec] on the wire (e.g. [1e999], [nan]) →
+      [remote_ssh_transport_error] — a timer must never receive
+      [infinity];
+    - [v <> 1] → [remote_ssh_version_error].
+
+    The [stdin_len] check happens BEFORE the payload is handed back, so
+    a truncated frame can never be mistaken for a valid request.
+
+    Duplicate JSON keys are first-wins ([List.assoc_opt]); benign, and
+    identical on both peers since both use this module. *)
+
+(** {1 Result trailer}
+
+    The shim appends the result trailer after the payload's stderr,
+    delimited by [\x1e] (RS, a control byte that cannot appear in valid
+    UTF-8):
+
+    {v
+    \x1e{"masc_exec_result":{"v":1,"exit":0,"signal":null,
+                             "timed_out":false,"shim_error":null}}\x1e
+    v}
+
+    This is how WEXITED vs WSIGNALED vs shim/transport errors stay
+    distinct (ssh alone exits 255 for its own errors). *)
+
+type trailer =
+  { v : int  (** protocol version; must be {!protocol_version} *)
+  ; exit : int option  (** set iff the payload exited normally *)
+  ; signal : int option  (** set iff the payload died on a signal *)
+  ; timed_out : bool  (** true iff the shim killed the payload on
+                          [timeout_sec] *)
+  ; shim_error : string option  (** set iff the shim itself failed
+                                    before/without running the payload *)
+  }
+
+val render_trailer : trailer -> string
+(** [render_trailer t] is the exact [\x1e]-delimited byte string the
+    shim appends to stderr.  Control bytes inside [shim_error] are
+    JSON-escaped by the renderer, so no literal [\x1e] can appear
+    between the delimiters. *)
+
+val parse_trailer : string -> (trailer, string) result
+(** [parse_trailer tail] extracts the trailer from the TAIL of a
+    captured stderr stream.
+
+    Last-match semantics: the payload may itself have emitted
+    [\x1e]-delimited junk earlier in the stream (stderr is not
+    guaranteed UTF-8), so ONLY the final [\x1e ... \x1e] pair in [tail]
+    is considered; earlier pairs are never inspected, so an earlier
+    malformed pair cannot poison a well-formed final trailer.
+
+    Honest limit of that rule: a transport error is produced only when
+    the surviving final pair is absent or malformed.  If the real
+    trailer was cut by tail truncation and an EARLIER well-formed pair
+    survives (e.g. the payload itself printed a forged
+    ["masc_exec_result"] blob), that earlier pair is indistinguishable
+    from a real trailer by construction and WILL be accepted.  Hence:
+
+    CONTRACT NOTE — {!parse_trailer} output is authoritative ONLY when
+    the ssh channel closed cleanly (full EOF on both streams observed).
+    On any ssh-level failure (client exit 255, channel reset, dropped
+    ControlMaster) the runner MUST classify the outcome as
+    [remote_ssh_transport_error] itself, regardless of any trailer it
+    managed to parse from the partial tail.
+
+    Errors (all [remote_ssh_transport_error], or
+    [remote_ssh_version_error] for [v <> 1]):
+    - fewer than two [\x1e] bytes in [tail] (absent trailer);
+    - the final pair is not valid JSON, lacks the ["masc_exec_result"]
+      wrapper, or has missing/mistyped fields;
+    - invariant violation: [exit], [signal] and [shim_error] are
+      mutually exclusive (more than one set → malformed), and at least
+      one of the three must be set unless [timed_out] is true (a
+      trailer with no result information at all → malformed).
+
+    Absent/malformed is NEVER mapped to a fabricated [exit 0]. *)
+
+(** {1 Shim probe}
+
+    [masc-exec-shim --probe] answers a plain JSON object
+    [{"name":..., "version":..., "capabilities":[...]}].  Preflight
+    compares major versions with {!probe_major_compatible} and, on
+    mismatch, fails with the spec-level named error
+    [remote_shim_version_skew] (fabricated by the caller — this module
+    only supplies the comparison). *)
+
+type probe =
+  { name : string  (** e.g. ["masc-exec-shim"] *)
+  ; version : string  (** dotted semver, e.g. ["1.4.2"] *)
+  ; capabilities : string list
+  }
+
+val render_probe : probe -> string
+val parse_probe : string -> (probe, string) result
+(** [parse_probe] fails with [remote_ssh_transport_error] on invalid
+    JSON or missing/mistyped fields. *)
+
+val probe_major_compatible : want:string -> string -> bool
+(** [probe_major_compatible ~want version] is [true] iff the numeric
+    major prefix of [version] equals [want] parsed as a number:
+    [want = "1"] vs ["1.4.2"] → [true]; [want = "2"] vs ["1.4.2"] →
+    [false].  Unparseable input → [false] (never raises). *)

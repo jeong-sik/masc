@@ -150,6 +150,20 @@
  (package masc)
  (libraries masc masc_core masc.config_dir_resolver masc.agent_core unix))
 
+;; Phase 1 SSH remote execution lane (spec §4.2): remote shim installed on
+;; SSH endpoints as the fixed remote command.  Decodes one framed request
+;; from stdin, supervises the payload (setsid + pdeathsig, process-group
+;; SIGTERM/grace/SIGKILL), and appends the result trailer to stderr.  Kept
+;; dependency-minimal (exec_ssh_protocol + unix) so scripts/build-shim-static.sh
+;; can produce a small static musl Linux binary.
+
+(executable
+ (name masc_exec_shim)
+ (modules masc_exec_shim)
+ (public_name masc-exec-shim)
+ (package masc)
+ (libraries exec_shim))
+
 ;; RFC-0374 capability probe runner.  Answers "can runtime R reach tool T"
 ;; without writing to the keeper's chat, checkpoint, or memory, which is what
 ;; made the 2026-08-12 sweep measure its own traffic (masc#28414).

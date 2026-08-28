@@ -370,6 +370,24 @@ let effective_meta_of_profile_defaults
       Error
         (Printf.sprintf "keeper %s rejected: %s"
            meta.name Env_config_sandbox.Gate.disabled_message)
+  (* Phase 1 SSH lane: [Remote_ssh] is the intended new lane, so the local
+     gate must NOT reject it — but it is undispatchable without the
+     [remote_endpoint] naming its [exec.ssh.endpoints.<name>] registry
+     entry, so config-load validation fails closed here instead of
+     letting the keeper boot into a dispatch that can only error. A blank
+     or whitespace-only value counts as missing (same trim idiom as
+     [runtime_id] below). The masc_keeper_up tool-arg side of this check
+     is Phase 1 task 9. *)
+  | Ok Remote_ssh
+    when (match defaults.remote_endpoint with
+          | None -> true
+          | Some endpoint -> String.trim endpoint = "") ->
+      Error
+        (Printf.sprintf
+           "keeper %s rejected: remote_ssh_endpoint_missing: sandbox_profile \
+            \"remote_ssh\" requires remote_endpoint = \"<name>\" in the keeper \
+            TOML (registry: [exec.ssh.endpoints.<name>] in runtime config)"
+           meta.name)
   | Ok sandbox_profile ->
       let default_network_mode =
         if has_profile_source then default_network_mode_for_profile sandbox_profile

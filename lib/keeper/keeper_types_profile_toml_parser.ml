@@ -32,6 +32,7 @@ let keeper_toml_fields =
   ; "sandbox_profile", Field_string
   ; "sandbox_image", Field_string
   ; "network_mode", Field_string
+  ; "remote_endpoint", Field_string
   ; "max_context_override", Field_int
   ; "telemetry_feedback_enabled", Field_bool
   ; "telemetry_feedback_window_hours", Field_int
@@ -271,6 +272,49 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      raw))
         | None -> Ok ())
   in
+  (* Phase 1 SSH lane (Docker-parity hardening table in
+     docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md
+     section 4.2): [remote_ssh] is transport-only, so [network_mode =
+     "none"] cannot be honored yet. Reject at config load — the same
+     layer that validates the [network_mode] string itself — rather than
+     silently ignoring a knob the operator explicitly set. Per-VM egress
+     policy arrives with the Phase 2 microVM backend. *)
+  let result =
+    Result.bind result (fun () ->
+        match
+          ( Option.bind (str "sandbox_profile") sandbox_profile_of_string
+          , Option.bind (str "network_mode") network_mode_of_string )
+        with
+        | Some Remote_ssh, Some Network_none ->
+            Error
+              "remote_ssh_no_network_mode: sandbox_profile \"remote_ssh\" does \
+               not support network_mode = \"none\" (only \"inherit\" is \
+               accepted in Phase 1; per-VM egress policy arrives with the \
+               microVM backend)"
+        (* Every other profile/mode combination keeps its existing
+           semantics; only remote_ssh gains the Phase 1 restriction. *)
+        | Some _, Some _ | Some _, None | None, _ -> Ok ())
+  in
+  (* Phase 1 SSH lane (Task 1 review follow-up): [remote_endpoint] is only
+     meaningful for the remote_ssh profile — it names an
+     [exec.ssh.endpoints.<name>] registry entry that only the SSH dispatch
+     branch consults. Setting it under any other profile (or none) is a
+     typo, not an override, so the load rejects it with a named error
+     instead of silently carrying a value nothing will read. No legacy TOML
+     exists to break: the key itself was introduced by the SSH lane. *)
+  let result =
+    Result.bind result (fun () ->
+        match
+          ( Option.bind (str "sandbox_profile") sandbox_profile_of_string
+          , str "remote_endpoint" )
+        with
+        | Some Remote_ssh, _ -> Ok ()
+        | _, Some _ ->
+            Error
+              "remote_endpoint_requires_remote_ssh: keeper.remote_endpoint is \
+               only valid with sandbox_profile = \"remote_ssh\""
+        | _, None -> Ok ())
+  in
   let result =
     Result.bind result (fun () ->
         match str "tools.native" with
@@ -329,6 +373,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         sandbox_image = str "sandbox_image";
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
+        remote_endpoint = str "remote_endpoint";
         autonomous_wake_prompt;
         max_context_override;
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
@@ -380,6 +425,7 @@ let merge_keeper_profile_defaults
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
+    remote_endpoint = prefer overlay.remote_endpoint base.remote_endpoint;
     max_context_override =
       prefer overlay.max_context_override base.max_context_override;
     telemetry_feedback_enabled =

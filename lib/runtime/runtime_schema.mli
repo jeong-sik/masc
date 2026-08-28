@@ -271,6 +271,11 @@ type config =
   ; exact_output_lane_decls : exact_output_lane_decl list
     (** Raw ordered AGENT_CORE target references from
         [\[runtime.exact_output_lanes.<id>\]]. *)
+  ; exec_ssh_endpoints : Exec_ssh_endpoint.t list
+    (** [\[exec.ssh.endpoints.<name>\]] — SSH remote execution endpoint
+        registry (Phase 1 SSH lane, spec §4.2). Keeper TOML [remote_endpoint]
+        names resolve against this list at keeper load/dispatch; an unknown
+        name is a config-load error. *)
   }
 [@@deriving show, eq]
 
@@ -278,6 +283,9 @@ type config =
 
 val provider_of_id : config -> string -> provider option
 val model_of_id : config -> string -> model_spec option
+
+(** Registry lookup by [\[exec.ssh.endpoints.<name>\]] key. *)
+val exec_ssh_endpoint : config -> string -> Exec_ssh_endpoint.t option
 
 (** Runtime id derived from a binding: ["provider.model"]. *)
 val binding_key : binding -> string

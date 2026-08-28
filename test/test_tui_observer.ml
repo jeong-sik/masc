@@ -201,6 +201,58 @@ let test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock () =
          Float.equal at 1787507570.5
      | _ -> false)
 
+let operator_digest_frame =
+  "data: {\"type\":\"operator_digest\",\"ts_unix\":1787507573.0}\n\n"
+
+let transport_health_frame =
+  "data: {\"type\":\"transport_health_snapshot\",\"ts_unix\":1787507574.0}\n\n"
+
+let composite_frame =
+  "data: {\"type\":\"keeper_composite_changed\",\"name\":\"lane-smith\",\
+   \"ts_unix\":1787507575.0}\n\n"
+
+(* Third time in this decoder. The chat stream frame and the waiting-queue
+   change above arrived as Other until each was given an arm; the snapshot list
+   was left as it was and had drifted by two. Both of these were on the Acting
+   screen as untaught types, and an untaught type counts as an action -- so the
+   filter that exists to show what a keeper did was showing server pushes.
+
+   The list is gone. [Dashboard_event_slices] is the table the server routes
+   by, and this decoder reads the same one. *)
+let test_every_whole_projection_push_decodes_as_a_snapshot () =
+  check (list string) "the two that were untaught read as snapshots"
+    [ "snapshot:operator_digest"; "snapshot:transport_health_snapshot" ]
+    (List.map summary
+       (decode_all [ operator_digest_frame; transport_health_frame ]));
+  (* Not one at a time: every type the table calls a whole projection. A new
+     one added to the table is covered here without this test being touched. *)
+  List.iter
+    (fun (entry : Masc.Dashboard_event_slices.entry) ->
+      if entry.whole_projection then
+        let frame =
+          Printf.sprintf "data: {\"type\":\"%s\",\"ts_unix\":1.0}\n\n"
+            entry.event_type
+        in
+        check (list string)
+          (Printf.sprintf "%s is a snapshot, not an untaught type"
+             entry.event_type)
+          [ "snapshot:" ^ entry.event_type ]
+          (List.map summary (decode_all [ frame ])))
+    Masc.Dashboard_event_slices.entries
+
+(* A delta has a slice too, and reading the table for "does this have one"
+   rather than "does it replace a projection" would swallow this one: the
+   screen would drop a keeper change into the quiet class. It has its own arm
+   above, and the table marks it as not a whole projection, so both halves
+   have to break before it can go wrong. *)
+let test_a_delta_with_a_slice_is_not_a_snapshot () =
+  check (list string) "a composite change stays a keeper event"
+    [ "composite(lane-smith)" ]
+    (List.map summary (decode_all [ composite_frame ]));
+  check bool "and the table does not call it a whole projection" false
+    (Masc.Dashboard_event_slices.carries_whole_projection
+       "keeper_composite_changed")
+
 let test_a_line_cut_by_the_chunk_boundary_is_held () =
   let at = String.index tool_called_frame '{' + 40 in
   let head = String.sub tool_called_frame 0 at in
@@ -287,6 +339,10 @@ let () =
             test_keeper_events_decode_by_name
         ; test_case "the chat stream and waiting queue keep their keeper and clock"
             `Quick test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock
+        ; test_case "every whole-projection push decodes as a snapshot" `Quick
+            test_every_whole_projection_push_decodes_as_a_snapshot
+        ; test_case "a delta with a slice is not a snapshot" `Quick
+            test_a_delta_with_a_slice_is_not_a_snapshot
         ; test_case "a line cut by the chunk boundary is held" `Quick
             test_a_line_cut_by_the_chunk_boundary_is_held
         ; test_case "what this build was not taught keeps its name" `Quick

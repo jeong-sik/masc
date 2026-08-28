@@ -393,31 +393,17 @@ let rec atomic_bump_max a v =
   let cur = Atomic.get a in
   if v > cur && not (Atomic.compare_and_set a cur v) then atomic_bump_max a v
 
-(* Must stay the exact domain of [dashboard_slice_for_sse_type]: accepting a
-   slice no event can be routed to is a subscription that silently never
-   delivers, and the rejection below is all-or-nothing, so it cannot be
-   discovered by watching one slice go quiet.
+(* The acceptor and the router read one table, so the acceptor cannot say yes
+   to a slice no event reaches -- a subscription that silently never delivers,
+   and one the all-or-nothing rejection below cannot localise by watching a
+   single slice go quiet.
 
-   "shell", "board" and "goals" were accepted here until #27027. They were fed
-   by dashboard/subscribe's one-shot snapshot provider rather than by deltas,
-   and that commit deleted the provider without pruning either vocabulary. *)
-let valid_dashboard_slice = function
-  | "execution" | "operator" | "transport" | "namespace" | "composite" -> true
-  | _ -> false
-
-let dashboard_slice_for_sse_type = function
-  (* "namespace_truth_snapshot" was accepted here alongside the canonical name
-     while both were broadcast. Only one is now (#27664). *)
-  | "project_snapshot" -> Some "namespace"
-  | "execution_snapshot" ->
-      Some "execution"
-  | "operator_snapshot" | "operator_digest" ->
-      Some "operator"
-  | "transport_health_snapshot" ->
-      Some "transport"
-  | "keeper_composite_changed" ->
-      Some "composite"
-  | _ -> None
+   They were two lists here until they drifted for a day after #27027, when
+   "shell", "board" and "goals" stayed accepted after the provider that fed
+   them was deleted. The slice names are now the table's image rather than a
+   second list, so that shape of drift has nowhere to live. *)
+let valid_dashboard_slice = Dashboard_event_slices.valid_slice
+let dashboard_slice_for_sse_type = Dashboard_event_slices.slice_for_sse_type
 
 let dashboard_session_result session =
   let slices =

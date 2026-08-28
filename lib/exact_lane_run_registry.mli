@@ -77,8 +77,11 @@ val completion_error_to_string : completion_error -> string
 val storage_filename : string
 
 val max_completed_retained : int
-(** How many completed runs survive a replay. Running entries are kept
-    regardless, so this bounds finished work only.
+(** How many completed runs survive a replay, PER LANE. Running entries are
+    kept regardless, so this bounds finished work only; the bound is applied
+    within each lane so the busiest lane (librarian) cannot evict the
+    quietest lane's history (compaction fires only on a capacity refusal —
+    lane audit W8).
 
     Derived from the page size of the surface that reads this store rather than
     copied from the sibling registries, which retain 64 and have no paging UI.

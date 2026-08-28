@@ -35,6 +35,7 @@ module Payload = struct
   let restart_reason = "worker fibers do not survive server restart"
   let replayed_running_completion = None
   let completed_retention = `Latest 64
+  let retention_group = None
 
   let registration_to_yojson registration =
     `Assoc

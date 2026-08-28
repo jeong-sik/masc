@@ -44,6 +44,15 @@ module type Payload = sig
       evidence. [None] drops it when the subsystem's authoritative state lives
       elsewhere. *)
   val completed_retention : [ `All | `Latest of int ]
+
+  val retention_group : (registration -> string) option
+  (** [Some group_of] makes [`Latest n] a PER-GROUP bound: the newest [n]
+      completed entries survive within each group instead of globally, so a
+      busy group cannot evict a quiet one's entire history (the exact-lane
+      registry's librarian runs every few turns per keeper while compaction
+      fires only on a capacity refusal — under a global bound the quiet
+      lane's zero retained runs was indistinguishable from "never ran").
+      [None] keeps the single global bound. *)
 end
 
 type persistence_state =

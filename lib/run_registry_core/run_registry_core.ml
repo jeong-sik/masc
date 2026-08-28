@@ -84,6 +84,7 @@ module type Payload = sig
   val replayed_running_completion
     : (started_at:float -> registration -> completion) option
   val completed_retention : [ `All | `Latest of int ]
+  val retention_group : (registration -> string) option
 end
 
 type persistence_state =
@@ -153,10 +154,30 @@ module Make (Payload : Payload) = struct
     | `All -> entries
     | `Latest _ ->
       let running, completed = List.partition is_running entries in
+      let newest_first =
+        List.sort
+          (fun left right -> Float.compare right.started_at left.started_at)
+          completed
+      in
       let recent_completed =
-        completed
-        |> List.sort (fun left right -> Float.compare right.started_at left.started_at)
-        |> List.filteri (fun index _ -> index < max_completed_retained)
+        match Payload.retention_group with
+        | None ->
+          List.filteri (fun index _ -> index < max_completed_retained) newest_first
+        | Some group_of ->
+          (* Per-group bound: count within each group while preserving the
+             global newest-first order, so a busy group cannot evict a quiet
+             one's history. *)
+          let seen : (string, int) Hashtbl.t = Hashtbl.create 8 in
+          List.filter
+            (fun entry ->
+               let group = group_of entry.registration in
+               let kept = Option.value (Hashtbl.find_opt seen group) ~default:0 in
+               if kept < max_completed_retained
+               then (
+                 Hashtbl.replace seen group (kept + 1);
+                 true)
+               else false)
+            newest_first
       in
       running @ recent_completed
   ;;

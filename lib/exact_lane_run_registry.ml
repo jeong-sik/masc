@@ -155,6 +155,12 @@ module Payload = struct
      compacts the log to that set on the next clean read. *)
   let completed_retention = `Latest 2000
 
+  (* The bound is per lane: librarian fires every few turns per keeper while
+     compaction fires only on a capacity refusal, and under the old global
+     bound the busiest lane evicted the quietest — retained_run_count = 0 for
+     compaction was indistinguishable from "never ran" (lane audit W8). *)
+  let retention_group = Some (fun registration -> lane_key registration.lane)
+
   let registration_to_yojson registration =
     `Assoc
       [ "lane", `String (lane_key registration.lane)

@@ -247,6 +247,13 @@ val activation_to_yojson : activation -> Yojson.Safe.t
 (** Exact durable activation evidence. Projections may add their own owner
     label around this value, but must not reconstruct or weaken its fields. *)
 
+val activation_of_yojson :
+  expected_trace_id:Keeper_id.Trace_id.t ->
+  Yojson.Safe.t ->
+  (activation, decode_error) result
+(** Strict inverse of {!activation_to_yojson}, bound to the trace that owns
+    the occurrence. *)
+
 val make_activation :
   identity:Skill_reference.identity ->
   content_revision:Skill_reference.content_revision ->

@@ -8912,44 +8912,33 @@ let render_tools (state : state) =
              | Some (observed_key, json) when String.equal key observed_key ->
               (match Tui_decode.decode_skill_evidence json with
                | Error _ ->
-                 [ Theme.bad (), "     Latest evidence response is malformed" ]
+                 [ Theme.bad (), "     Retained evidence response is malformed" ]
                | Ok evidence ->
-               let has_evidence_field name =
-                 match json_assoc_member_opt name json with
-                 | None | Some `Null -> false
-                 | Some _ -> true
-               in
-               let has_evidence =
-                 has_evidence_field "activation"
-                 || has_evidence_field "composition"
-               in
                let evidence_lines =
-                 match
-                   json_assoc_member_opt "schema" json,
-                   json_assoc_member_opt "status" json
-                 with
-                | ( Some (`String "masc.skill-evidence/v4")
-                  , Some (`String "not_observed_in_current_coverage") )
-                  when not has_evidence ->
+                 match evidence.Masc.Tui_decode.se_status with
+                 | Masc.Tui_decode.Skill_evidence_not_observed_in_retained_coverage ->
                   [ Theme.warn (),
-                    "     Latest evidence: not found in current coverage (not proof of never)"
+                    "     Retained evidence: not found in retained coverage (not proof of never)"
                   ]
-                | Some (`String "masc.skill-evidence/v4"), Some (`String "observed")
-                  when has_evidence ->
+                 | Masc.Tui_decode.Skill_evidence_observed ->
                   let activation_lines =
-                    match json_assoc_member_opt "activation" json with
-                    | Some (`Assoc _ as evidence) ->
-                      let keeper =
-                        match json_assoc_member_opt "keeper" evidence with
-                        | Some (`String value) -> value
-                        | _ -> "?"
-                      in
-                      (match json_assoc_member_opt "activation" evidence with
-                       | Some (`Assoc _ as activation) ->
-                         let string_field name fallback =
+                    let items, tied =
+                      match evidence.se_activation with
+                      | None -> [], false
+                      | Some (Masc.Tui_decode.Skill_evidence_most_recent_observed item) ->
+                        [ item ], false
+                      | Some
+                          (Masc.Tui_decode.Skill_evidence_most_recent_observed_timestamp_tie
+                             items) ->
+                        items, true
+                    in
+                    List.concat_map
+                      (fun item ->
+                         let activation = item.Masc.Tui_decode.sea_activation in
+                         let string_field name =
                            match json_assoc_member_opt name activation with
                            | Some (`String value) -> value
-                           | _ -> fallback
+                           | _ -> ""
                          in
                          let delivered =
                            match json_assoc_member_opt "delivery" activation with
@@ -8961,26 +8950,31 @@ let render_tools (state : state) =
                            | Some (`List values) -> List.length values
                            | Some _ | None -> 0
                          in
+                         let keepers =
+                           item.sea_owner_claims
+                           |> List.map (fun claim -> claim.seo_keeper)
+                           |> String.concat ","
+                         in
                          [ Ansi.bold,
                            Printf.sprintf
-                             "     Activation: %s · keeper=%s · actions=%d · at=%s"
+                             "     Activation: %s · owner=%s(%s) · actions=%d · at=%s"
                              delivered
-                             (Terminal_text.single_line keeper)
+                             (Terminal_text.single_line item.sea_owner_status)
+                             (Terminal_text.single_line keepers)
                              action_count
-                             (Terminal_text.single_line
-                                (string_field "activated_at" "?"))
+                             (Terminal_text.single_line (string_field "activated_at"))
                          ; Ansi.dim,
-                           "       tool use "
-                           ^ Terminal_text.single_line
-                               (string_field "skill_tool_use_id" "?")
-                         ]
-                       | Some _ | None ->
-                         [ Theme.bad (), "     Activation evidence is malformed" ])
-                    | Some `Null | None -> []
-                    | Some _ -> [ Theme.bad (), "     Activation evidence is malformed" ]
+                           Printf.sprintf
+                             "       trace %s · tool use %s%s"
+                             (Terminal_text.single_line item.sea_trace_id)
+                             (Terminal_text.single_line
+                                (string_field "skill_tool_use_id"))
+                             (if tied then " · equal-time candidate" else "")
+                         ])
+                      items
                   in
                   let composition_lines =
-                    match json_assoc_member_opt "composition" json with
+                    match evidence.se_composition with
                     | Some (`Assoc _ as composition) ->
                       (match json_assoc_member_opt "result" composition with
                        | Some (`Assoc _ as result) ->
@@ -9031,11 +9025,10 @@ let render_tools (state : state) =
                          ]
                        | Some _ | None ->
                          [ Theme.bad (), "     Composition evidence is malformed" ])
-                    | Some `Null | None -> []
+                    | None -> []
                     | Some _ -> [ Theme.bad (), "     Composition evidence is malformed" ]
                   in
                   activation_lines @ composition_lines
-                | _ -> [ Theme.bad (), "     Latest evidence response is malformed" ]
                in
                let coverage_lines =
                  let coverage = evidence.Masc.Tui_decode.se_coverage in
@@ -9047,27 +9040,32 @@ let render_tools (state : state) =
                      "unavailable"
                  in
                  let unavailable =
-                   List.map Terminal_text.single_line coverage.sec_unavailable
+                   List.map
+                     Terminal_text.single_line
+                     coverage.sec_composition_unavailable
                  in
                    [ Ansi.dim,
                      Printf.sprintf
-                       "       coverage current_ledgers=%d exact_reference=%s records_read=%d activation=incomplete unavailable=%d"
+                       "       coverage retained_sessions=%d ledgers=%d activation=%s gaps=%d owner_gaps=%d exact_reference=%s records_read=%d"
+                       coverage.sec_activation_sessions_inspected
                        coverage.sec_activation_ledgers_loaded
+                       coverage.sec_activation_scope
+                       coverage.sec_activation_gap_count
+                       coverage.sec_activation_owner_gap_count
                        composition_scope
                        coverage.sec_composition_records_read
-                       (List.length unavailable)
                    ]
                    @
                    (match unavailable with
                     | [] -> []
                     | values ->
                       [ Theme.warn (),
-                        "       unavailable: " ^ String.concat " · " values
+                        "       composition unavailable: " ^ String.concat " · " values
                       ])
                in
                evidence_lines @ coverage_lines)
              | Some _ | None ->
-               [ Ansi.dim, "     Latest evidence: Enter to load this exact revision" ])
+               [ Ansi.dim, "     Retained evidence: Enter to load this exact revision" ])
         in
         [ Ansi.bold,
           Printf.sprintf " Effective Keeper Surface — %s (%d tools)"

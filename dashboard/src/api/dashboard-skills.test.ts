@@ -481,7 +481,7 @@ describe('skill evidence contract', () => {
             activation: {
               ...activationPayload,
               turn_ref: 'trace-proof-2#1',
-              activated_at: '2026-08-28T12:00:00+09:00',
+              activated_at: '2026-08-28T12:00:00.0000000000001+09:00',
             },
           },
         ],
@@ -532,6 +532,47 @@ describe('skill evidence contract', () => {
         coverage,
       })).toThrow(SkillsContractError)
     }
+  })
+
+  it('rejects an invalid identity even when envelope and activation agree', () => {
+    const invalidReference = {
+      ...reference,
+      identity: { source_id: '../workspace', package_id: '..', name: 'Bad--Name' },
+    }
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v5',
+      status: 'observed',
+      reference: invalidReference,
+      activation: {
+        selection: 'most_recent_observed',
+        evidence: {
+          ...activationEvidence,
+          activation: { ...activationPayload, identity: invalidReference.identity },
+        },
+      },
+      composition: null,
+      coverage,
+    })).toThrow(SkillsContractError)
+  })
+
+  it('rejects an RFC3339 offset outside the canonical Ptime range', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v5',
+      status: 'observed',
+      reference,
+      activation: {
+        selection: 'most_recent_observed',
+        evidence: {
+          ...activationEvidence,
+          activation: {
+            ...activationPayload,
+            activated_at: '0000-01-01T00:00:00+01:00',
+          },
+        },
+      },
+      composition: null,
+      coverage,
+    })).toThrow(SkillsContractError)
   })
 
   it('rejects activation candidates not backed by loaded ledgers', () => {

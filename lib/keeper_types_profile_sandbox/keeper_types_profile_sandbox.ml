@@ -13,9 +13,10 @@ type sandbox_profile =
     (** One lightweight virtual machine per container, through Apple's
         [container] CLI on macOS 26+. The guest runs its own Linux kernel,
         so an escape has to cross the hypervisor rather than a shared
-        kernel. Measured 2026-08-28 on an M3 Max: 4.0-4.4s to start
-        against Docker's 0.6-0.9s, and about 400 MB of host memory per
-        running container. Network defaults to [Network_none]. *)
+        kernel. Measured 2026-08-28 on an M3 Max: about 460 MB of host
+        memory per running guest, a 1.3-2.4s boot paid once per keeper
+        (#31340 adopts the guest across turns), and 0.06-0.10s per call
+        after that. Network defaults to [Network_none]. *)
 
 module Sandbox_profile_tla = struct
   type t = sandbox_profile =

@@ -18,8 +18,6 @@
 type submit_request_spec =
   { criteria : Verification.criterion list
   ; output : Yojson.Safe.t
-  ; request_kind : string
-  ; next_action : string
   ; board_type : string
   ; board_title : string
   ; board_content : string
@@ -31,10 +29,6 @@ type submit_request_spec =
 
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     ~assignee ~evidence_refs =
-  (* Every submission is an ordinary verification request. *)
-  let request_kind = "normal" in
-  let request_summary = "" in
-  let next_action = "" in
   let board_type = "verification_request" in
   let board_title = Printf.sprintf "Verify: %s" task.title in
   let board_content =
@@ -60,18 +54,22 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   in
   let output =
     `Assoc
+      (* [request_kind], [request_summary] and [next_action] were written here
+         as the literals "normal", "" and "". Nothing computed them and nothing
+         could set them to anything else, so every request carried the same
+         three values and three rows of the verification detail pane said the
+         same thing on every request ever drawn. The reader even knew a second
+         kind, "conflict_triage", that had no producer anywhere in the repo.
+
+         [task_title] is what those rows were standing in front of: filled on
+         every request, and now what the queue reads. *)
       ([ ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
          ("task_title", `String task.title);
-         ("request_kind", `String request_kind);
-         ("request_summary", `String request_summary);
-         ("next_action", `String next_action);
        ]
        @ evidence_fields)
   in
   { criteria
   ; output
-  ; request_kind
-  ; next_action
   ; board_type
   ; board_title
   ; board_content
@@ -187,8 +185,6 @@ let notify_submit_for_verification ~(config : Workspace.config)
     ("worker", `String assignee);
     ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
     ("criteria", `List (List.map Verification.criterion_to_yojson spec.criteria));
-    ("request_kind", `String spec.request_kind);
-    ("next_action", `String spec.next_action);
   ] @ spec.evidence_fields) in
   let () =
     match Board_dispatch.create_post

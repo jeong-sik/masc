@@ -255,6 +255,46 @@ let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
 
+(** Fetch one goal's merged event timeline
+    ([GET /api/v1/dashboard/goals/detail]). Only the [timeline] (and the
+    queue-state detail behind a [`Null] timeline) is decoded; the rest of the
+    detail payload stays server-side until a surface needs it. *)
+let fetch_goal_timeline ~(host : string) ~(port : int) ~(goal_id : string) :
+    (Masc.Tui_decode.goal_timeline, string) result =
+  let path =
+    Printf.sprintf "/api/v1/dashboard/goals/detail?goal_id=%s"
+      (percent_encode_path_segment goal_id)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "goal detail returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_decode.decode_goal_detail_timeline json
+      | exception Yojson.Json_error detail ->
+          Error ("goal detail was not JSON: " ^ detail))
+
+(** Fetch one task's event history
+    ([GET /api/v1/dashboard/tasks/history]). *)
+let fetch_task_history ~(host : string) ~(port : int) ~(task_id : string) :
+    (Masc.Tui_decode.task_history_event list, string) result =
+  let path =
+    Printf.sprintf "/api/v1/dashboard/tasks/history?task_id=%s&limit=50"
+      (percent_encode_path_segment task_id)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "task history returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_decode.decode_task_history json
+      | exception Yojson.Json_error detail ->
+          Error ("task history was not JSON: " ^ detail))
+
 (** Fetch a keeper's durable tool-call log
     ([GET /api/v1/keepers/:name/tool-calls]). *)
 let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)

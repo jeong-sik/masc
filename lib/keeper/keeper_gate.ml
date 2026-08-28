@@ -472,24 +472,37 @@ end
 
 module Auto_judge_owners = Map.Make (Auto_judge_owner)
 module Auto_judge_owner_set = Set.Make (Auto_judge_owner)
+module Auto_judge_ids = Set.Make (String)
 
 let auto_judge_owner (entry : Keeper_approval_queue_rules_types.pending_approval) =
   entry.audit_base_path, entry.keeper_name
 ;;
 
-(** Immutable process projection of the one active approval for each exact
-    workspace/Keeper owner. The durable approval queue remains the work SSOT. *)
-let active_auto_judges : string Auto_judge_owners.t Atomic.t =
+(** Immutable process projection of the bounded active approvals for each exact
+    workspace/Keeper owner. The durable approval queue remains the work SSOT;
+    this map is only atomic admission state. *)
+let active_auto_judges : Auto_judge_ids.t Auto_judge_owners.t Atomic.t =
   Atomic.make Auto_judge_owners.empty
 ;;
 
 let rec claim_auto_judge (entry : Keeper_approval_queue_rules_types.pending_approval) =
   let active = Atomic.get active_auto_judges in
   let owner = auto_judge_owner entry in
-  match Auto_judge_owners.find_opt owner active with
-  | Some _ -> false
-  | None ->
-    let claimed = Auto_judge_owners.add owner entry.id active in
+  let active_ids =
+    Auto_judge_owners.find_opt owner active
+    |> Option.value ~default:Auto_judge_ids.empty
+  in
+  if Auto_judge_ids.mem entry.id active_ids
+     || Auto_judge_ids.cardinal active_ids
+        >= Keeper_config.keeper_hitl_max_concurrent_per_keeper ()
+  then false
+  else
+    let claimed =
+      Auto_judge_owners.add
+        owner
+        (Auto_judge_ids.add entry.id active_ids)
+        active
+    in
     if Atomic.compare_and_set active_auto_judges active claimed
     then true
     else claim_auto_judge entry
@@ -499,17 +512,24 @@ let rec release_auto_judge (entry : Keeper_approval_queue_rules_types.pending_ap
   let active = Atomic.get active_auto_judges in
   let owner = auto_judge_owner entry in
   match Auto_judge_owners.find_opt owner active with
-  | Some active_id when String.equal active_id entry.id ->
-    let released = Auto_judge_owners.remove owner active in
+  | Some active_ids when Auto_judge_ids.mem entry.id active_ids ->
+    let remaining = Auto_judge_ids.remove entry.id active_ids in
+    let released =
+      if Auto_judge_ids.is_empty remaining
+      then Auto_judge_owners.remove owner active
+      else Auto_judge_owners.add owner remaining active
+    in
     if not (Atomic.compare_and_set active_auto_judges active released)
     then release_auto_judge entry
   | Some _ | None -> ()
 ;;
 
-let active_auto_judge_for_owner ~base_path ~keeper_name =
+let active_auto_judges_for_owner ~base_path ~keeper_name =
   Auto_judge_owners.find_opt
     (base_path, keeper_name)
     (Atomic.get active_auto_judges)
+  |> Option.value ~default:Auto_judge_ids.empty
+  |> Auto_judge_ids.elements
 ;;
 
 type auto_judge_entry_class =
@@ -605,10 +625,8 @@ let auto_judge_entry_has_start_reservation
    and no drain trigger can restart it. Observed on 2026-07-28: 18 approvals
    across two Keepers sat behind two heads of exactly these two kinds, the
    oldest for 2416s, while new submissions kept firing the drain. Concurrency
-   remains bounded by [claim_auto_judge], not by this ordering. Selection still
-   yields at most one entry, so a drain reached from the tool-call hot path
-   makes at most one start attempt; an entry that fails to start becomes not
-   startable and the next trigger passes over it. *)
+   remains bounded by [claim_auto_judge], not by this ordering. Selection fills
+   the owner's currently available slots in durable sequence order. *)
 let ready_auto_judges_for_owner
       ?reserved_id
       ~base_path
@@ -623,16 +641,36 @@ let ready_auto_judges_for_owner
        auto_judge_entry_has_start_reservation reserved_id entry
      | None -> false)
   in
-  match
+  let available =
+    Keeper_config.keeper_hitl_max_concurrent_per_keeper ()
+    - List.length (active_auto_judges_for_owner ~base_path ~keeper_name)
+    |> max 0
+  in
+  let candidates =
     owner_auto_judges_in_fifo_order ~base_path ~keeper_name entries
-    |> List.find_opt startable
-  with
-  | Some entry -> [ entry ]
-  | None -> []
+    |> List.filter startable
+  in
+  let rec take n acc = function
+    | _ when n <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | entry :: rest -> take (n - 1) (entry :: acc) rest
+  in
+  match reserved_id with
+  | Some reserved_id when available > 0 ->
+    (match
+       List.find_opt
+         (fun (entry : Keeper_approval_queue_rules_types.pending_approval) ->
+            String.equal entry.id reserved_id)
+         candidates
+     with
+     | Some entry -> [ entry ]
+     | None -> [])
+  | Some _ -> []
+  | None -> take available [] candidates
 ;;
 
 type auto_judge_drain_blocker =
-  | Drain_owner_active of string
+  | Drain_owner_at_capacity of string list
   | Drain_entry_changed of string
   | Drain_entry_missing of string
   | Drain_start_failed of string * string
@@ -640,10 +678,11 @@ type auto_judge_drain_blocker =
   | Drain_mode_always_allow
 
 let auto_judge_drain_blocker_to_string = function
-  | Drain_owner_active approval_id ->
+  | Drain_owner_at_capacity approval_ids ->
     Printf.sprintf
-      "Auto Judge retry could not start because approval %s owns the active worker"
-      approval_id
+      "Auto Judge retry could not start because the owner has %d active worker(s): %s"
+      (List.length approval_ids)
+      (String.concat "," approval_ids)
   | Drain_entry_changed approval_id ->
     Printf.sprintf
       "Auto Judge retry could not start because approval %s changed before worker start"
@@ -664,7 +703,7 @@ let auto_judge_drain_blocker_to_string = function
 ;;
 
 type auto_judge_drain_outcome =
-  { started_id : string option
+  { started_ids : string list
   ; failures : (string * string) list
   ; blocker : auto_judge_drain_blocker option
   }
@@ -688,12 +727,8 @@ let drain_auto_judge_owners_with ~drain_owner owners =
          | Error operator_detail ->
            ( started_ids
            , { keeper_name; approval_id = None; operator_detail } :: failures )
-         | Ok (started_id, owner_failures) ->
-           let started_ids =
-             match started_id with
-             | Some approval_id -> approval_id :: started_ids
-             | None -> started_ids
-           in
+         | Ok (owner_started_ids, owner_failures) ->
+           let started_ids = List.rev_append owner_started_ids started_ids in
            let failures =
              List.fold_left
                (fun failures (approval_id, operator_detail) ->
@@ -915,21 +950,21 @@ and retry_auto_judge_entry
        | Ok (outcome : auto_judge_drain_outcome) ->
          (match
             List.assoc_opt entry.id outcome.failures,
-            outcome.started_id,
+            List.mem entry.id outcome.started_ids,
+            outcome.started_ids,
             outcome.blocker
           with
-          | Some reason, _, _ -> Error (reblock reason)
-          | None, Some id, _ when String.equal id entry.id ->
-            Ok Retry_started
-          | None, Some started_id, _ ->
+          | Some reason, _, _, _ -> Error (reblock reason)
+          | None, true, _, _ -> Ok Retry_started
+          | None, false, started_id :: _, _ ->
             Error
               (reblock
                  (Printf.sprintf
                     "Auto Judge retry could not start because earlier approval %s acquired the owner"
                     started_id))
-          | None, None, Some blocker ->
+          | None, false, [], Some blocker ->
             Error (reblock (auto_judge_drain_blocker_to_string blocker))
-          | None, None, None ->
+          | None, false, [], None ->
             Error
               (reblock
                  "Auto Judge retry drain completed without a start or blocker"))
@@ -987,9 +1022,9 @@ and drain_auto_judge_owner_queue
       ~keeper_name
       ()
   =
-  let rec loop failures blocker = function
+  let rec loop started_ids failures blocker = function
     | [] ->
-      { started_id = None
+      { started_ids = List.rev started_ids
       ; failures = List.rev failures
       ; blocker
       }
@@ -1003,22 +1038,25 @@ and drain_auto_judge_owner_queue
       in
       (match start_result with
        | Ok Started ->
-         { started_id = Some entry.id
-         ; failures = List.rev failures
-         ; blocker = None
-         }
+         loop (entry.id :: started_ids) failures None rest
        | Ok Skipped ->
-         (match active_auto_judge_for_owner ~base_path ~keeper_name with
-          | Some active_id ->
-            { started_id = None
+         let active_ids =
+           active_auto_judges_for_owner ~base_path ~keeper_name
+         in
+         if
+           List.length active_ids
+           >= Keeper_config.keeper_hitl_max_concurrent_per_keeper ()
+         then
+            { started_ids = List.rev started_ids
             ; failures = List.rev failures
-            ; blocker = Some (Drain_owner_active active_id)
+            ; blocker = Some (Drain_owner_at_capacity active_ids)
             }
-          | None ->
-            loop
-              failures
-              (Some (Drain_entry_changed entry.id))
-              rest)
+         else
+           loop
+             started_ids
+             failures
+             (Some (Drain_entry_changed entry.id))
+             rest
        | Error reason ->
          Log.Keeper.error
            ~keeper_name
@@ -1026,6 +1064,7 @@ and drain_auto_judge_owner_queue
            entry.id
            reason;
          loop
+           started_ids
            ((entry.id, reason) :: failures)
            (Some (Drain_start_failed (entry.id, reason)))
            rest)
@@ -1042,8 +1081,14 @@ and drain_auto_judge_owner_queue
     (* Selection ranges over every startable entry, so an empty selection under
        a reservation means the reserved entry itself is no longer startable --
        never that an earlier approval holds the FIFO head. *)
+    let active_ids = active_auto_judges_for_owner ~base_path ~keeper_name in
+    let at_capacity =
+      List.length active_ids
+      >= Keeper_config.keeper_hitl_max_concurrent_per_keeper ()
+    in
     let blocker =
       match reserved_id, selected with
+      | _, [] when at_capacity -> Some (Drain_owner_at_capacity active_ids)
       | Some reserved_id, [] ->
         (match
            List.exists
@@ -1055,7 +1100,7 @@ and drain_auto_judge_owner_queue
          | true -> Some (Drain_entry_changed reserved_id))
       | _ -> None
     in
-    loop [] blocker selected)
+    loop [] [] blocker selected)
 
 and drain_auto_judge_owner
       ?reserved_id
@@ -1073,13 +1118,13 @@ and drain_auto_judge_owner
     |> Result.map_error Keeper_approval_queue.storage_error_to_string
   | Ok Keeper_gate_mode.Manual ->
     Ok
-      { started_id = None
+      { started_ids = []
       ; failures = []
       ; blocker = Some Drain_mode_manual
       }
   | Ok Keeper_gate_mode.Always_allow ->
     Ok
-      { started_id = None
+      { started_ids = []
       ; failures = []
       ; blocker = Some Drain_mode_always_allow
       }
@@ -1148,7 +1193,7 @@ and drain_auto_judges ~base_path =
               drain_auto_judge_owner_queue ~base_path ~keeper_name ()
               |> Result.map
                    (fun (outcome : auto_judge_drain_outcome) ->
-                      outcome.started_id, outcome.failures)
+                      outcome.started_ids, outcome.failures)
               |> Result.map_error
                    Keeper_approval_queue.storage_error_to_string)
             auto_judge_owners))
@@ -1225,18 +1270,32 @@ let recovered_work_for_base_path ~base_path =
       | Activate_worker entry -> entry
       | Finalize_judgment (entry, _) -> entry
     in
-    (* Per owner, recover the earliest entry that still carries Auto Judge
-       work. Reading only the FIFO head and classifying it afterwards lets a
-       head with no work -- a Require_human judgment waiting on an operator, or
-       any ineligible disposition -- hide every recoverable entry behind it.
-       That is the same head-of-line stall [ready_auto_judges_for_owner]
-       avoids, and it would leave restart, the only remaining escape from a
-       stalled owner, recovering nothing for that owner. *)
+    (* Per owner, admit worker-bound entries up to the available slots, but do
+       not cross a finalizable exact-output row. That row is a durability
+       barrier: its already-produced judgment must be fsync-confirmed before
+       later provider work starts. Require_human and other ineligible rows are
+       still passed over rather than becoming FIFO barriers. *)
     owners
     |> Auto_judge_owner_set.elements
-    |> List.filter_map (fun (_, keeper_name) ->
+    |> List.concat_map (fun (_, keeper_name) ->
+      let available =
+        Keeper_config.keeper_hitl_max_concurrent_per_keeper ()
+        - List.length (active_auto_judges_for_owner ~base_path ~keeper_name)
+        |> max 0
+      in
+      let rec select worker_slots selected = function
+        | [] -> List.rev selected
+        | entry :: rest ->
+          (match recovered_work_for_entry entry with
+           | Some (Finalize_judgment _ as work) ->
+             if List.is_empty selected then [ work ] else List.rev selected
+           | Some (Activate_worker _ as work) when worker_slots > 0 ->
+             select (worker_slots - 1) (work :: selected) rest
+           | Some (Activate_worker _) -> List.rev selected
+           | None -> select worker_slots selected rest)
+      in
       owner_auto_judges_in_fifo_order ~base_path ~keeper_name entries
-      |> List.find_map recovered_work_for_entry)
+      |> select available [])
     |> List.sort (fun left right ->
       compare_auto_judge_entries
         (entry_of_recovered_work left)
@@ -1804,9 +1863,10 @@ module For_testing = struct
 
   let claim_auto_judge = claim_auto_judge
   let release_auto_judge = release_auto_judge
+  let active_auto_judges_for_owner = active_auto_judges_for_owner
 
   type owner_drain_outcome =
-    { started_id : string option
+    { started_ids : string list
     ; failures : (string * string) list
     }
 
@@ -1815,7 +1875,7 @@ module For_testing = struct
       ~drain_owner:(fun ~base_path ~keeper_name ->
         drain_owner ~base_path ~keeper_name
         |> Result.map (fun (outcome : owner_drain_outcome) ->
-          outcome.started_id, outcome.failures))
+          outcome.started_ids, outcome.failures))
       owners
   ;;
 

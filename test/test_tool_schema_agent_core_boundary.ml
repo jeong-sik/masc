@@ -24,7 +24,7 @@ open Masc
 
 (** Every descriptor-derived schema projected into the AGENT_CORE Keeper tool bundle.
     This is the same materialized catalog consumed by
-    [Keeper_tools_agent_core_bundle.make_tool_bundle], including descriptor-owned
+    [Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface], including descriptor-owned
     schemas that do not appear in [Tool_shard.all_keeper_tool_schemas]. *)
 let keeper_schemas : Masc_domain.tool_schema list =
   Keeper_tool_policy.keeper_model_tool_schemas ()

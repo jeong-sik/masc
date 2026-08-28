@@ -1506,6 +1506,13 @@ type state = {
   mutable runtime_catalog: Tui_decode.runtime_option list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
+  (* Lazy loads for the two detail panes; the id names which row the answer
+     belongs to so a stale load is discarded, not drawn under another item.
+     [None] doubles as "in flight" right after entry resets it. *)
+  mutable goal_timeline:
+    (string * (Tui_decode.goal_timeline, string) result) option;
+  mutable task_history:
+    (string * (Tui_decode.task_history_event list, string) result) option;
   mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
   mutable keeper_calls_error: string option;
   mutable keeper_calls_scroll: int;
@@ -2179,6 +2186,8 @@ let create_state
   runtime_catalog = [];
   runtime_assignments = [];
   runtime_catalog_error = None;
+  goal_timeline = None;
+  task_history = None;
   keeper_calls = None;
   keeper_calls_error = None;
   keeper_calls_scroll = 0;

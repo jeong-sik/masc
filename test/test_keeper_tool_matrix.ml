@@ -387,7 +387,7 @@ let test_keeper_agent_core_bundle_materializes_masc_fusion_tool () =
           }
       in
       let tools =
-        Masc.Keeper_tools_agent_core_bundle.make_tools
+        Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       let names =

@@ -55,7 +55,7 @@ let publication_recovery_turn_context ~registry ~keeper_name =
 
 (* agent_name is not free-form: keeper_meta_json_parse rejects a meta whose
    agent_name is not "keeper-<name>-agent". Derived the way production does. *)
-let make_meta ~name () : Keeper_meta_contract.keeper_meta =
+let make_meta ~name ?tool_groups () : Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -63,7 +63,7 @@ let make_meta ~name () : Keeper_meta_contract.keeper_meta =
           ; "trace_id", `String "test-trace-bundle-classifiable"
           ])
   with
-  | Ok meta -> meta
+  | Ok meta -> { meta with tool_groups }
   | Error e -> failf "make_meta failed: %s" e
 ;;
 
@@ -251,7 +251,7 @@ let assert_exact_activation snapshot expected
        activation.snapshot_revision)
 ;;
 
-let with_bundle_tools ?(record_activations = true) f =
+let with_bundle_tools ?(record_activations = true) ?tool_groups f =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let dir =
     Filename.concat
@@ -263,7 +263,7 @@ let with_bundle_tools ?(record_activations = true) f =
     ~finally:(fun () -> if Sys.file_exists dir then remove_tree dir)
     (fun () ->
        let config = Workspace.default_config dir in
-       let meta = make_meta ~name:"bundle-classifiable" () in
+       let meta = make_meta ~name:"bundle-classifiable" ?tool_groups () in
        let skill_snapshot, skill_catalog = skill_snapshot_and_catalog () in
        let trace_id = meta.runtime.trace_id in
        let session_dir =
@@ -315,13 +315,20 @@ let with_bundle_tools ?(record_activations = true) f =
        let composition_plan_index =
          Masc.Keeper_tool_composition_plan_index.create ()
        in
+       let capability_surface =
+         Keeper_capability_surface.create
+           ~tool_groups:meta.tool_groups
+           ~skill_names:None
+           ~global_skill_catalog:skill_catalog
+           ~task_skills:[]
+       in
        let bundle =
-         Keeper_tools_agent_core_bundle.make_tool_bundle
+         Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
            ~config
            ~meta
            ~publication_recovery
            ~ctx_snapshot
-           ~skill_catalog
+           ~capability_surface
            ~identity_tools:(identity_tools ())
            ~composition_plan_index
            ?skill_activation_context:
@@ -337,6 +344,16 @@ let with_bundle f =
   @@ fun _config _meta _skill_snapshot composition_plan_index tools ->
   f composition_plan_index
     (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools)
+;;
+
+let test_narrow_surface_controls_production_bundle () =
+  with_bundle_tools ~tool_groups:[ "board" ]
+  @@ fun _config _meta _skill_snapshot _composition_plan_index tools ->
+  let names =
+    List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools
+  in
+  check bool "board Tool remains executable" true (List.mem "masc_board_list" names);
+  check bool "off-surface Read is absent" false (List.mem "Read" names)
 ;;
 
 (* The handler is the tool. Reading only its schema would let a tool that
@@ -674,6 +691,8 @@ let () =
         ; test_case "names are unique" `Quick test_bundle_names_are_unique
         ; test_case "matches the expected projection" `Quick
             test_bundle_matches_expected_projection
+        ; test_case "narrow surface controls production bundle" `Quick
+            test_narrow_surface_controls_production_bundle
         ; test_case "the skill tool serves the body" `Quick
             test_the_skill_tool_serves_the_body
         ; test_case "a revisionless ask is taught the exact reference" `Quick

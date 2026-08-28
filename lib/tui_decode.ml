@@ -1802,9 +1802,6 @@ type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
-  vr_kind : string;
-  vr_summary : string;
-  vr_next_action : string option;
   vr_submitted_by : string;
   vr_created_at : string;
   vr_required_artifacts : string list;
@@ -2882,8 +2879,6 @@ let decode_verification_request json =
   let* vr_request_id = required_string_field json "request_id" in
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
-  let* vr_kind = required_string_field json "request_kind" in
-  let* vr_summary = required_string_field json "request_summary" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
   let* vr_created_at = required_string_field json "created_at" in
   let* vr_required_artifacts =
@@ -2892,7 +2887,6 @@ let decode_verification_request json =
   let* vr_submitted_evidence =
     decode_string_name_list json "submitted_evidence"
   in
-  let* vr_next_action = optional_string_field json "next_action" in
   let* vr_evidence_error =
     optional_string_field json "evidence_projection_error"
   in
@@ -2900,9 +2894,6 @@ let decode_verification_request json =
     { vr_request_id
     ; vr_task_id
     ; vr_task_title
-    ; vr_kind
-    ; vr_summary
-    ; vr_next_action
     ; vr_submitted_by
     ; vr_created_at
     ; vr_required_artifacts
@@ -3205,7 +3196,12 @@ let standalone_lane_status_to_string = function
   | Standalone_running -> "running"
   | Standalone_idle -> "idle"
   | Standalone_degraded -> "degraded"
-  | Standalone_no_retained_observation -> "no retained observation"
+  (* Thirteen cells, not twenty-three. This is what the screen prints in a
+     column sized for the other four words, and the long spelling pushed its
+     whole row nine columns right of every other one. The row already says
+     the rest -- [runs 0], [observed none] -- so the state word only has to
+     name the state. *)
+  | Standalone_no_retained_observation -> "none retained"
   | Standalone_unavailable -> "unavailable"
 
 let decode_standalone_lane_slot_count json =
@@ -5254,3 +5250,96 @@ let decode_asks_snapshot json =
   let* row_items = ask_list json "asks" in
   let* asn_rows = ask_map_results decode_ask_row row_items in
   Ok { asn_keeper; asn_open_count; asn_rows }
+
+(* Goal detail timeline (GET /api/v1/dashboard/goals/detail). The server
+   merges task/approval/keeper/goal events into one list of uniform
+   six-field rows; the TUI carries the four it renders. [timeline] is
+   [`Null] exactly when the approval-queue store could not be read — the
+   same discriminated failure the gate snapshot carries — so that case is
+   an explicit constructor, never an empty list. *)
+type goal_timeline_event = {
+  gt_ts : string;
+  gt_kind : string;
+  gt_summary : string;
+  gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
+}
+
+type goal_timeline =
+  | Goal_timeline_ready of goal_timeline_event list
+  | Goal_timeline_unavailable of string
+
+let decode_goal_timeline_event json =
+  let required field =
+    match member field json with
+    | `String value -> Ok value
+    | _ -> Error (Printf.sprintf "timeline event %s must be a string" field)
+  in
+  let* gt_ts = required "ts" in
+  let* gt_kind = required "kind" in
+  let* gt_summary = required "summary" in
+  let* gt_severity = required "severity" in
+  Ok { gt_ts; gt_kind; gt_summary; gt_severity }
+
+let decode_goal_detail_timeline json =
+  match member "timeline" json with
+  | `Null ->
+      let detail =
+        match member "operator_detail" (member "approval_queue_state" json) with
+        | `String detail -> detail
+        | _ -> "approval queue store is unreadable"
+      in
+      Ok (Goal_timeline_unavailable detail)
+  | `List items ->
+      let rec loop acc = function
+        | [] -> Ok (Goal_timeline_ready (List.rev acc))
+        | item :: rest ->
+            let* event = decode_goal_timeline_event item in
+            loop (event :: acc) rest
+      in
+      loop [] items
+  | _ -> Error "goal detail timeline is neither a list nor null"
+
+(* One task's event history (GET /api/v1/dashboard/tasks/history). Rows are
+   raw event-stream lines, not a uniform projection, so every field except
+   [ts] is optional and an unknown event type still renders as its type
+   string instead of being dropped. *)
+type task_history_event = {
+  th_ts : string;
+  th_label : string;  (** [action] when present, else [type], else "event" *)
+  th_from_status : string option;
+  th_to_status : string option;
+  th_actor : string option;
+  th_note : string option;  (** handoff_context.summary when present *)
+}
+
+let decode_task_history json =
+  match json with
+  | `List rows ->
+      let event_of_row row =
+        let str field =
+          match member field row with
+          | `String value when String.trim value <> "" -> Some value
+          | _ -> None
+        in
+        let th_label =
+          match str "action" with
+          | Some action -> action
+          | None -> (match str "type" with Some t -> t | None -> "event")
+        in
+        {
+          th_ts = Option.value (str "ts") ~default:"";
+          th_label;
+          th_from_status = str "from_status";
+          th_to_status = str "to_status";
+          th_actor = (match str "agent" with Some a -> Some a | None -> str "actor");
+          th_note =
+            (match member "handoff_context" row with
+             | `Assoc _ as handoff ->
+                 (match member "summary" handoff with
+                  | `String s when String.trim s <> "" -> Some s
+                  | _ -> None)
+             | _ -> None);
+        }
+      in
+      Ok (List.map event_of_row rows)
+  | _ -> Error "task history is not a list"

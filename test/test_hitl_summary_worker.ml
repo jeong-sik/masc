@@ -381,6 +381,7 @@ let test_a_context_of_another_shape_is_carried_through () =
 (* Through the real knob, so the wiring is covered and not just the trimming.
    Restored afterwards: a leaked runtime param would decide the next test. *)
 let thinking_blocks_key = "keeper.hitl.thinking_blocks"
+let hitl_concurrency_key = "keeper.hitl.max_concurrent_per_keeper"
 
 let with_thinking_blocks_kept n f =
   let restore () =
@@ -389,6 +390,15 @@ let with_thinking_blocks_kept n f =
   (match Masc.Runtime_params.set_by_key thinking_blocks_key (`Int n) with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "could not set the knob: %s" detail);
+  Fun.protect ~finally:restore f
+
+let with_hitl_concurrency n f =
+  let restore () =
+    ignore (Masc.Runtime_params.clear_by_key hitl_concurrency_key)
+  in
+  (match Masc.Runtime_params.set_by_key hitl_concurrency_key (`Int n) with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "could not set HITL concurrency: %s" detail);
   Fun.protect ~finally:restore f
 
 let test_the_newest_reasoning_can_be_kept () =
@@ -1736,6 +1746,9 @@ let test_visible_uncertainty_withholds_production_drain () =
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
     (fun () ->
+       (* This case isolates the persistence-uncertain lifecycle. Keep one slot
+          so the successor cannot legitimately start in parallel. *)
+       with_hitl_concurrency 1 @@ fun () ->
        install_queue base_path;
        Prompt_registry.set_markdown_dir
          (Masc_test_deps.source_path "config/prompts");
@@ -1824,22 +1837,20 @@ let test_visible_uncertainty_withholds_production_drain () =
        Gate.For_testing.release_auto_judge successor)
 ;;
 
-let test_owner_fifo_atomic_drain_is_nonsharing () =
+let test_same_owner_workers_run_in_parallel_with_bound () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "hitl-owner-fifo-drain" @@ fun base_path ->
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
     (fun () ->
+       with_hitl_concurrency 2 @@ fun () ->
        install_queue base_path;
        Prompt_registry.set_markdown_dir
          (Masc_test_deps.source_path "config/prompts");
        let release_first, resolve_release_first = Eio.Promise.create () in
-       let request_index = Atomic.make 0 in
        let server =
          F.start_server
-           ~on_request_before_reply:(fun () ->
-             if Atomic.fetch_and_add request_index 1 = 0
-             then Eio.Promise.await release_first)
+           ~on_request_before_reply:(fun () -> Eio.Promise.await release_first)
            ~sw
            ~net
            ~clock
@@ -1867,40 +1878,41 @@ let test_owner_fifo_atomic_drain_is_nonsharing () =
        let initial = Gate.resume_persisted_auto_judges ~base_path in
        check
          (list string)
-         "production recovery claims the oldest owner entry"
-         [ first.id ]
+         "production recovery fills both same-owner worker slots in queue order"
+         [ first.id; second.id ]
          initial.started_ids;
        F.await_first_request server;
        let concurrent = Gate.resume_persisted_auto_judges ~base_path in
        check
          (list string)
-         "concurrent drain cannot claim the same owner"
+         "concurrent recovery cannot overfill the owner bound"
          []
          concurrent.started_ids;
-       Eio.Time.sleep clock 0.02;
+       await_condition
+         ~clock
+         ~remaining:100
+         ~failure:"second same-owner worker did not reach the provider concurrently"
+         (fun () -> F.post_count server = 2);
        check int
-         "later owner work is not dispatched concurrently"
-         1
+         "both same-owner requests arrive before the first response is released"
+         2
          (F.post_count server);
-       (match Q.For_testing.get_pending_entry_unchecked ~id:second.id with
-        | Some
-            { exact_attempt = QT.Exact_unbound
-            ; summary_status = QT.Summary_pending
-            ; _
-            } ->
-          ()
-        | _ -> fail "later owner work was mutated before the oldest completed");
+       check
+         (list string)
+         "both worker identities remain independently claimed"
+         (List.sort String.compare [ first.id; second.id ])
+         (Gate.For_testing.active_auto_judges_for_owner
+            ~base_path
+            ~keeper_name:first.keeper_name);
        ignore (Eio.Promise.try_resolve resolve_release_first ());
        await_condition
          ~clock
          ~remaining:100
-         ~failure:"owner drain did not dispatch the FIFO successor"
-         (fun () -> F.post_count server = 2);
-       await_condition
-         ~clock
-         ~remaining:100
-         ~failure:"FIFO successor did not complete"
-         (fun () -> Option.is_none (Q.For_testing.get_pending_entry_unchecked ~id:second.id));
+         ~failure:"parallel same-owner workers did not complete"
+         (fun () ->
+            Option.is_none (Q.For_testing.get_pending_entry_unchecked ~id:first.id)
+            && Option.is_none
+                 (Q.For_testing.get_pending_entry_unchecked ~id:second.id));
        check int
          "each owner entry dispatches exactly once"
          2
@@ -1913,53 +1925,39 @@ let test_require_human_head_does_not_stop_owner_drain () =
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
     (fun () ->
+       with_hitl_concurrency 2 @@ fun () ->
        install_queue base_path;
        Prompt_registry.set_markdown_dir
          (Masc_test_deps.source_path "config/prompts");
-       let successor_server =
+       let server =
          F.start_server
            ~sw
            ~net
            ~clock
-           (F.Reply (F.openai_response (judgment_json "approve")))
-       in
-       let publish_successor_lane () =
-         publish_lane
-           [ "hitl-require-human-successor" ]
-           (F.resolver_snapshot
-              ~source:"hitl-require-human-successor"
-              [ { id = "hitl-require-human-successor"
-                ; base_url = successor_server.base_url
-                }
+           (F.Replies
+              [ F.openai_response (judgment_json "require_human")
+              ; F.openai_response (judgment_json "approve")
               ])
-       in
-       let head_server =
-         F.start_server
-           ~on_request_before_reply:publish_successor_lane
-           ~sw
-           ~net
-           ~clock
-           (F.Reply (F.openai_response (judgment_json "require_human")))
        in
        publish_lane
          [ "hitl-require-human-head" ]
          (F.resolver_snapshot
             ~source:"hitl-require-human-head"
-            [ { id = "hitl-require-human-head"; base_url = head_server.base_url } ]);
+            [ { id = "hitl-require-human-head"; base_url = server.base_url } ]);
        select_auto_judge_mode base_path;
        let head = pending_entry ~input_tag:"require-human-head" ~base_path () in
        let successor = pending_entry ~input_tag:"successor" ~base_path () in
        let recovery = Gate.resume_persisted_auto_judges ~base_path in
        check
          (list string)
-         "recovery starts the oldest owner entry"
-         [ head.id ]
+         "recovery starts both owner entries"
+         [ head.id; successor.id ]
          recovery.started_ids;
        await_condition
          ~clock
          ~remaining:100
-         ~failure:"Require_human head stopped the same-owner successor"
-         (fun () -> F.post_count successor_server = 1);
+         ~failure:"same-owner judgments did not both reach the provider"
+         (fun () -> F.post_count server = 2);
        await_condition
          ~clock
          ~remaining:100
@@ -1978,8 +1976,7 @@ let test_require_human_head_does_not_stop_owner_drain () =
             } ->
           ()
         | _ -> fail "Require_human head lost its durable operator-visible state");
-       check int "Require_human head judged once" 1 (F.post_count head_server);
-       check int "same-owner successor judged once" 1 (F.post_count successor_server))
+       check int "both same-owner entries judged once" 2 (F.post_count server))
 ;;
 
 let test_judge_effect_prompt_comes_from_registry () =
@@ -2167,9 +2164,9 @@ let () =
             `Quick
             test_visible_uncertainty_withholds_production_drain
         ; test_case
-            "owner FIFO atomic drain is non-sharing"
+            "same-owner workers run in parallel within the bound"
             `Quick
-            test_owner_fifo_atomic_drain_is_nonsharing
+            test_same_owner_workers_run_in_parallel_with_bound
         ; test_case
             "Require_human head does not stop owner drain"
             `Quick

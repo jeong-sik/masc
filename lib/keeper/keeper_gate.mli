@@ -126,8 +126,8 @@ val decide_external_service :
   decision
 
 (** Recover durable Auto Judge work for exactly one workspace. Each exact
-    [(base_path, keeper_name)] owner activates at most one entry: the oldest
-    one that still carries Auto Judge work. An oldest entry that is failed,
+    [(base_path, keeper_name)] owner activates up to its configured bounded
+    concurrency, in durable sequence order. An oldest entry that is failed,
     quarantined, released, uncertain, judged [Require_human], or otherwise
     ineligible carries no such work and is passed over instead of held as a
     FIFO barrier. None of those states leaves itself, so treating them as a
@@ -135,7 +135,7 @@ val decide_external_service :
     stayed in one: observed on 2026-07-28 holding 25 approvals across two
     Keepers, the oldest for 2416s, while every drive path kept firing. Entries
     that do carry work keep durable sequence order among themselves.
-    Completion drains only that owner's FIFO. Decisive output without an exact
+    Completion refills only that owner's available slots. Decisive output without an exact
     attempt identity is retained pending and recorded as a recovery failure.
     Completed exact output is first idempotently strict-rewritten with the same
     identity and summary; only [Keeper_approval_queue.Fsync_completed] permits
@@ -178,8 +178,8 @@ type operator_recovery_report =
   ; failures : auto_judge_owner_failure list
   }
 
-(** After an explicit operator selection of Auto Judge, activate one FIFO drain
-    for each Keeper owner with eligible current-schema work in the workspace.
+(** After an explicit operator selection of Auto Judge, fill the bounded worker
+    slots for each Keeper owner with eligible current-schema work in the workspace.
     Exact-bound entries remain operator-visible but are never reconstructed or
     reopened. *)
 val request_operator_auto_judge_recovery :
@@ -223,8 +223,13 @@ module For_testing : sig
   val claim_auto_judge : Keeper_approval_queue_rules_types.pending_approval -> bool
   val release_auto_judge : Keeper_approval_queue_rules_types.pending_approval -> unit
 
+  val active_auto_judges_for_owner
+    :  base_path:string
+    -> keeper_name:string
+    -> string list
+
   type owner_drain_outcome =
-    { started_id : string option
+    { started_ids : string list
     ; failures : (string * string) list
     }
 

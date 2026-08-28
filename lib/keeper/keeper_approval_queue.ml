@@ -3367,7 +3367,7 @@ let delivery_wake_was_observed delivery =
   in
   let post_id = Keeper_event_queue.hitl_resolution_post_id resolution in
   match
-    Keeper_reaction_ledger.event_queue_turn_started_seen_for_source_result
+    Keeper_reaction_ledger.event_queue_delivery_seen_for_source_result
       ~base_path:delivery.entry.audit_base_path
       ~keeper_name:delivery.entry.keeper_name
       ~post_id

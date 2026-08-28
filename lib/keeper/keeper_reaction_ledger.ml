@@ -1129,7 +1129,8 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
   | Ok _ -> Error Evidence_invalid_stimulus_id
 ;;
 
-let event_queue_turn_started_seen_for_source_result
+let event_queue_reaction_seen_for_source_result
+    ~reaction_matches
     ~base_path
     ~keeper_name
     ~post_id
@@ -1138,22 +1139,23 @@ let event_queue_turn_started_seen_for_source_result
   if String.equal post_id ""
   then Error Evidence_invalid_stimulus_id
   else
-    let turn_started_seen = ref false in
+    let reaction_seen = ref false in
     let expected_stimulus_kind = stimulus_kind_to_string stimulus_kind in
     let note_parsed_row row =
       match decode_current_row ~keeper_name row with
       | Ok
           (Current_reaction
              { metadata
-             ; reaction_kind = Turn_started
-             ; transition_receipt = None
-             }) ->
+             ; reaction_kind
+             ; transition_receipt
+             })
+         when reaction_matches reaction_kind transition_receipt ->
         (match assoc_field "reaction" metadata.raw with
          | Some reaction
            when string_field "post_id" reaction = Some post_id
                 && string_field "stimulus_kind" reaction
                    = Some expected_stimulus_kind ->
-           turn_started_seen := true
+           reaction_seen := true
          | Some _ | None -> ())
       | Ok (Current_stimulus _ | Current_reaction _)
       | Error _ ->
@@ -1166,7 +1168,26 @@ let event_queue_turn_started_seen_for_source_result
         | Dated_jsonl.Malformed_json _ -> ())
     with
     | Error error -> Error (Evidence_read_error error)
-    | Ok () -> Ok !turn_started_seen
+    | Ok () -> Ok !reaction_seen
+;;
+
+let event_queue_turn_started_seen_for_source_result =
+  event_queue_reaction_seen_for_source_result
+    ~reaction_matches:(fun reaction_kind transition_receipt ->
+      match reaction_kind, transition_receipt with
+      | Turn_started, None -> true
+      | (Event_queue_ack | Event_queue_cancelled), _
+      | Turn_started, Some _ -> false)
+;;
+
+let event_queue_delivery_seen_for_source_result =
+  event_queue_reaction_seen_for_source_result
+    ~reaction_matches:(fun reaction_kind transition_receipt ->
+      match reaction_kind, transition_receipt with
+      | Turn_started, None
+      | (Event_queue_ack | Event_queue_cancelled), Some _ -> true
+      | Turn_started, Some _
+      | (Event_queue_ack | Event_queue_cancelled), None -> false)
 ;;
 
 let nested_string_field outer inner json =

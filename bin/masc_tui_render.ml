@@ -4007,11 +4007,15 @@ let keeper_lane_row (columns : keeper_lane_columns)
 (** Render one current composite row per Keeper. This is a read-only operator
     view: the endpoint owns the phase diagnosis and this surface only makes
     the six facts scannable together. *)
+(* Through the semantic names, not the colour names. A raw [Ansi.red] is the
+   terminal's red whatever the page behind it is; [Theme.bad ()] is the same
+   reading lifted until it clears the readable floor on the scheme in force.
+   These four are states, so they are what the rule is about. *)
 let standalone_lane_status_style = function
-  | Tui_decode.Standalone_running -> Ansi.yellow
-  | Tui_decode.Standalone_idle -> Ansi.green
+  | Tui_decode.Standalone_running -> (Theme.warn ())
+  | Tui_decode.Standalone_idle -> (Theme.ok ())
   | Tui_decode.Standalone_degraded
-  | Tui_decode.Standalone_unavailable -> Ansi.red
+  | Tui_decode.Standalone_unavailable -> (Theme.bad ())
   | Tui_decode.Standalone_no_retained_observation -> Ansi.gray
 
 let standalone_lane_row width (lane : Tui_decode.standalone_lane) =
@@ -4105,20 +4109,20 @@ let render_lanes_overview (state : state) =
          box_line buf cols
            (Printf.sprintf
               "%s  WINDOWED · exact runs %d/%d; counts and p50 use newest bounded window%s"
-              Ansi.yellow snapshot.sls_exact_run_projection_count
+              (Theme.warn ()) snapshot.sls_exact_run_projection_count
               snapshot.sls_exact_run_source_total Ansi.reset);
        (match state.standalone_lanes_error with
         | None -> ()
         | Some detail ->
             box_line buf cols
-              (Ansi.yellow ^ "  STALE · refresh failed: "
+              ((Theme.warn ()) ^ "  STALE · refresh failed: "
                ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset))
    | None ->
        box_line buf cols
          (match state.standalone_lanes_error with
           | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
           | Some detail ->
-              Ansi.red ^ "  standalone lane observation unavailable: "
+              (Theme.bad ()) ^ "  standalone lane observation unavailable: "
               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset));
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_lane_header columns);

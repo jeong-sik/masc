@@ -1,7 +1,25 @@
 open Alcotest
 
+(* A colour name is a violation wherever it is reached for, and the check is
+   by name because it cannot be anything else: [module Raw = Ansi] followed
+   by [Raw.red] resolves to the same colour, and no syntactic check sees
+   through the alias. The guard's own fixtures pin that arrangement, so
+   narrowing the rule to "only when the owner is spelled Ansi" would open it.
+
+   One owner is exempt, by name. [Masc_tui_terminal_palette.red] does not
+   choose a colour -- it asks an RGB value for its red channel -- and the
+   guard reported it as a rule violation twice, both from the theme swatch
+   added in #31212. A guard with false positives is worse than none: it
+   teaches the reader that its output is noise, and the true ones go past
+   with them. The exemption is one module and it is written down; anything
+   wider would be the hole the fixtures exist to keep shut. *)
 let is_reserved_status_color_segment = function
   | "red" | "yellow" | "green" | "Sgr" -> true
+  | _ -> false
+;;
+
+let owns_colour_channels = function
+  | "Masc_tui_terminal_palette" | "Terminal_palette" | "Palette" -> true
   | _ -> false
 ;;
 
@@ -10,13 +28,17 @@ let reserved_status_color_path_violations structure =
   let inspect_path ({ txt; loc } : Longident.t Location.loc) =
     let path = Ast_grep.longident_to_string txt in
     let rec inspect = function
+      (* Unqualified: the module was opened, so the colour is in scope by its
+         bare name and this is the same reach for a raw token. *)
       | Longident.Lident segment ->
         if is_reserved_status_color_segment segment then
           violations := (loc, path, segment) :: !violations
       | Longident.Ldot (prefix, segment) ->
         inspect prefix.txt;
-        if is_reserved_status_color_segment segment.txt then
-          violations := (loc, path, segment.txt) :: !violations
+        if
+          is_reserved_status_color_segment segment.txt
+          && not (owns_colour_channels (Ast_grep.longident_leaf prefix.txt))
+        then violations := (loc, path, segment.txt) :: !violations
       | Longident.Lapply (left, right) ->
         inspect left.txt;
         inspect right.txt

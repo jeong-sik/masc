@@ -29,7 +29,7 @@ Keeper tool execution today:
 - SSH/microVM: **absent in code, docs-only**. `lib/transport.mli` is a message-shape
   abstraction, not a connection/spawn seam. Auth is bearer-token only
   (`lib/auth/auth.mli`); no SSH key management.
-- `~/.masc` (21 GB) currently holds model files, `config/keepers/polisher.toml`,
+- the live `<base-path>/.masc` (21 GB) currently holds model files, `config/keepers/polisher.toml`,
   reports — no active playground content.
 - Host constraint: macOS (Apple Silicon). Linux microVM primitives (KVM/Firecracker/
   gVisor) are unavailable; nested virtualization is not supported, so true microVMs

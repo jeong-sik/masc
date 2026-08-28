@@ -375,8 +375,8 @@ git commit -m "feat(keeper): fail closed on Local dispatch when the playground g
 
 - [ ] **Step 1: Verify current state**
 
-Run: `grep -rn 'sandbox_profile' config/keepers/ scripts/harness/ && grep -H sandbox_profile ~/.masc/config/keepers/*.toml`
-Expected: only `issue_king.toml` says `local` in the repo; live `~/.masc` keepers are already `docker` (verified 2026-08-27).
+Run: `grep -rn 'sandbox_profile' config/keepers/ scripts/harness/ && grep -H sandbox_profile $MASC_BASE_PATH/.masc/config/keepers/*.toml`
+Expected: only `issue_king.toml` says `local` in the repo; live `<base-path>/.masc` keepers are already `docker` (verified 2026-08-27).
 
 - [ ] **Step 2: Migrate**
 

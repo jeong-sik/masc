@@ -32,7 +32,7 @@ durable 이벤트는 사이클 입구에서만 턴에 투입되고, 사이클 �
 | MASC autonomy | 과거 evidence를 scheduling gate로 쓰지 않는다: 이 RFC는 순수 projection 정정이며 스케줄링·admission·큐 순서를 일절 바꾸지 않는다 |
 | 20. 테스트 | acceptance는 feature 왕복(§5)이다: busy/idle/hang 세 시나리오를 헬스 출력으로 검증하며, 헬퍼 단위 테스트를 늘리지 않는다 |
 
-## 2. 문제 — 실측 (2026-08-14, `~/.masc/logs/system_log_2026-08-14.jsonl`)
+## 2. 문제 — 실측 (2026-08-14, `<base-path>/.masc/logs/system_log_2026-08-14.jsonl`)
 
 같은 헬스 증상(`runnable_backlog_stale`)이 서로 다른 두 경로에서 났다.
 

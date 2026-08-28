@@ -10958,10 +10958,11 @@ let render_themes (state : state) =
         let swatch =
           entry.Theme_choice.swatch
           |> List.map (fun rgb ->
-               Printf.sprintf "\027[48;2;%d;%d;%dm  \027[49m"
-                 (Masc_tui_terminal_palette.red rgb)
-                 (Masc_tui_terminal_palette.green rgb)
-                 (Masc_tui_terminal_palette.blue rgb))
+               (* SSOT-R10: the theme owns projected-background bytes. The
+                  projection also folds the terminal's capability in, which
+                  the raw truecolor sprintf this replaces never did. *)
+               Masc_tui_theme.Sgr.background (Masc_tui_terminal_palette.best_color rgb)
+               ^ "  \027[49m")
           |> String.concat ""
         in
         (* Built in two halves with the swatch spliced between them, never

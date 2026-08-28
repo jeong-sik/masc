@@ -17,6 +17,14 @@ let max_secret_file_bytes = 64 * 1024
 let stream_emit_bytes = 4 * 1024
 let structural_pattern_overlap_bytes = 4 * 1024
 
+let ssh_remote_token_file ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat (Common.masc_dir_from_base_path ~base_path) "ssh")
+       "redaction")
+    (Workspace_utils.safe_filename keeper_name ^ ".token")
+;;
+
 let path_exists path =
   try Sys.file_exists path with
   | Sys_error _ -> false
@@ -160,6 +168,8 @@ let snapshot_with_additional_secret_files
             in
             acc |> collect_env_values env_root |> collect_file_values files_root)
          []
+    |> fun values ->
+    values_from_file (ssh_remote_token_file ~base_path ~keeper_name) values
     |> fun values ->
     List.fold_left
       (fun acc path -> values_from_structured_secret_file path acc)

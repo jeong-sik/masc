@@ -25,6 +25,8 @@ type parsed_args =
   ; autonomous_wake_prompt_present : bool
   ; proactive_enabled_opt : bool option
   ; sandbox_profile_opt : string option
+  ; remote_endpoint_opt : string option
+  ; remote_endpoint_present : bool
   ; network_mode_opt : string option
   ; tool_groups_opt : string list option
   ; tool_groups_present : bool

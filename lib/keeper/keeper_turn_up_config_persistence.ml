@@ -358,6 +358,16 @@ let full_fields
   in
   let fields =
     match
+      if parsed.remote_endpoint_present
+      then parsed.remote_endpoint_opt
+      else parsed.profile_defaults.remote_endpoint
+    with
+    | Some endpoint ->
+      ("remote_endpoint", Keeper_toml_loader.Toml_string endpoint) :: fields
+    | None -> fields
+  in
+  let fields =
+    match
       if parsed.skill_names_present
       then parsed.skill_names_opt
       else parsed.profile_defaults.skill_names
@@ -397,6 +407,15 @@ let explicit_edits
   |> append_optional "mention_targets" set_strings parsed.mention_targets_opt
   |> append_optional "proactive_enabled" set_bool parsed.proactive_enabled_opt
   |> append_optional "autoboot_enabled" set_bool parsed.autoboot_enabled_opt
+  |> fun fields ->
+  (if not parsed.remote_endpoint_present
+   then fields
+   else
+     ( "remote_endpoint"
+     , match parsed.remote_endpoint_opt with
+       | Some endpoint -> set_string endpoint
+       | None -> Keeper_toml_loader.Remove )
+     :: fields)
   |> fun fields ->
   (if not parsed.max_context_override_present
    then fields

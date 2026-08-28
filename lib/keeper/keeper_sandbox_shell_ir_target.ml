@@ -175,11 +175,26 @@ let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
               ]
             message)
      | Ok ssh ->
-       let runner = Keeper_sandbox_ssh.runner ~timeout_sec ssh in
-       Ok
-         { target =
-             Masc_exec.Sandbox_target.ssh
-               ~endpoint:(Keeper_sandbox_ssh.sandbox_endpoint ssh)
-               ~runner ()
-         })
+       let readiness =
+         if Env_config_sandbox.Preflight.enabled ()
+         then Keeper_sandbox_ssh.check_preflight ssh
+         else Ok ()
+       in
+       (match readiness with
+        | Error message ->
+          Error
+            (target_error ~class_:Tool_result.Dependency_unavailable
+               ~fields:
+                 [ "requested_sandbox", `String "remote_ssh"
+                 ; "remote_endpoint", `String endpoint.name
+                 ]
+               message)
+        | Ok () ->
+          let runner = Keeper_sandbox_ssh.runner ~timeout_sec ssh in
+          Ok
+            { target =
+                Masc_exec.Sandbox_target.ssh
+                  ~endpoint:(Keeper_sandbox_ssh.sandbox_endpoint ssh)
+                  ~runner ()
+            }))
 ;;

@@ -135,7 +135,7 @@ let () =
   assert (not !runner_called);
   assert (result.status = Unix.WEXITED 1);
   assert (result.stdout = "");
-  assert (has_infix ~affix:"not carried out for a sandboxed stage" result.stderr)
+  assert (has_infix ~affix:"remote_ssh_redirect_unavailable" result.stderr)
 
 (* --- pipeline with pipeline_runner = None decomposes per stage --- *)
 

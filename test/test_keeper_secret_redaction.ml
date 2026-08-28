@@ -103,6 +103,27 @@ let test_snapshot_redacts_base_secret_values () =
   not_contains "base env exact value hidden" redacted base_secret;
   contains "redaction marker present" redacted "[REDACTED]"
 
+let test_snapshot_redacts_remote_token_without_projecting_it () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "remote-token" in
+  let token = "remote.github.token.value" in
+  write_file (R.ssh_remote_token_file ~base_path:base ~keeper_name) (token ^ "\n");
+  let redaction = R.snapshot ~base_path:base ~keeper_name in
+  let redacted = R.redact_text redaction ("token=" ^ token) in
+  not_contains "remote token hidden" redacted token;
+  contains "remote token marker present" redacted "[REDACTED]";
+  match
+    Masc.Keeper_secret_projection.local_env_for_keeper
+      ~host_env:[| "PATH=/usr/bin" |] ~base_path:base ~keeper_name ()
+  with
+  | Error error -> Alcotest.fail error
+  | Ok None -> Alcotest.fail "scrubbed local env was unexpectedly absent"
+  | Ok (Some env) ->
+    Alcotest.(check bool) "remote token is not locally projected" false
+      (Array.exists (fun entry -> String_util.contains_substring entry token) env)
+
 let test_json_redaction_preserves_shape () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -306,6 +327,10 @@ let () =
             test_short_values_are_not_exact_redacted;
           Alcotest.test_case "redacts base secret values" `Quick
             test_snapshot_redacts_base_secret_values;
+          Alcotest.test_case
+            "redacts remote token without projecting it"
+            `Quick
+            test_snapshot_redacts_remote_token_without_projecting_it;
           Alcotest.test_case "redacts json while preserving shape" `Quick
             test_json_redaction_preserves_shape;
           Alcotest.test_case "redacts json object keys" `Quick

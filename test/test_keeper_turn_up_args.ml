@@ -1,6 +1,14 @@
 open Alcotest
 open Masc
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:""))
+    f
+;;
+
 let test_resolve_mention_targets_uses_fallback_when_absent () =
   check
     (list string)
@@ -88,6 +96,74 @@ let test_parse_rejects_runtime_agent_identity_as_keeper_name () =
     ; "keeper-omega_agent"
     ; "keeper_omega-agent"
     ]
+
+let test_remote_endpoint_validation () =
+  with_test_context @@ fun ctx ->
+  let preflight_key = "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" in
+  let previous_preflight = Sys.getenv_opt preflight_key in
+  Unix.putenv preflight_key "false";
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv preflight_key (Option.value previous_preflight ~default:""))
+  @@ fun () ->
+  let masc_dir = Filename.concat ctx.config.base_path ".masc" in
+  Unix.mkdir masc_dir 0o700;
+  let runtime_path = Filename.concat masc_dir "runtime.toml" in
+  let oc = open_out_bin runtime_path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc
+      {|[exec.ssh.endpoints.fixture]
+host = "fixture.invalid"
+user = "masc"
+remote_root = "/srv/masc/playground"
+|});
+  let parse fields =
+    Keeper_turn_up_args.parse ctx (`Assoc (("name", `String "remote-new") :: fields))
+  in
+  (match parse [ "sandbox_profile", `String "remote_ssh" ] with
+   | Ok _ -> fail "remote_ssh without endpoint was accepted"
+   | Error result ->
+     check bool "missing endpoint named" true
+       (String.starts_with
+          ~prefix:"remote_ssh_endpoint_missing:"
+          (Keeper_types_profile.tool_result_body result)));
+  (match
+     parse
+       [ "sandbox_profile", `String "remote_ssh"
+       ; "remote_endpoint", `String "ghost"
+       ]
+   with
+   | Ok _ -> fail "unknown endpoint was accepted"
+   | Error result ->
+     check bool "unknown endpoint named" true
+       (String.starts_with
+          ~prefix:"remote_ssh_endpoint_unknown:"
+          (Keeper_types_profile.tool_result_body result)));
+  (match
+     parse
+       [ "sandbox_profile", `String "remote_ssh"
+       ; "remote_endpoint", `String "fixture"
+       ]
+   with
+   | Error result ->
+     failf "known endpoint rejected: %s"
+       (Keeper_types_profile.tool_result_body result)
+   | Ok parsed ->
+     check bool "endpoint patch present" true parsed.remote_endpoint_present;
+     check (option string) "endpoint carried" (Some "fixture")
+       parsed.remote_endpoint_opt);
+  (match
+     parse
+       [ "sandbox_profile", `String "docker"
+       ; "remote_endpoint", `String "fixture"
+       ]
+   with
+   | Ok _ -> fail "docker endpoint was accepted"
+   | Error result ->
+     check bool "endpoint/profile mismatch named" true
+       (String.starts_with
+          ~prefix:"remote_endpoint_requires_remote_ssh:"
+          (Keeper_types_profile.tool_result_body result)))
 
 let test_parse_max_context_override () =
   let check_ok label expected value =
@@ -205,6 +281,82 @@ let missing_config_revision :
 let config_revision_with_manifest manifest :
     Keeper_turn_up_config_persistence.config_revision =
   { manifest; runtime_assignment = Runtime.Runtime_config_missing }
+
+let test_remote_endpoint_persistence_round_trip () =
+  with_persisting_context @@ fun ctx ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let masc_dir = Filename.concat ctx.config.base_path ".masc" in
+  if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o700;
+  let runtime_oc = open_out_bin (Filename.concat masc_dir "runtime.toml") in
+  Fun.protect ~finally:(fun () -> close_out runtime_oc) (fun () ->
+    output_string runtime_oc
+      {|[exec.ssh.endpoints.fixture]
+host = "fixture.invalid"
+user = "masc"
+remote_root = "/srv/masc/playground"
+|});
+  let name = "remote-persist-fixture" in
+  let base_meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name
+           ; "instructions", `String "fixture instructions"
+           ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parse_or_fail json =
+    match Keeper_turn_up_args.parse ctx json with
+    | Ok parsed -> parsed
+    | Error result -> failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  let persist parsed meta =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:(current_revision_exn ctx.config name)
+        ~config:ctx.config ~parsed ~meta ()
+    with
+    | Ok _ -> ()
+    | Error error ->
+      failf "persist: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let read_back () =
+    match
+      Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+        ~base_path:ctx.config.base_path name
+    with
+    | Ok defaults -> defaults.Keeper_types_profile.remote_endpoint
+    | Error error ->
+      failf "read back: %s"
+        (Keeper_types_profile.keeper_toml_load_error_to_string error)
+  in
+  let create =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "instructions", `String "fixture instructions"
+         ; "sandbox_profile", `String "remote_ssh"
+         ; "remote_endpoint", `String "fixture"
+         ])
+  in
+  persist create
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh };
+  check (option string) "remote endpoint persisted" (Some "fixture") (read_back ());
+  let clear =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "sandbox_profile", `String "docker"
+         ; "remote_endpoint", `Null
+         ])
+  in
+  persist clear
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Docker };
+  check (option string) "remote endpoint null removes key" None (read_back ())
+;;
 
 (* End-to-end for the settable surface behind the dashboard PATCH and
    masc_keeper_up: parse -> TOML persist -> profile-defaults read-back, then
@@ -1302,6 +1454,14 @@ let () =
             "local profile allowed with the hatch set"
             `Quick
             test_validate_allows_local_with_hatch
+        ; test_case
+            "remote endpoint required and registry-resolved"
+            `Quick
+            test_remote_endpoint_validation
+        ; test_case
+            "remote endpoint persists and null clears"
+            `Quick
+            test_remote_endpoint_persistence_round_trip
         ] )
     ; ( "max_context_override"
       , [ test_case "request values are exact or rejected" `Quick test_parse_max_context_override

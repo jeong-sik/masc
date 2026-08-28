@@ -118,6 +118,9 @@ let test_defaults_pinned () =
     (S.Runtime.docker_playground_enabled ());
   (* Preflight *)
   check bool "Preflight.enabled default" true (S.Preflight.enabled ());
+  check int "Preflight SSH TTL default" 60 (S.Preflight.ssh_ttl_sec ());
+  check int "Preflight SSH disk floor default" 1_048_576
+    (S.Preflight.ssh_disk_free_min_kib ());
   (* Shell_timeout buckets *)
   let pin bucket expected =
     check approx

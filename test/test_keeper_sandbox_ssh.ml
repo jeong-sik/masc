@@ -322,6 +322,7 @@ let test_cancellation_kills_local_ssh () =
 ;;
 
 let test_shell_ir_target_resolves_endpoint () =
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   with_eio @@ fun ~clock:_ ->
   let base_path = temp_dir () in
   let keepers_dir = Filename.concat base_path ".masc/config/keepers" in

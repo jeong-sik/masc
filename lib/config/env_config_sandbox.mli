@@ -117,6 +117,15 @@ module Preflight : sig
   (** Master switch for keeper_up / diagnostics preflight.
       Env: [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED].  Default: [true]. *)
 
+  val ssh_ttl_sec : unit -> int
+  (** Successful/failed SSH readiness observation TTL in seconds.
+      Env: [MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC]. Default: [60]. [0] disables
+      caching, which is useful for deterministic tests. *)
+
+  val ssh_disk_free_min_kib : unit -> int
+  (** Minimum available space under the endpoint remote root, in KiB.
+      Env: [MASC_KEEPER_SSH_PREFLIGHT_DISK_FREE_MIN_KIB]. Default: [1048576]
+      (1 GiB). *)
 end
 
 (** {1 Gate — local playground kill switch} *)
@@ -181,4 +190,3 @@ module Shell_timeout : sig
 end
 
 (** {1 Diagnostics / observability surface} *)
-

@@ -21,6 +21,8 @@ type parsed_args = {
   autonomous_wake_prompt_present : bool;
   proactive_enabled_opt : bool option;
   sandbox_profile_opt : string option;
+  remote_endpoint_opt : string option;
+  remote_endpoint_present : bool;
   network_mode_opt : string option;
   tool_groups_opt : string list option;
   tool_groups_present : bool;
@@ -194,6 +196,21 @@ let parse_runtime_id_opt args =
            "runtime_id must be a string (received %s)"
            (Json_util.kind_name other))
 
+let parse_remote_endpoint args =
+  match Json_util.assoc_member_opt "remote_endpoint" args with
+  | None -> Ok (false, None)
+  | Some `Null -> Ok (true, None)
+  | Some (`String raw) ->
+      let endpoint = String.trim raw in
+      if endpoint = ""
+      then Error "remote_endpoint must not be blank"
+      else Ok (true, Some endpoint)
+  | Some other ->
+      Error
+        (Printf.sprintf
+           "remote_endpoint must be a string or null (received %s)"
+           (Json_util.kind_name other))
+
 let normalize_max_context_override_value v =
   if v = 0 then Ok None
   else Keeper_config.validate_max_context_override_value v |> Result.map Option.some
@@ -274,6 +291,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
     let autonomous_wake_prompt_res = parse_autonomous_wake_prompt args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
+    let remote_endpoint_res = parse_remote_endpoint args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
     let instructions_arg = get_string_opt args "instructions" in
     let autonomous_instructions_arg =
@@ -298,7 +316,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       | Some raw, _, _ when Option.is_none (sandbox_profile_of_string raw) ->
         Some
           (Printf.sprintf
-             "invalid sandbox_profile: %S (expected: local or docker)"
+             "invalid sandbox_profile: %S (expected: local, docker, microvm, or remote_ssh)"
              raw)
       | Some _, _, _ | None, Some _, _ | None, None, None -> None
       | None, None, Some _ ->
@@ -317,14 +335,69 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       | Some _ -> autonomous_instructions_arg
       | None -> profile_defaults.autonomous_instructions
     in
+    let remote_endpoint_error =
+      match sandbox_profile_error, remote_endpoint_res with
+      | Some _, _ -> None
+      | None, Error error -> Some error
+      | None, Ok (remote_endpoint_present, remote_endpoint_opt) ->
+        let sandbox_profile =
+          match Option.bind sandbox_profile_opt sandbox_profile_of_string with
+          | Some profile -> profile
+          | None ->
+            Option.value profile_defaults.sandbox_profile
+              ~default:default_sandbox_profile
+        in
+        let endpoint_name =
+          if remote_endpoint_present
+          then remote_endpoint_opt
+          else profile_defaults.remote_endpoint
+        in
+        (match sandbox_profile, endpoint_name with
+         | Remote_ssh, None ->
+           Some
+             "remote_ssh_endpoint_missing: sandbox_profile=remote_ssh requires remote_endpoint"
+         | Remote_ssh, Some endpoint_name ->
+           (match
+              Keeper_sandbox_ssh.resolve_endpoint_name
+                ~base_path:ctx.config.base_path ~name:endpoint_name
+            with
+            | Error error -> Some error
+            | Ok endpoint ->
+              if not (Env_config_sandbox.Preflight.enabled ())
+              then None
+              else
+                (match
+                   Keeper_sandbox_ssh.create ~base_path:ctx.config.base_path
+                     ~keeper_name:name ~endpoint ()
+                 with
+                 | Error error -> Some error
+                 | Ok ssh ->
+                   (match Keeper_sandbox_ssh.check_preflight ~force:true ssh with
+                    | Ok () -> None
+                    | Error error -> Some error)))
+         | (Local | Docker | Micro_vm), Some _ ->
+           Some
+             "remote_endpoint_requires_remote_ssh: clear remote_endpoint or select sandbox_profile=remote_ssh"
+         | (Local | Docker | Micro_vm), None -> None)
+    in
     match
-      sandbox_profile_error, max_context_override_res, autonomous_wake_prompt_res
+      sandbox_profile_error, remote_endpoint_error,
+      max_context_override_res, autonomous_wake_prompt_res
     with
-    | Some msg, _, _ -> Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
-    | None, Error msg, _ -> Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
-    | None, _, Error msg -> Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
-    | None, Ok (max_context_override_present, max_context_override_opt),
+    | Some msg, _, _, _
+    | None, Some msg, _, _ ->
+      Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
+    | None, None, Error msg, _ ->
+      Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
+    | None, None, _, Error msg ->
+      Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
+    | None, None, Ok (max_context_override_present, max_context_override_opt),
       Ok (autonomous_wake_prompt_present, autonomous_wake_prompt_opt) ->
+    let remote_endpoint_present, remote_endpoint_opt =
+      match remote_endpoint_res with
+      | Ok value -> value
+      | Error _ -> false, None
+    in
     Ok {
       name;
       runtime_id_opt;
@@ -337,6 +410,8 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       autonomous_wake_prompt_present;
       proactive_enabled_opt;
       sandbox_profile_opt;
+      remote_endpoint_opt;
+      remote_endpoint_present;
       network_mode_opt;
       tool_groups_opt;
       tool_groups_present;

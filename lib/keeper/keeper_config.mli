@@ -86,6 +86,11 @@ val keeper_hitl_thinking_blocks : unit -> int
     judgment latency -- for the self-imposed constraints a judge cites when it
     denies. See {!Hitl_summary_worker} for what was measured on each side. *)
 
+val keeper_hitl_max_concurrent_per_keeper : unit -> int
+(** Maximum concurrent Auto Judge workers admitted for one workspace/Keeper
+    owner. This bounds per-Keeper fan-out; provider/runtime concurrency limits
+    remain the fleet-wide backpressure authority. *)
+
 val keeper_board_own_recent_max : unit -> int
 
 (** Fleet-message context layer (see .ml): how many projected keeper broadcasts

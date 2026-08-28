@@ -71,6 +71,28 @@ let keeper_hitl_thinking_blocks_rp =
 let keeper_hitl_thinking_blocks () : int =
   Runtime_params.get keeper_hitl_thinking_blocks_rp
 
+(* Auto Judge work is independent, durable, and nonblocking to the Keeper. A
+   single owner slot turned a burst from one Keeper into a serial queue even
+   while provider capacity sat idle. Four matches the existing completion
+   authority fan-out and remains below the runtime/provider global caps. The
+   runtime parameter keeps the product default observable and operator-tunable
+   without baking deployment policy into the queue algorithm. *)
+let keeper_hitl_max_concurrent_per_keeper_rp =
+  _rp_int ~key:"keeper.hitl.max_concurrent_per_keeper"
+    ~default:(fun () ->
+      int_of_env_default
+        "MASC_KEEPER_HITL_MAX_CONCURRENT_PER_KEEPER"
+        ~default:4
+        ~min_v:1
+        ~max_v:16)
+    ~min_v:1
+    ~max_v:16
+    ~description:"Concurrent Auto Judge workers admitted per Keeper"
+    ()
+
+let keeper_hitl_max_concurrent_per_keeper () : int =
+  Runtime_params.get keeper_hitl_max_concurrent_per_keeper_rp
+
 let keeper_board_own_recent_max_rp =
   _rp_int ~key:"keeper.board.own_recent.max"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_OWN_RECENT_MAX"

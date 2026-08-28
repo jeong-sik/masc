@@ -1,0 +1,128 @@
+# Cheap repo-wide guards, run on every pull request.
+#
+# Why this file exists, and why it is not part of ci.yml:
+#
+# #30827 measured PR CI at ~15 minutes with 12 of 17 runs cancelled and moved
+# the heavy suites off pull requests. That measurement was right. #30880 and
+# #30885 then removed every automatic pull_request trigger in the repo, so the
+# cheap guards left with the expensive ones.
+#
+# The cost of that: four PRs merged green because nothing ran, and main broke
+# after each one.
+#
+#   #31256  keeper_sandbox_microvm             no row in the owner matrix
+#   #31435  keeper_sandbox_ssh                 no row in the owner matrix
+#   #31481  keeper_tool_assemble_plan_runtime  no row in the owner matrix
+#   #31347  runtime_wall_clock.ml              no .mli
+#
+# Every guard below runs without the OCaml toolchain and finishes in seconds.
+# Measured on an M3 Max, 2026-08-29, against origin/main:
+#
+#   audit-keeper-tool-boundary-matrix.sh   0.20s
+#   ocaml-structure-ratchet.sh             0.30s
+#   audit-odoc-refs.py                     4.81s
+#   audit-code-smell.sh                    2.92s
+#   audit-tla-ml-line-refs.sh              1.35s
+#   lint-ignore-without-comment.py         1.14s
+#   audit-unwired-audits.sh                0.80s
+#   audit-ocaml-phase-count.sh             0.30s
+#   audit-tla-phase-count.sh               0.28s
+#   audit-tla-annotation-drift.sh          0.26s
+#   check-release-train-guard.sh           0.10s
+#
+# Sum: 12.5s of guard work. ci.yml stays workflow_dispatch-only, so nothing
+# here re-adds the 15-minute build that #30827 removed.
+#
+# Guards deliberately left out, and why:
+#
+#   check-pr-hygiene.sh, check-pr-sync.sh   require PR arguments
+#   verify_audit_claim.sh                   a helper, takes a claim to check
+#   audit-dead-surface.py                   requires a mode flag
+#   audit-rfc-closeout-lag.sh               over 60s
+#   audit-hardcoding-truth.sh               over 60s
+#   check-boundary-guard.sh                 over 60s
+#   audit-ocaml-spec-nav-line-refs.sh       27s
+#   check-board-attention-...-boundary.sh   33s
+#   audit-keeper-credential-drift.sh        11s, reads live credential state
+#
+#   audit-agent-core-payload.py             red on main today
+#   audit-keeper-fleet-readiness.py         red on main today
+#   audit-keeper-credential-uuid-integrity.sh  red on main today
+#   check-memory-leak.sh                    red on main today
+#   check-ssot.sh                           red on main today
+#   audit-path-ssot.sh                      red on main today
+#   hardening-ratchet.sh                    red on main today
+#   model-prose-ratchet.sh                  red on main today
+#   check-runtime-deployment-preflight.sh   red on main today
+#   scripts/ci/check-logging-consistency.sh red on main today
+#
+# The red ones are not excluded because they are wrong. They are excluded
+# because wiring a already-failing guard blocks every PR on a defect the PR
+# did not introduce. Each needs its own fix first, then a line here.
+
+name: PR Guards
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-guards-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guards:
+    name: Cheap Guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install shell dependencies
+        run: |
+          bash scripts/ci/apt-refresh.sh
+          sudo apt-get install -y -qq jq ripgrep
+
+      # Caught #31256, #31435, #31481 only after they had already merged.
+      - name: Keeper tool boundary matrix
+        run: bash scripts/audit-keeper-tool-boundary-matrix.sh
+
+      # Caught #31347 only after it had already merged.
+      - name: OCaml structure ratchet
+        run: bash scripts/ocaml-structure-ratchet.sh
+
+      - name: odoc references
+        run: python3 scripts/audit-odoc-refs.py
+
+      - name: Code smell ratchet
+        run: bash scripts/audit-code-smell.sh
+
+      - name: OCaml phase count
+        run: bash scripts/audit-ocaml-phase-count.sh
+
+      - name: TLA phase count
+        run: bash scripts/audit-tla-phase-count.sh
+
+      - name: TLA annotation drift
+        run: bash scripts/audit-tla-annotation-drift.sh
+
+      - name: TLA line references
+        run: bash scripts/audit-tla-ml-line-refs.sh
+
+      - name: ignore without comment
+        run: python3 scripts/lint-ignore-without-comment.py
+
+      - name: Release train guard
+        run: bash scripts/check-release-train-guard.sh
+
+      # Last, so it counts the guards this file wires. A guard CI does not run
+      # cannot fail, so it does not guard anything.
+      - name: Unwired audits
+        run: bash scripts/audit-unwired-audits.sh

@@ -7,6 +7,12 @@ type lane =
   | Board_attention
   | Compaction
 
+val lane_key : lane -> string
+(** The lane's wire identifier — the spelling the standalone-lane projection
+    serves and the TUI decoder and dashboard TS parse. This is the one
+    definition; a consumer that restates these strings drifts silently when
+    a lane is added or renamed. *)
+
 type outcome =
   | Succeeded
   | Cancelled

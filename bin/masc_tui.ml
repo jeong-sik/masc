@@ -1399,6 +1399,8 @@ type async_msg =
   | Task_history_loaded of
       string * (Masc.Tui_decode.task_history_event list, string) result
   | Task_cancel_done of string * (string, string) result
+  | Verification_evidence_loaded of
+      string * (Masc.Tui_decode.verification_evidence, string) result
   | Keeper_config_view_loaded of string * (string list, string) result
   | Keeper_sandbox_view_loaded of
       string * (Masc_tui_keeper_sandbox.t, string) result
@@ -2075,6 +2077,29 @@ let launch_task_cancel state ~mailbox ~task_id ~reason =
   | None ->
       enqueue_async mailbox
         (Task_cancel_done (task_id, Error "Eio switch is unavailable"))
+
+(* The operator evidence bundle for the verification detail, over HTTP.
+   Keyed by task id so a stale answer for a request the operator already
+   left is discarded, not drawn under another one. *)
+let launch_verification_evidence_load state ~mailbox task_id =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Verification_evidence_loaded (task_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Verification_evidence_loaded (task_id, Error "Eio switch is unavailable"))
 
 (* The detail pane's two non-Info tabs. Same discipline as the call log:
    the answer names the keeper it is for, so a stale load cannot be drawn
@@ -6821,6 +6846,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error err ->
           state.goal_action_armed <- None;
           state.goal_action_error <- Some err)
+  | Verification_evidence_loaded (task_id, result) ->
+      (match verification_cursor_row state, state.verification_detail_request_id with
+       | Some row, Some _ when String.equal row.Masc.Tui_decode.vr_task_id task_id ->
+           state.verification_evidence <- Some (task_id, result)
+       | _ -> ())
   | Task_cancel_done (task_id, result) ->
       (match result with
        | Ok _ ->
@@ -12097,7 +12127,11 @@ and is loaded on demand through keeper_skill.
                        (fun row ->
                           state.verification_detail_request_id <-
                             Some row.Masc.Tui_decode.vr_request_id;
-                          state.verification_detail_scroll <- 0)
+                          state.verification_detail_scroll <- 0;
+                          state.verification_evidence <- None;
+                          launch_verification_evidence_load state
+                            ~mailbox:async_messages
+                            row.Masc.Tui_decode.vr_task_id)
                        (verification_cursor_row state))
             | Harness ->
                 (match state.harness_detail, state.harness with

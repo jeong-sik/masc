@@ -6676,6 +6676,51 @@ let verification_detail_lines ~width
       [ Ansi.dim, "" ]
       @ wrapped_block "Evidence projection error" detail
 
+(* What the verifier can actually inspect: the operator evidence bundle,
+   lazily fetched on detail entry. The snapshot above lists references; this
+   carries artifact content prefixes (server-capped, truncation marked) and
+   the typed reason when an artifact could not be read — the judge's actual
+   input, drawn beside the verdict keys so approval is not blind. *)
+let verification_evidence_lines (state : state) ~width task_id =
+  let wrap ~prefix text =
+    Message_layout.wrap_body ~max_cells:(max 1 (width - 6))
+      ~sanitize:Keeper_chat.terminal_safe_text text
+    |> List.mapi (fun index line ->
+           Ansi.reset, (if index = 0 then prefix else "      ") ^ line)
+  in
+  let rows =
+    match state.verification_evidence with
+    | Some (id, result) when String.equal id task_id -> (
+        match result with
+        | Ok (Masc.Tui_decode.Evidence_items []) ->
+            [ Ansi.dim, "    (no inspectable evidence)" ]
+        | Ok (Masc.Tui_decode.Evidence_items items) ->
+            List.concat_map
+              (fun (item : Masc.Tui_decode.verification_evidence_item) ->
+                match item with
+                | Masc.Tui_decode.Ev_note note -> wrap ~prefix:"    - note: " note
+                | Masc.Tui_decode.Ev_artifact
+                    { ev_reference; ev_content; ev_bytes; ev_truncated } ->
+                    (( Ansi.reset
+                     , Printf.sprintf "    - artifact %s (%dB%s)"
+                         (Terminal_text.single_line ev_reference) ev_bytes
+                         (if ev_truncated then ", truncated" else "") )
+                     :: wrap ~prefix:"      " ev_content)
+                | Masc.Tui_decode.Ev_artifact_unreadable
+                    { ev_u_reference; ev_u_reason } ->
+                    wrap
+                      ~prefix:"    - artifact unreadable: "
+                      (Printf.sprintf "%s %s"
+                         (Option.value ev_u_reference ~default:"(no reference)")
+                         ev_u_reason))
+              items
+        | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
+            wrap ~prefix:"    evidence unavailable: " reason
+        | Error err -> wrap ~prefix:"    evidence load failed: " err)
+    | _ -> [ Ansi.dim, "    loading..." ]
+  in
+  (Ansi.dim, "") :: (Ansi.bold, "  EVIDENCE CONTENT") :: rows
+
 let verification_detail_pane (state : state) ~rows ~cols request buf =
   box_top buf cols;
   box_line buf cols
@@ -6683,7 +6728,11 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
        (screen_title " MASC Verification \xe2\x96\xb8 details")
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
-  let lines = verification_detail_lines ~width:(max 1 (framed_inner_width cols)) request in
+  let width = max 1 (framed_inner_width cols) in
+  let lines =
+    verification_detail_lines ~width request
+    @ verification_evidence_lines state ~width request.Masc.Tui_decode.vr_task_id
+  in
   let content_height = max 1 (rows - 6) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in

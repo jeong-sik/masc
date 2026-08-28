@@ -1647,3 +1647,27 @@ val decode_task_history : Yojson.Safe.t -> (task_history_event list, string) res
 (** Rows are raw event-stream lines rather than a uniform projection, so every
     field except [ts] is tolerant; an unknown event type renders as its type
     string instead of being dropped. *)
+
+(** Operator evidence bundle for one awaiting-verification task. The item
+    vocabulary is the producer's closed set, so an unknown kind fails the
+    decode rather than rendering as an empty row; [Evidence_access_unavailable]
+    is the store-level failure the server states explicitly. *)
+type verification_evidence_item =
+  | Ev_note of string
+  | Ev_artifact of {
+      ev_reference : string;
+      ev_content : string;
+      ev_bytes : int;
+      ev_truncated : bool;
+    }
+  | Ev_artifact_unreadable of {
+      ev_u_reference : string option;
+      ev_u_reason : string;
+    }
+
+type verification_evidence =
+  | Evidence_items of verification_evidence_item list
+  | Evidence_access_unavailable of string
+
+val decode_verification_evidence :
+  Yojson.Safe.t -> (verification_evidence, string) result

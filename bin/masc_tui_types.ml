@@ -1513,6 +1513,8 @@ type state = {
     (string * (Tui_decode.goal_timeline, string) result) option;
   mutable task_history:
     (string * (Tui_decode.task_history_event list, string) result) option;
+  mutable verification_evidence:
+    (string * (Tui_decode.verification_evidence, string) result) option;
   mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
   mutable keeper_calls_error: string option;
   mutable keeper_calls_scroll: int;
@@ -2188,6 +2190,7 @@ let create_state
   runtime_catalog_error = None;
   goal_timeline = None;
   task_history = None;
+  verification_evidence = None;
   keeper_calls = None;
   keeper_calls_error = None;
   keeper_calls_scroll = 0;

@@ -5347,3 +5347,81 @@ let decode_task_history json =
       in
       Ok (List.map event_of_row rows)
   | _ -> Error "task history is not a list"
+
+(* Operator evidence bundle (GET /api/v1/verification/evidence). The
+   verification snapshot already lists evidence references; this carries what
+   the verifier can actually inspect — artifact content prefixes (the server
+   caps and marks truncation) and the typed reason when an artifact could not
+   be read. The item vocabulary is the producer's closed set
+   (Workspace_verification_store.submitted_evidence_item_to_yojson), so an
+   unknown kind fails the decode rather than rendering as an empty row. *)
+type verification_evidence_item =
+  | Ev_note of string
+  | Ev_artifact of {
+      ev_reference : string;
+      ev_content : string;
+      ev_bytes : int;
+      ev_truncated : bool;
+    }
+  | Ev_artifact_unreadable of {
+      ev_u_reference : string option;
+      ev_u_reason : string;
+    }
+
+type verification_evidence =
+  | Evidence_items of verification_evidence_item list
+  | Evidence_access_unavailable of string
+
+let decode_verification_evidence json =
+  let result = member "result" json in
+  let evidence = member "evidence" result in
+  match member "access" evidence with
+  | `String "unavailable" ->
+      let reason =
+        match member "reason" evidence with
+        | `String reason -> reason
+        | _ -> "evidence store is unreadable"
+      in
+      Ok (Evidence_access_unavailable reason)
+  | `String "available" ->
+      let decode_item item =
+        let str field =
+          match member field item with `String s -> Some s | _ -> None
+        in
+        match member "kind" item with
+        | `String "note" ->
+            (match str "content" with
+             | Some content -> Ok (Ev_note content)
+             | None -> Error "evidence note is missing content")
+        | `String "artifact" ->
+            (match str "reference", str "content", member "bytes" item with
+             | Some ev_reference, Some ev_content, `Int ev_bytes ->
+                 let ev_truncated =
+                   match member "truncated" item with
+                   | `Bool b -> b
+                   | _ -> false
+                 in
+                 Ok (Ev_artifact { ev_reference; ev_content; ev_bytes; ev_truncated })
+             | _ -> Error "evidence artifact is missing reference/content/bytes")
+        | `String "artifact_unreadable" ->
+            let ev_u_reason =
+              match member "reason" item with
+              | `Null -> "unreadable"
+              | reason -> Yojson.Safe.to_string reason
+            in
+            Ok (Ev_artifact_unreadable { ev_u_reference = str "reference"; ev_u_reason })
+        | `String kind -> Error ("unknown evidence item kind: " ^ kind)
+        | _ -> Error "evidence item is missing kind"
+      in
+      (match member "items" evidence with
+       | `List items ->
+           let rec loop acc = function
+             | [] -> Ok (Evidence_items (List.rev acc))
+             | item :: rest ->
+                 let* decoded = decode_item item in
+                 loop (decoded :: acc) rest
+           in
+           loop [] items
+       | _ -> Error "available evidence carries no items list")
+  | `String other -> Error ("unknown evidence access state: " ^ other)
+  | _ -> Error "evidence access state is missing"

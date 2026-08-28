@@ -419,7 +419,7 @@ let parse_headers (tbl : Otoml.t) (path : string) : (string * string) list =
     List.sort (fun (a, _) (b, _) -> String.compare a b) pairs
 ;;
 
-let antigravity_cli_option_keys = [ "agent"; "effort"; "timeout-s" ]
+let antigravity_cli_option_keys = [ "agent"; "effort"; "timeout-s"; "add-dirs" ]
 
 let antigravity_forbidden_option_keys =
   [ "execution-mode"; "sandbox"; "disable-slash-commands" ]
@@ -459,6 +459,39 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
      | None ->
     let agent_result = antigravity_optional_string ~path tbl "agent" in
     let effort_result = antigravity_optional_string ~path tbl "effort" in
+    (* [add-dirs] entries must be absolute: the CLI resolves a relative
+       [--add-dir] against its own cwd, which is the keeper base path, so a
+       relative entry silently names a path inside the base the operator did
+       not mean. Reject at load instead. *)
+    let add_dirs_result =
+      match Otoml.find_opt tbl Fun.id [ "add-dirs" ] with
+      | None -> Ok []
+      | Some (Otoml.TomlArray entries) ->
+        let dirs, errs =
+          List.fold_left
+            (fun (dirs, errs) entry ->
+               match entry with
+               | Otoml.TomlString value when String.trim value = "" ->
+                 dirs, errs @ error (path ^ ".add-dirs") "add-dirs entries must be non-empty"
+               | Otoml.TomlString value when Filename.is_relative value ->
+                 ( dirs
+                 , errs
+                   @ error
+                       (path ^ ".add-dirs")
+                       (Printf.sprintf
+                          "add-dirs entries must be absolute paths, got %S"
+                          value) )
+               | Otoml.TomlString value -> dirs @ [ value ], errs
+               | _ ->
+                 dirs, errs @ error (path ^ ".add-dirs") "add-dirs entries must be strings")
+            ([], [])
+            entries
+        in
+        (match errs with
+         | [] -> Ok dirs
+         | errs -> Error errs)
+      | Some _ -> Error (error (path ^ ".add-dirs") "add-dirs must be an array of strings")
+    in
     let timeout_result =
       match
         strict_float_find path tbl "timeout-s"
@@ -472,9 +505,12 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
              "timeout-s is required for protocol antigravity-cli")
       | Ok (Some timeout_s) -> Ok timeout_s
     in
-    (match agent_result, effort_result, timeout_result with
-     | Error errors, _, _ | _, Error errors, _ | _, _, Error errors -> Error errors
-     | Ok agent, Ok effort, Ok timeout_s ->
+    (match agent_result, effort_result, add_dirs_result, timeout_result with
+     | Error errors, _, _, _
+     | _, Error errors, _, _
+     | _, _, Error errors, _
+     | _, _, _, Error errors -> Error errors
+     | Ok agent, Ok effort, Ok add_dirs, Ok timeout_s ->
        let effort_result =
          match effort with
          | None -> Ok None
@@ -489,7 +525,8 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
        in
        (match effort_result with
         | Error errors -> Error errors
-        | Ok effort -> Ok (Some { Runtime_schema.agent; effort; timeout_s }))))
+        | Ok effort ->
+          Ok (Some { Runtime_schema.agent; effort; timeout_s; add_dirs }))))
   | Messages_api
   | Chat_completions_api
   | Ollama_api

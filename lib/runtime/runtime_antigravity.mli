@@ -16,6 +16,9 @@ type execution_mode =
 type config =
   { cli_path : string
   ; cwd : string
+  ; add_dirs : string list
+    (** Extra absolute workspace roots beside [cwd], each passed as its own
+        [--add-dir]. Empty keeps [cwd] as the only root. *)
   ; model : string
   ; agent : string option
   ; effort : effort option

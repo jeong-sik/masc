@@ -4255,6 +4255,46 @@ let test_antigravity_cli_materializes_typed_process_options () =
             fail "antigravity-cli was materialized through the wrong execution owner"))
 ;;
 
+let test_antigravity_cli_add_dirs_reach_the_execution_config () =
+  let options =
+    "timeout-s = 45.0\nadd-dirs = [\"/srv/repos\", \"/srv/shared\"]"
+  in
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml
+       ~credential:antigravity_file_credential
+       ~options
+       ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Error error -> failf "antigravity-cli with add-dirs should load: %s" error
+       | Ok (_, default, _, _, _) ->
+         (match default.execution with
+          | Runtime_execution.Antigravity_cli config ->
+            check (list string) "add-dirs reach the execution config"
+              [ "/srv/repos"; "/srv/shared" ] config.add_dirs
+          | Runtime_execution.Agent_core _
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Claude_code _ ->
+            fail "antigravity-cli was materialized through the wrong execution owner"))
+;;
+
+(* A relative entry would resolve against the CLI's own cwd — the keeper base
+   path — and silently name a path inside the base the operator did not mean,
+   so it is rejected at load. *)
+let test_antigravity_cli_add_dirs_reject_relative_entries () =
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml
+       ~credential:antigravity_file_credential
+       ~options:"timeout-s = 45.0\nadd-dirs = [\"repos\"]"
+       ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> fail "a relative add-dirs entry must be rejected at load"
+       | Error error ->
+         check bool "diagnostic names the absolute-path requirement" true
+           (String_util.contains_substring error "absolute paths"))
+;;
+
 let test_antigravity_cli_requires_explicit_timeout () =
   with_temp_runtime_toml
     (antigravity_cli_runtime_toml
@@ -4357,6 +4397,10 @@ let () =
             test_codex_app_server_rejects_declared_credentials;
           test_case "antigravity CLI options materialize" `Quick
             test_antigravity_cli_materializes_typed_process_options;
+          test_case "antigravity add-dirs reach the execution config" `Quick
+            test_antigravity_cli_add_dirs_reach_the_execution_config;
+          test_case "antigravity add-dirs reject relative entries" `Quick
+            test_antigravity_cli_add_dirs_reject_relative_entries;
           test_case "antigravity CLI requires explicit timeout" `Quick
             test_antigravity_cli_requires_explicit_timeout;
           test_case "antigravity CLI requires file credentials" `Quick

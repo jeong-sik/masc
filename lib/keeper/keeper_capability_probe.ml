@@ -575,6 +575,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                    let config : Runtime_antigravity.config =
                      { cli_path = exec.cli_path
                      ; cwd = base_path
+                     ; add_dirs = []
                      ; model = exec.model
                      ; agent = exec.agent
                      ; effort = exec.effort

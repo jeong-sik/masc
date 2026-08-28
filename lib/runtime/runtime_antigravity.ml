@@ -16,6 +16,7 @@ type execution_mode =
 type config =
   { cli_path : string
   ; cwd : string
+  ; add_dirs : string list
   ; model : string
   ; agent : string option
   ; effort : effort option
@@ -58,6 +59,7 @@ let cli_non_authoritative_timeout = "2562047h47m16.854775807s"
 let default_config ~cwd ~model =
   { cli_path = "agy"
   ; cwd
+  ; add_dirs = []
   ; model
   ; agent = None
   ; effort = None
@@ -508,11 +510,14 @@ let argv config ~conversation_mode =
     ; config.model
     ; "--mode"
     ; execution_mode_to_string config.execution_mode
-    ; "--add-dir"
-    ; config.cwd
-    ; "--print-timeout"
-    ; cli_non_authoritative_timeout
     ]
+    (* The keeper base path is always the first workspace root; [add_dirs]
+       extends it with the provider-declared extra roots, one [--add-dir]
+       per directory. *)
+    @ List.concat_map
+        (fun dir -> [ "--add-dir"; dir ])
+        (config.cwd :: config.add_dirs)
+    @ [ "--print-timeout"; cli_non_authoritative_timeout ]
   in
   let with_optional flag value values =
     match value with

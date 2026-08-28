@@ -127,7 +127,7 @@ def activation():
             },
         },
         "delivery": {
-            "boundary": {"kind": "model_response", "response_id": "response-one"},
+            "boundary": {"kind": "model_response", "agent_core_turn": 7},
             "runtime_id": "runtime-one",
             "delivered_at": "2026-08-27T00:00:02Z",
             "content_bytes": 12,
@@ -437,13 +437,11 @@ def make_bundle(root: Path):
 
     tui_png = png(1200, 800)
     (tui_root / "tui-skill-use.png").write_bytes(tui_png)
-    exact_activation = recomputed_join["result"]["matches"][0]
+    exact_durable_activation = durable["activations"][0]
     receipt_block = "\n".join(
-        [
-            verifier.exact_reference_line(exact_activation),
-            f"invoked turn=7 id={SKILL_ID} runtime=runtime-one at=2026-08-27T00:00:01Z",
-            "action turn=7 runtime=runtime-one tool=keeper_status call=call-action-1 at=2026-08-27T00:00:03Z",
-        ]
+        verifier.tui_capture.expected_receipt_lines(
+            exact_durable_activation, exact_durable_activation["actions"]
+        )
     )
     visible_text = "\n".join(
         [
@@ -941,10 +939,22 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
 
     def test_tui_receipt_is_structurally_bound_to_the_durable_activation(self):
         mutations = (
-            ("exact=", "exact=garbage"),
+            (f"content_revision={CONTENT}", f"content_revision={CONTENT[:1]}"),
             (f"id={SKILL_ID}", f"id={SKILL_ID}0"),
             ("turn=7", "turn=999"),
             ("tool=keeper_status", "tool=foreign_tool"),
+            ("invoked turn=7", "row turn=7"),
+            ("action turn=7", "row turn=7"),
+            (
+                "at=2026-08-27T00:00:01Z",
+                "at=2026-08-27T00:00:01Z turn=999 runtime=evil",
+            ),
+            (
+                "action turn=7 runtime=runtime-one tool=keeper_status call=call-action-1 at=2026-08-27T00:00:03Z",
+                "action turn=7 runtime=runtime-one tool=keeper_status call=call-action-1 at=2026-08-27T00:00:03Z\n"
+                "action turn=9 runtime=evil tool=evil call=foreign at=2099-01-01T00:00:00Z",
+            ),
+            ("served body", "served-removed body"),
         )
         for old, new in mutations:
             with self.subTest(old=old, new=new), tempfile.TemporaryDirectory() as raw:
@@ -978,6 +988,7 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
     def test_tui_selection_path_is_required(self):
         cases = (
             ("visited_keepers", []),
+            ("visited_keepers", ["foreign", "foreign", "keeper-one"]),
             ("visited_tools_panes", ["surface", "async"]),
         )
         for field, value in cases:
@@ -988,6 +999,15 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                     verifier.VerificationError, "selection path"
                 ):
                     verify(bundle)
+
+    def test_tui_observation_schema_is_closed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            bundle["tui"]["observations"]["invalid_line"] = "legacy invalid=0"
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "observation field set"
+            ):
+                verify(bundle)
 
     def test_tui_skill_header_receipt_count_is_bound(self):
         with tempfile.TemporaryDirectory() as raw:

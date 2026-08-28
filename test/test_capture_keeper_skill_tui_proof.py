@@ -376,57 +376,70 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         self.assertEqual(visited, ["keeper-one"])
         wait_screen.assert_not_called()
 
-    def test_action_must_be_inside_exact_receipt_block(self):
+    def test_receipt_uses_exact_begin_and_end_boundaries(self):
         same = "\n".join(
             [
-                'exact={"content_revision":"one"}',
+                "begin id=call-skill-1",
+                "exact source_id=one",
                 "invoked turn=1 id=call-skill-1 runtime=one",
                 "action turn=1 runtime=one tool=x call=call-action-1",
+                "end id=call-skill-1",
             ]
         )
         another = "\n".join(
             [
-                'exact={"content_revision":"one"}',
+                "begin id=call-skill-1",
+                "exact source_id=one",
                 "invoked turn=1 id=call-skill-1 runtime=one",
-                'exact={"content_revision":"two"}',
+                "end id=call-skill-1",
+                "begin id=call-skill-2",
+                "exact source_id=two",
                 "invoked turn=2 id=call-skill-2 runtime=one",
                 "action turn=2 runtime=one tool=x call=call-action-1",
+                "end id=call-skill-2",
             ]
         )
 
-        self.assertTrue(
-            capture.receipt_block_contains(same, "call-skill-1", "call=call-action-1")
-        )
-        self.assertFalse(
-            capture.receipt_block_contains(
-                another, "call-skill-1", "call=call-action-1"
-            )
-        )
+        self.assertEqual(capture.exact_receipt_block(same, "call-skill-1"), same)
         self.assertNotIn(
-            'exact={"content_revision":"two"}',
+            "exact source_id=two",
             capture.exact_receipt_block(another, "call-skill-1") or "",
         )
         prefix_collision = "\n".join(
             [
-                'exact={"content_revision":"ten"}',
+                "begin id=call-skill-10",
+                "exact source_id=ten",
                 "invoked turn=1 id=call-skill-10 runtime=one",
                 "action turn=1 runtime=one tool=x call=call-action-1",
+                "end id=call-skill-10",
             ]
         )
-        self.assertFalse(
-            capture.receipt_block_contains(
-                prefix_collision, "call-skill-1", "call=call-action-1"
-            )
+        self.assertIsNone(capture.exact_receipt_block(prefix_collision, "call-skill-1"))
+
+    def test_exact_receipt_block_excludes_following_terminal_chrome(self):
+        receipt = "\n".join(
+            [
+                "begin id=call skill 1",
+                "exact source_id=one",
+                "invoked turn=1 id=call skill 1 runtime=runtime one",
+                "action turn=1 runtime=runtime one tool=x call=action id 1",
+                "end id=call skill 1",
+            ]
         )
+        screen = receipt + "\n\n  ↑/↓ scroll  q back"
+
+        self.assertEqual(capture.exact_receipt_block(screen, "call skill 1"), receipt)
 
     def test_exact_receipt_block_ignores_unrelated_clock_change(self):
         before = "\n".join(
             [
                 "MASC Tools 14:10:47 [connected]",
                 "session=session-1  ledger=ledger-1",
-                'exact={"content_revision":"one"}',
+                "begin id=call-skill-1",
+                "exact source_id=one",
                 "invoked turn=1 id=call-skill-1 runtime=one",
                 "action turn=1 runtime=one tool=x call=call-action-1",
+                "end id=call-skill-1",
             ]
         )
         after = before.replace("14:10:47", "14:10:48")
@@ -441,9 +454,11 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
     def test_exact_receipt_block_detects_changed_runtime_tool_and_turn(self):
         before = "\n".join(
             [
-                'exact={"content_revision":"one"}',
+                "begin id=call-skill-1",
+                "exact source_id=one",
                 "invoked turn=1 id=call-skill-1 runtime=one",
                 "action turn=1 runtime=one tool=x call=call-action-1",
+                "end id=call-skill-1",
             ]
         )
         after = before.replace("turn=1 runtime=one tool=x", "turn=9 runtime=two tool=y")
@@ -456,12 +471,14 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
     def test_exact_receipt_block_detects_changed_exact_identity(self):
         before = "\n".join(
             [
-                'exact={"content_revision":"one"}',
+                "begin id=call-skill-1",
+                "exact source_id=one",
                 "invoked turn=1 id=call-skill-1 runtime=one",
                 "action turn=1 runtime=one tool=x call=call-action-1",
+                "end id=call-skill-1",
             ]
         )
-        after = before.replace('"one"', '"two"')
+        after = before.replace("source_id=one", "source_id=two")
 
         self.assertNotEqual(
             capture.exact_receipt_block(before, "call-skill-1"),
@@ -501,14 +518,6 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             ]
         )
         middle = "MASC Tools 14:10:47 [connected]\nolder receipts"
-        receipt = "\n".join(
-            [
-                "MASC Tools 14:10:47 [connected]",
-                'exact={"content_revision":"one"}',
-                "invoked turn=8 id=call-skill-1 runtime=one at=activated-at",
-                "action turn=8 runtime=one tool=x call=call-action-1 at=observed-at",
-            ]
-        )
         activation = {
             "identity": {
                 "source_id": "source",
@@ -516,10 +525,28 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 "name": "skill",
             },
             "content_revision": "one",
+            "snapshot_revision": "snapshot-one",
+            "turn_ref": "trace-one#8",
             "agent_core_turn": 8,
             "skill_tool_use_id": "call-skill-1",
             "runtime_id": "one",
             "activated_at": "activated-at",
+            "invocation": {
+                "kind": "instruction",
+                "origin": {"kind": "session_instruction"},
+                "served_content": {
+                    "kind": "skill_body",
+                    "bytes": 3,
+                    "sha256": "body-sha",
+                },
+            },
+            "delivery": {
+                "boundary": {"kind": "model_response", "agent_core_turn": 8},
+                "runtime_id": "one",
+                "content_bytes": 3,
+                "content_sha256": "body-sha",
+                "delivered_at": "delivered-at",
+            },
         }
         action = {
             "identity": {"kind": "call_id", "call_id": "call-action-1"},
@@ -528,9 +555,11 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             "tool_name": "x",
             "observed_at": "observed-at",
         }
-        receipt = receipt.replace(
-            'exact={"content_revision":"one"}',
-            capture.exact_reference_line(activation),
+        receipt = "\n".join(
+            [
+                "MASC Tools 14:10:47 [connected]",
+                *capture.expected_receipt_lines(activation, [action]),
+            ]
         )
         screens = iter([top, middle, middle, receipt, receipt])
         with (
@@ -545,7 +574,6 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 skill_tool_use_id="call-skill-1",
                 activation=activation,
                 actions=[action],
-                action="call=call-action-1",
                 timeout=1.0,
             )
 

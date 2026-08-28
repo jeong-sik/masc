@@ -8965,14 +8965,27 @@ let render_tools (state : state) =
           List.concat_map
             (fun (activation : Masc.Keeper_skill_activation_ledger.activation) ->
                let origin, served = skill_invocation_text activation.invocation in
-               let exact_reference =
-                 Skill_reference.make
-                   ~identity:activation.identity
-                   ~content_revision:activation.content_revision
-                 |> Skill_reference.to_yojson
-                 |> Yojson.Safe.to_string
-               in
-               [ Ansi.dim, "   exact=" ^ Terminal_text.single_line exact_reference
+               [ Ansi.dim,
+                 "   begin id="
+                 ^ Terminal_text.single_line activation.skill_tool_use_id
+               ; Ansi.dim,
+                 "   exact source_id="
+                 ^ (activation.identity
+                    |> Skill_reference.identity_source_id_to_string
+                    |> Terminal_text.single_line)
+               ; Ansi.dim,
+                 "     package_id="
+                 ^ (activation.identity
+                    |> Skill_reference.identity_package_id_to_string
+                    |> Terminal_text.single_line)
+               ; Ansi.dim,
+                 "     name="
+                 ^ Terminal_text.single_line activation.identity.name
+               ; Ansi.dim,
+                 "     content_revision="
+                 ^ (activation.content_revision
+                    |> Skill_reference.content_revision_to_string
+                    |> Terminal_text.single_line)
                ; Ansi.dim,
                  Printf.sprintf
                    "     invoked turn=%d id=%s runtime=%s at=%s"
@@ -8998,7 +9011,11 @@ let render_tools (state : state) =
                     |> Terminal_text.single_line)
                    (Terminal_text.single_line origin)
                ]
-               @ skill_action_lines activation.actions)
+               @ skill_action_lines activation.actions
+               @ [ Ansi.dim,
+                   "       end id="
+                   ^ Terminal_text.single_line activation.skill_tool_use_id
+                 ])
             sap_activations
         in
         let timeline_lines =

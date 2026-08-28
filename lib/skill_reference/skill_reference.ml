@@ -113,6 +113,14 @@ let equal_content_revision = String.equal
 let make_identity ~source_id ~package_id ~name = { source_id; package_id; name }
 let make ~identity ~content_revision = { identity; content_revision }
 
+let identity_source_id_to_string identity =
+  Skill_source_config.source_id_to_string identity.source_id
+;;
+
+let identity_package_id_to_string identity =
+  package_id_to_string identity.package_id
+;;
+
 let equal_identity left right =
   String.equal
     (Skill_source_config.source_id_to_string left.source_id)

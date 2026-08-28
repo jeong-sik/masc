@@ -19,6 +19,7 @@ import zlib
 
 import join_natural_keeper_skill_ledger as ledger_join
 import keeper_skill_use_proof as proof_collector
+import capture_keeper_skill_tui_proof as tui_capture
 
 
 SCHEMA = "masc.keeper-skill-proof-verification/v1"
@@ -420,62 +421,15 @@ def action_markers(actions: list[Any]) -> list[str]:
     return markers
 
 
-def exact_reference_line(activation: dict[str, Any]) -> str:
-    reference_value = activation.get("reference")
-    if isinstance(reference_value, dict):
-        reference = reference_value
-        identity = object_field(reference, "identity", "Skill activation reference")
-    else:
-        reference = activation
-        identity = object_field(activation, "identity", "Skill activation")
-    value = {
-        "identity": {
-            field: string_field(identity, field, "join activation identity")
-            for field in ("source_id", "package_id", "name")
-        },
-        "content_revision": string_field(
-            reference, "content_revision", "Skill activation reference"
-        ),
-    }
-    return "exact=" + json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
 def receipt_matches_activation(
     block: str, activation: dict[str, Any], actions: list[Any]
 ) -> bool:
     lines = [line.strip(" │") for line in block.splitlines()]
-    if not lines:
+    try:
+        expected = tui_capture.expected_receipt_lines(activation, actions)
+    except tui_capture.CaptureError:
         return False
-    expected_reference = exact_reference_line(activation)
-    content_marker = '"content_revision":"'
-    if (
-        not expected_reference.startswith(lines[0])
-        or content_marker not in lines[0]
-        or lines[0].endswith(content_marker)
-    ):
-        return False
-    invoked_tokens = {
-        f"turn={integer_field(activation, 'agent_core_turn', 'join activation')}",
-        f"id={string_field(activation, 'skill_tool_use_id', 'join activation')}",
-        f"runtime={string_field(activation, 'runtime_id', 'join activation')}",
-        f"at={string_field(activation, 'activated_at', 'join activation')}",
-    }
-    if sum(invoked_tokens <= set(line.split()) for line in lines[1:]) != 1:
-        return False
-    for index, action_value in enumerate(actions):
-        if not isinstance(action_value, dict):
-            return False
-        action = cast(dict[str, Any], action_value)
-        expected_action_tokens = {
-            action_markers([action])[0],
-            f"turn={integer_field(action, 'agent_core_turn', f'proof action {index}')}",
-            f"runtime={string_field(action, 'runtime_id', f'proof action {index}')}",
-            f"tool={string_field(action, 'tool_name', f'proof action {index}')}",
-            f"at={string_field(action, 'observed_at', f'proof action {index}')}",
-        }
-        if sum(expected_action_tokens <= set(line.split()) for line in lines[1:]) != 1:
-            return False
-    return True
+    return lines == expected
 
 
 def server_from_proof(evidence: dict[str, Any]) -> dict[str, str]:
@@ -960,6 +914,10 @@ def verify_bundle(
         "TUI Keeper selection path differs",
     )
     require(
+        len(set(visited_keepers)) == len(visited_keepers),
+        "TUI Keeper selection path differs",
+    )
+    require(
         visited_tools_panes != []
         and all(isinstance(value, str) for value in visited_tools_panes)
         and visited_tools_panes[-1] == "activations"
@@ -972,6 +930,10 @@ def verify_bundle(
         "TUI visible text SHA differs",
     )
     observations = object_field(tui, "observations", "TUI proof")
+    require(
+        set(observations) == {"skill_header", "session_line", "receipt_block"},
+        "TUI observation field set differs",
+    )
     skill_header = string_field(observations, "skill_header", "TUI observations")
     session_line = string_field(observations, "session_line", "TUI observations")
     receipt_block = string_field(observations, "receipt_block", "TUI observations")

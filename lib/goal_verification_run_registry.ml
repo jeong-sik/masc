@@ -60,6 +60,7 @@ module Payload = struct
   let name = "goal_verification_run_registry"
   let running_noun = "Goal review(s)"
   let restart_reason = "Goal review fibers do not survive server restart"
+  let replayed_running_completion = None
   let completed_retention = `Latest 64
 
   let registration_to_yojson registration =

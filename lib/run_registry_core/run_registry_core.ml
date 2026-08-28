@@ -81,6 +81,8 @@ module type Payload = sig
   val completion_of_yojson : Yojson.Safe.t -> (completion, string) result
   val running_noun : string
   val restart_reason : string
+  val replayed_running_completion
+    : (started_at:float -> registration -> completion) option
   val completed_retention : [ `All | `Latest of int ]
 end
 
@@ -402,18 +404,36 @@ module Make (Payload : Payload) = struct
     | Completed completion -> [ register; Complete { id = entry.id; completion } ]
   ;;
 
-  let drop_replayed_running entries =
+  let settle_replayed_running entries =
     let running, completed = List.partition is_running entries in
-    (match running with
-     | [] -> ()
-     | stale ->
-       Log.Misc.warn
-         "%s: dropped %d replayed running %s; %s"
-         Payload.name
-         (List.length stale)
-         Payload.running_noun
-         Payload.restart_reason);
-    completed
+    match running, Payload.replayed_running_completion with
+    | [], _ -> completed
+    | stale, None ->
+      Log.Misc.warn
+        "%s: dropped %d replayed running %s; %s"
+        Payload.name
+        (List.length stale)
+        Payload.running_noun
+        Payload.restart_reason;
+      completed
+    | stale, Some completion_of ->
+      Log.Misc.warn
+        "%s: settled %d replayed running %s as terminal; %s"
+        Payload.name
+        (List.length stale)
+        Payload.running_noun
+        Payload.restart_reason;
+      List.map
+           (fun entry ->
+              { entry with
+                status =
+                  Completed
+                    (completion_of
+                       ~started_at:entry.started_at
+                       entry.registration)
+              })
+           stale
+      @ completed
   ;;
 
   let compact_replay_log path entries =
@@ -489,7 +509,7 @@ module Make (Payload : Payload) = struct
   ;;
 
   let entries_of_events events =
-    List.fold_left apply_event [] events |> drop_replayed_running |> prune
+    List.fold_left apply_event [] events |> settle_replayed_running |> prune
   ;;
 
   let replay path =

@@ -109,6 +109,24 @@ module Payload = struct
   let name = "exact_lane_run_registry"
   let running_noun = "exact lane run(s)"
   let restart_reason = "exact-output fibers do not survive server restart"
+  let replayed_running_completion =
+    Some
+      (fun ~started_at _registration ->
+         let elapsed_s = Float.max 0.0 (Time_compat.now () -. started_at) in
+         { outcome =
+             Failed
+               { code = "server_restarted"
+               ; detail = restart_reason
+               }
+         ; elapsed_s
+         ; output =
+             `Assoc
+               [ "reason", `String "server_restarted"
+               ; "detail", `String restart_reason
+               ]
+         ; selected_slot = None
+         })
+  ;;
 
   (* Bounded against the surface that reads this, not against the sibling
      registries.
@@ -126,10 +144,11 @@ module Payload = struct
      off the end of the store. 2 000 is ten full pages at the maximum size, or
      forty at the default of 50, and brings the boot replay to ~416 ms.
 
-     [Run_registry_core.prune] keeps every running entry regardless, so a
-     restart cannot lose work in flight; only completed runs past the bound are
-     dropped, and [run_registry_core.ml:498] compacts the log to that set on the
-     next clean replay. *)
+     [Run_registry_core.prune] keeps every in-process running entry regardless.
+     On replay, the vanished fiber is converted to a durable
+     [server_restarted] failure instead of disappearing or remaining Running
+     forever. Only terminal runs past the bound are dropped, and replay
+     compacts the log to that set on the next clean read. *)
   let completed_retention = `Latest 2000
 
   let registration_to_yojson registration =

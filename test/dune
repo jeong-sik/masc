@@ -3768,3 +3768,8 @@
  (name test_keeper_remote_ssh_profile)
  (modules test_keeper_remote_ssh_profile)
  (libraries masc_test_deps))
+
+(test
+ (name test_exec_ssh_endpoints)
+ (modules test_exec_ssh_endpoints)
+ (libraries masc_test_deps))

@@ -295,6 +295,26 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            semantics; only remote_ssh gains the Phase 1 restriction. *)
         | Some _, Some _ | Some _, None | None, _ -> Ok ())
   in
+  (* Phase 1 SSH lane (Task 1 review follow-up): [remote_endpoint] is only
+     meaningful for the remote_ssh profile — it names an
+     [exec.ssh.endpoints.<name>] registry entry that only the SSH dispatch
+     branch consults. Setting it under any other profile (or none) is a
+     typo, not an override, so the load rejects it with a named error
+     instead of silently carrying a value nothing will read. No legacy TOML
+     exists to break: the key itself was introduced by the SSH lane. *)
+  let result =
+    Result.bind result (fun () ->
+        match
+          ( Option.bind (str "sandbox_profile") sandbox_profile_of_string
+          , str "remote_endpoint" )
+        with
+        | Some Remote_ssh, _ -> Ok ()
+        | _, Some _ ->
+            Error
+              "remote_endpoint_requires_remote_ssh: keeper.remote_endpoint is \
+               only valid with sandbox_profile = \"remote_ssh\""
+        | _, None -> Ok ())
+  in
   let result =
     Result.bind result (fun () ->
         match str "tools.native" with

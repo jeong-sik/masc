@@ -139,6 +139,23 @@ let test_endpoint_blank_rejected () =
   reject "";
   reject "   "
 
+let test_remote_endpoint_requires_remote_ssh () =
+  let reject profile_pair =
+    let doc =
+      toml_doc_of_string_pairs (profile_pair @ [ "keeper.remote_endpoint", "build-box" ])
+    in
+    match Masc.Keeper_types_profile_toml_parser.profile_defaults_of_toml doc with
+    | Ok _ -> fail "remote_endpoint without remote_ssh profile must be rejected"
+    | Error msg ->
+      check bool "named error" true
+        (contains "remote_endpoint_requires_remote_ssh" msg)
+  in
+  reject [ "keeper.sandbox_profile", "docker" ];
+  reject [ "keeper.sandbox_profile", "local" ];
+  (* Absent profile defaults away from remote_ssh, so the endpoint is still
+     rejected. *)
+  reject []
+
 let () =
   run "remote_ssh profile"
     [ "profile", [ test_case "roundtrip" `Quick test_profile_roundtrip
@@ -149,4 +166,6 @@ let () =
                  ; test_case "inherit accepted" `Quick test_network_mode_inherit_accepted ]
     ; "endpoint", [ test_case "missing rejected" `Quick test_endpoint_missing_rejected
                   ; test_case "blank rejected" `Quick test_endpoint_blank_rejected
-                  ; test_case "present accepted" `Quick test_endpoint_present_accepted ] ]
+                  ; test_case "present accepted" `Quick test_endpoint_present_accepted
+                  ; test_case "requires remote_ssh" `Quick
+                      test_remote_endpoint_requires_remote_ssh ] ]

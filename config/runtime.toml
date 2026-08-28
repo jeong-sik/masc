@@ -75,6 +75,33 @@ slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["deepseek.deepseek-v4-pro", "glm-coding.glm-5-turbo"]
 
+# SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
+# docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).
+# A keeper opts in with sandbox_profile = "remote_ssh" + remote_endpoint =
+# "<name>" in its keeper TOML; the name must resolve to one of these tables
+# (unknown names are config-load errors, and unknown keys inside a table fail
+# the load — the registry is fail-closed). No live endpoint ships in the seed;
+# provision one with the exec-ssh bootstrap runbook, then uncomment.
+#
+# [exec.ssh.endpoints.dev]
+# host = "builder.local"              # required — remote host
+# user = "masc-exec"                  # required — remote unix user
+# remote_root = "/srv/masc/playground"  # required — remote playground root
+# port = 22                           # ssh port (default 22)
+# # Dedicated key — a path *reference*; key material lives at 0600 under
+# # <base>/.masc/ssh/ (config/identity/ conventions). Defaults resolve
+# # base-relative with the endpoint name substituted:
+# #   identity_file    = ".masc/ssh/<name>.key"
+# #   known_hosts_file = ".masc/ssh/known_hosts.d/<name>"  (pinned; public)
+# connect_timeout_sec = 10            # -> ssh ConnectTimeout (default 10)
+# max_concurrent_sessions = 8         # ControlMaster multiplex ceiling;
+#                                     # sshd MaxSessions defaults to 10, so
+#                                     # the ceiling must be explicit (default 8)
+# env_allowlist = []                  # request env names allowed to cross the
+#                                     # wire (default [] — no host secrets cross)
+# capabilities = []                   # reserved Phase 2 markers: "kvm",
+#                                     # "firecracker"; unknown values warn-and-ignore
+
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
 protocol = "openai-compatible-http"

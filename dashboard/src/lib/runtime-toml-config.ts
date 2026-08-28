@@ -88,7 +88,7 @@ interface TomlDocument {
 
 type TomlScalar = string | number | boolean | null
 
-// Mirrors the backend's reserved_namespaces (lib/runtime/runtime_toml.ml:554).
+// Mirrors the backend's reserved_namespaces (lib/runtime/runtime_toml.ml).
 // A *provider* id equal to one of these would collide with a top-level TOML
 // namespace once used as a binding pin's first segment (`[<providerId>.<modelId>]`,
 // e.g. `[models.foo]` could no longer be told apart from a model definition
@@ -103,6 +103,7 @@ const RESERVED_TOP_LEVEL = new Set([
   'routes',
   'profiles',
   'web_search',
+  'exec',
 ])
 
 function parseDocument(sourceText: string): TomlDocument {

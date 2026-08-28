@@ -376,6 +376,11 @@ type config =
     (** Raw ordered AGENT_CORE target references from
         [\[runtime.exact_output_lanes.<id>\]]. MASC does not interpret them as
         provider/model runtime bindings. *)
+  ; exec_ssh_endpoints : Exec_ssh_endpoint.t list
+    (** [\[exec.ssh.endpoints.<name>\]] — SSH remote execution endpoint
+        registry (Phase 1 SSH lane, spec §4.2). Keeper TOML [remote_endpoint]
+        names resolve against this list at keeper load/dispatch; an unknown
+        name is a config-load error. *)
   }
 [@@deriving show, eq]
 
@@ -387,6 +392,12 @@ let provider_of_id (cfg : config) (id : string) : provider option =
 
 let model_of_id (cfg : config) (id : string) : model_spec option =
   List.find_opt (fun (m : model_spec) -> String.equal m.id id) cfg.models
+;;
+
+let exec_ssh_endpoint (cfg : config) (name : string) : Exec_ssh_endpoint.t option =
+  List.find_opt
+    (fun (endpoint : Exec_ssh_endpoint.t) -> String.equal endpoint.name name)
+    cfg.exec_ssh_endpoints
 ;;
 
 (** Runtime id derived from a binding: ["provider.model"]. Single source of id

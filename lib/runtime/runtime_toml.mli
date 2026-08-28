@@ -8,6 +8,9 @@
     - [\[models.*\]] — Layer 2
     - [<provider>.<model>] binding tables — Layer 3
     - [\[runtime\].default] — the default Runtime id ([provider.model])
+    - [\[exec.ssh.endpoints.*\]] — SSH remote execution endpoint registry
+      (Phase 1 SSH lane, spec §4.2); exposed as
+      {!Runtime_schema.config.exec_ssh_endpoints}
 
     The routing layers are intentionally NOT parsed: Layer 4 aliases
     ([<p>.<m>.<a>]), Layer 5 [\[routes\]]/[\[system\]]/[\[profiles\]], and the

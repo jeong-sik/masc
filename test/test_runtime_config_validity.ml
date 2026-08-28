@@ -3065,6 +3065,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
+    ; exec_ssh_endpoints = []
     }
   in
   let binding =

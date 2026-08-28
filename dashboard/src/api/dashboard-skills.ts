@@ -1053,10 +1053,18 @@ function parseStrictRfc3339(value: string): Rfc3339Instant | null {
   const offset = zone === 'Z'
     ? 0
     : (offsetHour * 60 + offsetMinute) * (sign === '+' ? 60 : -60)
-  return {
-    value: civil.getTime() / 1000 - offset
-      + (fractionText === '' ? 0 : Number(`0.${fractionText}`)),
-  }
+  const ptimeFraction = fractionText.slice(0, 12)
+  const instant = civil.getTime() / 1000 - offset
+    + (ptimeFraction === '' ? 0 : Number(`0.${ptimeFraction}`))
+  const minimum = new Date(0)
+  minimum.setUTCFullYear(0, 0, 1)
+  minimum.setUTCHours(0, 0, 0, 0)
+  const maximumExclusive = new Date(0)
+  maximumExclusive.setUTCFullYear(10_000, 0, 1)
+  maximumExclusive.setUTCHours(0, 0, 0, 0)
+  if (instant < minimum.getTime() / 1000
+    || instant >= maximumExclusive.getTime() / 1000) return null
+  return { value: instant }
 }
 
 function compareRfc3339(left: Rfc3339Instant, right: Rfc3339Instant): number {
@@ -1083,6 +1091,30 @@ function turnRefBelongsToTrace(turnRef: string, traceId: string): boolean {
 
 function isPortableName(value: string): boolean {
   return value !== '.' && value !== '..' && /^[A-Za-z0-9._-]+$/.test(value)
+}
+
+function isCanonicalSkillName(value: string): boolean {
+  const canonical = value.trim().normalize('NFKC')
+  const scalars = [...canonical]
+  return value === canonical
+    && scalars.length > 0
+    && scalars.length <= 64
+    && !canonical.startsWith('-')
+    && !canonical.endsWith('-')
+    && !canonical.includes('--')
+    && /^[\p{Alphabetic}\p{Number}-]+$/u.test(canonical)
+    && canonical.toLowerCase() === canonical
+}
+
+function skillIdentityIsValid(identity: SkillIdentity): boolean {
+  return isPortableName(identity.source_id)
+    && identity.package_id !== '.'
+    && identity.package_id !== '..'
+    && identity.package_id !== ''
+    && !identity.package_id.includes('/')
+    && !identity.package_id.includes('\\')
+    && !identity.package_id.includes('\0')
+    && isCanonicalSkillName(identity.name)
 }
 
 function isTaskId(value: string): boolean {
@@ -1148,6 +1180,7 @@ function activationPayloadIsValid(
         && parseStrictRfc3339(action.observed_at) !== null)
   return isLowerHexRevision(activation.content_revision)
     && isLowerHexRevision(activation.snapshot_revision)
+    && skillIdentityIsValid(activation.identity)
     && activatedAt !== null
     && traceId.length <= 64
     && /^[A-Za-z0-9_-]+$/.test(traceId)

@@ -1,4 +1,4 @@
-name = "analyze_image"
+name = "keeper_analyze_image"
 description = """
 Read a stored image artifact and return a text description or answer. \
 Delegates to a vision model in a sub-call; the image is never added to this \

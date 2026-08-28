@@ -23,7 +23,7 @@ let test_model_surface_exposes_working_capability_families () =
     ; "Write"
     ; "WebSearch"
     ; "WebFetch"
-    ; "analyze_image"
+    ; "keeper_analyze_image"
     ; "keeper_voice_speak"
     ; "keeper_voice_listen"
     ; "keeper_voice_agent"

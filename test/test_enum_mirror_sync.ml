@@ -231,12 +231,12 @@ let test_keeper_status_bounds_match_their_owner () =
 ;;
 
 (* keeper_artifact_read states its max_bytes bounds and default, and
-   analyze_image its media-type vocabulary. [Keeper_artifact_read] and
+   keeper_analyze_image its media-type vocabulary. [Keeper_artifact_read] and
    [Keeper_vision_tool] own them; in config/tools/*.toml they are literals. *)
 let test_runtime_tool_owners_match () =
   check
     (list string)
-    "analyze_image media types match Keeper_vision_tool"
+    "keeper_analyze_image media types match Keeper_vision_tool"
     (List.sort_uniq String.compare Masc.Keeper_vision_tool.supported_image_media_types)
     (advertised_values_for_schemas
        Masc.Keeper_tool_runtime_schemas.schemas

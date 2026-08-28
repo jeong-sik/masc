@@ -473,7 +473,7 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_broadcast", keeper_shard_write);
     ("keeper_handoff", keeper_shard_write);
     ("keeper_task_create", keeper_shard_add_task);
-    ("analyze_image", keeper_shard_read);
+    ("keeper_analyze_image", keeper_shard_read);
     ("tool_edit_file", keeper_shard_write);
     ("tool_write_file", keeper_shard_write);
     ( "tool_execute",

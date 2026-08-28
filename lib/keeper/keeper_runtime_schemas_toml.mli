@@ -9,4 +9,4 @@
 val fusion : Masc_domain.tool_schema
 val fusion_status : Masc_domain.tool_schema
 val artifact_read : Masc_domain.tool_schema
-val analyze_image : Masc_domain.tool_schema
+val keeper_analyze_image : Masc_domain.tool_schema

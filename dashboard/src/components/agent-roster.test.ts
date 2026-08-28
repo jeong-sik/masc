@@ -592,7 +592,7 @@ describe('countRuntimeKinds', () => {
   })
 
   it('counts Draining-phase keepers under pausedKeepers (band SSOT, not isKeeperPaused)', () => {
-    // RFC-0295 §5.3 (iter-6): The Draining phase routes to the `paused` band
+    // The Draining phase routes to the `paused` band
     // in `keeperBand()` and the rail paint, filter chip, and count chip must
     // all derive from the same `band` SSOT. `isKeeperPaused()` is the
     // action-layer predicate (operator-pause vs. operator-stop) and does
@@ -1253,7 +1253,7 @@ describe('AgentRoster live-only cards', () => {
     ) as HTMLElement[]
     expect(rows.length).toBe(7)
     // every row carries a tone the rail CSS can paint
-    // RFC-0295: `busy` joins the valid set after the RuntimeBand 5th-value
+    // `busy` joins the valid set after the RuntimeBand 5th-value
     // extension; the CSS `[data-tone="busy"]` selectors in fleet.css are now
     // reachable from a transient-phase keeper.
     const valid = new Set(['ok', 'warn', 'bad', 'idle', 'busy'])
@@ -1261,7 +1261,7 @@ describe('AgentRoster live-only cards', () => {
     const toneByName = (name: string) =>
       rows.find(r => r.textContent?.includes(name))?.getAttribute('data-tone')
     // band → tone: paused=warn, offline=idle (the unambiguous bands).
-    // RFC-0295 §5.3: Draining routes to `paused` band → warn rail (matches
+    // Draining routes to `paused` band → warn rail (matches
     // prototype `data.jsx:37,49` `pause` glyph / `warn` tone pairing). It
     // is NOT in the transient group, so the transient-count chip drops
     // from 4 to 3.

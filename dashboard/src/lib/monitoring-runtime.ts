@@ -236,14 +236,14 @@ function keeperBand(projection: KeeperRuntimeProjection): RuntimeBand {
   // `projection.opState.kind === 'offline'`; routing through the runtime
   // projection keeps monitoring aligned with detail live-truth.
   //
-  // RFC-0295 §5.2 (pixel-perfect Fleet tone rail): autonomous transient FSM
+  // Pixel-perfect Fleet tone rail: autonomous transient FSM
   // phases (Compacting / HandingOff / Restarting) get their own band so the
   // prototype's busy rail becomes live instead of collapsing into `active`.
   // Routed *before* attention so a mid-compaction blocker check doesn't
   // repaint the row as red — the operator's first scan question is "what is
   // currently moving", not "what is currently failing".
   //
-  // RFC-0295 §5.3 (pixel-perfect Fleet tone rail, Draining reconciliation):
+  // Pixel-perfect Fleet tone rail, Draining reconciliation:
   // `Draining` routes to the `paused` band based on phase directly — NOT
   // through `opState.kind === 'paused'`, because the operational state
   // machine distinguishes "operator pause" (kind=paused, can be resumed) from

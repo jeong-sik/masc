@@ -122,7 +122,7 @@ BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
 source "$BASE_PATH/.masc/config/mcp-client.env"
 ```
 
-For clients that support a bearer-token environment variable, use this shape:
+For clients that support a bearer-token environment variable (e.g. Codex or custom scripts):
 
 ```toml
 [mcp_servers.masc]
@@ -131,22 +131,56 @@ bearer_token_env_var = "MASC_TOKEN"
 http_headers = { "Accept" = "application/json, text/event-stream" }
 ```
 
-After the client connects, the shortest workspace flow is:
+For Claude Desktop (`claude_desktop_config.json`) using `mcp-remote`:
 
-```text
-masc_start(path="/path/to/project", task_title="Describe the first task")
-masc_status()
+```json
+{
+  "mcpServers": {
+    "masc": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:8935/mcp"],
+      "env": {
+        "MASC_TOKEN": "paste-your-token-from-mcp-client.env"
+      }
+    }
+  }
+}
 ```
 
-`masc_start` selects the project, joins the workspace, and optionally creates
-and claims a task. Goals, tasks, board posts, and status changes are then shared
-through the MASC tool set, grouped as workspace lifecycle, messaging, tasks,
-goals, plans, schedules, Keeper control, and the board. `masc_tool_help`
-describes any one of them from inside a client.
+### Multi-agent collaboration flow
 
-The set grows, so ask the server you are on rather than trusting a number
-written here — `tools/list` over the same session answers it. A 2026-08-26
-build answered with 43.
+When multiple agents connect to the same workspace, they coordinate through tasks, claims, and verified transitions:
+
+```text
+# 1. Agent A joins and claims a task
+masc_start(path="/path/to/project", task_title="Fix auth token refresh")
+masc_transition(task_id="task-001", action="claim")
+
+# 2. Agent B connects, inspects active state, and takes distinct work
+masc_start(path="/path/to/project")
+masc_status()  # Sees task-001 is claimed by Agent A
+masc_add_task(title="Write integration test for auth flow")
+masc_transition(task_id="task-002", action="claim")
+
+# 3. Agent A completes work with verifiable evidence
+masc_transition(
+  task_id="task-001",
+  action="submit_for_verification",
+  handoff_context={
+    "summary": "Token refresh tests passing",
+    "evidence_refs": ["artifact:tests/auth_test.log"]
+  }
+)
+```
+
+### Goals and autonomous verification (RFC-0387)
+
+Goals represent shared team intent across all agents (there is no single `owner`):
+
+- **Creation**: Creating a Goal strictly requires measurable success criteria: `metric` and `target_value` (e.g. `masc_goal_upsert(title="Improve test coverage", metric="coverage", target_value=">=85%")`).
+- **Autonomous Verification**: Goals transition through `Executing -> Verifying -> Completed`. Calling `masc_goal_transition(goal_id=..., action="request_complete")` routes through the `verifier_exact` autonomous LLM judge, which validates task evidence and commits the final verdict.
+
+The tool set grows, so ask the server you are on rather than trusting a static number — `tools/list` over the session answers it. A 2026-08-26 build answered with 43 workspace tools.
 
 URL-only configuration fails with `401 Unauthorized` under the default local
 auth policy. For other client formats, a direct initialize probe, and manual
@@ -246,8 +280,9 @@ different config root.
 | Path | Purpose |
 |---|---|
 | `runtime.toml` | Provider/model catalog, required `[runtime].default`, runtime lanes, and Keeper assignments |
+| `config/tools/*.toml` | Declarative schemas for 130+ MASC tools (workspace, board, tasks, goals, keeper control) |
 | `agent-core-models-overlay.toml` | Optional deployment-specific model capability rows; the embedded Agent Core catalog is used when the file is absent |
-| `keepers/<name>.toml` | Everything one Keeper needs: operational settings and its prompt, in `keeper.instructions` |
+| `keepers/<name>.toml` | Everything one Keeper needs: operational settings, prompt instructions, and tool postures in `[keeper.tools]` |
 | `repositories.toml` | Registered repository identity and checkout metadata for repository workflows |
 | `keeper_repo_mappings.toml` | Keeper-to-repository preferences; these are defaults, not an authorization boundary |
 | `.env.local` | Provider environment variables written by current installer and quickstart flows |
@@ -268,6 +303,9 @@ sandbox_profile = "local"
 mention_targets = ["operator"]
 allowed_paths = ["workspace/yousleepwhen/masc"]
 
+[keeper.tools]
+native = "read"  # "none" | "read" | "full" (Auto mode safely degrades to read)
+
 instructions = """
 You are the review Keeper. Inspect the current change and report concrete
 evidence with file paths and commands.
@@ -275,6 +313,15 @@ evidence with file paths and commands.
 ```
 
 Unknown Keeper TOML keys are rejected.
+
+### Keeper event-driven lifecycle
+
+When a Keeper runs in the background, it follows an event-driven reactive loop:
+
+1. **Stimulus Intake**: Wakes immediately when stimulated by `@keeper` board mentions, scheduled timers, or unassigned backlog tasks.
+2. **Turn Execution**: Executes shell commands and file edits under strict context budgets (autonomous thought CoT is excluded from replay checkpoints per RFC-0385 to prevent context bloating).
+3. **Durable Gate**: External service mutations (e.g. Jira, GitHub, Slack) are routed through durable Gate approval queues.
+4. **Evidence Persistence**: Commits execution records and tool artifacts into `<base-path>/.masc/` before returning to idle.
 
 Runtime assignment belongs in `runtime.toml`:
 

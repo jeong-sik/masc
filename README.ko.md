@@ -120,7 +120,7 @@ BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
 source "$BASE_PATH/.masc/config/mcp-client.env"
 ```
 
-bearer 토큰을 환경 변수로 받는 클라이언트라면 이런 모양으로 씁니다.
+환경 변수 기반 bearer 토큰을 지원하는 클라이언트(예: Codex나 스크립트):
 
 ```toml
 [mcp_servers.masc]
@@ -129,21 +129,57 @@ bearer_token_env_var = "MASC_TOKEN"
 http_headers = { "Accept" = "application/json, text/event-stream" }
 ```
 
-클라이언트가 붙고 나면 가장 짧은 시작 흐름은 이렇습니다.
+Claude Desktop (`claude_desktop_config.json`, `mcp-remote` 사용):
 
-```text
-masc_start(path="/path/to/project", task_title="첫 작업을 한 줄로 적습니다")
-masc_status()
+```json
+{
+  "mcpServers": {
+    "masc": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:8935/mcp"],
+      "env": {
+        "MASC_TOKEN": "mcp-client.env 파일 안의 토큰값"
+      }
+    }
+  }
+}
 ```
 
-`masc_start`가 프로젝트를 고르고, 작업 공간에 참여시키고, 원하면 작업을 하나
-만들어서 바로 담당까지 잡아 줍니다. 그다음부터는 목표, 작업, 보드 글, 상태 변경이
-MASC 도구를 통해 공유됩니다. 도구는 작업 공간 참여와 메시지, 작업, 목표, 계획,
-예약, Keeper 조작, 보드로 나뉩니다. 클라이언트 안에서 `masc_tool_help`로 각 도구
-설명을 볼 수 있습니다.
+### 멀티 에이전트 협업 흐름
+
+여러 에이전트가 같은 작업 공간에 접속하면 작업 점유(claim)와 증거 기반 전이를 통해 충돌을 피합니다.
+
+```text
+# 1. Agent A가 작업 공간에 참여하고 작업 점유 선언
+masc_start(path="/path/to/project", task_title="인증 토큰 갱신 버그 수정")
+masc_transition(task_id="task-001", action="claim")
+
+# 2. Agent B가 참여하여 활성 상태를 확인하고 다른 작업을 점유
+masc_start(path="/path/to/project")
+masc_status()  # task-001이 Agent A에 의해 점유 중임을 확인
+masc_add_task(title="인증 흐름 통합 테스트 작성")
+masc_transition(task_id="task-002", action="claim")
+
+# 3. Agent A가 작업 완료 후 검증 증거와 함께 제출
+masc_transition(
+  task_id="task-001",
+  action="submit_for_verification",
+  handoff_context={
+    "summary": "토큰 갱신 테스트 통과",
+    "evidence_refs": ["artifact:tests/auth_test.log"]
+  }
+)
+```
+
+### Goal 생명주기와 자율 검증 (RFC-0387)
+
+Goal은 개별 에이전트의 소유(`owner`)가 아닌 팀 전체의 공유 목표입니다.
+
+- **Goal 생성**: 정량적 성공 기준(`metric`, `target_value`)이 필수입니다 (예: `masc_goal_upsert(title="테스트 커버리지 개선", metric="coverage", target_value=">=85%")`).
+- **자율 검증 전이**: `Executing → Verifying → Completed` 상태를 따릅니다. `masc_goal_transition(goal_id=..., action="request_complete")`로 완료를 요청하면 `verifier_exact` 자율 판정자가 작업 증거를 검사하여 최종 판정을 확정합니다.
 
 도구는 계속 늘어나니, 여기 적힌 숫자를 믿지 말고 붙어 있는 서버에 직접 물어보세요
-— 같은 세션에서 `tools/list`가 답합니다. 2026-08-26 빌드는 43개로 답했습니다.
+— 같은 세션에서 `tools/list`가 답합니다. 2026-08-26 빌드는 43개 작업 공간 도구로 답했습니다.
 
 URL만 적어 두면 기본 인증 설정에서 `401 Unauthorized`가 납니다. 다른 클라이언트
 형식, initialize 직접 확인, bearer 수동 발급은
@@ -239,8 +275,9 @@ MASC는 런타임 데이터를 `<base-path>/.masc` 아래에서 찾습니다. �
 | 경로 | 용도 |
 |---|---|
 | `runtime.toml` | 프로바이더·모델 목록, 필수 항목인 `[runtime].default`, 런타임 레인, Keeper 배정 |
+| `config/tools/*.toml` | 130여 개 MASC 도구의 정적 스키마 정의 (작업 공간, 보드, 작업, 목표, 키퍼 제어 등) |
 | `agent-core-models-overlay.toml` | 배포 환경에서만 쓰는 모델 능력 항목. 파일이 없으면 내장 Agent Core 목록을 씁니다 |
-| `keepers/<name>.toml` | Keeper 하나에 필요한 전부. 운영 설정과 프롬프트(`keeper.instructions`)가 같이 들어갑니다 |
+| `keepers/<name>.toml` | Keeper 하나에 필요한 전부. 운영 설정, 프롬프트(`keeper.instructions`), `[keeper.tools]` 도구 포스처 |
 | `repositories.toml` | 저장소 작업에 쓰는 저장소 정보와 체크아웃 경로 |
 | `keeper_repo_mappings.toml` | Keeper–저장소 기본 연결. 권한 경계가 아니라 기본값입니다 |
 | `.env.local` | 설치와 quickstart가 써 넣는 프로바이더 환경 변수 |
@@ -261,6 +298,9 @@ sandbox_profile = "local"
 mention_targets = ["operator"]
 allowed_paths = ["workspace/yousleepwhen/masc"]
 
+[keeper.tools]
+native = "read"  # "none" | "read" | "full" (Auto 모드에서는 read로 안전 강등)
+
 instructions = """
 당신은 리뷰 Keeper입니다. 지금 변경을 살펴보고 파일 경로와 명령을 붙여
 구체적인 근거를 보고해 주세요.
@@ -269,7 +309,16 @@ instructions = """
 
 TOML에 모르는 키가 있으면 거부합니다.
 
-런타임 배정은 `runtime.toml`에 적습니다.
+### Keeper 이벤트 반응형 생명주기
+
+Keeper가 백그라운드에서 실행될 때는 이벤트 반응형 루프를 따릅니다.
+
+1. **자극 수신 (Stimulus Intake)**: 보드 멘션(`@keeper`), 예약된 타이머, 또는 대기열에 할당되지 않은 작업이 들어오면 자극 큐가 Keeper를 즉시 깨웁니다.
+2. **턴 실행 (Turn Execution)**: 셸 명령 실행과 파일 수정을 수행합니다 (자율턴 사고 CoT는 RFC-0385에 따라 대화 재생 체크포인트에서 제외되어 컨텍스트 팽창을 방지).
+3. **내구성 게이트 (Durable Gate)**: 외부 서비스 쓰기 액션(Jira, GitHub, Slack 등)은 안전을 위해 내구성 있는 Gate 승인 큐를 거칩니다.
+4. **증거 영속화 (Evidence Persistence)**: 실행 기록과 도구 아티팩트를 `<base-path>/.masc/`에 영속화한 후 다시 대기 상태로 돌아갑니다.
+
+런타임 배정은 `runtime.toml`에 적습니다:
 
 ```toml
 [runtime.assignments]

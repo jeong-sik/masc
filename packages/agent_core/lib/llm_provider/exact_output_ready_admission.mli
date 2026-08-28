@@ -123,6 +123,10 @@ type 'callback_error flow_request_error =
 
 val schema_fingerprint_to_string : schema_fingerprint -> string
 
+val schema_instruction_text : output_requirement -> string
+(** The exact sentence appended to the prompt when the wire cannot carry the
+    schema ([Off]/[JsonMode]); see [Exact_output.schema_instruction_text]. *)
+
 val make_output_requirement
   :  schema:Yojson.Safe.t
   -> minimum_guarantee:minimum_guarantee

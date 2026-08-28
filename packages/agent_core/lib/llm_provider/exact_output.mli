@@ -445,6 +445,13 @@ val resolve_target : admitted_target -> (selected_target, target_selection_error
 (** Brand an opaque domain JSON schema. AGENT_CORE never interprets domain keys as a
     provider wire envelope; it always constructs the selected target's wire
     envelope itself. *)
+val schema_instruction_text : output_requirement -> string
+(** The exact sentence the ready-admission path appends to the prompt when
+    the wire cannot carry the schema ([Off] and [JsonMode] response formats):
+    the canonical schema JSON prefixed with the one-JSON-value instruction.
+    Exported so non-HTTP executors (official-client lane slots) instruct the
+    model with the same words instead of a drifting local copy. *)
+
 val make_output_requirement
   :  schema:Yojson.Safe.t
   -> minimum_guarantee:minimum_guarantee

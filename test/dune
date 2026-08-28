@@ -70,11 +70,6 @@
 ; Group 1: Pure synchronous tests
 
 (test
- (name test_keeper_json_schema_keyword_walk)
- (modules test_keeper_json_schema_keyword_walk)
- (libraries alcotest masc eio_main yojson))
-
-(test
  (name test_tui_keeper_config)
  (modules test_tui_keeper_config)
  (libraries alcotest masc_tui_keeper_config yojson str))

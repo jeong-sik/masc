@@ -134,7 +134,6 @@
   mtime.clock.os
   uuidm
   zstd
-  zarith
   dune-build-info
   time_compat
   fs_compat

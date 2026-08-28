@@ -96,7 +96,6 @@
   (mirage-crypto-pk (>= 1.0))
   (x509 (>= 1.0))
   (integers (>= 0.7))
-  (zarith (>= 1.14))
   (zstd (>= 0.4))
   (httpun (>= 0.2))
   (httpun-eio (>= 0.2))

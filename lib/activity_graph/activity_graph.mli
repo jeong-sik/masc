@@ -15,7 +15,7 @@
     and project the log into JSON views consumed by the SSE
     activity stream and the dashboard graph endpoint:
 
-    - {!format_sse_event} — single-event SSE wire encoding.
+    - [format_sse_event_data] — private single-event SSE wire encoding.
     - {!emit} — append + fan-out to every registered SSE
       client.
     - {!list_events} — page over the persisted log.

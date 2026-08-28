@@ -225,7 +225,7 @@ val validate_existing_state_read_only_result :
     or WAL compaction. A WAL-only owner is replayed from the row's exact
     complete pre-transition state;
     absence of both artifacts is an explicit error, matching
-    {!load_existing_state_result}. *)
+    {!load_state_result}. *)
 
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

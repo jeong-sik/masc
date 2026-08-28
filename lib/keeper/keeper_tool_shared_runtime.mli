@@ -81,7 +81,7 @@ val resolve_keeper_confined_write_path
     their explicit identity. The resulting path is checked once against the
     objective allowed-root containment boundary. *)
 (** Resolve a read target using the same deterministic namespace as
-    {!resolve_keeper_path}, without existence inference. *)
+    {!resolve_keeper_confined_write_path}, without existence inference. *)
 val resolve_keeper_read_path
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

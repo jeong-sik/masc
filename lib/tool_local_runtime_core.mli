@@ -6,12 +6,9 @@
     Its siblings ({!Tool_local_runtime},
     {!Tool_local_runtime_http}) do
     [include Tool_local_runtime_core], so this module's surface
-    propagates as a re-export through every consumer.  The
-    cmdline-flag-parsing helpers ([parse_pid_and_command],
-    [find_flag_value], [has_flag]) stay
-    private — they are stable but exposing them would invite
-    duplicate-discovery paths that drift from
-    {!discover_processes}'s field-by-field cmdline parser. *)
+    propagates as a re-export through every consumer.
+    The concrete [llama_process] record carries observed process metadata
+    without exposing a second cmdline-discovery path from this core module. *)
 
 (** {1 Types} *)
 
@@ -80,4 +77,3 @@ val split_ws : string -> string list
 (** {1 Process introspection} *)
 
 (** {1 Model discovery} *)
-

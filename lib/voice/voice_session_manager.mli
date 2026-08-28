@@ -11,8 +11,7 @@
     The [session] record carries mutable fields ([last_activity],
     [turn_count], [status]) under that same lock, so {!type-session} is
     abstract — callers route reads through {!session_to_json} and
-    writes through {!heartbeat} / {!increment_turn} /
-    {!suspend_session} / {!resume_session}. *)
+    writes through the lifecycle and activity functions below. *)
 
 (** {1 Types} *)
 

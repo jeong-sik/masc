@@ -122,9 +122,9 @@ let test_valid_instruction_and_exact_reference () =
   (match valid.kind with
    | Inventory.Instruction -> ()
    | Composition _ -> fail "instruction Skill was classified as a composition");
-  (match valid.exposure with
-   | Inventory.Model_visible -> ()
-   | Operator_only -> fail "effective instruction Skill was operator-only");
+  (match valid.catalog_status with
+   | Inventory.Effective -> ()
+   | Shadowed -> fail "effective instruction Skill was marked shadowed");
   let entry =
     match Snapshot.entries frozen with
     | [ entry ] -> entry
@@ -198,7 +198,7 @@ let test_invalid_sibling_isolated_with_digest () =
   | invalid -> failf "expected one invalid item, got %d" (List.length invalid)
 ;;
 
-let test_shadowed_skill_is_operator_only () =
+let test_catalog_status_tracks_source_precedence () =
   let config =
     parse_config
       (config_text
@@ -223,9 +223,9 @@ let test_shadowed_skill_is_operator_only () =
   | [ first; second ] ->
     check string "winner" "First source." first.description;
     check string "shadow" "Second source." second.description;
-    (match first.exposure, second.exposure with
-     | Inventory.Model_visible, Inventory.Operator_only -> ()
-     | _ -> fail "source precedence did not determine typed model exposure");
+    (match first.catalog_status, second.catalog_status with
+     | Inventory.Effective, Inventory.Shadowed -> ()
+     | _ -> fail "inventory lost the typed source-precedence result");
     check bool
       "shadow keeps a different exact reference"
       false
@@ -242,8 +242,8 @@ let () =
         ; test_case "valid composition" `Quick test_valid_composition
         ; test_case "invalid sibling isolation" `Quick
             test_invalid_sibling_isolated_with_digest
-        ; test_case "model and operator exposure" `Quick
-            test_shadowed_skill_is_operator_only
+        ; test_case "catalog source precedence" `Quick
+            test_catalog_status_tracks_source_precedence
         ] )
     ]
 ;;

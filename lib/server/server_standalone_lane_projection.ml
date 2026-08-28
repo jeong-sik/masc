@@ -34,10 +34,22 @@ type lane_spec =
   }
 
 let lane_specs =
-  [ { lane_id = "board_attention_exact"; label = "Board Attention"; required = true }
-  ; { lane_id = "hitl_auto_judge"; label = "HITL Auto Judge"; required = true }
-  ; { lane_id = "librarian_exact"; label = "Librarian"; required = false }
-  ; { lane_id = "compaction_exact"; label = "Compaction"; required = false }
+  [ { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention
+    ; label = "Board Attention"
+    ; required = true
+    }
+  ; { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Hitl_auto_judge
+    ; label = "HITL Auto Judge"
+    ; required = true
+    }
+  ; { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Librarian
+    ; label = "Librarian"
+    ; required = false
+    }
+  ; { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Compaction
+    ; label = "Compaction"
+    ; required = false
+    }
   ; { lane_id = Runtime.verifier_exact_lane_id; label = "Verifier"; required = false }
   ]
 ;;
@@ -58,13 +70,6 @@ let json_string_opt = function
   | Some value -> `String value
 ;;
 
-let exact_lane_id = function
-  | Exact_lane_run_registry.Librarian -> "librarian_exact"
-  | Exact_lane_run_registry.Hitl_auto_judge -> "hitl_auto_judge"
-  | Exact_lane_run_registry.Board_attention -> "board_attention_exact"
-  | Exact_lane_run_registry.Compaction -> "compaction_exact"
-;;
-
 let terminal_of_exact_outcome = function
   | Exact_lane_run_registry.Succeeded -> Succeeded
   | Exact_lane_run_registry.Cancelled -> Cancelled
@@ -81,7 +86,7 @@ let observed_exact_run (run : Exact_lane_run_registry.run) =
         { elapsed_s; selected_slot; _ } ->
       Terminal { kind = Failed; elapsed_s; selected_slot }
   in
-  { lane_id = exact_lane_id run.lane; started_at = run.started_at; status }
+  { lane_id = Exact_lane_run_registry.lane_key run.lane; started_at = run.started_at; status }
 ;;
 
 let terminal_of_verification_outcome = function

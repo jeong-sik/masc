@@ -34,6 +34,8 @@ Scope:
 
 Each path below must appear exactly once and use one owner from the table above.
 
+- `lib/keeper/keeper_tool_assemble_plan_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_assemble_plan_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_board_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_board_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_code_query.ml` - execution-dispatch
@@ -106,6 +108,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_exec_failure.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_factory.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_factory.mli` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_microvm.ml` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_microvm.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_read_backend.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_read_backend.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_read_runner.ml` - sandbox-runtime
@@ -124,6 +128,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_runtime.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_shell_ir_target.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_shell_ir_target.mli` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_ssh.ml` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_ssh.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox.mli` - sandbox-runtime
 - `lib/keeper/keeper_tool_execute_input.ml` - shell-surface

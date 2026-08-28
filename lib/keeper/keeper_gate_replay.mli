@@ -135,7 +135,6 @@ type replayable =
   | Replay_execute
   | Replay_network_read
   | Replay_connector_post
-  | Replay_memory_write
   | Replay_identity
       (** A call to an identity-attached outside service
           ({!Keeper_identity_gate}); the heaviest payload class here, and the
@@ -161,8 +160,8 @@ type replay_execution =
     Covers operations whose approvals a Keeper must otherwise re-earn by
     re-emitting a byte-identical call: [filesystem_write], [tool_execute], and
     producer-typed [network_read] (WebSearch/WebFetch), exact
-    [connector_post] continuations, and exact [memory_write] mutations. Any other operation is
-    {!Not_applicable}; its existing model-issued path remains authoritative.
+    [connector_post] continuations. Any other operation is {!Not_applicable};
+    its existing model-issued path remains authoritative.
 
     [gate_context] is the same causal-context provider the model-issued write
     path supplies. A re-derived input mismatch follows that producer's existing

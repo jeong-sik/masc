@@ -138,19 +138,21 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
      | _ -> ())
   in
 
-(* The route match below admits exactly four MCP paths; classifying them
-   here again must therefore never invent a profile for anything else. An
-   unrouted path reaching this classifier is route-table drift, and a loud
-   failure beats silently granting the widest (Full) surface (#8605 family:
-   unknown input never maps to a permissive default). *)
-let profile_for_mcp_path path =
-  match path with
-  | "/mcp/managed" -> Server_mcp_transport_http.Managed_agent
-  | "/mcp/operator" -> Server_mcp_transport_http.Operator_remote
-  | "/mcp" | "/" -> Server_mcp_transport_http.Full
-  | unrouted -> invalid_arg ("mcp profile requested for unrouted path: " ^ unrouted)
+  (* The route match below admits exactly four MCP paths; classifying them
+     here again must therefore never invent a profile for anything else. An
+     unrouted path reaching this classifier is route-table drift, and a loud
+     failure beats silently granting the widest (Full) surface (#8605
+     family: unknown input never maps to a permissive default). *)
+  let profile_for_mcp_path path =
+    match path with
+    | "/mcp/managed" -> Server_mcp_transport_http.Managed_agent
+    | "/mcp/operator" -> Server_mcp_transport_http.Operator_remote
+    | "/mcp" | "/" -> Server_mcp_transport_http.Full
+    | unrouted ->
+      invalid_arg ("mcp profile requested for unrouted path: " ^ unrouted)
+  in
 
-let h2_request_handler _client_addr h2_reqd =
+  let h2_request_handler _client_addr h2_reqd =
     let h2_req = H2.Reqd.request h2_reqd in
     let h2_headers = h2_req.headers in
     (* Convert H2.Request to Httpun.Request for compatibility with existing code *)

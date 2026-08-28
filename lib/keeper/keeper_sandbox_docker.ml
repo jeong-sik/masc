@@ -112,6 +112,7 @@ let rewrite_docker_command_paths_for_host_validation
 let effective_sandbox_profile ~(meta : keeper_meta) =
   match meta.sandbox_profile with
   | Docker -> Docker, meta.network_mode
+  | Micro_vm -> Micro_vm, meta.network_mode
   | Local -> Local, meta.network_mode
 ;;
 

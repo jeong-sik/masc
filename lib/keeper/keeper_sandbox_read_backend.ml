@@ -13,6 +13,9 @@ open Keeper_types_profile
 
 let is_hardened = function
   | Docker -> true
+  (* A per-container VM is at least as hardened as a container, so reads
+     route through the guest the same way. *)
+  | Micro_vm -> true
   | Local -> false
 
 let should_route_read ~(meta : keeper_meta) : bool =
@@ -122,7 +125,7 @@ let run_command_with_status ?turn_sandbox_factory
   let no_runtime =
     match resolve_result with
     | Runtime _ -> false
-    | No_factory | Local_profile -> true
+    | Backend_unimplemented _ | No_factory | Local_profile -> true
   in
   if no_runtime && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
@@ -136,6 +139,16 @@ let run_command_with_status ?turn_sandbox_factory
     | Runtime runtime ->
       Keeper_turn_sandbox_runtime.run_command_with_status
         ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
+    (* Refuse rather than fall through to the docker image path: the keeper
+       asked for a backend this build cannot start, and running its command
+       anywhere else is the silent-substitution failure of #31178. *)
+    | Backend_unimplemented profile ->
+      Error
+        (Printf.sprintf
+           "sandbox_profile=%s has no runtime in this build; refusing to run \
+            %s elsewhere"
+           (Keeper_types_profile_sandbox.sandbox_profile_to_string profile)
+           head_program)
     | No_factory | Local_profile ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
       | Error err ->

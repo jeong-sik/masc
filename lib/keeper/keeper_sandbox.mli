@@ -10,6 +10,7 @@
 type backend =
   | Local
   | Docker
+  | Micro_vm
 
 type t = {
   keeper_name : string;

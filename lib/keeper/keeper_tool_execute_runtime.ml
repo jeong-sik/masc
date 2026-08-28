@@ -335,6 +335,16 @@ let handle_tool_execute_typed
         in
         let dispatch_sandbox =
           match sandbox_profile with
+          (* Its own arm rather than sharing Docker's: that branch labels the
+             dispatch [via: docker], and a keeper that asked for a VM must not
+             be told docker ran its command. The refusal names what it asked
+             for. *)
+          | Micro_vm ->
+            Error
+              (Keeper_sandbox_shell_ir_target.target_error
+                 ~fields:[ "requested_sandbox", `String "microvm" ]
+                 "sandbox_profile=microvm has no runtime in this build; the \
+                  call is refused rather than dispatched to another backend")
           | Local ->
             if Env_config_sandbox.Gate.allow_local_playground ()
             then (

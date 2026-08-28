@@ -7,6 +7,7 @@
 type sandbox_profile =
   | Local
   | Docker
+  | Micro_vm
 
 exception Invalid_keeper_sandbox_config of string
 

@@ -27,6 +27,12 @@ type resolve_result =
   | Runtime of Keeper_turn_sandbox_runtime.t
   | No_factory
   | Local_profile
+  | Backend_unimplemented of Keeper_types_profile_sandbox.sandbox_profile
+      (** The keeper declared a guest backend this build cannot start. Callers
+          must refuse the call: answering with the host or with another
+          backend's runtime would run the work somewhere the keeper did not
+          ask for, which is how a docker-declared keeper spent weeks
+          executing on the host (#31178). *)
 
 type t
 

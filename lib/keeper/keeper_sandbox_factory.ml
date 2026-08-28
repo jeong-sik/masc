@@ -2,6 +2,7 @@ type resolve_result =
   | Runtime of Keeper_turn_sandbox_runtime.t
   | No_factory
   | Local_profile
+  | Backend_unimplemented of Keeper_types_profile_sandbox.sandbox_profile
 
 type t = {
   config : Workspace.config;
@@ -71,6 +72,10 @@ let resolve (t : t) ~cwd =
     in
     match effective_profile with
     | Keeper_types_profile_sandbox.Local -> Local_profile
+    (* No Micro_vm runtime yet. Handing back a Docker one would launch
+       docker for a keeper that asked for a VM. *)
+    | Keeper_types_profile_sandbox.Micro_vm ->
+      Backend_unimplemented Keeper_types_profile_sandbox.Micro_vm
     | Keeper_types_profile_sandbox.Docker ->
       let host_root =
         Keeper_sandbox.host_root_abs_of_meta ~config:t.config meta

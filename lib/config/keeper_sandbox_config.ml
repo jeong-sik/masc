@@ -7,21 +7,24 @@
 type sandbox_profile =
   | Local
   | Docker
+  | Micro_vm
 
 exception Invalid_keeper_sandbox_config of string
 
 let sandbox_profile_to_string = function
   | Local -> "local"
   | Docker -> "docker"
+  | Micro_vm -> "microvm"
 
 let sandbox_profile_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "local" -> Some Local
   | "docker" -> Some Docker
+  | "microvm" -> Some Micro_vm
   | _ -> None
 
 let valid_sandbox_profile_strings =
-  List.map sandbox_profile_to_string [ Local; Docker ]
+  List.map sandbox_profile_to_string [ Local; Docker; Micro_vm ]
 
 let default_sandbox_profile = Local
 
@@ -69,6 +72,13 @@ let host_root_rel_of_profile profile name =
   | Local -> Playground_paths.bundle_root name
   | Docker ->
       Printf.sprintf "%s/docker/%s/"
+        Playground_paths.all_playgrounds_prefix
+        (Playground_paths.sanitize_keeper_name name)
+  (* Its own root for the same reason Docker has one: the guest mounts this
+     path, and a keeper that moves between profiles must not find the other
+     lane's tree already in place. *)
+  | Micro_vm ->
+      Printf.sprintf "%s/microvm/%s/"
         Playground_paths.all_playgrounds_prefix
         (Playground_paths.sanitize_keeper_name name)
 

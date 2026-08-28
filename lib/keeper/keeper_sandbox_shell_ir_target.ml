@@ -71,6 +71,18 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
     Error
       (target_error
          "typed Shell IR Docker dispatch requires a turn sandbox factory (sandbox profile is Local)")
+  | Backend_unimplemented profile ->
+    Error
+      (target_error
+         ~fields:
+           [ ( "requested_sandbox"
+             , `String
+                 (Keeper_types_profile_sandbox.sandbox_profile_to_string profile) )
+           ]
+         (Printf.sprintf
+            "sandbox_profile=%s has no runtime in this build; the call is \
+             refused rather than dispatched to another backend"
+            (Keeper_types_profile_sandbox.sandbox_profile_to_string profile)))
   | Runtime runtime ->
     let image = docker_image meta in
     (match

@@ -182,6 +182,35 @@ let test_input_map_joins_only_verified_prompt_text () =
   check (option string) "digest mismatch is not joined" None
     changed_memory.exact_text
 
+(* Three surfaces spell a byte count through this: the Context inspector, the
+   attachment note beside a chat message, and the skill-delivery row. The
+   delivery row used to divide by 1024 itself and so had no rung above KB.
+
+   A column has to hold the widest reading, and the widest is not the largest
+   number: [1023.9 KB] is nine cells while [999.9 MB] is eight. The delivery
+   column is sized nine, so that is what this pins. *)
+let test_a_size_never_outgrows_the_column_it_is_drawn_in () =
+  List.iter
+    (fun bytes ->
+      let text = Masc_tui_context_inspector.format_bytes bytes in
+      check bool
+        (Printf.sprintf "%d bytes reads as %s, within nine cells" bytes text)
+        true
+        (String.length text <= 9))
+    [ 0; 1; 999; 1023; 1024; 1_048_575; 1_048_576; 999_999_999;
+      1_073_741_824 ]
+
+let test_a_size_climbs_past_kilobytes () =
+  List.iter
+    (fun (bytes, expected) ->
+      check string (Printf.sprintf "%d bytes" bytes) expected
+        (Masc_tui_context_inspector.format_bytes bytes))
+    [ (512, "512 B")
+    ; (1024, "1.0 KB")
+    ; (1_048_576, "1.0 MB")
+    ; (3_145_728, "3.0 MB")
+    ]
+
 let () =
   run "tui_context_inspector"
     [ ( "decode"
@@ -193,5 +222,9 @@ let () =
             test_prompt_capture_binds_keeper
         ; test_case "joins only verified prompt text" `Quick
             test_input_map_joins_only_verified_prompt_text
+        ; test_case "a size never outgrows its column" `Quick
+            test_a_size_never_outgrows_the_column_it_is_drawn_in
+        ; test_case "a size climbs past kilobytes" `Quick
+            test_a_size_climbs_past_kilobytes
         ] )
     ]

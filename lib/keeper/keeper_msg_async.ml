@@ -900,7 +900,15 @@ let normalize_request_context request_context =
           normalize_values (index + 1) (value :: normalized) rest
       in
       normalize_values 0 [] values
-    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+    | `Intlit literal ->
+      (match Yojson.Safe.from_string literal with
+       | (`Int _ | `Intlit _) as value -> Ok value
+       | _ -> Error "request_context Intlit must contain a JSON integer"
+       | exception Yojson.Json_error _ ->
+         Error "request_context Intlit must contain a JSON integer")
+    | `Float value when Float.is_finite value -> Ok (`Float value)
+    | `Float _ -> Error "request_context float must be finite"
+    | (`Null | `Bool _ | `Int _ | `String _) as value ->
       Ok value
     | `Tuple _ | `Variant _ ->
       Error "request_context must contain JSON-compatible values"

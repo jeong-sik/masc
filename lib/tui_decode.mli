@@ -713,6 +713,7 @@ type standalone_lane = {
   sl_status : standalone_lane_status;
   sl_configuration_state : string;
   sl_admitted_slots : string list;
+  sl_cli_slots : string list;
   sl_dropped_slots : string list;
       (** Slot ids the lane declared that publication could not admit — the
           per-lane answer to "configured single, or configured double with

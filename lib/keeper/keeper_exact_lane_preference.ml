@@ -126,7 +126,7 @@ let apply ~base_path ~keeper_name ~lane_id
           slot.slot_id)
         ~preferred:preference.slot_id
     in
-    { Runtime_exact_output_registry.selected_slots }
+    { resolved with Runtime_exact_output_registry.selected_slots }
 ;;
 
 let validate_admitted_slot ~lane_id ~slot_id =

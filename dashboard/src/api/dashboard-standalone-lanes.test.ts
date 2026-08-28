@@ -10,6 +10,7 @@ function row(laneId: string, status = 'idle') {
     configured: true,
     configuration_state: 'ready',
     admitted_slots: ['primary'],
+    cli_slots: [],
     dropped_slots: [],
     admission_error: null,
     status,

@@ -99,6 +99,7 @@ let test_keeper_preference_reorders_the_librarian_lane () =
        ~lanes:
          [ { Runtime_schema.id = "librarian_exact"
            ; slot_ids = [ "librarian-default"; "librarian-preferred" ]
+           ; cli_slot_ids = []
            }
          ]
        snapshot
@@ -191,6 +192,7 @@ let test_fit_shrinks_to_slot_budget_and_reports_zero_fit () =
        ~lanes:
          [ { Runtime_schema.id = "librarian_exact"
            ; slot_ids = [ "librarian-tight" ]
+           ; cli_slot_ids = []
            }
          ]
        snapshot

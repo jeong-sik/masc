@@ -10,6 +10,12 @@ type admitted_slot =
 type admitted_lane =
   { id : string
   ; slots : admitted_slot list
+  ; cli_slots : string list
+    (* Official-client runtime ids walked as one-shot fallbacks after every
+       catalog slot is exhausted. Carried verbatim from the declaration:
+       whether an id resolves to a live official-client runtime is an
+       execution-time question the lane runner answers with a typed error,
+       and the projection shows the declaration either way. *)
   }
 
 type rejected_slot =
@@ -60,7 +66,9 @@ type selected_slot =
   }
 
 type resolved_lane =
-  { selected_slots : selected_slot list }
+  { selected_slots : selected_slot list
+  ; cli_slots : string list
+  }
 
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }
@@ -154,7 +162,8 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
           (position + 1)
           (String_set.add lane.id seen)
           admitted_by_id
-          ({ id = lane.id; slots } :: admitted_lanes)
+          ({ id = lane.id; slots; cli_slots = lane.cli_slot_ids }
+           :: admitted_lanes)
           (List.rev_append lane_rejected_slots rejected_slots)
           rest
   in
@@ -391,9 +400,12 @@ let resolve_lane registry ~lane_id =
              : selected_slot))
         lane.slots
     in
-    if selected_slots = []
+    (* A lane is empty only when it has NOTHING to run: cli fallbacks keep a
+       lane alive even when every catalog slot was dropped (and a cli-only
+       judge lane is a supported shape — RFC cli-runtimes-as-lane-slots). *)
+    if selected_slots = [] && lane.cli_slots = []
     then Error (No_admitted_lane_slots { lane_id })
-    else Ok { selected_slots }
+    else Ok { selected_slots; cli_slots = lane.cli_slots }
 ;;
 
 let publication_error_to_string = function

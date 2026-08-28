@@ -97,6 +97,7 @@ describe('InternalAgentsMonitor', () => {
       configured: true,
       configurationState: 'ready',
       admittedSlots: ['qwen3-5-cloud'],
+      cliSlots: [],
       droppedSlots: [],
       admissionError: null,
       status: 'idle',
@@ -148,7 +149,7 @@ describe('InternalAgentsMonitor', () => {
     const older = new Promise(resolve => { resolveOlder = resolve })
     const lane = (label: string) => ({
       laneId: 'board_attention_exact', label, required: true, observationOnly: true,
-      configured: true, configurationState: 'ready', admittedSlots: ['primary'], droppedSlots: [],
+      configured: true, configurationState: 'ready', admittedSlots: ['primary'], cliSlots: [], droppedSlots: [],
       admissionError: null, status: 'idle', retainedRunCount: 1, runningCount: 0,
       succeededCount: 1, failedCount: 0, cancelledCount: 0, lastStartedAt: 10,
       lastTerminalAt: 11, lastOutcome: 'succeeded', p50ElapsedSeconds: 1,

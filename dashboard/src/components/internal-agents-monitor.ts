@@ -676,7 +676,7 @@ export function InternalAgentsMonitor() {
                       <tr key=${lane.laneId}>
                         <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code></td>
                         <td class=${statusClass}><strong>${statusLabel}</strong>${lane.admissionError ? html`<br /><span class="text-3xs">${lane.admissionError}</span>` : null}</td>
-                        <td class="mono">${lane.admittedSlots.length === 0 ? '—' : lane.admittedSlots.join(', ')}${lane.droppedSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-danger)]">dropped: ${lane.droppedSlots.join(', ')}</span>`}</td>
+                        <td class="mono">${lane.admittedSlots.length === 0 ? '—' : lane.admittedSlots.join(', ')}${lane.cliSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-text-tertiary)]">cli: ${lane.cliSlots.join(', ')}</span>`}${lane.droppedSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-danger)]">dropped: ${lane.droppedSlots.join(', ')}</span>`}</td>
                         <td class="r mono">${lane.runningCount}</td>
                         <td class="r mono">${lane.retainedRunCount}</td>
                         <td class="r mono">${lane.lastTerminalAt === null ? '관측 기록 없음' : `${lane.lastOutcome ?? 'terminal'} · ${formatDateTimeKo(lane.lastTerminalAt)}`}</td>

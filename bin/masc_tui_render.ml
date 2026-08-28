@@ -4314,10 +4314,19 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
     let base =
       match lane.sl_admitted_slots, lane.sl_admission_error with
       | [], Some reason -> reason
-      | [], None -> "no admitted slot"
+      | [], None ->
+        (* CLI-only lanes are legal (RFC cli-runtimes-as-lane-slots): with a
+           cli suffix declared, an empty catalog list is a shape, not a
+           failure. *)
+        if lane.sl_cli_slots = [] then "no admitted slot" else "cli-only"
       | admitted, None -> String.concat "," admitted
       | admitted, Some reason ->
         String.concat "," admitted ^ " \xc2\xb7 " ^ reason
+    in
+    let base =
+      match lane.sl_cli_slots with
+      | [] -> base
+      | cli -> base ^ " +cli:" ^ String.concat "," cli
     in
     (* A declared slot publication could not admit is the difference between
        "configured single" and "configured double, one silently dropped" —

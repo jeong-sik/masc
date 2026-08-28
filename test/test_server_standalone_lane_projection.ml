@@ -75,6 +75,7 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
   let resolve_lane lane_id =
     Projection.Configured
       { admitted_slots = [ lane_id ^ "-primary" ]
+      ; cli_slots = []
       ; dropped_slots = []
       ; admission_error = None
       }
@@ -183,7 +184,12 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
   in
   let resolve_lane lane_id =
     Projection.Configured
-      { admitted_slots = [ "slot" ]
+      { admitted_slots =
+          (if String.equal lane_id "hitl_auto_judge" then [] else [ "slot" ])
+      ; cli_slots =
+          (if String.equal lane_id "hitl_auto_judge"
+           then [ "antigravity_subscription.gemini-3-7-flash-high" ]
+           else [])
       ; dropped_slots =
           (if String.equal lane_id "librarian_exact"
            then [ "slot-typo" ]
@@ -233,6 +239,24 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
     true
     (match field "hitl_auto_judge" "dropped_slots" with
      | `List [] -> true
+     | _ -> false);
+  (* RFC cli-runtimes-as-lane-slots: the declared cli suffix is on the wire,
+     and a lane whose only slots are cli ones is ready, not degraded. *)
+  check bool
+    "cli slots are surfaced per lane"
+    true
+    (match field "hitl_auto_judge" "cli_slots" with
+     | `List [ `String "antigravity_subscription.gemini-3-7-flash-high" ] -> true
+     | _ -> false);
+  check string
+    "a cli-only lane is ready"
+    "ready"
+    (field "hitl_auto_judge" "configuration_state" |> Yojson.Safe.Util.to_string);
+  check bool
+    "an http-only lane carries an empty cli list"
+    true
+    (match field "librarian_exact" "cli_slots" with
+     | `List [] -> true
      | _ -> false)
 ;;
 
@@ -268,6 +292,7 @@ let test_latest_terminal_uses_completion_time () =
       ~resolve_lane:(fun lane_id ->
         Projection.Configured
           { admitted_slots = [ lane_id ^ "-primary" ]
+      ; cli_slots = []
       ; dropped_slots = []
       ; admission_error = None
       })

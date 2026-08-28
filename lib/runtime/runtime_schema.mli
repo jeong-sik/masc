@@ -241,6 +241,11 @@ type lane_decl =
 type exact_output_lane_decl =
   { id : string
   ; slot_ids : string list
+  ; cli_slot_ids : string list
+        (** [cli_slots] — official-client runtime ids walked as one-shot
+            fallbacks AFTER every catalog slot is exhausted
+            (RFC cli-runtimes-as-lane-slots). Empty keeps the lane
+            HTTP-only. *)
   }
 [@@deriving show, eq]
 

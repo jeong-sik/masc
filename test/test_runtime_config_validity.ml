@@ -1003,6 +1003,40 @@ let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
   | Error _ -> ()
   | Ok _ -> fail "duplicate exact-output slots must fail config parsing"
 
+let test_exact_output_lane_cli_slots_parse_in_order () =
+  let config =
+    "[runtime.exact_output_lanes.hitl_auto_judge]\n\
+     slots = [\"slot-a\"]\n\
+     cli_slots = [\"antigravity_subscription.gemini-3-7-flash-high\", \"claude_subscription.claude-opus-5\"]\n"
+  in
+  (match Runtime_toml.parse_string config with
+   | Error _ -> fail "cli_slots must parse"
+   | Ok config ->
+     (match config.Runtime_schema.exact_output_lane_decls with
+      | [ lane ] ->
+        check (list string) "cli declaration order is preserved"
+          [ "antigravity_subscription.gemini-3-7-flash-high"
+          ; "claude_subscription.claude-opus-5"
+          ]
+          lane.cli_slot_ids
+      | _ -> fail "exactly one exact-output lane must parse"));
+  let absent = "[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [\"slot-a\"]\n" in
+  (match Runtime_toml.parse_string absent with
+   | Error _ -> fail "a lane without cli_slots must parse"
+   | Ok config ->
+     (match config.Runtime_schema.exact_output_lane_decls with
+      | [ lane ] ->
+        check (list string) "absent cli_slots means HTTP-only" [] lane.cli_slot_ids
+      | _ -> fail "exactly one exact-output lane must parse"));
+  let duplicate =
+    "[runtime.exact_output_lanes.hitl_auto_judge]\n\
+     slots = [\"slot-a\"]\n\
+     cli_slots = [\"rt.x\", \"rt.x\"]\n"
+  in
+  match Runtime_toml.parse_string duplicate with
+  | Error _ -> ()
+  | Ok _ -> fail "duplicate cli slots must fail config parsing"
+
 let test_exact_output_lane_rejects_unknown_key () =
   let config =
     "[runtime.exact_output_lanes.compaction_exact]\n\
@@ -4445,6 +4479,8 @@ let () =
             `Quick test_deployment_agent_core_model_catalog_modality_priorities_resolve;
           test_case "exact-output lane config is ordered and rejects duplicates" `Quick
             test_exact_output_lane_config_is_ordered_and_rejects_duplicates;
+          test_case "exact-output lane cli_slots parse in order" `Quick
+            test_exact_output_lane_cli_slots_parse_in_order;
           test_case "exact-output lane rejects unknown keys" `Quick
             test_exact_output_lane_rejects_unknown_key;
           test_case "retired native-streaming capability is rejected" `Quick

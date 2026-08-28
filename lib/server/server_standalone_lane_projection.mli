@@ -9,6 +9,9 @@
 type lane_configuration =
   | Configured of
       { admitted_slots : string list
+      ; cli_slots : string list
+            (** Official-client runtime ids the lane walks as one-shot
+                fallbacks after catalog exhaustion (declaration order). *)
       ; dropped_slots : string list
             (** Slot ids the lane DECLARED that publication could not admit —
                 absent from the frozen catalog (a typo, a removed model, or a

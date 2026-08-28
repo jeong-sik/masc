@@ -114,7 +114,7 @@ let pending_entry
 let publish_lane slot_ids snapshot =
   match
     Runtime.publish_exact_output_registry
-      ~lanes:[ { Runtime_schema.id = Worker.For_testing.lane_id; slot_ids } ]
+      ~lanes:[ { Runtime_schema.id = Worker.For_testing.lane_id; slot_ids; cli_slot_ids = [] } ]
       snapshot
   with
   | Ok _ -> ()

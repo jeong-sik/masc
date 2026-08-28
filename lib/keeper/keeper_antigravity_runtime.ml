@@ -736,10 +736,13 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         in
         let projected =
           Host.host_stop_result
+            ~runtime_id
             ~model:config.model
             ~session_id
             ~turn_id
             ~turns_used:turn_count
+            ~latency_ms:
+              (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
             stop
         in
         let* () =

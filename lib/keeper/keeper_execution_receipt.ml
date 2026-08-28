@@ -141,17 +141,6 @@ let operator_disposition (receipt : t)
     | Provider_error _
     | Unknown _ -> false
   in
-  (* Terminal success as the producer's turn disposition states it.  The
-     [Keeper_terminal_reason] typing has no success variant (success is not
-     a failure family), so the success check reads the turn disposition
-     instead of pattern-matching [terminal_reason]. *)
-  (* [is_success] enumerates every disposition variant, so a new one is a
-     compile error there instead of a silent not-success here — the
-     [input_required] check twelve lines up already relies on that. *)
-  let turn_success =
-    Keeper_turn_disposition.is_success
-      (Keeper_turn_disposition.of_wire receipt.terminal_reason_code)
-  in
   let provider_runtime_failure =
     match terminal_reason with
     | Keeper_terminal_reason.Provider_runtime_failure _ -> true
@@ -300,17 +289,11 @@ let operator_disposition (receipt : t)
            because the outcome is success — the runtime was simply not
            needed.  Previously unmapped (1062 WARN/day on 2026-05-24). *)
         Disp_pass, Reason_healthy
-      | `Ok when receipt.runtime_outcome = Runtime_not_observed && turn_success ->
-        (* The turn provably ran and completed — terminal success, stop
-           reason completed, agent-core turns recorded (2..28 on the
-           2026-08-27 receipts), tool execution observed by the completion
-           contract — but no runtime attempt observation was written
-           (attempt_count=0, selected_model=null; claude_code subscription
-           lane, 38 WARN/day).  Every success signal agrees, so the absent
-           observation is missing bookkeeping, not a lost turn; not the
-           #11651 blocked->unknown silent path.  Gated on turn_success so a
-           failed turn without an observation still falls to unmapped. *)
-        Disp_pass, Reason_healthy
+      (* masc#31312 closed the producer gap this arm papered over: the
+         official-client host-stop path now writes a one-attempt runtime
+         observation, so a successful turn no longer arrives as
+         [Runtime_not_observed]. A receipt that still does is a new
+         producer hole and belongs in unmapped, per the contract above. *)
       | _
         when (match terminal_reason with
               | Keeper_terminal_reason.Accept_rejected _ -> true

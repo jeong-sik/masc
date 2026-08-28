@@ -325,10 +325,12 @@ let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
   let result =
     match
       Host.host_stop_result
+        ~runtime_id:"official-client-runtime"
         ~model:"official-client-model"
         ~session_id:"session-1"
         ~turn_id:"turn-2"
         ~turns_used:2
+        ~latency_ms:(Some 1234)
         (Repeated_tool_call { tool_name = "masc_probe"; repeated_count = 3 })
     with
     | Ok result -> result
@@ -338,6 +340,16 @@ let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
   check int "turns" 2 result.turns;
   check bool "no synthetic Agent Core checkpoint" true
     (Option.is_none result.checkpoint);
+  (* masc#31312: a host stop is one vendor-loop attempt; the receipt
+     classifier reads this observation, and [None] here was what made every
+     host-stopped turn surface as unmapped_runtime_state. *)
+  (match result.runtime_observation with
+   | None -> fail "host stop carried no runtime observation (masc#31312)"
+   | Some observation ->
+     check string "observation runtime" "official-client-runtime"
+       observation.Runtime_observation.runtime_id;
+     check int "observation records one attempt" 1
+       (List.length observation.attempts));
   match result.stop_reason with
   | Runtime_agent.Yielded_after_repeated_tool_call
       { turns_used; tool_name; repeated_count } ->
@@ -518,14 +530,23 @@ let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
 let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
   let project outcome =
     Host.host_stop_result
+      ~runtime_id:"official-client-runtime"
       ~model:"official-client-model"
       ~session_id:"session-terminal"
       ~turn_id:"turn-terminal"
       ~turns_used:4
+      ~latency_ms:(Some 250)
       (Terminal_tool_boundary { tool_name = "terminal"; outcome })
   in
   (match project Terminal_completed with
-   | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed; _ } -> ()
+   | Ok
+       { Runtime_agent.stop_reason = Runtime_agent.Completed
+       ; runtime_observation = Some _
+       ; _
+       } ->
+     ()
+   | Ok { Runtime_agent.runtime_observation = None; _ } ->
+     fail "terminal completion lost its runtime observation (masc#31312)"
    | Ok _ | Error _ -> fail "terminal completion changed outcome");
   (match project Durable_stimulus_deferred with
    | Ok
@@ -577,10 +598,12 @@ let test_terminal_host_stop_runs_completion_hooks_in_order () =
   in
   let projected =
     Host.host_stop_result
+      ~runtime_id:"official-client-runtime"
       ~model:"official-client-model"
       ~session_id:"session-terminal"
       ~turn_id:"turn-terminal"
       ~turns_used:4
+      ~latency_ms:None
       (Terminal_tool_boundary
          { tool_name = "terminal"; outcome = Terminal_completed })
   in

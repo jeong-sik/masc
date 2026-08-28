@@ -646,7 +646,7 @@ let test_denylist_beats_allowlist () =
 
 - [x] **Step 3: Run gated locally** — `scripts/test-ssh-fixture.sh` in one shell, then `MASC_TEST_SSH_FIXTURE=... scripts/dune-local.sh build test/test_keeper_ssh_integration.exe && _build/default/test/test_keeper_ssh_integration.exe`. Record the outcome in the PR description (CI without Docker skips the fixture — same posture as other Docker-dependent tests).
 
-- [ ] **Step 4: Commit** — `test(keeper): SSH lane end-to-end fixture — cancel reaps remote pgid, host ps invariant`
+- [x] **Step 4: Commit** — `test(keeper): SSH lane end-to-end fixture — cancel reaps remote pgid, host ps invariant`
 
 ### Task 11: Docs — RFC-0395, runbook, AGENTS.md sweep
 
@@ -661,13 +661,13 @@ let test_denylist_beats_allowlist () =
 
 - [x] **Step 3: AGENTS.md sweep** — no MASC-owned `AGENTS.md` exists in this repository; the parent personal-workspace file is not part of the MASC source/PR authority. The fixture gate and static shim build are documented in the MASC-owned runbook instead.
 
-- [ ] **Step 4: Commit** — `docs: RFC-0395 SSH remote exec lane + operator runbook`
+- [x] **Step 4: Commit** — `docs: RFC-0395 SSH remote exec lane + operator runbook`
 
 ### Task 12: Final review + PR
 
-- [ ] **Step 1: Full suite** — `scripts/ci-run-tests.sh "scripts/dune-local.sh test"`; diff failures against `/tmp/masc-gate-suite-final.log` baseline (only pre-existing failures may remain, same set as Phase 0).
-- [ ] **Step 2: Contract/TLA harness** — run whatever Phase 0 used (`scripts/check-tla.sh` or the dune alias recorded in the Phase 0 plan) plus the structural lint that Phase 0 touched (`test_keeper_local_playground_gate` overlay site precedent).
-- [ ] **Step 3: Reviewer subagent** — requesting-code-review flow against the spec §4.2/§5/§6 (fresh reviewer, not an implementer); resolve or explicitly defer every finding.
+- [x] **Step 1: Full suite** — `scripts/ci-run-tests.sh "scripts/dune-local.sh test"` ran once at the Task 11 head and recorded `/tmp/masc-ssh-phase1-final-suite.log`. The SSH profile/endpoint/protocol/shim/path/secret/preflight/runner suites passed; the repository-wide command exited 1 on existing/environmental clusters (including sandbox `Unix.EPERM`, network-backed matrices, path-SSOT drift, and `Unix.EINTR(waitpid)`). It also found three stale direct `parsed_args` records in `test_heartbeat_integration.ml`; the merged #31459 head already carries their correction, and the final rebased head passes the focused cases plus `scripts/dune-local.sh build @all`.
+- [x] **Step 2: Contract/TLA harness** — `scripts/tla-check.sh`, `scripts/ci/check-tla-variant-sync.sh`, and `scripts/ci/check-tla-harness-coverage.sh` pass. The Phase 0 local-playground gate also passed inside the full-suite run.
+- [x] **Step 3: Review gate** — the draft-PR-only state excludes the `deep-review` skill's reviewer-agent workflow, and this session policy does not permit an ad-hoc subagent. A direct five-tier cumulative-diff review against spec §4.2/§5/§6 found one Blocking issue: an endpoint user beginning with `-` could be parsed by OpenSSH as `ProxyCommand`, enabling local option injection. The final delta rejects unsafe host/user destinations at config load and again before runner side effects, with regression tests.
 - [ ] **Step 4: PR** — `gh pr create` on branch `feat/ssh-remote-exec-lane-20260827`, body per Phase 0's format (goal, design summary, test evidence incl. the gated integration run output, named-error catalog, follow-ups: Phase 2 microVM, keeper-by-keeper migration). Reference spec file and RFC-0395. Note the stacked-base relationship to PR #31202 in the body.
 
 ---

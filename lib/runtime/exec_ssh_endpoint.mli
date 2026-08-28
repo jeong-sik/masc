@@ -31,6 +31,12 @@ val default_max_concurrent_sessions : int
 (** [8] — sessions multiplex onto one ControlMaster connection; sshd
     [MaxSessions] defaults to 10, so the ceiling is explicit. *)
 
+val validate_destination : host:string -> user:string -> (unit, string) result
+(** Reject values that OpenSSH could parse as an option instead of the single
+    [user@host] destination argument, plus whitespace/control bytes and extra
+    [@] separators. This validation is repeated at dispatch as defense in
+    depth for callers that construct {!t} directly. *)
+
 (* Path convention: the defaults above are stored relative to the workspace
    base path, and an operator-written explicit RELATIVE [identity_file] or
    [known_hosts_file] resolves the same way — consumers join either form onto

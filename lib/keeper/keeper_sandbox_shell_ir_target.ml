@@ -79,10 +79,7 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
              , `String
                  (Keeper_types_profile_sandbox.sandbox_profile_to_string profile) )
            ]
-         (Printf.sprintf
-            "sandbox_profile=%s has no runtime in this build; the call is \
-             refused rather than dispatched to another backend"
-            (Keeper_types_profile_sandbox.sandbox_profile_to_string profile)))
+         (Keeper_types_profile_sandbox.backend_unimplemented_message profile))
   | Runtime runtime ->
     let image = docker_image meta in
     (match

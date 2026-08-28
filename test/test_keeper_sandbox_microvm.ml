@@ -108,6 +108,100 @@ let test_image_and_shell_come_last () =
       "argv must end with <image> bash -l -s, got: %s"
       (String.concat " " (List.rev rest))
 
+(* ── Refusal wiring ─────────────────────────────────────────────
+   The profile parses, the argv builder exists, and nothing starts the
+   guest yet. These pin the contract of that gap: every dispatch surface
+   refuses with the shared sentence instead of running docker. *)
+
+let temp_dir prefix =
+  let dir = Filename.temp_file prefix "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let microvm_meta ~name : Masc.Keeper_meta_contract.keeper_meta =
+  let json =
+    `Assoc
+      [ ("name", `String name)
+      ; ("trace_id", `String ("trace-" ^ name))
+      ; ("allowed_paths", `List [ `String "*" ])
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> { meta with sandbox_profile = Profile.Micro_vm }
+  | Error e -> Alcotest.fail e
+
+let refusal = Profile.backend_unimplemented_message Profile.Micro_vm
+
+let with_eio_fs f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  Fun.protect ~finally:Process_eio.reset_for_testing f
+
+let test_factory_resolves_microvm_to_backend_unimplemented () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir "microvm_refuse_factory_" in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"vm-refuse-factory" in
+  let factory = Masc.Keeper_sandbox_factory.create ~config ~meta ~turn_id:7 () in
+  (match
+     Masc.Keeper_sandbox_factory.resolve
+       factory
+       ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
+   with
+   | Backend_unimplemented Profile.Micro_vm -> ()
+   | Backend_unimplemented _ ->
+     Alcotest.fail "refused, but not with the Micro_vm profile"
+   | Runtime _ ->
+     Alcotest.fail
+       "factory resolved a Micro_vm keeper to a runtime — that runtime is \
+        docker's, the substitution the profile forbids"
+   | No_factory | Local_profile ->
+     Alcotest.fail "expected Backend_unimplemented for Micro_vm");
+  Masc.Keeper_sandbox_factory.cleanup factory
+
+let test_docker_shell_entrypoint_refuses_microvm () =
+  let base = temp_dir "microvm_refuse_shell_" in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"vm-refuse-shell" in
+  match
+    Masc.Keeper_sandbox_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
+      ~timeout_sec:5.0
+      ~cmd:"true"
+      ~network_mode:Profile.Network_none
+  with
+  | Error message ->
+    Alcotest.(check string) "shared refusal sentence" refusal message
+  | Ok _ ->
+    Alcotest.fail "docker shell entrypoint executed for a Micro_vm keeper"
+
+let test_docker_bash_entrypoint_refuses_microvm () =
+  let base = temp_dir "microvm_refuse_bash_" in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"vm-refuse-bash" in
+  let response =
+    Masc.Keeper_sandbox_docker.run_docker_bash
+      ~turn_sandbox_runtime:None
+      ~config
+      ~meta
+      ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
+      ~timeout_sec:5.0
+      ~cmd:"true"
+      ~network_mode:Profile.Network_none
+  in
+  if not (Astring.String.is_infix ~affix:refusal response)
+  then
+    Alcotest.failf
+      "bash entrypoint did not refuse with the shared sentence; got: %s"
+      response
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -122,5 +216,13 @@ let () =
             test_closed_network_is_spelled_on_the_command
         ; Alcotest.test_case "image and shell come last" `Quick
             test_image_and_shell_come_last
+        ] )
+    ; ( "refusal"
+      , [ Alcotest.test_case "factory resolves to Backend_unimplemented" `Quick
+            test_factory_resolves_microvm_to_backend_unimplemented
+        ; Alcotest.test_case "docker shell entrypoint refuses" `Quick
+            test_docker_shell_entrypoint_refuses_microvm
+        ; Alcotest.test_case "docker bash entrypoint refuses" `Quick
+            test_docker_bash_entrypoint_refuses_microvm
         ] )
     ]

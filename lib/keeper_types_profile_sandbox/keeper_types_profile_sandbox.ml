@@ -91,3 +91,9 @@ let default_network_mode_for_profile = function
   | Micro_vm -> Network_none
 ;;
 
+let backend_unimplemented_message profile =
+  Printf.sprintf
+    "sandbox_profile=%s has no runtime in this build; the call is refused \
+     rather than dispatched to another backend"
+    (sandbox_profile_to_string profile)
+;;

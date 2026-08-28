@@ -293,6 +293,7 @@ let status_ansi_color = function
 let lift_enabled = ref true
 
 let set_lift_enabled value = lift_enabled := value
+let lift_is_enabled () = !lift_enabled
 
 let ansi_readable_for ~colors_enabled ~project palette color =
   let code = ansi_color_code color in

@@ -7285,6 +7285,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Ok snapshot ->
            state.gate_pending <- snapshot.Tui_decode.gs_pending;
            state.gate_modes <- snapshot.Tui_decode.gs_modes;
+           state.gate_queue_unavailable <- snapshot.Tui_decode.gs_queue_unavailable;
            state.gate_error <- None;
            let count = List.length (approval_items state) in
            if state.approval_cursor >= count then
@@ -8819,15 +8820,52 @@ and is loaded on demand through keeper_skill.
                 with
                 | Error detail -> add_event state "error" ("Skill create failed: " ^ detail)
                 | Ok json ->
-                  let status =
-                    match json_assoc_member_opt "status" json with
-                    | Some (`String value) -> value
-                    | _ -> "created"
-                  in
-                  add_event
-                    state
-                    "system"
-                    (Printf.sprintf "%s · %s/%s" status source_id package_id);
+                  (* The server answers exactly created_and_published or
+                     created_but_unpublished(+reason). The old "created"
+                     default reported a status the server never sends and
+                     swallowed the not-published reason — the save path
+                     below already reports it; the create path now does
+                     the same. *)
+                  (match json_assoc_member_opt "status" json with
+                   | Some (`String "created_and_published") ->
+                     add_event
+                       state
+                       "system"
+                       (Printf.sprintf
+                          "created and published · %s/%s"
+                          source_id
+                          package_id)
+                   | Some (`String "created_but_unpublished") ->
+                     let reason =
+                       match json_assoc_member_opt "reason" json with
+                       | Some (`String reason) -> reason
+                       | _ -> "(no reason reported)"
+                     in
+                     add_event
+                       state
+                       "error"
+                       (Printf.sprintf
+                          "%s/%s was created but NOT published: %s"
+                          source_id
+                          package_id
+                          reason)
+                   | Some (`String other) ->
+                     add_event
+                       state
+                       "error"
+                       (Printf.sprintf
+                          "%s/%s: unrecognized create status %S"
+                          source_id
+                          package_id
+                          other)
+                   | Some _ | None ->
+                     add_event
+                       state
+                       "error"
+                       (Printf.sprintf
+                          "%s/%s: create receipt carried no status"
+                          source_id
+                          package_id));
                   launch_tools_load state ~mailbox:async_messages))))
   in
   let handle_skill_evidence () =

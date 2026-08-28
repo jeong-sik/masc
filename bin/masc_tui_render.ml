@@ -1806,8 +1806,17 @@ let render_approvals (state : state) =
            (Ansi.dim ^ "  (no approval data — press 'r' to refresh)"
            ^ Ansi.reset)
      | Some _, None ->
-         box_line buf cols
-           (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset));
+         (* An unreadable approval-queue store and an empty queue must not
+            share a face: the server says which one it was, and "no pending
+            approvals" over a store nobody could read is the lie an operator
+            acts on. *)
+         (match state.gate_queue_unavailable with
+          | Some detail ->
+              box_line buf cols
+                (data_unreliable_row ~cols ("approval queue unavailable: " ^ detail))
+          | None ->
+              box_line buf cols
+                (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset)));
     for _ = 1 to approval_body_rows do
       box_empty buf cols
     done

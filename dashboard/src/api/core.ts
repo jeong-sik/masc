@@ -531,9 +531,11 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
         ? jsonRpcError.message.trim()
         : ''
       const message = topLevelMessage || jsonRpcMessage || structuredErrorDetail
+      // The state key is the discriminator; counting fields would flip the
+      // verdict the moment the server adds a detail field, exactly when the
+      // operator most needs to know the write outcome is indeterminate.
       const configApplicationState = isRecord(parsed.config_application)
         && parsed.config_application.state === 'indeterminate'
-        && Object.keys(parsed.config_application).length === 1
         ? 'indeterminate' as const
         : undefined
       if (message || errorDetail || errorCode) {

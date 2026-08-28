@@ -4037,8 +4037,12 @@ let test_decode_secret_projection_rejects_a_wrong_env_name_type () =
 
 (* ── the durable Gate snapshot ──────────────────────────────────────── *)
 
-let gate_snapshot_json ?(queue = `List []) ?(hitl = `Null) () =
-  `Assoc [ ("approval_queue", queue); ("hitl", hitl) ]
+let gate_snapshot_json ?(queue = `List []) ?(hitl = `Null) ?(queue_state = `Null) () =
+  `Assoc
+    [ ("approval_queue", queue);
+      ("approval_queue_state", queue_state);
+      ("hitl", hitl);
+    ]
 
 let test_decode_gate_identity_row_reads_its_target () =
   (* The row a human decides on: an identity_call names its provider and
@@ -4099,6 +4103,42 @@ let test_decode_gate_null_queue_is_empty_with_modes () =
           Alcotest.check Alcotest.string "external lane" "manual"
             modes.Tui_decode.glm_external
       | None -> Alcotest.fail "the lanes went missing")
+
+let test_decode_gate_unreadable_queue_carries_the_detail () =
+  (* A null queue with an unavailable state is a store nobody could read,
+     not an empty queue — the pane needs the two apart, and the server's
+     operator_detail is what it shows. *)
+  let queue_state =
+    `Assoc
+      [ ("state", `String "unavailable");
+        ("code", `String "reset_required");
+        ("operator_detail", `String "queue journal is corrupt");
+      ]
+  in
+  match
+    Tui_decode.decode_gate_snapshot
+      (gate_snapshot_json ~queue:`Null ~queue_state ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot ->
+      Alcotest.check
+        Alcotest.(option string)
+        "detail survives"
+        (Some "queue journal is corrupt")
+        snapshot.Tui_decode.gs_queue_unavailable
+
+let test_decode_gate_ready_queue_state_is_not_a_warning () =
+  match
+    Tui_decode.decode_gate_snapshot
+      (gate_snapshot_json ~queue_state:(`Assoc [ ("state", `String "ready") ]) ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot ->
+      Alcotest.check
+        Alcotest.(option string)
+        "ready reads as available"
+        None
+        snapshot.Tui_decode.gs_queue_unavailable
 
 let test_decode_gate_row_missing_id_is_an_error () =
   let row =
@@ -4629,6 +4669,10 @@ let () =
           test_decode_gate_identity_row_reads_its_target;
         Alcotest.test_case "a null queue is empty with modes" `Quick
           test_decode_gate_null_queue_is_empty_with_modes;
+        Alcotest.test_case "an unreadable queue carries the detail" `Quick
+          test_decode_gate_unreadable_queue_carries_the_detail;
+        Alcotest.test_case "a ready queue state is not a warning" `Quick
+          test_decode_gate_ready_queue_state_is_not_a_warning;
         Alcotest.test_case "a row missing its id is an error" `Quick
           test_decode_gate_row_missing_id_is_an_error;
       ] );

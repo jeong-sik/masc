@@ -1404,6 +1404,20 @@ export interface KeeperConfigRevision {
   runtime_assignment: KeeperRuntimeAssignmentRevision
 }
 
+/** The server's answer when it could not read the revision at all —
+ * dashboard_http_keeper_snapshot emits `{state:"unavailable", detail}` in
+ * place of the manifest/runtime_assignment pair. Carried as its own arm so
+ * the panel can show `detail` and a save cannot post it as a CAS expected
+ * value. */
+export interface KeeperConfigRevisionUnavailable {
+  state: 'unavailable'
+  detail: string
+}
+
+export type KeeperConfigRevisionState =
+  | KeeperConfigRevision
+  | KeeperConfigRevisionUnavailable
+
 export interface RuntimeRef {
   group: string
   item: string | null
@@ -1509,7 +1523,7 @@ interface KeeperHookIntrospection {
 
 export interface KeeperConfig {
   name: string
-  config_revision: KeeperConfigRevision
+  config_revision: KeeperConfigRevisionState
   config_write?: KeeperConfigWriteReceipt
   config_transaction_warnings?: KeeperManifestWarning[]
   autoboot_enabled: boolean

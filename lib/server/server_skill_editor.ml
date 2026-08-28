@@ -377,12 +377,21 @@ let create ~base_path ~source_id ~package_id ~source_text ~refresh =
     then Error Source_not_ready
     else
       let* () =
+        (* fsync_directory is a blocking primitive whose contract is
+           "call only from a system-thread boundary"; inline it here and
+           the HTTP handler's fiber stalls the whole event loop for the
+           fsync. Same envelope as keeper_fs: run the mkdir+fsync pair in
+           a systhread, re-check cancellation after, and never fold
+           Cancelled into a write failure. *)
         try
-          Unix.mkdir package_dir 0o755;
-          Keeper_fs_durable_directory.fsync_directory source_root;
+          Eio_guard.run_in_systhread (fun () ->
+            Unix.mkdir package_dir 0o755;
+            Keeper_fs_durable_directory.fsync_directory source_root);
+          Eio_guard.check_if_ready ();
           Ok ()
         with
         | Unix.Unix_error (Unix.EEXIST, _, _) -> Error Package_already_exists
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Write_failed (Printexc.to_string exn))
       in
       match
@@ -392,8 +401,26 @@ let create ~base_path ~source_id ~package_id ~source_text ~refresh =
           source_text
       with
       | Error error ->
-        (try Unix.rmdir package_dir with _ -> ());
-        Error (Write_failed (Keeper_fs.durable_write_error_to_string error))
+        let base_detail = Keeper_fs.durable_write_error_to_string error in
+        (* A failed rollback is part of the answer: the leftover empty
+           directory makes every retry report Package_already_exists, so
+           the operator has to know it is there. *)
+        let detail =
+          try
+            Eio_guard.run_in_systhread (fun () -> Unix.rmdir package_dir);
+            Eio_guard.check_if_ready ();
+            base_detail
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | rollback_exn ->
+            Printf.sprintf
+              "%s; rollback left %s in place (%s), so retries will report \
+               a package conflict until it is removed"
+              base_detail
+              package_dir
+              (Printexc.to_string rollback_exn)
+        in
+        Error (Write_failed detail)
       | Ok () ->
         (match refresh () with
          | Error reason -> Ok (Created_but_unpublished { preview; reason })

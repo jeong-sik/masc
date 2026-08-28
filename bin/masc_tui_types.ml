@@ -1551,6 +1551,7 @@ type state = {
      same surface; answered through the dashboard resolve route. *)
   mutable gate_pending: Tui_decode.gate_pending list;
   mutable gate_modes: Tui_decode.gate_lane_modes option;
+  mutable gate_queue_unavailable: string option;
   mutable gate_error: string option;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
@@ -2205,6 +2206,7 @@ let create_state
   keeper_turns_error = None;
   gate_pending = [];
   gate_modes = None;
+  gate_queue_unavailable = None;
   gate_error = None;
   keeper_yolo_names = [];
   runtime_params = [];

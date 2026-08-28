@@ -930,6 +930,10 @@ type gate_lane_modes = {
 type gate_snapshot = {
   gs_pending : gate_pending list;
   gs_modes : gate_lane_modes option;
+  gs_queue_unavailable : string option;
+      (** [Some detail] when the server reported the approval-queue store
+          unreadable ([approval_queue_state.state] other than ready) — the
+          screen must not read that as "no pending approvals". *)
 }
 
 val decode_gate_snapshot : Yojson.Safe.t -> (gate_snapshot, string) result

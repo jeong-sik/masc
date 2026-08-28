@@ -6,7 +6,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision } from '../types'
+import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
   const booleanValue = asBoolean(value)
@@ -101,14 +101,33 @@ function decodeRuntimeAssignmentRevision(value: unknown): KeeperRuntimeAssignmen
   throw new Error('Invalid keeper config response: runtime_assignment state is malformed')
 }
 
-function decodeConfigRevision(value: unknown): KeeperConfigRevision {
+function decodeConfigRevision(value: unknown): KeeperConfigRevisionState {
   if (!isRecord(value) || Object.keys(value).length !== 2) {
     throw new Error('Invalid keeper config response: config_revision must be an object')
+  }
+  // The failure shape shares the two-key count with the success shape, so
+  // the discriminator has to be read before either arm is assumed: the
+  // server answers `{state:"unavailable", detail}` when it could not read
+  // the revision, and that detail is what the operator needs to see.
+  if (value.state === 'unavailable' && typeof value.detail === 'string') {
+    return { state: 'unavailable', detail: value.detail }
   }
   return {
     manifest: decodeManifestRevision(value.manifest),
     runtime_assignment: decodeRuntimeAssignmentRevision(value.runtime_assignment),
   }
+}
+
+/** A write receipt carries the revision the write produced; an unavailable
+ * revision there is a contract violation, not a state to store. */
+function decodeAvailableConfigRevision(value: unknown): KeeperConfigRevision {
+  const revision = decodeConfigRevision(value)
+  if ('state' in revision) {
+    throw new Error(
+      `Invalid keeper config response: write receipt revision is unavailable: ${revision.detail}`,
+    )
+  }
+  return revision
 }
 
 function decodeConfigWarningArray(
@@ -149,7 +168,7 @@ function decodeConfigWrite(value: unknown): KeeperConfig['config_write'] {
     throw new Error('Invalid keeper config response: config_write is malformed')
   }
   return {
-    revision: decodeConfigRevision(value.revision),
+    revision: decodeAvailableConfigRevision(value.revision),
     applied: value.applied,
     warnings: decodeConfigWarningArray(value.warnings),
   }

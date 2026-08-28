@@ -111,6 +111,7 @@ module For_testing : sig
     ?show_activity:(unit -> (unit, error) result) ->
     ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     ?base_url:string ->
+    ?now:(unit -> float) ->
     ?on_send_result:((unit, error) result -> unit) ->
     unit ->
     unit
@@ -118,6 +119,7 @@ module For_testing : sig
       {!Discord_rest_client}; tests can inject exact POST/PATCH outcomes while
       exercising the real event-loop state machine. [show_activity] represents
       one native typing refresh; its failure is observational and never settles
-      [on_send_result]. Rich side-message helpers remain production-backed and
-      should not be emitted by transport tests. *)
+      [on_send_result]. [now] makes edit pacing deterministic. Rich
+      side-message helpers remain production-backed and should not be emitted
+      by transport tests. *)
 end

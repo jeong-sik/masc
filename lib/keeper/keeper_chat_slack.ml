@@ -572,13 +572,14 @@ let adapter_loop_with_transport
     if remaining > 0.0 then sleep remaining
   in
   let rec loop ~acc_text ~acc_blocks ~run_id_opt ~message_id
-      ~last_edit_time ~last_edited_text =
+      ~last_edit_time ~last_edited_text ~post_attempts_left =
     let continue ?(acc_text = acc_text) ?(acc_blocks = acc_blocks)
         ?(run_id_opt = run_id_opt) ?(message_id = message_id)
         ?(last_edit_time = last_edit_time)
-        ?(last_edited_text = last_edited_text) () =
+        ?(last_edited_text = last_edited_text)
+        ?(post_attempts_left = post_attempts_left) () =
       loop ~acc_text ~acc_blocks ~run_id_opt ~message_id ~last_edit_time
-        ~last_edited_text
+        ~last_edited_text ~post_attempts_left
     in
     let event = Keeper_chat_events.subscribe events in
     (* Tool activity shows here as a transient "사용 중" line that the next one
@@ -593,16 +594,27 @@ let adapter_loop_with_transport
          | None, _ -> continue ~acc_text ()
          | Some _, None when patch_content = "" ->
            continue ~acc_text ()
-         | Some (post, _, _, _), None ->
+         | Some (post, _, _, _), None when post_attempts_left > 0 ->
            (match post ~content:patch_content with
             | Ok created_id ->
               continue ~acc_text ~message_id:(Some created_id)
                 ~last_edit_time:(now ()) ~last_edited_text:patch_content ()
             | Error error ->
+              (* A failed POST may still have landed server-side (network
+                 error after send, or ok=true with a missing ts), and Slack
+                 offers no idempotency key for chat.postMessage. One bounded
+                 retry, then this turn degrades to log-only streaming rather
+                 than risk a duplicate channel message; Run_finished still
+                 delivers the reply as a fresh message. *)
               Log.Keeper.warn
                 "keeper_chat_slack: streaming POST failed: %s"
                 (Format.asprintf "%a" pp_error error);
-              continue ~acc_text ())
+              continue ~acc_text
+                ~post_attempts_left:(post_attempts_left - 1) ())
+         | Some _, None ->
+           (* The POST retry budget is spent; skip live edits until the final
+              send. *)
+           continue ~acc_text ()
          | Some (_, edit, _, _), Some message_id ->
            let elapsed = now () -. last_edit_time in
            if patch_content = last_edited_text || elapsed < min_edit_interval_s
@@ -617,7 +629,13 @@ let adapter_loop_with_transport
                   "keeper_chat_slack: streaming PATCH failed (message_id=%s): %s"
                   message_id
                   (Format.asprintf "%a" pp_error error);
-                continue ~acc_text ()))
+                (* A failed edit consumed the rate budget just like a
+                   successful one; leaving last_edit_time stale let every
+                   incoming token retry immediately, deepening a 429 window.
+                   Retry-After is unavailable here (the HTTP client discards
+                   response headers), so re-arming the plain interval is the
+                   honest bound. *)
+                continue ~acc_text ~last_edit_time:(now ()) ()))
     | Text_message_end ->
         let final_content = final_stream_content acc_text in
         (match streaming_transport, message_id with
@@ -695,6 +713,7 @@ let adapter_loop_with_transport
         tool_trail := Keeper_chat_tool_trail.create ();
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
           ~message_id:None ~last_edit_time:0.0 ~last_edited_text:""
+          ~post_attempts_left:2
     | Agent_core_runtime_attempt_started ->
         continue ~acc_text:"" ()
     | Text_message_start { message_id = _; role = _ } ->
@@ -749,7 +768,17 @@ let adapter_loop_with_transport
         continue ~acc_blocks:(add_block acc_blocks block) ()
     | Status_block status ->
         let block = status_block_json status in
-        continue ~acc_text:"" ~acc_blocks:(add_block acc_blocks block) ()
+        (match status.Keeper_chat_blocks.kind with
+         | Keeper_chat_blocks.External_effect_pending ->
+           (* The turn's partial text is deliberately replaced by the
+              pending-approval status; External_effect_completed later deletes
+              the streaming message. *)
+           continue ~acc_text:"" ~acc_blocks:(add_block acc_blocks block) ()
+         | Keeper_chat_blocks.Continuation_checkpoint ->
+           (* A mid-turn checkpoint must not shrink the posted message: the
+              accumulated text is what Text_message_end and Run_finished
+              deliver. *)
+           continue ~acc_blocks:(add_block acc_blocks block) ())
     | Audio_block { token; mime = _; message_text; duration_sec = _ } ->
         let block = audio_block_json ~base_url ~token ~message_text in
         continue ~acc_blocks:(add_block acc_blocks block) ()
@@ -757,7 +786,7 @@ let adapter_loop_with_transport
         continue ()
   in
   loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:None ~message_id:None
-    ~last_edit_time:0.0 ~last_edited_text:""
+    ~last_edit_time:0.0 ~last_edited_text:"" ~post_attempts_left:2
 
 let adapter_loop ~clock ~token ~channel ?thread_ts ~events ?base_url
     ?on_send_result () =

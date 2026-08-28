@@ -305,9 +305,6 @@ module Glyph : sig
 end
 
 val set_lift_enabled : bool -> unit
-val lift_is_enabled : unit -> bool
-(** The current lift stance, for the surface that has to *say* it (the theme
-    screen's state column reads this; #31218 called it before it existed). *)
 (** Whether a colour the scheme leaves under the readable floor is raised
     until it clears. On by default, which is what masc drew before the setting
     existed.
@@ -327,7 +324,9 @@ val lift_is_enabled : unit -> bool
     number means "lifted" under one setting and "left under the floor" under
     the other -- so the screen has to be able to ask which.
 
-    This was removed once, in #31216, as an export nothing called. It was:
-    #31212 added the setting and no reader for it, which is the same thing as
-    a setting that does not appear anywhere. The answer was a caller, not a
-    smaller surface. *)
+    Three changes have now moved this one binding, each correct on its own
+    base and wrong once the others landed: #31212 added the setting with no
+    reader, #31216 removed the reader-less export, #31218 added the reader,
+    and #31227 and #31228 each restored the declaration. If it looks dead
+    again, the thing that broke is the theme screen's last column, not this
+    line. *)

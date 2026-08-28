@@ -138,6 +138,18 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
      | _ -> ())
   in
 
+(* The route match below admits exactly four MCP paths; classifying them
+   here again must therefore never invent a profile for anything else. An
+   unrouted path reaching this classifier is route-table drift, and a loud
+   failure beats silently granting the widest (Full) surface (#8605 family:
+   unknown input never maps to a permissive default). *)
+let profile_for_mcp_path path =
+  match path with
+  | "/mcp/managed" -> Server_mcp_transport_http.Managed_agent
+  | "/mcp/operator" -> Server_mcp_transport_http.Operator_remote
+  | "/mcp" | "/" -> Server_mcp_transport_http.Full
+  | unrouted -> invalid_arg ("mcp profile requested for unrouted path: " ^ unrouted)
+
 let h2_request_handler _client_addr h2_reqd =
     let h2_req = H2.Reqd.request h2_reqd in
     let h2_headers = h2_req.headers in
@@ -560,12 +572,7 @@ let h2_request_handler _client_addr h2_reqd =
             | Some id -> id
             | None -> Mcp_session.generate ()
           in
-          let profile =
-            match path with
-            | "/mcp/managed" -> Server_mcp_transport_http.Managed_agent
-            | "/mcp/operator" -> Server_mcp_transport_http.Operator_remote
-            | _ -> Server_mcp_transport_http.Full
-          in
+          let profile = profile_for_mcp_path path in
           (* HTTP-level auth check for MCP endpoints *)
           let base_path = match current_server_state () with
             | Some s -> (Mcp_server.workspace_config s).base_path
@@ -750,12 +757,7 @@ let h2_request_handler _client_addr h2_reqd =
       | `DELETE, "/mcp"
       | `DELETE, "/mcp/managed"
       | `DELETE, "/mcp/operator" ->
-          let profile =
-            match path with
-            | "/mcp/managed" -> Server_mcp_transport_http.Managed_agent
-            | "/mcp/operator" -> Server_mcp_transport_http.Operator_remote
-            | _ -> Server_mcp_transport_http.Full
-          in
+          let profile = profile_for_mcp_path path in
           let base_path = match current_server_state () with
             | Some s -> (Mcp_server.workspace_config s).base_path
             | None -> default_base_path ()

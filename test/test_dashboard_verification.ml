@@ -336,18 +336,22 @@ let test_task_id_filter () =
      | `List _ -> Alcotest.fail "expected empty list"
      | _ -> Alcotest.fail "requests not list"))
 
-let test_requests_json_surfaces_conflict_triage_fields () =
+(* [request_kind], [request_summary] and [next_action] were projected here
+   until this row was written. Nothing produced them: [submit_request_spec] is
+   the only caller of [Verification.create_request] outside tests, and it set
+   the three to the literals "normal", "" and "". The only place
+   "conflict_triage" appeared in the repository was the reader that matched on
+   it, and the only place the other two were non-empty was the test that hand
+   built an [output] to feed the reader its own vocabulary back.
+
+   What survives is the field the queue actually reads. *)
+let test_requests_json_carries_the_task_title () =
   with_temp_base_path (fun base_path ->
     let output =
       `Assoc [
         ("required_artifacts", `List [`String "artifact://required-A"]);
         ("submitted_evidence", `List [`String "trace://submitted-A"]);
         ("task_title", `String "conflict task");
-        ("request_kind", `String "conflict_triage");
-        ( "request_summary",
-          `String "Conflict verification required: board / planning / mutation path disagree." );
-        ( "next_action",
-          `String "Reconcile board / planning / mutation surfaces before ordinary approval." );
       ]
     in
     let req =
@@ -357,28 +361,24 @@ let test_requests_json_surfaces_conflict_triage_fields () =
       | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
     in
     let j = D.requests_json ~base_path ~task_id:"task-conflict" () in
-    let reqs =
-      match member "requests" j with
-      | `List xs -> xs
-      | _ -> Alcotest.fail "requests should be list"
-    in
     let row =
-      match reqs with
-      | [row] -> row
+      match member "requests" j with
+      | `List [row] -> row
       | _ -> Alcotest.fail "expected one request row"
     in
     (match member "request_id" row with
      | `String id when id = req.id -> ()
      | _ -> Alcotest.fail "request_id mismatch");
-    (match member "request_kind" row with
-     | `String "conflict_triage" -> ()
-     | _ -> Alcotest.fail "request_kind mismatch");
-    (match member "request_summary" row with
-     | `String "Conflict verification required: board / planning / mutation path disagree." -> ()
-     | _ -> Alcotest.fail "request_summary mismatch");
-    (match member "next_action" row with
-     | `String "Reconcile board / planning / mutation surfaces before ordinary approval." -> ()
-     | _ -> Alcotest.fail "next_action mismatch"))
+    (match member "task_title" row with
+     | `String "conflict task" -> ()
+     | _ -> Alcotest.fail "task_title mismatch");
+    List.iter
+      (fun field ->
+        match member field row with
+        | `Null -> ()
+        | _ ->
+          Alcotest.failf "%s is projected again and nothing produces it" field)
+      [ "request_kind"; "request_summary"; "next_action" ])
 
 (* Edges the live store does not currently hold but the writer can produce: an
    empty snapshot, an invalid-reference item that carries no reference at all,
@@ -664,8 +664,8 @@ let () =
       Alcotest.test_case "uses explicit base_path, not env" `Quick
         test_requests_json_uses_explicit_base_path_not_env;
       Alcotest.test_case "task_id filter" `Quick test_task_id_filter;
-      Alcotest.test_case "conflict triage fields" `Quick
-        test_requests_json_surfaces_conflict_triage_fields;
+      Alcotest.test_case "the task title, and nothing that is not produced" `Quick
+        test_requests_json_carries_the_task_title;
       Alcotest.test_case "evidence projection errors" `Quick
         test_requests_json_surfaces_evidence_projection_error;
       Alcotest.test_case "projects every snapshot item kind" `Quick

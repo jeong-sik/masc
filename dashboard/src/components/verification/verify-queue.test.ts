@@ -67,9 +67,6 @@ function requestsResponse(rows: Partial<VerificationRequestsResponse['requests']
       request_id: `vr-${i}`,
       task_id: 'task-1',
       task_title: 'compact lock 재진입 수정',
-      request_kind: 'normal',
-      request_summary: '',
-      next_action: null,
       created_at: '2026-08-23T04:50:00Z',
       submitted_by: 'sangsu',
       completion_contract: [],
@@ -208,21 +205,22 @@ describe('VerifyQueue', () => {
     expect(container.querySelector('.vq-bar-stat.bad')?.textContent).toContain('1 증거 실패')
   })
 
-  it('falls back to the request contract when the task carries none, and shows the submit memo', () => {
+  // The submit memo came from request_summary, a literal empty string in the
+  // producer, so the note never rendered outside this fixture. What the test
+  // is really for -- the contract falling back to the request when the task
+  // carries none -- is what it checks now.
+  it('falls back to the request contract when the task carries none', () => {
     tasks.value = [makeTask({ contract: null })]
     mockState.value = {
       loading: false,
       error: null,
       data: requestsResponse([{
         completion_contract: ['p99 측정 < 400ms'],
-        request_summary: 'open_fds·스위트 통과 · p99 측정 남음',
       }]),
     }
     const { container } = render(html`<${VerifyQueue} />`)
 
     expect(container.querySelector('.vq-gate-ev')?.textContent).toBe('p99 측정 < 400ms')
-    const notes = [...container.querySelectorAll('.vq-note')].map(n => n.textContent)
-    expect(notes.some(t => t?.includes('제출 메모 · open_fds·스위트 통과 · p99 측정 남음'))).toBe(true)
     const submitted = [...container.querySelectorAll('.vq-submitted')].map(n => n.textContent)
     expect(submitted.some(t => t?.includes('제출'))).toBe(true)
   })

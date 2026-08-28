@@ -311,9 +311,6 @@ export interface VerificationRequest {
   request_id: string
   task_id: string
   task_title: string
-  request_kind: 'normal' | 'conflict_triage'
-  request_summary: string
-  next_action: string | null
   created_at: string
   submitted_by: string
   completion_contract: string[]

@@ -546,6 +546,48 @@ let test_the_skill_tool_serves_the_body () =
         (contains ~needle:"gate-instruction" missing))
 ;;
 
+(* task-828: keepers that know a skill by name but not by revision sent ""
+   (and copied placeholders) and were answered by a schema length error that
+   could not name the catalog. The refusal has to hand back the exact
+   references this keeper carries, revision included, so the next call can
+   be the right one. *)
+let test_a_revisionless_ask_is_taught_the_exact_reference () =
+  with_bundle_tools (fun _config _meta _snapshot _composition_plan_index tools ->
+    match
+      List.find_opt
+        (fun (tool : Agent_core.Tool.t) ->
+           String.equal tool.schema.name
+             Keeper_tool_composition_catalog.skill_tool_name)
+        tools
+    with
+    | None -> fail "the instruction skill put no tool on the surface"
+    | Some tool ->
+      let reference = instruction_reference () in
+      let name_only =
+        match Skill_reference.to_yojson reference with
+        | `Assoc fields ->
+          `Assoc
+            (List.map
+               (fun (key, value) ->
+                  if String.equal key "content_revision"
+                  then key, `String ""
+                  else key, value)
+               fields)
+        | other -> other
+      in
+      let taught = run_tool tool name_only in
+      check bool "an empty revision is refused, not served" true
+        (contains ~needle:"requires one canonical exact Skill reference" taught);
+      check bool "the refusal carries the references this keeper holds" true
+        (contains ~needle:"this keeper carries:" taught);
+      check bool "the taught list includes the revision to copy verbatim" true
+        (contains
+           ~needle:
+             (Skill_reference.content_revision_to_string
+                reference.content_revision)
+           taught))
+;;
+
 let test_every_bundle_tool_is_classifiable () =
   with_bundle (fun composition_plan_index names ->
     let unclassifiable =
@@ -653,6 +695,8 @@ let () =
             test_narrow_surface_controls_production_bundle
         ; test_case "the skill tool serves the body" `Quick
             test_the_skill_tool_serves_the_body
+        ; test_case "a revisionless ask is taught the exact reference" `Quick
+            test_a_revisionless_ask_is_taught_the_exact_reference
         ; test_case "inline composition activation is durable" `Quick
             test_inline_composition_activation_is_durable
         ; test_case "async composition activation is durable" `Quick

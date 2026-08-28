@@ -335,8 +335,7 @@ let h2_request_handler _client_addr h2_reqd =
     in
     let session_id_opt = get_session_id_any httpun_request in
     let h2_respond_dashboard_index () =
-      let index_path = dashboard_index_path () in
-      match read_file index_path with
+      match Web_dashboard.load_dashboard_asset "index.html" with
       | Ok body ->
           let etag_value = "\"" ^ dashboard_etag_of_body body ^ "\"" in
           let if_none_match = H2.Headers.get h2_headers "if-none-match" in
@@ -352,7 +351,11 @@ let h2_request_handler _client_addr h2_reqd =
                let extra = [("etag", etag_value); ("cache-control", dashboard_index_cache_control); ("vary", "Accept-Encoding")] @ cors in
                h2_respond_html h2_reqd body ~extra_headers:extra)
       | Error _ ->
-          h2_respond_html h2_reqd "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; pnpm run build</body></html>" ~extra_headers:cors
+          h2_respond_html
+            h2_reqd
+            "<html><body>Dashboard assets unavailable. Inspect /health dashboard_surface.recovery.</body></html>"
+            ~status:`Service_unavailable
+            ~extra_headers:cors
     in
 
     let _h2_authorize_tool state ~tool_name =

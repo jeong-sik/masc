@@ -153,10 +153,10 @@ let assets_root = Web_dashboard.assets_root
 
 (** Local GraphiQL assets *)
 let graphiql_asset_root () =
-  Filename.concat (assets_root ()) "graphiql"
+  Option.map (fun root -> Filename.concat root "graphiql") (assets_root ())
 
 let graphiql_asset_path name =
-  Filename.concat (graphiql_asset_root ()) name
+  Option.map (fun root -> Filename.concat root name) (graphiql_asset_root ())
 
 let asset_content_type name =
   if Filename.check_suffix name ".css" then
@@ -190,34 +190,25 @@ let read_file path =
   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let serve_graphiql_asset name _request reqd =
-  let path = graphiql_asset_path name in
-  match read_file path with
-  | Ok body ->
+  match Option.map read_file (graphiql_asset_path name) with
+  | Some (Ok body) ->
       Http.Response.bytes ~content_type:(asset_content_type name) body reqd
-  | Error _ ->
+  | None | Some (Error _) ->
       Http.Response.not_found reqd
 
 (** Local GraphQL Playground assets *)
 let playground_asset_root () =
-  Filename.concat (assets_root ()) "playground"
+  Option.map (fun root -> Filename.concat root "playground") (assets_root ())
 
 let playground_asset_path name =
-  Filename.concat (playground_asset_root ()) name
+  Option.map (fun root -> Filename.concat root name) (playground_asset_root ())
 
 let serve_playground_asset name _request reqd =
-  let path = playground_asset_path name in
-  match read_file path with
-  | Ok body ->
+  match Option.map read_file (playground_asset_path name) with
+  | Some (Ok body) ->
       Http.Response.bytes ~content_type:(asset_content_type name) body reqd
-  | Error _ ->
+  | None | Some (Error _) ->
       Http.Response.not_found reqd
-
-(** Dashboard SPA assets (Preact + HTM, built by Vite) *)
-let dashboard_asset_root () =
-  Filename.concat (assets_root ()) "dashboard"
-
-let dashboard_index_path () =
-  Filename.concat (dashboard_asset_root ()) "index.html"
 
 (* The tag policy lives with the responder that emits it, so the HTML route
    here and the JSON responses share one definition rather than two copies
@@ -228,15 +219,16 @@ let dashboard_etag_of_body = Http.Response.etag_of_body
 let dashboard_index_cache_control = "no-store, max-age=0, must-revalidate"
 
 let serve_dashboard_index request reqd =
-  match read_file (dashboard_index_path ()) with
+  match Web_dashboard.load_dashboard_asset "index.html" with
   | Ok body ->
       Http.Response.html_cached
         ~etag:(dashboard_etag_of_body body)
         ~request body reqd
   | Error _ ->
-      Http.Response.html
-        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Dashboard not found</title><body><p>Dashboard build not found. Run: <code>cd dashboard &amp;&amp; pnpm run build</code></p></body></html>"
-        reqd
+    Http.Response.html
+      ~status:`Service_unavailable
+      "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Dashboard unavailable</title><body><p>Dashboard assets unavailable. Inspect <code>/health</code> dashboard_surface.recovery.</p></body></html>"
+      reqd
 
 let is_compressible_asset name =
   Filename.check_suffix name ".js"
@@ -247,8 +239,7 @@ let is_compressible_asset name =
   || Filename.check_suffix name ".map"
 
 let serve_dashboard_static name request reqd =
-  let path = Filename.concat (dashboard_asset_root ()) name in
-  match read_file path with
+  match Web_dashboard.load_dashboard_asset name with
   | Ok body ->
       let content_type = asset_content_type name in
       (* Vite hashed assets are immutable; index.html is not *)
@@ -266,27 +257,36 @@ let serve_dashboard_static name request reqd =
       in
       let headers = ("cache-control", cache_control) :: encoding_headers in
       Http.Response.bytes ~headers ~content_type final_body reqd
-  | Error _ ->
-      Http.Response.not_found reqd
+  | Error error ->
+    (match Web_dashboard.asset_error_http_status error with
+     | `Not_found -> Http.Response.not_found reqd
+     | `Service_unavailable ->
+       Http.Response.text
+         ~status:`Service_unavailable
+         "Dashboard assets unavailable; inspect /health dashboard_surface.recovery"
+         reqd)
 
 (** Dashboard Bonsai island (Jane Street Bonsai + js_of_ocaml).
     Coexists with the Preact SPA under [/dashboard/b/*] until the migration is
     complete. See planning/claude-plans/masc-eventual-parrot.md. *)
 let bonsai_asset_root () =
-  Filename.concat (assets_root ()) "dashboard_bonsai"
+  Option.map (fun root -> Filename.concat root "dashboard_bonsai") (assets_root ())
 
 (* Bundle version — mtime of main.bc.js, appended to the script src as a
    query string so the browser refetches whenever the bundle is rebuilt.
    Cache-Control on the bundle itself stays [immutable] (1 year) for cheap
    reloads of unchanged code; the URL change is what defeats the cache. *)
 let bonsai_asset_mtime filename =
-  let path = Filename.concat (bonsai_asset_root ()) filename in
-  try
-    let st = Unix.stat path in
-    Printf.sprintf "%d" (Float.to_int st.st_mtime)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> "0"
+  match bonsai_asset_root () with
+  | None -> "0"
+  | Some root ->
+    let path = Filename.concat root filename in
+    (try
+       let st = Unix.stat path in
+       Printf.sprintf "%d" (Float.to_int st.st_mtime)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | _ -> "0")
 
 let bonsai_bundle_version () = bonsai_asset_mtime "main.bc.js"
 let bonsai_tokens_version () = bonsai_asset_mtime "colors_and_type.generated.css"
@@ -494,9 +494,8 @@ let bonsai_api_keepers_summary request reqd =
         (Masc_dashboard_api_types.Keepers.response_to_yojson resp)
 
 let serve_bonsai_static name request reqd =
-  let path = Filename.concat (bonsai_asset_root ()) name in
-  match read_file path with
-  | Ok body ->
+  match Option.map (fun root -> read_file (Filename.concat root name)) (bonsai_asset_root ()) with
+  | Some (Ok body) ->
       let content_type = asset_content_type name in
       let cache_control =
         if Filename.check_suffix name ".html" then
@@ -512,7 +511,7 @@ let serve_bonsai_static name request reqd =
       in
       let headers = ("cache-control", cache_control) :: encoding_headers in
       Http.Response.bytes ~headers ~content_type final_body reqd
-  | Error _ ->
+  | None | Some (Error _) ->
       Http.Response.not_found reqd
 
 let favicon_svg = {|

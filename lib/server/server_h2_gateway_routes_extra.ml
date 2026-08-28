@@ -236,8 +236,8 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/static/css/middleware.css" ->
-      (match read_file (playground_asset_path "static/css/middleware.css") with
-       | Ok body ->
+      (match Option.map read_file (playground_asset_path "static/css/middleware.css") with
+       | Some (Ok body) ->
            let headers = H2.Headers.of_list [
              ("content-type", "text/css; charset=utf-8");
              ("content-length", string_of_int (String.length body));
@@ -246,12 +246,12 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
            H2.Body.Writer.write_string writer body;
            H2.Body.Writer.close writer
-       | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
+       | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
   | `GET, "/static/js/middleware.js" ->
-      (match read_file (playground_asset_path "static/js/middleware.js") with
-       | Ok body ->
+      (match Option.map read_file (playground_asset_path "static/js/middleware.js") with
+       | Some (Ok body) ->
            let headers = H2.Headers.of_list [
              ("content-type", "application/javascript; charset=utf-8");
              ("content-length", string_of_int (String.length body));
@@ -260,7 +260,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
            H2.Body.Writer.write_string writer body;
            H2.Body.Writer.close writer
-       | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
+       | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
   | `GET, p
@@ -271,9 +271,8 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
         h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found;
         true
       end
-      else
-        let file_path = Filename.concat (dashboard_asset_root ()) ("assets/" ^ filename) in
-        (match read_file file_path with
+      else begin
+        (match Web_dashboard.load_dashboard_asset ("assets/" ^ filename) with
          | Ok body ->
              let ct = asset_content_type filename in
              let is_compressible =
@@ -300,7 +299,16 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
              let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
              H2.Body.Writer.write_string writer final_body;
              H2.Body.Writer.close writer
-         | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
-      true
+         | Error error ->
+           (match Web_dashboard.asset_error_http_status error with
+            | `Not_found ->
+              h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
+            | `Service_unavailable ->
+              h2_respond_text
+                h2_reqd
+                "Dashboard assets unavailable; inspect /health dashboard_surface.recovery"
+                ~status:`Service_unavailable));
+        true
+      end
 
   | _ -> false

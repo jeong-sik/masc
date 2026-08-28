@@ -1,7 +1,7 @@
 ---- MODULE SlotScheduler ----
 \* Bug Model: Single-slot FIFO scheduler starvation.
 \*
-\* Models MASC_KEEPER_AUTONOMOUS_CONCURRENCY=3 with 1 LLM slot.
+\* Models a keeper concurrency of 3 against 1 LLM slot.
 \* 3 keepers enqueue requests; 1 slot processes them FIFO.
 \* Bug: if slot release is omitted (e.g. timeout without cleanup),
 \* the slot is permanently occupied and all keepers starve.

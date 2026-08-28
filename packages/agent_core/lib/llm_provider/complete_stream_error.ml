@@ -14,6 +14,42 @@ let parse_error_raw_excerpt raw =
   else String.sub redacted 0 max_parse_error_raw_excerpt ^ "...(truncated)"
 ;;
 
+(* Diagnostic sink for a frame the wire decoder refused, off unless
+   [MASC_WIRE_PARSE_DUMP] names a file.
+
+   The operator message keeps its 256-byte bound because it is read in a log
+   line, and that bound is what stalled the 2026-08-28 investigation into
+   kimi_coding: 36 of 64 calls ended in sse/malformed_payload, the excerpt
+   showed the parser stopping near the model-name string every time, and the
+   rest of the frame — the part that would say whether bytes went missing,
+   whether two frames overlapped, or whether the break sits on kimi's 8186-byte
+   chunk boundary — was already cut off. The same endpoint answered curl with
+   2,700+ clean frames, so the evidence has to come from the client that sees
+   the break.
+
+   Redaction runs before the write, same SSOT as the excerpt. Failures here are
+   swallowed on purpose: a diagnostic sink must not turn a provider error into
+   a second, different error on the way out. *)
+let dump_refused_frame ~label ~reason raw =
+  match Sys.getenv_opt "MASC_WIRE_PARSE_DUMP" with
+  | None | Some "" -> ()
+  | Some path ->
+    (try
+       let oc = open_out_gen [ Open_append; Open_creat ] 0o600 path in
+       Fun.protect
+         ~finally:(fun () -> close_out_noerr oc)
+         (fun () ->
+            Printf.fprintf
+              oc
+              "%s\t%s\t%d\t%s\n"
+              label
+              reason
+              (String.length raw)
+              (String.escaped (Secret_redactor.redact_string raw)))
+     with
+     | Sys_error _ -> ())
+;;
+
 (* Terminal telemetry labels for stream failures. They live beside the typed
    projection above so a published [Streaming_summary] can never disagree with
    the error it accompanies: both are derived from the same two functions. *)
@@ -108,6 +144,7 @@ let http_error_of_stream_error
             (parse_error_raw_excerpt raw)
       }
   | Types.Stream_parse_failed { reason; raw } ->
+    dump_refused_frame ~label:wire_label ~reason raw;
     Http_client.ProviderFailure
       { kind =
           Http_client.Provider_wire_error
@@ -123,6 +160,7 @@ let http_error_of_stream_error
                (parse_error_raw_excerpt raw))
       }
   | Types.Stream_ndjson_parse_failed { reason; raw } ->
+    dump_refused_frame ~label:"NDJSON" ~reason raw;
     Http_client.ProviderFailure
       { kind =
           Http_client.Provider_wire_error

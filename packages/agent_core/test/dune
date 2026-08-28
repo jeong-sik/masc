@@ -33,6 +33,11 @@
  (modules model_catalog_standalone_probe)
  (libraries agent_core_test_deps llm_provider))
 
+(executable
+ (name test_wire_parse_dump)
+ (modules test_wire_parse_dump)
+ (libraries llm_provider unix))
+
 ; --- AUTO-WIRED ORPHANS (fix/test-dune-orphans) ---
 ; ---- (1) compile failures — not wired until bodies are fixed ----
 ; The following files are NOT wired here because they fail to compile

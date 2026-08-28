@@ -134,6 +134,7 @@ type authorization_source =
   | Exact_always_rule
   | Keeper_always_allow
   | Workspace_always_allow
+  | Readonly_sandbox
 
 type approval_rule =
   { id : string
@@ -200,6 +201,7 @@ let authorization_source_to_string = function
   | Exact_always_rule -> "exact_always_rule"
   | Keeper_always_allow -> "keeper_always_allow"
   | Workspace_always_allow -> "workspace_always_allow"
+  | Readonly_sandbox -> "readonly_sandbox"
 ;;
 
 let authorization_source_of_string = function
@@ -207,6 +209,7 @@ let authorization_source_of_string = function
   | "exact_always_rule" -> Some Exact_always_rule
   | "keeper_always_allow" -> Some Keeper_always_allow
   | "workspace_always_allow" -> Some Workspace_always_allow
+  | "readonly_sandbox" -> Some Readonly_sandbox
   | _ -> None
 ;;
 

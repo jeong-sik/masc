@@ -26,6 +26,9 @@ type authorization_source =
   | Exact_always_rule of string
   | Keeper_always_allow
   | Workspace_always_allow
+  | Readonly_sandbox
+      (** The request is a closed-set observation-only argv inside the docker
+          sandbox ({!Keeper_gate_readonly}); allowed without judgment. *)
 
 type authorization =
   { source : authorization_source

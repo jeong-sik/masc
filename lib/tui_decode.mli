@@ -977,6 +977,11 @@ type server_identity = {
   sid_binary_commit_age_s : float option;
   sid_base_path : string;
   sid_masc_root : string;
+  sid_executable_in_worktree : bool option;
+      (** Whether the server's executable resolved inside [.worktrees/]
+          (health [build.executable_in_worktree]). [None] on an older server
+          that does not carry the field — unknown, so no warning and no
+          all-clear. *)
 }
 (** Which server the TUI is talking to, as [/health] reports it.
 

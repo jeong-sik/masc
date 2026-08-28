@@ -505,6 +505,12 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
         ; Masc_tui_footer.Server_base_path
             (Terminal_text.single_line identity.Tui_decode.sid_base_path)
         ]
+        @
+        (* Only a definite yes warns: an older server that cannot say
+           (None) must not read as either lane. *)
+        (match identity.Tui_decode.sid_executable_in_worktree with
+         | Some true -> [ Masc_tui_footer.Server_worktree_binary ]
+         | Some false | None -> [])
   in
   (* A workspace disagreement rides the footer every surface already draws,
      rather than replacing the screen. The reads that would be wrong under a

@@ -3777,6 +3777,7 @@ type server_identity = {
   sid_binary_commit_age_s : float option;
   sid_base_path : string;
   sid_masc_root : string;
+  sid_executable_in_worktree : bool option;
 }
 
 (* [/health] answers before the workspace is fully up, so every field here is
@@ -3800,6 +3801,13 @@ let decode_server_identity json =
     | Some (`Int value) -> Some (float_of_int value)
     | Some _ | None -> None
   in
+  let sid_executable_in_worktree =
+    (* Three-valued on purpose: [None] is an older server that does not
+       carry the field, and the footer must not warn (or vouch) on it. *)
+    match Option.map (member "executable_in_worktree") build with
+    | Some (`Bool value) -> Some value
+    | Some _ | None -> None
+  in
   Ok
     { sid_version =
         (match member "version" json with
@@ -3809,6 +3817,7 @@ let decode_server_identity json =
     ; sid_binary_commit_age_s
     ; sid_base_path = string_in paths "effective_base_path"
     ; sid_masc_root = string_in paths "effective_masc_root"
+    ; sid_executable_in_worktree
     }
 ;;
 

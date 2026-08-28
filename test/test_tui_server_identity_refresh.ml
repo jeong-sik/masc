@@ -6,6 +6,7 @@ let identity base_path : Tui_decode.server_identity =
   ; sid_binary_commit_age_s = Some 10.
   ; sid_base_path = base_path
   ; sid_masc_root = base_path ^ "/.masc"
+  ; sid_executable_in_worktree = Some false
   }
 
 let test_same_endpoint_restart_replaces_a_with_b () =

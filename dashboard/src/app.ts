@@ -29,7 +29,7 @@ import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } 
 import { setContextThresholds } from './config/context-thresholds'
 import { DashboardMain, DashboardHealthStrip, isKeeperDetailDashboardRoute } from './components/dashboard-shell'
 import { RemoteWarningBanner } from './components/auth-status'
-import { BundleStaleBanner } from './components/bundle-stale-banner'
+import { BundleStaleBanner, WorktreeServerBanner } from './components/bundle-stale-banner'
 import { SkipLink } from './components/skip-link'
 import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
@@ -355,6 +355,7 @@ export function App() {
           (render null when there is no warning / no health signal). */ ''}
       ${compactChromeMode ? null : html`<${RemoteWarningBanner} />`}
       ${compactChromeMode ? null : html`<${BundleStaleBanner} />`}
+      ${compactChromeMode ? null : html`<${WorktreeServerBanner} />`}
       ${compactChromeMode
         ? null
         : html`<${DashboardHealthStrip} hidden=${!shouldShowDashboardHealthStrip(currentTab)} />`}

@@ -74,6 +74,61 @@ export function bundleStaleBannerModel(
   }
 }
 
+// ── worktree-server banner ─────────────────────────────────────────
+//
+// The sibling generation warning: not "this screen is old" but "the server
+// itself is a working tree's build". Two restarts on 2026-08-27 kept an
+// old-generation worktree exe on the live port and every "merged feature is
+// not there" that evening traced back to it. The server now judges its own
+// executable path (health build.executable_in_worktree); this strip makes
+// the verdict visible where the operator already is.
+
+const worktreeBannerDismissed = signal(false)
+
+export function __resetWorktreeBannerForTests(): void {
+  worktreeBannerDismissed.value = false
+}
+
+/** The one-line warning, or null when the server runs the root build — or
+ *  when an older server carries no verdict (unknown is neither lane). */
+export function worktreeServerBannerModel(
+  build: { executable_in_worktree?: boolean; executable_path?: string } | null | undefined,
+): { message: string; path: string | null } | null {
+  if (!build || build.executable_in_worktree !== true) return null
+  return {
+    message:
+      '지금 서버가 작업 중인 worktree 의 빌드로 떠 있습니다 — 라이브는 root 빌드로 재시작하는 것이 안전해요.',
+    path: build.executable_path?.trim() || null,
+  }
+}
+
+export function WorktreeServerBanner() {
+  useEffect(() => subscribeDashboardFullHealthRefresh(), [])
+  const model = worktreeServerBannerModel(dashboardFullHealth.value?.build)
+  if (worktreeBannerDismissed.value || !model) return null
+
+  return html`
+    <div
+      role="alert"
+      data-testid="worktree-server-banner"
+      class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[var(--warn-20)] text-sm font-medium text-[var(--warn-fg)] v2-shell-panel"
+    >
+      <span>
+        ${model.message}
+        ${model.path
+          ? html` <code class="font-mono text-xs opacity-80">${model.path}</code>`
+          : null}
+      </span>
+      <button
+        type="button"
+        class="flex size-6 shrink-0 items-center justify-center rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors v2-shell-action"
+        aria-label="worktree 서버 경고 닫기"
+        onClick=${() => { worktreeBannerDismissed.value = true }}
+      ><${X} size=${14} /><//>
+    </div>
+  `
+}
+
 export function BundleStaleBanner() {
   useEffect(() => subscribeDashboardFullHealthRefresh(), [])
   const model = bundleStaleBannerModel(dashboardFullHealth.value?.dashboard_surface)

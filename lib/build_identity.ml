@@ -16,6 +16,7 @@ type t =
   ; repo_head_commit_age_seconds : int option [@default None]
   ; executable_path : string [@default ""]
   ; executable_dir : string [@default ""]
+  ; executable_in_worktree : bool [@default false]
   ; repo_root : string option [@default None]
   ; runtime_instance_id : string
   ; started_at : string
@@ -306,6 +307,20 @@ let runtime_instance_id = Random_id.uuid_v7 ()
 let resolved_executable_path = executable_path ()
 let resolved_executable_dir = Filename.dirname resolved_executable_path
 
+(* Worktrees live under <repo>/.worktrees/ by workspace convention
+   (instructions/workflow-git.md); an executable resolved from inside one is
+   a working tree's build serving live traffic, which operators repeatedly
+   mistook for the root binary (2026-08-27: two restarts in one evening kept
+   an old-generation worktree exe on the live port). Path convention is the
+   SSOT here — there is no git probe that answers "was this exe built from a
+   worktree" after the fact. *)
+let path_is_in_worktree path =
+  let marker = Filename.dir_sep ^ ".worktrees" ^ Filename.dir_sep in
+  String_util.contains_substring path marker
+;;
+
+let resolved_executable_in_worktree = path_is_in_worktree resolved_executable_path
+
 (** Commit hashes — eagerly resolved at startup.
     Not using [Eio.Lazy] because this is called from tests without Eio context.
     Embedded stamp + git probe are fast and side-effect-free. *)
@@ -338,6 +353,7 @@ let current () =
   ; repo_head_commit_age_seconds = age_seconds ~now repo_head_commit_unix_ts
   ; executable_path = resolved_executable_path
   ; executable_dir = resolved_executable_dir
+  ; executable_in_worktree = resolved_executable_in_worktree
   ; repo_root = resolved_repo_root
   ; runtime_instance_id
   ; started_at = started_at_iso

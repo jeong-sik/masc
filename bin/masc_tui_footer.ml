@@ -16,6 +16,10 @@ type status_item =
      the server resolved. [Server_base_path] already names the server's, so
      the pair reads as the disagreement it is. *)
   | Workspace_mismatch of string
+  (* The server's executable resolved inside .worktrees/: a working tree's
+     build is serving live traffic. Said only when the health probe says so;
+     an older server that cannot say stays silent. *)
+  | Server_worktree_binary
   (* Keepers mid-turn right now, first name first. The operator who sent a
      message and walked to another surface reads the answer's progress here
      instead of standing on the chat pane. Empty list draws nothing. *)
@@ -83,6 +87,11 @@ let status_item_projection = function
   | Workspace_mismatch local ->
     Some
       { text = "MISMATCH local " ^ local ^ " (r:retry)"
+      ; retention = Workspace_conflict
+      }
+  | Server_worktree_binary ->
+    Some
+      { text = "WORKTREE server (not the root build)"
       ; retention = Workspace_conflict
       }
   | Keeper_answering [] -> None

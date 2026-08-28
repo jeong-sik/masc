@@ -84,14 +84,7 @@ def digest(payload: bytes) -> str:
 
 def ledger_projection_matches(line: str, session_id: str, ledger_revision: str) -> bool:
     normalized = line.strip(" │")
-    prefix = f"session={session_id}  ledger="
-    if not normalized.startswith(prefix):
-        return False
-    displayed = normalized[len(prefix) :]
-    if displayed.endswith("…"):
-        displayed = displayed[:-1]
-        return displayed != "" and ledger_revision.startswith(displayed)
-    return displayed == ledger_revision
+    return normalized == f"session={session_id}  ledger={ledger_revision}"
 
 
 def utc_now() -> str:
@@ -427,6 +420,64 @@ def action_markers(actions: list[Any]) -> list[str]:
     return markers
 
 
+def exact_reference_line(activation: dict[str, Any]) -> str:
+    reference_value = activation.get("reference")
+    if isinstance(reference_value, dict):
+        reference = reference_value
+        identity = object_field(reference, "identity", "Skill activation reference")
+    else:
+        reference = activation
+        identity = object_field(activation, "identity", "Skill activation")
+    value = {
+        "identity": {
+            field: string_field(identity, field, "join activation identity")
+            for field in ("source_id", "package_id", "name")
+        },
+        "content_revision": string_field(
+            reference, "content_revision", "Skill activation reference"
+        ),
+    }
+    return "exact=" + json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def receipt_matches_activation(
+    block: str, activation: dict[str, Any], actions: list[Any]
+) -> bool:
+    lines = [line.strip(" │") for line in block.splitlines()]
+    if not lines:
+        return False
+    expected_reference = exact_reference_line(activation)
+    content_marker = '"content_revision":"'
+    if (
+        not expected_reference.startswith(lines[0])
+        or content_marker not in lines[0]
+        or lines[0].endswith(content_marker)
+    ):
+        return False
+    invoked_tokens = {
+        f"turn={integer_field(activation, 'agent_core_turn', 'join activation')}",
+        f"id={string_field(activation, 'skill_tool_use_id', 'join activation')}",
+        f"runtime={string_field(activation, 'runtime_id', 'join activation')}",
+        f"at={string_field(activation, 'activated_at', 'join activation')}",
+    }
+    if sum(invoked_tokens <= set(line.split()) for line in lines[1:]) != 1:
+        return False
+    for index, action_value in enumerate(actions):
+        if not isinstance(action_value, dict):
+            return False
+        action = cast(dict[str, Any], action_value)
+        expected_action_tokens = {
+            action_markers([action])[0],
+            f"turn={integer_field(action, 'agent_core_turn', f'proof action {index}')}",
+            f"runtime={string_field(action, 'runtime_id', f'proof action {index}')}",
+            f"tool={string_field(action, 'tool_name', f'proof action {index}')}",
+            f"at={string_field(action, 'observed_at', f'proof action {index}')}",
+        }
+        if sum(expected_action_tokens <= set(line.split()) for line in lines[1:]) != 1:
+            return False
+    return True
+
+
 def server_from_proof(evidence: dict[str, Any]) -> dict[str, str]:
     source = object_field(evidence, "source", "proof")
     runtime = object_field(evidence, "runtime", "proof")
@@ -757,6 +808,22 @@ def verify_bundle(
     proof_actions = list_field(proof_identity, "actions", "proof identity")
     require(proof_actions != [], "proof has no later model-selected action")
     require(match.get("actions") == proof_actions, "join and proof actions differ")
+    durable_activations = list_field(
+        join_decoded["durable-skill-activations-after.json"],
+        "activations",
+        "joined durable Skill ledger",
+    )
+    durable_matches = [
+        activation
+        for activation in durable_activations
+        if isinstance(activation, dict)
+        and activation.get("skill_tool_use_id") == selected_id
+    ]
+    require(
+        len(durable_matches) == 1,
+        "joined durable Skill ledger does not contain one selected activation",
+    )
+    durable_activation = cast(dict[str, Any], durable_matches[0])
     scoped = object_field(proof_identity, "scoped_summary", "proof identity")
     scoped_summary = object_field(scoped, "summary", "proof scoped summary")
     require(
@@ -883,6 +950,22 @@ def verify_bundle(
         == proof_artifacts_with_dashboard,
         "TUI producer artifact index differs",
     )
+    selection = object_field(tui, "selection", "TUI proof")
+    visited_keepers = list_field(selection, "visited_keepers", "TUI selection")
+    visited_tools_panes = list_field(selection, "visited_tools_panes", "TUI selection")
+    require(
+        visited_keepers != []
+        and all(isinstance(value, str) for value in visited_keepers)
+        and visited_keepers[-1] == proof_identity.get("keeper"),
+        "TUI Keeper selection path differs",
+    )
+    require(
+        visited_tools_panes != []
+        and all(isinstance(value, str) for value in visited_tools_panes)
+        and visited_tools_panes[-1] == "activations"
+        and len(set(visited_tools_panes)) == len(visited_tools_panes),
+        "TUI Tools pane selection path differs",
+    )
     visible_text = string_field(tui, "visible_text", "TUI proof")
     require(
         tui.get("visible_text_sha256") == digest(visible_text.encode()),
@@ -891,11 +974,14 @@ def verify_bundle(
     observations = object_field(tui, "observations", "TUI proof")
     skill_header = string_field(observations, "skill_header", "TUI observations")
     session_line = string_field(observations, "session_line", "TUI observations")
-    invalid_line = string_field(observations, "invalid_line", "TUI observations")
     receipt_block = string_field(observations, "receipt_block", "TUI observations")
+    header_match = re.fullmatch(
+        rf"Skill Use — {re.escape(str(proof_identity['keeper']))} \(([1-9][0-9]*) receipts\)",
+        skill_header,
+    )
     require(
-        skill_header.startswith(f"Skill Use — {proof_identity['keeper']} (")
-        and skill_header.endswith(" receipts)"),
+        header_match is not None
+        and int(header_match.group(1)) == len(durable_activations),
         "TUI observation does not contain the exact Skill header",
     )
     require(
@@ -907,15 +993,7 @@ def verify_bundle(
         "TUI ledger projection differs",
     )
     require(
-        "invalid=0" in invalid_line.split(),
-        "TUI invalid-transition observation differs",
-    )
-    receipt_lines = [line.strip(" │") for line in receipt_block.splitlines()]
-    require(
-        len(receipt_lines) >= 2
-        and receipt_lines[0].startswith("exact=")
-        and f"id={selected_id}" in receipt_block
-        and expected_markers[0] in receipt_block,
+        receipt_matches_activation(receipt_block, durable_activation, proof_actions),
         "TUI exact receipt observation differs",
     )
     require(

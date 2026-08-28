@@ -468,7 +468,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             capture.exact_receipt_block(after, "call-skill-1"),
         )
 
-    def test_ledger_projection_accepts_exact_or_observed_prefix(self):
+    def test_ledger_projection_requires_the_full_revision(self):
         revision = "abcdef0123456789"
 
         self.assertTrue(
@@ -476,7 +476,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 f"session=trace-one  ledger={revision}", "trace-one", revision
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             capture.ledger_projection_matches(
                 "session=trace-one  ledger=abcdef012345…", "trace-one", revision
             )
@@ -496,7 +496,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             [
                 "MASC Tools 14:10:47 [connected]",
                 "Skill Use — keeper-one (8 receipts)",
-                "session=trace-one  ledger=abcdef012345…",
+                "session=trace-one  ledger=abcdef0123456789",
                 "invoked=8 actions=8 invalid=0",
             ]
         )
@@ -505,9 +505,32 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             [
                 "MASC Tools 14:10:47 [connected]",
                 'exact={"content_revision":"one"}',
-                "invoked turn=8 id=call-skill-1 runtime=one",
-                "action turn=8 runtime=one tool=x call=call-action-1",
+                "invoked turn=8 id=call-skill-1 runtime=one at=activated-at",
+                "action turn=8 runtime=one tool=x call=call-action-1 at=observed-at",
             ]
+        )
+        activation = {
+            "identity": {
+                "source_id": "source",
+                "package_id": "package",
+                "name": "skill",
+            },
+            "content_revision": "one",
+            "agent_core_turn": 8,
+            "skill_tool_use_id": "call-skill-1",
+            "runtime_id": "one",
+            "activated_at": "activated-at",
+        }
+        action = {
+            "identity": {"kind": "call_id", "call_id": "call-action-1"},
+            "agent_core_turn": 8,
+            "runtime_id": "one",
+            "tool_name": "x",
+            "observed_at": "observed-at",
+        }
+        receipt = receipt.replace(
+            'exact={"content_revision":"one"}',
+            capture.exact_reference_line(activation),
         )
         screens = iter([top, middle, middle, receipt, receipt])
         with (
@@ -520,6 +543,8 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 session_id="trace-one",
                 ledger_revision="abcdef0123456789",
                 skill_tool_use_id="call-skill-1",
+                activation=activation,
+                actions=[action],
                 action="call=call-action-1",
                 timeout=1.0,
             )

@@ -437,11 +437,12 @@ def make_bundle(root: Path):
 
     tui_png = png(1200, 800)
     (tui_root / "tui-skill-use.png").write_bytes(tui_png)
+    exact_activation = recomputed_join["result"]["matches"][0]
     receipt_block = "\n".join(
         [
-            'exact={"content_revision":"one"}',
-            f"invoked turn=1 id={SKILL_ID} runtime=runtime-one",
-            "action turn=1 runtime=runtime-one tool=keeper_time_now call=call-action-1",
+            verifier.exact_reference_line(exact_activation),
+            f"invoked turn=7 id={SKILL_ID} runtime=runtime-one at=2026-08-27T00:00:01Z",
+            "action turn=7 runtime=runtime-one tool=keeper_status call=call-action-1 at=2026-08-27T00:00:03Z",
         ]
     )
     visible_text = "\n".join(
@@ -474,13 +475,15 @@ def make_bundle(root: Path):
             "captured_action_marker": "call=call-action-1",
         },
         "server": {**server(), "binary_commit_source": "embedded"},
-        "selection": {"visited_keepers": ["keeper-one"]},
+        "selection": {
+            "visited_keepers": ["keeper-one"],
+            "visited_tools_panes": ["surface", "async", "activations"],
+        },
         "producer_artifacts": producer_artifacts,
         "terminal": {"cols": 180, "rows": 42},
         "observations": {
             "skill_header": "Skill Use — keeper-one (1 receipts)",
-            "session_line": f"session=trace-one  ledger={durable['revision'][:12]}…",
-            "invalid_line": "invoked=1 actions=1 invalid=0",
+            "session_line": f"session=trace-one  ledger={durable['revision']}",
             "receipt_block": receipt_block,
         },
         "visible_text": visible_text,
@@ -933,6 +936,67 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             bundle["tui"]["visible_text_sha256"] = verifier.digest(visible.encode())
             with self.assertRaisesRegex(
                 verifier.VerificationError, "screenshot viewport"
+            ):
+                verify(bundle)
+
+    def test_tui_receipt_is_structurally_bound_to_the_durable_activation(self):
+        mutations = (
+            ("exact=", "exact=garbage"),
+            (f"id={SKILL_ID}", f"id={SKILL_ID}0"),
+            ("turn=7", "turn=999"),
+            ("tool=keeper_status", "tool=foreign_tool"),
+        )
+        for old, new in mutations:
+            with self.subTest(old=old, new=new), tempfile.TemporaryDirectory() as raw:
+                bundle = make_bundle(Path(raw))
+                receipt = bundle["tui"]["observations"]["receipt_block"]
+                mutated = receipt.replace(old, new, 1)
+                bundle["tui"]["observations"]["receipt_block"] = mutated
+                bundle["tui"]["visible_text"] = bundle["tui"]["visible_text"].replace(
+                    receipt, mutated
+                )
+                bundle["tui"]["visible_text_sha256"] = verifier.digest(
+                    bundle["tui"]["visible_text"].encode()
+                )
+                with self.assertRaisesRegex(
+                    verifier.VerificationError, "exact receipt observation"
+                ):
+                    verify(bundle)
+
+    def test_tui_ledger_projection_rejects_abbreviation(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            revision = bundle["proof"]["proof"]["ledger_revision"]
+            bundle["tui"]["observations"]["session_line"] = (
+                f"session=trace-one  ledger={revision[:12]}…"
+            )
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "ledger projection"
+            ):
+                verify(bundle)
+
+    def test_tui_selection_path_is_required(self):
+        cases = (
+            ("visited_keepers", []),
+            ("visited_tools_panes", ["surface", "async"]),
+        )
+        for field, value in cases:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                bundle = make_bundle(Path(raw))
+                bundle["tui"]["selection"][field] = value
+                with self.assertRaisesRegex(
+                    verifier.VerificationError, "selection path"
+                ):
+                    verify(bundle)
+
+    def test_tui_skill_header_receipt_count_is_bound(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            bundle["tui"]["observations"]["skill_header"] = (
+                "Skill Use — keeper-one (9 receipts)"
+            )
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "exact Skill header"
             ):
                 verify(bundle)
 

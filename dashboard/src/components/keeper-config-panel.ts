@@ -2277,11 +2277,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${InlineSelectRow}
         label="network_mode"
         value=${rd.network_mode}
-        options=${rd.sandbox_profile === 'docker'
+        options=${rd.sandbox_profile === 'docker' || rd.sandbox_profile === 'microvm'
           ? ['inherit', 'none'] as const
-          : rd.sandbox_profile === 'microvm'
-            ? ['none'] as const
-            : ['inherit'] as const}
+          : ['inherit'] as const}
         onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         dirty=${dirtyFlags.network_mode}
       />
@@ -2303,8 +2301,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ` : null}
       ${rd.sandbox_profile === 'microvm' ? html`
         <${Callout}
-          title="microvm 은 network_mode = none 만 가능합니다"
-          body="container 에는 host 네트워크가 없고 기본 네트워크도 외부로 나가지 못합니다. 호스트 네트워크가 필요하면 docker 로 두세요. 그리고 microvm 은 이미지를 container 저장소에 따로 넣어야 합니다 — docker 에 빌드한 것으로는 실행되지 않고, 실행 전에 거절됩니다."
+          title="microvm 이미지는 따로 넣어야 합니다"
+          body="microvm 은 container 저장소의 이미지를 씁니다. docker 에 빌드한 것으로는 실행되지 않고 실행 직전에 거절됩니다. network_mode = inherit 은 container 의 NAT 를 쓰며 외부로 나갑니다 — 다만 게스트 기본 DNS 가 응답하지 않아 nameserver 를 함께 넘깁니다(MASC_KEEPER_MICROVM_DNS, 기본 1.1.1.1). host 네트워크 자체는 container 에 없습니다."
           tone="warn"
         />
       ` : null}

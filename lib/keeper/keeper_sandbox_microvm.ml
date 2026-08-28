@@ -56,30 +56,36 @@ let run_argv
   @ [ image; "bash"; "-l"; "-s" ]
 ;;
 
-(** What [container] can be told about the network, or why it cannot.
+(** What [container] is told about the network.
 
-    [Network_none] maps to [--network none], the same token Docker uses.
+    [Network_none] closes it with [--network none].
 
-    [Network_inherit] has no equivalent and is refused. Docker spells it
-    [--network host]; container has no host network -- [container network
-    list] shows only [default] (192.168.64.0/24), and [--network host] fails
-    with "network host not found". Measured 2026-08-28 on container 1.3.0:
-    the default network does not reach outside either, so a guest on it
-    cannot fetch https://example.com.
+    [Network_inherit] uses container's default network, which is a NAT
+    ([container network inspect default] reports mode "nat"). A guest on it
+    gets an address and a default route and reaches the outside: measured
+    2026-08-28 on container 1.3.0, ping 8.8.8.8 answered in 39 ms, and with
+    a nameserver supplied, HTTPS to api.github.com and `git ls-remote`
+    against this repository both succeeded.
 
-    Returning [] here would hand the keeper a guest with no route while its
-    profile still said [inherit], and git would fail for reasons the keeper
-    could not see. The refusal names the mismatch instead. *)
-let network_args (mode : Keeper_types_profile_sandbox.network_mode) =
+    The nameserver has to be supplied. The guest's /etc/resolv.conf points at
+    the gateway, and the gateway does not answer DNS from inside the guest
+    ("connection refused") even though the same port answers from the host.
+    Without [--dns] the guest routes fine and resolves nothing, which reads
+    as "no network" -- it is what made an earlier version of this module
+    refuse [inherit] outright, on a claim that was wrong.
+
+    [--network host] is a separate matter and still has no equivalent:
+    container has no host network, and asking for one fails with "network
+    host not found". [inherit] therefore means container's NAT, not the
+    host's namespace, and the two differ in what the guest can reach on
+    localhost. *)
+let network_args ~dns (mode : Keeper_types_profile_sandbox.network_mode) =
   match mode with
-  | Keeper_types_profile_sandbox.Network_none -> Ok [ "--network"; "none" ]
+  | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ]
   | Keeper_types_profile_sandbox.Network_inherit ->
-    Error
-      "microvm_network_unsupported: network_mode=inherit has no container \
-       equivalent -- container has no host network and its default network \
-       does not route outside. Next: set network_mode = \"none\" for this \
-       keeper, or keep it on sandbox_profile = \"docker\" if it needs the \
-       host network."
+    (match dns with
+     | Some server when String.trim server <> "" -> [ "--dns"; String.trim server ]
+     | Some _ | None -> [])
 ;;
 
 (** Whether [image] is in container's own store.

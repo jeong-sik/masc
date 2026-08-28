@@ -13,10 +13,11 @@ val unsupported_docker_flags : string list
     must weigh when choosing the profile, not a runtime fallback. *)
 
 val network_args :
-  Keeper_types_profile_sandbox.network_mode -> (string list, string) result
-(** [Network_inherit] is refused: container has no host network and its
-    default network does not route outside, so honouring it silently would
-    leave the keeper with no route while its profile still claimed one. *)
+  dns:string option -> Keeper_types_profile_sandbox.network_mode -> string list
+(** [Network_inherit] uses container's NAT, which routes outside. It needs a
+    nameserver passed in: the guest's resolver points at the gateway and the
+    gateway refuses DNS from inside, so without one the guest routes fine and
+    resolves nothing. *)
 
 val run_argv :
   container_name:string ->

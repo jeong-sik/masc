@@ -72,6 +72,13 @@ module Runtime = struct
     get_string ~default:"masc-keeper-sandbox:local"
       "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
 
+  (* container's guest resolver points at the gateway, and the gateway
+     refuses DNS from inside the guest even though the same port answers
+     from the host. Without a nameserver the guest routes fine and resolves
+     nothing, which reads as a dead network. Empty means "pass no --dns",
+     which is the right answer once container fixes its default. *)
+  let microvm_dns () = get_string ~default:"1.1.1.1" "MASC_KEEPER_MICROVM_DNS"
+
   let docker_playground_enabled () =
     Feature_flag_registry.get_bool "MASC_KEEPER_DOCKER_PLAYGROUND"
 

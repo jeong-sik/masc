@@ -1739,6 +1739,10 @@ let post_skill_evidence ~host ~port reference =
     ~body:(skill_editor_body reference None)
 ;;
 
+let fetch_async_request_observation ~host ~port =
+  get_json ~host ~port ~path:"/api/v1/async-requests"
+;;
+
 (** GET /api/v1/prompts — every prompt the registry serves, with the file
     value, any override, and what is currently effective. *)
 let fetch_prompts ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =

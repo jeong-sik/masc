@@ -8077,6 +8077,86 @@ let skill_action_lines actions =
          (Terminal_text.single_line action.observed_at))
     actions
 
+let async_request_observation_lines (state : state) =
+  match state.tools_async_observation_error, state.tools_async_observation with
+  | Some detail, _ ->
+    [ Theme.bad (), " Async broker — " ^ Terminal_text.single_line detail ]
+  | None, None -> [ Theme.warn (), " Async broker — not loaded" ]
+  | None, Some json ->
+    (match json_assoc_member_opt "status" json with
+     | Some (`String "unavailable") ->
+       [ Theme.bad (), " Async broker — durable inventory unavailable" ]
+     | Some (`String "ready") ->
+       let int_field json name =
+         match json_assoc_member_opt name json with
+         | Some (`Int value) -> value
+         | Some _ | None -> 0
+       in
+       let summary_lines =
+         match json_assoc_member_opt "summary" json with
+         | Some (`Assoc _ as summary) ->
+           [ Ansi.bold,
+             Printf.sprintf
+               " Async broker — active=%d · runtime-owned=%d · ownership-unknown=%d · record-errors=%d"
+               (int_field summary "active")
+               (int_field summary "runtime_owned")
+               (int_field summary "ownership_unknown")
+               (int_field summary "record_errors")
+           ]
+         | Some _ | None -> [ Theme.bad (), " Async broker — summary is malformed" ]
+       in
+       let request_lines =
+         match json_assoc_member_opt "requests" json with
+         | Some (`List requests) ->
+           List.map
+             (fun request ->
+                let string_field name fallback =
+                  match json_assoc_member_opt name request with
+                  | Some (`String value) -> value
+                  | Some _ | None -> fallback
+                in
+                let elapsed =
+                  match json_assoc_member_opt "elapsed_sec" request with
+                  | Some (`Float value) -> Printf.sprintf "%.1fs" value
+                  | Some (`Int value) -> Printf.sprintf "%ds" value
+                  | Some _ | None -> "?s"
+                in
+                let ownership = string_field "worker_ownership" "unknown" in
+                (if String.equal ownership "runtime_owned"
+                 then Theme.good ()
+                 else Theme.warn ()),
+                Printf.sprintf
+                  "   %s · %s · %s · %s · %s"
+                  (Terminal_text.single_line (string_field "request_id" "?"))
+                  (Terminal_text.single_line (string_field "keeper_name" "?"))
+                  (Terminal_text.single_line (string_field "status" "?"))
+                  elapsed
+                  (Terminal_text.single_line ownership))
+             requests
+         | Some _ | None -> [ Theme.bad (), "   async request rows are malformed" ]
+       in
+       let recovery_lines =
+         match json_assoc_member_opt "startup_recovery" json with
+         | Some (`Assoc _ as recovery) ->
+           [ Ansi.dim,
+             Printf.sprintf
+               "   startup recovery: lost=%d finalized=%d cleaned=%d unreadable=%d failed=%d staging=%d/%d/%d"
+               (int_field recovery "lost")
+               (int_field recovery "finalized")
+               (int_field recovery "cleaned")
+               (int_field recovery "unreadable")
+               (int_field recovery "failed")
+               (int_field recovery "staging_files_inspected")
+               (int_field recovery "staging_files_deleted")
+               (int_field recovery "staging_files_preserved")
+           ]
+         | Some `Null | None ->
+           [ Ansi.dim, "   startup recovery: not observed by this process" ]
+         | Some _ -> [ Theme.bad (), "   startup recovery report is malformed" ]
+       in
+       summary_lines @ request_lines @ recovery_lines
+     | Some _ | None -> [ Theme.bad (), " Async broker response is malformed" ])
+
 let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -8753,6 +8833,8 @@ let render_tools (state : state) =
   in
   let display_lines =
     effective_lines
+    @ [ Ansi.dim, "" ]
+    @ async_request_observation_lines state
     @ [ Ansi.dim, "" ]
     @ activation_lines
     @ [ Ansi.dim, "" ]

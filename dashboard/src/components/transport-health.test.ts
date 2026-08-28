@@ -38,6 +38,18 @@ import type { SSEEvent } from '../types'
 
 function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
   return {
+    http_listener: {
+      mode: 'h2',
+      status: 'listening',
+      active_connections: 1,
+      accepted_total: 1,
+      accept_errors_total: 0,
+      rate_limit_responses_total: 0,
+      rate_limit_responses: [],
+      last_accept_unix: 1_775_000_000,
+      last_accept_age_seconds: 0,
+      last_error: null,
+    },
     summary: {
       primary_path: 'streamable_http',
       queue_pressure: 'steady',
@@ -94,6 +106,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       presence_stream: '/events/presence',
       supports_post: true,
       supports_sse_upgrade: true,
+      auth_rejects_total: 0,
     },
     http2: {
       listener_mode: 'h2_only',
@@ -799,4 +812,3 @@ describe('transportTruthLine', () => {
     expect(transportTruthLine(data)).toBe('cached_surface · cache stale · stale 1234ms')
   })
 })
-

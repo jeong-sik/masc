@@ -7,12 +7,20 @@ import {
 import {
   decodeTransportHealthData,
   type HotSession,
+  type HttpListener,
+  type HttpRateLimitResponse,
   type TransportHealthData,
   type TransportHealthSnapshot,
   type TransportHealthSchemaDriftError,
 } from './schemas/transport-health'
 
-export type { HotSession, TransportHealthData, TransportHealthSnapshot }
+export type {
+  HotSession,
+  HttpListener,
+  HttpRateLimitResponse,
+  TransportHealthData,
+  TransportHealthSnapshot,
+}
 export {
   decodeTransportHealthData,
   isTransportHealthReady,

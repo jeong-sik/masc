@@ -154,6 +154,28 @@ val inc_grpc_bytes_sent : bytes:int -> unit
 
 (** {1 Primary HTTP listener state} *)
 
+type http_protocol =
+  | H1
+  | H2
+
+type http_rate_limit_scope =
+  | Client_ip
+  | Agent
+  | Sse_connection
+
+type response_write_acceptance =
+  | Accepted_by_writer
+  | Rejected_by_writer
+
+(** Records one HTTP 429 response only when the transport writer accepted it.
+    This does not claim that the peer received the bytes.  Protocol and scope
+    labels come from closed sums, so the metric cardinality is fixed. *)
+val record_http_rate_limit_response
+  :  acceptance:response_write_acceptance
+  -> protocol:http_protocol
+  -> scope:http_rate_limit_scope
+  -> unit
+
 (** Marks the primary HTTP accept loop as listening.  [mode] is one of
     ["h1"], ["h2"], or ["auto"]. *)
 val record_http_listener_started : mode:string -> unit
@@ -177,8 +199,8 @@ val record_http_accept_error : mode:string -> error:string -> unit
     histogram (self-registered on first call). *)
 val record_http_accept_latency : mode:string -> float -> unit
 
-(** Snapshot of primary HTTP accept-loop status for [/health] and
-    dashboard transport health. *)
+(** Snapshot of primary HTTP accept-loop status and writer-accepted HTTP 429
+    counters for [/health] and dashboard transport health. *)
 val http_listener_json : ?now:float -> unit -> Yojson.Safe.t
 
 (** {1 WebSocket metrics} *)
@@ -323,4 +345,3 @@ val queue_pressure_kind_of_string : string -> queue_pressure_kind option
     [http_listener_mode]).  Reads metric values via
     [Otel_metric_store.required_metric_value] and performs no Workspace I/O. *)
 val transport_health_json : unit -> Yojson.Safe.t
-

@@ -75,12 +75,43 @@ const WebsocketSchema = Schema.Struct({
   delivery: WebsocketDeliverySchema,
 })
 
+const HttpRateLimitResponseSchema = Schema.Struct({
+  protocol: Schema.Literal('h1', 'h2'),
+  scope: Schema.Literal('client_ip', 'agent', 'sse_connection'),
+  total: NonNegativeIntegerSchema,
+})
+
+export type HttpRateLimitResponse = Schema.Schema.Type<
+  typeof HttpRateLimitResponseSchema
+>
+
+const HttpListenerSchema = Schema.Struct({
+  mode: Schema.Literal('unknown', 'h1', 'h2', 'auto'),
+  status: Schema.Literal(
+    'not_started',
+    'listening',
+    'stopped',
+    'accept_error',
+  ),
+  active_connections: NonNegativeIntegerSchema,
+  accepted_total: NonNegativeIntegerSchema,
+  accept_errors_total: NonNegativeIntegerSchema,
+  rate_limit_responses_total: NonNegativeIntegerSchema,
+  rate_limit_responses: Schema.Array(HttpRateLimitResponseSchema),
+  last_accept_unix: Schema.OptionFromNullOr(NonNegativeNumberSchema),
+  last_accept_age_seconds: Schema.OptionFromNullOr(NonNegativeNumberSchema),
+  last_error: Schema.OptionFromNullOr(Schema.String),
+})
+
+export type HttpListener = Schema.Schema.Type<typeof HttpListenerSchema>
+
 const StreamableHttpSchema = Schema.Struct({
   endpoint: Schema.Literal('/mcp'),
   observer_stream: Schema.Literal('/mcp?sse_kind=observer'),
   presence_stream: Schema.Literal('/events/presence'),
   supports_post: Schema.Literal(true),
   supports_sse_upgrade: Schema.Literal(true),
+  auth_rejects_total: NonNegativeIntegerSchema,
 })
 
 const Http2Schema = Schema.Union(
@@ -114,6 +145,7 @@ const ProjectionDiagnosticsSchema = Schema.Struct({
 })
 
 const TransportHealthReadySchema = Schema.Struct({
+  http_listener: HttpListenerSchema,
   summary: SummarySchema,
   sse: SseOuterSchema,
   grpc: GrpcSchema,

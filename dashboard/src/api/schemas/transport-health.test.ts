@@ -8,6 +8,21 @@ import {
 } from './transport-health'
 
 const currentWire = {
+  http_listener: {
+    mode: 'auto',
+    status: 'listening',
+    active_connections: 2,
+    accepted_total: 11,
+    accept_errors_total: 0,
+    rate_limit_responses_total: 3,
+    rate_limit_responses: [
+      { protocol: 'h1', scope: 'client_ip', total: 2 },
+      { protocol: 'h2', scope: 'agent', total: 1 },
+    ],
+    last_accept_unix: 1_725_000_000,
+    last_accept_age_seconds: 0.25,
+    last_error: null,
+  },
   summary: {
     primary_path: 'streamable_http',
     queue_pressure: 'steady',
@@ -64,6 +79,7 @@ const currentWire = {
     presence_stream: '/events/presence',
     supports_post: true,
     supports_sse_upgrade: true,
+    auth_rejects_total: 4,
   },
   http2: {
     listener_mode: 'auto',
@@ -106,6 +122,12 @@ describe('decodeTransportHealthData', () => {
     expect(result.sse.hot_sessions).toEqual([])
     expect(result.grpc.port).toBe(8936)
     expect(result.websocket.mode).toBe('same_origin')
+    expect(result.http_listener.rate_limit_responses[0]).toEqual({
+      protocol: 'h1',
+      scope: 'client_ip',
+      total: 2,
+    })
+    expect(result.streamable_http.auth_rejects_total).toBe(4)
     expect(result.http2.listener_mode).toBe('auto')
     expect(result.projection_diagnostics.source).toBe('cached_surface')
   })
@@ -138,11 +160,13 @@ describe('decodeTransportHealthData', () => {
       true,
     )
     expect(Option.isNone(result.projection_diagnostics.stale_age_ms)).toBe(true)
+    expect(Option.isNone(result.http_listener.last_error)).toBe(true)
   })
 
   it.each([
     ['generated_at', { ...currentWire, generated_at: '' }],
     ['summary', { ...currentWire, summary: undefined }],
+    ['http_listener', { ...currentWire, http_listener: undefined }],
     ['grpc', { ...currentWire, grpc: undefined }],
     [
       'projection_diagnostics',
@@ -200,6 +224,40 @@ describe('decodeTransportHealthData', () => {
       {
         ...currentWire,
         streamable_http: { ...currentWire.streamable_http, endpoint: '/mcp-v2' },
+      },
+    ],
+    [
+      'streamable auth reject count',
+      {
+        ...currentWire,
+        streamable_http: {
+          ...currentWire.streamable_http,
+          auth_rejects_total: undefined,
+        },
+      },
+    ],
+    [
+      'HTTP rate-limit protocol',
+      {
+        ...currentWire,
+        http_listener: {
+          ...currentWire.http_listener,
+          rate_limit_responses: [
+            { protocol: 'h3', scope: 'agent', total: 1 },
+          ],
+        },
+      },
+    ],
+    [
+      'negative HTTP rate-limit count',
+      {
+        ...currentWire,
+        http_listener: {
+          ...currentWire.http_listener,
+          rate_limit_responses: [
+            { protocol: 'h1', scope: 'agent', total: -1 },
+          ],
+        },
       },
     ],
   ])('rejects invalid or missing %s', (_label, value) => {

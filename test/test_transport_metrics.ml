@@ -60,6 +60,13 @@ let test_init () =
      set or observation. *)
   check bool "http accept counter zero-filled" true
     (has_metric "masc_http_accepts_total");
+  let rate_limit_cells =
+    Otel_metric_store.snapshot ()
+    |> List.filter (fun (m : Otel_metric_store.metric) ->
+      String.equal m.name "masc_http_rate_limit_responses_total")
+  in
+  check int "typed HTTP rate-limit cells zero-filled" 6
+    (List.length rate_limit_cells);
   TM.set_grpc_active_streams 0;
   check bool "grpc active streams gauge appears once set" true
     (has_metric "masc_grpc_active_streams_total");
@@ -254,6 +261,20 @@ let test_http_listener_state_json () =
   TM.record_http_listener_started ~mode:"auto";
   TM.record_http_accept ~mode:"auto";
   let accepted = TM.http_listener_json () in
+  check_assoc_keys
+    "http listener exact keys"
+    [ "mode"
+    ; "status"
+    ; "active_connections"
+    ; "accepted_total"
+    ; "accept_errors_total"
+    ; "rate_limit_responses_total"
+    ; "rate_limit_responses"
+    ; "last_accept_unix"
+    ; "last_accept_age_seconds"
+    ; "last_error"
+    ]
+    accepted;
   check string "http listener mode" "auto"
     (accepted |> U.member "mode" |> U.to_string);
   check string "http listener listening" "listening"
@@ -283,6 +304,77 @@ let test_http_listener_state_json () =
     (stopped |> U.member "status" |> U.to_string);
   check int "http listener active connection released" 0
     (stopped |> U.member "active_connections" |> U.to_int)
+
+let http_rate_limit_value ~protocol ~scope =
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_http_rate_limit_responses
+    ~labels:[ "protocol", protocol; "scope", scope ]
+    ()
+
+let test_http_rate_limit_response_counter () =
+  let h1_ip_before = http_rate_limit_value ~protocol:"h1" ~scope:"client_ip" in
+  let h2_agent_before = http_rate_limit_value ~protocol:"h2" ~scope:"agent" in
+  let total_before =
+    Otel_metric_store.metric_total
+      Otel_metric_store.metric_http_rate_limit_responses
+  in
+  TM.record_http_rate_limit_response
+    ~acceptance:TM.Rejected_by_writer
+    ~protocol:TM.H1
+    ~scope:TM.Client_ip;
+  check (float 0.01) "a rejected writer does not count a response" 0.0
+    (http_rate_limit_value ~protocol:"h1" ~scope:"client_ip"
+     -. h1_ip_before);
+  TM.record_http_rate_limit_response
+    ~acceptance:TM.Accepted_by_writer
+    ~protocol:TM.H1
+    ~scope:TM.Client_ip;
+  TM.record_http_rate_limit_response
+    ~acceptance:TM.Accepted_by_writer
+    ~protocol:TM.H1
+    ~scope:TM.Client_ip;
+  TM.record_http_rate_limit_response
+    ~acceptance:TM.Accepted_by_writer
+    ~protocol:TM.H2
+    ~scope:TM.Agent;
+  check (float 0.01) "H1 client-IP responses only increase" 2.0
+    (http_rate_limit_value ~protocol:"h1" ~scope:"client_ip"
+     -. h1_ip_before);
+  check (float 0.01) "H2 agent responses only increase" 1.0
+    (http_rate_limit_value ~protocol:"h2" ~scope:"agent"
+     -. h2_agent_before);
+  let listener = TM.http_listener_json ~now:0.0 () in
+  let projected_total =
+    listener |> U.member "rate_limit_responses_total" |> U.to_int
+  in
+  check int "listener total advances monotonically" 3
+    (projected_total - int_of_float total_before);
+  let rows =
+    listener |> U.member "rate_limit_responses" |> U.to_list
+  in
+  check int "closed protocol/scope matrix" 6 (List.length rows);
+  List.iter
+    (check_assoc_keys "rate-limit response row"
+       [ "protocol"; "scope"; "total" ])
+    rows;
+  let labels =
+    rows
+    |> List.map (fun row ->
+      row |> U.member "protocol" |> U.to_string,
+      row |> U.member "scope" |> U.to_string)
+    |> List.sort compare
+  in
+  check
+    (list (pair string string))
+    "closed protocol/scope labels"
+    [ "h1", "agent"
+    ; "h1", "client_ip"
+    ; "h1", "sse_connection"
+    ; "h2", "agent"
+    ; "h2", "client_ip"
+    ; "h2", "sse_connection"
+    ]
+    labels
 
 (* ============================================================
    Agent Health Metrics
@@ -367,10 +459,12 @@ let test_transport_health_json () =
   let ws_json = json |> U.member "websocket" in
   let http2_json = json |> U.member "http2" in
   let summary_json = json |> U.member "summary" in
+  let http_listener_json = json |> U.member "http_listener" in
   let agent_health_json = json |> U.member "agent_health" in
   check_assoc_keys
     "transport-health exact top-level keys"
     [ "summary"
+    ; "http_listener"
     ; "sse"
     ; "grpc"
     ; "websocket"
@@ -380,6 +474,13 @@ let test_transport_health_json () =
     ; "generated_at"
     ]
     json;
+  check int "transport health reuses listener rate-limit total"
+    (TM.http_listener_json ()
+     |> U.member "rate_limit_responses_total"
+     |> U.to_int)
+    (http_listener_json
+     |> U.member "rate_limit_responses_total"
+     |> U.to_int);
   check_assoc_keys
     "summary exact keys"
     [ "primary_path"; "queue_pressure"; "external_fanout_targets" ]
@@ -661,6 +762,8 @@ let () =
     ("http_listener", [
       test_case "primary listener state json" `Quick
         test_http_listener_state_json;
+      test_case "typed rate-limit response counter" `Quick
+        test_http_rate_limit_response_counter;
     ]);
     ("agent_health", [
       test_case "set_agent_heartbeat_age" `Quick test_agent_heartbeat_age;

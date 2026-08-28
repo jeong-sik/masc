@@ -15,17 +15,18 @@ let safe_respond_with_string reqd response body =
      the surrounding incident note already captures the diagnostic
      intent — adding a backtrace there would just churn parsers.
 
-     RFC-0106 P1: routed via [Cancel_safe.observe] so the Cancelled
+     RFC-0106 P1: routed via [Cancel_safe.protect] so the Cancelled
      re-raise discipline lives in one place. The [Failure] arm is
      preserved inside [on_exn] because it is a typed boundary
      (2026-05-05 AGENT_CORE cancel race), not a catch-all. *)
-  Cancel_safe.observe
+  Cancel_safe.protect
     ~on_exn:(function
       | Failure msg ->
           Log.Server.warn
             "[mcp-http] respond_with_string skipped (reqd invalid state; \
              2026-05-05 AGENT_CORE cancel race): %s"
-            msg
+            msg;
+          Transport_metrics.Rejected_by_writer
       | exn ->
           let backtrace = Printexc.get_backtrace () in
           let summary = Printexc.to_string exn in
@@ -36,8 +37,11 @@ let safe_respond_with_string reqd response body =
           else
             Log.Server.warn
               "[mcp-http] respond_with_string unexpected exception: %s\n%s"
-              summary backtrace)
-    (fun () -> Httpun.Reqd.respond_with_string reqd response body)
+              summary backtrace;
+          Transport_metrics.Rejected_by_writer)
+    (fun () ->
+      Httpun.Reqd.respond_with_string reqd response body;
+      Transport_metrics.Accepted_by_writer)
 
 let mcp_headers = Server_mcp_transport_http_headers.mcp_headers
 
@@ -97,7 +101,7 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
   let response =
     Httpun.Response.create ~headers (Mcp_error_code.to_http_status code)
   in
-  safe_respond_with_string reqd response body
+  ignore (safe_respond_with_string reqd response body)
 
 let mcp_auth_reject_reason_label
     (failure : Server_mcp_transport_http_types.auth_failure) =
@@ -192,7 +196,7 @@ let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request req
       @ deps.cors_headers origin)
   in
   let response = Httpun.Response.create ~headers `Service_unavailable in
-  safe_respond_with_string reqd response body
+  ignore (safe_respond_with_string reqd response body)
 
 (** [respond_sse_register_error] — SSE GET register 검증(unknown/expired session) 실패 시,
     200 스트림을 열기 전에 404 + 새 [Mcp-Session-Id] 로 응답한다. 기존엔 200 송출 후
@@ -211,12 +215,13 @@ let respond_sse_register_error ~(deps : Server_mcp_transport_http_types.deps)
       ( ("content-length", string_of_int (String.length body))
       :: json_headers ~deps new_session_id protocol_version origin )
   in
-  safe_respond_with_string reqd (Httpun.Response.create ~headers `Not_found) body
+  ignore
+    (safe_respond_with_string reqd
+       (Httpun.Response.create ~headers `Not_found) body)
 
 let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~origin ~session_id ~protocol_version
     ~reason ~retry_after_s reqd =
   let reason_label = Sse_reject_reason.to_label reason in
-  Transport_metrics.inc_sse_reject ~reason:reason_label;
   let retry_after_s = Float.max retry_after_s 0.001 in
   let retry_after_header =
     retry_after_s |> Float.ceil |> int_of_float |> max 1 |> string_of_int
@@ -236,4 +241,9 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
       :: json_headers ~deps session_id protocol_version origin)
   in
   let response = Httpun.Response.create ~headers `Too_many_requests in
-  safe_respond_with_string reqd response body
+  Transport_metrics.inc_sse_reject ~reason:reason_label;
+  let acceptance = safe_respond_with_string reqd response body in
+  Transport_metrics.record_http_rate_limit_response
+    ~acceptance
+    ~protocol:Transport_metrics.H1
+    ~scope:Transport_metrics.Sse_connection

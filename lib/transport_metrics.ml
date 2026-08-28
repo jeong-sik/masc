@@ -258,6 +258,63 @@ let inc_ws_delta_payload_serialization () =
 
 (** {1 Primary HTTP listener state} *)
 
+type http_protocol =
+  | H1
+  | H2
+
+type http_rate_limit_scope =
+  | Client_ip
+  | Agent
+  | Sse_connection
+
+type response_write_acceptance =
+  | Accepted_by_writer
+  | Rejected_by_writer
+
+let http_protocols = [ H1; H2 ]
+let http_rate_limit_scopes = [ Client_ip; Agent; Sse_connection ]
+
+let http_protocol_to_string = function
+  | H1 -> "h1"
+  | H2 -> "h2"
+;;
+
+let http_rate_limit_scope_to_string = function
+  | Client_ip -> "client_ip"
+  | Agent -> "agent"
+  | Sse_connection -> "sse_connection"
+;;
+
+let http_rate_limit_labels ~protocol ~scope =
+  [ "protocol", http_protocol_to_string protocol
+  ; "scope", http_rate_limit_scope_to_string scope
+  ]
+;;
+
+let () =
+  List.iter
+    (fun protocol ->
+      List.iter
+        (fun scope ->
+          Otel_metric_store.register_counter
+            ~name:Otel_metric_store.metric_http_rate_limit_responses
+            ~help:Otel_metric_store.metric_http_rate_limit_responses
+            ~labels:(http_rate_limit_labels ~protocol ~scope)
+            ())
+        http_rate_limit_scopes)
+    http_protocols
+;;
+
+let record_http_rate_limit_response ~acceptance ~protocol ~scope =
+  match acceptance with
+  | Rejected_by_writer -> ()
+  | Accepted_by_writer ->
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_http_rate_limit_responses
+      ~labels:(http_rate_limit_labels ~protocol ~scope)
+      ()
+;;
+
 let http_listener_mode_runtime : string Atomic.t = Atomic.make "unknown"
 let http_listener_status : string Atomic.t = Atomic.make "not_started"
 let http_active_connections : int Atomic.t = Atomic.make 0
@@ -341,6 +398,31 @@ let json_float_option = function
   | None -> `Null
 ;;
 
+let http_rate_limit_response_json protocol scope =
+  let total =
+    Otel_metric_store.metric_value_or_zero
+      Otel_metric_store.metric_http_rate_limit_responses
+      ~labels:(http_rate_limit_labels ~protocol ~scope)
+      ()
+    |> int_of_float
+  in
+  `Assoc
+    [ "protocol", `String (http_protocol_to_string protocol)
+    ; "scope", `String (http_rate_limit_scope_to_string scope)
+    ; "total", `Int total
+    ]
+;;
+
+let http_rate_limit_responses_json () =
+  List.concat_map
+    (fun protocol ->
+      List.map
+        (http_rate_limit_response_json protocol)
+        http_rate_limit_scopes)
+    http_protocols
+  |> fun rows -> `List rows
+;;
+
 let http_listener_json ?now () =
   let now =
     match now with
@@ -360,6 +442,12 @@ let http_listener_json ?now () =
     ; ( "accept_errors_total"
       , `Int (int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_http_accept_errors))
       )
+    ; ( "rate_limit_responses_total"
+      , `Int
+          (int_of_float
+             (Otel_metric_store.metric_total
+                Otel_metric_store.metric_http_rate_limit_responses)) )
+    ; "rate_limit_responses", http_rate_limit_responses_json ()
     ; "last_accept_unix", json_float_option last_accept_unix
     ; "last_accept_age_seconds", json_float_option last_accept_age_seconds
     ; "last_error", Json_util.string_opt_to_json (Atomic.get http_last_accept_error)
@@ -578,7 +666,8 @@ let transport_health_json () =
       ~sse_sessions:sse_total
   in
   `Assoc
-    [ ( "summary"
+    [ "http_listener", http_listener_json ()
+    ; ( "summary"
       , `Assoc
           [ "primary_path", `String (primary_path_kind_to_string primary_path)
           ; ( "queue_pressure"

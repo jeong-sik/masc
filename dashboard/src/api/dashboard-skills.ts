@@ -111,15 +111,31 @@ export interface SkillProfile {
   flow: SkillFlow | null
 }
 
-export type SkillRunResponse =
-  | { status: 'never_observed'; reference: SkillReference; scan_limit: number }
-  | {
-      status: 'observed'
-      reference: SkillReference
-      scan_limit: number
-      run: Record<string, unknown>
-      nodes: readonly Record<string, unknown>[]
-    }
+export interface SkillEvidenceCoverage {
+  composition_scan_limit: number
+  composition_rows_scanned: number
+  instruction_ledgers_loaded: number
+  unavailable: readonly string[]
+}
+
+export interface SkillActivationEvidence {
+  keeper: string
+  activation: Record<string, unknown>
+}
+
+export interface SkillCompositionEvidence {
+  run: Record<string, unknown>
+  nodes: readonly Record<string, unknown>[]
+}
+
+export interface SkillEvidenceResponse {
+  schema: 'masc.skill-evidence/v1'
+  status: 'observed' | 'never_observed'
+  reference: SkillReference
+  activation: SkillActivationEvidence | null
+  composition: SkillCompositionEvidence | null
+  coverage: SkillEvidenceCoverage
+}
 
 export interface WritableSkillSource { source_id: string }
 
@@ -229,6 +245,31 @@ const SkillFlowSchema = Schema.Struct({
     execution_mode: Schema.NonEmptyString,
     node_ids: Schema.Array(Schema.NonEmptyString),
   })),
+})
+
+const UnknownRecordSchema = Schema.Record({
+  key: Schema.String,
+  value: Schema.Unknown,
+})
+
+const SkillEvidenceResponseSchema = Schema.Struct({
+  schema: Schema.Literal('masc.skill-evidence/v1'),
+  status: Schema.Literal('observed', 'never_observed'),
+  reference: SkillReferenceSchema,
+  activation: Schema.NullOr(Schema.Struct({
+    keeper: Schema.NonEmptyString,
+    activation: UnknownRecordSchema,
+  })),
+  composition: Schema.NullOr(Schema.Struct({
+    run: UnknownRecordSchema,
+    nodes: Schema.Array(UnknownRecordSchema),
+  })),
+  coverage: Schema.Struct({
+    composition_scan_limit: PositiveSafeIntegerSchema,
+    composition_rows_scanned: NonNegativeSafeIntegerSchema,
+    instruction_ledgers_loaded: NonNegativeSafeIntegerSchema,
+    unavailable: Schema.Array(Schema.String),
+  }),
 })
 
 const SkillProfileSchema = Schema.Struct({
@@ -451,8 +492,18 @@ export async function fetchSkills(opts: GetOptions = {}): Promise<SkillsResponse
   return decodeSkillsResponse(raw)
 }
 
-export async function fetchSkillRun(reference: SkillReference): Promise<SkillRunResponse> {
-  return post('/api/v1/skills/runs', { reference })
+export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse {
+  const decoded = decodeWithSchema(SkillEvidenceResponseSchema, raw, 'invalid_response')
+  const observed = decoded.activation !== null || decoded.composition !== null
+  if ((decoded.status === 'observed') !== observed) {
+    contractError('invalid_response', 'skill evidence status disagrees with its observations')
+  }
+  return decoded
+}
+
+export async function fetchSkillEvidence(reference: SkillReference): Promise<SkillEvidenceResponse> {
+  const raw = await post<unknown>('/api/v1/skills/evidence', { reference })
+  return decodeSkillEvidenceResponse(raw)
 }
 
 export async function fetchWritableSkillSources(): Promise<readonly WritableSkillSource[]> {

@@ -4031,6 +4031,92 @@ let test_tool_call_fleet_cache_tracks_durable_revision () =
          (Option.is_none (Dashboard_cache.peek key)))
 ;;
 
+let test_skill_evidence_joins_activation_and_composition () =
+  let source_id =
+    match Skill_source_config.source_id_of_string "workspace" with
+    | Ok value -> value
+    | Error detail -> fail detail
+  in
+  let package_id =
+    match Skill_catalog_snapshot.package_id_of_directory "release-checklist" with
+    | Ok value -> value
+    | Error _ -> fail "invalid Skill package fixture"
+  in
+  let content_revision =
+    match Skill_reference.content_revision_of_string (String.make 64 'a') with
+    | Ok value -> value
+    | Error _ -> fail "invalid content revision fixture"
+  in
+  let snapshot_revision =
+    match Skill_catalog_snapshot.snapshot_revision_of_string (String.make 64 'b') with
+    | Ok value -> value
+    | Error _ -> fail "invalid snapshot revision fixture"
+  in
+  let identity =
+    Skill_reference.make_identity
+      ~source_id
+      ~package_id
+      ~name:"release-checklist"
+  in
+  let reference = Skill_reference.make ~identity ~content_revision in
+  let activation =
+    match
+      Lib.Keeper_skill_activation_ledger.make_activation
+        ~identity
+        ~content_revision
+        ~snapshot_revision
+        ~turn_ref:(Ids.Turn_ref.make ~trace_id:"trace-evidence" ~absolute_turn:1)
+        ~runtime_id:"codex.default"
+        ~skill_tool_use_id:"skill-call-1"
+        ~agent_core_turn:1
+        ~invocation:
+          (Lib.Keeper_skill_activation_ledger.Instruction_invocation
+             { origin = Session_instruction
+             ; served_content = Skill_body { bytes = 4; sha256 = String.make 64 'c' }
+             })
+        ~activated_at:"2026-08-28T03:00:00Z"
+    with
+    | Ok value -> value
+    | Error _ -> fail "invalid Skill activation fixture"
+  in
+  let run_id = "composition-run-1" in
+  let run =
+    `Assoc
+      [ "record_kind", `String "composition_run"
+      ; "skill_reference", Skill_reference.to_yojson reference
+      ; "composition_run_id", `String run_id
+      ; "success", `Bool true
+      ]
+  in
+  let node =
+    `Assoc
+      [ "record_kind", `String "tool_call"
+      ; "composition_run_id", `String run_id
+      ; "tool_name", `String "keeper_time_now"
+      ]
+  in
+  let json =
+    Server_skill_evidence.For_testing.to_yojson
+      ~reference
+      ~rows:[ node; run ]
+      ~activation:(Some ("rondo", activation))
+      ~ledgers_loaded:2
+      ~unavailable:[ "sangsu: ledger_unreadable" ]
+  in
+  let open Yojson.Safe.Util in
+  check string "evidence schema" "masc.skill-evidence/v1"
+    (json |> member "schema" |> to_string);
+  check string "observed status" "observed" (json |> member "status" |> to_string);
+  check string "activation keeper" "rondo"
+    (json |> member "activation" |> member "keeper" |> to_string);
+  check int "composition node count" 1
+    (json |> member "composition" |> member "nodes" |> to_list |> List.length);
+  check int "ledger coverage" 2
+    (json |> member "coverage" |> member "instruction_ledgers_loaded" |> to_int);
+  check int "unavailable coverage" 1
+    (json |> member "coverage" |> member "unavailable" |> to_list |> List.length)
+;;
+
 let () =
   run "dashboard_http_core"
     [
@@ -4144,7 +4230,9 @@ let () =
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );
       ( "dashboard behavior contracts",
-        [ test_case "GitHub login stream includes CORS" `Quick
+        [ test_case "Skill evidence joins activation and composition" `Quick
+            test_skill_evidence_joins_activation_and_composition;
+          test_case "GitHub login stream includes CORS" `Quick
             test_keeper_github_login_stream_headers_include_cors;
           test_case "GitHub login stream flushes each event" `Quick
             test_keeper_github_login_stream_flushes_each_event;

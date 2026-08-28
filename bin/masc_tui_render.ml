@@ -8242,61 +8242,139 @@ let render_tools (state : state) =
             in
             (Ansi.bold, "     Flow  " ^ batch_line) :: node_lines
         in
-        let selected_skill_run_lines =
+        let selected_skill_evidence_lines =
           match List.nth_opt ets_skill_profiles state.tools_skill_cursor with
           | None -> []
-          | Some profile when String.equal profile.esp_kind "instruction" ->
-            [ Ansi.dim,
-              "     Result: model-owned Keeper turn · inspect Skill Activations / Keeper calls"
-            ]
           | Some profile ->
             let key =
               Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string
             in
-            (match state.tools_skill_run with
+            (match state.tools_skill_evidence with
              | Some (observed_key, json) when String.equal key observed_key ->
-               (match json_assoc_member_opt "status" json with
+               let evidence_lines =
+                 match json_assoc_member_opt "status" json with
                 | Some (`String "never_observed") ->
-                  [ Theme.warn (), "     Latest result: no exact-revision run in the recent log window" ]
+                  [ Theme.warn (),
+                    "     Latest evidence: no exact-revision activation or composition run"
+                  ]
                 | Some (`String "observed") ->
-                  (match json_assoc_member_opt "run" json with
-                   | Some run ->
-                     let string_field name fallback =
-                       match json_assoc_member_opt name run with
-                       | Some (`String value) -> value
-                       | _ -> fallback
-                     in
-                     let duration =
-                       match json_assoc_member_opt "duration_ms" run with
-                       | Some (`Float value) -> Printf.sprintf "%.0fms" value
-                       | Some (`Int value) -> Printf.sprintf "%dms" value
-                       | _ -> "?ms"
-                     in
-                     let success =
-                       match json_assoc_member_opt "success" run with
-                       | Some (`Bool true) -> "✓ completed"
-                       | Some (`Bool false) -> "✗ failed"
-                       | _ -> "unknown"
-                     in
-                     let output =
-                       match json_assoc_member_opt "output" run with
-                       | Some (`String value) -> value
-                       | Some value -> Yojson.Safe.to_string value
-                       | None -> "no output"
-                     in
-                     [ Ansi.bold,
-                       Printf.sprintf
-                         "     Latest result: %s · %s · keeper=%s · run=%s"
-                         success
-                         duration
-                         (Terminal_text.single_line (string_field "keeper" "?"))
-                         (Terminal_text.single_line (string_field "composition_run_id" "?"))
-                     ; Ansi.dim, "       " ^ Terminal_text.single_line output
-                     ]
-                   | None -> [ Theme.bad (), "     Latest result: malformed run response" ])
-                | _ -> [ Theme.bad (), "     Latest result: malformed response" ])
+                  let activation_lines =
+                    match json_assoc_member_opt "activation" json with
+                    | Some (`Assoc _ as evidence) ->
+                      let keeper =
+                        match json_assoc_member_opt "keeper" evidence with
+                        | Some (`String value) -> value
+                        | _ -> "?"
+                      in
+                      (match json_assoc_member_opt "activation" evidence with
+                       | Some (`Assoc _ as activation) ->
+                         let string_field name fallback =
+                           match json_assoc_member_opt name activation with
+                           | Some (`String value) -> value
+                           | _ -> fallback
+                         in
+                         let delivered =
+                           match json_assoc_member_opt "delivery" activation with
+                           | Some `Null | None -> "invoked"
+                           | Some _ -> "✓ delivered"
+                         in
+                         let action_count =
+                           match json_assoc_member_opt "actions" activation with
+                           | Some (`List values) -> List.length values
+                           | Some _ | None -> 0
+                         in
+                         [ Ansi.bold,
+                           Printf.sprintf
+                             "     Activation: %s · keeper=%s · actions=%d · at=%s"
+                             delivered
+                             (Terminal_text.single_line keeper)
+                             action_count
+                             (Terminal_text.single_line
+                                (string_field "activated_at" "?"))
+                         ; Ansi.dim,
+                           "       tool use "
+                           ^ Terminal_text.single_line
+                               (string_field "skill_tool_use_id" "?")
+                         ]
+                       | Some _ | None ->
+                         [ Theme.bad (), "     Activation evidence is malformed" ])
+                    | Some `Null | None -> []
+                    | Some _ -> [ Theme.bad (), "     Activation evidence is malformed" ]
+                  in
+                  let composition_lines =
+                    match json_assoc_member_opt "composition" json with
+                    | Some (`Assoc _ as composition) ->
+                      (match json_assoc_member_opt "run" composition with
+                       | Some (`Assoc _ as run) ->
+                         let string_field name fallback =
+                           match json_assoc_member_opt name run with
+                           | Some (`String value) -> value
+                           | _ -> fallback
+                         in
+                         let duration =
+                           match json_assoc_member_opt "duration_ms" run with
+                           | Some (`Float value) -> Printf.sprintf "%.0fms" value
+                           | Some (`Int value) -> Printf.sprintf "%dms" value
+                           | _ -> "?ms"
+                         in
+                         let success =
+                           match json_assoc_member_opt "success" run with
+                           | Some (`Bool true) -> "✓ completed"
+                           | Some (`Bool false) -> "✗ failed"
+                           | _ -> "unknown"
+                         in
+                         let output =
+                           match json_assoc_member_opt "output" run with
+                           | Some (`String value) -> value
+                           | Some value -> Yojson.Safe.to_string value
+                           | None -> "no output"
+                         in
+                         [ Ansi.bold,
+                           Printf.sprintf
+                             "     Composition: %s · %s · keeper=%s · run=%s"
+                             success
+                             duration
+                             (Terminal_text.single_line
+                                (string_field "keeper" "?"))
+                             (Terminal_text.single_line
+                                (string_field "composition_run_id" "?"))
+                         ; Ansi.dim, "       " ^ Terminal_text.single_line output
+                         ]
+                       | Some _ | None ->
+                         [ Theme.bad (), "     Composition evidence is malformed" ])
+                    | Some `Null | None -> []
+                    | Some _ -> [ Theme.bad (), "     Composition evidence is malformed" ]
+                  in
+                  activation_lines @ composition_lines
+                | _ -> [ Theme.bad (), "     Latest evidence response is malformed" ]
+               in
+               let coverage_lines =
+                 match json_assoc_member_opt "coverage" json with
+                 | Some (`Assoc _ as coverage) ->
+                   let int_field name =
+                     match json_assoc_member_opt name coverage with
+                     | Some (`Int value) -> value
+                     | Some _ | None -> 0
+                   in
+                   let unavailable =
+                     match json_assoc_member_opt "unavailable" coverage with
+                     | Some (`List values) -> List.length values
+                     | Some _ | None -> 0
+                   in
+                   [ Ansi.dim,
+                     Printf.sprintf
+                       "       coverage ledgers=%d log_rows=%d/%d unavailable=%d"
+                       (int_field "instruction_ledgers_loaded")
+                       (int_field "composition_rows_scanned")
+                       (int_field "composition_scan_limit")
+                       unavailable
+                   ]
+                 | Some _ | None ->
+                   [ Theme.warn (), "       evidence coverage is unavailable" ]
+               in
+               evidence_lines @ coverage_lines
              | Some _ | None ->
-               [ Ansi.dim, "     Latest result: Enter to load this exact revision" ])
+               [ Ansi.dim, "     Latest evidence: Enter to load this exact revision" ])
         in
         [ Ansi.bold,
           Printf.sprintf " Effective Keeper Surface — %s (%d tools)"
@@ -8322,11 +8400,11 @@ let render_tools (state : state) =
             "   Skill footprint: %dB/%dB tool context · %dB catalog bodies · eager body 0B"
             ets_skill_tool_surface_bytes ets_tool_surface_bytes ets_skill_body_bytes;
           Ansi.bold,
-          "   Skills — J/K select · Enter result · e edit · c new instruction · C new composition";
+          "   Skills — J/K select · Enter evidence · e edit · c new instruction · C new composition";
           Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
         @ skill_profile_lines
         @ selected_skill_flow_lines
-        @ selected_skill_run_lines
+        @ selected_skill_evidence_lines
         (* Said on this surface because this is the one that answers "what can
            this Keeper call". A document the catalog could not read is absent
            from that answer, and absence with nothing beside it reads as a

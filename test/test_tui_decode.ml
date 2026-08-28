@@ -4661,8 +4661,70 @@ let test_task_history_rejects_a_non_list () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "a non-list task history decoded"
 
+(* Evidence bundle: the item vocabulary is the producer's closed set, so an
+   unknown kind must fail the decode; the unavailable access state carries
+   the server's stated reason, never an empty list. *)
+let test_verification_evidence_decodes_items () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"ok":true,"result":{"task_id":"task-9","verification_id":"vr-1",
+         "producer":"sangsu",
+         "evidence":{"access":"available","request":{},
+           "items":[
+             {"kind":"note","content":"tests green"},
+             {"kind":"artifact","reference":"artifact:proof.json",
+              "content":"{}","bytes":2,"truncated":false},
+             {"kind":"artifact_unreadable","reference":"artifact:gone.txt",
+              "reason":{"code":"missing"}}]}}}|}
+  in
+  match Masc.Tui_decode.decode_verification_evidence json with
+  | Error err -> Alcotest.fail err
+  | Ok (Masc.Tui_decode.Evidence_access_unavailable _) ->
+      Alcotest.fail "available evidence decoded as unavailable"
+  | Ok (Masc.Tui_decode.Evidence_items items) ->
+      Alcotest.(check int) "three items" 3 (List.length items);
+      (match items with
+       | [ Masc.Tui_decode.Ev_note note
+         ; Masc.Tui_decode.Ev_artifact { ev_reference; ev_bytes; ev_truncated; _ }
+         ; Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reference; ev_u_reason }
+         ] ->
+           Alcotest.(check string) "note" "tests green" note;
+           Alcotest.(check string) "reference" "artifact:proof.json" ev_reference;
+           Alcotest.(check int) "bytes" 2 ev_bytes;
+           Alcotest.(check bool) "not truncated" false ev_truncated;
+           Alcotest.(check (option string)) "unreadable ref"
+             (Some "artifact:gone.txt") ev_u_reference;
+           Alcotest.(check bool) "reason preserved" true
+             (String.length ev_u_reason > 0)
+       | _ -> Alcotest.fail "items decoded out of shape")
+
+let test_verification_evidence_unavailable_and_unknown_kind () =
+  (match
+     Masc.Tui_decode.decode_verification_evidence
+       (Yojson.Safe.from_string
+          {|{"result":{"evidence":{"access":"unavailable",
+             "request_id":"vr-1","reason":"snapshot invalid"}}}|})
+   with
+   | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
+       Alcotest.(check string) "reason" "snapshot invalid" reason
+   | Ok _ | Error _ -> Alcotest.fail "unavailable access did not decode");
+  match
+    Masc.Tui_decode.decode_verification_evidence
+      (Yojson.Safe.from_string
+         {|{"result":{"evidence":{"access":"available",
+            "items":[{"kind":"hologram"}]}}}|})
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an unknown evidence kind decoded"
+
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_verification_evidence",
+      [ Alcotest.test_case "decodes the three item kinds" `Quick
+          test_verification_evidence_decodes_items
+      ; Alcotest.test_case "unavailable carries reason; unknown kind fails" `Quick
+          test_verification_evidence_unavailable_and_unknown_kind
+      ] );
     ( "decode_goal_timeline",
       [ Alcotest.test_case "carries ready events" `Quick
           test_goal_timeline_decodes_ready_events

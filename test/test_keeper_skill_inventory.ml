@@ -162,6 +162,21 @@ let search_candidates surface query =
          (Masc.Keeper_capability_search.error_to_yojson error))
 ;;
 
+let tool_capability_with_availability surface availability =
+  Masc.Keeper_capability_surface.tool_capabilities surface
+  |> List.find_opt (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+    capability.availability = availability)
+  |> function
+  | Some capability -> capability
+  | None -> fail "Tool capability with requested availability is absent"
+;;
+
+let tool_reference_of_yojson json =
+  match Masc.Keeper_capability_surface.ordinary_tool_reference_of_yojson json with
+  | Ok reference -> reference
+  | Error _ -> fail "exact Tool reference did not parse"
+;;
+
 let test_valid_instruction_and_exact_reference () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let frozen =
@@ -299,6 +314,147 @@ let test_capability_surface_keeps_active_and_outside_tools () =
           capability.availability
           = Masc.Keeper_capability_surface.Outside_tool_surface)
        capabilities)
+;;
+
+let test_active_tool_reference_resolves_canonical_descriptor () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let surface = capability_surface (snapshot config [ [] ]) in
+  let capability =
+    tool_capability_with_availability surface Masc.Keeper_capability_surface.Active
+  in
+  let reference =
+    Masc.Keeper_capability_surface.ordinary_tool_reference capability
+  in
+  match
+    Masc.Keeper_capability_surface.resolve_ordinary_tool_reference surface reference
+  with
+  | Ok (Masc.Keeper_capability_surface.Active_tool descriptor) ->
+    check bool "resolution returns canonical descriptor record" true
+      (descriptor == capability.descriptor)
+  | Ok (Tool_unavailable _) -> fail "active Tool resolved as unavailable"
+  | Error _ -> fail "active exact Tool reference did not resolve"
+;;
+
+let test_outside_tool_reference_returns_availability_only () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let surface =
+    capability_surface ~tool_groups:(Some [ "board" ]) (snapshot config [ [] ])
+  in
+  let capability =
+    tool_capability_with_availability
+      surface
+      Masc.Keeper_capability_surface.Outside_tool_surface
+  in
+  let reference =
+    Masc.Keeper_capability_surface.ordinary_tool_reference capability
+  in
+  match
+    Masc.Keeper_capability_surface.resolve_ordinary_tool_reference surface reference
+  with
+  | Ok (Masc.Keeper_capability_surface.Tool_unavailable Outside_tool_surface) -> ()
+  | Ok (Tool_unavailable _) -> fail "outside Tool returned the wrong availability"
+  | Ok (Active_tool _) -> fail "outside Tool resolution exposed a descriptor"
+  | Error _ -> fail "known outside Tool reference was treated as unknown"
+;;
+
+let test_forged_tool_reference_rejects_unknown_and_mismatch () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let surface = capability_surface (snapshot config [ [] ]) in
+  let capability =
+    tool_capability_with_availability surface Masc.Keeper_capability_surface.Active
+  in
+  let mismatch =
+    tool_reference_of_yojson
+      (`Assoc
+         [ "descriptor_id", `String capability.descriptor.id
+         ; "capability_id", `String "forged-capability"
+         ])
+  in
+  (match
+     Masc.Keeper_capability_surface.resolve_ordinary_tool_reference surface mismatch
+   with
+   | Error (Masc.Keeper_capability_surface.Mismatched_tool_reference _) -> ()
+   | Error (Unknown_tool_reference _) -> fail "mismatched pair became unknown"
+   | Ok _ -> fail "mismatched descriptor/capability pair resolved");
+  let unknown =
+    tool_reference_of_yojson
+      (`Assoc
+         [ "descriptor_id", `String "forged-descriptor"
+         ; "capability_id", `String capability.descriptor.capability_id
+         ])
+  in
+  match
+    Masc.Keeper_capability_surface.resolve_ordinary_tool_reference surface unknown
+  with
+  | Error (Masc.Keeper_capability_surface.Unknown_tool_reference _) -> ()
+  | Error (Mismatched_tool_reference _) -> fail "unknown descriptor became mismatch"
+  | Ok _ -> fail "unknown descriptor reference resolved"
+;;
+
+let test_tool_reference_json_is_closed () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let surface = capability_surface (snapshot config [ [] ]) in
+  let capability =
+    tool_capability_with_availability surface Masc.Keeper_capability_surface.Active
+  in
+  let module Surface = Masc.Keeper_capability_surface in
+  let reference = Surface.ordinary_tool_reference capability in
+  let encoded = Surface.ordinary_tool_reference_to_yojson reference in
+  (match Surface.ordinary_tool_reference_of_yojson encoded with
+   | Ok decoded ->
+     check string "descriptor round-trip" reference.descriptor_id decoded.descriptor_id;
+     check string "capability round-trip" reference.capability_id decoded.capability_id
+   | Error _ -> fail "encoded Tool reference did not round-trip");
+  let check_error label expected json =
+    match Surface.ordinary_tool_reference_of_yojson json with
+    | Error actual -> check bool label true (actual = expected)
+    | Ok _ -> failf "%s was accepted" label
+  in
+  check_error
+    "unknown reference field"
+    (Surface.Unknown_reference_field "name")
+    (`Assoc
+       [ "descriptor_id", `String reference.descriptor_id
+       ; "capability_id", `String reference.capability_id
+       ; "name", `String "alias"
+       ]);
+  check_error
+    "duplicate reference field"
+    (Surface.Duplicate_reference_field "descriptor_id")
+    (`Assoc
+       [ "descriptor_id", `String reference.descriptor_id
+       ; "descriptor_id", `String reference.descriptor_id
+       ; "capability_id", `String reference.capability_id
+       ]);
+  check_error
+    "missing reference field"
+    (Surface.Missing_reference_field "capability_id")
+    (`Assoc [ "descriptor_id", `String reference.descriptor_id ]);
+  check_error
+    "empty reference field"
+    (Surface.Empty_reference_field "descriptor_id")
+    (`Assoc
+       [ "descriptor_id", `String "  "
+       ; "capability_id", `String reference.capability_id
+       ]);
+  check string "non-empty reference is not normalized" " exact-id "
+    ((tool_reference_of_yojson
+        (`Assoc
+           [ "descriptor_id", `String " exact-id "
+           ; "capability_id", `String reference.capability_id
+           ])).descriptor_id);
+  check string "parse error codec is typed" "empty_reference_field"
+    Yojson.Safe.Util.(
+      Surface.ordinary_tool_reference_parse_error_to_yojson
+        (Surface.Empty_reference_field "descriptor_id")
+      |> member "kind"
+      |> to_string);
+  check string "resolution error codec is typed" "unknown_tool_reference"
+    Yojson.Safe.Util.(
+      Surface.ordinary_tool_resolution_error_to_yojson
+        (Surface.Unknown_tool_reference reference)
+      |> member "kind"
+      |> to_string)
 ;;
 
 let test_empty_selection_makes_valid_skill_operator_only () =
@@ -581,6 +737,80 @@ let test_surface_digest_binds_exact_tool_input_schema () =
     (String.equal (Masc.Keeper_capability_surface.digest surface) altered_digest)
 ;;
 
+let test_surface_digest_binds_exact_tool_reference () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let surface = capability_surface (snapshot config [ [] ]) in
+  let material = Masc.Keeper_capability_surface.digest_material_to_yojson surface in
+  let rewrite_reference = function
+    | `Assoc candidate_fields ->
+      let is_tool =
+        match List.assoc_opt "candidate_kind" candidate_fields with
+        | Some (`String "ordinary_tool") -> true
+        | _ -> false
+      in
+      if not is_tool
+      then `Assoc candidate_fields
+      else
+        `Assoc
+          (List.map
+             (fun (field, value) ->
+                if not (String.equal field "reference")
+                then field, value
+                else
+                  ( field
+                  , match value with
+                    | `Assoc reference_fields ->
+                      `Assoc
+                        (List.map
+                           (fun (reference_field, reference_value) ->
+                              if String.equal reference_field "capability_id"
+                              then reference_field, `String "tampered-capability"
+                              else reference_field, reference_value)
+                           reference_fields)
+                    | other -> other ))
+             candidate_fields)
+    | other -> other
+  in
+  let altered_material =
+    match material with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if not (String.equal field "candidates")
+              then field, value
+              else
+                ( field
+                , match value with
+                  | `List (row :: rest) ->
+                    let changed_row =
+                      match row with
+                      | `Assoc row_fields ->
+                        `Assoc
+                          (List.map
+                             (fun (row_field, row_value) ->
+                                if String.equal row_field "candidate"
+                                then row_field, rewrite_reference row_value
+                                else row_field, row_value)
+                             row_fields)
+                      | other -> other
+                    in
+                    `List (changed_row :: rest)
+                  | other -> other ))
+           fields)
+    | other -> other
+  in
+  let altered_digest =
+    altered_material
+    |> Yojson.Safe.sort
+    |> Yojson.Safe.to_string
+    |> Digestif.SHA256.digest_string
+    |> Digestif.SHA256.to_hex
+  in
+  check bool "exact Tool reference change changes surface digest" false
+    (String.equal (Masc.Keeper_capability_surface.digest surface) altered_digest)
+;;
+
 let () =
   run
     "keeper_skill_inventory"
@@ -594,6 +824,14 @@ let () =
             test_catalog_status_tracks_source_precedence
         ; test_case "restricted Tool availability" `Quick
             test_capability_surface_keeps_active_and_outside_tools
+        ; test_case "active Tool exact reference" `Quick
+            test_active_tool_reference_resolves_canonical_descriptor
+        ; test_case "outside Tool exact reference" `Quick
+            test_outside_tool_reference_returns_availability_only
+        ; test_case "forged Tool exact reference" `Quick
+            test_forged_tool_reference_rejects_unknown_and_mismatch
+        ; test_case "Tool reference JSON is closed" `Quick
+            test_tool_reference_json_is_closed
         ; test_case "empty Skill selection" `Quick
             test_empty_selection_makes_valid_skill_operator_only
         ; test_case "shadowed and invalid Skill availability" `Quick
@@ -608,6 +846,8 @@ let () =
             test_search_returns_every_fts_hit_without_cutoff
         ; test_case "surface digest binds exact Tool schema" `Quick
             test_surface_digest_binds_exact_tool_input_schema
+        ; test_case "surface digest binds exact Tool reference" `Quick
+            test_surface_digest_binds_exact_tool_reference
         ] )
     ]
 ;;

@@ -16,6 +16,30 @@ type tool_capability =
   ; availability : capability_availability
   }
 
+type ordinary_tool_reference =
+  { descriptor_id : string
+  ; capability_id : string
+  }
+
+type ordinary_tool_reference_parse_error =
+  | Reference_not_object
+  | Unknown_reference_field of string
+  | Duplicate_reference_field of string
+  | Missing_reference_field of string
+  | Reference_field_not_string of string
+  | Empty_reference_field of string
+
+type ordinary_tool_resolution =
+  | Active_tool of Keeper_tool_descriptor.t
+  | Tool_unavailable of capability_availability
+
+type ordinary_tool_resolution_error =
+  | Unknown_tool_reference of ordinary_tool_reference
+  | Mismatched_tool_reference of
+      { reference : ordinary_tool_reference
+      ; expected_capability_id : string
+      }
+
 type skill_identity =
   | Exact_skill of Keeper_skill_inventory.skill_inventory_item
   | Missing_configured_skill_name of string
@@ -152,6 +176,119 @@ let descriptors surface = surface.descriptors
 let skill_projection surface = surface.skill_projection
 let skill_catalog surface = surface.skill_projection.catalog
 let tool_capabilities surface = surface.tool_capabilities
+
+let ordinary_tool_reference capability =
+  { descriptor_id = capability.descriptor.id
+  ; capability_id = capability.descriptor.capability_id
+  }
+;;
+
+let ordinary_tool_reference_to_yojson reference =
+  `Assoc
+    [ "descriptor_id", `String reference.descriptor_id
+    ; "capability_id", `String reference.capability_id
+    ]
+;;
+
+let ordinary_tool_reference_parse_error_to_yojson = function
+  | Reference_not_object -> `Assoc [ "kind", `String "reference_not_object" ]
+  | Unknown_reference_field field ->
+    `Assoc
+      [ "kind", `String "unknown_reference_field"; "field", `String field ]
+  | Duplicate_reference_field field ->
+    `Assoc
+      [ "kind", `String "duplicate_reference_field"; "field", `String field ]
+  | Missing_reference_field field ->
+    `Assoc
+      [ "kind", `String "missing_reference_field"; "field", `String field ]
+  | Reference_field_not_string field ->
+    `Assoc
+      [ "kind", `String "reference_field_not_string"; "field", `String field ]
+  | Empty_reference_field field ->
+    `Assoc
+      [ "kind", `String "empty_reference_field"; "field", `String field ]
+;;
+
+let first_duplicate fields =
+  let rec loop seen = function
+    | [] -> None
+    | (name, _) :: rest ->
+      if List.mem name seen then Some name else loop (name :: seen) rest
+  in
+  loop [] fields
+;;
+
+let ordinary_tool_reference_of_yojson = function
+  | `Assoc fields ->
+    (match first_duplicate fields with
+     | Some field -> Error (Duplicate_reference_field field)
+     | None ->
+       (match
+          List.find_opt
+            (fun (field, _) ->
+               not
+                 (String.equal field "descriptor_id"
+                  || String.equal field "capability_id"))
+            fields
+        with
+        | Some (field, _) -> Error (Unknown_reference_field field)
+        | None ->
+          let required_string field =
+            match List.assoc_opt field fields with
+            | None -> Error (Missing_reference_field field)
+            | Some (`String value) when String.equal (String.trim value) "" ->
+              Error (Empty_reference_field field)
+            | Some (`String value) -> Ok value
+            | Some _ -> Error (Reference_field_not_string field)
+          in
+          (match required_string "descriptor_id" with
+           | Error _ as error -> error
+           | Ok descriptor_id ->
+             (match required_string "capability_id" with
+              | Error _ as error -> error
+              | Ok capability_id -> Ok { descriptor_id; capability_id }))))
+  | _ -> Error Reference_not_object
+;;
+
+let resolve_ordinary_tool_reference surface reference =
+  match
+    List.find_opt
+      (fun capability ->
+         String.equal capability.descriptor.id reference.descriptor_id)
+      surface.tool_capabilities
+  with
+  | None -> Error (Unknown_tool_reference reference)
+  | Some capability ->
+    if not
+         (String.equal
+            capability.descriptor.capability_id
+            reference.capability_id)
+    then
+      Error
+        (Mismatched_tool_reference
+           { reference
+           ; expected_capability_id = capability.descriptor.capability_id
+           })
+    else
+      (match capability.availability with
+       | Active -> Ok (Active_tool capability.descriptor)
+       | availability -> Ok (Tool_unavailable availability))
+;;
+
+let ordinary_tool_resolution_error_to_yojson = function
+  | Unknown_tool_reference reference ->
+    `Assoc
+      [ "kind", `String "unknown_tool_reference"
+      ; "reference", ordinary_tool_reference_to_yojson reference
+      ]
+  | Mismatched_tool_reference { reference; expected_capability_id } ->
+    `Assoc
+      [ "kind", `String "mismatched_tool_reference"
+      ; "reference", ordinary_tool_reference_to_yojson reference
+      ; "expected_capability_id", `String expected_capability_id
+      ]
+;;
+
 let skill_capabilities surface = surface.skill_capabilities
 let skill_snapshot_revision surface = surface.skill_snapshot_revision
 let candidates surface =
@@ -310,6 +447,9 @@ let candidate_to_yojson = function
   | Ordinary_tool capability ->
     `Assoc
       [ "candidate_kind", `String "ordinary_tool"
+      ; ( "reference"
+        , ordinary_tool_reference capability
+          |> ordinary_tool_reference_to_yojson )
       ; "capability", tool_capability_to_yojson capability
       ]
   | Skill capability ->

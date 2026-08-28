@@ -8347,6 +8347,21 @@ let async_request_observation_lines (state : state) =
 
 (* The Tools sections, named where the reader is standing. Same shape as
    {!config_pane_strip}: a reader who has seen one has seen the other. *)
+(* Enough of a content hash to tell two of them apart, which is the only
+   question a reader asks of one on a screen. The footer already draws commit
+   hashes this way and says why; these are the same kind of value and were
+   drawn whole, so a 64-character revision ran past the width and arrived cut
+   mid-hash -- long enough to fill the line, short of anything to compare.
+
+   Short of the prefix length the value is left as it is: a value that is
+   already short is not a hash, and trimming it would take meaning. *)
+let short_revision_length = 12
+
+let short_revision value =
+  if String.length value <= short_revision_length then value
+  else String.sub value 0 short_revision_length ^ "\xe2\x80\xa6"
+;;
+
 let tools_pane_strip (state : state) =
   let name pane label =
     if state.tools_pane = pane then
@@ -8459,18 +8474,26 @@ let render_tools (state : state) =
           | Some max_bytes -> Printf.sprintf "%d bytes" max_bytes
           | None -> "not configured"
         in
-        let instruction =
-          match ets_instruction_skills with
+        (* Names, not the wire form. These were serialised to JSON and then
+           cut to the width of the line, so the header read
+           [{"identity":{"source_id":"project-masc","package_id"~] -- sixty
+           characters that answer nothing, in the place a reader looks first.
+
+           The skills are listed by name a few rows below, so the header's
+           job is the count and which ones, and it can say both in less room
+           than the envelope of the first one took. *)
+        let skill_names refs =
+          match refs with
           | [] -> "none"
           | xs ->
-            Skill_reference.list_to_yojson xs |> Yojson.Safe.to_string
+            Printf.sprintf "%d · %s" (List.length xs)
+              (xs
+               |> List.map (fun reference ->
+                    reference.Skill_reference.identity.Skill_reference.name)
+               |> String.concat " ")
         in
-        let composition =
-          match ets_composition_skills with
-          | [] -> "none"
-          | xs ->
-            Skill_reference.list_to_yojson xs |> Yojson.Safe.to_string
-        in
+        let instruction = skill_names ets_instruction_skills in
+        let composition = skill_names ets_composition_skills in
         let digest =
           match ets_tool_surface_sha256 with
           | None -> "n/a (Agent Core owns the turn)"
@@ -8716,7 +8739,7 @@ let render_tools (state : state) =
             (Terminal_text.single_line composition);
           Ansi.dim,
           "   skill snapshot="
-          ^ Terminal_text.single_line ets_skill_snapshot_revision;
+          ^ short_revision (Terminal_text.single_line ets_skill_snapshot_revision);
           Ansi.dim,
           "   deferred resource bound=" ^ Terminal_text.single_line resource_bound;
           Ansi.bold,
@@ -8729,7 +8752,7 @@ let render_tools (state : state) =
             ets_tool_surface_bytes;
           Ansi.bold,
           "   Skills — J/K select · Enter evidence · e edit · c new instruction · C new composition";
-          Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
+          Ansi.dim, "   digest=" ^ short_revision (Terminal_text.single_line digest) ]
         @ skill_profile_lines
         @ selected_skill_flow_lines
         @ selected_skill_evidence_lines
@@ -8966,11 +8989,13 @@ let render_tools (state : state) =
              |> Terminal_text.single_line)
             (Masc.Keeper_skill_activation_ledger.revision sap_ledger
              |> Masc.Keeper_skill_activation_ledger.ledger_revision_to_string
-             |> Terminal_text.single_line)
+             |> Terminal_text.single_line
+             |> short_revision)
         ; Ansi.dim,
           "   workspace="
           ^ (Masc.Keeper_skill_activation_ledger.workspace_key sap_ledger
-             |> Terminal_text.single_line)
+             |> Terminal_text.single_line
+             |> short_revision)
         ]
         @ timeline_lines
         @ scoped_lines

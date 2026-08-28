@@ -775,6 +775,18 @@ let test_operator_approvals_use_current_contract () =
      names share a long prefix then read alike -- which is the column's whole
      job. The pre-pass that measures them is the [display_width] call; a
      return to a fixed width takes it with it. *)
+  (* The Tools header names its skills instead of serialising them. It used
+     [Skill_reference.list_to_yojson] and then let the line's width cut the
+     result, so the header read [{"identity":{"source_id":"project-masc"~] --
+     sixty characters answering nothing, where a reader looks first, about
+     skills the same screen lists by name a few rows below.
+
+     A return to the wire form brings the call back with it. *)
+  check int "the tools header does not serialise its skills" 0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_tools"
+       ~callee:"Skill_reference.list_to_yojson");
   check bool "approval renderer measures its name column" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"

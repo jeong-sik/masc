@@ -2021,8 +2021,9 @@ let render_board_compose (state : state) =
     else
       "type to write  esc:send or discard  Tab:surfaces  q:quit"
   in
-  Buffer.add_string buf
-    (Printf.sprintf "%s  %s%s\n" Ansi.dim prompt Ansi.reset);
+  (* footer_line, not a hand-rolled dim line: the status tail (port, build,
+     worktree/generation warnings) must reach this surface too. *)
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:prompt);
   finish_frame_with_strip state ~surface_key:"board-compose" ~cursor:Frame_presenter.Hidden ~rows
     ~cols buf
 
@@ -3760,10 +3761,8 @@ let render_keeper_list (state : state) =
     (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_bl (draw_hline (cols - 2))
        Ansi.box_br Ansi.reset);
   Buffer.add_string buf
-    (Message_layout.fit_width
-       (keeper_action_hints ~offers_back:false state selected_reading)
-       (max 1 cols)
-     ^ "\n");
+    (footer_line state ~max_cells:cols
+       ~hints:(keeper_action_hints ~offers_back:false state selected_reading));
 
   finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
       ~cols buf
@@ -5114,9 +5113,9 @@ let render_keeper_logs (state : state) =
 
     box_bottom buf cols;
 
-    (* Footer *)
-    Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  q:quit  r:refresh%s\n"
-      Ansi.dim Ansi.reset);
+    Buffer.add_string buf
+      (footer_line state ~max_cells:cols
+         ~hints:"j/k:scroll  Esc:back  q:quit  r:refresh");
 
     finish_surface state ~surface_key:"keeper-logs" ~rows:terminal_rows
       ~cols buf
@@ -8998,11 +8997,10 @@ let render_runtime_pick (state : state) =
   done;
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf
-       "  %sj/k%s move  %senter%s assign  %sd%s back to default  %sesc%s \
-        cancel\n"
-       Ansi.cyan Ansi.reset Ansi.cyan Ansi.reset Ansi.cyan Ansi.reset Ansi.dim
-       Ansi.reset);
+    (footer_line state ~max_cells:cols
+       ~hints:
+         (Printf.sprintf "%sj/k%s move  %senter%s assign  %sd%s back to default  esc cancel"
+            Ansi.cyan Ansi.reset Ansi.cyan Ansi.reset Ansi.cyan Ansi.reset));
   finish_surface state ~surface_key:"runtime-pick" ~rows:terminal_rows ~cols
     buf
 

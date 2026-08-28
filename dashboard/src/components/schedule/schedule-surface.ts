@@ -390,6 +390,7 @@ export function ScheduleSurface() {
       ${selectedRequest
         ? html`<${SchDetail}
             request=${selectedRequest}
+            signals=${automation?.signals ?? []}
             onClose=${() => selectSchedule(null)}
           />`
         : null}

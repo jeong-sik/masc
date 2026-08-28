@@ -28,6 +28,7 @@ function request(
 
 function automation(
   requests: DashboardScheduledAutomationRequest[],
+  signals: DashboardScheduledAutomationSignal[] = [],
 ): DashboardScheduledAutomation {
   return {
     schema: 'masc.dashboard.scheduled_automation.v1',
@@ -39,6 +40,7 @@ function automation(
     counts: {},
     fsm: { state: 'idle', active_count: requests.length, terminal_count: 0 },
     requests,
+    signals,
   }
 }
 
@@ -460,6 +462,32 @@ describe('ScheduledAutomationPanel', () => {
   })
 
   it('renders keeper wake dispatch receipts as queue proof in diagnostics and v2', async () => {
+    const emissionSignals: DashboardScheduledAutomationSignal[] = [
+      {
+        occurrence_id: 'occ-1',
+        kind: 'schedule.due_candidate',
+        event_type: 'schedule.due_candidate',
+        schedule_id: 'sched-keeper-wake',
+        emitted_at: 1750464000,
+        emitted_at_iso: '2026-06-21T00:00:00Z',
+      },
+      {
+        occurrence_id: 'occ-2',
+        kind: 'schedule.due_candidate',
+        event_type: 'schedule.due_candidate',
+        schedule_id: 'sched-keeper-wake',
+        emitted_at: 1750467600,
+        emitted_at_iso: '2026-06-21T01:00:00Z',
+      },
+      {
+        occurrence_id: 'occ-foreign',
+        kind: 'schedule.due_candidate',
+        event_type: 'schedule.due_candidate',
+        schedule_id: 'sched-somebody-else',
+        emitted_at: 1750471200,
+        emitted_at_iso: '2026-06-21T02:00:00Z',
+      },
+    ]
     const auto = automation([
       request({
         schedule_id: 'sched-keeper-wake',
@@ -540,6 +568,8 @@ describe('ScheduledAutomationPanel', () => {
       }),
     ])
 
+    auto.signals = emissionSignals
+
     render(html`<${ScheduledAutomationPanel} automation=${auto} />`, container)
 
     const receipt = container.querySelector('[data-schedule-dispatch-receipt="recognized"]')
@@ -609,6 +639,15 @@ describe('ScheduledAutomationPanel', () => {
     expect(keeperLink).not.toBeNull()
     expect(keeperLink?.getAttribute('href')).toContain('keeper=schedule-keeper')
     expect(keeperLink?.textContent).toContain('schedule-keeper')
+    // Emission history: this schedule's past firings from the shared signal
+    // window, newest first, with the foreign schedule's signal excluded.
+    const history = container.querySelector('[data-testid="schedule-emission-history"]')
+    expect(history).not.toBeNull()
+    expect(history?.textContent).toContain('2건')
+    const emissions = Array.from(
+      container.querySelectorAll('[data-emission]'),
+    ).map(node => node.getAttribute('data-emission'))
+    expect(emissions).toEqual(['occ-2', 'occ-1'])
 
     const wakeRequest = auto.requests[0]!
     const ackedAuto = automation([

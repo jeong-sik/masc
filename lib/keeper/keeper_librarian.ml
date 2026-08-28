@@ -13,12 +13,22 @@ type object_field_error =
 type current_selection =
   { facts : fact list }
 
+type tool_observation_outcome =
+  | Succeeded
+  | Failed
+
+type tool_observation =
+  { tool_name : string
+  ; outcome : tool_observation_outcome
+  }
+
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; keeper_instructions : string
   ; current : current_selection option
   ; max_recall_fact_bytes : int
   ; messages : Agent_core.Types.message list
+  ; tool_observations : tool_observation list
   ; counterpart_observations : Keeper_counterpart_observation.t list
   }
 
@@ -141,6 +151,25 @@ let format_keeper_instructions_for_prompt instructions =
   | Some instructions -> instructions
 ;;
 
+let tool_observation_outcome_to_string = function
+  | Succeeded -> "succeeded"
+  | Failed -> "failed"
+;;
+
+let format_tool_observations_for_prompt observations =
+  `List
+    (List.map
+       (fun observation ->
+          `Assoc
+            [ "tool_name", `String observation.tool_name
+            ; ( "outcome"
+              , `String
+                  (tool_observation_outcome_to_string observation.outcome) )
+            ])
+       observations)
+  |> Yojson.Safe.pretty_to_string
+;;
+
 let prompt_variables (inp : input) : (string * string) list =
   [ ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
@@ -148,6 +177,8 @@ let prompt_variables (inp : input) : (string * string) list =
   ; "max_recall_fact_bytes", string_of_int inp.max_recall_fact_bytes
   ; ( "conversation_history"
     , format_messages_for_prompt inp.messages )
+  ; ( "turn_tool_observations"
+    , format_tool_observations_for_prompt inp.tool_observations )
   ; ( "counterpart_observations"
     , Keeper_counterpart_observation.render_for_prompt
         inp.counterpart_observations )

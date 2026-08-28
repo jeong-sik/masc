@@ -71,7 +71,7 @@ let run
   ~(meta : Keeper_meta_contract.keeper_meta)
   ~turn
   ~agent_core_turn_count
-  ~actual_tools
+  ~tool_observations
   ~librarian_messages
   ~post_turn_t0
   ~inference_telemetry
@@ -132,6 +132,7 @@ let run
             ; max_recall_fact_bytes =
                 Env_config.KeeperMemoryOs.recall_facts_max_bytes ()
             ; messages = librarian_messages
+            ; tool_observations
             ; counterpart_observations
             }
           in

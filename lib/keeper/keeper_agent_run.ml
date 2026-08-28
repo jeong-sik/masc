@@ -1304,7 +1304,6 @@ let run_turn
                              ~session ~append_manifest
                              ~model:manifest_model_label
                              ~acc
-                             ~actual_keeper_tool_names
                              ~result
                              ~last_persisted_checkpoint:
                                !last_persisted_checkpoint_ref

@@ -61,6 +61,14 @@ let input () : Librarian.input =
           ~role:Agent_core.Types.User
           [ Agent_core.Types.Text "new conversation" ]
       ]
+  ; tool_observations =
+      [ { Librarian.tool_name = "keeper_artifact_read"
+        ; outcome = Librarian.Succeeded
+        }
+      ; { Librarian.tool_name = "tool_execute"
+        ; outcome = Librarian.Failed
+        }
+      ]
   ; counterpart_observations = []
   }
 ;;
@@ -411,6 +419,30 @@ let test_prompt_carries_keeper_instructions () =
   check string "blank Keeper instructions render an explicit marker"
     "[no keeper instructions]"
     (List.assoc "keeper_instructions" (Librarian.prompt_variables blank))
+;;
+
+let test_prompt_carries_typed_tool_observations_without_payloads () =
+  let variables = Librarian.prompt_variables (input ()) in
+  let observations = List.assoc "turn_tool_observations" variables in
+  check bool "successful artifact read is host-authored input" true
+    (String_util.contains_substring observations
+       {|"tool_name": "keeper_artifact_read"|});
+  check bool "successful outcome is retained" true
+    (String_util.contains_substring observations {|"outcome": "succeeded"|});
+  check bool "failed outcome is retained" true
+    (String_util.contains_substring observations {|"outcome": "failed"|});
+  match Runtime.messages_for_librarian (input ()) with
+  | Error detail -> failf "librarian render failed: %s" detail
+  | Ok messages ->
+    let rendered = user_text_of_messages messages in
+    check bool "typed observations section is rendered" true
+      (String_util.contains_substring rendered
+         "Host-authored current-turn tool observations");
+    check bool "tool identity reaches the rendered prompt" true
+      (String_util.contains_substring rendered "keeper_artifact_read");
+    check bool "tool payload authority stays excluded" true
+      (String_util.contains_substring rendered
+         "not that the assistant interpreted its payload correctly")
 ;;
 
 let test_durable_speaker_attribution_reaches_counterpart_observations () =
@@ -946,6 +978,8 @@ let () =
             test_prompt_contains_exact_current_selection
         ; test_case "prompt carries Keeper instructions" `Quick
             test_prompt_carries_keeper_instructions
+        ; test_case "prompt carries typed tool observations without payloads" `Quick
+            test_prompt_carries_typed_tool_observations_without_payloads
         ; test_case "durable speaker attribution reaches counterpart observations" `Quick
             test_durable_speaker_attribution_reaches_counterpart_observations
         ; test_case "counterpart sources retain direct and attention fallback" `Quick

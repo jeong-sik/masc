@@ -47,7 +47,7 @@ let run_post_turn ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~turn 
     ~meta
     ~turn
     ~agent_core_turn_count:1
-    ~actual_tools:[]
+    ~tool_observations:[]
     ~librarian_messages:[]
     ~post_turn_t0:(Time_compat.now ())
     ~inference_telemetry:None

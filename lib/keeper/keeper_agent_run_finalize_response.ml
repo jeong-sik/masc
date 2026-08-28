@@ -20,7 +20,6 @@ let finalize
     ~(append_manifest : Keeper_agent_run_turn_helpers.append_manifest_fn)
     ~model
     ~(acc : Keeper_run_tools.hook_accumulator)
-    ~actual_keeper_tool_names
     ~(result : Runtime_agent.run_result)
     ~last_persisted_checkpoint
     ~final_agent_core_turn_ordinal
@@ -243,12 +242,26 @@ let finalize
       | Some checkpoint -> checkpoint.Agent_core.Checkpoint.messages
       | None -> Option.to_list assistant_msg
     in
+    let librarian_tool_observations =
+      acc.tool_calls
+      |> List.rev
+      |> List.map (fun (detail : Keeper_agent_result.tool_call_detail) ->
+        ({ tool_name =
+             Keeper_tool_descriptor_resolution.canonical_tool_name
+               detail.tool_name
+         ; outcome =
+             (match detail.execution_outcome with
+              | Tool_result.Ok -> Keeper_librarian.Succeeded
+              | Tool_result.Error -> Keeper_librarian.Failed)
+         }
+          : Keeper_librarian.tool_observation))
+    in
     Keeper_agent_run_post_turn_memory.run
       ~config
       ~meta
       ~turn:manifest_keeper_turn_id
       ~agent_core_turn_count:result.turns
-      ~actual_tools:actual_keeper_tool_names
+      ~tool_observations:librarian_tool_observations
       ~librarian_messages
       ~post_turn_t0
       ~inference_telemetry:result.response.telemetry

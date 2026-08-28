@@ -61,6 +61,9 @@ val partition : t -> partition
 
 val skills : t -> Keeper_skill_catalog.skill list
 
+val task_ids_for_reference : t -> Skill_reference.t -> string list
+(** Exact Task ids that selected this revision in the frozen turn observation. *)
+
 val executable_selection :
   projection:Keeper_skill_catalog.turn_projection -> t -> t
 (** Retain only Task selections present in the executable turn projection.

@@ -9,6 +9,13 @@
 type lane_configuration =
   | Configured of
       { admitted_slots : string list
+      ; dropped_slots : string list
+            (** Slot ids the lane DECLARED that publication could not admit —
+                absent from the frozen catalog (a typo, a removed model, or a
+                credential-unbound target the resolver excluded). The one
+                boot-time WARN was the only signal before this field, so an
+                operator could not tell "configured single" from "configured
+                double, one silently dropped" (lane audit W4). *)
       ; admission_error : string option
       }
   | Unconfigured of string

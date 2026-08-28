@@ -4311,12 +4311,20 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
      whose registry could not be read are different problems and the operator
      acts on them differently -- and nothing drew it. *)
   let slots =
-    match lane.sl_admitted_slots, lane.sl_admission_error with
-    | [], Some reason -> reason
-    | [], None -> "no admitted slot"
-    | admitted, None -> String.concat "," admitted
-    | admitted, Some reason ->
-      String.concat "," admitted ^ " \xc2\xb7 " ^ reason
+    let base =
+      match lane.sl_admitted_slots, lane.sl_admission_error with
+      | [], Some reason -> reason
+      | [], None -> "no admitted slot"
+      | admitted, None -> String.concat "," admitted
+      | admitted, Some reason ->
+        String.concat "," admitted ^ " \xc2\xb7 " ^ reason
+    in
+    (* A declared slot publication could not admit is the difference between
+       "configured single" and "configured double, one silently dropped" —
+       the boot WARN was the only place that said so before this. *)
+    match lane.sl_dropped_slots with
+    | [] -> base
+    | dropped -> base ^ " (dropped " ^ String.concat "," dropped ^ ")"
   in
   let observed_slots =
     match lane.sl_selected_slots with

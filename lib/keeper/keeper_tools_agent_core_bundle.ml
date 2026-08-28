@@ -358,38 +358,54 @@ let make_tool_bundle_for_descriptors_with_policy
          in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
-             let make_handler =
+             let h =
                match capability_surface with
                | Some capability_surface ->
                  Keeper_tools_agent_core_handler.make_keeper_tool_handler
                    ~capability_surface
+                   ~name:internal
+                   ~descriptor
+                   ~model_name
+                   ~input_schema:descriptor.input_schema
+                   ~config
+                   ~meta
+                   ~publication_recovery
+                   ~ctx_snapshot
+                   ?turn_sandbox_factory
+                   ?clock
+                   ?continuation_channel
+                   ?gate_context:gate_context_provider
+                   ?gate_grant
+                   ?record_gate_result
+                   ?on_completed
+                   ~on_deferred:mark_deferred_tool_result
+                   ~on_external_effect_deferred:mark_external_effect_deferred
+                   ?on_failed
+                   ()
                | None ->
                  Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
-             in
-             let h =
-               make_handler
-                 ~name:internal
-                 ~input_schema:descriptor.input_schema
-                 ~config
-                 ~meta
-                 ~publication_recovery
-                 ~ctx_snapshot
+                   ~name:internal
+                   ~input_schema:descriptor.input_schema
+                   ~config
+                   ~meta
+                   ~publication_recovery
+                   ~ctx_snapshot
                    ?turn_sandbox_factory
-                 ?clock
-                 ?continuation_channel
-                 ?gate_context:gate_context_provider
-                 ?gate_grant
-                 ?record_gate_result
-                 ?on_completed
-                 ~on_deferred:mark_deferred_tool_result
-                 ~on_external_effect_deferred:mark_external_effect_deferred
-                 ?on_failed
-                 ~prepare_input:(fun input ->
-                   Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
-                     ~tool_name:model_name
-                     descriptor
-                     ~input)
-                 ()
+                   ?clock
+                   ?continuation_channel
+                   ?gate_context:gate_context_provider
+                   ?gate_grant
+                   ?record_gate_result
+                   ?on_completed
+                   ~on_deferred:mark_deferred_tool_result
+                   ~on_external_effect_deferred:mark_external_effect_deferred
+                   ?on_failed
+                   ~prepare_input:(fun input ->
+                     Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
+                       ~tool_name:model_name
+                       descriptor
+                       ~input)
+                   ()
              in
              Tool_bridge.agent_core_tool_of_masc_with_execution_env
                ?descriptor:agent_core_descriptor

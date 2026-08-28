@@ -30,10 +30,7 @@ type frozen_surface_admission_error =
 
 let descriptor_is_in_frozen_surface capability_surface descriptor =
   Keeper_capability_surface.descriptors capability_surface
-  |> List.exists (fun admitted ->
-    String.equal
-      admitted.Keeper_tool_descriptor.id
-      descriptor.Keeper_tool_descriptor.id)
+  |> List.exists (fun admitted -> admitted == descriptor)
 ;;
 
 let frozen_surface_admission_error_to_execution error =

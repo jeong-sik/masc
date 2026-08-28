@@ -4812,6 +4812,73 @@ let test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor () =
     (outcome_label name_result.disposition)
 ;;
 
+let test_frozen_surface_rejects_same_id_counterfeit_descriptor () =
+  with_exec_fixture "frozen-surface-counterfeit-descriptor"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let canonical = composition_descriptor "keeper_time_now" in
+  let counterfeit =
+    { canonical with description = canonical.description ^ " (counterfeit)" }
+  in
+  check string "counterfeit retains the registered id" canonical.id counterfeit.id;
+  check bool "counterfeit is not canonical" false (counterfeit == canonical);
+  let result =
+    KET.execute_keeper_tool_descriptor_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~descriptor:counterfeit
+      ~input:(`Assoc [])
+      ()
+  in
+  check_frozen_surface_rejection "counterfeit descriptor" result
+;;
+
+let test_frozen_surface_production_bundle_executes_public_read () =
+  with_exec_fixture "frozen-surface-production-read"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let playground = KES.keeper_default_write_root ~config ~meta in
+  let relative_path = "frozen-bundle-read.txt" in
+  let expected_content = "canonical frozen bundle content\n" in
+  mkdir_p playground;
+  write_file (Filename.concat playground relative_path) expected_content;
+  let capability_surface = frozen_capability_surface ~tool_groups:[] in
+  let bundle =
+    Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot:ctx_work
+      ~capability_surface
+      ()
+  in
+  Fun.protect
+    ~finally:bundle.cleanup
+    (fun () ->
+       let read_tool =
+         match find_tool_by_name bundle.tools "Read" with
+         | Some tool -> tool
+         | None -> fail "production capability bundle omitted public Read"
+       in
+       match
+         Agent_core.Tool.execute
+           read_tool
+           (`Assoc [ "file_path", `String relative_path; "limit", `Int 4096 ])
+       with
+       | Error error ->
+         failf
+           "production capability bundle Read failed: %s"
+           error.Agent_core.Types.message
+       | Ok output ->
+         let payload = parse_json output.content in
+         check string
+           "production capability bundle returns fixture content"
+           expected_content
+           Yojson.Safe.Util.(payload |> member "content" |> to_string))
+;;
+
 let test_frozen_surface_name_dispatch_rejects_non_exposed_alias () =
   with_exec_fixture "frozen-surface-name-alias"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -7302,6 +7369,10 @@ let () =
         test_frozen_surface_direct_dispatch_rejects_excluded_global_tool;
       test_case "frozen surface accepts its exact descriptor" `Quick
         test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor;
+      test_case "frozen surface rejects a same-id counterfeit descriptor" `Quick
+        test_frozen_surface_rejects_same_id_counterfeit_descriptor;
+      test_case "production frozen bundle executes public Read" `Quick
+        test_frozen_surface_production_bundle_executes_public_read;
       test_case "frozen surface rejects a non-exposed descriptor alias" `Quick
         test_frozen_surface_name_dispatch_rejects_non_exposed_alias;
       test_case "nested plan preserves frozen surface authority" `Quick

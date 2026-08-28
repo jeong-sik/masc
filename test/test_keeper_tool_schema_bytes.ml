@@ -126,6 +126,7 @@ let all_surface_golden_names =
   ; "keeper_time_now"
   ; "keeper_tools_list"
   ; "keeper_capability_search"
+  ; "keeper_assemble_plan"
   ; "keeper_voice_agent"
   ; "keeper_voice_listen"
   ; "keeper_voice_session_end"

@@ -8,6 +8,7 @@
     "Write.toml",
     "analyze_image.toml",
     "keeper_artifact_read.toml",
+    "keeper_assemble_plan.toml",
     "keeper_broadcast.toml",
     "keeper_capability_search.toml",
     "keeper_composition_cancel.toml",

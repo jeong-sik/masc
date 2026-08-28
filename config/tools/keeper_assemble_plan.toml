@@ -1,0 +1,56 @@
+name = "keeper_assemble_plan"
+description = """
+Ask the configured Assembler exact-output lane to build one typed Tool DAG from \
+an objective and exact ordinary-Tool references frozen for this Keeper turn. \
+The result is a durable content-addressed proposal_id. This call never executes \
+the proposal or any referenced Tool; pass the proposal_id to the separate \
+proposal execution surface when execution is intended."""
+additional_properties = false
+
+[[params]]
+name = "objective"
+type = "string"
+required = true
+min_length = 1
+pattern = "^([^ \t\n\f\r]|[ \t\n\f\r])*[^ \t\n\f\r]([^ \t\n\f\r]|[ \t\n\f\r])*$"
+
+[[params]]
+name = "execution"
+type = "string"
+required = true
+enum = ["inline", "async"]
+
+[[params]]
+name = "ordinary_tool_references"
+type = "array"
+required = true
+min_items = 1
+unique_items = true
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "descriptor_id"
+type = "string"
+required = true
+min_length = 1
+pattern = "^([^ \t\n\f\r]|[ \t\n\f\r])*[^ \t\n\f\r]([^ \t\n\f\r]|[ \t\n\f\r])*$"
+
+[[params.items.params]]
+name = "capability_id"
+type = "string"
+required = true
+min_length = 1
+pattern = "^([^ \t\n\f\r]|[ \t\n\f\r])*[^ \t\n\f\r]([^ \t\n\f\r]|[ \t\n\f\r])*$"
+
+[help]
+short_description = "Build and persist a typed Tool DAG proposal without executing it."
+when_to_use = "Use after capability search when several Tool calls need explicit dependencies or output handoff."
+key_constraints = [
+  "References are exact identities from this Keeper turn's frozen capability surface.",
+  "The call invokes only the Assembler exact-output lane and stores a proposal.",
+  "No ordinary Tool and no proposal execution runs during assembly.",
+]
+alternatives = ["keeper_plan_execute"]

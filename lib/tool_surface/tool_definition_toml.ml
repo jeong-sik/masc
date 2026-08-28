@@ -332,6 +332,10 @@ let rec param_of_pairs ~context pairs =
       let* () = only_for ~context:key_context ~declared Ptype_array in
       let* v = as_int ~context:key_context value in
       Ok (Some ("minItems", `Int v))
+    | "unique_items" ->
+      let* () = only_for ~context:key_context ~declared Ptype_array in
+      let* v = as_bool ~context:key_context value in
+      Ok (Some ("uniqueItems", `Bool v))
     | "additional_properties" ->
       (* JSON Schema lets this be a boolean or a schema. [false] closes the
          object; a schema says what an undeclared key must look like, which is

@@ -91,6 +91,7 @@ let tag_of_runtime_handler
   | Tool_time_now
   | Tool_tools_list
   | Tool_capability_search
+  | Tool_assemble_plan
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search

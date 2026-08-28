@@ -510,6 +510,192 @@ let test_keeper_preference_dispatches_only_the_preferred_candidate () =
   | _ -> fail "preferred execution observation is missing"
 ;;
 
+let assembler_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String name
+        ; "trace_id", `String (name ^ "-trace")
+        ; "allowed_paths", `List [ `String "*" ]
+        ])
+  with
+  | Ok meta -> meta
+  | Error detail -> fail detail
+;;
+
+let find_agent_core_tool tools name =
+  List.find_opt
+    (fun (tool : Agent_core.Tool.t) ->
+       String.equal tool.schema.Agent_core.Types.name name)
+    tools
+  |> function
+  | Some tool -> tool
+  | None -> failf "Agent-Core bundle omitted %s" name
+;;
+
+let test_model_visible_tool_produces_proposal_without_tool_execution () =
+  with_eio_base "assembler-model-visible-tool"
+  @@ fun ~sw ~net ~clock ~base_path:_ ~config ~request:_ ->
+  let accepted =
+    Fixture.start_server
+      ~sw
+      ~net
+      ~clock
+      (Fixture.Reply (Fixture.openai_response plan_output))
+  in
+  publish_lane
+    [ { Fixture.id = "assembler-tool-accepted"; base_url = accepted.base_url } ];
+  let capability_surface = surface () in
+  let reference = reference capability_surface "keeper_time_now" in
+  let meta = assembler_meta "assembler-tool-test" in
+  let publication_recovery =
+    { Keeper_publication_recovery_availability.provider =
+        Keeper_publication_recovery_availability.non_runtime_provider
+    ; keeper_name = meta.name
+    }
+  in
+  let bundle =
+    Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot:
+        (Keeper_context_runtime.create
+           ~eio:false
+           ~system_prompt:"assembler Tool test")
+      ~clock
+      ~capability_surface
+      ()
+  in
+  Fun.protect
+    ~finally:bundle.cleanup
+    (fun () ->
+       let tool = find_agent_core_tool bundle.tools "keeper_assemble_plan" in
+       let input =
+         `Assoc
+           [ "objective", `String "Read the current time"
+           ; "execution", `String "inline"
+           ; ( "ordinary_tool_references"
+             , `List
+                 [ Surface.ordinary_tool_reference_to_yojson reference ] )
+           ]
+       in
+       let output =
+         match Agent_core.Tool.execute tool input with
+         | Ok output -> Yojson.Safe.from_string output.content
+         | Error error -> failf "keeper_assemble_plan failed: %s" error.message
+       in
+       check bool "Tool result succeeded" true
+         (field "ok" output = Some (`Bool true));
+       check int "Assembler provider called exactly once" 1
+         (Fixture.post_count accepted);
+       assert_no_provider_tool_surface accepted;
+       let proposal_id =
+         match field "proposal_id" output with
+         | Some (`String value) -> value
+         | _ -> fail "Tool result omitted proposal_id"
+       in
+       let proposal_id =
+         match Proposal.Proposal_id.of_string proposal_id with
+         | Ok proposal_id -> proposal_id
+         | Error Proposal.Proposal_id.Not_lowercase_sha256 ->
+           fail "Tool result proposal_id is not content-addressed"
+       in
+       let proposal =
+         match
+           Store.load
+             ~descriptors:(Surface.descriptors capability_surface)
+             config
+             proposal_id
+         with
+         | Ok proposal -> proposal
+         | Error error ->
+           failf "Tool result proposal did not load: %s"
+             (Store.error_to_yojson error |> Yojson.Safe.to_string)
+       in
+       check string "Tool result digest matches stored proposal"
+         (Proposal.digest proposal)
+         (match field "proposal_digest" output with
+          | Some (`String value) -> value
+          | _ -> "");
+       let run_id =
+         match field "run_id" output with
+         | Some (`String value) -> value
+         | _ -> fail "Tool result omitted run_id"
+       in
+       (match Exact.get (Exact.global ()) ~run_id with
+        | Some
+            { status =
+                Exact.Completed
+                  { outcome = Exact.Succeeded
+                  ; selected_slot = Some "assembler-tool-accepted"
+                  ; _
+                  }
+            ; _
+            } -> ()
+        | Some _ -> fail "Tool run ledger did not record typed success"
+        | None -> fail "Tool run ledger omitted returned run_id");
+       check bool "ordinary Tool dispatch log remains absent" false
+         (Sys.file_exists
+            (Filename.concat (Workspace.masc_root_dir config) "tool_calls")))
+;;
+
+let test_compatibility_path_requires_frozen_surface () =
+  let result =
+    Keeper_tool_assemble_plan_runtime.handle_without_frozen_surface ()
+  in
+  (match result.disposition with
+   | Tool_result.Failed Tool_result.Policy_rejection -> ()
+   | Tool_result.Completed () | Tool_result.Deferred () | Tool_result.Failed _ ->
+     fail "compatibility path did not return a policy rejection");
+  check bool "compatibility refusal is proven pre-effect" true
+    (result.failure_effect_disposition = Tool_result.Proven_pre_effect);
+  let data = Option.value result.data ~default:`Null in
+  check (option string) "typed frozen-surface refusal"
+    (Some "frozen_surface_required")
+    (match field "error" data with
+     | Some (`String value) -> Some value
+     | _ -> None)
+;;
+
+let test_model_visible_runtime_reports_missing_net_before_setup () =
+  with_temp_base @@ fun base_path ->
+  let capability_surface = surface () in
+  let reference = reference capability_surface "keeper_time_now" in
+  let args =
+    `Assoc
+      [ "objective", `String "Read the current time"
+      ; "execution", `String "inline"
+      ; ( "ordinary_tool_references"
+        , `List [ Surface.ordinary_tool_reference_to_yojson reference ] )
+      ]
+  in
+  let result =
+    Keeper_tool_assemble_plan_runtime.handle
+      ~capability_surface
+      ~config:(Workspace.default_config_uncached base_path)
+      ~keeper_name:"assembler-no-net"
+      ~args
+      ()
+  in
+  (match result.disposition with
+   | Tool_result.Failed Tool_result.Runtime_failure -> ()
+   | Tool_result.Completed () | Tool_result.Deferred () | Tool_result.Failed _ ->
+     fail "missing net did not return a runtime failure");
+  check bool "missing net is proven pre-effect" true
+    (result.failure_effect_disposition = Tool_result.Proven_pre_effect);
+  let data = Option.value result.data ~default:`Null in
+  check (option string) "typed missing-net error"
+    (Some "assembler_runtime_resource_unavailable")
+    (match field "error" data with
+     | Some (`String value) -> Some value
+     | _ -> None);
+  check (option string) "typed missing resource" (Some "eio_net")
+    (match field "resource" data with
+     | Some (`String value) -> Some value
+     | _ -> None)
+;;
+
 let () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   run
@@ -539,6 +725,18 @@ let () =
             "keeper preference dispatches only the preferred candidate"
             `Quick
             test_keeper_preference_dispatches_only_the_preferred_candidate
+        ; test_case
+            "model-visible Tool stores a proposal without Tool execution"
+            `Quick
+            test_model_visible_tool_produces_proposal_without_tool_execution
+        ; test_case
+            "compatibility path requires the frozen surface"
+            `Quick
+            test_compatibility_path_requires_frozen_surface
+        ; test_case
+            "missing net is typed before Assembler setup"
+            `Quick
+            test_model_visible_runtime_reports_missing_net_before_setup
         ] )
     ]
 ;;

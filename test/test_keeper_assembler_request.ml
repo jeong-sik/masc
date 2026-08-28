@@ -163,10 +163,28 @@ let test_schema_embeds_reference_ssot () =
     (Yojson.Safe.to_string embedded)
 ;;
 
+let test_model_visible_schema_matches_typed_request_boundary () =
+  let descriptor =
+    match Descriptor.find_id "keeper.assemble_plan" with
+    | Some descriptor -> descriptor
+    | None -> fail "keeper_assemble_plan descriptor is absent"
+  in
+  let canonical label json =
+    match Keeper_chat_operation.canonical_json_string json with
+    | Ok value -> value
+    | Error detail -> failf "%s schema is not canonicalizable: %s" label detail
+  in
+  check string "TOML descriptor and typed decoder publish one schema"
+    (canonical "request" Request.input_schema)
+    (canonical "descriptor" descriptor.input_schema)
+;;
+
 let test_request_schema_pins_nonblank_unique_references () =
   let open Yojson.Safe.Util in
   let properties = Request.input_schema |> member "properties" in
-  check string "objective nonblank pattern" "[^ \t\n\012\r]"
+  check string
+    "objective nonblank pattern"
+    "^([^ \t\n\012\r]|[ \t\n\012\r])*[^ \t\n\012\r]([^ \t\n\012\r]|[ \t\n\012\r])*$"
     (properties |> member "objective" |> member "pattern" |> to_string);
   check bool "reference array unique" true
     (properties |> member "ordinary_tool_references" |> member "uniqueItems" |> to_bool);
@@ -311,6 +329,10 @@ let () =
         ; test_case "async mutation" `Quick test_async_requires_static_read_only
         ; test_case "async read only" `Quick test_async_accepts_static_read_only
         ; test_case "reference schema SSOT" `Quick test_schema_embeds_reference_ssot
+        ; test_case
+            "model-visible schema matches typed request boundary"
+            `Quick
+            test_model_visible_schema_matches_typed_request_boundary
         ; test_case "request schema syntax parity" `Quick
             test_request_schema_pins_nonblank_unique_references
         ; test_case "recursive nonempty plan schema" `Quick

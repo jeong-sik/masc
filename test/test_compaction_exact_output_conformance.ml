@@ -184,6 +184,40 @@ let check_identity label (observation : C.attempt_observation) =
 
 let push_event events event = events := !events @ [ event ]
 
+(* The per-keeper exact-lane slot pin applies to compaction the same way it
+   does to the other three registry lanes: a pinned slot moves to the front
+   of the ordered candidates. Compaction used to resolve the lane and stop,
+   so a pin honored on three lanes silently did not apply here. *)
+let test_per_keeper_preference_reorders_compaction_slots () =
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc compaction preference"
+      [ { id = "pref-slot-a"; base_url = "http://127.0.0.1:9" }
+      ; { id = "pref-slot-b"; base_url = "http://127.0.0.1:9" }
+      ]
+  in
+  let registry =
+    publish_exn ~slot_ids:[ "pref-slot-a"; "pref-slot-b" ] snapshot
+  in
+  let base_path = Filename.temp_dir "masc-compaction-preference" "" in
+  let keeper_name = "keeper-compaction-preference" in
+  ensure_registered_keeper ~base_path keeper_name;
+  let config = Masc.Workspace.default_config base_path in
+  (match
+     Masc.Keeper_exact_lane_preference.set config ~actor:"test"
+       ~keeper_name ~lane_id:conformance_lane_id (Some "pref-slot-b")
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail ("preference set failed: " ^ e));
+  let prepared =
+    prepare_exn ~base_path ~keeper_name ~registry ()
+  in
+  Alcotest.(check (list string))
+    "the pinned slot leads the ordered candidates"
+    [ "pref-slot-b"; "pref-slot-a" ]
+    (C.prepared_ordered_slot_ids prepared)
+;;
+
 let test_missing_compaction_lane_is_explicit_degraded_state () =
   let snapshot =
     F.resolver_snapshot
@@ -1079,6 +1113,10 @@ let () =
             "terminal carries the provider account"
             `Quick
             test_terminal_carries_the_provider_account
+        ; Alcotest.test_case
+            "per-keeper preference reorders compaction slots"
+            `Quick
+            test_per_keeper_preference_reorders_compaction_slots
         ] )
       (* The "affinity and non-sharing" group held only cases whose functions
          #25993 removed; its registrations were left behind and the group is now

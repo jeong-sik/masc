@@ -647,15 +647,38 @@ let test_non_finite_lifecycle_times_are_rejected () =
   in
   Out_channel.with_open_bin ledger_path (fun channel ->
     output_string channel (non_finite_row ^ "\n"));
+  (* The row must never become a candidate. It no longer fails the whole read —
+     one bad row used to stop the lane and block the compaction that removes it
+     — so the reason is asserted where it is now carried, in the rejection
+     list. *)
+  (match
+     A.load_candidates_with_rejections ~base_path ~keeper_name:valid.keeper_name
+   with
+   | Error detail -> Alcotest.failf "reader failed instead of rejecting a row: %s" detail
+   | Ok (candidates, rejected) ->
+     Alcotest.(check int)
+       "non-finite row is not loaded"
+       0
+       (List.length candidates);
+     (match rejected with
+      | [ (_, detail) ] ->
+        let expected = "board attention candidate.recorded_at must be finite" in
+        if not (String.ends_with ~suffix:expected detail)
+        then
+          Alcotest.failf
+            "non-finite durable candidate returned the wrong reader error: %s"
+            detail
+      | rejected ->
+        Alcotest.failf
+          "expected exactly one rejected row, got %d"
+          (List.length rejected)));
   match A.load_candidates ~base_path ~keeper_name:valid.keeper_name with
-  | Error detail ->
-    let expected = "board attention candidate.recorded_at must be finite" in
-    if not (String.ends_with ~suffix:expected detail)
-    then
-      Alcotest.failf
-        "non-finite durable candidate returned the wrong reader error: %s"
-        detail
-  | Ok _ -> Alcotest.fail "load accepted a non-finite durable candidate"
+  | Error detail -> Alcotest.failf "load_candidates failed on a skippable row: %s" detail
+  | Ok candidates ->
+    Alcotest.(check int)
+      "load accepted no non-finite candidate"
+      0
+      (List.length candidates)
 ;;
 
 let test_non_finite_complete_request_evidence_is_rejected () =
@@ -834,6 +857,48 @@ let test_record_dedupes_exact_identity_and_rejects_conflict () =
   Alcotest.(check bool) "conflict preserved original" true (load_one ~base_path = original)
 ;;
 
+(* One unreadable row used to fail the whole read, and the write path reads
+   before it writes, so compaction could never remove it. Measured 2026-08-28:
+   17 of 575 rows carried a field a hard cut had removed and stopped all 10
+   keeper ledgers, 402 WARN/day. The reader must keep the rows it can parse and
+   let the next write compact the rest away. *)
+let test_unreadable_row_does_not_hide_the_rest () =
+  with_temp_base "board-attention-candidate-partial-read" @@ fun base_path ->
+  let persisted = record ~base_path (candidate (signal "post-partial")) in
+  let path =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat base_path ".masc")
+         "board_attention_candidates")
+      "alpha.jsonl"
+  in
+  let good = In_channel.with_open_bin path In_channel.input_all in
+  Alcotest.(check bool) "fixture wrote a row" true (String.length good > 0);
+  (* A row the current decoder refuses, ahead of the good one — the shape a
+     removed field leaves behind. *)
+  Out_channel.with_open_bin path (fun oc ->
+    Out_channel.output_string oc "{\"schema_version\":5,\"unreadable\":true}\n";
+    Out_channel.output_string oc good);
+  (match A.load_candidates ~base_path ~keeper_name:"alpha" with
+   | Ok [ loaded ] ->
+     Alcotest.(check bool) "readable row survives" true (loaded = persisted)
+   | Ok candidates ->
+     Alcotest.failf "expected the one readable candidate, got %d" (List.length candidates)
+   | Error detail -> Alcotest.failf "one bad row failed the whole read: %s" detail);
+  (* The next write compacts the file, so the bad row does not come back. *)
+  let _ = record ~base_path (candidate (signal "post-partial-second")) in
+  let after = In_channel.with_open_bin path In_channel.input_all in
+  let contains haystack needle =
+    let hn = String.length haystack and nn = String.length needle in
+    let rec scan i = i + nn <= hn && (String.sub haystack i nn = needle || scan (i + 1)) in
+    scan 0
+  in
+  Alcotest.(check bool)
+    "next write drops the unreadable row"
+    false
+    (contains after "unreadable")
+;;
+
 let test_record_requests_worker_without_invoking_judgment () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -949,6 +1014,10 @@ let () =
     "keeper_board_attention_candidate"
     [ ( "durable candidate"
       , [ Alcotest.test_case
+            "an unreadable row does not hide the rest"
+            `Quick
+            test_unreadable_row_does_not_hide_the_rest
+        ; Alcotest.test_case
             "codec and context identity are strict"
             `Quick
             test_codec_and_context_identity_are_strict

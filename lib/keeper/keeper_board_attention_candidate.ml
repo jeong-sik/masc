@@ -1414,29 +1414,47 @@ let candidate_of_json json =
   Ok candidate
 ;;
 
+(* One unreadable row used to fail the whole read, and the write path reads
+   before it writes — so compaction could never run and the row stayed
+   forever. Measured 2026-08-28: 17 of 575 rows carried a field a hard cut had
+   removed, and those 17 stopped all 10 keeper ledgers, 402 WARN/day.
+
+   This ledger is a projection. [latest_candidates] keeps the newest row per
+   candidate_id and the board itself is the source, so a dropped row costs a
+   cached candidate, not durable truth. Reading the rest is worth more than
+   refusing everything.
+
+   Rejected rows are returned, never swallowed: the caller logs them, and the
+   next write compacts them out because [latest_candidates] rewrites the file
+   from the rows that parsed. *)
+type parse_report =
+  { rows : candidate list
+  ; rejected : (int * string) list
+  }
+
 let parse_rows content =
   let lines = String.split_on_char '\n' content in
-  let rec loop line_number acc = function
-    | [] -> Ok (List.rev acc)
+  let rec loop line_number rows rejected = function
+    | [] -> { rows = List.rev rows; rejected = List.rev rejected }
     | line :: rest ->
       let line = String.trim line in
       if String.equal line ""
-      then loop (line_number + 1) acc rest
+      then loop (line_number + 1) rows rejected rest
       else
         (match Yojson.Safe.from_string line with
          | json ->
            (match candidate_of_json json with
-            | Ok candidate -> loop (line_number + 1) (candidate :: acc) rest
+            | Ok candidate -> loop (line_number + 1) (candidate :: rows) rejected rest
             | Error detail ->
-              Error (Printf.sprintf "candidate ledger line %d: %s" line_number detail))
+              loop (line_number + 1) rows ((line_number, detail) :: rejected) rest)
          | exception Yojson.Json_error detail ->
-           Error
-             (Printf.sprintf
-                "candidate ledger line %d: invalid JSON: %s"
-                line_number
-                detail))
+           loop
+             (line_number + 1)
+             rows
+             ((line_number, "invalid JSON: " ^ detail) :: rejected)
+             rest)
   in
-  loop 1 [] lines
+  loop 1 [] [] lines
 ;;
 
 let latest_candidates rows =
@@ -1458,9 +1476,22 @@ let latest_candidates rows =
   |> List.map snd
 ;;
 
-let load_candidates_from_content content =
-  let* rows = parse_rows content in
-  Ok (latest_candidates rows)
+let report_rejected_rows ~context rejected =
+  match rejected with
+  | [] -> ()
+  | (line_number, detail) :: _ ->
+    Log.Keeper.warn
+      "candidate ledger %s: skipped %d unreadable row(s); first is line %d: %s"
+      context
+      (List.length rejected)
+      line_number
+      detail
+;;
+
+let load_candidates_from_content ~context content =
+  let { rows; rejected } = parse_rows content in
+  report_rejected_rows ~context rejected;
+  latest_candidates rows
 ;;
 
 let durable_error_to_string error =
@@ -1535,6 +1566,17 @@ let candidate_read_memo : (string, ledger_stat_key * candidate list) Hashtbl.t =
    state; the critical sections are Hashtbl lookups with no yield. *)
 let candidate_read_memo_mutex = Stdlib.Mutex.create ()
 
+(* Rejections are returned, not only logged: a caller that must fail closed on
+   an unreadable row can see it, and a test can name the reason. Callers that
+   only want the readable candidates use [load_candidates]. *)
+let load_candidates_with_rejections ~base_path ~keeper_name =
+  let path = candidate_path ~base_path ~keeper_name in
+  read_locked path (fun content ->
+    let { rows; rejected } = parse_rows content in
+    report_rejected_rows ~context:path rejected;
+    Ok (latest_candidates rows, rejected))
+;;
+
 let load_candidates ~base_path ~keeper_name =
   let path = candidate_path ~base_path ~keeper_name in
   let before = ledger_stat_key_opt path in
@@ -1550,7 +1592,10 @@ let load_candidates ~base_path ~keeper_name =
   match cached with
   | Some candidates -> Ok candidates
   | None ->
-    let* candidates = read_locked path load_candidates_from_content in
+    let* candidates =
+      read_locked path (fun content ->
+        Ok (load_candidates_from_content ~context:path content))
+    in
     (* Double-stat: memoize only when the file identity is unchanged across
        the read; a concurrent rewrite lands as a new inode and skips the
        store, so the next call re-reads. *)
@@ -1581,10 +1626,8 @@ let update_ledger_many ~base_path ~keeper_name decide =
   try
     match
       Fs_compat.rewrite_private_file_durable_locked_result path (fun content ->
-        match load_candidates_from_content content with
-        | Error detail -> None, Error detail
-        | Ok candidates ->
-          (match decide candidates with
+        let candidates = load_candidates_from_content ~context:path content in
+        (match decide candidates with
            | Error _ as error -> None, error
            | Ok (None, result) -> None, Ok result
            | Ok (Some updated, result) ->

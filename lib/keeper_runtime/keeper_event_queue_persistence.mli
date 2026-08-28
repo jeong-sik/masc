@@ -213,15 +213,6 @@ val load_state_result :
     unprojected source-bearing row remains authoritative until the reaction
     projector records and retires it. *)
 
-val load_existing_state_result :
-  base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Read already-created durable queue state. A current snapshot or v6 WAL is
-    durable owner evidence; a WAL-only owner is replayed from the row's exact
-    complete pre-transition state.
-    Unlike {!load_state_result}, absence of both artifacts is an explicit
-    [Error]. Use this when absence would be interpreted as evidence about prior
-    durable work. *)
-
 val validate_state_read_only_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Decode a current snapshot when present and replay its v6 WAL without

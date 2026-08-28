@@ -67,6 +67,58 @@ let test_retry_after_failure_uses_a_new_generation () =
   let ready = Detail.complete stale request2 (Ok "fresh B") in
   check_ready "retry can succeed" "fresh B" ready "B"
 
+(* A periodic refresh revalidates the post already on screen. The reader must
+   keep the last good detail until the completion lands: collapsing to the
+   Loading placeholder for one frame is what reset the scroll and flickered
+   the comments on every tick. *)
+let test_revalidation_keeps_ready_data_visible () =
+  let loading, request1 = Detail.start Detail.initial ~post_id:"A" |> started in
+  let ready = Detail.complete loading request1 (Ok "A v1") in
+  check_ready "A settles" "A v1" ready "A";
+  let refreshing, request2 = Detail.start ready ~post_id:"A" |> started in
+  check bool "revalidation receives a fresh request" false
+    (Detail.same_request request1 request2);
+  check_ready "revalidation keeps the last good detail" "A v1" refreshing "A";
+  (match Detail.start refreshing ~post_id:"A" with
+   | Detail.Already_loading -> ()
+   | Detail.Started _ ->
+       fail "a second revalidation was not suppressed");
+  check bool "the in-flight revalidation is current" true
+    (Detail.is_current refreshing request2);
+  let after_stale = Detail.complete refreshing request1 (Ok "stale A") in
+  check_ready "stale completion cannot settle the revalidation" "A v1"
+    after_stale "A";
+  let revalidated = Detail.complete after_stale request2 (Ok "A v2") in
+  check_ready "revalidation completion swaps in the new detail" "A v2"
+    revalidated "A"
+
+let test_switching_posts_during_revalidation_shows_loading () =
+  let loading, request1 = Detail.start Detail.initial ~post_id:"A" |> started in
+  let ready = Detail.complete loading request1 (Ok "A v1") in
+  let refreshing, request2 = Detail.start ready ~post_id:"A" |> started in
+  let loading_b, request_b = Detail.start refreshing ~post_id:"B" |> started in
+  check_loading "B starts from scratch" loading_b "B";
+  check_absent "A is not projected for B" loading_b "A";
+  let after_late_refresh =
+    Detail.complete loading_b request2 (Ok "late A refresh")
+  in
+  check_loading "late revalidation cannot settle B" after_late_refresh "B";
+  let ready_b = Detail.complete after_late_refresh request_b (Ok "B detail") in
+  check_ready "B settles" "B detail" ready_b "B";
+  check_absent "A is not projected once B is shown" ready_b "A";
+  ignore request1
+
+let test_revalidation_failure_replaces_the_detail () =
+  let loading, request1 = Detail.start Detail.initial ~post_id:"A" |> started in
+  let ready = Detail.complete loading request1 (Ok "A v1") in
+  let refreshing, request2 = Detail.start ready ~post_id:"A" |> started in
+  let failed =
+    Detail.complete refreshing request2 (Error "refresh failed")
+  in
+  check_failed "a failed revalidation surfaces its error" "refresh failed"
+    failed "A";
+  ignore request1
+
 let () =
   run "tui_board_detail"
     [ ( "generation-aware projection"
@@ -76,5 +128,11 @@ let () =
             test_clear_and_reopen_rejects_same_post_aba
         ; test_case "retry generation" `Quick
             test_retry_after_failure_uses_a_new_generation
+        ; test_case "revalidation keeps the ready detail" `Quick
+            test_revalidation_keeps_ready_data_visible
+        ; test_case "post switch during revalidation" `Quick
+            test_switching_posts_during_revalidation_shows_loading
+        ; test_case "revalidation failure surfaces" `Quick
+            test_revalidation_failure_replaces_the_detail
         ] )
     ]

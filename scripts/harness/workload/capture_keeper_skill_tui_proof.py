@@ -142,6 +142,15 @@ def string_field(value: Any, field: str, context: str) -> str:
     return child
 
 
+def integer_field(value: Any, field: str, context: str) -> int:
+    child = value.get(field)
+    require(
+        isinstance(child, int) and not isinstance(child, bool),
+        f"{context}.{field} is not an integer",
+    )
+    return child
+
+
 def read_token(path: Path) -> str:
     require(not path.is_symlink(), "token file must not be a symlink")
     try:
@@ -281,6 +290,7 @@ def validate_bundle(
         "session_id": session_id,
         "ledger_revision": ledger_revision,
         "skill_tool_use_id": skill_tool_use_id,
+        "activation": exact[0],
         "actions": actions,
         "action_markers": action_markers,
     }
@@ -818,6 +828,57 @@ def receipt_block_contains(value: str, skill_tool_use_id: str, action: str) -> b
     return any(action in line.strip(" │").split() for line in block.splitlines()[1:])
 
 
+def exact_reference_line(activation: dict[str, Any]) -> str:
+    identity = object_field(activation, "identity", "Skill activation")
+    reference = {
+        "identity": {
+            field: string_field(identity, field, "Skill activation identity")
+            for field in ("source_id", "package_id", "name")
+        },
+        "content_revision": string_field(
+            activation, "content_revision", "Skill activation"
+        ),
+    }
+    return "exact=" + json.dumps(reference, ensure_ascii=False, separators=(",", ":"))
+
+
+def receipt_matches_activation(
+    block: str, activation: dict[str, Any], actions: list[Any]
+) -> bool:
+    lines = [line.strip(" │") for line in block.splitlines()]
+    if not lines:
+        return False
+    expected_reference = exact_reference_line(activation)
+    content_marker = '"content_revision":"'
+    if (
+        not expected_reference.startswith(lines[0])
+        or content_marker not in lines[0]
+        or lines[0].endswith(content_marker)
+    ):
+        return False
+    invoked_tokens = {
+        f"turn={integer_field(activation, 'agent_core_turn', 'Skill activation')}",
+        f"id={string_field(activation, 'skill_tool_use_id', 'Skill activation')}",
+        f"runtime={string_field(activation, 'runtime_id', 'Skill activation')}",
+        f"at={string_field(activation, 'activated_at', 'Skill activation')}",
+    }
+    if sum(invoked_tokens <= set(line.split()) for line in lines[1:]) != 1:
+        return False
+    for index, action_value in enumerate(actions):
+        if not isinstance(action_value, dict):
+            return False
+        expected_action_tokens = {
+            action_marker(action_value),
+            f"turn={integer_field(action_value, 'agent_core_turn', f'action {index}')}",
+            f"runtime={string_field(action_value, 'runtime_id', f'action {index}')}",
+            f"tool={string_field(action_value, 'tool_name', f'action {index}')}",
+            f"at={string_field(action_value, 'observed_at', f'action {index}')}",
+        }
+        if sum(expected_action_tokens <= set(line.split()) for line in lines[1:]) != 1:
+            return False
+    return True
+
+
 def tools_surface_is_connected(value: str) -> bool:
     return any(
         line.strip().startswith("MASC Tools ") and line.rstrip().endswith("[connected]")
@@ -827,14 +888,7 @@ def tools_surface_is_connected(value: str) -> bool:
 
 def ledger_projection_matches(line: str, session_id: str, ledger_revision: str) -> bool:
     normalized = line.strip(" │")
-    prefix = f"session={session_id}  ledger="
-    if not normalized.startswith(prefix):
-        return False
-    displayed = normalized[len(prefix) :]
-    if displayed.endswith("…"):
-        displayed = displayed[:-1]
-        return displayed != "" and ledger_revision.startswith(displayed)
-    return displayed == ledger_revision
+    return normalized == f"session={session_id}  ledger={ledger_revision}"
 
 
 def scroll_to_skill_receipt(
@@ -844,6 +898,8 @@ def scroll_to_skill_receipt(
     session_id: str,
     ledger_revision: str,
     skill_tool_use_id: str,
+    activation: dict[str, Any],
+    actions: list[Any],
     action: str,
     timeout: float,
 ) -> tuple[str, dict[str, str]]:
@@ -875,25 +931,20 @@ def scroll_to_skill_receipt(
             )
             if session_line is not None:
                 observations["session_line"] = session_line
-        if "invalid_line" not in observations:
-            invalid_line = next(
-                (line for line in normalized_lines if "invalid=0" in line.split()),
-                None,
-            )
-            if invalid_line is not None:
-                observations["invalid_line"] = invalid_line
         receipt = exact_receipt_block(visible, skill_tool_use_id)
-        if receipt is not None and receipt_block_contains(
-            visible, skill_tool_use_id, action
+        if (
+            receipt is not None
+            and receipt_block_contains(visible, skill_tool_use_id, action)
+            and receipt_matches_activation(receipt, activation, actions)
         ):
             observations["receipt_block"] = receipt
-        if len(observations) == 4 and receipt is not None:
+        if len(observations) == 3 and receipt is not None:
             return visible, observations
         press(page, "j")
         page.wait_for_timeout(25)
         advanced = screen_text(page)
         if advanced == visible:
-            required = {"skill_header", "session_line", "invalid_line", "receipt_block"}
+            required = {"skill_header", "session_line", "receipt_block"}
             missing = sorted(required - observations.keys())
             raise CaptureError(f"TUI reached the bottom before observations: {missing}")
     raise CaptureError("TUI Skill receipt observations did not complete before timeout")
@@ -1004,6 +1055,8 @@ def main() -> int:
                     session_id=selected["session_id"],
                     ledger_revision=selected["ledger_revision"],
                     skill_tool_use_id=selected["skill_tool_use_id"],
+                    activation=selected["activation"],
+                    actions=selected["actions"],
                     action=selected["action_markers"][0],
                     timeout=args.timeout,
                 )

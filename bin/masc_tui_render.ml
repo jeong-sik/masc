@@ -9036,8 +9036,7 @@ let render_tools (state : state) =
              |> Terminal_text.single_line)
             (Masc.Keeper_skill_activation_ledger.revision sap_ledger
              |> Masc.Keeper_skill_activation_ledger.ledger_revision_to_string
-             |> Terminal_text.single_line
-             |> short_revision)
+             |> Terminal_text.single_line)
         ; Ansi.dim,
           "   workspace="
           ^ (Masc.Keeper_skill_activation_ledger.workspace_key sap_ledger

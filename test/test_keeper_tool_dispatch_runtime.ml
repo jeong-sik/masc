@@ -4771,6 +4771,195 @@ let composition_invocation ~completion =
     ~completion
 ;;
 
+let frozen_capability_surface ~tool_groups =
+  let snapshot =
+    Skill_catalog_snapshot.config_unreadable
+      ~detail:"dispatch boundary test has no Skill sources"
+  in
+  Masc.Keeper_capability_surface.create
+    ~tool_groups:(Some tool_groups)
+    ~skill_names:None
+    ~global_skill_catalog:Masc.Keeper_skill_catalog.empty
+    ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot)
+    ~task_skills:[]
+;;
+
+let execution_data_exn label (result : KET.executed_tool_result) =
+  match result.data with
+  | Some data -> data
+  | None -> fail (label ^ " omitted typed execution data")
+;;
+
+let check_frozen_surface_rejection label (result : KET.executed_tool_result) =
+  check string (label ^ " outcome") "failure" (outcome_label result.disposition);
+  check bool
+    (label ^ " is a policy rejection")
+    true
+    (result.disposition = Tool_result.Failed Tool_result.Policy_rejection);
+  check bool
+    (label ^ " is proven pre-effect")
+    true
+    (result.failure_effect_disposition = Tool_result.Proven_pre_effect);
+  let data = execution_data_exn label result in
+  check string
+    (label ^ " typed error")
+    "tool_outside_frozen_capability_surface"
+    Yojson.Safe.Util.(data |> member "error" |> to_string)
+;;
+
+let test_frozen_surface_direct_dispatch_rejects_excluded_global_tool () =
+  with_exec_fixture "frozen-surface-direct-excluded"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let result =
+    KET.execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~name:"Read"
+      ~input:(`Assoc [ "file_path", `String "outside.txt" ])
+      ()
+  in
+  check_frozen_surface_rejection "excluded name dispatch" result;
+  register_registered_dispatch_probe ();
+  let registered_result =
+    KET.execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~name:registered_dispatch_probe_tool
+      ~input:(`Assoc [])
+      ()
+  in
+  check_frozen_surface_rejection
+    "registered-only fallback"
+    registered_result
+;;
+
+let test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor () =
+  with_exec_fixture "frozen-surface-direct-included"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let descriptor = composition_descriptor "keeper_time_now" in
+  let result =
+    KET.execute_keeper_tool_descriptor_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~descriptor
+      ~input:(`Assoc [])
+      ()
+  in
+  check string "included descriptor completes" "success"
+    (outcome_label result.disposition);
+  let name_result =
+    KET.execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~name:"keeper_time_now"
+      ~input:(`Assoc [])
+      ()
+  in
+  check string "included exposed name completes" "success"
+    (outcome_label name_result.disposition)
+;;
+
+let test_frozen_surface_name_dispatch_rejects_non_exposed_alias () =
+  with_exec_fixture "frozen-surface-name-alias"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let capability_surface = frozen_capability_surface ~tool_groups:[] in
+  check bool
+    "Read descriptor is active in the fixture"
+    true
+    (Masc.Keeper_capability_surface.descriptors capability_surface
+     |> List.exists (fun descriptor ->
+       Masc.Keeper_tool_descriptor.keeper_model_names descriptor
+       |> List.exists (String.equal "Read")));
+  let result =
+    KET.execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~name:"tool_read_file"
+      ~input:(`Assoc [ "path", `String "outside.txt" ])
+      ()
+  in
+  check_frozen_surface_rejection "non-exposed internal alias" result
+;;
+
+let test_frozen_surface_nested_plan_rejects_excluded_descriptor () =
+  with_exec_fixture "frozen-surface-nested-plan-excluded"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let descriptor = composition_descriptor "Read" in
+  let node =
+    Masc.Keeper_tool_plan.node
+      ~id:(composition_node_id "read")
+      ~tool_name:"Read"
+      ~input:
+        (Masc.Keeper_tool_plan.Json_template.literal
+           (`Assoc [ "file_path", `String "outside.txt" ]))
+      ()
+  in
+  let plan =
+    match Masc.Keeper_tool_plan.create ~descriptors:[ descriptor ] [ node ] with
+    | Ok plan -> plan
+    | Error error -> fail (Masc.Keeper_tool_plan.error_to_string error)
+  in
+  match
+    Masc.Keeper_tool_plan_executor.execute_keeper
+      ~capability_surface
+      ~plan
+      ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
+      ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
+      ~parent_invocation:
+        (composition_invocation
+           ~completion:Agent_core.Tool_contract.Continue_after_success)
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot:ctx_work
+      ()
+  with
+  | Error
+      { cause = Masc.Keeper_tool_plan_executor.Tool_did_not_complete node_result
+      ; _
+      } ->
+    check bool
+      "nested exclusion stays a policy rejection"
+      true
+      (match node_result.result with
+       | Tool_result.Failed { class_ = Tool_result.Policy_rejection; _ } -> true
+       | Tool_result.Completed _
+       | Tool_result.Deferred _
+       | Tool_result.Failed _ -> false);
+    check
+      (option bool)
+      "nested exclusion stays proven pre-effect"
+      (Some true)
+      (Option.map
+         (fun disposition -> disposition = Tool_result.Proven_pre_effect)
+         node_result.failure_effect_disposition);
+    check string
+      "nested exclusion preserves typed error"
+      "tool_outside_frozen_capability_surface"
+      Yojson.Safe.Util.
+        (Tool_result.data node_result.result |> member "error" |> to_string)
+  | Error _ -> fail "nested plan failed before the frozen dispatch boundary"
+  | Ok _ -> fail "nested plan recovered a descriptor outside its frozen surface"
+;;
+
 let test_tools_search_error_reaches_agent_core_as_typed_payload () =
   with_exec_fixture
     "tools-search-agent-core-error"
@@ -6781,8 +6970,7 @@ let test_composition_runtime_uses_canonical_descriptor () =
          | Error _ -> fail "canonicalized composition plan was rejected"
        in
        match
-         Masc.Keeper_tool_plan_executor.execute_keeper
-           ~capability_authority:Masc.Keeper_tool_runtime.Compatibility_meta
+         Masc.Keeper_tool_plan_executor.Compatibility.execute_keeper
            ~plan
            ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
            ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
@@ -6825,8 +7013,7 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
          | Error _ -> fail "terminal composition plan was rejected"
        in
        match
-         Masc.Keeper_tool_plan_executor.execute_keeper
-           ~capability_authority:Masc.Keeper_tool_runtime.Compatibility_meta
+         Masc.Keeper_tool_plan_executor.Compatibility.execute_keeper
            ~plan
            ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
            ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
@@ -7172,6 +7359,14 @@ let () =
         test_invalid_surface_post_input_stays_correction_capable;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
+      test_case "frozen surface rejects an excluded global tool" `Quick
+        test_frozen_surface_direct_dispatch_rejects_excluded_global_tool;
+      test_case "frozen surface accepts its exact descriptor" `Quick
+        test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor;
+      test_case "frozen surface rejects a non-exposed descriptor alias" `Quick
+        test_frozen_surface_name_dispatch_rejects_non_exposed_alias;
+      test_case "nested plan preserves frozen surface authority" `Quick
+        test_frozen_surface_nested_plan_rejects_excluded_descriptor;
       test_case "composition dispatch uses canonical descriptor authority" `Quick
         test_composition_runtime_uses_canonical_descriptor;
       test_case "catalog composition is a first-class executable tool" `Quick

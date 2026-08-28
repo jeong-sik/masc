@@ -71,7 +71,8 @@ val instruction_skill_schema_tool :
     description used by the executable tool. *)
 
 val make_tools
-  :  ?instruction_skills:instruction_skill list
+  :  capability_surface:Keeper_capability_surface.t
+  -> ?instruction_skills:instruction_skill list
        (** Instruction skills this keeper carries. Present ones get
            {!Keeper_tool_composition_catalog.skill_tool_name}, which serves a
            frozen body or one deferred bundled resource for a canonical
@@ -100,7 +101,6 @@ val make_tools
           result)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
-  -> capability_authority:Keeper_tool_runtime.capability_authority
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
@@ -117,12 +117,54 @@ val make_tools
   -> ?on_external_effect_deferred:(unit -> unit)
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
-  -> descriptors:Keeper_tool_descriptor.t list
-       (** The exact descriptor set already selected for this Keeper turn.
-           Declared compositions and ad-hoc plans validate against this set;
-           they cannot recover the process-global descriptor catalog. *)
   -> unit
   -> Agent_core.Tool.t list
+(** Production materialization consumes the same immutable authority as direct
+    dispatch. Its descriptor set cannot be supplied independently. *)
+
+module Compatibility : sig
+  val make_tools
+    :  descriptors:Keeper_tool_descriptor.t list
+    -> ?instruction_skills:instruction_skill list
+    -> ?skill_compositions:composition_skill list
+    -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
+    -> ?record_instruction_activation:
+         (invocation:Agent_core.Tool_contract.Invocation.t ->
+          content:Keeper_skill_activation_recorder.instruction_content ->
+          Skill_reference.t ->
+          ( Keeper_skill_activation_ledger.record_outcome
+          , Keeper_skill_activation_recorder.error )
+            result)
+    -> ?record_composition_activation:
+         (invocation:Agent_core.Tool_contract.Invocation.t ->
+          tool_name:string ->
+          reference:Skill_reference.t ->
+          ( Keeper_skill_activation_ledger.record_outcome
+          , Keeper_skill_activation_recorder.error )
+            result)
+    -> config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> publication_recovery:
+         Keeper_publication_recovery_availability.turn_context
+    -> ctx_snapshot:Keeper_types.working_context
+    -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+    -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
+    -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+    -> ?continuation_channel:Keeper_continuation_channel.t
+    -> ?gate_context:(unit -> Keeper_gate.causal_context)
+    -> ?gate_grant:Keeper_gate.cycle_grant
+    -> ?record_gate_result:
+         (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
+    -> ?on_completed:(Keeper_tool_execution.terminal_effect_receipt option -> unit)
+    -> ?on_deferred:(unit -> unit)
+    -> ?on_external_effect_deferred:(unit -> unit)
+    -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
+    -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
+    -> unit
+    -> Agent_core.Tool.t list
+end
+(** Explicit compatibility adapter for tests that supply a descriptor list
+    without an enclosing Keeper turn. *)
 
 module For_testing : sig
   val instruction_skill_description :

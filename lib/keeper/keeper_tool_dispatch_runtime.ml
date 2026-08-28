@@ -21,6 +21,75 @@ type descriptor_dispatch_resolution =
   | Return_descriptor_invariant of Keeper_tool_descriptor.t
   | Try_registered_only_route
 
+type frozen_surface_admission_error =
+  | Descriptor_outside_frozen_surface of
+      { requested_tool : string
+      ; descriptor_id : string
+      }
+  | Tool_name_absent_from_frozen_surface of { requested_tool : string }
+
+let descriptor_is_in_frozen_surface capability_surface descriptor =
+  Keeper_capability_surface.descriptors capability_surface
+  |> List.exists (fun admitted ->
+    String.equal
+      admitted.Keeper_tool_descriptor.id
+      descriptor.Keeper_tool_descriptor.id)
+;;
+
+let frozen_surface_admission_error_to_execution error =
+  let requested_tool, detail_fields =
+    match error with
+    | Descriptor_outside_frozen_surface { requested_tool; descriptor_id } ->
+      requested_tool, [ "descriptor_id", `String descriptor_id ]
+    | Tool_name_absent_from_frozen_surface { requested_tool } ->
+      requested_tool, []
+  in
+  let data =
+    `Assoc
+      ([ "ok", `Bool false
+       ; "error", `String "tool_outside_frozen_capability_surface"
+       ; "tool", `String requested_tool
+       ; ( "availability"
+         , `String
+             (Keeper_capability_surface.capability_availability_to_string
+                Keeper_capability_surface.Outside_tool_surface) )
+       ]
+       @ detail_fields)
+  in
+  Keeper_tool_execution.failure_data
+    ~class_:Tool_result.Policy_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect
+    ~message:(Yojson.Safe.to_string data)
+    data
+;;
+
+let admit_descriptor capability_authority ~requested_tool descriptor =
+  match capability_authority with
+  | Keeper_tool_runtime.Compatibility_meta -> Ok ()
+  | Keeper_tool_runtime.Frozen_surface capability_surface ->
+    if descriptor_is_in_frozen_surface capability_surface descriptor
+    then Ok ()
+    else
+      Error
+        (Descriptor_outside_frozen_surface
+           { requested_tool; descriptor_id = descriptor.Keeper_tool_descriptor.id })
+;;
+
+let admit_tool_name capability_authority requested_tool =
+  match capability_authority with
+  | Keeper_tool_runtime.Compatibility_meta -> Ok ()
+  | Keeper_tool_runtime.Frozen_surface capability_surface ->
+    let is_exposed_name descriptor =
+      Keeper_tool_descriptor.keeper_model_names descriptor
+      |> List.exists (String.equal requested_tool)
+    in
+    if
+      Keeper_capability_surface.descriptors capability_surface
+      |> List.exists is_exposed_name
+    then Ok ()
+    else Error (Tool_name_absent_from_frozen_surface { requested_tool })
+;;
+
 let resolve_descriptor_dispatch = function
   | Descriptor_route (_, Some raw_output) | Validation_rejected raw_output ->
     Return_output raw_output
@@ -147,6 +216,14 @@ let execute_keeper_tool_descriptor_with_authority
       ~(input : Yojson.Safe.t)
       ()
   =
+  match
+    admit_descriptor
+      capability_authority
+      ~requested_tool:descriptor.internal_name
+      descriptor
+  with
+  | Error error -> frozen_surface_admission_error_to_execution error
+  | Ok () ->
   match Keeper_tool_descriptor.find_id descriptor.id with
   | Some canonical when canonical == descriptor ->
     let context =
@@ -220,6 +297,10 @@ let execute_keeper_tool_call_with_authority
   : executed_tool_result
   =
   let args = input in
+  let surface_admission = admit_tool_name capability_authority name in
+  match surface_admission with
+  | Error error -> frozen_surface_admission_error_to_execution error
+  | Ok () ->
        let keeper_tool_runtime_context =
          runtime_context
            ~config

@@ -439,7 +439,7 @@ let equal_completion left right =
     Agent_core.Tool_contract.Continue_after_success -> false
 ;;
 
-let execute_keeper
+let execute_keeper_with_authority
       ~plan
       ~run_id
       ?composition_run_id
@@ -565,3 +565,16 @@ let execute_keeper
     ?observe_node_result
     ()
 ;;
+
+let execute_keeper ~capability_surface =
+  execute_keeper_with_authority
+    ~capability_authority:
+      (Keeper_tool_runtime.Frozen_surface capability_surface)
+;;
+
+module Compatibility = struct
+  let execute_keeper =
+    execute_keeper_with_authority
+      ~capability_authority:Keeper_tool_runtime.Compatibility_meta
+  ;;
+end

@@ -1349,11 +1349,16 @@ let retry_blocked_auto_judge
       ~expected_disposition
       approval_id
   =
+  (* Same admission rule as [drain_auto_judges] (#31321): the entry's owner
+     is judged by its EFFECTIVE mode, not the workspace mode alone. The old
+     workspace-mode short-circuit refused this operator escape hatch for a
+     keeper pinned to auto_judge under an always_allow or manual workspace —
+     the exact stalled-owner configuration the retry exists for. The
+     workspace read stays first so an unreadable mode store remains a loud
+     error. *)
   match Keeper_gate_mode.read ~base_path with
   | Error detail -> Error detail
-  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
-    Error "Auto Judge retry requires auto_judge mode"
-  | Ok Keeper_gate_mode.Auto_judge ->
+  | Ok _workspace_mode ->
     (match
        Keeper_approval_queue.get_pending_entry_for_workspace
          ~base_path
@@ -1363,6 +1368,17 @@ let retry_blocked_auto_judge
        Error (Keeper_approval_queue.storage_error_to_string error)
      | Ok None -> Error ("pending approval not found: " ^ approval_id)
      | Ok (Some entry) ->
+       (match
+          let owner_base_path, keeper_name = auto_judge_owner entry in
+          Keeper_gate_mode.resolve ~base_path:owner_base_path ~keeper_name
+        with
+        | Error detail -> Error detail
+        | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
+          Error
+            (Printf.sprintf
+               "Auto Judge retry requires auto_judge mode for keeper %s"
+               entry.keeper_name)
+        | Ok Keeper_gate_mode.Auto_judge ->
        (match
           retry_auto_judge_entry
             ~requested_by
@@ -1400,7 +1416,7 @@ let retry_blocked_auto_judge
             ?goal_id:entry.goal_id
             ~actor:requested_by
             ());
-       Ok ()))
+       Ok ())))
 ;;
 
 let finalize_recovered_judgment
@@ -1547,11 +1563,15 @@ type operator_recovery_report =
   }
 
 let request_operator_auto_judge_recovery ~base_path =
+  (* [drain_auto_judges] already admits owners by their EFFECTIVE mode
+     (#31321), so refusing here on the workspace mode alone re-closed the
+     escape hatch for a keeper pinned to auto_judge under an always_allow
+     or manual workspace. The workspace read stays as the loud
+     unreadable-store check; a workspace where no owner resolves to
+     auto_judge simply drains zero entries, and the report says so. *)
   match Keeper_gate_mode.read ~base_path with
   | Error detail -> Error detail
-  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
-    Error "operator Auto Judge recovery requires auto_judge mode"
-  | Ok Keeper_gate_mode.Auto_judge ->
+  | Ok _workspace_mode ->
     (match Hitl_summary_worker.snapshot_topology_readiness () with
      | Error detail -> Error detail
      | Ok () ->

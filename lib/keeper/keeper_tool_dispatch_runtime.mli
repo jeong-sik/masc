@@ -109,6 +109,18 @@ module Compatibility : sig
     -> input:Yojson.Safe.t
     -> unit
     -> executed_tool_result
+
+  val execute_keeper_tool_call
+    :  config:Workspace.config
+    -> meta:keeper_meta
+    -> publication_recovery:
+         Keeper_publication_recovery_availability.turn_context
+    -> ctx_work:working_context
+    -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+    -> name:string
+    -> input:Yojson.Safe.t
+    -> unit
+    -> string
 end
 (** Explicit metadata compatibility boundary for tests and callers without a
     Keeper turn. Production Keeper handlers cannot enter this module without
@@ -118,15 +130,3 @@ end
     [publication_recovery] preserves that entry's exact owner identity while
     carrying the live runtime provider. File edit/write dispatch reads the
     provider only at the effect boundary. *)
-
-val execute_keeper_tool_call
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> publication_recovery:
-       Keeper_publication_recovery_availability.turn_context
-  -> ctx_work:working_context
-  -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> name:string
-  -> input:Yojson.Safe.t
-  -> unit
-  -> string

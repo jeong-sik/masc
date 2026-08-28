@@ -422,11 +422,6 @@ let edit_keeper_toml_fields_strict_staged ~(path : string) fields =
      | Ok content -> Fs_compat.save_file_atomic_strict_staged path content)
 ;;
 
-let edit_keeper_toml_fields ~path fields =
-  edit_keeper_toml_fields_strict_staged ~path fields
-  |> Result.map_error Fs_compat.atomic_replace_failure_to_string
-;;
-
 let create_keeper_toml_file_strict_staged ~(path : string) fields =
   if Fs_compat.file_exists path
   then
@@ -457,11 +452,6 @@ let create_keeper_toml_file_strict_staged ~(path : string) fields =
       in
       Fs_compat.mkdir_p (Filename.dirname path);
       Fs_compat.save_file_atomic_strict_staged path content)
-;;
-
-let create_keeper_toml_file ~path fields =
-  create_keeper_toml_file_strict_staged ~path fields
-  |> Result.map_error Fs_compat.atomic_replace_failure_to_string
 ;;
 
 (* Higher-level functions (profile_defaults_of_toml, load_keeper_toml,

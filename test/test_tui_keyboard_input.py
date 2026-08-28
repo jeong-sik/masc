@@ -5518,7 +5518,7 @@ def keeper_calls_interaction() -> Interaction:
             ("\u2717".encode(), "the failed-call verdict"),
             (b"#2 tool tool_execute", "the failed-call tool"),
             (b"14.5s", "the failure's duration"),
-            (b"lib/a.ml", "the subject the trail names"),
+            (b"lib/a.ml", "the recorded input path"),
             (b"exact-assembler-run-42", "the Assembler producer run"),
             (b"aaaaaaaaaaaa", "the proposal identity"),
             (b"retained_match", "the provenance verdict"),
@@ -5542,7 +5542,9 @@ def keeper_calls_constrained_fixture() -> SequencedHttpResponse:
     entries: list[dict[str, object]] = []
     for index, provenance_status in enumerate(provenance_statuses):
         marker = chr(ord("a") + index)
-        output = provenance_status + "-" + marker * (71 - len(provenance_status))
+        input_tag = provenance_status if index < 3 else "fourth-call"
+        output_tag = provenance_status if index < 3 else "fourth-output"
+        output = output_tag + "-" + marker * (71 - len(output_tag))
         entries.append(
             {
                 "ts": 1787534998.4 + index,
@@ -5550,7 +5552,7 @@ def keeper_calls_constrained_fixture() -> SequencedHttpResponse:
                 "tool": "keeper_proposal_execute",
                 "input": (
                     '{"request":"input-'
-                    + provenance_status
+                    + input_tag
                     + "-"
                     + marker * 120
                     + "\x1b[31m한🙂-tail" + '"}'
@@ -5644,17 +5646,19 @@ def keeper_calls_constrained_interaction() -> Interaction:
         expected: set[bytes] = {b"keeper_proposal_execute", b"\\x1B[31m"}
         for index, provenance_status in enumerate(provenance_statuses):
             marker = chr(ord("a") + index)
+            input_tag = provenance_status if index < 3 else "fourth-call"
+            output_tag = provenance_status if index < 3 else "fourth-output"
             expected.update(
                 {
                     ("exact-assembler-" + marker * 32).encode(),
                     (marker * 64).encode(),
                     provenance_status.encode(),
                     (
-                        provenance_status
+                        output_tag
                         + "-"
-                        + marker * (71 - len(provenance_status))
+                        + marker * (71 - len(output_tag))
                     ).encode(),
-                    ("input-" + provenance_status).encode(),
+                    ("input-" + input_tag).encode(),
                     "한🙂-tail".encode(),
                 }
             )
@@ -5668,6 +5672,14 @@ def keeper_calls_constrained_interaction() -> Interaction:
                 raise AssertionError(
                     f"Constrained Keeper Calls truncated a reachable row: {frame!r}"
                 )
+            for line in plain.splitlines():
+                if "한🙂-tail".encode() in line and not re.search(
+                    rb"#[0-9]+ input ", line
+                ):
+                    raise AssertionError(
+                        "Wrapped Keeper Calls input tail lost its call/field label: "
+                        f"{line!r}"
+                    )
             seen.update(value for value in expected if value in plain)
             matches = list(footer_re.finditer(plain))
             if not matches:
@@ -5675,7 +5687,8 @@ def keeper_calls_constrained_interaction() -> Interaction:
                     f"Constrained Keeper Calls omitted its row bounds: {frame!r}"
                 )
             match = matches[-1]
-            return tuple(int(value) for value in match.groups())
+            first_raw, last_raw, total_raw = match.groups()
+            return int(first_raw), int(last_raw), int(total_raw)
 
         first, last, total = observe(pane)
         if (first, last) != (1, 2):
@@ -5683,10 +5696,16 @@ def keeper_calls_constrained_interaction() -> Interaction:
                 f"Constrained Keeper Calls started at {(first, last)!r}, expected (1, 2)"
             )
         while last < total:
+            previous_first = first
             frame_start = len(output)
             send_and_wait(process, master_fd, output, b"j", b"rows ")
             pane = bytes(output[frame_start:])
             first, last, current_total = observe(pane)
+            if first != previous_first + 1:
+                raise AssertionError(
+                    "Constrained Keeper Calls j did not move exactly one row: "
+                    f"{previous_first} -> {first}"
+                )
             if current_total != total:
                 raise AssertionError(
                     f"Constrained Keeper Calls row total changed: {current_total} != {total}"
@@ -5701,10 +5720,16 @@ def keeper_calls_constrained_interaction() -> Interaction:
                 f"Constrained Keeper Calls left exact values unreachable: {missing!r}"
             )
         while first > 1:
+            previous_first = first
             frame_start = len(output)
             send_and_wait(process, master_fd, output, b"k", b"rows ")
             pane = bytes(output[frame_start:])
             first, last, current_total = observe(pane)
+            if first != previous_first - 1:
+                raise AssertionError(
+                    "Constrained Keeper Calls k did not move exactly one row: "
+                    f"{previous_first} -> {first}"
+                )
             if current_total != total:
                 raise AssertionError(
                     f"Constrained Keeper Calls row total changed on return: {current_total} != {total}"
@@ -5713,6 +5738,89 @@ def keeper_calls_constrained_interaction() -> Interaction:
             raise AssertionError(
                 f"Constrained Keeper Calls did not return to top: {(first, last)!r}"
             )
+
+        narrow = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=15,
+            columns=19,
+            needle=re.compile(rb"\[[0-9]+/[0-9]+\]"),
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        narrow_seen: set[bytes] = set()
+        narrow_expected = {b"provenance", b"retained_contra", b"diction"}
+        narrow_footer_re = re.compile(rb"\[([0-9]+)/([0-9]+)\]")
+
+        def observe_narrow(frame: bytes) -> tuple[int, int, int]:
+            plain = CSI_RE.sub(b"", frame)
+            matches = list(narrow_footer_re.finditer(plain))
+            if not matches:
+                raise AssertionError(
+                    f"Narrow Keeper Calls omitted compact row bounds: {frame!r}"
+                )
+            first_raw, total_raw = matches[-1].groups()
+            first = int(first_raw)
+            total = int(total_raw)
+            return first, min(total, first + 1), total
+
+        narrow_first, narrow_last, narrow_total = observe_narrow(narrow)
+        narrow_plain = CSI_RE.sub(b"", narrow)
+        recent_narrow_plain = [narrow_plain]
+        narrow_seen.update(value for value in narrow_expected if value in narrow_plain)
+        while narrow_last < narrow_total:
+            previous_first = narrow_first
+            frame_start = len(output)
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"j",
+                re.compile(rb"\[[0-9]+/[0-9]+\]"),
+            )
+            narrow = bytes(output[frame_start:])
+            narrow_first, narrow_last, current_total = observe_narrow(narrow)
+            if narrow_first != previous_first + 1:
+                raise AssertionError(
+                    "Narrow Keeper Calls j did not move exactly one row: "
+                    f"{previous_first} -> {narrow_first}"
+                )
+            if current_total != narrow_total:
+                raise AssertionError(
+                    "Narrow Keeper Calls row total changed: "
+                    f"{current_total} != {narrow_total}"
+                )
+            narrow_plain = CSI_RE.sub(b"", narrow)
+            recent_narrow_plain.append(narrow_plain)
+            recent_narrow_plain = recent_narrow_plain[-3:]
+            if b"diction" in narrow_plain:
+                if not any(
+                    b"provenance" in recent for recent in recent_narrow_plain
+                ):
+                    raise AssertionError(
+                        "Narrow Keeper Calls separated a provenance tail from "
+                        f"its field label: {recent_narrow_plain!r}"
+                    )
+            narrow_seen.update(
+                value for value in narrow_expected if value in narrow_plain
+            )
+        narrow_missing = narrow_expected - narrow_seen
+        if narrow_missing:
+            raise AssertionError(
+                "Narrow Keeper Calls clipped field labels or values: "
+                f"{narrow_missing!r}"
+            )
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=15,
+            columns=100,
+            needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 calls (4)",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
         send_and_wait(
             process,
             master_fd,

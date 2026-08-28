@@ -9452,9 +9452,9 @@ let render_tools (state : state) =
   finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
 
 (** Dispatch a normal-height render based on the current surface. *)
-(* One keeper's durable tool-call log, the row vocabulary the chat pane
-   uses: the finished glyph for a call that returned, the failure glyph for
-   one that returned an error, the subject the trail names the call by. The
+(* One keeper's durable tool-call log, using the same row vocabulary as the
+   chat pane: the finished glyph for a call that returned, the failure glyph
+   for one that returned an error, and the exact fields recorded for it. The
    server's own freshness verdict rides the header - a stale page must not
    read as a quiet keeper. *)
 let render_keeper_calls (state : state) =
@@ -9538,13 +9538,43 @@ let render_keeper_calls (state : state) =
   let inner_cells = max 1 (framed_inner_width cols) in
   let labeled_rows ~call_index ~style ~label value =
     let prefix = Printf.sprintf "  #%d %s " (call_index + 1) label in
-    let body_cells = max 1 (inner_cells - Message_layout.display_width prefix) in
     let value = Terminal_text.single_line value in
-    match Message_layout.split_cells ~max_cells:body_cells value with
-    | [] -> [ call_index, style, prefix ^ "(empty)" ]
-    | first :: rest ->
-      (call_index, style, prefix ^ first)
-      :: List.map (fun part -> call_index, style, prefix ^ part) rest
+    let value = if String.equal value "" then "(empty)" else value in
+    let narrow_rows () =
+      (* Drop decorative indentation before wrapping the exact header. The
+         TUI requests at most 100 entries, so even [#100
+         provenance] fits the 15-cell framed body of a 19-column terminal. *)
+      let field_header =
+        Printf.sprintf "#%d %s" (call_index + 1) label
+      in
+      let header_rows =
+        Message_layout.split_cells ~max_cells:inner_cells field_header
+        |> List.map (fun part -> call_index, style, part)
+      in
+      let value_rows =
+        Message_layout.split_cells ~max_cells:inner_cells value
+        |> List.map (fun part -> call_index, style, part)
+      in
+      List.concat_map
+        (fun value_row -> header_rows @ [ value_row ] @ header_rows)
+        value_rows
+    in
+    if Message_layout.display_width prefix < inner_cells then
+      let body_cells = inner_cells - Message_layout.display_width prefix in
+      let parts = Message_layout.split_cells ~max_cells:body_cells value in
+      if
+        List.for_all
+          (fun part -> Message_layout.display_width part <= body_cells)
+          parts
+      then List.map (fun part -> call_index, style, prefix ^ part) parts
+      else narrow_rows ()
+    else
+      (* On a narrow terminal the full field prefix may consume the framed
+         width. Keeping it inline would make every value byte permanently
+         unreachable after [box_line_styled] clips the row. Draw the exact
+         call/field label on both sides of every value chunk so a two-row
+         viewport never separates a continuation from its field context. *)
+      narrow_rows ()
   in
   let rows =
     entries
@@ -9629,9 +9659,20 @@ let render_keeper_calls (state : state) =
   end;
   if scroll > 0 || total_rows > content_height then
     let last_visible = min total_rows (scroll + content_height) in
+    let detailed_footer =
+      Printf.sprintf "[%d calls · rows %d-%d of %d]" shown (scroll + 1)
+        last_visible total_rows
+    in
+    let compact_footer =
+      Printf.sprintf "[%d/%d]" (scroll + 1) total_rows
+    in
+    let footer =
+      if Message_layout.display_width detailed_footer <= framed_inner_width cols
+      then detailed_footer
+      else compact_footer
+    in
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d calls · rows %d-%d of %d]" shown (scroll + 1)
-         last_visible total_rows)
+      footer
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf

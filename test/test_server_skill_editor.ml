@@ -294,13 +294,26 @@ let read_file path =
 
 let test_delete_exact_reference_and_publish () =
   with_workspace @@ fun base_path ->
-  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
-  (match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
-   | Ok (Editor.Deleted_and_published { reference = deleted; _ }) ->
-     check bool "deleted exact reference" true (Skill_reference.equal reference deleted)
-   | Ok (Deleted_but_unpublished _) -> fail "deleted Skill was not published"
-   | Error error -> fail (Editor.error_to_string error));
+  let skill_path, original, reference, refresh = setup base_path ~access:"read-write" in
+  let recovery_id =
+    match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+    | Ok
+        (Editor.Deleted_and_published
+           { reference = deleted
+           ; recovery_id
+           ; disposition = Quarantine_retained
+           ; _
+           }) ->
+      check bool "deleted exact reference" true (Skill_reference.equal reference deleted);
+      recovery_id
+    | Ok (Deleted_and_published _) -> fail "successful delete did not retain recovery"
+    | Ok (Deleted_but_unpublished _) -> fail "deleted Skill was not published"
+    | Error error -> fail (Editor.error_to_string error)
+  in
   check bool "SKILL.md removed" false (Sys.file_exists skill_path);
+  let source_root = Filename.dirname (Filename.dirname skill_path) in
+  let recovery_path = Editor.For_testing.recovery_file_path ~source_root ~recovery_id in
+  check string "exact bytes retained" original (read_file recovery_path);
   (match Editor.load ~base_path reference with
    | Error Editor.Reference_not_current -> ()
    | Error error -> fail ("wrong post-delete error: " ^ Editor.error_to_string error)
@@ -339,6 +352,151 @@ let test_delete_stale_published_revision_does_not_mutate () =
    | Error error -> fail ("wrong published stale error: " ^ Editor.error_to_string error)
    | Ok _ -> fail "stale published reference deleted the replacement Skill");
   check string "published replacement survives" replacement (read_file skill_path)
+;;
+
+let replace_file_atomically path source_text =
+  let replacement_path = path ^ ".external-replacement" in
+  write_file replacement_path source_text;
+  Unix.rename replacement_path path
+;;
+
+let test_delete_quarantines_then_restores_pre_mutation_replacement () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  let replacement = skill_text "Concurrent replacement." "# Replacement" in
+  let refresh_called = ref false in
+  let observed_refresh () =
+    refresh_called := true;
+    refresh ()
+  in
+  (match
+     Editor.For_testing.delete
+       ~before_quarantine:(fun () -> replace_file_atomically skill_path replacement)
+       ~after_quarantine:(fun () -> ())
+       ~after_verification:(fun () -> ())
+       ~base_path
+       ~reference
+       ~confirmed:true
+       ~refresh:observed_refresh
+   with
+   | Error
+       (Editor.Delete_revision_conflict
+          { actual; disposition = Original_restored; _ }) ->
+     check
+       string
+       "replacement revision"
+       (Skill_reference.content_revision_of_source_text replacement
+        |> Skill_reference.content_revision_to_string)
+       (Skill_reference.content_revision_to_string actual)
+   | Error error -> fail ("wrong quarantine race error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "pre-mutation replacement was reported as deleted");
+  check bool "mismatch never publishes" false !refresh_called;
+  check string "newer bytes restored" replacement (read_file skill_path)
+;;
+
+let test_delete_retains_quarantine_when_original_reappears () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  let quarantined_replacement =
+    skill_text "Replacement moved to recovery." "# Quarantined"
+  in
+  let concurrent_original =
+    skill_text "Replacement recreated at source." "# Current"
+  in
+  let refresh_called = ref false in
+  let observed_refresh () =
+    refresh_called := true;
+    refresh ()
+  in
+  let recovery_id =
+    match
+      Editor.For_testing.delete
+        ~before_quarantine:(fun () ->
+          replace_file_atomically skill_path quarantined_replacement)
+        ~after_quarantine:(fun () -> write_file skill_path concurrent_original)
+        ~after_verification:(fun () -> ())
+        ~base_path
+        ~reference
+        ~confirmed:true
+        ~refresh:observed_refresh
+    with
+    | Error
+        (Editor.Recovery_required
+           { observed = Some actual
+           ; recovery_id
+           ; disposition = Quarantine_retained
+           ; _
+           }) ->
+      check
+        string
+        "quarantined revision"
+        (Skill_reference.content_revision_of_source_text quarantined_replacement
+         |> Skill_reference.content_revision_to_string)
+        (Skill_reference.content_revision_to_string actual);
+      recovery_id
+    | Error error -> fail ("wrong retained quarantine error: " ^ Editor.error_to_string error)
+    | Ok _ -> fail "two-version race was reported as deleted"
+  in
+  check bool "recovery-required never publishes" false !refresh_called;
+  check string "current source survives" concurrent_original (read_file skill_path);
+  let source_root = Filename.dirname (Filename.dirname skill_path) in
+  let recovery_path = Editor.For_testing.recovery_file_path ~source_root ~recovery_id in
+  check
+    string
+    "quarantined replacement survives"
+    quarantined_replacement
+    (read_file recovery_path)
+;;
+
+let write_all fd source_text =
+  let rec loop offset =
+    if offset < String.length source_text
+    then
+      let written =
+        Unix.write_substring fd source_text offset (String.length source_text - offset)
+      in
+      loop (offset + written)
+  in
+  loop 0
+;;
+
+let test_delete_retains_open_fd_write_after_verification () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  let later_bytes = skill_text "Open descriptor update." "# Later" in
+  let fd = Unix.openfile skill_path [ Unix.O_WRONLY ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close fd)
+    (fun () ->
+       let recovery_id =
+         match
+           Editor.For_testing.delete
+             ~before_quarantine:(fun () -> ())
+             ~after_quarantine:(fun () -> ())
+             ~after_verification:(fun () ->
+               Unix.ftruncate fd 0;
+               write_all fd later_bytes;
+               Unix.fsync fd)
+             ~base_path
+             ~reference
+             ~confirmed:true
+             ~refresh
+         with
+         | Ok
+             (Editor.Deleted_and_published
+                { recovery_id; disposition = Quarantine_retained; _ }) ->
+           recovery_id
+         | Ok (Deleted_and_published _) ->
+           fail "open-fd delete did not retain recovery"
+         | Ok (Deleted_but_unpublished _) -> fail "open-fd delete was not published"
+         | Error error -> fail (Editor.error_to_string error)
+       in
+       check bool "source name remains absent" false (Sys.file_exists skill_path);
+       let source_root = Filename.dirname (Filename.dirname skill_path) in
+       let recovery_path =
+         Editor.For_testing.recovery_file_path ~source_root ~recovery_id
+       in
+       check string "post-verification bytes retained" later_bytes (read_file recovery_path))
 ;;
 
 let test_delete_requires_confirmation () =
@@ -444,6 +602,12 @@ let () =
             test_delete_stale_revision_does_not_mutate
         ; test_case "delete stale published revision does not mutate" `Quick
             test_delete_stale_published_revision_does_not_mutate
+        ; test_case "delete restores pre-mutation replacement" `Quick
+            test_delete_quarantines_then_restores_pre_mutation_replacement
+        ; test_case "delete retains quarantine when original reappears" `Quick
+            test_delete_retains_quarantine_when_original_reappears
+        ; test_case "delete retains open-fd write after verification" `Quick
+            test_delete_retains_open_fd_write_after_verification
         ; test_case "delete requires confirmation" `Quick
             test_delete_requires_confirmation
         ; test_case "delete read-only source does not mutate" `Quick

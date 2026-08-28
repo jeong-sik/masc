@@ -505,11 +505,13 @@ let parse_skill_create_body body_str =
 
 let skill_editor_error_status = function
   | Server_skill_editor.Source_read_only -> `Forbidden
-  | Revision_conflict _ | Package_already_exists -> `Conflict
+  | Revision_conflict _ | Delete_revision_conflict _ | Recovery_required _
+  | Package_already_exists ->
+    `Conflict
   | Snapshot_not_registered | Snapshot_uninitialized | Reference_not_current
   | Source_not_ready | Source_file_missing ->
     `Not_found
-  | Invalid_workspace | Source_read_failed | Write_failed _ | Remove_failed _ ->
+  | Invalid_workspace | Source_read_failed | Write_failed _ | Quarantine_failed _ ->
     `Internal_server_error
   | Source_too_large _ -> `Payload_too_large
   | Source_path_rejected _ | Confirmation_required | Invalid_package_id _
@@ -762,7 +764,7 @@ let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome 
     Log.Dashboard.warn "Skill write audit failed: %s" (Printexc.to_string exn)
 ;;
 
-let audit_skill_delete state agent_name ~reference ~status ~outcome =
+let audit_skill_delete state agent_name ~reference ~status ~recovery ~outcome =
   try
     Audit_log.log_action
       (Mcp_server.workspace_config state)
@@ -770,9 +772,15 @@ let audit_skill_delete state agent_name ~reference ~status ~outcome =
       ~action:(Audit_log.Custom "skill_delete")
       ~details:
         (`Assoc
-          [ "reference", Skill_reference.to_yojson reference
-          ; "status", `String status
-          ])
+          ([ "reference", Skill_reference.to_yojson reference
+           ; "status", `String status
+           ]
+           @ match recovery with
+             | None -> []
+             | Some (recovery_id, disposition) ->
+               [ "recovery_id", `String recovery_id
+               ; "recovery_disposition", `String disposition
+               ]))
       ~outcome
       ()
   with
@@ -1736,18 +1744,32 @@ let add_routes ~sw ~clock router =
                   | Error error ->
                     audit_skill_delete state agent_name ~reference
                       ~status:(Server_skill_editor.error_code error)
+                      ~recovery:None
                       ~outcome:
                         (Audit_log.Failure (Server_skill_editor.error_to_string error));
                     respond_skill_editor_error ~request:req reqd error
                   | Ok outcome ->
-                    let status, audit_outcome =
+                    let status, audit_outcome, recovery_id, disposition =
                       match outcome with
-                      | Server_skill_editor.Deleted_and_published _ ->
-                        "deleted_and_published", Audit_log.Success
-                      | Deleted_but_unpublished { reason; _ } ->
-                        "deleted_but_unpublished", Audit_log.Failure reason
+                      | Server_skill_editor.Deleted_and_published
+                          { recovery_id; disposition; _ } ->
+                        ( "deleted_and_published"
+                        , Audit_log.Success
+                        , recovery_id
+                        , disposition )
+                      | Deleted_but_unpublished
+                          { reason; recovery_id; disposition; _ } ->
+                        ( "deleted_but_unpublished"
+                        , Audit_log.Failure reason
+                        , recovery_id
+                        , disposition )
                     in
                     audit_skill_delete state agent_name ~reference ~status
+                      ~recovery:
+                        (Some
+                           ( recovery_id
+                           , Server_skill_editor.recovery_disposition_to_string
+                               disposition ))
                       ~outcome:audit_outcome;
                     Http.Response.json_value
                       ~compress:true

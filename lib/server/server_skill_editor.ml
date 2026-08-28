@@ -5,6 +5,12 @@ type path_rejection =
   | Non_directory_component
   | Non_regular_file
   | Identity_changed
+  | Recovery_directory_not_private
+
+type recovery_disposition =
+  | Original_restored
+  | Quarantine_retained
+  | Original_restored_with_quarantine_retained
 
 type loaded =
   { reference : Skill_reference.t
@@ -49,10 +55,14 @@ type delete_outcome =
   | Deleted_and_published of
       { reference : Skill_reference.t
       ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      ; recovery_id : string
+      ; disposition : recovery_disposition
       }
   | Deleted_but_unpublished of
       { reference : Skill_reference.t
       ; reason : string
+      ; recovery_id : string
+      ; disposition : recovery_disposition
       }
 
 type error =
@@ -69,11 +79,23 @@ type error =
   | Package_already_exists
   | Invalid_package_id of string
   | Revision_conflict of { actual : Skill_reference.content_revision }
+  | Delete_revision_conflict of
+      { actual : Skill_reference.content_revision
+      ; recovery_id : string
+      ; disposition : recovery_disposition
+      }
   | Source_too_large of { bytes : int; max_bytes : int }
   | Validation_failed of string
   | Write_failed of string
-  | Remove_failed of
-      { removed : bool
+  | Quarantine_failed of
+      { candidate_moved : bool
+      ; recovery_id : string option
+      ; detail : string
+      }
+  | Recovery_required of
+      { observed : Skill_reference.content_revision option
+      ; recovery_id : string
+      ; disposition : recovery_disposition
       ; detail : string
       }
 
@@ -97,6 +119,14 @@ let path_rejection_to_string = function
   | Non_directory_component -> "non_directory_component"
   | Non_regular_file -> "non_regular_file"
   | Identity_changed -> "identity_changed"
+  | Recovery_directory_not_private -> "recovery_directory_not_private"
+;;
+
+let recovery_disposition_to_string = function
+  | Original_restored -> "original_restored"
+  | Quarantine_retained -> "quarantine_retained"
+  | Original_restored_with_quarantine_retained ->
+    "original_restored_with_quarantine_retained"
 ;;
 
 let error_code = function
@@ -112,11 +142,12 @@ let error_code = function
   | Confirmation_required -> "confirmation_required"
   | Package_already_exists -> "package_already_exists"
   | Invalid_package_id _ -> "invalid_package_id"
-  | Revision_conflict _ -> "revision_conflict"
+  | Revision_conflict _ | Delete_revision_conflict _ -> "revision_conflict"
   | Source_too_large _ -> "source_too_large"
   | Validation_failed _ -> "validation_failed"
   | Write_failed _ -> "write_failed"
-  | Remove_failed _ -> "remove_failed"
+  | Quarantine_failed _ -> "quarantine_failed"
+  | Recovery_required _ -> "recovery_required"
 ;;
 
 let error_to_string = function
@@ -136,12 +167,30 @@ let error_to_string = function
   | Revision_conflict { actual } ->
     "SKILL.md changed after this editor loaded it; current revision is "
     ^ Skill_reference.content_revision_to_string actual
+  | Delete_revision_conflict { actual; recovery_id; disposition } ->
+    Printf.sprintf
+      "SKILL.md changed before quarantine; current revision is %s; recovery_id=%s; \
+       disposition=%s"
+      (Skill_reference.content_revision_to_string actual)
+      recovery_id
+      (recovery_disposition_to_string disposition)
   | Source_too_large { bytes; max_bytes } ->
     Printf.sprintf "SKILL.md is too large: %d bytes (maximum %d)" bytes max_bytes
   | Validation_failed detail -> "Skill validation failed: " ^ detail
   | Write_failed detail -> "Skill durable write failed: " ^ detail
-  | Remove_failed { removed; detail = _ } ->
-    Printf.sprintf "Skill durable delete failed after file removal=%b" removed
+  | Quarantine_failed { candidate_moved; recovery_id; detail = _ } ->
+    Printf.sprintf
+      "Skill quarantine failed after candidate move=%b%s"
+      candidate_moved
+      (match recovery_id with
+       | None -> ""
+       | Some recovery_id -> "; recovery_id=" ^ recovery_id)
+  | Recovery_required { recovery_id; disposition; observed = _; detail = _ } ->
+    Printf.sprintf
+      "Skill deletion stopped with preserved recovery data; recovery_id=%s; \
+       disposition=%s"
+      recovery_id
+      (recovery_disposition_to_string disposition)
 ;;
 
 let current_snapshot ~base_path =
@@ -496,7 +545,202 @@ let create ~base_path ~source_id ~package_id ~source_text ~refresh =
                       })))))
 ;;
 
-let delete ~base_path ~reference ~confirmed ~refresh =
+type quarantine =
+  { recovery_id : string
+  ; recovery_root : string
+  ; directory : string
+  ; path : string
+  }
+
+type restore_result =
+  | Restored
+  | Restore_recovery_required of recovery_disposition * string
+
+let recovery_root_name = ".masc-skill-delete-recovery"
+
+let path_rejection_of_owned_directory = function
+  | Fs_compat.Owned_path_outside_root _ -> Outside_source
+  | Owned_path_non_directory _ -> Non_directory_component
+;;
+
+let run_quarantine_io operation =
+  try
+    let result = Eio_guard.run_in_systhread operation in
+    Eio_guard.check_if_ready ();
+    Ok result
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let inspect_private_recovery_root ~source_root recovery_root =
+  match Fs_compat.inspect_owned_directory_chain ~ownership_root:source_root recovery_root with
+  | Error rejection ->
+    Error (Source_path_rejected (path_rejection_of_owned_directory rejection))
+  | Ok Fs_compat.Owned_directory_missing -> Error Source_not_ready
+  | Ok (Owned_directory stat) ->
+    if stat.Unix.st_uid = Unix.geteuid () && stat.st_perm land 0o077 = 0
+    then Ok recovery_root
+    else Error (Source_path_rejected Recovery_directory_not_private)
+;;
+
+let ensure_private_recovery_root source_root =
+  let recovery_root = Filename.concat source_root recovery_root_name in
+  match run_quarantine_io (fun () ->
+    match
+      Fs_compat.inspect_owned_directory_chain ~ownership_root:source_root recovery_root
+    with
+    | Ok Fs_compat.Owned_directory_missing ->
+      (try Unix.mkdir recovery_root 0o700 with
+       | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+      Keeper_fs_durable_directory.fsync_directory source_root
+    | Ok (Owned_directory _) -> ()
+    | Error rejection ->
+      raise (Invalid_argument (Fs_compat.owned_directory_chain_rejection_to_string rejection)))
+  with
+  | Error detail ->
+    Error
+      (Quarantine_failed
+         { candidate_moved = false; recovery_id = None; detail })
+  | Ok () -> inspect_private_recovery_root ~source_root recovery_root
+;;
+
+let create_quarantine source_root =
+  let* recovery_root = ensure_private_recovery_root source_root in
+  let rec create () =
+    let recovery_id = Random_id.prefixed ~prefix:"skill-delete-" ~bytes:16 in
+    let directory = Filename.concat recovery_root recovery_id in
+    let creation =
+      try
+        Eio_guard.run_in_systhread (fun () -> Unix.mkdir directory 0o700);
+        Eio_guard.check_if_ready ();
+        `Created
+      with
+      | Unix.Unix_error (Unix.EEXIST, _, _) -> `Collision
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> `Failed (Printexc.to_string exn)
+    in
+    match creation with
+    | `Collision -> create ()
+    | `Failed detail ->
+      Error
+        (Quarantine_failed
+           { candidate_moved = false
+           ; recovery_id = Some recovery_id
+           ; detail
+           })
+    | `Created ->
+      (match run_quarantine_io (fun () ->
+         Keeper_fs_durable_directory.fsync_directory recovery_root)
+    with
+    | Ok () ->
+      Ok
+        { recovery_id
+        ; recovery_root
+        ; directory
+        ; path = Filename.concat directory "SKILL.md"
+        }
+      | Error detail ->
+        Error
+          (Quarantine_failed
+             { candidate_moved = false
+             ; recovery_id = Some recovery_id
+             ; detail
+             }))
+  in
+  create ()
+;;
+
+let cleanup_empty_quarantine quarantine =
+  match run_quarantine_io (fun () ->
+    Unix.rmdir quarantine.directory;
+    Keeper_fs_durable_directory.fsync_directory quarantine.recovery_root)
+  with
+  | Ok () -> ()
+  | Error detail ->
+    Log.Dashboard.warn
+      "Skill delete empty recovery cleanup failed recovery_id=%s error=%s"
+      quarantine.recovery_id
+      detail
+;;
+
+let quarantine_candidate ~before_quarantine (target : target) =
+  let* quarantine = create_quarantine target.source_root in
+  let hook_result =
+    try before_quarantine (); Ok () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  in
+  match hook_result with
+  | Error detail ->
+    cleanup_empty_quarantine quarantine;
+    Error
+      (Quarantine_failed
+         { candidate_moved = false
+         ; recovery_id = Some quarantine.recovery_id
+         ; detail
+         })
+  | Ok () ->
+    let moved = ref false in
+    (match run_quarantine_io (fun () ->
+       Unix.rename target.path quarantine.path;
+       moved := true;
+       Keeper_fs_durable_directory.fsync_directory (Filename.dirname target.path);
+       Keeper_fs_durable_directory.fsync_directory quarantine.directory)
+     with
+     | Ok () -> Ok quarantine
+     | Error detail ->
+       if not !moved then cleanup_empty_quarantine quarantine;
+       Error
+         (Quarantine_failed
+            { candidate_moved = !moved
+            ; recovery_id = Some quarantine.recovery_id
+            ; detail
+            }))
+;;
+
+let restore_quarantined_candidate (target : target) (quarantine : quarantine) =
+  let linked = ref false in
+  match run_quarantine_io (fun () ->
+    Unix.link quarantine.path target.path;
+    linked := true;
+    Keeper_fs_durable_directory.fsync_directory (Filename.dirname target.path))
+  with
+  | Error detail ->
+    let disposition =
+      if !linked
+      then Original_restored_with_quarantine_retained
+      else Quarantine_retained
+    in
+    Restore_recovery_required (disposition, detail)
+  | Ok () ->
+    (match
+       Keeper_fs.remove_file_durable
+         ~ownership_root:target.source_root
+         quarantine.path
+     with
+     | Ok () ->
+       cleanup_empty_quarantine quarantine;
+       Restored
+     | Error error ->
+       let disposition =
+         if error.removed
+         then Original_restored
+         else Original_restored_with_quarantine_retained
+       in
+       Restore_recovery_required
+         (disposition, Keeper_fs.durable_remove_error_to_string error))
+;;
+
+let delete_with
+      ~before_quarantine
+      ~after_quarantine
+      ~after_verification
+      ~base_path
+      ~reference
+      ~confirmed
+      ~refresh
+  =
   if not confirmed
   then Error Confirmation_required
   else
@@ -511,41 +755,161 @@ let delete ~base_path ~reference ~confirmed ~refresh =
         else
           let* _, actual = read_current target in
           let* () = require_expected_revision reference actual in
-          match
-            Keeper_fs.remove_file_durable
-              ~ownership_root:target.source_root
-              target.path
-          with
-          | Error error ->
-            Error
-              (Remove_failed
-                 { removed = error.removed
-                 ; detail = Keeper_fs.durable_remove_error_to_string error
-                 })
-          | Ok () ->
-            (match refresh () with
-             | Error reason -> Ok (Deleted_but_unpublished { reference; reason })
-             | Ok publication ->
-               (match published_snapshot publication with
-                | Error reason ->
-                  Ok (Deleted_but_unpublished { reference; reason })
-                | Ok snapshot ->
-                  (match Skill_catalog_snapshot.resolve_reference snapshot reference with
-                   | Error _ ->
-                     Ok
-                       (Deleted_and_published
-                          { reference
-                          ; snapshot_revision =
-                              Skill_catalog_snapshot.snapshot_revision snapshot
-                          })
-                   | Ok _ ->
+          let* quarantine = quarantine_candidate ~before_quarantine target in
+          let after_quarantine_result =
+            try after_quarantine (); Ok () with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error (Printexc.to_string exn)
+          in
+          (match after_quarantine_result with
+           | Error detail ->
+             Error
+               (Recovery_required
+                  { observed = None
+                  ; recovery_id = quarantine.recovery_id
+                  ; disposition = Quarantine_retained
+                  ; detail
+                  })
+           | Ok () ->
+             (match
+                Fs_compat.load_owned_regular_file
+                  ~ownership_root:target.source_root
+                  quarantine.path
+              with
+           | Error error ->
+             Error
+               (Recovery_required
+                  { observed = None
+                  ; recovery_id = quarantine.recovery_id
+                  ; disposition = Quarantine_retained
+                  ; detail = Fs_compat.owned_regular_file_read_error_to_string error
+                  })
+           | Ok None ->
+             Error
+               (Recovery_required
+                  { observed = None
+                  ; recovery_id = quarantine.recovery_id
+                  ; disposition = Quarantine_retained
+                  ; detail = "quarantined candidate disappeared before verification"
+                  })
+           | Ok (Some quarantined_source) ->
+             let observed =
+               Skill_reference.content_revision_of_source_text quarantined_source
+             in
+             if not (Skill_reference.equal_content_revision reference.content_revision observed)
+             then
+               (match restore_quarantined_candidate target quarantine with
+                | Restored ->
+                  Error
+                    (Delete_revision_conflict
+                       { actual = observed
+                       ; recovery_id = quarantine.recovery_id
+                       ; disposition = Original_restored
+                       })
+                | Restore_recovery_required (disposition, detail) ->
+                  Error
+                    (Recovery_required
+                       { observed = Some observed
+                       ; recovery_id = quarantine.recovery_id
+                       ; disposition
+                       ; detail
+                       }))
+             else
+               let after_verification_result =
+                 try after_verification (); Ok () with
+                 | Eio.Cancel.Cancelled _ as exn -> raise exn
+                 | exn -> Error (Printexc.to_string exn)
+               in
+               (match after_verification_result with
+                | Error detail ->
+                  Error
+                    (Recovery_required
+                       { observed = Some observed
+                       ; recovery_id = quarantine.recovery_id
+                       ; disposition = Quarantine_retained
+                       ; detail
+                       })
+                | Ok () ->
+                  (match refresh () with
+                   | Error reason ->
                      Ok
                        (Deleted_but_unpublished
                           { reference
-                          ; reason =
-                              "deleted reference remained present after publication"
-                          })))))
+                          ; reason
+                          ; recovery_id = quarantine.recovery_id
+                          ; disposition = Quarantine_retained
+                          })
+                   | Ok publication ->
+                     (match published_snapshot publication with
+                      | Error reason ->
+                        Ok
+                          (Deleted_but_unpublished
+                             { reference
+                             ; reason
+                             ; recovery_id = quarantine.recovery_id
+                             ; disposition = Quarantine_retained
+                             })
+                      | Ok snapshot ->
+                        (match
+                           Skill_catalog_snapshot.resolve_reference snapshot reference
+                         with
+                         | Error _ ->
+                           Ok
+                             (Deleted_and_published
+                                { reference
+                                ; snapshot_revision =
+                                    Skill_catalog_snapshot.snapshot_revision snapshot
+                                ; recovery_id = quarantine.recovery_id
+                                ; disposition = Quarantine_retained
+                                })
+                         | Ok _ ->
+                           Ok
+                             (Deleted_but_unpublished
+                                { reference
+                                ; reason =
+                                    "deleted reference remained present after publication"
+                                ; recovery_id = quarantine.recovery_id
+                                ; disposition = Quarantine_retained
+                                }))))))))
 ;;
+
+let delete ~base_path ~reference ~confirmed ~refresh =
+  delete_with
+    ~before_quarantine:(fun () -> ())
+    ~after_quarantine:(fun () -> ())
+    ~after_verification:(fun () -> ())
+    ~base_path
+    ~reference
+    ~confirmed
+    ~refresh
+;;
+
+module For_testing = struct
+  let recovery_file_path ~source_root ~recovery_id =
+    Filename.concat
+      source_root
+      (Filename.concat recovery_root_name (Filename.concat recovery_id "SKILL.md"))
+  ;;
+
+  let delete
+        ~before_quarantine
+        ~after_quarantine
+        ~after_verification
+        ~base_path
+        ~reference
+        ~confirmed
+        ~refresh
+    =
+    delete_with
+      ~before_quarantine
+      ~after_quarantine
+      ~after_verification
+      ~base_path
+      ~reference
+      ~confirmed
+      ~refresh
+  ;;
+end
 
 let preview_to_yojson (preview : preview) =
   `Assoc
@@ -612,18 +976,25 @@ let create_outcome_to_yojson = function
 ;;
 
 let delete_outcome_to_yojson = function
-  | Deleted_and_published { reference; snapshot_revision } ->
+  | Deleted_and_published
+      { reference; snapshot_revision; recovery_id; disposition } ->
     `Assoc
       [ "status", `String "deleted_and_published"
       ; "reference", Skill_reference.to_yojson reference
       ; ( "snapshot_revision"
         , `String (Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision) )
+      ; "recovery_id", `String recovery_id
+      ; ( "recovery_disposition"
+        , `String (recovery_disposition_to_string disposition) )
       ]
-  | Deleted_but_unpublished { reference; reason } ->
+  | Deleted_but_unpublished { reference; reason; recovery_id; disposition } ->
     `Assoc
       [ "status", `String "deleted_but_unpublished"
       ; "reference", Skill_reference.to_yojson reference
       ; "reason", `String reason
+      ; "recovery_id", `String recovery_id
+      ; ( "recovery_disposition"
+        , `String (recovery_disposition_to_string disposition) )
       ]
 ;;
 
@@ -638,9 +1009,32 @@ let error_to_yojson error =
          [ ( "actual_revision"
            , `String (Skill_reference.content_revision_to_string actual) )
          ]
+       | Delete_revision_conflict { actual; recovery_id; disposition } ->
+         [ ( "actual_revision"
+           , `String (Skill_reference.content_revision_to_string actual) )
+         ; "recovery_id", `String recovery_id
+         ; ( "recovery_disposition"
+           , `String (recovery_disposition_to_string disposition) )
+         ]
        | Source_path_rejected rejection ->
          [ "path_rejection", `String (path_rejection_to_string rejection) ]
-       | Remove_failed { removed; detail = _ } -> [ "removed", `Bool removed ]
+       | Quarantine_failed { candidate_moved; recovery_id; detail = _ } ->
+         [ "candidate_moved", `Bool candidate_moved
+         ; ( "recovery_id"
+           , match recovery_id with
+             | None -> `Null
+             | Some recovery_id -> `String recovery_id )
+         ]
+       | Recovery_required { observed; recovery_id; disposition; detail = _ } ->
+         [ ( "actual_revision"
+           , match observed with
+             | None -> `Null
+             | Some observed ->
+               `String (Skill_reference.content_revision_to_string observed) )
+         ; "recovery_id", `String recovery_id
+         ; ( "recovery_disposition"
+           , `String (recovery_disposition_to_string disposition) )
+         ]
        | Invalid_workspace | Snapshot_not_registered | Snapshot_uninitialized
        | Reference_not_current | Source_not_ready | Source_file_missing
        | Source_read_failed | Source_read_only

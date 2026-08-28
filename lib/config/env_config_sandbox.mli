@@ -70,6 +70,11 @@ end
 module Runtime : sig
   val docker_image : unit -> string
 
+  val microvm_remove_timeout_sec : unit -> float
+  (** How long to wait for a microvm guest to be removed. Removing one is a
+      VM shutdown: measured at 63-67s, against a Cleanup_rm bucket of 10s and
+      an Io bucket of 30s that were both sized for docker. *)
+
   val microvm_dns : unit -> string
   (** Nameserver handed to a microvm guest on the default network.
 

@@ -45,3 +45,10 @@ val prune_shared_jsonl_stores :
     Returns the number of files removed. Exposed for unit tests. *)
 
 val startup_prune_jsonl : Mcp_server.server_state -> unit
+
+val startup_sweep_microvm_guests : Mcp_server.server_state -> unit
+(** Remove microvm guests whose owning server is gone. Runs at boot, before
+    this process owns any guest, so every candidate belongs to an earlier
+    server -- and one still running keeps its own pid alive, which is what
+    stops a second server from collecting a first one's guests. Failure is
+    logged: a leaked guest costs memory, a refused boot costs the fleet. *)

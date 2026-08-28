@@ -194,3 +194,52 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn -> Log.Misc.warn "startup prune failed: %s (next boot retries; disk impact bounded by retention)" (Printexc.to_string exn))
+
+
+(** Collect microvm guests whose owning server is gone.
+
+    Boot is the honest moment for it. A guest is keeper-lifetime, so nothing
+    about its age or its idleness says it is abandoned; what does is its
+    [masc.mcp.owner_pid] naming a process that no longer exists. At boot this
+    process owns no guest yet, so every candidate belongs to an earlier
+    server -- and any of those still running keeps its own pid alive, which
+    is what stops a second server from collecting a first one's guests.
+
+    Failure is logged, not fatal. A leaked guest costs memory; a boot that
+    refuses to finish costs the whole fleet.
+
+    Removing a guest is a VM shutdown and takes about a minute each
+    (measured 63-67s on container 1.3.0), so this is not something keeper
+    boot should wait behind -- see the group it is registered in. *)
+let startup_sweep_microvm_guests (_state : Mcp_server.server_state) =
+  try
+    let timeout_sec = Env_config_sandbox.Runtime.microvm_remove_timeout_sec () in
+    let outcome =
+      Keeper_sandbox_microvm.sweep_abandoned_guests
+        ~timeout_sec
+        ~is_pid_alive:Keeper_sandbox_runtime.pid_alive
+        ~run_argv:(fun ~timeout_sec argv ->
+          Process_eio.run_argv_with_status ~timeout_sec argv)
+    in
+    (match outcome.removed with
+     | [] -> ()
+     | removed ->
+       Log.Misc.info
+         "startup sweep: removed %d microvm guest(s) whose server is gone: %s"
+         (List.length removed)
+         (String.concat ", " removed));
+    List.iter
+      (fun (container_id, detail) ->
+         Log.Misc.warn
+           "startup sweep: microvm guest %s survived removal: %s"
+           container_id
+           detail)
+      outcome.failed
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Misc.warn
+      "startup microvm sweep failed: %s (next boot retries; a leaked guest \
+       costs memory, a refused boot costs the fleet)"
+      (Printexc.to_string exn)
+;;

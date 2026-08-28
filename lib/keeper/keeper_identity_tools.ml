@@ -187,11 +187,20 @@ let projected_env_value ~base_path ~keeper_name ~name =
             name))
 ;;
 
-let refresh ?post ~base_path ~keeper_name ~(provider : Provider.t) ~now () =
-  let* access_token =
+(* One place decides where a provider's bearer comes from. The two call paths
+   below -- cataloguing tools and running one -- would otherwise each carry
+   the decision, and the day a third source appears they drift. *)
+let access_token_for ~base_path ~keeper_name ~(provider : Provider.t) =
+  match provider.Provider.credential_source with
+  | Provider.Oauth_exchange ->
     projected_env_value ~base_path ~keeper_name
       ~name:provider.Provider.access_token_env
-  in
+  | Provider.Github_cli { hostname } ->
+    Keeper_github_identity.stored_token ~base_path ~keeper_name ~hostname
+;;
+
+let refresh ?post ~base_path ~keeper_name ~(provider : Provider.t) ~now () =
+  let* access_token = access_token_for ~base_path ~keeper_name ~provider in
   let* client =
     Result.map_error Mcp_client.error_to_string
       (Mcp_client.connect ?post ~url:provider.Provider.mcp_url ~access_token ())
@@ -324,6 +333,12 @@ let stored_expires_at ~base_path ~keeper_name ~(provider : Provider.t) =
    pretending they are the same. *)
 let renew_if_needed ?token_post ?discover ~base_path ~keeper_name
       ~(provider : Provider.t) ~now ~access_token () =
+  match provider.Provider.credential_source with
+  (* gh owns this credential: it minted the token, it rewrites the file it
+     lives in, and masc holds no refresh token to spend. Renewing here would
+     mean going to an authorization server about a grant masc never made. *)
+  | Provider.Github_cli _ -> Ok access_token
+  | Provider.Oauth_exchange ->
   match stored_expires_at ~base_path ~keeper_name ~provider with
   (* No stored expiry means nothing said this token is old. Renewing on a
      guess would spend a refresh token to replace a working credential. *)
@@ -379,10 +394,7 @@ let renew_if_needed ?token_post ?discover ~base_path ~keeper_name
 
 let run_call ?post ~base_path ~keeper_name ~(provider : Provider.t)
       ~remote_name ~arguments () =
-  match
-    projected_env_value ~base_path ~keeper_name
-      ~name:provider.Provider.access_token_env
-  with
+  match access_token_for ~base_path ~keeper_name ~provider with
   | Error message -> Error (Precondition message)
   | Ok stored_token -> (
     match

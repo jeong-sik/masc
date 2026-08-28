@@ -561,6 +561,93 @@ let test_tool_projection_rejects_permissive_identity () =
   | Ok _ -> Alcotest.fail "world-readable credential file was accepted"
 ;;
 
+let write_hosts ~config ~keeper_name content =
+  let config_dir =
+    match Github.ensure_config_dir ~config ~keeper_name with
+    | Error message -> Alcotest.fail message
+    | Ok path -> path
+  in
+  let hosts = Filename.concat config_dir "hosts.yml" in
+  write_file hosts content;
+  Unix.chmod hosts 0o600
+;;
+
+(* The shape `gh auth login --insecure-storage` writes: the token sits under
+   the host. *)
+let test_stored_token_reads_the_host_scalar () =
+  with_temp_base @@ fun base_path config ->
+  let keeper_name = "token-host" in
+  write_hosts ~config ~keeper_name "github.com:\n  oauth_token: gho_fixture\n";
+  match Github.stored_token ~base_path ~keeper_name ~hostname:"github.com" with
+  | Error message -> Alcotest.fail message
+  | Ok token -> Alcotest.(check string) "host scalar is the token" "gho_fixture" token
+;;
+
+(* The other shape the decoder admits: the token under the host's [users]
+   mapping. Both are gh's, so both have to answer. *)
+let test_stored_token_reads_the_users_scalar () =
+  with_temp_base @@ fun base_path config ->
+  let keeper_name = "token-users" in
+  write_hosts
+    ~config
+    ~keeper_name
+    "github.com:\n  users:\n    anyang-keepers:\n      oauth_token: gho_nested\n";
+  match Github.stored_token ~base_path ~keeper_name ~hostname:"github.com" with
+  | Error message -> Alcotest.fail message
+  | Ok token -> Alcotest.(check string) "nested scalar is the token" "gho_nested" token
+;;
+
+(* Two hosts in one file is ordinary once an enterprise remote is added. The
+   caller named one, so the other must not answer for it. *)
+let test_stored_token_is_scoped_to_the_named_host () =
+  with_temp_base @@ fun base_path config ->
+  let keeper_name = "token-two-hosts" in
+  write_hosts
+    ~config
+    ~keeper_name
+    "github.com:\n  oauth_token: gho_public\n\
+     ghe.example.com:\n  oauth_token: gho_enterprise\n";
+  (match Github.stored_token ~base_path ~keeper_name ~hostname:"ghe.example.com" with
+   | Error message -> Alcotest.fail message
+   | Ok token -> Alcotest.(check string) "enterprise host" "gho_enterprise" token);
+  match Github.stored_token ~base_path ~keeper_name ~hostname:"unlisted.example" with
+  | Ok token -> Alcotest.fail ("an unlisted host answered with " ^ token)
+  | Error _ -> ()
+;;
+
+(* Logged out, gh leaves `{}`. Reading that as a credential would send an
+   empty bearer and read the provider's 401 as the provider being down. *)
+let test_stored_token_refuses_a_logged_out_identity () =
+  with_temp_base @@ fun base_path config ->
+  let keeper_name = "token-logged-out" in
+  write_hosts ~config ~keeper_name "{}\n";
+  match Github.stored_token ~base_path ~keeper_name ~hostname:"github.com" with
+  | Ok token -> Alcotest.fail ("a logged-out identity answered with " ^ token)
+  | Error _ -> ()
+;;
+
+let test_stored_token_refuses_a_keeper_with_no_identity () =
+  with_temp_base @@ fun base_path _config ->
+  match Github.stored_token ~base_path ~keeper_name:"never-logged-in" ~hostname:"github.com" with
+  | Ok token -> Alcotest.fail ("a keeper with no identity answered with " ^ token)
+  | Error _ -> ()
+;;
+
+(* The reason masc keeps no copy: gh rewrites this file, and the next read has
+   to be the new token rather than the one that was current at attach time. *)
+let test_stored_token_follows_a_relogin () =
+  with_temp_base @@ fun base_path config ->
+  let keeper_name = "token-relogin" in
+  write_hosts ~config ~keeper_name "github.com:\n  oauth_token: gho_first\n";
+  (match Github.stored_token ~base_path ~keeper_name ~hostname:"github.com" with
+   | Error message -> Alcotest.fail message
+   | Ok token -> Alcotest.(check string) "first login" "gho_first" token);
+  write_hosts ~config ~keeper_name "github.com:\n  oauth_token: gho_second\n";
+  match Github.stored_token ~base_path ~keeper_name ~hostname:"github.com" with
+  | Error message -> Alcotest.fail message
+  | Ok token -> Alcotest.(check string) "second login is what is read" "gho_second" token
+;;
+
 let test_run_inherited_returns_child_exit_status () =
   let status = Github.run_inherited ~timeout_sec:10.0 ~env:[||] [ "sh"; "-c"; "exit 7" ] in
   Alcotest.(check process_status_testable)
@@ -655,6 +742,30 @@ let () =
             "run_inherited empty argv yields 127"
             `Quick
             test_run_inherited_empty_argv_is_127
+        ; Alcotest.test_case
+            "stored_token reads the host scalar"
+            `Quick
+            test_stored_token_reads_the_host_scalar
+        ; Alcotest.test_case
+            "stored_token reads the users scalar"
+            `Quick
+            test_stored_token_reads_the_users_scalar
+        ; Alcotest.test_case
+            "stored_token is scoped to the named host"
+            `Quick
+            test_stored_token_is_scoped_to_the_named_host
+        ; Alcotest.test_case
+            "stored_token refuses a logged-out identity"
+            `Quick
+            test_stored_token_refuses_a_logged_out_identity
+        ; Alcotest.test_case
+            "stored_token refuses a keeper with no identity"
+            `Quick
+            test_stored_token_refuses_a_keeper_with_no_identity
+        ; Alcotest.test_case
+            "stored_token follows a relogin"
+            `Quick
+            test_stored_token_follows_a_relogin
         ] )
     ]
 ;;

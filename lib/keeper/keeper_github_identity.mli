@@ -24,6 +24,20 @@ val config_dir : config:Workspace.config -> keeper_name:string -> string
 val container_config_dir : container_masc_dir:string -> keeper_name:string -> string
 
 val secret_files_of_base_path : base_path:string -> keeper_name:string -> string list
+
+val stored_token
+  :  base_path:string
+  -> keeper_name:string
+  -> hostname:string
+  -> (string, string) result
+(** The token this Keeper's gh CLI holds for [hostname], read from its
+    hosts.yml at the moment of asking.
+
+    masc keeps no second copy: gh rewrites that file on login and logout, so
+    a copy would answer with a credential the Keeper no longer has. Callers
+    that need a bearer for a GitHub-backed provider come here rather than to
+    the secret projection. An absent or logged-out identity is an error
+    naming what to do, not an empty string. *)
 (** Paths of the GitHub CLI files that can hold credentials ([hosts.yml])
     for callers that hold only [base_path] (default cluster). Intended as
     [additional_secret_files] input for

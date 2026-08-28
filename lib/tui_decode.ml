@@ -5250,3 +5250,96 @@ let decode_asks_snapshot json =
   let* row_items = ask_list json "asks" in
   let* asn_rows = ask_map_results decode_ask_row row_items in
   Ok { asn_keeper; asn_open_count; asn_rows }
+
+(* Goal detail timeline (GET /api/v1/dashboard/goals/detail). The server
+   merges task/approval/keeper/goal events into one list of uniform
+   six-field rows; the TUI carries the four it renders. [timeline] is
+   [`Null] exactly when the approval-queue store could not be read — the
+   same discriminated failure the gate snapshot carries — so that case is
+   an explicit constructor, never an empty list. *)
+type goal_timeline_event = {
+  gt_ts : string;
+  gt_kind : string;
+  gt_summary : string;
+  gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
+}
+
+type goal_timeline =
+  | Goal_timeline_ready of goal_timeline_event list
+  | Goal_timeline_unavailable of string
+
+let decode_goal_timeline_event json =
+  let required field =
+    match member field json with
+    | `String value -> Ok value
+    | _ -> Error (Printf.sprintf "timeline event %s must be a string" field)
+  in
+  let* gt_ts = required "ts" in
+  let* gt_kind = required "kind" in
+  let* gt_summary = required "summary" in
+  let* gt_severity = required "severity" in
+  Ok { gt_ts; gt_kind; gt_summary; gt_severity }
+
+let decode_goal_detail_timeline json =
+  match member "timeline" json with
+  | `Null ->
+      let detail =
+        match member "operator_detail" (member "approval_queue_state" json) with
+        | `String detail -> detail
+        | _ -> "approval queue store is unreadable"
+      in
+      Ok (Goal_timeline_unavailable detail)
+  | `List items ->
+      let rec loop acc = function
+        | [] -> Ok (Goal_timeline_ready (List.rev acc))
+        | item :: rest ->
+            let* event = decode_goal_timeline_event item in
+            loop (event :: acc) rest
+      in
+      loop [] items
+  | _ -> Error "goal detail timeline is neither a list nor null"
+
+(* One task's event history (GET /api/v1/dashboard/tasks/history). Rows are
+   raw event-stream lines, not a uniform projection, so every field except
+   [ts] is optional and an unknown event type still renders as its type
+   string instead of being dropped. *)
+type task_history_event = {
+  th_ts : string;
+  th_label : string;  (** [action] when present, else [type], else "event" *)
+  th_from_status : string option;
+  th_to_status : string option;
+  th_actor : string option;
+  th_note : string option;  (** handoff_context.summary when present *)
+}
+
+let decode_task_history json =
+  match json with
+  | `List rows ->
+      let event_of_row row =
+        let str field =
+          match member field row with
+          | `String value when String.trim value <> "" -> Some value
+          | _ -> None
+        in
+        let th_label =
+          match str "action" with
+          | Some action -> action
+          | None -> (match str "type" with Some t -> t | None -> "event")
+        in
+        {
+          th_ts = Option.value (str "ts") ~default:"";
+          th_label;
+          th_from_status = str "from_status";
+          th_to_status = str "to_status";
+          th_actor = (match str "agent" with Some a -> Some a | None -> str "actor");
+          th_note =
+            (match member "handoff_context" row with
+             | `Assoc _ as handoff ->
+                 (match member "summary" handoff with
+                  | `String s when String.trim s <> "" -> Some s
+                  | _ -> None)
+             | _ -> None);
+        }
+      in
+      Ok (List.map event_of_row rows)
+  | _ -> Error "task history is not a list"

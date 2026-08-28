@@ -1616,3 +1616,34 @@ val decode_asks_snapshot : Yojson.Safe.t -> (asks_snapshot, string) result
 (** A row whose mode or free-text shape is unknown fails the decode rather
     than defaulting: a surface that guessed would offer the operator a control
     the server will refuse. *)
+
+type goal_timeline_event = {
+  gt_ts : string;
+  gt_kind : string;
+  gt_summary : string;
+  gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
+}
+
+(** Goal detail timeline. [`Null] from the server means the approval-queue
+    store could not be read (the same discriminated failure the gate snapshot
+    carries), so it decodes to the explicit unavailable constructor, never an
+    empty list. *)
+type goal_timeline =
+  | Goal_timeline_ready of goal_timeline_event list
+  | Goal_timeline_unavailable of string
+
+val decode_goal_detail_timeline : Yojson.Safe.t -> (goal_timeline, string) result
+
+type task_history_event = {
+  th_ts : string;
+  th_label : string;  (** [action] when present, else [type], else "event" *)
+  th_from_status : string option;
+  th_to_status : string option;
+  th_actor : string option;
+  th_note : string option;  (** handoff_context.summary when present *)
+}
+
+val decode_task_history : Yojson.Safe.t -> (task_history_event list, string) result
+(** Rows are raw event-stream lines rather than a uniform projection, so every
+    field except [ts] is tolerant; an unknown event type renders as its type
+    string instead of being dropped. *)

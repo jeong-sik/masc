@@ -1280,6 +1280,45 @@ let render_overview (state : state) =
    arithmetic instead of trusting it. *)
 let boxed_surface_chrome_rows = 10
 
+(* One task's event history, appended after the detail body so it rides the
+   same scroll. Loaded lazily on detail entry; the id check drops an answer
+   for a task the operator already left. Rows are raw event-stream lines, so
+   only the fields present are drawn. *)
+let task_history_lines (state : state) task_id =
+  let header = "  HISTORY" in
+  let rows =
+    match state.task_history with
+    | Some (id, result) when String.equal id task_id -> (
+        match result with
+        | Ok [] -> [ "    (no events recorded)" ]
+        | Ok events ->
+            List.concat_map
+              (fun (event : Tui_decode.task_history_event) ->
+                let transition =
+                  match event.Tui_decode.th_from_status, event.th_to_status with
+                  | Some from_status, Some to_status ->
+                      Printf.sprintf "  %s -> %s" from_status to_status
+                  | Some from_status, None -> "  from " ^ from_status
+                  | None, Some to_status -> "  -> " ^ to_status
+                  | None, None -> ""
+                in
+                let actor =
+                  match event.th_actor with
+                  | Some actor -> "  by " ^ actor
+                  | None -> ""
+                in
+                Printf.sprintf "    %s  %s%s%s"
+                  (Planning_detail.short_ts event.th_ts)
+                  event.th_label transition actor
+                :: (match event.th_note with
+                    | Some note -> [ "      " ^ note ]
+                    | None -> []))
+              events
+        | Error err -> [ "    load failed: " ^ err ])
+    | _ -> [ "    loading..." ]
+  in
+  ("" :: header :: rows)
+
 let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -1415,6 +1454,7 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
            @ list_lines "done-when" contract.Masc_domain.completion_contract
            @ list_lines "evidence" contract.Masc_domain.required_evidence)
     @ list_lines "file" task.files
+    @ task_history_lines state task.id
   in
   let total_lines = List.length body_lines in
   (* Chrome above and below the scrolling body: top border, header, divider,
@@ -2956,6 +2996,8 @@ let planning_detail_pane (state : state)
      surface's scroll moves through. *)
   let body =
     Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note
+    @ Planning_detail.timeline ~width:(cols - 6) ~goal_id:goal.pg_id
+        state.goal_timeline
   in
   (* What is being done about this goal. The goal record does not carry its
      tasks -- the goal-task registry is the source of truth and the loader

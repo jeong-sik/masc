@@ -1394,6 +1394,10 @@ type async_msg =
   | Verification_verdict_done of (string * bool, string) result
   | Keeper_calls_loaded of
       string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
+  | Goal_timeline_loaded of
+      string * (Masc.Tui_decode.goal_timeline, string) result
+  | Task_history_loaded of
+      string * (Masc.Tui_decode.task_history_event list, string) result
   | Keeper_config_view_loaded of string * (string list, string) result
   | Keeper_sandbox_view_loaded of
       string * (Masc_tui_keeper_sandbox.t, string) result
@@ -1980,6 +1984,49 @@ let launch_keeper_calls_load state ~mailbox keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_calls_loaded (keeper_name, Error "Eio switch is unavailable"))
+
+(* The two detail-pane histories, over HTTP. Same discipline as the call
+   log: the answer names the row it is for, so a load that returns after the
+   operator moved on is discarded, not drawn under another item. *)
+let launch_goal_timeline_load state ~mailbox goal_id =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Goal_timeline_loaded (goal_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Goal_timeline_loaded (goal_id, Error "Eio switch is unavailable"))
+
+let launch_task_history_load state ~mailbox task_id =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_task_history ~host ~port ~task_id with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Task_history_loaded (task_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Task_history_loaded (task_id, Error "Eio switch is unavailable"))
 
 (* The detail pane's two non-Info tabs. Same discipline as the call log:
    the answer names the keeper it is for, so a stale load cannot be drawn
@@ -6726,6 +6773,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error err ->
           state.goal_action_armed <- None;
           state.goal_action_error <- Some err)
+  | Goal_timeline_loaded (goal_id, result) ->
+      (* Drawn only while the operator still has this goal open; a stale
+         answer for a goal already left is dropped, same as the call log. *)
+      (match state.planning_mode with
+       | Planning_detail current when String.equal current goal_id ->
+           state.goal_timeline <- Some (goal_id, result)
+       | _ -> ())
+  | Task_history_loaded (task_id, result) ->
+      (match state.task_detail_id with
+       | Some current when String.equal current task_id ->
+           state.task_history <- Some (task_id, result)
+       | _ -> ())
   | Keeper_calls_loaded (keeper_name, result) -> (
       let still_selected =
         match List.nth_opt state.keepers state.keeper_cursor with
@@ -9817,6 +9876,9 @@ and is loaded on demand through keeper_skill.
                      goto_surface state ~mailbox:async_messages Overview;
                      state.task_detail_id <- Some task_id;
                      state.task_detail_scroll <- 0;
+                     state.task_history <- None;
+                     launch_task_history_load state ~mailbox:async_messages
+                       task_id;
                      let rec index_of i = function
                        | [] -> None
                        | (t : Masc_tui_types.task) :: rest ->
@@ -10591,9 +10653,16 @@ and is loaded on demand through keeper_skill.
                    setting it the operator arrives at the top of a list and
                    goes looking for the row they just followed. *)
                 (match destination, opened with
-                 | Overview, Some task_id -> state.task_detail_id <- Some task_id
+                 | Overview, Some task_id ->
+                     state.task_detail_id <- Some task_id;
+                     state.task_history <- None;
+                     launch_task_history_load state ~mailbox:async_messages
+                       task_id
                  | Planning, Some goal_id ->
-                     state.planning_mode <- Planning_detail goal_id
+                     state.planning_mode <- Planning_detail goal_id;
+                     state.goal_timeline <- None;
+                     launch_goal_timeline_load state ~mailbox:async_messages
+                       goal_id
                  | Board, Some post_id -> state.board_mode <- Board_read post_id
                  | Schedules, Some schedule_id ->
                      state.schedule_detail_id <- Some schedule_id
@@ -11860,7 +11929,10 @@ and is loaded on demand through keeper_skill.
                   (match List.nth_opt state.tasks state.task_cursor with
                    | Some task ->
                        state.task_detail_id <- Some task.id;
-                       state.task_detail_scroll <- 0
+                       state.task_detail_scroll <- 0;
+                       state.task_history <- None;
+                       launch_task_history_load state
+                         ~mailbox:async_messages task.id
                    | None -> ())
             | Keepers Keeper_list ->
                 (match List.nth_opt state.keepers state.keeper_cursor with
@@ -11952,7 +12024,10 @@ and is loaded on demand through keeper_skill.
                      (match List.nth_opt goals state.planning_cursor with
                       | Some g ->
                           state.planning_mode <- Planning_detail g.pg_id;
-                          state.planning_scroll <- 0
+                          state.planning_scroll <- 0;
+                          state.goal_timeline <- None;
+                          launch_goal_timeline_load state
+                            ~mailbox:async_messages g.pg_id
                       | None -> ())
                  | Planning_detail _ -> ())
             | Fusion ->

@@ -80,12 +80,6 @@ val resolve_keeper_confined_write_path
     paths, including a Docker-visible path projected to its host mount, retain
     their explicit identity. The resulting path is checked once against the
     objective allowed-root containment boundary. *)
-val resolve_keeper_path
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> raw_path:string
-  -> (string, string) result
-
 (** Resolve a read target using the same deterministic namespace as
     {!resolve_keeper_path}, without existence inference. *)
 val resolve_keeper_read_path

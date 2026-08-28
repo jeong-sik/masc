@@ -93,7 +93,6 @@ val start_session :
 val end_session : t -> agent_id:string -> bool
 (** [true] if a session was removed, [false] if [agent_id] had none. *)
 
-val suspend_session : t -> agent_id:string -> unit
 val resume_session : t -> agent_id:string -> unit
 
 (** {1 Query} *)

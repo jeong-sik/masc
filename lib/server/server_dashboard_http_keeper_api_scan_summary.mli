@@ -4,18 +4,6 @@
     state and JSONL receipt rows on disk. No side effects beyond
     reading the receipt files in {!read_receipt_rows}. *)
 
-(** [receipt_row_matches ?turn_id keeper_name trace_id json] returns
-    [true] when [json] is a receipt row whose [keeper_name] equals
-    [keeper_name] AND whose [trace_id] or [turn_count] matches the
-    arguments. When [turn_id] is [None], only [trace_id] matching is
-    considered. *)
-val receipt_row_matches
-  :  ?turn_id:int
-  -> string
-  -> string
-  -> Yojson.Safe.t
-  -> bool
-
 (** [read_receipt_rows ~keeper_name ~trace_id ?turn_id paths] reads
     every JSONL receipt under [paths] and returns the rows that match
     {!receipt_row_matches}. Result is in file order; subsequent

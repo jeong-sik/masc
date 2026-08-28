@@ -52,12 +52,6 @@ val valid_source_strings : string list
     error messages and the [masc_library_add] schema [enum]
     field — adding a constructor updates both automatically. *)
 
-val source_of_string_opt : string -> library_source option
-(** [source_of_string_opt s] returns [Some _] when [s] matches a
-    canonical label exactly, [None] otherwise.  Pinned at the
-    contract seam — fail-closed parsing is the SSOT contract for
-    the [source] field. *)
-
 (** {1 String helper} *)
 
 val string_contains : needle:string -> string -> bool

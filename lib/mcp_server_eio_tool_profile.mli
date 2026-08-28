@@ -108,14 +108,6 @@ val tool_annotations_for_profile :
     Subjective mutation severity and open-world classifications are not
     inferred. [profile] currently does not alter these exact annotations. *)
 
-val tool_title_of_name : string -> string
-(** [tool_title_of_name name] returns the human-readable title:
-
-    + Custom title from the internal [custom_tool_titles] table
-      when present.
-    + Otherwise auto-generated Title Case from the identifier
-      (drops [masc_] prefix, splits on [_], capitalises each word). *)
-
 val tool_json_for_profile :
   ?usage_summary:Telemetry_eio.tool_usage_summary ->
   tool_profile ->

@@ -72,8 +72,6 @@ type 'a publication =
 
 val revision_to_yojson : revision -> Yojson.Safe.t
 
-val revision_of_yojson : Yojson.Safe.t -> (revision, string) result
-
 val config_revision_to_yojson : config_revision -> Yojson.Safe.t
 
 val config_revision_of_yojson : Yojson.Safe.t -> (config_revision, string) result

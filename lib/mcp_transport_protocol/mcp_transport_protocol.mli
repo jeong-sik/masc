@@ -253,12 +253,6 @@ val body_uses_stateless_protocol : string -> bool
 (** [true] iff the JSON-RPC body declares a stateless protocol version
     in per-request [_meta]. *)
 
-val protocol_version_from_initialize_request_json :
-  Yojson.Safe.t -> string option
-(** Returns [Some v] if [json] is a well-formed [initialize] request,
-    where [v] is normalized to a supported version. Returns [None] for
-    any other shape. *)
-
 val protocol_version_from_body : string -> string option
 (** Convenience: parses [body_str] as JSON then delegates to
     {!protocol_version_from_initialize_request_json}. Returns [None] on

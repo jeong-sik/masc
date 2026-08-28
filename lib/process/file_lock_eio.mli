@@ -56,21 +56,6 @@ val acquire_flock_retry :
   unit ->
   Unix.file_descr
 
-(** Fiber-friendly wrapper around {!acquire_flock_retry}. Systhread
-    is used for [openfile], [F_TLOCK], and retry sleeps (unless a
-    clock is supplied, in which case [Eio.Time.sleep] yields to the
-    Eio scheduler). *)
-val acquire_flock_retry_cooperative :
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  lock_path:string ->
-  mode:Unix.open_flag list ->
-  perm:int ->
-  ?max_attempts:int ->
-  ?sleep_sec:float ->
-  caller:string ->
-  unit ->
-  Unix.file_descr
-
 (** [release_flock_fd fd] unlocks (best-effort) and closes [fd]. *)
 val release_flock_fd : Unix.file_descr -> unit
 

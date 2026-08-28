@@ -50,9 +50,6 @@ val run_in_systhread : (unit -> 'a) -> 'a
     Outside an Eio fiber, falls back to [Fun.protect]. *)
 val protect : finally:(unit -> unit) -> (unit -> 'a) -> 'a
 
-(** Cooperatively yield from an Eio fiber; no-op in a non-Eio context. *)
-val yield_if_ready : unit -> unit
-
 (** Check cooperative cancellation from an Eio fiber; no-op in a non-Eio
     context. *)
 val check_if_ready : unit -> unit

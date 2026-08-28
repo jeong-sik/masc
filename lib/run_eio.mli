@@ -27,8 +27,6 @@ val run_record_of_json : Yojson.Safe.t -> run_record option
 
 (** {1 Path builders} *)
 
-val runs_dir : Workspace_utils.config -> string
-
 val run_dir : Workspace_utils.config -> string -> string
 
 val run_json_path : Workspace_utils.config -> string -> string

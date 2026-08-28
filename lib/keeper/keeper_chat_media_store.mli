@@ -43,9 +43,6 @@ val content_type_of_path : string -> string
     Guards the serve route path parameter; the token is not a bearer capability. *)
 val valid_token : string -> bool
 
-(** Raw generated-media byte budget used before durable writes. *)
-val max_raw_bytes : unit -> int
-
 (** Encoded-carrier budget for live stream accumulation. Gives base64 expansion
     headroom over {!max_raw_bytes}. *)
 val max_wire_bytes : unit -> int

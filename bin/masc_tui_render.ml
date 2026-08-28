@@ -8123,7 +8123,7 @@ let async_request_observation_lines (state : state) =
                 in
                 let ownership = string_field "worker_ownership" "unknown" in
                 (if String.equal ownership "runtime_owned"
-                 then Theme.good ()
+                 then Theme.ok ()
                  else Theme.warn ()),
                 Printf.sprintf
                   "   %s · %s · %s · %s · %s"

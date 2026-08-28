@@ -39,6 +39,48 @@ let test_agent_id_invalid_chars () =
     | Ok _ -> Alcotest.fail (Printf.sprintf "Expected error for invalid chars '%s'" s)
   ) cases
 
+(* A keeper name carries dots (edgar.a.poe). RFC-0393 made a keeper name its
+   own id instead of an encoded string, so the dot reaches this validator
+   directly and a rejection here stops that keeper from claiming its own task.
+   Board widened to the same character set in #8633 and called its pattern "a
+   strict superset of both"; this is the half that never followed. *)
+let test_agent_id_allows_dots () =
+  let cases = ["edgar.a.poe"; "a.b"; "keeper:edgar.a.poe"; "x.y-z_1"] in
+  List.iter (fun s ->
+    match Validation.Agent_id.validate s with
+    | Ok _ -> ()
+    | Error e -> Alcotest.fail (Printf.sprintf "Expected valid agent_id '%s': %s" s e)
+  ) cases
+
+(* Widening the character set must not reopen traversal: ".." is still refused,
+   and the check that refuses it is only reachable now that dots parse. *)
+let test_agent_id_dot_traversal_still_refused () =
+  let cases = [".."; "../x"; "..foo"] in
+  List.iter (fun s ->
+    match Validation.Agent_id.validate s with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail (Printf.sprintf "Expected error for '%s'" s)
+  ) cases
+
+(* SSOT: board delegates to this validator instead of carrying its own copy.
+   The copy drifted twice (#8625 length, #8633 pattern), each time caught up by
+   hand. Agreement is asserted here so a third drift is a test failure. *)
+let test_board_agent_id_agrees_with_validation () =
+  let cases =
+    [ "edgar.a.poe"; "claude"; "keeper:edgar.a.poe"; "agent-1"
+    ; ""; ".."; "../x"; "agent/subdir"; "agent@host"; String.make 65 'a' ]
+  in
+  List.iter (fun s ->
+    let canonical = Result.is_ok (Validation.Agent_id.validate s) in
+    let board = Result.is_ok (Board_types.Agent_id.of_string s) in
+    if canonical <> board
+    then
+      Alcotest.fail
+        (Printf.sprintf
+           "board and Validation disagree on '%s': Validation=%b board=%b"
+           s canonical board)
+  ) cases
+
 (* ===== Task_id Tests ===== *)
 
 let test_task_id_valid () =
@@ -156,6 +198,11 @@ let tests = [
   Alcotest.test_case "safe_float nan" `Quick test_safe_float_nan;
   Alcotest.test_case "safe_float infinity" `Quick test_safe_float_infinity;
   Alcotest.test_case "safe_float clamp" `Quick test_safe_float_clamp;
+  Alcotest.test_case "agent_id allows dots" `Quick test_agent_id_allows_dots;
+  Alcotest.test_case "agent_id still refuses dot traversal" `Quick
+    test_agent_id_dot_traversal_still_refused;
+  Alcotest.test_case "board agent_id agrees with Validation" `Quick
+    test_board_agent_id_agrees_with_validation;
   (* Stats *)
   Alcotest.test_case "rejection stats" `Quick test_rejection_stats;
 ]

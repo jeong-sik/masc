@@ -3778,3 +3778,8 @@
  (name test_exec_ssh_endpoints)
  (modules test_exec_ssh_endpoints)
  (libraries masc_test_deps))
+
+(test
+ (name test_exec_ssh_protocol)
+ (modules test_exec_ssh_protocol)
+ (libraries masc_test_deps exec_ssh_protocol))

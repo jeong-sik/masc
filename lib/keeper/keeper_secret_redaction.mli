@@ -8,6 +8,11 @@ type t
 
 val empty : t
 
+val ssh_remote_token_file : base_path:string -> keeper_name:string -> string
+(** Host-side 0600 registration file for a remote keeper's GitHub token.
+    The SSH bootstrap owns writes; snapshots read it only for exact-value
+    redaction and never project it into a local or Docker execution env. *)
+
 val snapshot : base_path:string -> keeper_name:string -> t
 (** Snapshot exact secret values from the keeper's projected secret root. *)
 
@@ -40,4 +45,3 @@ val redact_json : t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Redact a JSON value's object keys as well as its string leaves, preserving
     shape. A secret can be the key -- a header name, or a parameter a tool used
     as a dict key -- so a leaves-only traversal emits it (#22941). *)
-

@@ -31,21 +31,8 @@ let runtime_config_path ~base_path =
   if Sys.file_exists workspace_path then Some workspace_path else Runtime.config_path ()
 ;;
 
-let resolve_endpoint ~base_path ~keeper_name =
-  let* defaults =
-    Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
-      ~base_path keeper_name
-    |> Result.map_error Keeper_types_profile.keeper_toml_load_error_to_string
-  in
-  let* endpoint_name =
-    match defaults.remote_endpoint with
-    | Some name when String.trim name <> "" -> Ok (String.trim name)
-    | _ ->
-      Error
-        (Printf.sprintf
-           "remote_ssh_endpoint_missing: keeper %s has no remote_endpoint"
-           keeper_name)
-  in
+let resolve_endpoint_name ~base_path ~name:endpoint_name =
+  let endpoint_name = String.trim endpoint_name in
   let* config_path =
     runtime_config_path ~base_path
     |> Option.to_result
@@ -72,6 +59,24 @@ let resolve_endpoint ~base_path ~keeper_name =
          (Printf.sprintf
             "remote_ssh_endpoint_unknown: endpoint %s is not declared in [exec.ssh.endpoints]"
             endpoint_name)
+;;
+
+let resolve_endpoint ~base_path ~keeper_name =
+  let* defaults =
+    Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+      ~base_path keeper_name
+    |> Result.map_error Keeper_types_profile.keeper_toml_load_error_to_string
+  in
+  let* endpoint_name =
+    match defaults.remote_endpoint with
+    | Some name when String.trim name <> "" -> Ok (String.trim name)
+    | _ ->
+      Error
+        (Printf.sprintf
+           "remote_ssh_endpoint_missing: keeper %s has no remote_endpoint"
+           keeper_name)
+  in
+  resolve_endpoint_name ~base_path ~name:endpoint_name
 ;;
 
 type shared_state =
@@ -149,10 +154,6 @@ let create ?ssh_bin ~base_path ~keeper_name
     ; shared = shared_state ~base_path endpoint
     }
 ;;
-
-module For_testing = struct
-  let set_ssh_bin_override value = Atomic.set ssh_bin_override value
-end
 
 let ssh_argv t =
   let endpoint = t.endpoint in
@@ -298,8 +299,19 @@ let local_wall_budget t timeout_sec =
 ;;
 
 let remote_cwd t cwd =
-  Keeper_remote_path.host_to_remote ~base_path:t.base_path
-    ~endpoint:t.endpoint ~keeper:t.keeper_name cwd
+  let normalized =
+    Keeper_alerting_path.normalize_path_for_check cwd
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let endpoint_root =
+    Keeper_alerting_path.normalize_path_for_check t.endpoint.remote_root
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  if String.equal normalized endpoint_root
+  then Ok endpoint_root
+  else
+    Keeper_remote_path.host_to_remote ~base_path:t.base_path
+      ~endpoint:t.endpoint ~keeper:t.keeper_name cwd
 ;;
 
 let runner ~timeout_sec t =
@@ -442,3 +454,180 @@ let runner ~timeout_sec t =
                       (transport_error endpoint_name
                          "ssh status and result trailer disagree") )))))
 ;;
+
+type preflight_cache_entry =
+  { checked_at : float
+  ; result : (unit, string) result
+  }
+
+let preflight_cache : (string, preflight_cache_entry) Hashtbl.t = Hashtbl.create 8
+let preflight_cache_mu = Stdlib.Mutex.create ()
+
+let preflight_cache_key t =
+  Printf.sprintf "%s\x00%s\x00%s\x00%s"
+    t.base_path t.endpoint.name t.keeper_name t.ssh_bin
+;;
+
+let cached_preflight ~now t =
+  let ttl = float_of_int (Env_config_sandbox.Preflight.ssh_ttl_sec ()) in
+  if ttl <= 0.0
+  then None
+  else
+    Stdlib.Mutex.protect preflight_cache_mu (fun () ->
+      match Hashtbl.find_opt preflight_cache (preflight_cache_key t) with
+      | Some entry when now -. entry.checked_at < ttl -> Some entry.result
+      | Some _ | None -> None)
+;;
+
+let store_preflight ~now t result =
+  Stdlib.Mutex.protect preflight_cache_mu (fun () ->
+    Hashtbl.replace preflight_cache (preflight_cache_key t)
+      { checked_at = now; result })
+;;
+
+let probe_ssh_argv t =
+  match List.rev (ssh_argv t) with
+  | _fixed_command :: rest -> List.rev ("masc-exec-shim --probe" :: rest)
+  | [] -> [ t.ssh_bin; "masc-exec-shim --probe" ]
+;;
+
+let preflight_timeout_sec t = float_of_int t.endpoint.connect_timeout_sec +. 5.0
+
+let run_probe t =
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split
+      ~timeout_sec:(preflight_timeout_sec t)
+      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+      (probe_ssh_argv t)
+  in
+  match status with
+  | Unix.WEXITED 0 ->
+    (match Exec_ssh_protocol.parse_probe (String.trim stdout) with
+     | Error error ->
+       Error
+         (Printf.sprintf
+            "remote_ssh_probe_invalid: endpoint %s: %s"
+            t.endpoint.name error)
+     | Ok probe ->
+       let want = string_of_int Exec_ssh_protocol.protocol_version in
+       if Exec_ssh_protocol.probe_major_compatible ~want probe.version
+       then Ok ()
+       else
+         Error
+           (Printf.sprintf
+              "remote_shim_version_skew: endpoint %s requires major %s but remote reports %s"
+              t.endpoint.name want probe.version))
+  | Unix.WEXITED code ->
+    Error
+      (Printf.sprintf
+         "remote_ssh_endpoint_unreachable: endpoint %s host %s exited %d: %s"
+         t.endpoint.name t.endpoint.host code
+         (Exec_policy.truncate_for_log stderr))
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+    Error
+      (Printf.sprintf
+         "remote_ssh_endpoint_unreachable: endpoint %s host %s signal %d"
+         t.endpoint.name t.endpoint.host signal)
+;;
+
+let run_preflight_command t ~error_code argv =
+  let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
+  let status, stdout, stderr =
+    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+      ~argv ~env:[||] ~cwd:(Some t.endpoint.remote_root)
+  in
+  match status with
+  | Unix.WEXITED 0 -> Ok stdout
+  | Unix.WEXITED code ->
+    Error
+      (Printf.sprintf "%s: endpoint %s exit=%d stderr=%s"
+         error_code t.endpoint.name code (Exec_policy.truncate_for_log stderr))
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+    Error
+      (Printf.sprintf "%s: endpoint %s signal=%d stderr=%s"
+         error_code t.endpoint.name signal (Exec_policy.truncate_for_log stderr))
+;;
+
+let whitespace_tokens line =
+  line
+  |> String.split_on_char ' '
+  |> List.concat_map (String.split_on_char '\t')
+  |> List.filter (fun token -> token <> "")
+;;
+
+let available_kib output =
+  output
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.trim line <> "")
+  |> List.rev
+  |> List.find_map (fun line ->
+    match whitespace_tokens line with
+    | _filesystem :: _blocks :: _used :: available :: _ ->
+      int_of_string_opt available
+    | _ -> None)
+;;
+
+let perform_preflight t =
+  let ( let* ) = Result.bind in
+  let* () = run_probe t in
+  let* _ =
+    run_preflight_command t ~error_code:"remote_git_unavailable"
+      [ "git"; "--version" ]
+  in
+  let* _ =
+    run_preflight_command t ~error_code:"remote_ssh_root_missing"
+      [ "test"; "-d"; t.endpoint.remote_root ]
+  in
+  let keeper_root =
+    Filename.concat t.endpoint.remote_root
+      (Playground_paths.sanitize_keeper_name t.keeper_name)
+  in
+  let* _ =
+    run_preflight_command t ~error_code:"remote_ssh_keeper_root_missing"
+      [ "test"; "-d"; keeper_root ]
+  in
+  let* disk =
+    run_preflight_command t ~error_code:"remote_ssh_disk_probe_failed"
+      [ "df"; "-Pk"; t.endpoint.remote_root ]
+  in
+  let minimum = Env_config_sandbox.Preflight.ssh_disk_free_min_kib () in
+  let* () =
+    match available_kib disk with
+    | Some available when available >= minimum -> Ok ()
+    | Some available ->
+      Error
+        (Printf.sprintf
+           "remote_ssh_disk_low: endpoint %s available_kib=%d minimum_kib=%d"
+           t.endpoint.name available minimum)
+    | None ->
+      Error
+        (Printf.sprintf
+           "remote_ssh_disk_probe_failed: endpoint %s returned unparseable df output"
+           t.endpoint.name)
+  in
+  let gh_config_dir = Filename.concat keeper_root ".config/gh" in
+  let* _ =
+    run_preflight_command t ~error_code:"remote_github_identity_missing"
+      [ "env"; "GH_CONFIG_DIR=" ^ gh_config_dir; "gh"; "auth"; "status" ]
+  in
+  Ok ()
+;;
+
+let check_preflight ?(force = false) t =
+  (* NDT-OK: wall time controls only readiness-cache freshness; it is neither
+     persisted authority nor a policy decision. *)
+  let now = Unix.gettimeofday () in
+  match if force then None else cached_preflight ~now t with
+  | Some result -> result
+  | None ->
+    let result = perform_preflight t in
+    store_preflight ~now t result;
+    result
+;;
+
+module For_testing = struct
+  let set_ssh_bin_override value = Atomic.set ssh_bin_override value
+
+  let clear_preflight_cache () =
+    Stdlib.Mutex.protect preflight_cache_mu (fun () -> Hashtbl.clear preflight_cache)
+end

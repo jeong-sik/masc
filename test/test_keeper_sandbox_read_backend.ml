@@ -401,6 +401,7 @@ max_concurrent_sessions = 2
   Alcotest.(check bool) "host path intentionally absent" false
     (Sys.file_exists missing_host_path);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   with_fake_ssh fake_ssh_success_script @@ fun () ->
   match
     Keeper_sandbox_read_backend.read_file ~config ~meta

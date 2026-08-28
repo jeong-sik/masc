@@ -1,6 +1,14 @@
 open Alcotest
 open Masc
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:""))
+    f
+;;
+
 let temp_dir () =
   let path = Filename.temp_file "masc-ssh-secret-policy-" "" in
   Sys.remove path;
@@ -113,6 +121,7 @@ let test_typed_github_token_is_rejected_before_dispatch () =
 ;;
 
 let test_allowlisted_nonsecret_env_reaches_dispatch_branch () =
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   setup @@ fun ~config ~meta ~playground ->
   with_dispatch_override @@ fun () ->
   let raw =

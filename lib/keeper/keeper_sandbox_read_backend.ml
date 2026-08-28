@@ -137,6 +137,11 @@ let run_remote_command_with_status
     Keeper_sandbox_ssh.create ~base_path:config.base_path
       ~keeper_name:meta.name ~endpoint ()
   in
+  let* () =
+    if Env_config_sandbox.Preflight.enabled ()
+    then Keeper_sandbox_ssh.check_preflight ssh
+    else Ok ()
+  in
   let* cwd =
     Keeper_remote_path.host_to_remote ~base_path:config.base_path
       ~endpoint ~keeper:meta.name (host_playground_root ~config ~meta)

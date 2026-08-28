@@ -134,6 +134,13 @@ module Preflight = struct
   let enabled () =
     get_bool ~default:true "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
 
+  let ssh_ttl_sec () =
+    max 0 (get_int ~default:60 "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC")
+
+  let ssh_disk_free_min_kib () =
+    max 0
+      (get_int ~default:1_048_576
+         "MASC_KEEPER_SSH_PREFLIGHT_DISK_FREE_MIN_KIB")
 end
 
 (* --------------------------------------------------------------- *)
@@ -225,4 +232,3 @@ module Shell_timeout = struct
              ~default:global_default_sec v
          | None -> global_default_sec)
 end
-

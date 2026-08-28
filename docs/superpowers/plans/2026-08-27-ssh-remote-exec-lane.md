@@ -84,7 +84,7 @@ The variant SSOT comment at `keeper_types_profile_sandbox.ml:13-23` means adding
 - Modify: `config/tools/masc_keeper_up.toml` (:28-36) — enum gains `remote_ssh`
 - Modify: every remaining match site the compiler flags (expected: `lib/keeper/keeper_sandbox.ml:72-78,98-103,130-152,154-158,160-172,199-205`, `lib/keeper/keeper_sandbox_docker.ml:112-116`, `lib/keeper/keeper_sandbox_read_backend.ml:15-16`, `lib/keeper/keeper_runtime_contract.ml:10-11`, `lib/keeper/keeper_tool_execute_runtime.ml:43-47,337-384,402-411,420-428`, `lib/keeper/keeper_tool_shared_runtime.ml:107`, `lib/keeper/keeper_sandbox_control.ml:89,602,608`, `lib/keeper/keeper_turn_up_args.ml:377-391,430-433`, `lib/keeper/keeper_runtime.ml:212-223,332-361,497-501`, `lib/keeper/keeper_meta_contract.ml:290,349-415`, `lib/keeper/keeper_sandbox_factory.mli:26-29,50-63`)
 
-- [ ] **Step 1: Write the failing test + dune stanza**
+- [x] **Step 1: Write the failing test + dune stanza**
 
 `test/test_keeper_remote_ssh_profile.ml`:
 ```ocaml
@@ -389,7 +389,7 @@ let () =
                ; test_case "version skew" `Quick test_probe_version_skew ] ]
 ```
 
-- [ ] **Step 2: RED.**
+- [x] **Step 2: RED.**
 
 - [ ] **Step 3: Implement the codec**
 
@@ -603,13 +603,13 @@ let test_denylist_beats_allowlist () =
 
 - [ ] **Step 2: RED.**
 
-- [ ] **Step 3: Preflight extension** — `Env_config_sandbox.Preflight` gains `check_ssh_endpoint ~endpoint ~keeper` running, over the pinned ssh flags: (1) connect, (2) `masc-exec-shim --probe` + `probe_major_compatible`, (3) remote `git --version`, (4) `remote_root` exists + disk-free floor, (5) remote `gh auth status` with `GH_CONFIG_DIR=<remote_root>/<keeper>/.config/gh`, (6) local ControlPath dir creatable. TTL cache (per endpoint, default 60s, overridable via env for tests) consulted at dispatch; keeper_up always forces a fresh check. Every failure is a named error; there is NO fallback to another lane.
+- [x] **Step 3: Preflight extension** — `Env_config_sandbox.Preflight` gains `check_ssh_endpoint ~endpoint ~keeper` running, over the pinned ssh flags: (1) connect, (2) `masc-exec-shim --probe` + `probe_major_compatible`, (3) remote `git --version`, (4) `remote_root` exists + disk-free floor, (5) remote `gh auth status` with `GH_CONFIG_DIR=<remote_root>/<keeper>/.config/gh`, (6) local ControlPath dir creatable. TTL cache (per endpoint, default 60s, overridable via env for tests) consulted at dispatch; keeper_up always forces a fresh check. Every failure is a named error; there is NO fallback to another lane.
 
-- [ ] **Step 4: Bootstrap tool** — `bin/masc_exec_ssh_bootstrap.ml --endpoint <name>`: generates the dedicated keypair under `<base>/.masc/ssh/` (0600, never committed); `ssh-keyscan`s the host and writes the pinned `known_hosts` only after the operator confirms the fingerprint out-of-band (the tool prints the fingerprint and requires retyping it — runbook step); installs/upgrades `masc-exec-shim` (built by `scripts/build-shim-static.sh`) and records its version; creates `remote_root`; provisions `<remote_root>/<keeper>/.config/gh` per keeper (never per-call over the wire); registers the remote token *value* in the host redaction set so a leak into output is still scrubbed.
+- [x] **Step 4: Bootstrap tool** — `bin/masc_exec_ssh_bootstrap.ml --endpoint <name>`: generates the dedicated keypair under `<base>/.masc/ssh/` (0600, never committed); `ssh-keyscan`s the host and writes the pinned `known_hosts` only after the operator confirms the fingerprint out-of-band (the tool prints the fingerprint and requires retyping it — runbook step); installs/upgrades `masc-exec-shim` (built by `scripts/build-shim-static.sh`) and records its version; creates `remote_root`; provisions `<remote_root>/<keeper>/.config/gh` per keeper (never per-call over the wire); registers the remote token *value* in the host redaction set so a leak into output is still scrubbed.
 
-- [ ] **Step 5: keeper_up wiring** — `keeper_turn_up_args.ml` validation: `sandbox_profile = "remote_ssh"` requires `remote_endpoint`; unknown endpoint name → config-load error naming it. The profile TOML parser arm (Task 1) already carries the key through.
+- [x] **Step 5: keeper_up wiring** — `keeper_turn_up_args.ml` validation: `sandbox_profile = "remote_ssh"` requires `remote_endpoint`; unknown endpoint name → config-load error naming it. The profile TOML parser arm (Task 1) already carries the key through.
 
-- [ ] **Step 6: GREEN + no-regression.**
+- [x] **Step 6: GREEN + no-regression.**
 
 - [ ] **Step 7: Commit** — `feat(keeper): SSH endpoint preflight + provisioning bootstrap`
 

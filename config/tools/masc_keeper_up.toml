@@ -42,6 +42,14 @@ the SSH remote execution lane (Phase 1; requires remote_endpoint in the \
 keeper TOML, runner lands with the lane)."""
 
 [[params]]
+name = "remote_endpoint"
+type = "string"
+description = """
+Endpoint registry name under [exec.ssh.endpoints.<name>] in runtime.toml. \
+Required with sandbox_profile = "remote_ssh"; pass null to clear it when \
+switching the keeper to another sandbox profile."""
+
+[[params]]
 name = "autoboot_enabled"
 type = "boolean"
 description = """

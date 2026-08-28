@@ -164,6 +164,13 @@
  (package masc)
  (libraries exec_shim))
 
+(executable
+ (name masc_exec_ssh_bootstrap)
+ (modules masc_exec_ssh_bootstrap)
+ (public_name masc-exec-ssh-bootstrap)
+ (package masc)
+ (libraries masc masc.runtime masc_workspace fs_compat cmdliner unix))
+
 ;; RFC-0374 capability probe runner.  Answers "can runtime R reach tool T"
 ;; without writing to the keeper's chat, checkpoint, or memory, which is what
 ;; made the 2026-08-12 sweep measure its own traffic (masc#28414).

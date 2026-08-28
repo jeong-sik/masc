@@ -3611,6 +3611,7 @@ type gate_lane_modes = {
 type gate_snapshot = {
   gs_pending : gate_pending list;
   gs_modes : gate_lane_modes option;
+  gs_queue_unavailable : string option;
 }
 
 (* What a human decides on. An identity_call row carries the real target
@@ -3676,8 +3677,10 @@ let decode_gate_snapshot json =
   let* gs_pending =
     match member "approval_queue" json with
     (* The server sends [null] when the queue store is unavailable; the
-       snapshot still carries the lanes, so this is empty-with-modes rather
-       than a decode failure. The dashboard shows the same face. *)
+       snapshot still carries the lanes, so this is not a decode failure —
+       but it is not "no pending approvals" either. The companion
+       [approval_queue_state] below carries which of the two it was, the
+       same field the dashboard reads. *)
     | `Null -> Ok []
     | `List items ->
         let rec loop acc = function
@@ -3689,6 +3692,21 @@ let decode_gate_snapshot json =
         loop [] items
     | _ -> Error "approval_queue is neither a list nor null"
   in
+  let* gs_queue_unavailable =
+    match member "approval_queue_state" json with
+    | `Null -> Ok None
+    | state_json ->
+        (match member "state" state_json with
+         | `String "ready" -> Ok None
+         | `String _ ->
+             let detail =
+               match member "operator_detail" state_json with
+               | `String detail -> detail
+               | _ -> "approval queue store is unreadable"
+             in
+             Ok (Some detail)
+         | _ -> Error "approval_queue_state.state must be a string")
+  in
   let* gs_modes =
     match member "hitl" json with
     | `Null -> Ok None
@@ -3696,7 +3714,7 @@ let decode_gate_snapshot json =
         let* modes = decode_gate_lane_modes hitl in
         Ok (Some modes)
   in
-  Ok { gs_pending; gs_modes }
+  Ok { gs_pending; gs_modes; gs_queue_unavailable }
 
 (* The durable per-Keeper Gate settings, which are a different thing from the
    in-memory YOLO stance above: this is what the Gate decides an external

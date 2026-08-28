@@ -439,7 +439,16 @@ let run_docker_shell_command_with_status_internal
   =
   let image = resolve_sandbox_image meta in
   let sandbox_error = sandbox_error ~config ~meta in
-  if String.trim image = ""
+  (* The docker entrypoints execute only the Docker profile. A [Micro_vm]
+     keeper reaching here would be run under docker — the substitution the
+     profile exists to rule out — so it is refused with the same sentence
+     the typed Shell IR target uses. *)
+  if meta.sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
+  then
+    sandbox_error
+      (Keeper_types_profile_sandbox.backend_unimplemented_message
+         Keeper_types_profile_sandbox.Micro_vm)
+  else if String.trim image = ""
   then sandbox_error "keeper sandbox docker image is not configured"
   else (
     let cmd = rewrite_docker_command_paths ~config ~meta cmd in
@@ -730,6 +739,12 @@ let run_docker_bash
   =
   let image = resolve_sandbox_image meta in
   let sandbox_error_json = sandbox_error_json ~config ~meta in
+  if meta.sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
+  then
+    sandbox_error_json
+      (Keeper_types_profile_sandbox.backend_unimplemented_message
+         Keeper_types_profile_sandbox.Micro_vm)
+  else (
   match docker_bash_preflight ~config ~meta ~cmd with
   | Some err -> err
   | None -> (
@@ -786,5 +801,5 @@ let run_docker_bash
        | None -> ());
 	     run_docker_bash_via_container
 	       ~config ~meta ~cwd ~timeout_sec ~cmd
-	      ~network_mode)
+	      ~network_mode))
 ;;

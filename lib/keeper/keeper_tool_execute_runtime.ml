@@ -350,11 +350,12 @@ let handle_tool_execute_typed
                 (Keeper_sandbox_shell_ir_target.target_error
                    ("local_playground_disabled: "
                     ^ Env_config_sandbox.Gate.disabled_message))
-          (* Both guest profiles take the same route. The labels below are
-             read off the profile rather than written as "docker": a keeper
-             that asked for a VM must not be told docker ran its command,
-             which is how a mislabelled field sent an operator chasing the
-             wrong subsystem (#31225). *)
+          (* Both guest profiles enter the same target constructor, but a
+             [Micro_vm] keeper never reaches a docker runtime: the factory
+             resolves it to [Backend_unimplemented] and the constructor
+             surfaces that refusal. The labels below are still read off the
+             profile rather than written as "docker" — a keeper that asked
+             for a VM must not be told docker ran its command (#31225). *)
           | Docker | Micro_vm ->
             if typed_input_has_env input
             then

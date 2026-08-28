@@ -34,10 +34,9 @@ type resolve_result =
           ask for, which is how a docker-declared keeper spent weeks
           executing on the host (#31178).
 
-          No profile constructs this today -- Docker and Micro_vm both
-          resolve to a runtime. It is kept so the next backend lands with a
-          refusal already spelled at every consumer, rather than reaching for
-          a neighbour's runtime because there is nowhere else to go. *)
+          [Micro_vm] constructs this today: its argv builder exists but no
+          runtime starts the guest yet, so the factory refuses instead of
+          resolving to Docker's runtime. Docker resolves to a runtime. *)
 
 type t
 

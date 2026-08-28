@@ -27,3 +27,9 @@ val valid_network_mode_strings : string list
 val default_sandbox_profile : sandbox_profile
 val default_network_mode_for_profile : sandbox_profile -> network_mode
 
+val backend_unimplemented_message : sandbox_profile -> string
+(** The refusal a caller must surface when the declared profile has no
+    runtime in this build. One sentence, shared by every dispatch surface,
+    so an operator greps one string regardless of which entrypoint refused
+    (typed Shell IR target, docker shell entrypoints, factory consumers). *)
+

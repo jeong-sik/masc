@@ -174,6 +174,7 @@ let test_turn_start_argv_shape () =
       ~uid:501
       ~gid:20
       ~memory:"2g"
+      ~cpus:None
       ~host_root:"/base/.masc/playground/microvm/probe"
       ~container_root:"/home/keeper/playground/probe"
       ~network_args:(M.network_args ~dns:None Profile.Network_none)
@@ -196,7 +197,26 @@ let test_turn_start_argv_shape () =
     (fun needle ->
        if not (contains needle a)
        then Alcotest.failf "turn_start_argv is missing %s" needle)
-    [ "-d"; "--rm"; "--read-only"; "--label" ]
+    [ "-d"; "--rm"; "--read-only"; "--label" ];
+  if contains "--cpus" a
+  then Alcotest.fail "cpus:None must pass no --cpus";
+  let sized =
+    M.turn_start_argv
+      ~container_name:"masc-keeper-turn-probe"
+      ~label_args:[]
+      ~uid:501
+      ~gid:20
+      ~memory:"8g"
+      ~cpus:(Some "8")
+      ~host_root:"/base/.masc/playground/microvm/probe"
+      ~container_root:"/home/keeper/playground/probe"
+      ~network_args:[]
+      ~image:"masc-keeper-sandbox:local"
+  in
+  if not (adjacent ~flag:"--cpus" ~value:"8" sized)
+  then Alcotest.fail "cpus:Some must pass --cpus <count>";
+  if not (adjacent ~flag:"--memory" ~value:"8g" sized)
+  then Alcotest.fail "memory must reach --memory"
 
 let test_inspect_state_parser () =
   let running =

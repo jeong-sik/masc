@@ -49,6 +49,7 @@ val turn_start_argv :
   uid:int ->
   gid:int ->
   memory:string ->
+  cpus:string option ->
   host_root:string ->
   container_root:string ->
   network_args:string list ->

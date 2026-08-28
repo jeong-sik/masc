@@ -534,7 +534,14 @@ let start_microvm_container ?timeout_sec (t : t) =
                   ())
              ~uid:t.uid
              ~gid:t.gid
-             ~memory:(Env_config_sandbox.Hardening.memory ())
+             ~memory:
+               (match Env_config_sandbox.Runtime.microvm_memory () with
+                | "" -> Env_config_sandbox.Hardening.memory ()
+                | sized -> sized)
+             ~cpus:
+               (match Env_config_sandbox.Runtime.microvm_cpus () with
+                | "" -> None
+                | count -> Some count)
              ~host_root:t.host_root
              ~container_root:t.container_root
              ~network_args:

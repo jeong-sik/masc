@@ -141,6 +141,7 @@ let turn_start_argv
       ~uid
       ~gid
       ~memory
+      ~cpus
       ~host_root
       ~container_root
       ~network_args
@@ -152,6 +153,9 @@ let turn_start_argv
   @ [ "--user"; Printf.sprintf "%d:%d" uid gid ]
   @ [ "--cap-drop"; "ALL"; "--read-only" ]
   @ [ "--memory"; memory ]
+  @ (match cpus with
+     | Some count -> [ "--cpus"; count ]
+     | None -> [])
   @ [ "--volume"; host_root ^ ":" ^ container_root ]
   @ [ "--workdir"; container_root ]
   @ network_args

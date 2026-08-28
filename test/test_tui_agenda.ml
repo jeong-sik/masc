@@ -359,6 +359,24 @@ let test_rows_fit_the_width_they_were_given () =
     [ 30; 46; 60; 76; 120 ]
 ;;
 
+(* [short_who] is public now: the Schedules list needed the same answer, and
+   before it called this it drew "keeper:~" -- the seven-cell prefix took the
+   name's room and two schedules for two different keepers read alike.
+
+   A target with no prefix, or one whose prefix is a different kind, comes
+   back untouched. Stripping up to the first colon would eat the front of any
+   name that happens to contain one. *)
+let test_the_kind_prefix_comes_off_a_target () =
+  check string "the keeper prefix comes off" "edgar.a.poe"
+    (Agenda.short_who "keeper:edgar.a.poe");
+  check string "a bare name is left alone" "edgar.a.poe"
+    (Agenda.short_who "edgar.a.poe");
+  check string "another kind is left alone" "board:sweep"
+    (Agenda.short_who "board:sweep");
+  check string "the prefix alone is not a name to shorten" "keeper:"
+    (Agenda.short_who "keeper:")
+;;
+
 let () =
   run
     "tui agenda"
@@ -401,6 +419,8 @@ let () =
         ; test_case "an expired call says so" `Quick test_an_expired_call_says_so
         ; test_case "rows fit the width they were given" `Quick
             test_rows_fit_the_width_they_were_given
+        ; test_case "the kind prefix comes off a target" `Quick
+            test_the_kind_prefix_comes_off_a_target
         ] )
     ]
 ;;

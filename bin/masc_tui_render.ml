@@ -1786,7 +1786,12 @@ let render_approvals (state : state) =
                  long it has been waiting. *)
               let waited =
                 match pending.Tui_decode.gp_waiting_s with
-                | Some seconds -> Printf.sprintf "%.0fs waiting" seconds
+                | Some seconds ->
+                  (* Not raw seconds. This cell read "41989s waiting", and
+                     the line above says what an operator does with it --
+                     weigh it. Eleven hours and thirty-nine minutes is a
+                     weight; five figures of seconds is arithmetic homework. *)
+                  Masc_tui_answering.duration_text seconds ^ " waiting"
                 | None -> "waiting"
               in
               Printf.sprintf "  %s  %s  %s  %s"
@@ -2980,10 +2985,17 @@ let render_schedule_list (state : state) =
                in
                (* The payload target names who the wake reaches (a keeper for
                   keeper wakes); rows without one fall back to the summary,
-                  then the source, so every row names something. *)
+                  then the source, so every row names something.
+
+                  The kind prefix comes off first. It is "keeper:" on every
+                  row this list can draw, so it separates nothing and takes
+                  seven cells out of the name -- which left two schedules for
+                  two different keepers both reading "keeper:~". The agenda
+                  strip has stripped it since it was written; this list is
+                  the surface that did not. *)
                let subject =
                  match row.sch_payload_target with
-                 | Some target -> target
+                 | Some target -> Masc_tui_agenda.short_who target
                  | None ->
                      (match row.sch_payload_summary with
                       | Some summary -> summary

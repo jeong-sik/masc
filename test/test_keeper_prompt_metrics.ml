@@ -192,7 +192,18 @@ let test_keeper_prompt_keeps_current_contract () =
   check bool "unrelated work is excluded" true
     (has_in prompt "Do not add unrelated work");
   check bool "output leads with the result" true
-    (has_in prompt "lead with the result")
+    (has_in prompt "lead with the result");
+  check bool "past failures are time scoped" true
+    (has_in prompt
+       "not permanent proof about the current runtime");
+  check bool "current read-only probes are preferred" true
+    (has_in prompt "use a bounded, read-only current probe");
+  check bool "memory and current observation stay separate" true
+    (has_in prompt
+       "what this turn observed separately from what memory recalled");
+  check bool "uncertain effects are never resent" true
+    (has_in prompt
+       "applied, ambiguous, indeterminate, or not proven absent")
 
 (* The Librarian retains recurring lessons that current authoritative sources
    have not taught effectively. *)
@@ -204,7 +215,18 @@ let test_librarian_keeps_a_recurring_lesson () =
   check bool "the test is the conversation, not a judgement of the limitation" true
     (has_in prompt "the source that would have taught it did not, and that recurrence is the evidence");
   check bool "the cost of dropping it is named" true
-    (has_in prompt "returns the Keeper to the turn before it learned")
+    (has_in prompt "returns the Keeper to the turn before it learned");
+  check bool "recalled repetition is not recurrence" true
+    (has_in prompt
+       "repeating a recalled failure is not a new observation");
+  check bool "new success supersedes stale prohibitions" true
+    (has_in prompt
+       "drop the obsolete prohibition instead of preserving it as a permanent rule");
+  check bool "partially stale compound facts are corrected" true
+    (has_in prompt "correcting a partially stale compound fact");
+  check bool "false clauses cannot shelter behind true clauses" true
+    (has_in prompt
+       "Retaining a false clause to save a true one")
 
 (* Every assembled Keeper system prompt opens with the shared cacheable block. *)
 let test_assembled_prompt_opens_with_system_tag () =

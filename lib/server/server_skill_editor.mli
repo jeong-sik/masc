@@ -12,6 +12,12 @@ type path_rejection =
   | Non_directory_component
   | Non_regular_file
   | Identity_changed
+  | Recovery_directory_not_private
+
+type recovery_disposition =
+  | Original_restored
+  | Quarantine_retained
+  | Original_restored_with_quarantine_retained
 
 type loaded = private
   { reference : Skill_reference.t
@@ -56,10 +62,14 @@ type delete_outcome =
   | Deleted_and_published of
       { reference : Skill_reference.t
       ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      ; recovery_id : string
+      ; disposition : recovery_disposition
       }
   | Deleted_but_unpublished of
       { reference : Skill_reference.t
       ; reason : string
+      ; recovery_id : string
+      ; disposition : recovery_disposition
       }
 
 type error =
@@ -76,11 +86,23 @@ type error =
   | Package_already_exists
   | Invalid_package_id of string
   | Revision_conflict of { actual : Skill_reference.content_revision }
+  | Delete_revision_conflict of
+      { actual : Skill_reference.content_revision
+      ; recovery_id : string
+      ; disposition : recovery_disposition
+      }
   | Source_too_large of { bytes : int; max_bytes : int }
   | Validation_failed of string
   | Write_failed of string
-  | Remove_failed of
-      { removed : bool
+  | Quarantine_failed of
+      { candidate_moved : bool
+      ; recovery_id : string option
+      ; detail : string
+      }
+  | Recovery_required of
+      { observed : Skill_reference.content_revision option
+      ; recovery_id : string
+      ; disposition : recovery_disposition
       ; detail : string
       }
 
@@ -107,10 +129,12 @@ val create :
   refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
   (create_outcome, error) result
 
-(** Delete the exact [SKILL.md] selected by [reference]. [confirmed] must be
-    [true]. The exact content revision is checked again while holding the path
-    lock, before the durable unlink. Existing turns keep their immutable
-    snapshot; [refresh] only publishes the change for later turns. *)
+(** Logically delete the exact [SKILL.md] selected by [reference]. [confirmed]
+    must be [true]. The candidate is atomically moved into a fresh private,
+    non-scanned recovery directory and verified there. A matching candidate is
+    retained under [recovery_id], never unlinked by this operation. Existing
+    turns keep their immutable snapshot; [refresh] only publishes the change
+    for later turns. *)
 val delete :
   base_path:string ->
   reference:Skill_reference.t ->
@@ -119,6 +143,7 @@ val delete :
   (delete_outcome, error) result
 
 val access_to_string : access -> string
+val recovery_disposition_to_string : recovery_disposition -> string
 val error_code : error -> string
 val error_to_string : error -> string
 val loaded_to_yojson : loaded -> Yojson.Safe.t
@@ -128,3 +153,19 @@ val writable_source_to_yojson : writable_source -> Yojson.Safe.t
 val create_outcome_to_yojson : create_outcome -> Yojson.Safe.t
 val delete_outcome_to_yojson : delete_outcome -> Yojson.Safe.t
 val error_to_yojson : error -> Yojson.Safe.t
+
+module For_testing : sig
+  val recovery_file_path : source_root:string -> recovery_id:string -> string
+
+  (** Inject an external path replacement after the exact revision precheck
+      and immediately before the atomic quarantine rename. *)
+  val delete :
+    before_quarantine:(unit -> unit) ->
+    after_quarantine:(unit -> unit) ->
+    after_verification:(unit -> unit) ->
+    base_path:string ->
+    reference:Skill_reference.t ->
+    confirmed:bool ->
+    refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
+    (delete_outcome, error) result
+end

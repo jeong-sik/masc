@@ -9911,8 +9911,16 @@ let render_themes (state : state) =
   let content_height = max 1 (rows - 6) in
   let cursor = max 0 (min state.theme_cursor (List.length entries - 1)) in
   let scroll = max 0 (cursor - content_height + 1) in
+  (* The count in the last column is the number of measured colours that sit
+     under the readable floor. What happens to them depends on [tui]
+     lift_colours: with the lift on they are raised, with it off they are
+     drawn as the scheme's author published them. The same number means two
+     different things, so the heading has to say which one, or a reader with
+     the lift off reads "3 lifted" about three colours nothing lifted. *)
+  let lift_on = Masc_tui_theme.lift_is_enabled () in
   box_line_styled buf cols ~style:Ansi.dim
-    (Printf.sprintf "  %-26s %-18s %-9s %-10s" "theme" "colours" "page" "lifted")
+    (Printf.sprintf "  %-26s %-18s %-9s %-12s" "theme" "colours" "page"
+       (if lift_on then "lifted" else "below floor"))
   ;
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
@@ -9946,7 +9954,7 @@ let render_themes (state : state) =
             (if picked then chosen_mark else " ")
             (Terminal_text.single_line entry.name)
           ^ swatch
-          ^ Printf.sprintf "  %-9s %-10s"
+          ^ Printf.sprintf "  %-9s %-12s"
               (if entry.light then "light" else "dark")
               (match entry.lifted with
                | 0 -> "none"

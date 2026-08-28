@@ -416,9 +416,83 @@ let test_keeper_action_colours_stay_apart_without_red_and_green () =
     schemes
 ;;
 
+(* [tui] lift_colours off. The lift exists for schemes whose colours fall
+   under the floor; a reader who picked a high-contrast scheme already solved
+   that, and for them the lift is not a rescue but a change to colours they
+   chose. Off has to mean the scheme's own code goes out -- including for the
+   entries that fail the floor, which are the only ones the lift ever touched
+   and so the only ones where off and on differ.
+
+   The setting is restored whatever the checks do: it is a ref every later
+   test in this file reads. *)
+let with_lift enabled f =
+  let restore = Masc_tui_theme.lift_is_enabled () in
+  Masc_tui_theme.set_lift_enabled enabled;
+  Fun.protect ~finally:(fun () -> Masc_tui_theme.set_lift_enabled restore) f
+;;
+
+let test_lift_off_draws_the_schemes_own_colour () =
+  with_lift false (fun () ->
+      List.iter
+        (fun scheme ->
+          let bg = background scheme in
+          List.iter
+            (fun (label, colour) ->
+              let entry =
+                ansi scheme (Masc_tui_theme.For_testing.ansi_color_index colour)
+              in
+              let ratio = Color.contrast_ratio entry bg in
+              check bool
+                (Printf.sprintf
+                   "%s: %s reads at %.2f and still goes out as the scheme's own"
+                   scheme.name label ratio)
+                true
+                (String.equal (readable scheme colour)
+                   (Masc_tui_theme.For_testing.ansi_color_code colour)))
+            named_colours)
+        schemes)
+;;
+
+(* The same schemes with the lift on must not all agree with the off run, or
+   the check above would pass on a lift that never did anything. At least one
+   entry somewhere is under the floor -- the bundled set includes schemes the
+   catalog notes as needing several. *)
+let test_lift_on_still_replaces_a_failing_entry () =
+  with_lift true (fun () ->
+      let replaced =
+        List.exists
+          (fun scheme ->
+            List.exists
+              (fun (_, colour) ->
+                String.starts_with ~prefix:truecolor_prefix
+                  (readable scheme colour))
+              named_colours)
+          schemes
+      in
+      check bool "some entry is lifted when the lift is on" true replaced)
+;;
+
+(* What the theme screen reads to label its last column. The count beside a
+   scheme means "lifted" under one setting and "left under the floor" under
+   the other, so the screen has to be able to ask. *)
+let test_the_setting_reads_back () =
+  with_lift false (fun () ->
+      check bool "off reads back as off" false (Masc_tui_theme.lift_is_enabled ()));
+  with_lift true (fun () ->
+      check bool "on reads back as on" true (Masc_tui_theme.lift_is_enabled ()))
+;;
+
 let () =
   Alcotest.run "masc-tui-theme-contrast"
-    [ ( "readability across themes"
+    [ ( "lift_colours"
+      , [ Alcotest.test_case "off draws the scheme's own colour" `Quick
+            test_lift_off_draws_the_schemes_own_colour
+        ; Alcotest.test_case "on still replaces a failing entry" `Quick
+            test_lift_on_still_replaces_a_failing_entry
+        ; Alcotest.test_case "the setting reads back" `Quick
+            test_the_setting_reads_back
+        ] )
+    ; ( "readability across themes"
       , [ Alcotest.test_case "lifting makes every token readable" `Quick
             test_lifting_makes_every_token_readable_on_every_scheme
         ; Alcotest.test_case "lifting keeps the colour it lifted" `Quick

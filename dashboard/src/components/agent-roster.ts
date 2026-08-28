@@ -75,7 +75,7 @@ import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
 import { hashForRoute, navigate } from '../router'
-import { keeperTurns, runningTurnFor, subscribeKeeperTurnsRefresh } from './keeper-turns-state'
+import { finishGlowFor, keeperFinishes, keeperTurns, runningTurnFor, subscribeKeeperTurnsRefresh } from './keeper-turns-state'
 import { operatorSnapshot } from '../operator-store'
 import { FleetAsideActions, FleetQueueSection, FleetRotationSection } from './fleet-aside-extras'
 
@@ -1161,6 +1161,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     const answeringTurn = row.keeperRuntime
       ? runningTurnFor(keeperTurns.value, row.keeperRuntime.name)
       : null
+    // The finish glow — the other half of the walked-away question. The
+    // store already drops a keeper that started running again, so the two
+    // badges are mutually exclusive by construction.
+    const answeredGlow = row.keeperRuntime && !answeringTurn
+      ? finishGlowFor(keeperFinishes.value, row.keeperRuntime.name, Date.now())
+      : null
     // #16 (38-bug campaign PR-5): never claim a bare "실행 중" (running)
     // as a silent default — that hid actively-executing / idle-waiting /
     // reactively-woken behind one label. Prefer the FSM stage label, then
@@ -1241,6 +1247,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 data-answering
                 title=${`지금 턴이 돌고 있습니다 · ${answeringTurn.lane} · ${answeringElapsed(answeringTurn.started_at_unix)} 경과`}
               >◌ 응답 중</span>`
+            : null}
+          ${answeredGlow
+            ? html`<span
+                class="fl-gloss"
+                data-answered
+                title=${`턴이 방금 끝났습니다 · ${answeringElapsed(answeredGlow.finished_at_ms / 1000)} 전`}
+              >✓ 방금 응답</span>`
             : null}
           <span class="fl-gloss" title=${glossTitle}>${glossText}</span>
           ${row.bandActionHint ? html`<span class="fl-gloss">${row.bandActionHint}</span>` : null}

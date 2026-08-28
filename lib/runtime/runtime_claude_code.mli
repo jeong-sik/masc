@@ -198,6 +198,13 @@ val probe_subscription :
 (** Measure the official CLI login without submitting a model turn. The child
     receives the same credential-scrubbed environment as [run_turn]. *)
 
+val cli_admitted_reasoning_effort :
+  Llm_provider.Reasoning_effort.t -> Llm_provider.Reasoning_effort.t
+(** The CLI's effort vocabulary as a total snap: [Minimal] — the one effort
+    the CLI refuses — becomes [Low]; every other effort is itself. [command]
+    still rejects an un-snapped [Minimal], so this is the survivable path a
+    caller opts into, not a silent coercion inside the argv builder. *)
+
 val command :
   config ->
   dynamic_tools:dynamic_tool list ->

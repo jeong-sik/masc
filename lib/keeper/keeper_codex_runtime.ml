@@ -63,50 +63,9 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
      | false, _ | _, None -> result)
 ;;
 
-(* Catalog-driven reasoning-effort clamp for the Codex app-server runtime.
-
-   [Runtime_inference.resolve_reasoning_effort] reads the operator-declared
-   per-model effort from runtime config; the official-client (codex_app_server)
-   runtime sits outside AGENT_CORE's request-validation layer, so a value the
-   selected model does not accept (e.g. [Max] on a model whose catalog row only
-   accepts up to [XHigh]) reaches the provider and fails the turn with a 400.
-
-   Snap the requested effort into the catalog's accepted set rather than fail
-   the turn: the requested effort when it is accepted, otherwise the nearest
-   accepted effort (highest below; lowest when every accepted effort is higher).
-   The catalog ([models.toml] [accepted_reasoning_efforts]) is the SSOT, so an
-   operator controls the effective effort by editing that row. *)
-let clamp_reasoning_effort_to_catalog
-    ~(model_id : string option)
-    ~(requested : Llm_provider.Reasoning_effort.t option)
-    : Llm_provider.Reasoning_effort.t option =
-  match requested, model_id with
-  | None, _ | _, None -> requested
-  | Some effort, Some model ->
-    (match Llm_provider.Capabilities.for_model_id_catalog model with
-     | None -> requested
-     | Some caps ->
-       (match caps.Llm_provider.Capabilities.accepted_reasoning_efforts with
-        | None -> requested
-        | Some accepted when List.mem effort accepted -> requested
-        | Some [] -> requested
-        | Some (first :: rest as accepted) ->
-          let below =
-            List.filter
-              (fun candidate ->
-                 Llm_provider.Reasoning_effort.compare candidate effort < 0)
-              accepted
-          in
-          let pick_max a b =
-            if Llm_provider.Reasoning_effort.compare a b >= 0 then a else b
-          in
-          let pick_min a b =
-            if Llm_provider.Reasoning_effort.compare a b <= 0 then a else b
-          in
-          match below with
-          | [] -> Some (List.fold_left pick_min first rest)
-          | b_first :: b_rest -> Some (List.fold_left pick_max b_first b_rest)))
-;;
+(* Catalog-driven reasoning-effort clamping lives on the shared
+   official-client host so Codex and Claude Code treat the same declared
+   effort identically; see [Keeper_official_client_host.effective_reasoning_effort]. *)
 
 let project_messages messages =
   let rec loop developer history = function
@@ -606,26 +565,16 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     (* Snap the operator-declared effort into the catalog's accepted set so a
        per-model cap (e.g. [Max] unsupported on a model that tops out at
-       [XHigh]) does not fail the turn. The catalog is the SSOT; an operator
-       widens the accepted set by editing [models.toml]. The same value feeds
-       the raw_trace start record and the request so observation matches the
-       wire. *)
+       [XHigh]) does not fail the turn. The same value feeds the raw_trace
+       start record and the request so observation matches the wire. *)
     let effective_reasoning_effort =
-      clamp_reasoning_effort_to_catalog
+      Host.effective_reasoning_effort
+        ~runtime_label
+        ~keeper_name
+        ~runtime_id
         ~model_id:config.model
         ~requested:prepared.reasoning_effort
     in
-    ( match prepared.reasoning_effort, effective_reasoning_effort with
-      | Some asked, Some effective
-        when Llm_provider.Reasoning_effort.compare asked effective <> 0 ->
-        Log.Keeper.info
-          ~keeper_name
-          "%s reasoning effort clamped to catalog: model=%s asked=%s effective=%s"
-          runtime_label
-          (Option.value config.model ~default:runtime_id)
-          (Llm_provider.Reasoning_effort.to_string asked)
-          (Llm_provider.Reasoning_effort.to_string effective)
-      | _ -> () );
     let* developer_messages, history = project_messages prepared.messages in
     let* prompt, images =
       match goal_blocks with
@@ -1243,7 +1192,5 @@ module For_testing = struct
   ;;
   let native_posture_note = native_posture_note
   let codex_error_to_core_error = codex_error_to_core_error
-  let clamp_reasoning_effort_to_catalog = clamp_reasoning_effort_to_catalog
-
   let recovery_failure_of_client_error = recovery_failure_of_client_error
 end

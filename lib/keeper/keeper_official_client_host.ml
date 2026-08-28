@@ -203,6 +203,65 @@ let with_run_lifecycle_events ~event_bus ~keeper_name run =
     run
 ;;
 
+(* Snap a requested reasoning effort into the catalog's accepted set: the
+   requested effort when it is accepted, otherwise the nearest accepted effort
+   (highest below; lowest when every accepted effort is higher). The catalog
+   ([models.toml] [accepted_reasoning_efforts]) is the SSOT, so an operator
+   controls the effective effort by editing that row.
+
+   Shared by the Codex and Claude Code lanes: before this lived here, the
+   same operator-declared effort was clamped on Codex but failed the whole
+   turn on Claude Code ([reasoning_args] rejects [Minimal]), so which lane a
+   keeper ran on decided whether a config value was survivable. *)
+let clamp_reasoning_effort_to_catalog
+    ~(model_id : string option)
+    ~(requested : Llm_provider.Reasoning_effort.t option)
+    : Llm_provider.Reasoning_effort.t option =
+  match requested, model_id with
+  | None, _ | _, None -> requested
+  | Some effort, Some model ->
+    (match Llm_provider.Capabilities.for_model_id_catalog model with
+     | None -> requested
+     | Some caps ->
+       (match caps.Llm_provider.Capabilities.accepted_reasoning_efforts with
+        | None -> requested
+        | Some accepted when List.mem effort accepted -> requested
+        | Some [] -> requested
+        | Some (first :: rest as accepted) ->
+          let below =
+            List.filter
+              (fun candidate ->
+                 Llm_provider.Reasoning_effort.compare candidate effort < 0)
+              accepted
+          in
+          let pick_max a b =
+            if Llm_provider.Reasoning_effort.compare a b >= 0 then a else b
+          in
+          let pick_min a b =
+            if Llm_provider.Reasoning_effort.compare a b <= 0 then a else b
+          in
+          match below with
+          | [] -> Some (List.fold_left pick_min first rest)
+          | b_first :: b_rest -> Some (List.fold_left pick_max b_first b_rest)))
+;;
+
+let effective_reasoning_effort
+    ~runtime_label ~keeper_name ~runtime_id ~model_id ~requested =
+  let effective = clamp_reasoning_effort_to_catalog ~model_id ~requested in
+  (match requested, effective with
+   | Some asked, Some snapped
+     when Llm_provider.Reasoning_effort.compare asked snapped <> 0 ->
+     Log.Keeper.info
+       ~keeper_name
+       "%s reasoning effort clamped to catalog: model=%s asked=%s effective=%s"
+       runtime_label
+       (Option.value model_id ~default:runtime_id)
+       (Llm_provider.Reasoning_effort.to_string asked)
+       (Llm_provider.Reasoning_effort.to_string snapped)
+   | _ -> ());
+  effective
+;;
+
 let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latency_ms stop =
   match stop with
   | Terminal_tool_boundary

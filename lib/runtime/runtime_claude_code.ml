@@ -1112,6 +1112,18 @@ let mcp_config tools =
             ]))
 ;;
 
+(* The CLI's effort vocabulary as a total snap: [minimal] is the one effort
+   the CLI refuses, and its nearest admitted neighbour is [low]. Every other
+   effort is itself. [reasoning_args] below stays the enforcing boundary
+   (a caller that skips this snap still fails loudly rather than sending a
+   flag the CLI rejects); the keeper lane applies the snap so an
+   operator-declared [minimal] survives as a turn instead of killing it,
+   mirroring the Codex lane's catalog clamp. *)
+let cli_admitted_reasoning_effort = function
+  | Llm_provider.Reasoning_effort.Minimal -> Llm_provider.Reasoning_effort.Low
+  | effort -> effort
+;;
+
 let reasoning_args = function
   | None -> Ok []
   | Some Llm_provider.Reasoning_effort.None_ ->

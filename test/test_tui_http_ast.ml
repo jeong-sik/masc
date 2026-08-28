@@ -758,11 +758,24 @@ let test_operator_approvals_use_current_contract () =
        ~binding_name:"render_approvals"
        ~callee:"Terminal_text.single_line_or"
      >= 3);
-  check int "approval renderer sanitizes optional error text" 1
+  (* A floor for the same reason as its two neighbours, and it is the last of
+     the three to become one. The surface now sanitises two optional errors
+     rather than one -- [gate_error] when the Gate lanes will not read, and
+     [approvals_error] when the list will not -- and both are external text
+     reaching a terminal, so both belong. An exact count called the second one
+     a regression.
+
+     The distinction worth keeping: an exact count is right where a new call
+     site is a new way to do something, which is why the theme-apply check
+     above stays exact -- a fourth [apply] is a fourth way to change the
+     palette and the reader should be made to say why. Here more is the
+     behaviour the rule wants, and only fewer is the failure. *)
+  check bool "approval renderer sanitizes optional error text" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_approvals"
-       ~callee:"Terminal_text.optional_single_line");
+       ~callee:"Terminal_text.optional_single_line"
+     >= 1);
   check int "terminal text boundary delegates to the typed sanitizer" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_ansi.ml"

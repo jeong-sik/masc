@@ -145,6 +145,23 @@ val run_argv_with_stdin_and_status_split :
     stdout/stderr chunks while the process is still running. Fallback Unix
     execution remains completion-captured. *)
 
+val run_argv_with_stdin_held_open_and_status_split :
+  ?timeout_sec:float ->
+  ?env:string array ->
+  ?cwd:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
+  stdin_content:string ->
+  string list ->
+  (Unix.process_status * string * string)
+(** Like [run_argv_with_stdin_and_status_split], except the child stdin stays
+    open after [stdin_content] has been written and closes only after the
+    child exits or the enclosing Eio switch is cancelled.
+
+    This is a protocol primitive for peers where EOF means cancellation, not
+    merely end-of-request. It requires an initialized Eio process runtime and
+    fails closed with status 127 when called through the Unix fallback path. *)
+
 (** Run command with explicit argv, return (Unix.process_status, stdout).
     Uses spawn + await to get exit status without raising.
     @param timeout_sec Optional explicit wall-clock timeout. Absent means unbounded.

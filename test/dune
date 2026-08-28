@@ -3812,3 +3812,8 @@
  (name test_exec_shim)
  (modules test_exec_shim)
  (libraries masc_test_deps exec_ssh_protocol exec_shim))
+
+(test
+ (name test_keeper_sandbox_ssh)
+ (modules test_keeper_sandbox_ssh)
+ (libraries masc_test_deps exec_ssh_protocol))

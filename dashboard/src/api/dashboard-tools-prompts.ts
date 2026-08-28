@@ -798,6 +798,7 @@ export interface DashboardFullHealthResponse {
   schedule_runner?: DashboardScheduleRunnerStatus | null
   keeper_event_queue?: DashboardKeeperEventQueueHealth | null
   dashboard_surface?: DashboardSurfaceHealth | null
+  build?: import('../types/dashboard-execution').ServerBuildIdentity | null
 }
 
 // --- Runtime provider reachability probe ---

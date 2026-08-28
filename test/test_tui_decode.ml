@@ -3195,7 +3195,25 @@ let test_decode_server_identity_survives_a_bare_health () =
     Alcotest.(check string) "no base path either" ""
       identity.Tui_decode.sid_base_path;
     Alcotest.(check (option (float 0.001))) "and no age is None" None
-      identity.Tui_decode.sid_binary_commit_age_s
+      identity.Tui_decode.sid_binary_commit_age_s;
+    Alcotest.(check (option bool))
+      "an absent worktree verdict is unknown, not a lane" None
+      identity.Tui_decode.sid_executable_in_worktree
+
+let test_decode_server_identity_reads_the_worktree_verdict () =
+  let with_flag value =
+    `Assoc [ ("build", `Assoc [ ("executable_in_worktree", `Bool value) ]) ]
+  in
+  (match Tui_decode.decode_server_identity (with_flag true) with
+   | Error detail -> Alcotest.fail detail
+   | Ok identity ->
+     Alcotest.(check (option bool)) "a worktree binary says so" (Some true)
+       identity.Tui_decode.sid_executable_in_worktree);
+  match Tui_decode.decode_server_identity (with_flag false) with
+  | Error detail -> Alcotest.fail detail
+  | Ok identity ->
+    Alcotest.(check (option bool)) "a root binary says so too" (Some false)
+      identity.Tui_decode.sid_executable_in_worktree
 
 let test_decode_server_identity_takes_an_integer_age () =
   (* The server writes the age as a float today; a whole-second value would
@@ -4167,6 +4185,8 @@ let () =
           test_decode_server_identity_survives_a_bare_health;
         Alcotest.test_case "takes an integer age" `Quick
           test_decode_server_identity_takes_an_integer_age;
+        Alcotest.test_case "reads the worktree verdict" `Quick
+          test_decode_server_identity_reads_the_worktree_verdict;
       ] );
     ( "bounded_parent_depth",
       [

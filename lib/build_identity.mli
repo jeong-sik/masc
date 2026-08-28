@@ -42,6 +42,12 @@ type t = {
         worktree binary. *)
   executable_dir : string;
     (** Directory containing [executable_path]. *)
+  executable_in_worktree : bool;
+    (** Whether [executable_path] resolves inside a [.worktrees/] directory —
+        a working tree's build serving live traffic. Judged by the workspace
+        path convention (worktrees live under [<repo>/.worktrees/]); surfaces
+        warn on it so an old-generation worktree binary on the live port is
+        seen, not deduced. *)
   repo_root : string option;
     (** Git root resolved from the executable path first, then cwd. *)
   runtime_instance_id : string;
@@ -51,6 +57,12 @@ type t = {
   started_at : string;
   uptime_seconds : int;
 }
+
+val path_is_in_worktree : string -> bool
+(** Whether [path] contains a [.worktrees/] segment — the workspace
+    convention for worktree checkouts. The judgement behind
+    [executable_in_worktree], exposed so the convention is pinned by test
+    rather than re-derived by readers. *)
 
 val to_yojson : t -> Yojson.Safe.t
 (** PPX-generated serializer. *)

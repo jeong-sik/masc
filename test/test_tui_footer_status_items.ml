@@ -316,6 +316,28 @@ let test_answered_glow_reads_by_name () =
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ())
 
+let test_worktree_server_warning_survives_narrow_widths () =
+  check_string "the worktree warning reads in full"
+    "<dim>  q:quit  | WORKTREE server (not the root build) | Port: 8935<reset>\n"
+    (Masc_tui_footer.line
+       ~status:[ Masc_tui_footer.Server_worktree_binary ]
+       ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
+       ~hints:"q:quit" ());
+  (* Same retention as the workspace mismatch: at a width that drops the
+     port, the warning is still on the row. *)
+  let narrow =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Server_build
+            { version = "9.9.9"; commit = "abcdef0123456" }
+        ; Masc_tui_footer.Server_worktree_binary
+        ]
+      ~dim:"" ~reset:"" ~max_cells:52 ~port:8935 ~hints:"q:quit" ()
+  in
+  check_at_most_cells "narrow footer fits" 52 narrow;
+  check_bool "the build fact went first" false (contains ~needle:"9.9.9" narrow);
+  check_bool "the warning stayed" true (contains ~needle:"WORKTREE" narrow)
+
 let test_answering_outlives_the_build_fact () =
   (* At a width with no room for everything, the live-activity fact stays on
      the row after refresh and build have been dropped. *)
@@ -365,6 +387,8 @@ let tests =
           test_answering_names_the_first_keeper
       ; Alcotest.test_case "answered glow reads by name" `Quick
           test_answered_glow_reads_by_name
+      ; Alcotest.test_case "worktree server warning survives narrow widths"
+          `Quick test_worktree_server_warning_survives_narrow_widths
       ; Alcotest.test_case "answering outlives the build fact" `Quick
           test_answering_outlives_the_build_fact
       ] )

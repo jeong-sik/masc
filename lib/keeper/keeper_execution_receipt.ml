@@ -145,10 +145,12 @@ let operator_disposition (receipt : t)
      [Keeper_terminal_reason] typing has no success variant (success is not
      a failure family), so the success check reads the turn disposition
      instead of pattern-matching [terminal_reason]. *)
+  (* [is_success] enumerates every disposition variant, so a new one is a
+     compile error there instead of a silent not-success here — the
+     [input_required] check twelve lines up already relies on that. *)
   let turn_success =
-    (match Keeper_turn_disposition.of_wire receipt.terminal_reason_code with
-     | Keeper_turn_disposition.Success -> true
-     | _ -> false)
+    Keeper_turn_disposition.is_success
+      (Keeper_turn_disposition.of_wire receipt.terminal_reason_code)
   in
   let provider_runtime_failure =
     match terminal_reason with

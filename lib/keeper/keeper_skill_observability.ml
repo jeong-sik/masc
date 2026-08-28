@@ -166,12 +166,14 @@ let flow_of_plan plan =
     |> List.mapi (fun index -> function
       | Keeper_tool_plan_executor.Serial_batch node ->
         { index
-        ; execution_mode = "serial"
+        ; execution_mode =
+            execution_mode_to_string Agent_core.Tool_contract.Serial
         ; node_ids = [ Keeper_tool_plan.Node_id.to_string node.node.id ]
         }
       | Concurrent_batch nodes ->
         { index
-        ; execution_mode = "concurrent"
+        ; execution_mode =
+            execution_mode_to_string Agent_core.Tool_contract.Concurrent
         ; node_ids =
             List.map
               (fun (node : Keeper_tool_plan_executor.scheduled_node) ->

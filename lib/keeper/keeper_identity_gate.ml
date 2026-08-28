@@ -195,9 +195,16 @@ let resolve_provider provider_id =
 
 (* JSON-RPC error codes the server sends before it runs any tool: the
    request never became a tool execution, so no effect happened. Every other
-   post-send failure keeps the honest answer, which is "unknown". *)
+   post-send failure keeps the honest answer, which is "unknown". Decided
+   over the typed code sum, not bare literals — the same numbers written
+   out here were the exact "magic number repetition" the
+   [Mcp_error_code.t] sum was introduced to close. *)
 let rpc_rejects_before_execution code =
-  code = -32600 || code = -32601 || code = -32602
+  match Mcp_error_code.of_wire_code code with
+  | Some
+      ( Mcp_error_code.Invalid_request | Mcp_error_code.Method_not_found
+      | Mcp_error_code.Invalid_params ) -> true
+  | Some _ | None -> false
 ;;
 
 let execution_of_call_result result =

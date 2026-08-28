@@ -47,3 +47,9 @@ val resources_of_body :
 val resource_text_of_body :
   request_id:string -> string -> (string, string) result
 (** Read a [resources/read] answer's concatenated text contents. *)
+
+val task_cancel_arguments :
+  task_id:string -> reason:string -> (string * Yojson.Safe.t) list
+(** The [masc_transition] arguments for an operator cancel. Exit-class on the
+    tool contract, so the one typed reason is sent as both [reason] and the
+    required non-empty [handoff_context.summary]. *)

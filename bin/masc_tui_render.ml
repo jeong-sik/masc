@@ -1514,7 +1514,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
-       ~hints:"j/k:scroll  left/esc:back  r:refresh");
+       ~hints:"j/k:scroll  x:cancel  left/esc:back  r:refresh");
 
   finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 

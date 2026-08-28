@@ -3783,3 +3783,8 @@
  (name test_exec_ssh_protocol)
  (modules test_exec_ssh_protocol)
  (libraries masc_test_deps exec_ssh_protocol))
+
+(test
+ (name test_exec_shim)
+ (modules test_exec_shim)
+ (libraries masc_test_deps exec_ssh_protocol exec_shim))

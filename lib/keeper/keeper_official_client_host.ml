@@ -203,7 +203,7 @@ let with_run_lifecycle_events ~event_bus ~keeper_name run =
     run
 ;;
 
-let host_stop_result ~model ~session_id ~turn_id ~turns_used stop =
+let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latency_ms stop =
   match stop with
   | Terminal_tool_boundary
       { outcome = Terminal_failed { failure_class; effect_disposition; diagnostic }
@@ -247,6 +247,30 @@ let host_stop_result ~model ~session_id ~turn_id ~turns_used stop =
         Runtime_agent.Awaiting_external_effect { turns_used }
       | Terminal_tool_boundary { outcome = Terminal_failed _; _ } -> assert false
     in
+    (* masc#31312: this host-stop path was the one producer that returned
+       [runtime_observation = None] on a successful or yielded turn, so every
+       tool-boundary stop (completed, deferred stimulus, external effect,
+       repeated tool call) reached the execution receipt as
+       [Runtime_not_observed] and the operator disposition fell to
+       "unmapped_runtime_state". The vendor loop ran exactly one attempt to
+       get here, so record that attempt the same way the in-loop terminal
+       does. *)
+    let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
+    Runtime_observation.record_attempt_terminal
+      capture
+      ~model_id:model
+      ~latency_ms
+      ~error:None;
+    let runtime_observation =
+      Runtime_observation.runtime_observation_with_metrics
+        ~runtime_id
+        ~selected_model_raw:(Some model)
+        ~capture
+        ~attempt_details_source:"official_client_host_stop"
+        ~agent_core_internal_runtime_allowed:false
+        ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable
+        ()
+    in
     Ok
       { Runtime_agent.response
       ; checkpoint = None
@@ -254,7 +278,7 @@ let host_stop_result ~model ~session_id ~turn_id ~turns_used stop =
       ; turns = turns_used
       ; trace_ref = None
       ; run_validation = None
-      ; runtime_observation = None
+      ; runtime_observation = Some runtime_observation
       ; stop_reason
       }
 ;;

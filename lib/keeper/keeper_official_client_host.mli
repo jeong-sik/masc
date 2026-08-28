@@ -258,15 +258,22 @@ val with_run_lifecycle_events :
     the single MASC owner for those events. *)
 
 val host_stop_result :
+  runtime_id:string ->
   model:string ->
   session_id:string ->
   turn_id:string ->
   turns_used:int ->
+  latency_ms:int option ->
   host_stop ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
 (** Build the provider-neutral checkpoint terminal after an official-client
     adapter stops its vendor-owned loop. The external client session is the
-    durable continuation owner, so no Agent Core checkpoint is synthesized. *)
+    durable continuation owner, so no Agent Core checkpoint is synthesized.
+
+    Non-failed stops carry a one-attempt runtime observation (masc#31312):
+    the vendor loop did run to reach this boundary, and a [None] observation
+    here made every host-stopped turn classify as [Runtime_not_observed],
+    which the operator disposition surfaced as "unmapped_runtime_state". *)
 
 val admit_native_posture :
   posture:Runtime_native_tools.posture ->

@@ -863,10 +863,13 @@ let run_without_lifecycle ~runtime_id ~keeper_name
       | Turn_inflight { session_id; turn_id = Some turn_id; _ } ->
         let projected =
           Host.host_stop_result
+            ~runtime_id
             ~model:(Option.value client_config.model ~default:runtime_id)
             ~session_id
             ~turn_id
             ~turns_used:turn_count
+            ~latency_ms:
+              (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
             stop
         in
         let* () =

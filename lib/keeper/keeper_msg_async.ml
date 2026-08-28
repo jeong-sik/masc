@@ -148,6 +148,7 @@ and recovery_record_error_kind =
 type submit_error =
   | Submit_rejected of access_rejection
   | Submit_invalid_keeper_name of { reason : string }
+  | Submit_invalid_request_context of { reason : string }
   | Initial_persistence_failed of { reason : string }
   | Acceptance_persistence_failed of
       { request_id : string
@@ -700,6 +701,11 @@ let submit_error_to_json = function
       [ "error", `String "invalid_keeper_name"
       ; "message", `String reason
       ]
+  | Submit_invalid_request_context { reason } ->
+    `Assoc
+      [ "error", `String "invalid_request_context"
+      ; "message", `String reason
+      ]
   | Initial_persistence_failed { reason } ->
     `Assoc
       [ "error", `String "request_persistence_failed"
@@ -853,7 +859,7 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
   `Assoc fields
 ;;
 
-(* Whole-record equality, next to [same_request_identity]'s five identity
+(* Whole-record equality, next to [same_request_identity]'s immutable identity
    fields. The terminal-conflict check used to ask this by serializing both
    entries and comparing the JSON. That agreed with the record only because
    [entry_record_to_json] happens to emit every field, in a fixed order, on a
@@ -863,11 +869,57 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
    not to its rendering. *)
 let same_entry_record (left : entry) (right : entry) = left = right
 
+let normalize_request_context request_context =
+  let rec normalize_json path = function
+    | `Assoc fields ->
+      let rec normalize_fields seen normalized = function
+        | [] ->
+          Ok
+            (`Assoc
+               (List.sort
+                  (fun (left, _) (right, _) -> String.compare left right)
+                  normalized))
+        | (name, value) :: rest ->
+          if List.mem name seen
+          then
+            Error
+              (Printf.sprintf
+                 "request_context contains duplicate field %S at %s"
+                 name
+                 (String.concat "." (List.rev path)))
+          else
+            let* value = normalize_json (name :: path) value in
+            normalize_fields (name :: seen) ((name, value) :: normalized) rest
+      in
+      normalize_fields [] [] fields
+    | `List values ->
+      let rec normalize_values index normalized = function
+        | [] -> Ok (`List (List.rev normalized))
+        | value :: rest ->
+          let* value = normalize_json (string_of_int index :: path) value in
+          normalize_values (index + 1) (value :: normalized) rest
+      in
+      normalize_values 0 [] values
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+      Ok value
+    | `Tuple _ | `Variant _ ->
+      Error "request_context must contain JSON-compatible values"
+  in
+  match request_context with
+  | None -> Ok None
+  | Some fields ->
+    let* normalized = normalize_json [ "request_context" ] (`Assoc fields) in
+    (match normalized with
+     | `Assoc fields -> Ok (Some fields)
+     | _ -> assert false)
+;;
+
 let same_request_identity (left : entry) (right : entry) =
   String.equal left.request_id right.request_id
   && String.equal left.keeper_name right.keeper_name
   && String.equal left.base_path right.base_path
   && String.equal left.submitted_by right.submitted_by
+  && left.request_context = right.request_context
   && Float.equal left.submitted_at right.submitted_at
 ;;
 
@@ -1024,7 +1076,7 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
   let* request_context =
     match Json_util.assoc_member_opt "request_context" json with
     | Some `Null -> Ok None
-    | Some (`Assoc fields) -> Ok (Some fields)
+    | Some (`Assoc fields) -> normalize_request_context (Some fields)
     | Some _ -> Error "record request_context must be an object or null"
     | None -> Error "record is missing required field \"request_context\""
   in
@@ -2199,6 +2251,10 @@ let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
     ~(f : request_id:string -> Eio.Switch.t -> tool_result)
     ~keeper_name () :
     (submit_outcome, submit_error) result =
+  let* request_context =
+    normalize_request_context request_context
+    |> Result.map_error (fun reason -> Submit_invalid_request_context { reason })
+  in
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Error (Submit_rejected rejection)
   | Ok (base_path, submitted_by) ->

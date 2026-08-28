@@ -4572,8 +4572,112 @@ let test_decode_runtime_params_rejects_a_row_without_a_key () =
   | Ok _ -> Alcotest.fail "accepted a parameter that names nothing"
 
 
+(* Goal detail timeline: [`Null] from the server means the approval-queue
+   store could not be read, so it must decode to the explicit unavailable
+   constructor — an empty list would draw a goal with no history where the
+   truth is "the history could not be read". *)
+let test_goal_timeline_decodes_ready_events () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"approval_queue_state":{"state":"ready"},
+         "timeline":[
+           {"ts":"2026-07-28T03:57:38Z","kind":"goal_phase","lane":"goal",
+            "title":"Goal Phase","summary":"phase=completed by rondo",
+            "severity":"ok"},
+           {"ts":"2026-07-28T04:00:00Z","kind":"keeper_receipt","lane":"keeper",
+            "title":"Receipt","summary":"turn failed","severity":"bad"}]}|}
+  in
+  match Masc.Tui_decode.decode_goal_detail_timeline json with
+  | Error err -> Alcotest.fail err
+  | Ok (Masc.Tui_decode.Goal_timeline_unavailable _) ->
+      Alcotest.fail "a present timeline decoded as unavailable"
+  | Ok (Masc.Tui_decode.Goal_timeline_ready events) ->
+      Alcotest.(check int) "two events" 2 (List.length events);
+      let first = List.hd events in
+      Alcotest.(check string) "ts" "2026-07-28T03:57:38Z"
+        first.Masc.Tui_decode.gt_ts;
+      Alcotest.(check string) "kind" "goal_phase" first.gt_kind;
+      Alcotest.(check string) "summary" "phase=completed by rondo"
+        first.gt_summary;
+      Alcotest.(check string) "severity" "ok" first.gt_severity
+
+let test_goal_timeline_null_is_unavailable_with_detail () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"approval_queue_state":
+          {"state":"unavailable","operator_detail":"queue store unreadable"},
+         "timeline":null}|}
+  in
+  match Masc.Tui_decode.decode_goal_detail_timeline json with
+  | Ok (Masc.Tui_decode.Goal_timeline_unavailable detail) ->
+      Alcotest.(check string) "detail" "queue store unreadable" detail
+  | Ok (Masc.Tui_decode.Goal_timeline_ready _) ->
+      Alcotest.fail "a null timeline decoded as ready"
+  | Error err -> Alcotest.fail err
+
+let test_goal_timeline_rejects_a_thin_event () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"timeline":[{"ts":"2026-07-28T03:57:38Z","kind":"goal_phase"}]}|}
+  in
+  match Masc.Tui_decode.decode_goal_detail_timeline json with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an event missing summary/severity decoded"
+
+(* Task history rows are raw event-stream lines: the shape below is a live
+   row verbatim (2026-08-28, task-770), and an unknown event type must keep
+   its type string rather than being dropped. *)
+let test_task_history_decodes_live_rows () =
+  let json =
+    Yojson.Safe.from_string
+      {|[{"type":"task_transition","agent":"sangsu","task":"task-770",
+          "from_status":"in_progress","to_status":"todo",
+          "ts":"2026-08-28T09:25:14Z","action":"release",
+          "handoff_context":{"summary":"build replay is readable"}},
+         {"type":"task_note","task":"task-770","ts":"2026-08-28T09:00:00Z"}]|}
+  in
+  match Masc.Tui_decode.decode_task_history json with
+  | Error err -> Alcotest.fail err
+  | Ok rows ->
+      Alcotest.(check int) "two rows" 2 (List.length rows);
+      let first = List.hd rows in
+      Alcotest.(check string) "label prefers action" "release"
+        first.Masc.Tui_decode.th_label;
+      Alcotest.(check (option string)) "from" (Some "in_progress")
+        first.th_from_status;
+      Alcotest.(check (option string)) "to" (Some "todo") first.th_to_status;
+      Alcotest.(check (option string)) "actor" (Some "sangsu") first.th_actor;
+      Alcotest.(check (option string)) "note" (Some "build replay is readable")
+        first.th_note;
+      let second = List.nth rows 1 in
+      Alcotest.(check string) "label falls back to type" "task_note"
+        second.th_label;
+      Alcotest.(check (option string)) "no actor" None second.th_actor
+
+let test_task_history_rejects_a_non_list () =
+  match
+    Masc.Tui_decode.decode_task_history
+      (Yojson.Safe.from_string {|{"events":[]}|})
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a non-list task history decoded"
+
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_goal_timeline",
+      [ Alcotest.test_case "carries ready events" `Quick
+          test_goal_timeline_decodes_ready_events
+      ; Alcotest.test_case "null decodes as unavailable with detail" `Quick
+          test_goal_timeline_null_is_unavailable_with_detail
+      ; Alcotest.test_case "rejects a thin event" `Quick
+          test_goal_timeline_rejects_a_thin_event
+      ] );
+    ( "decode_task_history",
+      [ Alcotest.test_case "decodes live rows" `Quick
+          test_task_history_decodes_live_rows
+      ; Alcotest.test_case "rejects a non-list" `Quick
+          test_task_history_rejects_a_non_list
+      ] );
     ( "decode_runtime_surface",
       [ Alcotest.test_case "joins projection and observation in lane order" `Quick
           test_decode_and_join_runtime_surface

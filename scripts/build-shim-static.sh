@@ -13,10 +13,19 @@
 #
 # Env overrides:
 #   SHIM_BUILD_IMAGE     container image (default: ocaml/opam:alpine-3.24-ocaml-5.5,
-#                        matching the repo switch's OCaml 5.5)
+#                        matching the repo switch's OCaml 5.5).  Pinned by
+#                        tag, NOT digest — once the produced artifact is
+#                        confirmed good in the Task 10 fixture, digest-pinning
+#                        the image is a deliberate follow-up.
 #   SHIM_BUILD_PLATFORM  docker --platform (default: native; use
 #                        linux/amd64 to cross-build x86_64 from arm64 via
 #                        qemu — slow but works)
+#
+# Portability note: the /out bind-mount relies on Docker Desktop's
+# ownership mapping (files created by the container's unprivileged opam
+# user land writable on the macOS host).  On a Linux docker host the
+# container uid may not match the host user — adjust the artifact copy
+# (e.g. docker --user $(id -u)) there.
 #
 # The script vendors ONLY the shim's own sources (lib/exec_ssh_protocol,
 # lib/exec_shim, bin/masc_exec_shim.ml) into a scratch dune project, so the

@@ -201,6 +201,13 @@ val run : unit -> unit
     bounded by a 1s grace so an escaped daemon (double-fork + [setsid]
     defeats process-group kills by design) cannot hang the shim.
 
+    Shim→runner stdout/stderr forwarding writes are BLOCKING: a
+    back-pressured ssh channel stalls the supervision loop (deadline,
+    grace and EOF detection freeze) until the channel tears down — over
+    ssh that is [ServerAliveInterval]×[ServerAliveCountMax] — after which
+    the write fails with EPIPE (SIGPIPE is ignored, see {!main}) and the
+    On_eof kill policy unsticks the loop.
+
     Framing limits: the 8-byte big-endian length prefix is capped at
     256 MiB; a larger declared frame or a truncated frame is a
     [remote_ssh_transport_error]. *)

@@ -28,9 +28,12 @@
 #include <caml/memory.h>
 
 /* caml_convert_signal_number is exported by the OCaml runtime (the unix
-   library's own kill.c calls it), but its declaration in caml/signals.h
-   sits behind CAML_INTERNALS, which dune-built stubs do not define.
-   Declare the prototype locally rather than opting into internals. */
+   library's own kill.c calls it), but its declaration (caml/signals.h:99
+   on OCaml 5.5) sits inside the CAML_INTERNALS block spanning
+   signals.h:56-117, which dune-built stubs do not define — including the
+   header alone yields an implicit-declaration error.  Declare the
+   prototype locally rather than opting into internals; the 9/15/2
+   mapping is pinned by the "host signal numbers" unit test. */
 CAMLextern int caml_convert_signal_number(int);
 
 #ifdef __linux__

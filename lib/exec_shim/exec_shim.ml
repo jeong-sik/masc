@@ -258,6 +258,10 @@ let spawn ~argv ~env ~cwd =
     (try
        ignore (Unix.setsid ());
        set_pdeathsig ();
+       (* The shim ignores SIGPIPE (see [main]); ignored dispositions
+          survive exec, so re-arm the default or payloads would inherit
+          non-standard SIGPIPE semantics. *)
+       Sys.set_signal Sys.sigpipe Sys.Signal_default;
        (* Race: the parent may have died between fork and prctl. *)
        if Unix.getppid () = 1 then exit 127;
        Unix.dup2 stdin_r Unix.stdin;
@@ -368,8 +372,11 @@ let supervise ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
       false in
   while !status = None || !out_open || !err_open do
     let now = Unix.gettimeofday () in
-    if !status = None && now >= deadline
+    if !status = None && (not !kill_started) && now >= deadline
     then (
+      (* Only attribute [timed_out] when the deadline is what started the
+         kill; a deadline expiring during an in-flight EOF-cancel kill must
+         not rewrite the cause. *)
       timed_out := true;
       start_kill On_timeout);
     step_kill now;
@@ -458,7 +465,10 @@ let supervise ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
     | None ->
       (* Unreachable: the loop exits only after the child was reaped. *)
       snd (Unix.waitpid [] pid) in
-  (* Reap leftover process-group members (grandchildren) per policy. *)
+  (* Reap leftover process-group members (grandchildren) per policy.  No
+     liveness recheck between reap and this SIGKILL: the pgid could only
+     have been recycled by a pid-space wraparound inside the drain window
+     — negligible on Linux, acknowledged. *)
   List.iter
     (function
       | Sigterm_pgid -> send_to_pgid Sys.sigterm
@@ -519,6 +529,12 @@ let probe =
   Exec_ssh_protocol.{ name = "masc-exec-shim"; version = "1.0.0"; capabilities = [] }
 
 let main () =
+  (* OCaml does NOT ignore SIGPIPE by default; an undelivered SIGPIPE would
+     kill the shim outright (signal 13) where the code expects EPIPE
+     exceptions — the ssh channel going away mid-stream is a cancel path,
+     handled via the On_eof kill policy.  Ignore it here; the payload child
+     re-arms the default disposition pre-exec. *)
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   match Array.to_list Sys.argv with
   | [ _; "--probe" ] -> print_endline (Exec_ssh_protocol.render_probe probe)
   | [ _ ] -> run ()

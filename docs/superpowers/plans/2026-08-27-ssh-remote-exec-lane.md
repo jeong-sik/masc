@@ -492,7 +492,7 @@ let test_denylist_beats_allowlist () =
 - [ ] **Step 3: Runner implementation** in `keeper_sandbox_ssh.ml`:
 
 - `build_ssh_argv ~endpoint ~control_path_dir` produces exactly the flag set above (order fixed for testability); `ControlPath` dir is created 0700 at runner construction; `max_concurrent_sessions` bounds concurrent dispatches per endpoint with a semaphore (sshd `MaxSessions` default 10 — the ceiling is explicit).
-- `runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd` — spawn via `Process_eio.run_argv_with_stdin_and_status_split` (mli:133-146) or the streaming variant (:206-217) so chunk callbacks fire as the ssh channel delivers; encode the request via `Exec_ssh_protocol.encode_request`; write frame to ssh stdin, then `stdin_content` raw bytes are part of the frame (`stdin_len`), then close stdin for no-stdin commands so the shim sees EOF semantics correctly.
+- `runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd` — spawn via `Process_eio.run_argv_with_stdin_and_status_split` (mli:133-146) or the streaming variant (:206-217) so chunk callbacks fire as the ssh channel delivers; encode the request via `Exec_ssh_protocol.encode_request`; write frame to ssh stdin, then `stdin_content` raw bytes are part of the frame (`stdin_len`). (amended post-Task-5 review) The runner holds the ssh channel (shim stdin) OPEN until the trailer arrives — shim stdin EOF means "cancel the payload", so closing it early would kill the command; only the CHILD's stdin gets EOF (the shim closes it once `stdin_len` bytes are consumed, or immediately when `stdin_len=0`).
 - Stream tail buffering: keep only the trailing bytes needed to detect the `\x1e...\x1e` trailer; deliver preceding stderr chunks immediately; on process exit, strip the trailer from the stderr bucket and map trailer fields → `Unix.process_status` (`exit` → `WEXITED n`, `signal` → `WSIGNALED n`); `timed_out=true` → named remote-timeout error; absent/malformed trailer or ssh's own exit 255 → `remote_ssh_transport_error` naming the endpoint. (amended post-Task-4 review: a parsed trailer is authoritative ONLY when the ssh channel closed cleanly with full EOF observed — on any ssh-level failure the runner classifies `remote_ssh_transport_error` regardless of any trailer parsed from the partial tail, because a well-formed earlier `\x1e...\x1e` pair is indistinguishable from the real trailer after truncation.)
 - Wall-clock budget = `connect_timeout_sec + timeout_sec + drain grace` (constant, documented); per-bucket timeouts come from `Env_config_sandbox.Shell_timeout` exactly like the Docker lane.
 - Cancellation = kill the local ssh client process (`Process_eio.tree_kill` :275-316 precedent); channel EOF lets the shim's watchdog reap the remote process group (asserted end-to-end in Task 10).
@@ -619,6 +619,10 @@ let test_denylist_beats_allowlist () =
 (* echo round-trip: stdout/stderr split preserved, exit 0 *)
 (* hostile bytes: invalid-UTF-8 argv, NUL stdin, 1 MiB payload round-trip losslessly *)
 (* trailer integrity: remote `exit 3` surfaces WEXITED 3; `kill -9 $$` surfaces WSIGNALED 9 *)
+(* (added post-Task-5 review) fast-exit payload (`true`) + >64 KiB stdin payload
+   → trailer exit 0, no transport error (SIGPIPE regression pin: writing payload
+   stdin to a pipe whose reader already exited must raise EPIPE in the shim,
+   not kill it with signal 13) *)
 (* cancel quiet payload: start `sleep 600`, cancel after 1s, then ssh into the
    fixture and assert `pgrep -f "sleep 600"` finds nothing (no remote orphans) *)
 (* host-side invariant: after all cases, run `ps -Ao args` on the masc host and

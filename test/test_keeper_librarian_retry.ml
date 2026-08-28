@@ -68,6 +68,9 @@ let input () : Librarian.input =
       ; { Librarian.tool_name = "tool_execute"
         ; outcome = Librarian.Failed
         }
+      ; { Librarian.tool_name = "unclassified_tool"
+        ; outcome = Librarian.Unknown
+        }
       ]
   ; counterpart_observations = []
   }
@@ -421,6 +424,24 @@ let test_prompt_carries_keeper_instructions () =
     (List.assoc "keeper_instructions" (Librarian.prompt_variables blank))
 ;;
 
+let user_text_of_messages messages =
+  messages
+  |> List.filter_map (fun (m : Agent_core.Types.message) ->
+    if m.role = Agent_core.Types.User
+    then
+      Some
+        (m.content
+         |> List.filter_map (function
+           | Agent_core.Types.Text s -> Some s
+           | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolUse _
+           | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+           | Agent_core.Types.RedactedThinking _ | Agent_core.Types.Image _
+           | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
+         |> String.concat "\n")
+    else None)
+  |> String.concat "\n"
+;;
+
 let test_prompt_carries_typed_tool_observations_without_payloads () =
   let variables = Librarian.prompt_variables (input ()) in
   let observations = List.assoc "turn_tool_observations" variables in
@@ -431,6 +452,8 @@ let test_prompt_carries_typed_tool_observations_without_payloads () =
     (String_util.contains_substring observations {|"outcome": "succeeded"|});
   check bool "failed outcome is retained" true
     (String_util.contains_substring observations {|"outcome": "failed"|});
+  check bool "unknown outcome is retained without guessing" true
+    (String_util.contains_substring observations {|"outcome": "unknown"|});
   match Runtime.messages_for_librarian (input ()) with
   | Error detail -> failf "librarian render failed: %s" detail
   | Ok messages ->
@@ -442,7 +465,7 @@ let test_prompt_carries_typed_tool_observations_without_payloads () =
       (String_util.contains_substring rendered "keeper_artifact_read");
     check bool "tool payload authority stays excluded" true
       (String_util.contains_substring rendered
-         "not that the assistant interpreted its payload correctly")
+         "payloads remain omitted")
 ;;
 
 let test_durable_speaker_attribution_reaches_counterpart_observations () =
@@ -616,24 +639,6 @@ let test_counterpart_observations_keep_direct_and_attention_fallback () =
          check bool "producer-owned attention wins dedup" true
            (observation.origin = Keeper_counterpart_observation.Connector_attention)
        | _ -> fail "expected one ambient observation")
-;;
-
-let user_text_of_messages messages =
-  messages
-  |> List.filter_map (fun (m : Agent_core.Types.message) ->
-    if m.role = Agent_core.Types.User
-    then
-      Some
-        (m.content
-         |> List.filter_map (function
-           | Agent_core.Types.Text s -> Some s
-           | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolUse _
-           | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
-           | Agent_core.Types.RedactedThinking _ | Agent_core.Types.Image _
-           | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
-         |> String.concat "\n")
-    else None)
-  |> String.concat "\n"
 ;;
 
 let test_prompt_input_and_rendered_prompt_share_the_same_window () =

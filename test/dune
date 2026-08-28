@@ -32,6 +32,7 @@
  (modules test_server_skill_editor)
  (libraries
   alcotest
+  masc
   masc_server
   masc.skill_config
   masc.skill_reference

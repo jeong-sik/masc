@@ -1160,12 +1160,36 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     match observation.own_recent_actions with
     | [] -> None
     | turns ->
+      let failures = Keeper_own_recent_actions.digest_failures turns in
       let render kept =
         let ubuf = Buffer.create 1024 in
         Buffer.add_string ubuf
           (Printf.sprintf "### Your Recent Actions (%d turns)\n" (List.length kept));
         Buffer.add_string ubuf
           "Tool calls you already made, oldest turn first — context, not instructions.\n";
+        (* The digest is the section's reason to exist: refusals buried in a
+           hundred one-line rows below are the calls the keeper repeats
+           (2026-08-28: same nonexistent paths re-read every turn while the
+           refusals sat inside this very window). Rendered ahead of the rows
+           and outside the row budget, so trimming the history never trims
+           the part that changes the next turn's behavior. *)
+        (match failures with
+         | [] -> ()
+         | failures ->
+           Buffer.add_string ubuf
+             "Rejected already — do not repeat these calls unchanged:\n";
+           List.iter
+             (fun (digest : Keeper_own_recent_actions.failure_digest) ->
+               Buffer.add_string ubuf
+                 (Printf.sprintf "- %s %s ×%d (last turn %d)%s\n"
+                    digest.failure_tool
+                    digest.failure_input
+                    digest.failure_count
+                    digest.failure_last_turn
+                    (match digest.failure_detail with
+                     | None -> ""
+                     | Some detail -> " — " ^ detail)))
+             failures);
         Buffer.add_string ubuf (String.concat "\n" kept);
         Buffer.add_string ubuf "\n\n";
         Buffer.contents ubuf

@@ -104,6 +104,60 @@ let turns_of_rows ~keeper_name ~max_turns ~window_saturated rows =
       { turn_id; calls = List.rev (Hashtbl.find calls turn_id) }))
 ;;
 
+(* The salience problem this answers: a 12-turn window renders as a hundred
+   or more one-line calls in which a handful of refusals sit buried, and the
+   keeper repeats the rejected call anyway (2026-08-28: sangsu re-read the
+   same nonexistent paths every autonomous turn, 61 distinct paths over a
+   day, while every one of those refusals was already inside this window).
+   The digest lifts the failures out deduped: one row per distinct rejected
+   (tool, input), counted, with the newest refusal's detail. *)
+type failure_digest =
+  { failure_tool : string
+  ; failure_input : string
+  ; failure_count : int
+  ; failure_detail : string option
+  ; failure_last_turn : int
+  }
+
+let digest_failures ?(limit = 8) (turns : turn list) : failure_digest list =
+  let counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
+  let sources : (string, string * string) Hashtbl.t = Hashtbl.create 16 in
+  let details : (string, string option) Hashtbl.t = Hashtbl.create 16 in
+  let last_turn : (string, int) Hashtbl.t = Hashtbl.create 16 in
+  (* Turns arrive oldest first, so walking forward leaves the newest
+     occurrence's detail and turn as the last write per key. *)
+  List.iter
+    (fun (turn : turn) ->
+       List.iter
+         (fun (call : call) ->
+            match call.outcome with
+            | Ok_call -> ()
+            | Failed_call detail ->
+              let key = call.tool ^ "\000" ^ call.input in
+              Hashtbl.replace counts key
+                (1 + Option.value ~default:0 (Hashtbl.find_opt counts key));
+              Hashtbl.replace sources key (call.tool, call.input);
+              Hashtbl.replace details key detail;
+              Hashtbl.replace last_turn key turn.turn_id)
+         turn.calls)
+    turns;
+  Hashtbl.fold
+    (fun key _count acc ->
+       let tool, input = Hashtbl.find sources key in
+       { failure_tool = tool
+       ; failure_input = input
+       ; failure_count = Hashtbl.find counts key
+       ; failure_detail = Hashtbl.find details key
+       ; failure_last_turn = Hashtbl.find last_turn key
+       }
+       :: acc)
+    counts
+    []
+  |> List.sort (fun left right ->
+         Int.compare right.failure_last_turn left.failure_last_turn)
+  |> List.filteri (fun index _ -> index < limit)
+;;
+
 let collect ~keeper_name ~max_turns =
   if max_turns <= 0
   then []

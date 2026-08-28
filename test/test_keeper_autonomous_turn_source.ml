@@ -270,6 +270,29 @@ let test_version_rejected_run_is_not_reread () =
   Alcotest.(check int) "rejected run is not re-read after rewrite" 0 (turn_count ())
 ;;
 
+(* Deletion is one-way (hard-cut cleanup, retention pruning): a missing
+   referenced file never comes back, so the reader caches the miss per
+   (path, run) the same way it caches a version rejection. The proof: a
+   record whose trace file never exists, then a valid trace placed at the
+   same path -- the second load must still skip it. *)
+let test_missing_trace_run_is_not_reread () =
+  with_workspace @@ fun config ->
+  let path = trace_path config "vanished" in
+  let turn_count () =
+    List.length (Keeper_autonomous_turn_source.load_recent ~config ~keeper_name ())
+  in
+  write_turn_record config ~absolute_turn:48
+    ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id:"run-gone" ~start_seq:1));
+  Alcotest.(check int) "missing trace run is rejected" 0 (turn_count ());
+  write_lines path
+    (run_lines ~worker_run_id:"run-gone" ~start_seq:1 ~base_ts:5000.
+       ~prompt:Keeper_unified_prompt.autonomous_wake_marker
+       ~final_text:"too late");
+  Alcotest.(check int) "missing run is not re-read after the file appears" 0
+    (turn_count ())
+;;
+
 let test_mismatched_raw_trace_runtime_identity_is_skipped () =  with_workspace @@ fun config ->
   let path = trace_path config "runtime-identity-mismatch" in
   let records =
@@ -561,6 +584,8 @@ let () =
             test_mismatched_raw_trace_runtime_identity_is_skipped
         ; Alcotest.test_case "version-rejected run is not re-read" `Quick
             test_version_rejected_run_is_not_reread
+        ; Alcotest.test_case "missing-trace run is not re-read" `Quick
+            test_missing_trace_run_is_not_reread
         ; Alcotest.test_case "rejects mismatched raw session identity" `Quick
             test_mismatched_raw_trace_session_identity_is_skipped
         ; Alcotest.test_case "since and limit use current records" `Quick

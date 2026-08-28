@@ -960,6 +960,48 @@ let pending_entry_of_yojson ~base_path json =
   | _ -> Error "gate_pending.entry must be a JSON object"
 ;;
 
+let pending_entry_invariant_error json =
+  match json with
+  | `Assoc fields ->
+    (match
+       List.assoc_opt "id" fields,
+       List.assoc_opt "input_hash" fields,
+       List.assoc_opt "sequence" fields,
+       List.assoc_opt "summary_status" fields,
+       List.assoc_opt "exact_attempt" fields,
+       List.assoc_opt "summary_attempt_disposition" fields
+     with
+     | Some (`String id),
+       Some (`String input_hash),
+       Some (`Int sequence),
+       Some summary_json,
+       Some exact_attempt_json,
+       Some summary_attempt_disposition_json ->
+       (match
+          summary_status_of_yojson_with_error summary_json,
+          exact_attempt_state_of_yojson_with_error exact_attempt_json,
+          summary_attempt_disposition_of_yojson_with_error
+            summary_attempt_disposition_json
+        with
+        | Ok summary_status, Ok exact_attempt, Ok summary_attempt_disposition ->
+          (match
+             validate_entry_exact_attempt
+               ~id
+               ~input_hash
+               ~sequence
+               ~summary_status
+               ~summary_attempt_disposition
+               exact_attempt
+           with
+           | Ok () -> None
+           | Error reason -> Some reason)
+        | Error _, _, _
+        | _, Error _, _
+        | _, _, Error _ -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
 let approval_decision_of_yojson json =
   match json with
   | `Assoc fields ->
@@ -1160,7 +1202,7 @@ let parse_list ~surface parse = function
   | _ -> Error (surface ^ " must be an array")
 ;;
 
-let parse_list_with_entry_errors ~surface parse = function
+let parse_list_with_entry_errors ~surface ?(fatal_error = fun _ -> None) parse = function
   | `List values ->
     let rec loop index acc errors = function
       | [] -> Ok (List.rev acc, List.rev errors)
@@ -1168,11 +1210,14 @@ let parse_list_with_entry_errors ~surface parse = function
         (match parse value with
          | Ok parsed -> loop (index + 1) (parsed :: acc) errors rest
          | Error reason ->
-           loop
-             (index + 1)
-             acc
-             (Printf.sprintf "%s[%d]: %s" surface index reason :: errors)
-             rest)
+           (match fatal_error value with
+            | Some fatal -> Error fatal
+            | None ->
+              loop
+                (index + 1)
+                acc
+                (Printf.sprintf "%s[%d]: %s" surface index reason :: errors)
+                rest))
     in
     loop 0 [] [] values
   | _ -> Error (surface ^ " must be an array")
@@ -1294,6 +1339,7 @@ let snapshot_of_yojson ~base_path json =
     let* pending_entries, pending_entry_errors =
       parse_list_with_entry_errors
         ~surface:"gate_pending.pending"
+        ~fatal_error:pending_entry_invariant_error
         (pending_entry_of_yojson ~base_path)
         pending_json
     in

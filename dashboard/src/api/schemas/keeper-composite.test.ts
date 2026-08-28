@@ -91,7 +91,7 @@ describe('parseKeeperCompositeSnapshot', () => {
   it('round-trips every phase the backend can emit', () => {
     for (const phase of [
       'offline', 'running', 'failing', 'compacting',
-      'handing_off', 'draining', 'paused', 'stopped', 'crashed',
+      'draining', 'paused', 'stopped', 'crashed',
       'restarting',
     ]) {
       const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, phase })

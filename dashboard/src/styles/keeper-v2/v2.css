@@ -1471,19 +1471,16 @@
 .tps-range.on { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 45%, transparent); background: color-mix(in oklab, var(--status-ok) 10%, transparent); }
 .tps-avg { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
 
-/* drain / handoff contextual readout (shown only while Draining/HandingOff) */
+/* drain contextual readout (shown only while Draining) */
 .drain-card { border: 1px solid color-mix(in oklab, var(--status-warn) 34%, var(--border-main)); border-radius: var(--radius-sm); background: color-mix(in oklab, var(--status-warn) 7%, var(--bg-card)); padding: 11px 12px; }
-.drain-card[data-phase="HandingOff"] { border-color: color-mix(in oklab, var(--info) 34%, var(--border-main)); background: color-mix(in oklab, var(--info) 7%, var(--bg-card)); }
 .drain-head { display: flex; align-items: center; gap: 9px; }
 .drain-badge { font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.04em; padding: 2px 8px; border-radius: var(--radius-pill); color: var(--status-warn); border: 1px solid color-mix(in oklab, var(--status-warn) 40%, transparent); }
-.drain-card[data-phase="HandingOff"] .drain-badge { color: var(--info); border-color: color-mix(in oklab, var(--info) 40%, transparent); }
 .drain-gloss { font-size: 10.5px; color: var(--text-dim); }
 .drain-count { font-size: var(--fs-12); color: var(--text-mid); margin-top: 9px; }
 .drain-count .mono { color: var(--text-bright); font-size: var(--fs-14); margin-right: 2px; }
 .drain-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .drain-item { display: flex; align-items: center; gap: 8px; font-size: var(--fs-11); }
 .drain-spin { flex: none; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--status-warn); border-top-color: transparent; animation: spin 0.9s linear infinite; }
-.drain-card[data-phase="HandingOff"] .drain-spin { border-color: var(--info); border-top-color: transparent; }
 .drain-t-id { color: var(--volt-strong); flex: none; }
 .drain-t-title { color: var(--text-mid); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drain-t-state { color: var(--text-dim); font-size: var(--fs-10); flex: none; }

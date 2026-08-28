@@ -10,7 +10,7 @@ import {
 
 // Wire format: backend (keeper_state_machine.ml:21-35 + keeper_composite_observer.ml:141-201)
 // emits all lane values lowercase + snake_case. Prior fixtures asserted
-// PascalCase ('Failing', 'Stable', 'HandingOff') that the
+// PascalCase ('Failing', 'Stable') that the
 // backend never emits — mock↔mock loophole that hid the dead branches.
 describe('swimlaneSegmentColor', () => {
   it('returns alarm color for alarm values', () => {
@@ -26,10 +26,6 @@ describe('swimlaneSegmentColor', () => {
 
   it('returns warn color for compacting', () => {
     expect(swimlaneSegmentColor('compacting')).toBe('bg-[var(--amber-bright-45)]')
-  })
-
-  it('returns handoff color for handing_off', () => {
-    expect(swimlaneSegmentColor('handing_off')).toBe('bg-[var(--purple-50)]')
   })
 
   it('returns default active color for unknown / active values', () => {

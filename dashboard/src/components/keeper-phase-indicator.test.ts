@@ -6,14 +6,13 @@ import { PHASE_STYLES, getPhaseStyle, pipelineStageDetailLabel } from './keeper-
 // ================================================================
 
 describe('PHASE_STYLES', () => {
-  it('has all 10 phases', () => {
+  it('has all 9 phases', () => {
     const phases = Object.keys(PHASE_STYLES)
-    expect(phases).toHaveLength(10)
+    expect(phases).toHaveLength(9)
     expect(phases).toContain('Offline')
     expect(phases).toContain('Running')
     expect(phases).toContain('Failing')
     expect(phases).toContain('Compacting')
-    expect(phases).toContain('HandingOff')
     expect(phases).toContain('Draining')
     expect(phases).toContain('Paused')
     expect(phases).toContain('Stopped')
@@ -90,8 +89,8 @@ describe('getPhaseStyle', () => {
     expect(s.color).toBe('var(--paused)')
   })
 
-  it('Compacting / HandingOff / Draining / Restarting share the accent (slate/working) tone', () => {
-    const tones = (['Compacting', 'HandingOff', 'Draining', 'Restarting'] as const).map(
+  it('Compacting / Draining / Restarting share the accent (slate/working) tone', () => {
+    const tones = (['Compacting', 'Draining', 'Restarting'] as const).map(
       (p) => getPhaseStyle(p).color,
     )
     expect(new Set(tones).size).toBe(1)
@@ -103,7 +102,7 @@ describe('getPhaseStyle', () => {
   })
 
   it('returns correct style for all phases', () => {
-    const phases: string[] = ['Offline', 'Running', 'Failing', 'Compacting', 'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting']
+    const phases: string[] = ['Offline', 'Running', 'Failing', 'Compacting', 'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting']
     for (const phase of phases) {
       const style = getPhaseStyle(phase)
       expect(style.label).toBeTruthy()

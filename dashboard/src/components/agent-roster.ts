@@ -751,7 +751,7 @@ export function countRuntimeKinds(
   agents: number
   keepers: number
   pausedKeepers: number
-  // Transient band rows (Compacting / HandingOff / Restarting)
+  // Transient band rows (Compacting / Restarting)
   // are now part of the breakdown. Exposed so consumers can reconcile
   // `keepers + pausedKeepers + transientKeepers + offlineKeepers` against
   // `keeperRows` without guessing where the missing rows went.

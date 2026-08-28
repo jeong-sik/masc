@@ -53,9 +53,9 @@ const SWIMLANE_LANES: Array<{
 
 // Wire format is lowercase + snake_case for every lane:
 //   - KSM phase: `phase_to_string` in lib/keeper/keeper_state_machine.ml:21-35
-//     emits 'running' | 'failing' | 'handing_off' etc.
+//     emits 'running' | 'failing' | 'draining' etc.
 //   - KTC/KDP/KCL/KMC: keeper_composite_observer.ml:141-201 lowercase.
-// Prior PascalCase entries ('Failing', 'Stable', 'HandingOff')
+// Prior PascalCase entries ('Failing', 'Stable')
 // never matched backend emit; swimlane segments for those phases fell
 // through to the default indigo color, losing the alarm/warn/handoff
 // visual signals.
@@ -74,7 +74,6 @@ export function swimlaneSegmentColor(value: string): string {
   if (ALARM_VALUES.has(value)) return 'bg-[var(--bad-50)]'
   if (IDLE_LIKE_VALUES.has(value)) return 'bg-[var(--color-bg-panel-alt)]'
   if (value === 'compacting') return 'bg-[var(--amber-bright-45)]'
-  if (value === 'handing_off') return 'bg-[var(--purple-50)]'
   return 'bg-[var(--indigo-45)]'
 }
 

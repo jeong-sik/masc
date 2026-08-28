@@ -4,7 +4,7 @@
     - [Keeper_transition_audit.recent_completed_turns] (50-entry ring) ->
       turn outcomes classified after [mark_turn_finished].
     - [Keeper_transition_audit.recent_transitions] (50-entry ring) ->
-      compaction / handoff outcomes classified by [selected_event].
+      compaction outcomes classified by [selected_event].
     - [registry_entry] crash_log / restart_count / turn_consecutive_failures
       -> resilience counters.
     - [Dashboard_harness_health.read_recent_verdicts] -> AGENT_CORE verdict pass/fail

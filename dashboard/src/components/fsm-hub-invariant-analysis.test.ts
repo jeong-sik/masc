@@ -174,17 +174,6 @@ describe('deriveOperationalInsight', () => {
     expect(insight.headline).toContain('Compaction')
   })
 
-  it('reports warn for HandingOff phase', () => {
-    const insight = deriveOperationalInsight(
-      makeSnapshot({
-        phase: 'handing_off',
-      }),
-      noObservations,
-      now,
-    )
-    expect(insight.tone).toBe('warn')
-  })
-
   it('reports warn for Draining phase', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({

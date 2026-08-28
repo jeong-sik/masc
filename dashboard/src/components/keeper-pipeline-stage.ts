@@ -10,7 +10,6 @@ import type { PipelineStage } from '../types'
 const STAGES: { key: PipelineStage; label: string }[] = [
   { key: 'idle', label: 'idle' },
   { key: 'compacting', label: 'compact' },
-  { key: 'handoff', label: 'handoff' },
   { key: 'offline', label: 'offline' },
   { key: 'failing', label: 'fail' },
   { key: 'draining', label: 'drain' },

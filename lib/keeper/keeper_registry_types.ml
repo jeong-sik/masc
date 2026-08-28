@@ -296,8 +296,8 @@ let is_paired_lifecycle_event = function
 ;;
 
 let origin_allows_paired_lifecycle_event origin event =
-  (* This guard only constrains paired lifecycle events (compaction +
-     handoff half-events). For any other event the gate is outside its
+  (* This guard only constrains paired compaction lifecycle events. For any
+     other event the gate is outside its
      domain and returns true unconditionally — the caller's question
      does not apply. *)
   if not (is_paired_lifecycle_event event) then true
@@ -311,8 +311,7 @@ let origin_allows_paired_lifecycle_event origin event =
     | Post_turn_lifecycle -> true
     | Generic_dispatch -> false
     | Operator_compact ->
-      (* Operator_compact authorizes only compaction half-events;
-         handoff half-events flow through other origins. *)
+      (* Operator_compact authorizes only the compaction pair. *)
       (match event with
        | Keeper_state_machine.Compaction_started
        | Keeper_state_machine.Compaction_completed

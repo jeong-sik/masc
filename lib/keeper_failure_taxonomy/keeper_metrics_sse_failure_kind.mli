@@ -3,6 +3,5 @@
 
 type t =
   | Compaction
-  | Handoff
 
 val to_label : t -> string

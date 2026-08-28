@@ -430,7 +430,7 @@ interface DeriveInputsLite {
 describe('toKeeperPhase — wire-boundary narrow (lowercase + PascalCase)', () => {
   it.each<KeeperPhase>([
     'Offline', 'Running', 'Failing', 'Compacting',
-    'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed',
+    'Draining', 'Paused', 'Stopped', 'Crashed',
     'Restarting',
   ])('accepts PascalCase KeeperPhase %s', (phase) => {
     expect(toKeeperPhase(phase)).toBe(phase)
@@ -439,7 +439,6 @@ describe('toKeeperPhase — wire-boundary narrow (lowercase + PascalCase)', () =
     ['offline', 'Offline'],
     ['running', 'Running'],
     ['failing', 'Failing'],
-    ['handing_off', 'HandingOff'],
   ])('accepts lowercase wire format %s → %s', (input, expected) => {
     expect(toKeeperPhase(input)).toBe(expected)
   })
@@ -460,7 +459,7 @@ describe('compositePhaseTone — exhaustive switch over KeeperPhase', () => {
     expect(compositePhaseTone(phase)).toBe('active')
   })
   it.each<KeeperPhase>([
-    'Compacting', 'HandingOff', 'Draining', 'Paused', 'Restarting',
+    'Compacting', 'Draining', 'Paused', 'Restarting',
   ])('phase %s ⇒ warn', (phase) => {
     expect(compositePhaseTone(phase)).toBe('warn')
   })
@@ -678,14 +677,6 @@ describe('deriveKeeperTurnPhase — RFC-0135 PR-14b', () => {
   it('falls back to pipeline_stage when composite null', () => {
     expect(deriveKeeperTurnPhase({ pipeline_stage: 'compacting' } as Keeper, null)).toBe('compacting')
   })
-  it('falls back to pipeline_stage when composite turn_phase empty string', () => {
-    expect(
-      deriveKeeperTurnPhase(
-        { pipeline_stage: 'handoff' } as Keeper,
-        { turn_phase: '' } as unknown as KeeperCompositeSnapshot,
-      ),
-    ).toBe('handoff')
-  })
   it('returns null when both sources empty', () => {
     expect(deriveKeeperTurnPhase({} as Keeper, null)).toBeNull()
   })
@@ -701,9 +692,7 @@ describe('derivePreferredPhase — RFC-0135 PR-14d', () => {
     ).toBe('Compacting')
   })
   it('falls back to keeper.phase when composite empty', () => {
-    expect(
-      derivePreferredPhase({ phase: 'HandingOff' } as Keeper, null),
-    ).toBe('HandingOff')
+    expect(derivePreferredPhase({ phase: 'Draining' } as Keeper, null)).toBe('Draining')
   })
   it('falls back to keeper.phase when composite has unknown wire value', () => {
     expect(

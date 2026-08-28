@@ -112,8 +112,9 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Drain_complete -> { c with drain_complete = true }
   | Fiber_started ->
     (* A new fiber = a new life. Reset health, buffer, backoff, and stop conditions.
-       Previous heartbeat/turn failures, in-progress compaction/handoff, and
-       supervisor backoff state are all irrelevant to the new fiber.
+       Previous heartbeat/turn failures, in-progress compaction, context-handoff
+       recommendations, and supervisor backoff state are all irrelevant to the
+       new fiber.
 
        TLA+ model checking found that preserving stop_requested across fiber
        restart causes a liveness violation: the new fiber enters Draining
@@ -330,8 +331,8 @@ let check_event_precondition (c : conditions) (ev : event)
        AutoCompactTriggered: it does NOT require [context_overflow], so
        an operator can pre-emptively compact a keeper whose context is not
        yet near its budget
-       keeper.  But the two buffer-op exclusivity preconditions are
-       identical — concurrent compaction or handoff entangles ops. *)
+       keeper. The buffer-op exclusivity precondition still rejects a second
+       compaction while one is active. *)
     if c.compaction_active
     then
       Error

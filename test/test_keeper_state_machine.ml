@@ -1866,7 +1866,7 @@ let () =
             "double failure (hb+turn) recovery"
             `Quick
             test_chain_double_failure_recovery
-        ; test_case "operator stop during handoff" `Quick test_chain_stop_during_buffer_op
+        ; test_case "operator stop during compaction" `Quick test_chain_stop_during_buffer_op
         ; test_case "triple restart survives" `Quick test_chain_triple_restart_survives
         ; test_case
             "pause while failing then stop"

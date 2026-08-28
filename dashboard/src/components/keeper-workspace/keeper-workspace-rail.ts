@@ -1,6 +1,6 @@
 // Keeper Workspace — context rail (right). Ported to the keeper-v2 prototype DOM
 // (rails.jsx ContextRail): `.ctx` → `.ctx-scroll` → `.ctx-sec` sections (주의 /
-// 드레인 `.drain-card` while Draining/HandingOff / 런타임 `.rtc-card` with the
+// 드레인 `.drain-card` while Draining / 런타임 `.rtc-card` with the
 // design's collapsed-by-default `.rtc-head`→`.rtc-detail` disclosure and
 // `.rail-hb` heartbeat line / 컨텍스트 `.ctx-card` with `.ctx-usage` +
 // `.ctx-notobs` / 소유 태스크 `.ctx-list`), styled by the vendored SSOT CSS.
@@ -174,14 +174,14 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
   `
 }
 
-// Design drain/handoff card (rails.jsx ContextRail `.drain-card`): visible only
-// while the keeper FSM is Draining or HandingOff. Counts and rows come from the
+// Design drain card (rails.jsx ContextRail `.drain-card`): visible only while
+// the keeper FSM is Draining. Counts and rows come from the
 // live owned-task list; the 대기 자극 flush sub-list reads the keeper waiting
 // inventory's event_queue_pending rows (the same store the lane strip uses) —
 // nothing is synthesized when the inventory has not reported.
-function drainPhase(keeper: Keeper): 'Draining' | 'HandingOff' | null {
+function drainPhase(keeper: Keeper): 'Draining' | null {
   const phase = keeper.lifecycle_phase ?? keeper.phase ?? null
-  return phase === 'Draining' || phase === 'HandingOff' ? phase : null
+  return phase === 'Draining' ? phase : null
 }
 
 function DrainSection({ keeper }: { keeper: Keeper }): VNode | null {
@@ -190,19 +190,16 @@ function DrainSection({ keeper }: { keeper: Keeper }): VNode | null {
   const owned = ownedTasks(keeper)
   const inventory = keeperWaitingInventoryState(keeper.name).inventory
   const entry = inventory?.keepers.find(k => k.keeper_name === keeper.name) ?? null
-  const stimuli =
-    phase === 'Draining'
-      ? (entry?.waiting_on ?? []).filter(row => row.source === 'event_queue_pending')
-      : []
+  const stimuli = (entry?.waiting_on ?? []).filter(row => row.source === 'event_queue_pending')
   return html`
     <div class="ctx-sec">
-      <h4>${phase === 'Draining' ? '드레인 큐' : '핸드오프 진행'}</h4>
+      <h4>드레인 큐</h4>
       <div class="drain-card" data-phase=${phase}>
         <div class="drain-head">
           <span class="drain-badge">${phase}</span>
-          <span class="drain-gloss">${phase === 'Draining' ? '작업을 비우고 정상 종료 중' : '소유 태스크를 다른 keeper 에게 인계 중'}</span>
+          <span class="drain-gloss">작업을 비우고 정상 종료 중</span>
         </div>
-        <div class="drain-count"><span class="mono">${owned.length}</span>건 ${phase === 'Draining' ? '비우는 중' : '인계 중'}</div>
+        <div class="drain-count"><span class="mono">${owned.length}</span>건 비우는 중</div>
         ${owned.length > 0
           ? html`
               <div class="drain-list">

@@ -268,8 +268,6 @@ function keeperLifecycleStatus(
       return 'failing'
     case 'Compacting':
       return 'compacting'
-    case 'HandingOff':
-      return 'handoff'
     case 'Draining':
       return 'draining'
     case 'Paused':
@@ -399,13 +397,9 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToke
   // only the 13 PascalCase phases, none of which lowercase to
   // `'inactive'`), so the guard was dead defensive.
   if (keeper.last_heartbeat && isHeartbeatAlive(keeper, keeper.last_heartbeat)) {
-    // Route through `keeperLifecycleStatus`, not `.toLowerCase()`. The
-    // PascalCase phase names are not their own tokens: `'HandingOff'`
-    // lowercases to `'handingoff'`, but the token is `'handoff'`. It was
-    // the only multi-word phase, so it was the only one that broke — a
-    // handing-off keeper rendered as `확인 필요` while `Compacting` (one
-    // word, so `.toLowerCase()` happened to land on its token) rendered
-    // correctly. Unrecognized phases still fall through to `'idle'`.
+    // Route through `keeperLifecycleStatus`, not an open-ended lowercase
+    // conversion, so only the closed KeeperPhase vocabulary reaches the
+    // display token layer. Unrecognized phases still fall through to `idle`.
     const phase = (keeper.lifecycle_phase ?? keeper.phase)?.trim()
     if (phase && phase.toLowerCase() !== 'offline') {
       return keeperLifecycleStatus(phase) ?? toKeeperPhaseToken(phase) ?? 'idle'

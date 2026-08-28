@@ -76,7 +76,7 @@ const STATUS_CHIP_TONES: ReadonlySet<string> = new Set([
  * Accepts both vocabularies in use across the codebase:
  *
  *   1. Design-system / backend FSM names from the Anyang Sleepers
- *      spec: running, compacting, handing_off, draining, failing,
+ *      spec: running, compacting, draining, failing,
  *      restarting, paused, stopped, crashed, dead, offline.
  *
  *   2. Dashboard-layer names defined in `types/core.ts#KeeperLifecycleState`
@@ -98,7 +98,6 @@ export function keeperStateTone(state: string): StatusChipTone {
       return 'ok'
     // working — in flight, not actionable
     case 'compacting':
-    case 'handing_off':
     case 'handoff-imminent':
     case 'draining':
     case 'preparing':

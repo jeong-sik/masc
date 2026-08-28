@@ -56,9 +56,8 @@ function invariantDetail(
   }
 }
 
-// Backend (lib/keeper/keeper_state_machine.ml:21-35) emits phase strings
-// via `phase_to_string` in lowercase + snake_case: 'running', 'failing',
-// 'handing_off' etc. The composite observer (keeper_composite_observer.ml:628)
+// Backend emits phase strings via `phase_to_string` in lowercase. The
+// composite observer
 // passes the same wire format through `snapshot.phase`. Compare against
 // those exact tokens — PascalCase comparisons are dead branches in production.
 function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
@@ -80,9 +79,6 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   }
   if (isCompactionActive(snapshot)) {
     return 'KMC 가 done 에 도달한 뒤 KSM 이 running 으로 control 을 반환해야 함.'
-  }
-  if (snapshot.phase === 'handing_off') {
-    return 'handoff completion 이 관측되면 현재 keeper 는 stop 해야 함.'
   }
   if (snapshot.phase === 'draining') {
     return 'lifecycle 가 stopped 로 정착되기 전에 draining 이 완료되어야 함.'
@@ -168,7 +164,7 @@ export function deriveOperationalInsight(
       ],
     }
   }
-  if (snapshot.phase === 'handing_off' || snapshot.phase === 'draining') {
+  if (snapshot.phase === 'draining') {
     const collapsedDetail = snapshot.collapsed_from
       ? ` raw keeper phase is ${snapshot.collapsed_from} — 이건 단순한 idleness 가 아님.`
       : ''

@@ -1025,7 +1025,6 @@ export interface KeeperStatusDetail {
 export type PipelineStage =
   | 'idle'
   | 'compacting'
-  | 'handoff'
   | 'offline'
   | 'failing'
   | 'draining'
@@ -1084,7 +1083,6 @@ export type KeeperPhase =
   | 'Running'
   | 'Failing'
   | 'Compacting'
-  | 'HandingOff'
   | 'Draining'
   | 'Paused'
   | 'Stopped'

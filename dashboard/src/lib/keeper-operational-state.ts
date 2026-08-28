@@ -267,7 +267,6 @@ export function compositePhaseTone(phase: KeeperPhase): 'active' | 'warn' | 'err
     case 'Running':
       return 'active'
     case 'Compacting':
-    case 'HandingOff':
     case 'Draining':
     case 'Paused':
     case 'Restarting':

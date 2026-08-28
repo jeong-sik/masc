@@ -51,7 +51,6 @@ export type KeeperPhaseToken =
   | 'running'
   | 'paused'
   | 'compacting'
-  | 'handoff'
   | 'draining'
   | 'restarting'
   | 'failing'
@@ -95,7 +94,6 @@ export const PHASE_TONE: Readonly<Record<KeeperPhaseToken, FleetTone>> =
       paused: 'warn',
       draining: 'warn',
       compacting: 'busy',
-      handoff: 'busy',
       restarting: 'busy',
       failing: 'bad',
       stopped: 'idle',
@@ -127,7 +125,6 @@ export const PHASE_LABEL_KO: Readonly<Record<KeeperPhaseToken, string>> =
       running: '실행 중',
       paused: '일시정지',
       compacting: '압축 중',
-      handoff: '인계 중',
       draining: '정리 중',
       restarting: '재시작 중',
       failing: '오류 발생',
@@ -163,7 +160,6 @@ export const PHASE_DESCRIPTION_KO: Readonly<Record<KeeperPhaseToken, string>> =
       running: 'keeper_state_machine 기준으로 정상 실행 상태입니다.',
       paused: 'keeper가 재개 대기 상태로 멈춰 있습니다.',
       compacting: '컨텍스트를 정리하는 중입니다.',
-      handoff: '새 세대로 넘기는 중입니다.',
       draining: '현재 작업을 마무리하는 중입니다.',
       restarting: '복구를 시도하고 있습니다.',
       failing: '최근 실행에서 오류를 감지했습니다.',

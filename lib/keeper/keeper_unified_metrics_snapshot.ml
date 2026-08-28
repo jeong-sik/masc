@@ -16,7 +16,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(channel : Keeper_world_observation.keeper_cycle_channel)
     ~(checkpoint_bytes : int)
     ~(message_count : int)
-    ~(handoff_json : Yojson.Safe.t option)
     () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
@@ -118,16 +117,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
          match result.runtime_observation with
          | Some observation -> redacted_runtime_observation_to_json observation
          | None -> `Null);
-        ("handoff_performed",
-         `Bool
-           (match handoff_json with
-            | Some (`Assoc fields) ->
-                Safe_ops.json_bool ~default:false "performed" (`Assoc fields)
-            | _ -> false));
-        ("handoff",
-         match handoff_json with
-         | Some value -> value
-         | None -> `Assoc [ ("performed", `Bool false) ]);
         ( "trace_ref",
           match result.trace_ref with
           | Some trace_ref ->

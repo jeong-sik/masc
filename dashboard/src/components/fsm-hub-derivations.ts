@@ -135,7 +135,6 @@ export function inferTransitionReason(field: string, from: string, to: string): 
   }
   if (field === 'KSM') {
     if (to === 'Compacting') return 'KSM 이 lifecycle 차원에서 compaction 진입'
-    if (to === 'HandingOff') return '키퍼 인계 시작 — 다른 keeper 로 전환 준비'
     if (to === 'Failing') return '연속 실패 임계 도달 — 다음 fail 시 Crashed 가능'
     if (isCrashedPhase(to)) return '비정상 종료 — restart 정책 확인'
   }

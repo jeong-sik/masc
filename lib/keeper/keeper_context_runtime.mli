@@ -63,9 +63,6 @@ val save_agent_core_checkpoint
 type post_turn_lifecycle =
   { updated_meta : keeper_meta
   ; checkpoint : Agent_core.Checkpoint.t option
-  ; handoff_json : Yojson.Safe.t option
-  ; handoff_attempted : bool
-  ; handoff_failure_reason : string option
   ; checkpoint_bytes : int
   ; message_count : int
   }

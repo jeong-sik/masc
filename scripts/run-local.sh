@@ -16,9 +16,46 @@ PRINT_PORT_ONLY=0
 BOOTSTRAP_ONLY=0
 BUILD_DASHBOARD=0
 BOOTSTRAP_KEEPERS=0
+DASHBOARD_BUILD_RECEIPT=""
 
 # shellcheck source=scripts/lib/runtime-artifact-contract.sh
 source "$REPO_ROOT/scripts/lib/runtime-artifact-contract.sh"
+
+capture_source_root_identity() {
+  local receipt=""
+  local schema=""
+  local receipt_extra=0
+  receipt="$(mktemp "${TMPDIR:-/tmp}/masc-source-root-receipt.XXXXXX")"
+  if ! "$REPO_ROOT/scripts/run-local-executable-binding.py" \
+      --inspect-source-root "$REPO_ROOT" >"$receipt"
+  then
+    rm -f "$receipt"
+    echo "Unable to capture exact source-root identity" >&2
+    exit 1
+  fi
+  {
+    IFS= read -r schema
+    IFS= read -r SOURCE_ROOT
+    IFS= read -r SOURCE_ROOT_DEVICE
+    IFS= read -r SOURCE_ROOT_INODE
+    if IFS= read -r _extra; then receipt_extra=1; fi
+  } <"$receipt"
+  rm -f "$receipt"
+  if ! {
+    [ "$receipt_extra" = "0" ] \
+      && [ "$schema" = "masc.run-local-source-root.v1" ] \
+      && [ -d "$SOURCE_ROOT" ] \
+      && [ "$SOURCE_ROOT_DEVICE" -ge 0 ] \
+      && [ "$SOURCE_ROOT_INODE" -ge 0 ]
+  }
+  then
+    echo "Source-root inspection did not return an exact identity receipt" >&2
+    exit 1
+  fi
+  REPO_ROOT="$SOURCE_ROOT"
+}
+
+capture_source_root_identity
 
 usage() {
   cat >&2 <<'EOF'
@@ -130,13 +167,29 @@ materialize_executable_provenance() {
   git_common_dir="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)"
   private_root="$git_common_dir/masc-run-local-artifacts"
   receipt="$(mktemp "${TMPDIR:-/tmp}/masc-launch-binding.XXXXXX")"
-  if ! "$REPO_ROOT/scripts/run-local-executable-binding.py" \
-      --private-root "$private_root" \
-      --executable "$BUILT_EXE" \
-      --commit "$SOURCE_COMMIT" \
-      --fingerprint "$BUILD_INPUT_FINGERPRINT" >"$receipt"
-  then
+  materialize_binding() {
+    "$REPO_ROOT/scripts/run-local-executable-binding.py" \
+        --materialize \
+        --private-root "$private_root" \
+        --executable "$BUILT_EXE" \
+        --source-root "$SOURCE_ROOT" \
+        --expected-source-root "$SOURCE_ROOT" \
+        --expected-source-root-device "$SOURCE_ROOT_DEVICE" \
+        --expected-source-root-inode "$SOURCE_ROOT_INODE" \
+        --commit "$SOURCE_COMMIT" \
+        --fingerprint "$BUILD_INPUT_FINGERPRINT" \
+        "$@"
+  }
+  if { [ -n "$DASHBOARD_BUILD_RECEIPT" ] \
+        && ! materialize_binding \
+          --dashboard-build-receipt "$DASHBOARD_BUILD_RECEIPT" >"$receipt"; } \
+    || { [ -z "$DASHBOARD_BUILD_RECEIPT" ] \
+         && ! materialize_binding >"$receipt"; }; then
     rm -f "$receipt"
+    if [ -n "$DASHBOARD_BUILD_RECEIPT" ]; then
+      rm -f "$DASHBOARD_BUILD_RECEIPT"
+      DASHBOARD_BUILD_RECEIPT=""
+    fi
     exit 1
   fi
   {
@@ -150,6 +203,10 @@ materialize_executable_provenance() {
     if IFS= read -r _extra; then receipt_extra=1; fi
   } <"$receipt"
   rm -f "$receipt"
+  if [ -n "$DASHBOARD_BUILD_RECEIPT" ]; then
+    rm -f "$DASHBOARD_BUILD_RECEIPT"
+    DASHBOARD_BUILD_RECEIPT=""
+  fi
   if ! {
     [ "$receipt_extra" = "0" ] \
       && [ "$schema" = "masc.run-local-launch-binding.v1" ] \
@@ -240,13 +297,144 @@ bootstrap_local_config() {
 }
 
 build_dashboard_if_requested() {
+  local runtime_receipt=""
+  local input_receipt=""
+  local package_manager_receipt=""
+  local package_manager_schema=""
+  local package_manager_kind=""
+  local package_manager_executable=""
+  local package_manager_sha256=""
+  local node_executable=""
+  local node_sha256=""
+  local dashboard_build_path=""
+  local environment_profile_sha256=""
+  local package_manager_extra=0
   if [ "$BUILD_DASHBOARD" != "1" ]; then
     return 0
   fi
   if [ -x "$REPO_ROOT/scripts/build-dashboard-if-needed.sh" ]; then
-    "$REPO_ROOT/scripts/build-dashboard-if-needed.sh"
+    runtime_receipt="$(mktemp "${TMPDIR:-/tmp}/masc-dashboard-build-runtime.XXXXXX")"
+    if ! "$REPO_ROOT/scripts/run-local-executable-binding.py" \
+        --capture-dashboard-build-runtime \
+        --source-root "$SOURCE_ROOT" \
+        --expected-source-root "$SOURCE_ROOT" \
+        --expected-source-root-device "$SOURCE_ROOT_DEVICE" \
+        --expected-source-root-inode "$SOURCE_ROOT_INODE" >"$runtime_receipt"
+    then
+      rm -f "$runtime_receipt"
+      echo "Unable to capture Dashboard runtime before dependency preparation" >&2
+      exit 1
+    fi
+    chmod 400 "$runtime_receipt"
+    package_manager_receipt="$(mktemp "${TMPDIR:-/tmp}/masc-dashboard-package-manager.XXXXXX")"
+    if ! "$REPO_ROOT/scripts/run-local-executable-binding.py" \
+        --read-dashboard-package-manager "$runtime_receipt" >"$package_manager_receipt"
+    then
+      rm -f "$runtime_receipt" "$package_manager_receipt"
+      echo "Unable to resolve the captured Dashboard package-manager identity" >&2
+      exit 1
+    fi
+    {
+      IFS= read -r package_manager_schema
+      IFS= read -r package_manager_kind
+      IFS= read -r package_manager_executable
+      IFS= read -r package_manager_sha256
+      IFS= read -r node_executable
+      IFS= read -r node_sha256
+      IFS= read -r dashboard_build_path
+      IFS= read -r environment_profile_sha256
+      if IFS= read -r _extra; then package_manager_extra=1; fi
+    } <"$package_manager_receipt"
+    rm -f "$package_manager_receipt"
+    if [ "$package_manager_extra" != "0" ] \
+      || [ "$package_manager_schema" != "masc.run-local-dashboard-package-manager.v1" ] \
+      || [ ! -x "$package_manager_executable" ] \
+      || [ ! -x "$node_executable" ] \
+      || ! masc_runtime_artifact_valid_hash "$package_manager_sha256" \
+      || ! masc_runtime_artifact_valid_hash "$node_sha256" \
+      || ! masc_runtime_artifact_valid_hash "$environment_profile_sha256" \
+      || [ -z "$dashboard_build_path" ]; then
+      rm -f "$runtime_receipt"
+      echo "Captured Dashboard package-manager identity is invalid" >&2
+      exit 1
+    fi
+    if ! "$REPO_ROOT/scripts/build-dashboard-if-needed.sh" \
+      --prepare-exact \
+      --package-manager-kind "$package_manager_kind" \
+      --package-manager-executable "$package_manager_executable" \
+      --package-manager-sha256 "$package_manager_sha256" \
+      --node-executable "$node_executable" \
+      --node-sha256 "$node_sha256" \
+      --build-path "$dashboard_build_path" \
+      --environment-profile-sha256 "$environment_profile_sha256" \
+      --runtime-receipt "$runtime_receipt"
+    then
+      rm -f "$runtime_receipt"
+      echo "Dashboard dependency preparation did not preserve the captured runtime" >&2
+      exit 1
+    fi
+    input_receipt="$(mktemp "${TMPDIR:-/tmp}/masc-dashboard-build-input.XXXXXX")"
+    if ! "$REPO_ROOT/scripts/run-local-executable-binding.py" \
+        --capture-dashboard-build-input \
+        --source-root "$SOURCE_ROOT" \
+        --expected-source-root "$SOURCE_ROOT" \
+        --expected-source-root-device "$SOURCE_ROOT_DEVICE" \
+        --expected-source-root-inode "$SOURCE_ROOT_INODE" \
+        --dashboard-package-manager-kind "$package_manager_kind" \
+        --dashboard-package-manager-executable "$package_manager_executable" \
+        --dashboard-node-executable "$node_executable" \
+        --dashboard-environment-path "$dashboard_build_path" >"$input_receipt" \
+      || ! "$REPO_ROOT/scripts/run-local-executable-binding.py" \
+        --verify-dashboard-runtime-transition \
+        --dashboard-build-runtime-receipt "$runtime_receipt" \
+        --dashboard-build-input-receipt "$input_receipt"
+    then
+      rm -f "$runtime_receipt" "$input_receipt"
+      echo "Dashboard prepared runtime differs from the captured selection" >&2
+      exit 1
+    fi
+    chmod 400 "$input_receipt"
+    if ! "$REPO_ROOT/scripts/build-dashboard-if-needed.sh" \
+      --build-exact \
+      --package-manager-kind "$package_manager_kind" \
+      --package-manager-executable "$package_manager_executable" \
+      --package-manager-sha256 "$package_manager_sha256" \
+      --node-executable "$node_executable" \
+      --node-sha256 "$node_sha256" \
+      --build-path "$dashboard_build_path" \
+      --environment-profile-sha256 "$environment_profile_sha256" \
+      --runtime-receipt "$runtime_receipt" \
+      --build-input-receipt "$input_receipt"
+    then
+      rm -f "$runtime_receipt" "$input_receipt"
+      echo "Dashboard exact build failed" >&2
+      exit 1
+    fi
+    rm -f "$runtime_receipt"
+    DASHBOARD_BUILD_RECEIPT="$(mktemp "${TMPDIR:-/tmp}/masc-dashboard-build-receipt.XXXXXX")"
+    if ! "$REPO_ROOT/scripts/run-local-executable-binding.py" \
+        --emit-dashboard-build-receipt \
+        --source-root "$SOURCE_ROOT" \
+        --expected-source-root "$SOURCE_ROOT" \
+        --expected-source-root-device "$SOURCE_ROOT_DEVICE" \
+        --expected-source-root-inode "$SOURCE_ROOT_INODE" \
+        --dashboard-build-input-receipt "$input_receipt" \
+        --dashboard-package-manager-kind "$package_manager_kind" \
+        --dashboard-package-manager-executable "$package_manager_executable" \
+        --dashboard-node-executable "$node_executable" \
+        --dashboard-environment-path "$dashboard_build_path" \
+        --commit "$SOURCE_COMMIT" >"$DASHBOARD_BUILD_RECEIPT"
+    then
+      rm -f "$input_receipt"
+      rm -f "$DASHBOARD_BUILD_RECEIPT"
+      DASHBOARD_BUILD_RECEIPT=""
+      echo "Dashboard build did not produce an exact identity receipt" >&2
+      exit 1
+    fi
+    rm -f "$input_receipt"
   else
-    echo "[local-run] Dashboard build helper missing, skipping." >&2
+    echo "[local-run] Dashboard build helper missing; exact build cannot continue." >&2
+    exit 1
   fi
 }
 
@@ -313,7 +501,6 @@ if [ "${MASC_DUNE_DRY_RUN:-0}" = "1" ]; then
 fi
 
 bootstrap_local_config "$TARGET_DIR"
-build_dashboard_if_requested
 
 LOCAL_CONFIG_DIR="${MASC_CONFIG_DIR:-$TARGET_DIR/.masc/config}"
 SOURCE_COMMIT="$(source_commit)" || {
@@ -329,6 +516,11 @@ if [ "$AFTER_COMMIT" != "$SOURCE_COMMIT" ]; then
 fi
 
 if [ "$BOOTSTRAP_ONLY" = "1" ]; then
+  build_dashboard_if_requested
+  if [ -n "$DASHBOARD_BUILD_RECEIPT" ]; then
+    rm -f "$DASHBOARD_BUILD_RECEIPT"
+    DASHBOARD_BUILD_RECEIPT=""
+  fi
   echo "[local-run] Bootstrap ready" >&2
   echo "  Target dir: $TARGET_DIR" >&2
   echo "  Config root: $LOCAL_CONFIG_DIR" >&2
@@ -339,6 +531,7 @@ if [ "$BOOTSTRAP_ONLY" = "1" ]; then
   exit 0
 fi
 
+build_dashboard_if_requested
 materialize_executable_provenance
 
 if lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then

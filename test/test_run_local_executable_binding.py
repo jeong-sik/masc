@@ -124,9 +124,15 @@ class RunLocalExecutableBindingTest(unittest.TestCase):
         commit: str,
         fingerprint: str,
     ):
+        canonical, info = binding.inspect_source_root(source_root)
         return binding.materialize(
             private_root=private_root,
             executable=executable,
+            source_root=source_root,
+            expected_source_root=canonical,
+            expected_source_root_device=info.st_dev,
+            expected_source_root_inode=info.st_ino,
+            dashboard_build_receipt_path=None,
             commit=commit,
             fingerprint=fingerprint,
         )
@@ -169,6 +175,40 @@ class RunLocalExecutableBindingTest(unittest.TestCase):
                 first, second = executor.map(lambda _index: materialize(), range(2))
             self.assertEqual(first, second)
 
+    def test_same_executable_from_distinct_worktrees_has_distinct_provenance(self):
+        with tempfile.TemporaryDirectory() as raw:
+            private_root, executable = self.fixture(raw)
+            common_root = Path(raw) / "common"
+            worktree_root = Path(raw) / "worktree"
+            common_root.mkdir()
+            worktree_root.mkdir()
+            for root in (common_root, worktree_root):
+                dashboard = root / "assets" / "dashboard"
+                dashboard.mkdir(parents=True)
+                (dashboard / "index.html").write_text(root.name)
+
+            common = self.materialize(
+                private_root=private_root,
+                executable=executable,
+                source_root=common_root,
+                commit="a" * 40,
+                fingerprint="b" * 64,
+            )
+            worktree = self.materialize(
+                private_root=private_root,
+                executable=executable,
+                source_root=worktree_root,
+                commit="a" * 40,
+                fingerprint="b" * 64,
+            )
+
+            self.assertEqual(common[0], worktree[0])
+            self.assertNotEqual(common[2], worktree[2])
+            self.assertEqual(
+                worktree_root.resolve(),
+                Path(json.loads(worktree[2].read_text())["source_root"]),
+            )
+
     def test_existing_artifact_with_mutable_mode_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             private_root, executable = self.fixture(raw)
@@ -189,6 +229,33 @@ class RunLocalExecutableBindingTest(unittest.TestCase):
                     commit="a" * 40,
                     fingerprint="b" * 64,
                 )
+
+    def test_source_root_same_path_replacement_is_rejected_before_materialization(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            source_root = root / "source"
+            source_root.mkdir()
+            executable = root / "main.exe"
+            executable.write_bytes(b"executable")
+            executable.chmod(0o700)
+            canonical, source_info = binding.inspect_source_root(source_root)
+            source_root.rename(root / "displaced-source")
+            source_root.mkdir()
+
+            with self.assertRaisesRegex(binding.BindingError, "inode differs"):
+                binding.materialize(
+                    private_root=root / "private",
+                    executable=executable,
+                    source_root=source_root,
+                    expected_source_root=canonical,
+                    expected_source_root_device=source_info.st_dev,
+                    expected_source_root_inode=source_info.st_ino,
+                    dashboard_build_receipt_path=None,
+                    commit="a" * 40,
+                    fingerprint="b" * 64,
+                )
+            self.assertFalse((root / "private").exists())
 
     def test_build_receipt_carries_matching_prebuild_identity(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -633,6 +700,96 @@ class RunLocalExecutableBindingTest(unittest.TestCase):
                 text=True,
             )
             self.assertNotEqual(0, rejected.returncode)
+
+    def test_dashboard_blob_replacement_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            source_root, _pnpm, _node = self.dashboard_build_fixture(root)
+            private_root = root / "private"
+            private_root.mkdir(mode=0o700)
+            _dashboard_root, entries, payloads = binding.dashboard_source_entries(
+                source_root
+            )
+            snapshot_root, _tree, _info = binding.materialize_dashboard_snapshot(
+                private_root, entries, payloads
+            )
+            blob = snapshot_root / str(entries[0]["sha256"])
+            blob.chmod(0o600)
+            blob.write_bytes(b"x" * int(entries[0]["size"]))
+            blob.chmod(0o600)
+            with self.assertRaisesRegex(binding.BindingError, "blob differs"):
+                binding.require_snapshot_tree(snapshot_root, entries)
+
+    def test_concurrent_dashboard_snapshot_materialization_converges(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            source_root, _pnpm, _node = self.dashboard_build_fixture(root)
+            private_root = root / "private"
+            private_root.mkdir(mode=0o700)
+            _dashboard_root, entries, payloads = binding.dashboard_source_entries(
+                source_root
+            )
+
+            def materialize():
+                return binding.materialize_dashboard_snapshot(
+                    private_root, entries, payloads
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                first, second = executor.map(lambda _index: materialize(), range(2))
+            self.assertEqual(first[0], second[0])
+            self.assertEqual(first[1], second[1])
+            binding.require_snapshot_tree(first[0], entries)
+
+    def test_concurrent_dashboard_cas_materialization_converges(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            source_root, pnpm, node = self.dashboard_build_fixture(root)
+            before = binding.dashboard_build_input_receipt(
+                source_root,
+                package_manager_executable=pnpm,
+                package_manager_kind="pnpm",
+                node_executable=node,
+                environment_path=str(node.parent.resolve()),
+            )
+            commit = str(before["source_commit"])
+            receipt = binding.dashboard_build_receipt(
+                source_root,
+                commit,
+                before,
+                package_manager_executable=pnpm,
+                package_manager_kind="pnpm",
+                node_executable=node,
+                environment_path=str(node.parent.resolve()),
+            )
+            receipt_path = root / "dashboard-receipt.json"
+            receipt_path.write_text(json.dumps(receipt))
+            executable = root / "main.exe"
+            executable.write_bytes(b"exact executable")
+            executable.chmod(0o700)
+            canonical, source_info = binding.inspect_source_root(source_root)
+
+            def materialize():
+                return binding.materialize(
+                    private_root=root / "private",
+                    executable=executable,
+                    source_root=source_root,
+                    expected_source_root=canonical,
+                    expected_source_root_device=source_info.st_dev,
+                    expected_source_root_inode=source_info.st_ino,
+                    dashboard_build_receipt_path=receipt_path,
+                    commit=commit,
+                    fingerprint="b" * 64,
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                first, second = executor.map(lambda _index: materialize(), range(2))
+            self.assertEqual(first, second)
+            provenance = json.loads(first[2].read_text())
+            self.assertEqual("available", provenance["dashboard_assets"]["state"])
 
     def test_input_inventory_supports_newline_path_and_nul_bytes(self):
         with tempfile.TemporaryDirectory() as raw:

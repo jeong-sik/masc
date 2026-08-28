@@ -459,23 +459,174 @@ let candidate_to_yojson = function
       ]
 ;;
 
-let digest_candidate_to_yojson = function
-  | Ordinary_tool capability as candidate ->
+type digest_skill_error_kind =
+  | Snapshot_document_rejected
+  | Snapshot_document_unreadable
+  | Snapshot_exact_identity_duplicate
+  | Snapshot_invalid_package_id
+  | Catalog_rejection_kind of Keeper_skill_catalog.error
+
+type digest_skill_kind =
+  | Digest_instruction
+  | Digest_composition
+  | Digest_invalid
+  | Digest_missing_configured
+
+type digest_skill_identity =
+  | Digest_exact_reference of Skill_reference.t
+  | Digest_invalid_source of
+      { source_id : Skill_source_config.source_id
+      ; package_id : Skill_reference.package_id option
+      ; directory : string
+      ; content_revision : Skill_reference.content_revision option
+      }
+  | Digest_configured_name of string
+
+type digest_candidate =
+  | Digest_tool of tool_capability
+  | Digest_skill of
+      { logical_identity : digest_skill_identity
+      ; exposure : skill_exposure
+      ; availability : capability_availability
+      ; kind : digest_skill_kind
+      ; catalog_status : Keeper_skill_inventory.catalog_status option
+      ; error_kind : digest_skill_error_kind option
+      }
+
+let digest_skill_error_kind = function
+  | Keeper_skill_inventory.Snapshot_rejection reason ->
+    (match reason with
+     | Skill_catalog_snapshot.Document_rejected _ -> Snapshot_document_rejected
+     | Skill_catalog_snapshot.Document_unreadable _ -> Snapshot_document_unreadable
+     | Skill_catalog_snapshot.Exact_identity_duplicate _ ->
+       Snapshot_exact_identity_duplicate
+     | Skill_catalog_snapshot.Invalid_package_id _ -> Snapshot_invalid_package_id)
+  | Keeper_skill_inventory.Catalog_rejection error ->
+    Catalog_rejection_kind error
+;;
+
+let digest_skill_error_kind_to_string = function
+  | Snapshot_document_rejected -> "snapshot:document_rejected"
+  | Snapshot_document_unreadable -> "snapshot:document_unreadable"
+  | Snapshot_exact_identity_duplicate -> "snapshot:exact_identity_duplicate"
+  | Snapshot_invalid_package_id -> "snapshot:invalid_package_id"
+  | Catalog_rejection_kind error ->
+    "catalog:" ^ Keeper_skill_catalog.error_code error
+;;
+
+let digest_skill_kind_to_string = function
+  | Digest_instruction -> "instruction"
+  | Digest_composition -> "composition"
+  | Digest_invalid -> "invalid"
+  | Digest_missing_configured -> "missing_configured"
+;;
+
+let digest_skill_identity_to_yojson = function
+  | Digest_exact_reference reference -> Skill_reference.to_yojson reference
+  | Digest_configured_name name -> `Assoc [ "configured_name", `String name ]
+  | Digest_invalid_source { source_id; package_id; directory; content_revision } ->
     `Assoc
-      [ "candidate", candidate_to_yojson candidate
+      [ ( "source_id"
+        , `String (Skill_source_config.source_id_to_string source_id) )
+      ; ( "package_id"
+        , Option.fold
+            ~none:`Null
+            ~some:(fun package_id ->
+              `String (Skill_reference.package_id_to_string package_id))
+            package_id )
+      ; "directory", `String directory
+      ; ( "content_revision"
+        , Option.fold
+            ~none:`Null
+            ~some:(fun revision ->
+              `String (Skill_reference.content_revision_to_string revision))
+            content_revision )
+      ]
+;;
+
+let digest_invalid_identity (invalid : Keeper_skill_inventory.invalid_skill) =
+  match invalid.reference with
+  | Some reference -> Digest_exact_reference reference
+  | None ->
+    Digest_invalid_source
+      { source_id = invalid.source_id
+      ; package_id = invalid.package_id
+      ; directory = invalid.directory
+      ; content_revision = invalid.content_revision
+      }
+;;
+
+let digest_candidate = function
+  | Ordinary_tool capability -> Digest_tool capability
+  | Skill capability ->
+    (match capability.identity with
+     | Missing_configured_skill_name name ->
+       Digest_skill
+         { logical_identity = Digest_configured_name name
+         ; exposure = capability.exposure
+         ; availability = capability.availability
+         ; kind = Digest_missing_configured
+         ; catalog_status = None
+         ; error_kind = None
+         }
+     | Exact_skill (Keeper_skill_inventory.Valid valid) ->
+       Digest_skill
+         { logical_identity = Digest_exact_reference valid.reference
+         ; exposure = capability.exposure
+         ; availability = capability.availability
+         ; kind =
+             (match valid.kind with
+              | Keeper_skill_inventory.Instruction -> Digest_instruction
+              | Composition _ -> Digest_composition)
+         ; catalog_status = Some valid.catalog_status
+         ; error_kind = None
+         }
+     | Exact_skill (Keeper_skill_inventory.Invalid invalid) ->
+       Digest_skill
+         { logical_identity = digest_invalid_identity invalid
+         ; exposure = capability.exposure
+         ; availability = capability.availability
+         ; kind = Digest_invalid
+         ; catalog_status = None
+         ; error_kind = Some (digest_skill_error_kind invalid.error)
+         })
+;;
+
+let digest_candidate_to_yojson = function
+  | Digest_tool capability ->
+    `Assoc
+      [ ( "candidate"
+        , candidate_to_yojson (Ordinary_tool capability) )
       ; "input_schema", capability.descriptor.input_schema
       ]
-  | Skill _ as candidate -> candidate_to_yojson candidate
+  | Digest_skill skill ->
+    `Assoc
+      [ "candidate_kind", `String "skill"
+      ; "logical_identity", digest_skill_identity_to_yojson skill.logical_identity
+      ; "exposure", `String (skill_exposure_to_string skill.exposure)
+      ; ( "availability"
+        , `String (capability_availability_to_string skill.availability) )
+      ; "kind", `String (digest_skill_kind_to_string skill.kind)
+      ; ( "catalog_status"
+        , Option.fold
+            ~none:`Null
+            ~some:(fun status -> `String (catalog_status_to_string status))
+            skill.catalog_status )
+      ; ( "error_kind"
+        , Option.fold
+            ~none:`Null
+            ~some:(fun kind -> `String (digest_skill_error_kind_to_string kind))
+            skill.error_kind )
+      ]
 ;;
 
 let digest_material_to_yojson surface =
   `Assoc
-    [ ( "skill_snapshot_revision"
-      , `String
-          (Skill_catalog_snapshot.snapshot_revision_to_string
-             surface.skill_snapshot_revision) )
-    ; ( "candidates"
-      , `List (List.map digest_candidate_to_yojson (candidates surface)) )
+    [ ( "candidates"
+      , `List
+          (candidates surface
+           |> List.map digest_candidate
+           |> List.map digest_candidate_to_yojson) )
     ]
 ;;
 

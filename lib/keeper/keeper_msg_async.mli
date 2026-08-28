@@ -37,6 +37,9 @@ type entry =
   ; keeper_name : string
   ; base_path : string
   ; submitted_by : string
+  ; request_context : (string * Yojson.Safe.t) list option
+      (** Immutable producer context accepted with the request and retained
+          across every terminal status, including cancellation and loss. *)
   ; status : request_status
   ; submitted_at : float
   ; completed_at : float option
@@ -298,7 +301,8 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     for SSE or other live terminal notifications. Projection exceptions are
     observed and isolated from request truth. *)
 val submit
-  :  ?on_accepted:(string -> (unit, string) result)
+  :  ?request_context:(string * Yojson.Safe.t) list
+  -> ?on_accepted:(string -> (unit, string) result)
   -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
   -> ?on_worker_settled:(worker_settlement -> unit)
   -> background_sw:Eio.Switch.t
@@ -315,7 +319,8 @@ val submit
     callers needing only fire-and-forget execution should keep using
     {!submit}. *)
 val submit_with_request_id
-  :  ?on_accepted:(string -> (unit, string) result)
+  :  ?request_context:(string * Yojson.Safe.t) list
+  -> ?on_accepted:(string -> (unit, string) result)
   -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
   -> ?on_worker_settled:(worker_settlement -> unit)
   -> background_sw:Eio.Switch.t
@@ -426,6 +431,7 @@ module For_testing : sig
 
   val submit
     :  request_ops
+    -> ?request_context:(string * Yojson.Safe.t) list
     -> ?on_accepted:(string -> (unit, string) result)
     -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
     -> ?on_worker_settled:(worker_settlement -> unit)

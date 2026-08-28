@@ -116,19 +116,12 @@ let expected_model_tool_names
     then [ Keeper_tool_composition_catalog.skill_tool_name ]
     else []
   in
-  (* The shared async controls join the surface when any skill declares an
-     async composition. *)
+  (* The shared controls are always present because an Assembler proposal may
+     select async execution independently of Skill-declared compositions. *)
   let control_names =
-    if
-      List.exists
-        (fun (entry : Keeper_tool_composition_catalog.entry) ->
-          entry.execution = Keeper_tool_composition_catalog.Async)
-        entries
-    then
-      [ Keeper_tool_composition_catalog.status_tool_name
-      ; Keeper_tool_composition_catalog.cancel_tool_name
-      ]
-    else []
+    [ Keeper_tool_composition_catalog.status_tool_name
+    ; Keeper_tool_composition_catalog.cancel_tool_name
+    ]
   in
   List.sort_uniq
     String.compare

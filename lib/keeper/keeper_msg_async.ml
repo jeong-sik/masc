@@ -43,6 +43,7 @@ type entry =
   ; keeper_name : string
   ; base_path : string
   ; submitted_by : string
+  ; request_context : (string * Yojson.Safe.t) list option
   ; status : request_status
   ; submitted_at : float
   ; completed_at : float option
@@ -534,7 +535,7 @@ let with_keeper_persistence_lock ~base_path ~keeper_name f =
 exception CancelledByOperator
 exception Worker_preempted of string
 exception Worker_already_settled of entry
-let record_schema_version = 3
+let record_schema_version = 4
 
 let server_background_switch () =
   match Eio_context.get_root_switch_opt () with
@@ -821,6 +822,9 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
     ; "keeper_name", `String e.keeper_name
     ; "base_path", `String e.base_path
     ; "submitted_by", `String e.submitted_by
+    ; ( "request_context"
+      , Option.fold ~none:`Null ~some:(fun fields -> `Assoc fields)
+          e.request_context )
     ; "status", `String (status_to_string e.status)
     ; "submitted_at", `Float e.submitted_at
     ]
@@ -923,6 +927,7 @@ let validate_record_fields ~status_fields json =
     ; "keeper_name"
     ; "base_path"
     ; "submitted_by"
+    ; "request_context"
     ; "status"
     ; "submitted_at"
     ]
@@ -1016,6 +1021,13 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
   in
   let* persisted_base_path = required_string "base_path" json in
   let* submitted_by = required_string "submitted_by" json in
+  let* request_context =
+    match Json_util.assoc_member_opt "request_context" json with
+    | Some `Null -> Ok None
+    | Some (`Assoc fields) -> Ok (Some fields)
+    | Some _ -> Error "record request_context must be an object or null"
+    | None -> Error "record is missing required field \"request_context\""
+  in
   let* () =
     let trimmed = String.trim submitted_by in
     if String.equal trimmed "" || not (String.equal submitted_by trimmed)
@@ -1046,6 +1058,7 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
     ; keeper_name
     ; base_path = persisted_base_path
     ; submitted_by
+    ; request_context
     ; status
     ; submitted_at
     ; completed_at
@@ -1906,7 +1919,13 @@ let validate_request_store_root ~base_path =
          { reason = Fs_compat.owned_directory_chain_rejection_to_string rejection })
 ;;
 
-let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
+let reserve_new_request
+      ~ops
+      ~base_path
+      ~submitted_by
+      ~keeper_name
+      ~request_context
+  =
   let rec reserve () =
     let request_id = ops.generate_request_id () in
     if not (is_safe_request_id request_id)
@@ -1928,6 +1947,7 @@ let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
                   ; keeper_name
                   ; base_path
                   ; submitted_by
+                  ; request_context
                   ; status = Queued
                   ; submitted_at = Time_compat.now ()
                   ; completed_at = None
@@ -2174,8 +2194,8 @@ let runtime_cancelled_status () =
     "keeper_msg worker was cancelled by runtime before terminal result"
 ;;
 
-let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
-    ~base_path ~caller
+let submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
+    ?on_worker_settled ~background_sw ~base_path ~caller
     ~(f : request_id:string -> Eio.Switch.t -> tool_result)
     ~keeper_name () :
     (submit_outcome, submit_error) result =
@@ -2187,7 +2207,14 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
      | Ok keeper_name_id ->
     let keeper_name = Keeper_id.Keeper_name.to_string keeper_name_id in
     with_keeper_submission_lock ~base_path ~keeper_name:keeper_name_id (fun () ->
-    match reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name with
+    match
+      reserve_new_request
+        ~ops
+        ~base_path
+        ~submitted_by
+        ~keeper_name
+        ~request_context
+    with
     | Error rejection -> Error (Submit_rejected rejection)
     | Ok (request_id, entry, key, transition_lock) ->
     let reconciliation_outcome reason =
@@ -2477,10 +2504,10 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
 
 let submit_with_request_id = submit_with_ops production_request_ops
 
-let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
-    ~base_path ~caller ~f ~keeper_name () =
-  submit_with_request_id ?on_accepted ?on_worker_aborted ?on_worker_settled
-    ~background_sw ~base_path ~caller
+let submit ?request_context ?on_accepted ?on_worker_aborted ?on_worker_settled
+    ~background_sw ~base_path ~caller ~f ~keeper_name () =
+  submit_with_request_id ?request_context ?on_accepted ?on_worker_aborted
+    ?on_worker_settled ~background_sw ~base_path ~caller
     ~f:(fun ~request_id:_ request_sw -> f request_sw)
     ~keeper_name ()
 ;;
@@ -2591,6 +2618,9 @@ let entry_to_json (e : entry) : Yojson.Safe.t =
     [ "request_id", `String e.request_id
     ; "keeper_name", `String e.keeper_name
     ; "submitted_by", `String e.submitted_by
+    ; ( "request_context"
+      , Option.fold ~none:`Null ~some:(fun fields -> `Assoc fields)
+          e.request_context )
     ; "status", `String (status_to_string e.status)
     ; "submitted_at", `Float e.submitted_at
     ]
@@ -2870,9 +2900,9 @@ module For_testing = struct
   let atomic_staging_dir = atomic_staging_dir
   let load_record = load_record
   let recover_lost_disk_records = recover_lost_disk_records
-  let submit ops ?on_accepted ?on_worker_aborted ?on_worker_settled
+  let submit ops ?request_context ?on_accepted ?on_worker_aborted ?on_worker_settled
       ~background_sw ~base_path ~caller ~f ~keeper_name () =
-    submit_with_ops ops ?on_accepted ?on_worker_aborted
+    submit_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
       ?on_worker_settled ~background_sw ~base_path ~caller
       ~f:(fun ~request_id:_ request_sw -> f request_sw)
       ~keeper_name ()

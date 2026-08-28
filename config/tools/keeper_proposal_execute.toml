@@ -31,5 +31,5 @@ when_to_use = "Use only with execution_request returned by keeper_assemble_plan.
 key_constraints = [
   "The proposal is loaded against the current frozen capability surface.",
   "approval_tools must exactly match the stored typed plan node sequence.",
-  "Async proposals return a typed not_supported result until durable async execution is wired.",
+  "Async proposals return a durable request_id and settle through the shared composition status and cancellation tools.",
 ]

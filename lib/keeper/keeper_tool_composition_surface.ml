@@ -169,26 +169,20 @@ let schema_tool_rows ?(skill_compositions = []) () =
         ~input_schema:
           Tool_schemas_composition_control.proposal_execute_schema.input_schema )
   in
-  if
-    List.exists
-      (fun ((entry : Catalog.entry), _) -> entry.execution = Catalog.Async)
-      skill_compositions
-  then
-    composition_tools
-    @ [ plan_execute_tool
-      ; proposal_execute_tool
-      ; ( Async_status
-        , schema_tool
-            ~name:Catalog.status_tool_name
-            ~description:Tool_schemas_composition_control.status_schema.description
-            ~input_schema:Tool_schemas_composition_control.status_schema.input_schema )
-      ; ( Async_cancel
-        , schema_tool
-            ~name:Catalog.cancel_tool_name
-            ~description:Tool_schemas_composition_control.cancel_schema.description
-            ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema )
-      ]
-  else composition_tools @ [ plan_execute_tool; proposal_execute_tool ]
+  composition_tools
+  @ [ plan_execute_tool
+    ; proposal_execute_tool
+    ; ( Async_status
+      , schema_tool
+          ~name:Catalog.status_tool_name
+          ~description:Tool_schemas_composition_control.status_schema.description
+          ~input_schema:Tool_schemas_composition_control.status_schema.input_schema )
+    ; ( Async_cancel
+      , schema_tool
+          ~name:Catalog.cancel_tool_name
+          ~description:Tool_schemas_composition_control.cancel_schema.description
+          ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema )
+    ]
 ;;
 
 let schedule_to_json (schedule : Agent_core.Tool_contract.schedule) =
@@ -457,7 +451,10 @@ let observe_composition_run_summary
 
 let observe_async_run_settlement
       ~composition_tool
-      ~skill_reference
+      ?skill_reference
+      ?assembler_run_id
+      ?proposal_id
+      ?proposal_provenance
       ~composition_tool_kind
       ~composition_run_id
       ~parent_invocation
@@ -497,17 +494,27 @@ let observe_async_run_settlement
            in
            observe_composition_run_summary
              ~composition_tool
-             ~assembler_run_id:None
-             ~proposal_id:None
-             ~proposal_provenance:None
-             ~skill_reference
+             ~assembler_run_id
+             ~proposal_id
+             ~proposal_provenance
+             ?skill_reference
              ~composition_execution:Catalog.Async
              ~composition_tool_kind
              ~composition_run_id
              ~parent_invocation
              ~meta
              ~turn_context
-             ~input:(`Assoc [ "request_id", `String entry.request_id ])
+             ~input:
+               (`Assoc
+                 (("request_id", `String entry.request_id)
+                  :: Option.to_list
+                       (Option.map
+                          (fun proposal_id ->
+                             ( "proposal_id"
+                             , `String
+                                 (Keeper_plan_proposal.Proposal_id.to_string
+                                    proposal_id) ))
+                          proposal_id)))
              ~output_text
              ~success
              ~duration_ms
@@ -669,17 +676,21 @@ let cause_to_json = function
       ]
 ;;
 
-let failure_data ~tool_name ~tool_kind (failure : Executor.failure) =
+let failure_data ?proposal_id ~tool_name ~tool_kind (failure : Executor.failure) =
   `Assoc
-    [ "composition_tool", `String tool_name
-    ; tool_kind_field tool_kind
-    ; "settled", `List (List.map node_result_to_json failure.settled)
-    ; "cause", cause_to_json failure.cause
-    ; ( "effect_disposition"
-      , `String
-          (Tool_result.failure_effect_disposition_to_string
-             failure.effect_disposition) )
-    ]
+    (("composition_tool", `String tool_name)
+     :: tool_kind_field tool_kind
+     :: Option.to_list
+          (Option.map
+             (fun proposal_id -> "proposal_id", `String proposal_id)
+             proposal_id)
+     @ [ "settled", `List (List.map node_result_to_json failure.settled)
+       ; "cause", cause_to_json failure.cause
+       ; ( "effect_disposition"
+         , `String
+             (Tool_result.failure_effect_disposition_to_string
+                failure.effect_disposition) )
+       ])
 ;;
 
 let failure_class (failure : Executor.failure) =
@@ -694,22 +705,25 @@ let failure_class (failure : Executor.failure) =
     Tool_result.Runtime_failure
 ;;
 
-let result_of_execution ~tool_name ~tool_kind ~start_time = function
+let result_of_execution ?proposal_id ~tool_name ~tool_kind ~start_time = function
   | Ok settled ->
     Tool_result.make_ok
       ~tool_name
       ~start_time
       ~data:
         (`Assoc
-            [ "composition_tool", `String tool_name
-            ; tool_kind_field tool_kind
-            ; "actions", `List (List.map node_result_to_json settled)
-            ])
+            (("composition_tool", `String tool_name)
+             :: tool_kind_field tool_kind
+             :: Option.to_list
+                  (Option.map
+                     (fun proposal_id -> "proposal_id", `String proposal_id)
+                     proposal_id)
+             @ [ "actions", `List (List.map node_result_to_json settled) ]))
       ()
   | Error
       ({ Executor.cause = Executor.Tool_did_not_complete result; _ } as failure :
         Executor.failure) ->
-    let data = failure_data ~tool_name ~tool_kind failure in
+    let data = failure_data ?proposal_id ~tool_name ~tool_kind failure in
     (match result.result with
      | Tool_result.Deferred payload ->
        Tool_result.make_deferred
@@ -734,7 +748,7 @@ let result_of_execution ~tool_name ~tool_kind ~start_time = function
          ~data
          "composition executor reported a completed result as incomplete")
   | Error failure ->
-    let data = failure_data ~tool_name ~tool_kind failure in
+    let data = failure_data ?proposal_id ~tool_name ~tool_kind failure in
     Tool_result.make_err
       ~tool_name
       ~class_:Tool_result.Runtime_failure
@@ -760,7 +774,11 @@ let execute_keeper_plan ~capability_authority =
 ;;
 
 let async_worker_result
-      ~(entry : Catalog.entry)
+      ~composition_execution
+      ~tool_kind
+      ?assembler_run_id
+      ?proposal_id
+      ?proposal_provenance
       ~plan
       ~tool_name
       ~request_id
@@ -783,7 +801,8 @@ let async_worker_result
     Keeper_sandbox_factory.cleanup sandbox_factory);
   let start_time = Time_compat.now () in
   let run_id = Keeper_tool_plan.Run_id.fresh () in
-  execute_keeper_plan
+  let execution =
+    execute_keeper_plan
     ~capability_authority
     ~plan
     ~run_id
@@ -800,19 +819,45 @@ let async_worker_result
          (fun turn_context ->
             observe_node_result
               ~composition_tool:tool_name
-              ~assembler_run_id:None
-              ~proposal_id:None
-              ~proposal_provenance:None
-              ~composition_execution:entry.execution
-              ~composition_tool_kind:(Catalog.tool_kind entry)
+              ~assembler_run_id
+              ~proposal_id
+              ~proposal_provenance
+              ~composition_execution
+              ~composition_tool_kind:tool_kind
               ~composition_run_id
               ~parent_invocation:source_invocation
               ~meta
               ~turn_context)
          turn_context)
     ?clock
-    ()
-  |> result_of_execution ~tool_name ~tool_kind:(Catalog.tool_kind entry) ~start_time
+      ()
+  in
+  let proposal_id_text =
+    Option.map Keeper_plan_proposal.Proposal_id.to_string proposal_id
+  in
+  let result =
+    result_of_execution
+      ?proposal_id:proposal_id_text
+      ~tool_name
+      ~tool_kind
+      ~start_time
+      execution
+  in
+  match assembler_run_id, proposal_id, proposal_provenance with
+  | Some assembler_run_id, Some proposal_id, Some proposal_provenance ->
+    Keeper_plan_proposal_provenance.attach_to_result
+      ~assembler_run_id
+      ~proposal_id
+      proposal_provenance
+      result
+  | None, None, None -> result
+  | _ ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Runtime_failure
+      ~start_time
+      ~data:(`Assoc [ "error", `String "incomplete_async_proposal_identity" ])
+      "async proposal identity must be complete or absent"
 ;;
 
 let result_from_json ~tool_name ~start_time ~class_ ~ok data =
@@ -828,10 +873,13 @@ let result_from_json ~tool_name ~start_time ~class_ ~ok data =
 ;;
 
 let async_submission_result
-      ~entry
-      ~skill_reference
+      ?skill_reference
+      ?assembler_run_id
+      ?proposal_id
+      ?proposal_provenance
       ~plan
       ~tool_name
+      ~tool_kind
       ~parent_invocation
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -843,12 +891,44 @@ let async_submission_result
       ()
   =
   let start_time = Time_compat.now () in
-  let tool_kind = Catalog.tool_kind entry in
   let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
+  let proposal_fields =
+    Option.to_list
+      (Option.map
+         (fun assembler_run_id ->
+            ( "assembler_run_id"
+            , `String
+                (Keeper_plan_proposal_execution_request.Assembler_run_id.to_string
+                   assembler_run_id) ))
+         assembler_run_id)
+    @ Option.to_list
+        (Option.map
+           (fun proposal_id ->
+              ( "proposal_id"
+              , `String (Keeper_plan_proposal.Proposal_id.to_string proposal_id) ))
+           proposal_id)
+    @ Option.to_list
+        (Option.map
+           (fun provenance ->
+              ( "proposal_provenance_status"
+              , `String
+                  (Keeper_plan_proposal_provenance.status_to_string provenance) ))
+           proposal_provenance)
+  in
+  let with_proposal_fields = function
+    | `Assoc fields -> `Assoc (fields @ proposal_fields)
+    | json -> json
+  in
+  let request_context =
+    match proposal_fields with
+    | [] -> None
+    | fields -> Some fields
+  in
   match Keeper_msg_async.server_background_switch () with
   | Error error ->
     let data =
       with_tool_kind_field tool_kind (Keeper_msg_async.submit_error_to_json error)
+      |> with_proposal_fields
     in
     result_from_json
       ~tool_name
@@ -859,6 +939,7 @@ let async_submission_result
   | Ok background_sw ->
     (match
        Keeper_msg_async.submit_with_request_id
+         ?request_context
          ~background_sw
          ~base_path:config.base_path
          ~caller:meta.name
@@ -872,7 +953,10 @@ let async_submission_result
          ~on_worker_settled:(fun settlement ->
            observe_async_run_settlement
              ~composition_tool:tool_name
-             ~skill_reference
+             ?skill_reference
+             ?assembler_run_id
+             ?proposal_id
+             ?proposal_provenance
              ~composition_tool_kind:tool_kind
              ~composition_run_id
              ~parent_invocation
@@ -885,7 +969,11 @@ let async_submission_result
              settlement)
          ~f:(fun ~request_id request_sw ->
            async_worker_result
-             ~entry
+             ~composition_execution:Catalog.Async
+             ~tool_kind
+             ?assembler_run_id
+             ?proposal_id
+             ?proposal_provenance
              ~plan
              ~tool_name
              ~request_id
@@ -907,6 +995,7 @@ let async_submission_result
          with_tool_kind_field
            tool_kind
            (Keeper_msg_async.submit_error_to_json error)
+         |> with_proposal_fields
        in
        result_from_json
          ~tool_name
@@ -920,13 +1009,15 @@ let async_submission_result
           } as outcome) ->
        let data =
          `Assoc
-           [ "composition_tool", `String tool_name
-           ; ( "composition_run_id"
-             , `String
-                 (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) )
-           ; tool_kind_field tool_kind
-           ; "execution", `String "async"
-           ; "request_id", `String request_id
+           (("composition_tool", `String tool_name)
+            :: ( "composition_run_id"
+               , `String
+                   (Keeper_tool_plan.Composition_run_id.to_string
+                      composition_run_id) )
+            :: tool_kind_field tool_kind
+            :: proposal_fields
+            @ [ "execution", `String "async"
+              ; "request_id", `String request_id
            (* Says the wake exists. Without it the only way to learn the
               result is to poll keeper_composition_status, which is the habit
               that left results sitting a median of 21.9s. *)
@@ -935,8 +1026,8 @@ let async_submission_result
                  "async: you will be woken with the result when this \
                   composition settles. Read it with keeper_composition_status \
                   and this request_id; there is no need to poll for it." )
-           ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
-           ]
+              ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
+              ])
        in
        result_from_json
          ~tool_name
@@ -951,14 +1042,16 @@ let async_submission_result
           } as outcome) ->
        let data =
          `Assoc
-           [ "composition_tool", `String tool_name
-           ; ( "composition_run_id"
-             , `String
-                 (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) )
-           ; tool_kind_field tool_kind
-           ; "execution", `String "async"
-           ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
-           ]
+           (("composition_tool", `String tool_name)
+            :: ( "composition_run_id"
+               , `String
+                   (Keeper_tool_plan.Composition_run_id.to_string
+                      composition_run_id) )
+            :: tool_kind_field tool_kind
+            :: proposal_fields
+            @ [ "execution", `String "async"
+              ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
+              ])
        in
        result_from_json
          ~tool_name
@@ -1457,9 +1550,6 @@ let make_tools_with_authority
      TOML catalog, so materialization cannot tell them apart — one closure
      serves both. Name collisions across the two sources are refused where
      both catalogs are loaded, before this point. *)
-  let declared_entries =
-    List.map (fun (skill : composition_skill) -> skill.entry) skill_compositions
-  in
   let composition_tools =
     skill_compositions
     |> List.map (fun (skill : composition_skill) ->
@@ -1575,10 +1665,10 @@ let make_tools_with_authority
                            ( Activation_ledger.Recorded _
                            | Activation_ledger.Already_recorded _ ) ->
                          async_submission_result
-                           ~entry
                            ~skill_reference:skill.reference
                            ~plan
                            ~tool_name
+                           ~tool_kind:(Catalog.tool_kind entry)
                            ~parent_invocation
                            ~config
                            ~meta
@@ -1590,10 +1680,10 @@ let make_tools_with_authority
                            ())
                     | None ->
                       async_submission_result
-                        ~entry
                         ~skill_reference:skill.reference
                         ~plan
                         ~tool_name
+                        ~tool_kind:(Catalog.tool_kind entry)
                         ~parent_invocation
                         ~config
                         ~meta
@@ -2261,17 +2351,30 @@ let make_tools_with_authority
                        else
                          (match Proposal.execution proposal with
                           | Proposal.Async ->
-                            reject
-                              ~start_time
-                              ~class_:Tool_result.Workflow_rejection
-                              (`Assoc
-                                ([ "error", `String "not_supported"
-                                 ; "mode", `String "async"
-                                 ]
-                                 @ provenance_fields
-                                     ~assembler_run_id
-                                     ~proposal_id
-                                     proposal_provenance))
+                            let turn_context =
+                              Option.map
+                                (fun cell ->
+                                   Keeper_tool_call_log_context.get_turn_context_record
+                                     ~cell
+                                     ())
+                                turn_ctx_cell
+                            in
+                            async_submission_result
+                              ~assembler_run_id
+                              ~proposal_id
+                              ~proposal_provenance
+                              ~plan:(Proposal.plan proposal)
+                              ~tool_name
+                              ~tool_kind
+                              ~parent_invocation
+                              ~config
+                              ~meta
+                              ~capability_authority
+                              ~publication_recovery
+                              ~ctx_snapshot
+                              ~turn_context
+                              ?clock
+                              ()
                           | Proposal.Inline ->
                             execute_loaded
                               ~start_time
@@ -2280,11 +2383,6 @@ let make_tools_with_authority
                               ~assembler_run_id
                               ~proposal_provenance
                               proposal)))))))
-  in
-  let has_async =
-    List.exists
-      (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
-      declared_entries
   in
   let composition_tools =
     composition_tools @ [ plan_execute_tool; proposal_execute_tool ]
@@ -2303,10 +2401,7 @@ let make_tools_with_authority
             ()
         ]
   in
-  if not has_async
-  then composition_tools
-  else
-    let status_tool =
+  let status_tool =
       make_request_control_tool
         ~config
         ~name:Catalog.status_tool_name
@@ -2315,8 +2410,8 @@ let make_tools_with_authority
         ~descriptor:
           (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
         ~handle:(fun request_id -> status_result ~config ~meta ~request_id)
-    in
-    let cancel_tool =
+  in
+  let cancel_tool =
       make_request_control_tool
         ~config
         ~name:Catalog.cancel_tool_name
@@ -2324,8 +2419,8 @@ let make_tools_with_authority
         ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
         ~handle:(fun request_id -> cancel_result ~config ~meta ~request_id)
-    in
-    composition_tools @ [ status_tool; cancel_tool ]
+  in
+  composition_tools @ [ status_tool; cancel_tool ]
 ;;
 
 let make_tools ~capability_surface =

@@ -303,6 +303,59 @@ let test_refused_call_keeps_its_arguments () =
     (Option.is_some (Astring.String.find_sub ~sub:"REJECTED: not verified" section))
 ;;
 
+(* The digest is the salience fix: sangsu re-read the same nonexistent paths
+   every autonomous turn on 2026-08-28 while the refusals were already inside
+   this window, buried in the row matrix. Five turns of the same rejected
+   read must surface as one counted row, ahead of the rows. *)
+let test_failure_digest_dedupes_and_counts () =
+  let path = "{\"path\":\"/repos/masc/lib/keeper/keeper_sandbox_control.ml\"}" in
+  let observation =
+    { base_observation with
+      WO.own_recent_actions =
+        List.init 5 (fun i ->
+            action_turn
+              (370 + i)
+              [
+                call
+                  ~tool:"tool_read_file"
+                  ~input:path
+                  ~outcome:
+                    (Masc.Keeper_own_recent_actions.Failed_call
+                       (Some "docker_cat_failed: No such file or directory"));
+              ])
+    }
+  in
+  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let section = own_recent_actions_section body in
+  check bool "digest heading present" true
+    (Option.is_some (Astring.String.find_sub ~sub:"Rejected already" section));
+  check bool "the same rejected read is counted once" true
+    (Option.is_some (Astring.String.find_sub ~sub:" ×5 " section));
+  check bool "and keeps its newest refusal reason" true
+    (Option.is_some
+       (Astring.String.find_sub
+          ~sub:"docker_cat_failed: No such file or directory" section))
+;;
+
+let test_no_digest_without_failures () =
+  let observation =
+    { base_observation with
+      WO.own_recent_actions =
+        [ action_turn
+            380
+            [ call
+                ~tool:"masc_board_list"
+                ~input:"{}"
+                ~outcome:Masc.Keeper_own_recent_actions.Ok_call ]
+        ]
+    }
+  in
+  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let section = own_recent_actions_section body in
+  check bool "no digest heading without refusals" true
+    (Option.is_none (Astring.String.find_sub ~sub:"Rejected already" section))
+;;
+
 (* --- 1. Current Task layer --- *)
 
 let test_current_task_section_renders () =
@@ -876,6 +929,10 @@ let () =
             test_successful_call_arguments_are_not_replayed;
           test_case "a refused call keeps what was sent" `Quick
             test_refused_call_keeps_its_arguments;
+          test_case "repeated refusals collapse into one digest row" `Quick
+            test_failure_digest_dedupes_and_counts;
+          test_case "no digest block without refusals" `Quick
+            test_no_digest_without_failures;
         ] );
       ( "goal titles",
         [

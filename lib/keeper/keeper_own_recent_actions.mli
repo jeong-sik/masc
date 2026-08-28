@@ -48,3 +48,17 @@ val collect : keeper_name:string -> max_turns:int -> turn list
     returned is whole: a saturated tail read begins mid-turn, so its oldest
     group is discarded rather than rendered with calls silently missing. A
     short read window therefore costs turns, never parts of one. *)
+
+type failure_digest =
+  { failure_tool : string
+  ; failure_input : string
+  ; failure_count : int
+  ; failure_detail : string option
+        (** The newest occurrence's refusal text, [None] when unexplained. *)
+  ; failure_last_turn : int
+  }
+
+val digest_failures : ?limit:int -> turn list -> failure_digest list
+(** Collapses the window's refusals into one row per distinct rejected
+    (tool, input), counted, newest occurrence first, capped at [limit]
+    (default 8). Pure. Empty when every call in the window succeeded. *)

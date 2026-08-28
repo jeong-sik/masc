@@ -1235,7 +1235,7 @@ let test_the_screen_does_not_read_the_servers_bind_address () =
 
 let test_server_identity_is_revalidated_on_every_refresh () =
   let main_path = "bin/masc_tui.ml" in
-  check int "each surface refresh asks the compact identity probe once" 1
+  check int "each full refresh asks the compact identity probe once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"load_http_surfaces" ~callee:"load_server_identity");
   check int "identity-known cache gating is absent" 0
@@ -1251,6 +1251,18 @@ let test_server_identity_is_revalidated_on_every_refresh () =
   check int "a failed refresh clears current identity" 1
     (Ast_grep.count_field_clears_to_none ~module_path:main_path
        ~binding_name:"apply_async_message" ~field_name:"server_identity")
+;;
+
+let test_scoped_surface_refresh_does_not_own_connection_status () =
+  let main_path = "bin/masc_tui.ml" in
+  check int "scoped launch preserves the last full connection reading" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"start_http_scoped_refresh"
+       ~callees:[] ~fields:[ "connection_status" ]);
+  check int "scoped completion preserves the last full connection reading" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"apply_http_scoped_surfaces"
+       ~callees:[] ~fields:[ "connection_status" ])
 ;;
 
 let test_gate_stance_listing_rides_the_flow_generation () =
@@ -1319,9 +1331,10 @@ let test_planning_refresh_reconciles_navigation_identity () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:main_path ~binding_name:"apply_planning_load" ~callees:[]
        ~fields:[ "view" ]);
-  check int "HTTP surface application owns one planning apply" 1
+  check int "scoped HTTP application owns one planning apply" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_http_surfaces" ~callee:"apply_planning_load");
+       ~binding_name:"apply_http_scoped_surfaces"
+       ~callee:"apply_planning_load");
   (* #29443 removed two [List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals]
      lookups from the key loop: the loop re-derived the Planning selection from
      whichever snapshot it happened to hold, and a reorder between refreshes
@@ -2236,6 +2249,10 @@ let () =
           "server identity is revalidated on every refresh"
           `Quick
           test_server_identity_is_revalidated_on_every_refresh;
+        test_case
+          "scoped surface refresh preserves connection status"
+          `Quick
+          test_scoped_surface_refresh_does_not_own_connection_status;
         test_case
           "overview events use bounded scroll projection"
           `Quick

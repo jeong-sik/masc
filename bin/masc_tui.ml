@@ -1223,8 +1223,7 @@ type approval_observation = {
   ao_result: (approval_snapshot, string) result;
 }
 
-type http_surface_results = {
-  http_overview: (overview_snapshot, string) result;
+type http_scoped_surface_results = {
   http_transport: (Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
   (* [None] on surfaces that do not draw them. Each is read by one surface, and
@@ -1235,9 +1234,6 @@ type http_surface_results = {
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
   http_fleet_safety: (Tui_decode.fleet_safety, string) result option;
-  (* Mandatory on every refresh: the same endpoint may name a different
-     server after a restart, without a failed request reaching this process. *)
-  http_server_identity: (Tui_decode.server_identity, string) result;
   (* [None] on surfaces that do not show it: the roster costs a request and
      only the Keepers surface reads it, so leaving it out keeps whatever the
      last Keepers refresh observed rather than dropping it. *)
@@ -1245,9 +1241,21 @@ type http_surface_results = {
     (Keeper_control.roster, Keeper_control.roster_failure) result option;
 }
 
+type http_surface_results = {
+  http_overview: (overview_snapshot, string) result;
+  http_approvals: approval_observation option;
+  http_scoped: http_scoped_surface_results;
+  (* Mandatory on every refresh: the same endpoint may name a different
+     server after a restart, without a failed request reaching this process. *)
+  http_server_identity: (Tui_decode.server_identity, string) result;
+}
+
 type async_msg =
   | Http_refresh_done of http_surface_results
   | Http_refresh_failed of string * Approval.Flow.generation option
+  | Http_scoped_refresh_done of http_scoped_surface_results
+  | Http_scoped_refresh_failed of
+      string * Approval.Flow.generation option
   | Board_post_refresh_done of
       Board_detail.request * (board_post * board_comment list, string) result
   | Board_post_refresh_failed of Board_detail.request * string
@@ -4933,10 +4941,9 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_surfaces ~host ~port ~approval_generation ~board_sort
+let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
     ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
-  let http_overview = load_overview ~host ~port in
   (* Only the Overview row shows this, so a refresh on another surface does not
      spend a request on it. [None] leaves whatever the last read observed. *)
   let http_transport =
@@ -4967,28 +4974,40 @@ let load_http_surfaces ~host ~port ~approval_generation ~board_sort
   let http_fleet_safety =
     when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
   in
-  (* A process can disappear and another bind the same endpoint between two
-     successful ticks. The compact /health identity is therefore revalidated
-     on every refresh rather than inferred from connection failure. *)
-  let http_server_identity = load_server_identity ~host ~port in
   let http_keeper_roster =
     when_needed needs.needs_keeper_roster (fun () ->
         load_keeper_roster ~host ~port)
   in
-  { http_overview
-  ; http_transport
+  { http_transport
   ; http_approvals
   ; http_asks
   ; http_board
   ; http_planning
   ; http_system_logs
   ; http_fleet_safety
-  ; http_server_identity
   ; http_keeper_roster
   }
 
-let apply_http_surfaces state results =
-  apply_overview_load state results.http_overview;
+let load_http_surfaces ~host ~port ~approval_generation ~board_sort
+    ~(needs : Masc_tui_types.surface_needs) =
+  let http_overview = load_overview ~host ~port in
+  let http_approvals =
+    Option.map
+      (fun ao_generation ->
+         { ao_generation; ao_result = load_approvals ~host ~port })
+      approval_generation
+  in
+  (* A process can disappear and another bind the same endpoint between two
+     successful ticks. The compact /health identity is therefore revalidated
+     on every refresh rather than inferred from connection failure. *)
+  let http_server_identity = load_server_identity ~host ~port in
+  let http_scoped =
+    load_http_scoped_surfaces ~host ~port ~approval_generation:None ~board_sort
+      ~needs
+  in
+  { http_overview; http_approvals; http_scoped; http_server_identity }
+
+let apply_http_scoped_surfaces state results =
   Option.iter (apply_transport_load state) results.http_transport;
   Option.iter (apply_approval_observation state) results.http_approvals;
   Option.iter (apply_asks_load state) results.http_asks;
@@ -4996,6 +5015,12 @@ let apply_http_surfaces state results =
   Option.iter (apply_planning_load state) results.http_planning;
   Option.iter (apply_system_logs_load state) results.http_system_logs;
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
+  Option.iter (apply_keeper_roster_load state) results.http_keeper_roster
+
+let apply_http_surfaces state results =
+  apply_overview_load state results.http_overview;
+  Option.iter (apply_approval_observation state) results.http_approvals;
+  apply_http_scoped_surfaces state results.http_scoped;
   (* This is a current reading, not a last-known cache. A failed probe makes
      the projection unread; every following refresh asks again, so a same-port
      replacement still moves A -> B as soon as /health succeeds. *)
@@ -5010,7 +5035,6 @@ let apply_http_surfaces state results =
    | Masc_tui_types.Workspace_identity_match ->
      load_from_masc_dir state state.local_base_path
    | Masc_tui_types.Workspace_identity_unread -> ());
-  Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
@@ -5021,8 +5045,8 @@ let apply_http_surfaces state results =
   state.connection_status <-
     refresh_status
       ([ reached results.http_overview ]
-       @ reached_if_asked results.http_board
-       @ reached_if_asked results.http_planning
+       @ reached_if_asked results.http_scoped.http_board
+       @ reached_if_asked results.http_scoped.http_planning
        @ (Option.map
             (fun observation -> reached observation.ao_result)
             results.http_approvals
@@ -5254,7 +5278,13 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   | (Disconnected | Connecting | Reconnecting), _ ->
       ()
 
-let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
+let start_http_refresh state ~host ~port ~intent ~refresh_inflight
+    ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  scoped_refresh_followup :=
+    note_full_refresh_intent ~intent
+      ~full_refresh_inflight:!refresh_inflight
+      ~scoped_refresh_inflight:!scoped_refresh_inflight
+      !scoped_refresh_followup;
   if not !refresh_inflight then begin
     refresh_inflight := true;
     let flow, approval_generation =
@@ -5265,7 +5295,10 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
       (match state.connection_status with
        | Connected | Degraded -> Masc_tui_types.Reconnecting
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
-    let needs = Masc_tui_types.surface_needs state.view in
+    let needs =
+      Masc_tui_types.full_refresh_needs
+        ~scoped_refresh_inflight:!scoped_refresh_inflight state.view
+    in
     (* The chat pane's history comes down its own generation-guarded path, not
        in the surface bundle, so the tick asks for it here. Without this the
        pane read once on open and a message that arrived after that waited for
@@ -5345,6 +5378,65 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
                (load_http_surfaces ~host ~port ~approval_generation
                   ~board_sort:state.board_sort ~needs))
   end
+
+let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
+    ~(needs : Masc_tui_types.surface_needs) =
+  if not !refresh_inflight then begin
+    refresh_inflight := true;
+    let approval_generation =
+      if needs.needs_operator_approvals then begin
+        let flow, generation = Approval.Flow.reserve_refresh state.approval_flow in
+        state.approval_flow <- flow;
+        generation
+      end
+      else None
+    in
+    (* Chat history has its own generation-guarded loader rather than a field
+       in the HTTP surface record. It still follows the same delta: entering
+       chat asks once; moving among Keeper modes that share the roster does
+       not restart it. *)
+    (if needs.needs_keeper_chat && state.msg_scroll = 0 then
+       match state.msg_target_keeper_name with
+       | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
+       | None -> ());
+    let run_refresh () =
+      try
+        enqueue_async mailbox
+          (Http_scoped_refresh_done
+             (load_http_scoped_surfaces ~host ~port
+                ~approval_generation ~board_sort:state.board_sort ~needs))
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        enqueue_async mailbox
+          (Http_scoped_refresh_failed
+             ( Printf.sprintf "HTTP surface refresh failed: %s"
+                 (Printexc.to_string exn)
+             , approval_generation ))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork ~sw run_refresh
+    | None ->
+        Fun.protect
+          ~finally:(fun () -> refresh_inflight := false)
+          (fun () ->
+             apply_http_scoped_surfaces state
+               (load_http_scoped_surfaces ~host ~port
+                  ~approval_generation ~board_sort:state.board_sort ~needs))
+  end
+
+let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
+    ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  let next, launch =
+    take_scoped_refresh_followup
+      ~full_refresh_inflight:!refresh_inflight
+      ~scoped_refresh_inflight:!scoped_refresh_inflight
+      !scoped_refresh_followup
+  in
+  scoped_refresh_followup := next;
+  if launch then
+    start_http_refresh state ~host ~port ~intent:Revalidate ~refresh_inflight
+      ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
 
 let board_detail_request_still_current state request =
   Board_detail.is_current state.board_detail request
@@ -6395,7 +6487,8 @@ let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
            Masc_tui_paste.max_bytes paste.Masc_tui_paste.dropped)
   end
 
-let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
+let apply_async_message state ~base_path ~http_refresh_inflight
+    ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
   | Http_refresh_done results ->
       http_refresh_inflight := false;
@@ -6409,7 +6502,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
        | _ -> ());
       open_observer_if_due state ~retry_closed:false
-        ~host:(server_peer_host) ~port:state.port ~mailbox
+        ~host:(server_peer_host) ~port:state.port ~mailbox;
+      start_scoped_refresh_followup state ~host:(server_peer_host)
+        ~port:state.port ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox
   | Observer_opened session_id ->
       state.mcp_session <- Some session_id;
       state.observer <-
@@ -6498,7 +6595,37 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       approval_generation;
       state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
-      add_event state "error" err
+      add_event state "error" err;
+      start_scoped_refresh_followup state ~host:(server_peer_host)
+        ~port:state.port ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox
+  | Http_scoped_refresh_done results ->
+      http_scoped_refresh_inflight := false;
+      apply_http_scoped_surfaces state results;
+      (match state.view with
+       | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+       | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
+       | _ -> ());
+      start_scoped_refresh_followup state ~host:(server_peer_host)
+        ~port:state.port ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox
+  | Http_scoped_refresh_failed (err, approval_generation) ->
+      http_scoped_refresh_inflight := false;
+      Option.iter
+        (fun ao_generation ->
+           apply_approval_observation state
+             { ao_generation; ao_result = Error err })
+        approval_generation;
+      (* A scoped surface read cannot establish that the server disappeared:
+         only the full refresh owns /health and connection status. Keep the
+         last observed connection and expose the failed dataset read. *)
+      add_event state "error" err;
+      start_scoped_refresh_followup state ~host:(server_peer_host)
+        ~port:state.port ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox
   | Board_post_refresh_done (request, result) ->
       apply_board_post_load state request result
   | Board_post_refresh_failed (request, err) ->
@@ -6510,7 +6637,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
          now means the row stops offering the action that just ran without
          waiting out the refresh interval. *)
       start_http_refresh state ~host:(server_peer_host)
-        ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
+        ~port:state.port ~intent:Revalidate
+        ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox
   | Board_new_post_done { reply_to; sent_draft; result } -> (
       (* The completion answers for the draft it carried, not for whatever
          is in the buffer now: a slow server must not clear words typed
@@ -6536,7 +6666,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              contain what they just published. A comment refreshes the
              detail too, so the reply is visible the moment it lands. *)
           start_http_refresh state ~host:(server_peer_host)
-            ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox;
+            ~port:state.port ~intent:Revalidate
+            ~refresh_inflight:http_refresh_inflight
+            ~scoped_refresh_inflight:http_scoped_refresh_inflight
+            ~scoped_refresh_followup ~mailbox;
           (match reply_to with
            | Some post_id ->
                start_board_post_refresh state
@@ -6556,7 +6689,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (* The score is drawn from the list; refresh it rather than
              waiting out the interval to see the arrow land. *)
           start_http_refresh state ~host:(server_peer_host)
-            ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
+            ~port:state.port ~intent:Revalidate
+            ~refresh_inflight:http_refresh_inflight
+            ~scoped_refresh_inflight:http_scoped_refresh_inflight
+            ~scoped_refresh_followup ~mailbox
       | Error err ->
           state.board_vote_armed <- None;
           add_event state "error" ("Board vote failed: " ^ err))
@@ -6570,7 +6706,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              yet; without this the detail keeps the old phase after the
              operator already changed it. *)
           start_http_refresh state ~host:(server_peer_host)
-            ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
+            ~port:state.port ~intent:Revalidate
+            ~refresh_inflight:http_refresh_inflight
+            ~scoped_refresh_inflight:http_scoped_refresh_inflight
+            ~scoped_refresh_followup ~mailbox
       | Error err ->
           state.goal_action_armed <- None;
           state.goal_action_error <- Some err)
@@ -7709,13 +7848,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             (* The cursor is kept so the same page can be asked for again;
                what is on screen is untouched. *)
             state.msg_older_error <- Some detail)
-let drain_async_messages state ~base_path ~http_refresh_inflight mailbox =
+let drain_async_messages state ~base_path ~http_refresh_inflight
+    ~http_scoped_refresh_inflight ~scoped_refresh_followup mailbox =
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None -> changed
     | Some msg ->
-        apply_async_message state ~base_path ~http_refresh_inflight ~mailbox
-          msg;
+        apply_async_message state ~base_path ~http_refresh_inflight
+          ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
         loop true
   in
   loop false
@@ -8179,6 +8319,8 @@ let main () =
   let host = server_peer_host in
   let port = state.port in
   let http_refresh_inflight = ref false in
+  let http_scoped_refresh_inflight = ref false in
+  let scoped_refresh_followup = ref No_scoped_followup in
   let async_messages = Eio.Stream.create 32 in
   let presented_surface_reference () =
     match state.view with
@@ -8242,7 +8384,10 @@ let main () =
    with
    | Some notice -> add_event state "error" notice
    | None -> ());
-  start_http_refresh state ~host ~port ~refresh_inflight:http_refresh_inflight
+  start_http_refresh state ~host ~port ~intent:Revalidate
+    ~refresh_inflight:http_refresh_inflight
+    ~scoped_refresh_inflight:http_scoped_refresh_inflight
+    ~scoped_refresh_followup
     ~mailbox:async_messages;
   add_event state "system" "TUI started";
 
@@ -8987,7 +9132,7 @@ and is loaded on demand through keeper_skill.
       end;
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
-          async_messages
+          ~http_scoped_refresh_inflight ~scoped_refresh_followup async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
       (* Check for input *)
       let input_timeout =
@@ -10556,8 +10701,10 @@ and is loaded on demand through keeper_skill.
            load_local_workspace_if_safe state base_path;
            let host = server_peer_host in
            let port = state.port in
-           start_http_refresh state ~host ~port
+           start_http_refresh state ~host ~port ~intent:Revalidate
              ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup
              ~mailbox:async_messages;
            (* Also reload logs / Board detail if viewing them. *)
            (match state.view with
@@ -12241,7 +12388,10 @@ and is loaded on demand through keeper_skill.
                        ("Board order: "
                         ^ board_sort_label state.board_sort);
                      start_http_refresh state ~host:server_peer_host
-                       ~port:state.port ~refresh_inflight:http_refresh_inflight
+                       ~port:state.port ~intent:Revalidate
+                       ~refresh_inflight:http_refresh_inflight
+                       ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                       ~scoped_refresh_followup
                        ~mailbox:async_messages)
             | Planning ->
                 (* Client-side re-order of the loaded goals: no refetch. *)
@@ -12342,22 +12492,31 @@ and is loaded on demand through keeper_skill.
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
       | _ -> ());
 
-      (* A refresh already running was asked for what the surface open when it
-         started needed, so it brings nothing for this one. The need is recorded
-         as fetched only once a request has actually gone out; until then the
-         next pass through the loop tries again. *)
+      (* Surface navigation asks only for datasets the destination adds. The
+         full refresh owns connection identity and the global badges; replaying
+         it for every Tab made an Overview -> Tools walk spend those requests
+         once per distinct [surface_needs] record. A scoped refresh neither
+         repeats them nor changes connection status. *)
       let needed = Masc_tui_types.surface_needs state.view in
-      if needed <> !drawn_needs && not !http_refresh_inflight then begin
+      if
+        needed <> !drawn_needs
+        && not !http_refresh_inflight
+        && not !http_scoped_refresh_inflight
+      then begin
+        let delta =
+          Masc_tui_types.surface_needs_delta ~previous:!drawn_needs ~next:needed
+        in
         drawn_needs := needed;
-        start_http_refresh state ~host:(server_peer_host)
-          ~port:state.port ~refresh_inflight:http_refresh_inflight
-          ~mailbox:async_messages
+        if Masc_tui_types.surface_needs_any delta then
+          start_http_scoped_refresh state ~host:(server_peer_host)
+            ~port:state.port ~refresh_inflight:http_scoped_refresh_inflight
+            ~mailbox:async_messages ~needs:delta
       end;
 
       Eio.Fiber.yield ();
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
-          async_messages
+          ~http_scoped_refresh_inflight ~scoped_refresh_followup async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
 
       (* Periodic refresh *)
@@ -12438,8 +12597,10 @@ and is loaded on demand through keeper_skill.
         (* The retry a closed feed waits for. *)
         open_observer_if_due state ~retry_closed:true ~host ~port
           ~mailbox:async_messages;
-        start_http_refresh state ~host ~port
+        start_http_refresh state ~host ~port ~intent:Cadence
           ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup
           ~mailbox:async_messages;
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with

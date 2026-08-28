@@ -141,17 +141,39 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
        binding under a name that already names a Keeper would poison every
        ledger attribution for that Keeper, so the join is refused at this
        boundary. Keeper runtimes do not bind through masc_start. *)
-    if
-      List.mem
-        (String.trim agent_name)
-        (Keeper_meta_store.keeper_names active_config)
-    then
+    let uniqueness_refusal =
+      (* An unreadable census refuses the join: nothing was checked, so
+         uniqueness is unproven. The keeper_names wrapper folds a census
+         Error to [], which admitted the join exactly then. *)
+      match Keeper_meta_store.keeper_names_result active_config with
+      | Error census_error ->
+        Some
+          (Printf.sprintf
+             "keeper name census unavailable (%s); retry once keeper metadata is readable"
+             census_error)
+      | Ok keeper_names ->
+        (* Compare under the fold ledger attribution uses:
+           [Keeper_identity.Keeper_id.of_string] lowercases, so "Taskmaster"
+           and keeper "taskmaster" share one attribution id. A byte compare
+           admits exactly the collision this gate exists to refuse. *)
+        let joining = String.lowercase_ascii (String.trim agent_name) in
+        if
+          List.exists
+            (fun keeper -> String.equal joining (String.lowercase_ascii keeper))
+            keeper_names
+        then
+          Some
+            (Printf.sprintf
+               "%S already names a Keeper; join under a different agent name"
+               agent_name)
+        else None
+    in
+    match uniqueness_refusal with
+    | Some reason ->
       Some
         (runtime_err_workflow ~tool_name ~start_time
-           (Printf.sprintf
-              "masc_start refused: %S already names a Keeper; join under a different agent name"
-              agent_name))
-    else
+           ("masc_start refused: " ^ reason))
+    | None ->
     (* Step 2: bind session (idempotent) *)
     let session_binding_result =
       try

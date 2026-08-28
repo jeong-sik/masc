@@ -1700,9 +1700,13 @@ type skill_evidence_status =
   | Skill_evidence_observed
   | Skill_evidence_not_observed_in_current_coverage
 
+type skill_evidence_composition_scope =
+  | Skill_evidence_exact_reference_latest_completed
+  | Skill_evidence_composition_unavailable
+
 type skill_evidence_coverage =
-  { sec_composition_scan_limit : int
-  ; sec_composition_rows_scanned : int
+  { sec_composition_scope : skill_evidence_composition_scope
+  ; sec_composition_records_read : int
   ; sec_activation_ledgers_loaded : int
   ; sec_unavailable : string list
   }

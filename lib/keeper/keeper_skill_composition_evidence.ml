@@ -102,7 +102,11 @@ let valid_result = function
        ] ->
        String.trim tool_name <> ""
        && valid_duration duration_ms
-       && Option.is_some (Tool_result.tool_failure_class_of_string failure_class)
+       &&
+       (match Tool_result.tool_failure_class_of_string failure_class with
+        | Some value ->
+          String.equal failure_class (Tool_result.tool_failure_class_to_string value)
+        | None -> false)
      | _ -> false)
   | _ -> false
 ;;

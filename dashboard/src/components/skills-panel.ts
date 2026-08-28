@@ -13,6 +13,7 @@ import {
   readSkillSource,
   saveSkillSource,
   type SkillEvidenceResponse,
+  type SkillCompositionEvidence,
   type SkillEditorLoaded,
   type SkillEditorPreview,
   type AsyncRequestObservation,
@@ -214,12 +215,25 @@ function runOutput(value: unknown): string {
   }
 }
 
+function compositionNodes(composition: SkillCompositionEvidence): readonly Record<string, unknown>[] {
+  return composition.executor_settlements
+}
+
+function compositionCoverageLabel(scope: SkillEvidenceResponse['coverage']['composition_scope']): string {
+  switch (scope) {
+    case 'exact_reference_latest_completed':
+      return 'composition exact-reference latest completed authority'
+    case 'unavailable':
+      return 'composition exact-reference latest-completed authority unavailable'
+  }
+}
+
 function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null }) {
   if (!result) return html`<div class="ss-muted">Load the latest exact-revision result.</div>`
   if (result.status === 'not_observed_in_current_coverage') {
     return html`
       <div class="text-[var(--color-status-warn)]">No exact-revision run was found in the current coverage. This is not proof that it never ran.</div>
-      <div class="ss-muted text-3xs">${result.coverage.activation_ledgers_loaded} current-session activation ledgers · ${result.coverage.composition_rows_scanned}/${result.coverage.composition_scan_limit} bounded log rows · incomplete coverage</div>
+      <div class="ss-muted text-3xs">${result.coverage.activation_ledgers_loaded} current-session activation ledgers · ${result.coverage.composition_records_read} composition records read · ${compositionCoverageLabel(result.coverage.composition_scope)} · activation coverage incomplete</div>
       ${result.coverage.unavailable.length > 0 ? html`<div class="text-[var(--color-status-warn)] text-3xs">Unavailable: ${result.coverage.unavailable.join(' · ')}</div>` : null}
     `
   }
@@ -227,7 +241,8 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
   const actions = Array.isArray(activation?.actions) ? activation.actions.length : 0
   const delivered = activation?.delivery !== null && activation?.delivery !== undefined
   const composition = result.composition
-  const output = composition?.run.output
+  const compositionNodeCount = composition ? compositionNodes(composition).length : 0
+  const output = composition?.result.data
   return html`
     <div class="space-y-2" data-testid="skill-latest-evidence">
       ${activation ? html`
@@ -239,16 +254,16 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
       ${composition ? html`
         <div>
           <div class="font-semibold">
-            ${runField(composition.run, 'success') === 'true' ? '✓ completed' : '✗ failed'}
-            · ${runDuration(composition.run)}
-            · ${runField(composition.run, 'keeper')}
+            ${runField(composition.result, 'disposition') === 'completed' ? '✓ completed' : runField(composition.result, 'disposition')}
+            · ${runDuration(composition.result)}
+            · ${composition.keeper}
           </div>
-          <div class="ss-muted mono">${runField(composition.run, 'composition_run_id')} · ${composition.nodes.length} node rows</div>
+          <div class="ss-muted mono">${composition.composition_run_id} · ${compositionNodeCount} typed node settlements</div>
           <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-raised)] p-2 text-3xs">${runOutput(output)}</pre>
         </div>
       ` : null}
       <div class="ss-muted text-3xs">
-        coverage ${result.coverage.activation_ledgers_loaded} current-session activation ledgers · ${result.coverage.composition_rows_scanned}/${result.coverage.composition_scan_limit} bounded log rows · incomplete
+        coverage ${result.coverage.activation_ledgers_loaded} current-session activation ledgers · ${result.coverage.composition_records_read} composition records read · ${compositionCoverageLabel(result.coverage.composition_scope)} · activation coverage incomplete
         ${result.coverage.unavailable.length > 0 ? html` · ⚠ ${result.coverage.unavailable.join(' · ')}` : null}
       </div>
     </div>

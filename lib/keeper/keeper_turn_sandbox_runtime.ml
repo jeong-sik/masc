@@ -473,9 +473,9 @@ let resolve_image (t : t) =
    running guest is adopted instead of booted (amortising the 4.0-4.4s VM
    start to once per keeper), and turn cleanup leaves it running. State
    accumulated inside the guest between turns belongs to the same keeper.
-   Teardown is [teardown_keeper_vm]; nothing wires it to keeper_down yet,
-   so a deleted keeper leaves its guest until that lands (~400 MB each,
-   [container stop <name>] by hand). *)
+   Teardown is [teardown_keeper_vm], which shutdown finalization runs after
+   the registry unregister succeeds -- the one point that knows the keeper is
+   gone for good rather than between turns. *)
 let keeper_vm_name (t : t) =
   Printf.sprintf
     "masc-keeper-vm-%s-%s"
@@ -594,11 +594,19 @@ let start_microvm_container ?timeout_sec (t : t) =
                     (Keeper_sandbox_runtime.docker_failure_output_for_log out))))))
 ;;
 
-let teardown_keeper_vm ?timeout_sec ~(config : Workspace.config) ~(meta : keeper_meta) () =
+(* Takes the name rather than the meta: shutdown finalization holds
+   [operation.keeper_name] and no meta by the time the registry entry is
+   gone, and the guest name is derived from the name alone. *)
+let teardown_keeper_vm_by_name
+      ?timeout_sec
+      ~(config : Workspace.config)
+      ~(keeper_name : string)
+      ()
+  =
   let container_name =
     Printf.sprintf
       "masc-keeper-vm-%s-%s"
-      (Workspace_utils.safe_filename meta.name)
+      (Workspace_utils.safe_filename keeper_name)
       (String.sub (Keeper_sandbox_runtime.base_path_hash config.base_path) 0 8)
   in
   let stop_st, stop_out =
@@ -622,6 +630,10 @@ let teardown_keeper_vm ?timeout_sec ~(config : Workspace.config) ~(meta : keeper
          (Printf.sprintf
             "microvm_teardown_failed: %s"
             (Keeper_sandbox_runtime.docker_failure_output_for_log stop_out)))
+;;
+
+let teardown_keeper_vm ?timeout_sec ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  teardown_keeper_vm_by_name ?timeout_sec ~config ~keeper_name:meta.name ()
 ;;
 
 let start_container ?timeout_sec (t : t) =

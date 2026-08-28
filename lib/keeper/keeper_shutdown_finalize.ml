@@ -785,7 +785,33 @@ let complete_cleanup
           unregister_retired_exact ~base_path:config.base_path operation entry
         with
         | Error detail -> block ~config operation Registry_unregister detail
-        | Ok registry_unregistered -> finish registry_unregistered))
+        | Ok registry_unregistered ->
+          (* The microvm lane keeps one guest per keeper across turns, so turn
+             teardown deliberately leaves it running; this is the only place
+             that knows the keeper is gone for good. Without it a removed
+             keeper left ~400 MB of guest behind for somebody to notice by
+             hand.
+
+             After the unregister, not before: a failed unregister leaves the
+             keeper registered, and a keeper that is still registered must
+             keep its guest. A teardown failure is logged rather than
+             blocking -- the keeper is already gone from the registry, and
+             refusing to finish would leave the shutdown half-applied over a
+             guest that can be removed by hand. Docker keepers have no guest
+             under this name, so the call is a no-op for them. *)
+          (match
+             Keeper_turn_sandbox_runtime.teardown_keeper_vm_by_name
+               ~config
+               ~keeper_name:operation.keeper_name
+               ()
+           with
+           | Ok () -> ()
+           | Error detail ->
+             Log.Keeper.warn
+               ~keeper_name:operation.keeper_name
+               "keeper removed but its microvm guest was not: %s"
+               detail);
+          finish registry_unregistered))
 ;;
 
 let run ~config ~entry ?successor_operation_id operation =

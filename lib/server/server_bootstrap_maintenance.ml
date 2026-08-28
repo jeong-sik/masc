@@ -162,6 +162,11 @@ type durable_demand_owner_error =
   | Executor_unavailable of Executor_pool_ref.strict_submit_error
   | Demand_execution_failed of exn * Printexc.raw_backtrace
 
+(* One ERROR per orphaned keeper per process: the condition is a standing
+   operator decision, not a new event, so repeating it every recovery cycle
+   buries real errors. *)
+let owner_absent_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
+
 let load_durable_demand_meta ~base_path ~config ~keeper_name =
   match
     Executor_pool_ref.submit_strict (fun () ->
@@ -231,15 +236,23 @@ let recover_projected_durable_demand_owner
          keeper_name
          detail
      | Error Owner_absent ->
-       Log.Server.error
-         "keeper durable demand orphaned keeper=%s reason=owner_absent: durable \
-          work sits under %s but the Keeper store holds no metadata for that \
-          name, so the work cannot execute until the name is registered or the \
-          directory is removed"
-         keeper_name
-         (Filename.concat
-            (Common.keepers_runtime_dir_of_base ~base_path)
-            keeper_name)
+       (* This state waits on an operator decision (register the name or
+          remove the directory) that no maintenance cycle can make for it.
+          The recovery loop visits every keeper every cycle, so an
+          unacknowledged orphan logged at ERROR every visit -- 167/hour for
+          one stale kidsnote queue on 2026-08-28. Say it once per process;
+          the durable work stays where it is either way. *)
+       if not (Hashtbl.mem owner_absent_reported keeper_name) then (
+         Hashtbl.add owner_absent_reported keeper_name ();
+         Log.Server.error
+           "keeper durable demand orphaned keeper=%s reason=owner_absent: durable \
+            work sits under %s but the Keeper store holds no metadata for that \
+            name, so the work cannot execute until the name is registered or the \
+            directory is removed"
+           keeper_name
+           (Filename.concat
+              (Common.keepers_runtime_dir_of_base ~base_path)
+              keeper_name))
      | Error (Executor_unavailable error) ->
        Log.Server.error
          "keeper durable demand recovery retained keeper=%s reason=executor_unavailable detail=%s"

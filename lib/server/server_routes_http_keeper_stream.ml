@@ -405,11 +405,8 @@ let handle_keeper_turns_list state request reqd =
               ; ("preview", preview_json)
               ]
         in
-        `Assoc
-          [ ("keeper_name", `String keeper_name)
-          ; ("status", `String "ok")
-          ; ("turn", turn_json)
-          ]
+        Tool_args.ok_assoc
+          [ ("keeper_name", `String keeper_name); ("turn", turn_json) ]
     in
     respond_json_value_with_cors ~status:`OK request reqd
       (`Assoc

@@ -12492,14 +12492,27 @@ and is loaded on demand through keeper_skill.
                      add_event state "system"
                        "Gate lanes are not loaded yet; wait for the refresh"
                  | Some modes ->
+                     (* Cycle through the closed Keeper_gate_mode variants
+                        rather than a string re-spelling: a fourth mode
+                        makes this match a compile error instead of a
+                        silent fall-through to manual. An unrecognized
+                        stored value still cycles to manual, the
+                        fail-closed end. *)
                      let next =
-                       match modes.Tui_decode.glm_external with
-                       | "manual" -> "auto_judge"
-                       | "auto_judge" -> "always_allow"
-                       | _ -> "manual"
+                       match
+                         Masc.Keeper_gate_mode.of_string
+                           modes.Tui_decode.glm_external
+                       with
+                       | Some Masc.Keeper_gate_mode.Manual ->
+                           Masc.Keeper_gate_mode.Auto_judge
+                       | Some Masc.Keeper_gate_mode.Auto_judge ->
+                           Masc.Keeper_gate_mode.Always_allow
+                       | Some Masc.Keeper_gate_mode.Always_allow | None ->
+                           Masc.Keeper_gate_mode.Manual
                      in
                      launch_gate_external_mode_set state
-                       ~mailbox:async_messages ~mode:next)
+                       ~mailbox:async_messages
+                       ~mode:(Masc.Keeper_gate_mode.to_string next))
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Planning | Schedules | Verification | Harness

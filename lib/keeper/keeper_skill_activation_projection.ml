@@ -94,23 +94,27 @@ let resolve_trace_string ~config raw_trace_id =
   |> Result.map (fun trace_id -> resolve_trace ~config ~trace_id)
 ;;
 
+(* The wire schema tag, written once: three response arms carry it, and the
+   dashboard pins this exact string before reading anything else. *)
+let trace_schema = "masc.dashboard.skill-activations/v1"
+
 let trace_to_yojson = function
   | Trace_available { trace_id; ledger } ->
     `Assoc
-      ([ "schema", `String "masc.dashboard.skill-activations/v1"
+      ([ "schema", `String trace_schema
        ; "status", `String "available"
        ; "trace_id", `String (Keeper_id.Trace_id.to_string trace_id)
        ]
        @ ledger_fields ledger)
   | Trace_not_recorded { trace_id } ->
     `Assoc
-      [ "schema", `String "masc.dashboard.skill-activations/v1"
+      [ "schema", `String trace_schema
       ; "status", `String "not_recorded"
       ; "trace_id", `String (Keeper_id.Trace_id.to_string trace_id)
       ]
   | Trace_unavailable { trace_id; reason; detail } ->
     `Assoc
-      [ "schema", `String "masc.dashboard.skill-activations/v1"
+      [ "schema", `String trace_schema
       ; "status", `String "unavailable"
       ; "trace_id", `String (Keeper_id.Trace_id.to_string trace_id)
       ; "reason", `String reason

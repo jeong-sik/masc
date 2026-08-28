@@ -8,6 +8,11 @@ import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
 import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
 
+// The activation ledger's wire schema — keeper_skill_activation_ledger.ml
+// writes exactly this tag, and every reader below pins it before trusting
+// the rows.
+const SKILL_ACTIVATIONS_SCHEMA = 'masc.skill-activations/v5'
+
 // --- Tool metrics (P4 Phase 4.5) ---
 
 export interface DashboardToolInventoryItem {
@@ -712,7 +717,7 @@ export type DashboardSkillActivationProjection =
       summary: DashboardSkillActivationSummary
       scoped_summaries: DashboardSkillScopedSummary[]
       ledger: {
-        schema: 'masc.skill-activations/v5'
+        schema: typeof SKILL_ACTIVATIONS_SCHEMA
         workspace_key: string
         session_id: string
         revision: string
@@ -1509,7 +1514,7 @@ export function normalizeSkillActivationProjection(
     'activations',
     'transition_rejections',
   ])
-  if (ledger.schema !== 'masc.skill-activations/v5') {
+  if (ledger.schema !== SKILL_ACTIVATIONS_SCHEMA) {
     throw new Error('skill_activations schema is not v5')
   }
   if (
@@ -1526,7 +1531,7 @@ export function normalizeSkillActivationProjection(
     scoped_summaries: projection.scoped_summaries.map((scoped, index) =>
       decodeScopedSummary(scoped, `available.scoped_summaries[${index}]`)),
     ledger: {
-      schema: 'masc.skill-activations/v5',
+      schema: SKILL_ACTIVATIONS_SCHEMA,
       workspace_key: skillActivationSha256(ledger.workspace_key, 'available.ledger.workspace_key'),
       session_id: skillActivationString(ledger.session_id, 'available.ledger.session_id'),
       revision: skillActivationSha256(ledger.revision, 'available.ledger.revision'),

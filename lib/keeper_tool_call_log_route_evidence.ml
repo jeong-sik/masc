@@ -101,6 +101,7 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
   in
   let command_present =
     Option.is_some (Json_util.assoc_string_opt "cmd" input)
+    || Option.is_some (Json_util.assoc_string_opt "script" input)
     || typed_exec_command_present input
     || Option.is_some (Json_util.assoc_string_opt "op" input)
   in

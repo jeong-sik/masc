@@ -3687,11 +3687,21 @@ let execute_gate_command envelope =
     | Some (_ :: _ as argv) -> Some (command_text argv)
     | Some [] | None -> None
   in
+  let script_command args =
+    (* The script form is already the command line the operator is
+       approving; there is nothing to assemble. *)
+    match member "script" args with
+    | `String script when String.trim script <> "" -> Some script
+    | _ -> None
+  in
   match member "input" envelope with
   | `Assoc _ as args -> (
     match stage_command args with
     | Some command -> Some command
     | None -> (
+      match script_command args with
+      | Some command -> Some command
+      | None -> (
       (* A staged call carries no top-level argv; the tool takes one shape or
          the other, never both. Stages read the way they run. *)
       match member "pipeline" args with
@@ -3703,7 +3713,7 @@ let execute_gate_command envelope =
             | _, _ -> None)
           stages (Some [])
         |> Option.map (String.concat " | ")
-      | _ -> None))
+      | _ -> None)))
   | _ -> None
 
 (* Where the command would run. The same envelope carries it, and it decides

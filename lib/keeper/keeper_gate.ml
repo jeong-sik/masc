@@ -541,6 +541,7 @@ type auto_judge_entry_class =
   | Auto_judge_not_requested
   | Auto_judge_pending_unbound
   | Auto_judge_finalizable of Keeper_approval_queue_rules_types.hitl_context_summary
+  | Auto_judge_retryable_cancellation
   | Auto_judge_ineligible
 
 let classify_auto_judge_entry
@@ -565,6 +566,22 @@ let classify_auto_judge_entry
       { status = Keeper_approval_queue_rules_types.Exact_completed; _ },
     Keeper_approval_queue_rules_types.Summary_available summary ->
     Auto_judge_finalizable summary
+  (* A cancellation quarantine is the server dying under an in-flight
+     judgment — six restarts on 2026-08-28 left seven such rows stuck in
+     the queue with no automatic path out, because the catch-all below
+     skips every quarantined shape and retry was operator-only. The
+     judgment never ran to a verdict, so rescheduling is not a re-run of a
+     decided outcome. Every other quarantine cause stays ineligible: a
+     flow-execution failure may be deterministic, and auto-retrying it
+     would loop. *)
+  | Keeper_approval_queue_rules_types.Summary_attempt_settled,
+    Keeper_approval_queue_rules_types.Exact_bound
+      { status =
+          Keeper_approval_queue_rules_types.Exact_quarantined
+            Keeper_approval_queue_rules_types.Exact_cancellation;
+        _ },
+    Keeper_approval_queue_rules_types.Summary_failed _ ->
+    Auto_judge_retryable_cancellation
   | _ ->
     Auto_judge_ineligible
 ;;
@@ -572,7 +589,8 @@ let classify_auto_judge_entry
 let auto_judge_entry_ready entry =
   match classify_auto_judge_entry entry with
   | Auto_judge_not_requested
-  | Auto_judge_pending_unbound ->
+  | Auto_judge_pending_unbound
+  | Auto_judge_retryable_cancellation ->
     true
   | Auto_judge_finalizable _
   | Auto_judge_ineligible ->
@@ -1017,6 +1035,20 @@ and start_auto_judge_entry (entry : Keeper_approval_queue_rules_types.pending_ap
     (match classify_auto_judge_entry current with
      | Auto_judge_not_requested -> start_auto_judge current
      | Auto_judge_pending_unbound -> spawn_auto_judge_entry current
+     | Auto_judge_retryable_cancellation ->
+       (* The entry's own durable row is the CAS expectation: retrying the
+          exact state that was frozen when the server died under it. *)
+       (match
+          retry_auto_judge_entry
+            ~requested_by:"cancellation-quarantine-drain"
+            ~expected_input_hash:current.input_hash
+            ~expected_sequence:current.sequence
+            ~expected_exact_attempt:current.exact_attempt
+            ~expected_disposition:current.summary_attempt_disposition
+            current
+        with
+        | Ok _ -> Ok Started
+        | Error reason -> Error reason)
      | Auto_judge_finalizable _
      | Auto_judge_ineligible ->
        Ok Skipped)
@@ -1268,6 +1300,7 @@ let recovered_work_for_base_path ~base_path =
         Some (Finalize_judgment (entry, summary))
       | Auto_judge_finalizable
           { judgment = Keeper_approval_queue_rules_types.Require_human; _ }
+      | Auto_judge_retryable_cancellation
       | Auto_judge_ineligible ->
         None
     in

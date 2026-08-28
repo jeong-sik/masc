@@ -26,9 +26,20 @@ val board_error_to_string : Board.board_error -> string
 val board_error_failure_class : Board.board_error -> Tool_result.tool_failure_class
 val error_of_board_error : tool_name:string -> start_time:float -> Board.board_error -> Tool_result.result
 val visibility_of_string : string -> Board.visibility option
-val format_post : Board.post -> string
+val format_post : ?viewer_vote:Board.vote_direction -> Board.post -> string
+(** [viewer_vote] is the reading agent's own vote on the post, rendered as a
+    "내 투표" marker beside the tallies so the next turn's read carries what
+    the vote tool's "Already voted" answer only said once (task-839). *)
+
 val format_post_compact : Board.post -> string
-val format_comment_tree : ?max_depth:int -> Board.comment list -> string list
+
+val format_comment_tree
+  :  ?max_depth:int
+  -> ?viewer_vote_of:(Board.Comment_id.t -> Board.vote_direction option)
+  -> Board.comment list
+  -> string list
+(** [viewer_vote_of] answers, per comment, the reading agent's own vote; the
+    default answers [None] for every comment and renders no marker. *)
 val sources_footer : Yojson.Safe.t list -> string
 val parse_sort_order : string -> (sort_order, string) Result.t
 val judgment_arg : Yojson.Safe.t -> Yojson.Safe.t option

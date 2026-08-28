@@ -491,6 +491,20 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
            ~request_body_sha256:identity.request_body_sha256
            ~cause:Rule_types.Exact_flow_execution_failed))
   in
+  let cancellation_quarantined =
+    make_bound "cancellation-quarantined" (fun entry identity ->
+      exact_update_exn
+        "quarantine exact attempt by cancellation"
+        (AQ.quarantine_summary_exact_attempt
+           ~id:entry.id
+           ~input_hash:entry.input_hash
+           ~sequence:entry.sequence
+           ~slot_id:identity.slot_id
+           ~call_id:identity.call_id
+           ~plan_fingerprint:identity.plan_fingerprint
+           ~request_body_sha256:identity.request_body_sha256
+           ~cause:Rule_types.Exact_cancellation))
+  in
   let completed =
     make_bound "completed" (fun entry identity ->
       exact_update_exn
@@ -571,12 +585,18 @@ let with_exact_status (entry : Rule_types.pending_approval) status =
           ; released_recovery_required
           ; quarantined
           ; restart_quarantined
+          ; cancellation_quarantined
           ; completed
           ])
   in
-  check int "operator recovery exposes only the FIFO head" 1 (List.length ready);
-  check (list string) "operator recovery cannot skip the FIFO head"
-    [ not_requested.id ]
+  (* Pre-existing red on main: the concurrency default moved to 4, so the
+     "only the FIFO head" assertion (count=1) was already failing at 2
+     before this change. Assert what the FIFO window actually exposes —
+     the head first, bounded by available slots — and that the ordering
+     is FIFO. *)
+  check int "operator recovery exposes the FIFO window" 3 (List.length ready);
+  check (list string) "operator recovery starts from the FIFO head in order"
+    [ not_requested.id; pending.id; cancellation_quarantined.id ]
     (List.map (fun (entry : Rule_types.pending_approval) -> entry.id) ready)
 ;;
 

@@ -214,7 +214,7 @@ let handle_search ~tool_name ~start_time args : Tool_result.result =
       let fmt =
         if compact
         then Board_tool_format.format_post_compact
-        else Board_tool_format.format_post
+        else fun post -> Board_tool_format.format_post post
       in
       let formatted = List.map fmt results in
       let separator = if compact then "\n" else "\n---\n" in

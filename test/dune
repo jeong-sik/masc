@@ -1429,6 +1429,7 @@
   test_eval_harness
   test_tool_board_coverage
   test_board_comment_id_is_visible
+  test_board_read_shows_viewer_vote
   test_yojson_type_error_board
   test_tool_registry
   test_tool_registry_consistency
@@ -1568,6 +1569,7 @@
   test_eval_harness
   test_tool_board_coverage
   test_board_comment_id_is_visible
+  test_board_read_shows_viewer_vote
   test_yojson_type_error_board
   test_tool_registry
   test_tool_registry_consistency

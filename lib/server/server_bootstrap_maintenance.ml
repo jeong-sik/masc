@@ -195,6 +195,23 @@ let load_durable_demand_meta ~base_path ~config ~keeper_name =
   | Error error -> Error (Executor_unavailable error)
 ;;
 
+type durable_demand_recovery_action =
+  | Wake_executable_owner
+  | Supervise_recoverable_owner
+  | Report_unknown_owner of string
+  | Retain_non_executable_owner of string
+
+let durable_demand_recovery_action = function
+  | Keeper_activation_readiness.Executable -> Wake_executable_owner
+  | Keeper_activation_readiness.Recoverable -> Supervise_recoverable_owner
+  | Keeper_activation_readiness.Unknown detail -> Report_unknown_owner detail
+  | ( Keeper_activation_readiness.Retained_disabled _
+    | Keeper_activation_readiness.Paused_dead _
+    | Keeper_activation_readiness.Shutdown_fenced _ ) as retained ->
+    Retain_non_executable_owner
+      (Keeper_activation_readiness.owner_execution_truth_to_wire retained)
+;;
+
 let recover_projected_durable_demand_owner
       (ctx : _ Keeper_types_profile.context)
       (projection : Keeper_event_queue_recovery.owner_projection)
@@ -284,26 +301,33 @@ let recover_projected_durable_demand_owner
              ~runtime
              (Ok meta)
        in
-       (match truth with
-        | Keeper_activation_readiness.Executable -> ()
-        | Keeper_activation_readiness.Recoverable ->
+       (match durable_demand_recovery_action truth with
+        | Wake_executable_owner ->
+          (* The durable queue survived the process that originally sent its
+             wake hint. A live owner therefore still needs a new edge after
+             startup or maintenance discovery; otherwise it can sleep forever
+             beside runnable work. [wakeup_keeper] is only the hint -- the
+             queue remains the authoritative payload. *)
+          Keeper_keepalive.wakeup_keeper ~base_path keeper_name;
+          Log.Server.info
+            "keeper durable demand recovery woke executable owner keeper=%s"
+            keeper_name
+        | Supervise_recoverable_owner ->
           let owner_ctx = { ctx with agent_name = meta.name } in
           Keeper_supervisor.supervise_keepalive
             ~proactive_warmup_sec:0
             owner_ctx
             meta
-        | Keeper_activation_readiness.Unknown detail ->
+        | Report_unknown_owner detail ->
           Log.Server.error
             "keeper durable demand recovery retained keeper=%s reason=unknown detail=%s"
             keeper_name
             detail
-        | ( Keeper_activation_readiness.Retained_disabled _
-          | Keeper_activation_readiness.Paused_dead _
-          | Keeper_activation_readiness.Shutdown_fenced _ ) as retained ->
+        | Retain_non_executable_owner reason ->
           Log.Server.info
             "keeper durable demand recovery retained keeper=%s reason=%s"
             keeper_name
-            (Keeper_activation_readiness.owner_execution_truth_to_wire retained)))
+            reason))
 ;;
 
 let consume_owner_projection_batch
@@ -355,6 +379,13 @@ let recover_keeper_durable_demand_owners
 ;;
 
 module Recovery_for_testing = struct
+  type nonrec durable_demand_recovery_action = durable_demand_recovery_action =
+    | Wake_executable_owner
+    | Supervise_recoverable_owner
+    | Report_unknown_owner of string
+    | Retain_non_executable_owner of string
+
+  let durable_demand_recovery_action = durable_demand_recovery_action
   let load_durable_demand_meta = load_durable_demand_meta
   let consume_owner_projection_batch = consume_owner_projection_batch
 end

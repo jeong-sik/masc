@@ -631,10 +631,39 @@ export async function fetchWritableSkillSources(): Promise<readonly WritableSkil
   return response.sources
 }
 
+/** Mirror of Server_skill_editor.create_outcome_to_yojson: the server
+ * answers exactly created_and_published or created_but_unpublished (with
+ * the reason). Anything else is drift, not a state to invent a label for —
+ * the old `?? 'created'` default reported a status the server never sends
+ * and hid the not-published reason. */
+export type SkillCreateReceipt =
+  | { status: 'created_and_published' }
+  | { status: 'created_but_unpublished'; reason: string }
+
+export function decodeSkillCreateReceipt(raw: unknown): SkillCreateReceipt {
+  if (typeof raw === 'object' && raw !== null) {
+    const record = raw as Record<string, unknown>
+    if (record.status === 'created_and_published') {
+      return { status: 'created_and_published' }
+    }
+    if (record.status === 'created_but_unpublished' && typeof record.reason === 'string') {
+      return { status: 'created_but_unpublished', reason: record.reason }
+    }
+  }
+  const status = typeof raw === 'object' && raw !== null
+    ? (raw as Record<string, unknown>).status ?? null
+    : null
+  throw new Error(
+    `skill create receipt carried an unrecognized status: ${JSON.stringify(status)}`,
+  )
+}
+
 export async function createSkill(input: {
   source_id: string
   package_id: string
   source_text: string
-}): Promise<Record<string, unknown>> {
-  return post('/api/v1/skills/editor/create', input)
+}): Promise<SkillCreateReceipt> {
+  return decodeSkillCreateReceipt(
+    await post<Record<string, unknown>>('/api/v1/skills/editor/create', input),
+  )
 }

@@ -1,9 +1,40 @@
 import { describe, expect, it } from 'vitest'
 import {
   decodeAsyncRequestObservation,
+  decodeSkillCreateReceipt,
   decodeSkillEvidenceResponse,
   SkillsContractError,
 } from './dashboard-skills'
+
+// Server_skill_editor.create_outcome_to_yojson sends exactly these two
+// statuses; the old client defaulted anything else to 'created', a status
+// the server never sends, and dropped the not-published reason.
+describe('skill create receipt contract', () => {
+  it('accepts the published receipt', () => {
+    expect(decodeSkillCreateReceipt({ status: 'created_and_published', preview: {} }))
+      .toEqual({ status: 'created_and_published' })
+  })
+
+  it('carries the not-published reason', () => {
+    expect(decodeSkillCreateReceipt({
+      status: 'created_but_unpublished',
+      reason: 'catalog refresh failed',
+      preview: {},
+    })).toEqual({
+      status: 'created_but_unpublished',
+      reason: 'catalog refresh failed',
+    })
+  })
+
+  it.each([
+    ['a fabricated status', { status: 'created' }],
+    ['a missing reason', { status: 'created_but_unpublished' }],
+    ['no status at all', {}],
+    ['a non-object payload', null],
+  ])('rejects %s instead of inventing a label', (_label, raw) => {
+    expect(() => decodeSkillCreateReceipt(raw)).toThrow('unrecognized status')
+  })
+})
 
 const reference = {
   identity: {

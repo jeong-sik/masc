@@ -393,7 +393,9 @@ export function SkillsPanel() {
               package_id: createName.value,
               source_text: sourceText,
             })
-            createStatus.value = String(receipt.status ?? 'created')
+            createStatus.value = receipt.status === 'created_and_published'
+              ? 'created and published'
+              : `created but NOT published: ${receipt.reason}`
             response.value = await fetchSkills()
           } catch (cause) {
             createStatus.value = cause instanceof Error ? cause.message : String(cause)

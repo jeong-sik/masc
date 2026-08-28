@@ -784,6 +784,14 @@ let async_parent_invocation ~request_id source =
     ~completion:Agent_core.Tool_contract.Continue_after_success
 ;;
 
+let execute_keeper_plan ~capability_authority =
+  match capability_authority with
+  | Keeper_tool_runtime.Frozen_surface capability_surface ->
+    Executor.execute_keeper ~capability_surface
+  | Keeper_tool_runtime.Compatibility_meta ->
+    Executor.Compatibility.execute_keeper
+;;
+
 let async_worker_result
       ~(entry : Catalog.entry)
       ~plan
@@ -808,7 +816,8 @@ let async_worker_result
     Keeper_sandbox_factory.cleanup sandbox_factory);
   let start_time = Time_compat.now () in
   let run_id = Keeper_tool_plan.Run_id.fresh () in
-  Executor.execute_keeper
+  execute_keeper_plan
+    ~capability_authority
     ~plan
     ~run_id
     ~composition_run_id
@@ -816,7 +825,6 @@ let async_worker_result
       (async_parent_invocation ~request_id source_invocation)
     ~config
     ~meta
-    ~capability_authority
     ~publication_recovery
     ~ctx_snapshot
     ~turn_sandbox_factory:sandbox_factory
@@ -1449,7 +1457,7 @@ module For_testing = struct
   let cancel_result = cancel_result
 end
 
-let make_tools
+let make_tools_with_authority
       ?(instruction_skills : instruction_skill list = [])
       ?(skill_compositions : composition_skill list = [])
       ?composition_plan_index
@@ -1681,14 +1689,14 @@ let make_tools
              let run_id = Keeper_tool_plan.Run_id.fresh () in
              let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
              let execution =
-               Executor.execute_keeper
+               execute_keeper_plan
+                 ~capability_authority
                  ~plan
                  ~run_id
                  ~composition_run_id
                  ~parent_invocation
                  ~config
                  ~meta
-                 ~capability_authority
                  ~publication_recovery
                  ~ctx_snapshot
                  ?turn_sandbox_factory
@@ -1870,14 +1878,14 @@ let make_tools
                      Keeper_tool_plan.Composition_run_id.fresh ()
                    in
                    let execution =
-                     Executor.execute_keeper
+                     execute_keeper_plan
+                       ~capability_authority
                        ~plan
                        ~run_id
                        ~composition_run_id
                        ~parent_invocation
                        ~config
                        ~meta
-                       ~capability_authority
                        ~publication_recovery
                        ~ctx_snapshot
                        ?turn_sandbox_factory
@@ -2012,3 +2020,18 @@ let make_tools
     in
     composition_tools @ [ status_tool; cancel_tool ]
 ;;
+
+let make_tools ~capability_surface =
+  make_tools_with_authority
+    ~capability_authority:
+      (Keeper_tool_runtime.Frozen_surface capability_surface)
+    ~descriptors:(Keeper_capability_surface.descriptors capability_surface)
+;;
+
+module Compatibility = struct
+  let make_tools ~descriptors =
+    make_tools_with_authority
+      ~capability_authority:Keeper_tool_runtime.Compatibility_meta
+      ~descriptors
+  ;;
+end

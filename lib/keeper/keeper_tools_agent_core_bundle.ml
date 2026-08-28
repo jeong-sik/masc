@@ -468,17 +468,19 @@ let make_tool_bundle_for_descriptors_with_policy
              reference)
         skill_activation_context
     in
-    Keeper_tool_composition_surface.make_tools
+    let make_composition_tools =
+      match capability_surface with
+      | Some capability_surface ->
+        Keeper_tool_composition_surface.make_tools ~capability_surface
+      | None ->
+        Keeper_tool_composition_surface.Compatibility.make_tools ~descriptors
+    in
+    make_composition_tools
         ~instruction_skills
         ~skill_compositions:composition_skills
         ?composition_plan_index
         ~config
         ~meta
-        ~capability_authority:
-          (match capability_surface with
-           | Some capability_surface ->
-             Keeper_tool_runtime.Frozen_surface capability_surface
-           | None -> Keeper_tool_runtime.Compatibility_meta)
         ~publication_recovery
         ~ctx_snapshot
         ?record_instruction_activation
@@ -503,7 +505,6 @@ let make_tool_bundle_for_descriptors_with_policy
         ~on_external_effect_deferred:mark_external_effect_deferred
         ~on_failed:mark_terminal_effect_failed
         ~on_externalization_error:mark_completed_terminal_externalization_failed
-        ~descriptors
         ()
   in
   (* Identity tools are external effects by definition; they join the turn

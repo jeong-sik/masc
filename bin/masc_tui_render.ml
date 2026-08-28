@@ -1961,6 +1961,30 @@ let render_approvals (state : state) =
 (* Who wrote it, in one column. 1561 of this workspace's 2171 posts are system
    posts and 588 are automation; the 22 a person wrote are what an operator is
    scanning for, so those are the ones that get a mark. *)
+(* The Board's column widths, asked once by the header and once by every row.
+
+   The title is what absorbs the terminal: 68 is what the fixed columns and
+   the gaps between them take, so what is left is the title's. Held here
+   rather than spelled at both call sites, because the two used to disagree
+   and a header that disagrees with its rows is worse than no header -- it
+   labels the wrong column and the reader has no way to notice.
+
+   The mark is one display cell wide for every kind ([board_kind_mark]), so
+   the header pads one to sit over it. *)
+let board_score_w = 5
+let board_replies_w = 7
+
+(* 4 lead + 1 mark + 1 gap + 12 id + 2 + 12 hearth + 2 + 16 author + 2
+   + 2 + score + 2 + replies, and 2 more for the frame the box draws around
+   all of it, measured rather than assumed: at eighty columns a row built
+   to 78 still overflowed, so the frame takes four. The old 68 accounted for
+   none of it, which is why REPLIES sat past the right edge no matter how
+   the title was sized. *)
+let board_row_fixed_cols = 4 + 1 + 1 + 12 + 2 + 12 + 2 + 16 + 2 + 2
+                           + board_score_w + 2 + board_replies_w + 4
+
+let board_row_layout ~cols = (1, 12, 12, 16, max 1 (cols - board_row_fixed_cols))
+
 let board_kind_mark = function
   | Some Post_by_person -> Ansi.bold ^ (Theme.info ()) ^ "@" ^ Ansi.reset
   | Some Post_by_automation -> Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
@@ -2065,9 +2089,22 @@ let render_board_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (* The header is laid out by the same arithmetic as the rows below it,
+     because a header laid out by its own is a header that stops describing
+     them. It did: the rows size their title to [cols - 68] and the header
+     claimed a fixed 20, so at eighty columns the header ran eight cells
+     long. The overflow pushed SCORE into the frame's edge and REPLIES off
+     it -- two columns still drawn on every row, with nothing left saying
+     what they were. The mark ahead of the id is one cell and the header
+     reserved two, which put every label one cell right of its data.
+
+     [board_row_layout] is the one place either of them asks. *)
+  let mark_pad, id_w, hearth_w, author_w, title_w = board_row_layout ~cols in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-2s %-12s  %-12s  %-16s  %-20s  %5s  %7s"
-       "" "ID" "HEARTH" "AUTHOR" "TITLE" "SCORE" "REPLIES");
+    (Printf.sprintf "    %-*s %-*s  %-*s  %-*s  %-*s  %s  %s" mark_pad ""
+       id_w "ID" hearth_w "HEARTH" author_w "AUTHOR" title_w "TITLE"
+       (Printf.sprintf "%-*s" board_score_w "SCORE")
+       (Printf.sprintf "%-*s" board_replies_w "REPLIES"));
   box_divider buf cols;
 
   let board_list_error =
@@ -2099,7 +2136,7 @@ let render_board_list (state : state) =
         let p = List.nth state.board_posts idx in
         let is_selected = idx = state.board_cursor in
         let id =
-          Ansi.cyan ^ fit_width (Terminal_text.single_line p.bp_id) 12
+          Ansi.cyan ^ fit_width (Terminal_text.single_line p.bp_id) id_w
           ^ Ansi.reset
         in
         let hearth =
@@ -2108,28 +2145,33 @@ let render_board_list (state : state) =
               (match Terminal_text.optional_single_line p.bp_hearth with
                | Some hearth -> hearth
                | None -> "")
-              12
+              hearth_w
           ^ Ansi.reset
         in
         let author =
           Masc_tui_theme.tone Masc_tui_theme.Accent
-          ^ fit_width (Terminal_text.single_line p.bp_author) 16
+          ^ fit_width (Terminal_text.single_line p.bp_author) author_w
           ^ Ansi.reset
         in
         let score =
           (board_score_style p.bp_votes)
-          ^ Printf.sprintf "+%d" p.bp_votes
+          ^ Printf.sprintf "%-*s" board_score_w
+              (Printf.sprintf "+%d" p.bp_votes)
           ^ Ansi.reset
         in
-        let replies = Ansi.dim ^ Printf.sprintf "c%d" p.bp_comment_count
-          ^ Ansi.reset in
+        let replies =
+          Ansi.dim
+          ^ Printf.sprintf "%-*s" board_replies_w
+              (Printf.sprintf "c%d" p.bp_comment_count)
+          ^ Ansi.reset
+        in
         let line =
           Printf.sprintf "  %s %s  %s  %s  %s  %s  %s"
             (board_kind_mark p.bp_kind)
             id
             hearth
             author
-            (fit_width (Terminal_text.single_line p.bp_title) (cols - 68))
+            (fit_width (Terminal_text.single_line p.bp_title) title_w)
             score
             replies
         in

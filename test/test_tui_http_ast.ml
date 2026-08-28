@@ -97,16 +97,26 @@ let status_color_violation_to_string (location, path, segment) =
     segment path
 ;;
 
-(* Two sites apply a theme, and they answer different questions: boot reads
-   the name runtime.toml carries, and the Config surface applies the one under
-   the cursor. Anything beyond those two is a third way to change the palette,
-   which is how the surface came to apply on pageup/pagedown -- a key the
-   footer never advertised, while it said "Enter: use theme" the whole time.
+(* Four sites apply a theme, and each answers a different question: boot
+   reads the name runtime.toml carries, the Config surface applies the one
+   under the cursor, and the preview added by #31212 applies the scheme the
+   cursor is passing over and then applies back whatever was in force when
+   the reader walked in.
+
+   The count is the point rather than the number. Anything past these is a
+   further way to change the palette, which is how the surface came to apply
+   on pageup/pagedown -- a key the footer never advertised, while it said
+   "Enter: use theme" the whole time. When this fails, the question is not
+   "what should the number be" but "what is the new site and does it belong".
+
+   The number was 2 until the preview landed, and this test caught the change
+   after the fact rather than before: #31212 merged red here. It is written
+   down because a count that drifts silently stops being a gate.
 
    This counts; it does not prove Enter reaches the second one. The key press
    itself is not automated. *)
 let test_theme_apply_is_boot_and_the_surface () =
-  check int "one at boot, one on the Config surface" 2
+  check int "boot, the surface, and the preview's two" 4
     (Ast_grep.count_calls ~module_path:"bin/masc_tui.ml"
        ~callee:"Masc_tui_theme_choice.apply")
 ;;
@@ -2066,6 +2076,30 @@ let test_the_session_filter_reads_the_transcript () =
      >= 1)
 ;;
 
+
+(* The Board header and its rows are laid out by one function.
+
+   They were not: the rows sized their title to [cols - 68] and the header
+   claimed a fixed 20, so at eighty columns the header ran long, SCORE was
+   cut to "SC~" and REPLIES fell off the frame entirely -- two columns still
+   drawn on every row with nothing saying what they were. The mark ahead of
+   the id is one cell and the header reserved two, which put every label one
+   cell off its data.
+
+   A header that disagrees with its rows is worse than no header: it labels
+   the wrong column and the reader has no way to notice. This pins that both
+   still ask [board_row_layout] rather than each doing its own arithmetic. *)
+let test_the_board_header_and_rows_share_one_layout () =
+  let module_path = "bin/masc_tui_render.ml" in
+  Alcotest.(check bool)
+    "the shared layout is defined" true
+    (Ast_grep.count_value_bindings ~module_path ~name:"board_row_layout" > 0);
+  Alcotest.(check bool)
+    "and something asks it" true
+    (Ast_grep.count_calls ~module_path ~callee:"board_row_layout" > 0)
+;;
+
+
 let () =
   run "masc-tui-http-regression" [
     ( "tui-http",
@@ -2160,6 +2194,10 @@ let () =
           "the session row filter reads the transcript"
           `Quick
           test_the_session_filter_reads_the_transcript;
+        test_case
+          "the board header and rows share one layout"
+          `Quick
+          test_the_board_header_and_rows_share_one_layout;
       ]
     )
   ]

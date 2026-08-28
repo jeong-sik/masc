@@ -48,6 +48,11 @@ type run =
   ; status : run_status
   }
 
+(* Exhaustive by construction: [lane_key] below matches every constructor,
+   so a lane added to the variant without a row here fails to compile via
+   that match — keep the two adjacent. *)
+let all_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Compaction ]
+
 let lane_key = function
   | Librarian -> "librarian_exact"
   | Hitl_auto_judge -> "hitl_auto_judge"

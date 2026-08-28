@@ -672,12 +672,35 @@ def wait_screen(page: Any, marker: str, timeout: float) -> None:
     )
 
 
+def selected_surface_from_screen(value: str) -> str | None:
+    for line in value.splitlines():
+        for token in line.split():
+            if token.startswith("▸") and len(token) > 1:
+                return token[1:]
+    return None
+
+
 def goto_tools(page: Any, timeout: float) -> None:
-    press(page, "Escape")
-    press(page, ":")
-    page.keyboard.type("go tools")
-    press(page, "Enter")
-    wait_screen(page, "MASC Tools", timeout)
+    deadline = time.monotonic() + timeout
+    current = selected_surface_from_screen(screen_text(page))
+    require(current is not None, "TUI did not expose its selected surface")
+    visited = [current]
+    while time.monotonic() < deadline:
+        press(page, "Tab")
+        observed = current
+        while observed == current and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+            selected = selected_surface_from_screen(screen_text(page))
+            if selected is not None:
+                observed = selected
+        require(observed != current, "TUI surface selection did not advance")
+        if observed == "Tools":
+            wait_screen(page, "MASC Tools", max(0.001, deadline - time.monotonic()))
+            return
+        require(observed not in visited, "TUI completed a surface cycle without Tools")
+        visited.append(observed)
+        current = observed
+    raise CaptureError("TUI did not reach the Tools surface")
 
 
 def selected_keeper_from_screen(value: str) -> str | None:

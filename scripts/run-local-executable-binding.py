@@ -19,8 +19,9 @@ import tempfile
 
 
 RECEIPT_SCHEMA = "masc.run-local-launch-binding.v1"
-PROVENANCE_SCHEMA = "masc.run-local-executable-identity.v1"
+PROVENANCE_SCHEMA = "masc.run-local-executable-identity.v2"
 SOURCE_ROOT_RECEIPT_SCHEMA = "masc.run-local-source-root.v1"
+DASHBOARD_ASSETS_SCHEMA = "masc.run-local-dashboard-assets.v1"
 DASHBOARD_BUILD_RECEIPT_SCHEMA = "masc.run-local-dashboard-build.v1"
 DASHBOARD_BUILD_INPUT_SCHEMA = "masc.run-local-dashboard-build-input.v1"
 DASHBOARD_BUILD_RUNTIME_SCHEMA = "masc.run-local-dashboard-build-runtime.v1"
@@ -1173,8 +1174,83 @@ def write_once(path: Path, payload: bytes, mode: int) -> os.stat_result:
     return info
 
 
+def validate_dashboard_build_binding(
+    source_root: Path,
+    commit: str,
+    receipt_path: Path | None,
+) -> tuple[
+    tuple[Path, list[dict[str, object]], dict[str, bytes]] | None,
+    dict[str, object] | None,
+]:
+    if receipt_path is None:
+        return None, None
+    raw_receipt = json.loads(receipt_path.read_text())
+    if not isinstance(raw_receipt, dict):
+        raise BindingError("dashboard build receipt is not an object")
+    input_fields = (
+        "source_root",
+        "source_root_device",
+        "source_root_inode",
+        "source_commit",
+        "head_tree",
+        "index_tree",
+        "input_sha256",
+        "input_file_count",
+        "input_matches_head",
+        "lock_sha256",
+        "build_mode",
+        "environment_path",
+        "environment_path_identity_sha256",
+        "environment_path_executable_sha256",
+        "environment_path_executable_count",
+        "environment_profile_sha256",
+        "node_executable",
+        "node_executable_sha256",
+        "node_version",
+        "node_platform",
+        "node_arch",
+        "package_manager_kind",
+        "package_manager_executable",
+        "package_manager_executable_sha256",
+        "pnpm_version",
+        "vite_version",
+        "installed_graph_metadata_sha256",
+        "installed_graph_metadata_count",
+    )
+    expected_input = {
+        "schema": DASHBOARD_BUILD_INPUT_SCHEMA,
+        **{field: raw_receipt.get(field) for field in input_fields},
+    }
+    require_dashboard_phase_receipt(expected_input, runtime=False)
+    expected_receipt = dashboard_build_receipt(
+        source_root,
+        commit,
+        expected_input,
+        package_manager_executable=Path(
+            str(expected_input["package_manager_executable"])
+        ),
+        package_manager_kind=str(expected_input["package_manager_kind"]),
+        node_executable=Path(str(expected_input["node_executable"])),
+        environment_path=str(expected_input["environment_path"]),
+    )
+    if raw_receipt != expected_receipt:
+        raise BindingError(
+            "dashboard build receipt differs from current input/output identity"
+        )
+    return dashboard_source_entries(source_root), expected_receipt
+
+
 def materialize(
-    *, private_root: Path, executable: Path, commit: str, fingerprint: str
+    *,
+    private_root: Path,
+    executable: Path,
+    source_root: Path,
+    expected_source_root: Path,
+    expected_source_root_device: int,
+    expected_source_root_inode: int,
+    dashboard_build_receipt_path: Path | None,
+    commit: str,
+    fingerprint: str,
 ) -> tuple[Path, str, Path, str, int, int]:
     if not executable.is_file() or executable.is_symlink():
         raise BindingError("Dune executable is not a regular file")
@@ -1184,37 +1260,96 @@ def materialize(
         char not in "0123456789abcdef" for char in fingerprint
     ):
         raise BindingError("build-input fingerprint is not SHA-256")
+    source_root, source_root_info = require_source_root_identity(
+        source_root,
+        expected_path=expected_source_root,
+        expected_device=expected_source_root_device,
+        expected_inode=expected_source_root_inode,
+    )
     ensure_private_directory(private_root)
     with materialization_lock(private_root):
+        source_root, source_root_info = require_source_root_identity(
+            source_root,
+            expected_path=expected_source_root,
+            expected_device=expected_source_root_device,
+            expected_inode=expected_source_root_inode,
+        )
+        dashboard_capture, dashboard_receipt = validate_dashboard_build_binding(
+            source_root, commit, dashboard_build_receipt_path
+        )
         return materialize_locked(
             private_root=private_root,
             executable=executable,
+            source_root=source_root,
+            source_root_info=source_root_info,
+            dashboard_capture=dashboard_capture,
+            dashboard_receipt=dashboard_receipt,
             commit=commit,
             fingerprint=fingerprint,
         )
 
 
 def materialize_locked(
-    *, private_root: Path, executable: Path, commit: str, fingerprint: str
+    *,
+    private_root: Path,
+    executable: Path,
+    source_root: Path,
+    source_root_info: os.stat_result,
+    dashboard_capture: tuple[Path, list[dict[str, object]], dict[str, bytes]] | None,
+    dashboard_receipt: dict[str, object] | None,
+    commit: str,
+    fingerprint: str,
 ) -> tuple[Path, str, Path, str, int, int]:
     executable_dir = private_root / "executables"
     provenance_dir = private_root / "provenance"
     ensure_private_directory(executable_dir)
     ensure_private_directory(provenance_dir)
+    fsync_directory(private_root)
 
     executable_payload = executable.read_bytes()
     executable_sha256 = digest_bytes(executable_payload)
     bound_executable = executable_dir / f"{executable_sha256}-main_eio.exe"
     executable_info = write_once(bound_executable, executable_payload, 0o500)
+    fsync_directory(executable_dir)
     if digest_file(bound_executable) != executable_sha256:
         raise BindingError("materialized executable digest differs")
 
+    if dashboard_capture is None or dashboard_receipt is None:
+        dashboard_assets: dict[str, object] = {
+            "state": "unavailable",
+            "reason": "build_receipt_missing",
+        }
+    else:
+        dashboard_root, dashboard_entries, dashboard_payloads = dashboard_capture
+        (
+            dashboard_snapshot_root,
+            dashboard_tree_sha256_value,
+            dashboard_snapshot_info,
+        ) = materialize_dashboard_snapshot(
+            private_root, dashboard_entries, dashboard_payloads
+        )
+        dashboard_assets = {
+            "state": "available",
+            "schema": DASHBOARD_ASSETS_SCHEMA,
+            "source_root": str(dashboard_root),
+            "snapshot_root": str(dashboard_snapshot_root),
+            "snapshot_device": dashboard_snapshot_info.st_dev,
+            "snapshot_inode": dashboard_snapshot_info.st_ino,
+            "tree_sha256": dashboard_tree_sha256_value,
+            "file_count": len(dashboard_entries),
+            "files": dashboard_entries,
+            "build_receipt": dashboard_receipt,
+        }
     provenance_payload = (
         json.dumps(
             {
                 "schema": PROVENANCE_SCHEMA,
                 "binary_commit": commit,
                 "build_input_fingerprint": fingerprint,
+                "source_root": str(source_root),
+                "source_root_device": source_root_info.st_dev,
+                "source_root_inode": source_root_info.st_ino,
+                "dashboard_assets": dashboard_assets,
                 "executable_sha256": executable_sha256,
                 "executable_device": executable_info.st_dev,
                 "executable_inode": executable_info.st_ino,
@@ -1227,6 +1362,7 @@ def materialize_locked(
     provenance_sha256 = digest_bytes(provenance_payload)
     provenance_path = provenance_dir / f"{provenance_sha256}.json"
     provenance_info = write_once(provenance_path, provenance_payload, 0o400)
+    fsync_directory(provenance_dir)
     if digest_file(provenance_path) != provenance_sha256:
         raise BindingError("materialized provenance digest differs")
     return (
@@ -1250,6 +1386,7 @@ def parse_args() -> argparse.Namespace:
     action.add_argument("--verify-dashboard-build-runtime", action="store_true")
     action.add_argument("--verify-dashboard-build-input", action="store_true")
     action.add_argument("--verify-dashboard-runtime-transition", action="store_true")
+    action.add_argument("--materialize", action="store_true")
     parser.add_argument("--dashboard-build-runtime-receipt", type=Path)
     parser.add_argument("--dashboard-build-input-receipt", type=Path)
     parser.add_argument("--dashboard-package-manager-executable", type=Path)
@@ -1267,6 +1404,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-source-root", type=Path)
     parser.add_argument("--expected-source-root-device", type=int)
     parser.add_argument("--expected-source-root-inode", type=int)
+    parser.add_argument("--dashboard-build-receipt", type=Path)
     parser.add_argument("--commit")
     parser.add_argument("--fingerprint")
     return parser.parse_args()
@@ -1485,9 +1623,15 @@ def main() -> int:
                 )
             print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
             return 0
+        if not args.materialize:
+            raise BindingError("exactly one binding action is required")
         required = (
             args.private_root,
             args.executable,
+            args.source_root,
+            args.expected_source_root,
+            args.expected_source_root_device,
+            args.expected_source_root_inode,
             args.commit,
             args.fingerprint,
         )
@@ -1495,6 +1639,10 @@ def main() -> int:
             raise BindingError("materialization arguments are incomplete")
         assert args.private_root is not None
         assert args.executable is not None
+        assert args.source_root is not None
+        assert args.expected_source_root is not None
+        assert args.expected_source_root_device is not None
+        assert args.expected_source_root_inode is not None
         assert args.commit is not None
         assert args.fingerprint is not None
         (
@@ -1507,6 +1655,11 @@ def main() -> int:
         ) = materialize(
             private_root=args.private_root,
             executable=args.executable,
+            source_root=args.source_root,
+            expected_source_root=args.expected_source_root,
+            expected_source_root_device=args.expected_source_root_device,
+            expected_source_root_inode=args.expected_source_root_inode,
+            dashboard_build_receipt_path=args.dashboard_build_receipt,
             commit=args.commit,
             fingerprint=args.fingerprint,
         )

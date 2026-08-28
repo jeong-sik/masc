@@ -273,6 +273,51 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             )
         )
 
+    def test_tools_navigation_follows_the_observed_surface_ring(self):
+        class Page:
+            def wait_for_timeout(self, _milliseconds):
+                pass
+
+        screens = iter(
+            [
+                "▸Overview Acting Tools\n  MASC Overview",
+                "▸Overview Acting Tools\n  MASC Overview",
+                "Overview ▸Acting Tools\n  MASC Acting",
+                "Overview ▸Acting Tools\n  MASC Acting",
+                "Overview Acting ▸Tools\n  MASC Tools",
+            ]
+        )
+        with (
+            mock.patch.object(capture, "screen_text", side_effect=screens),
+            mock.patch.object(capture, "press") as press,
+            mock.patch.object(capture, "wait_screen") as wait_screen,
+        ):
+            capture.goto_tools(Page(), 1.0)
+
+        self.assertEqual(
+            [call.args[1] for call in press.call_args_list], ["Tab", "Tab"]
+        )
+        wait_screen.assert_called_once()
+
+    def test_tools_navigation_rejects_a_complete_surface_cycle(self):
+        class Page:
+            def wait_for_timeout(self, _milliseconds):
+                pass
+
+        screens = iter(
+            [
+                "▸Overview Acting Tools",
+                "Overview ▸Acting Tools",
+                "▸Overview Acting Tools",
+            ]
+        )
+        with (
+            mock.patch.object(capture, "screen_text", side_effect=screens),
+            mock.patch.object(capture, "press"),
+        ):
+            with self.assertRaisesRegex(capture.CaptureError, "surface cycle"):
+                capture.goto_tools(Page(), 1.0)
+
     def test_action_must_be_inside_exact_receipt_block(self):
         same = "\n".join(
             [

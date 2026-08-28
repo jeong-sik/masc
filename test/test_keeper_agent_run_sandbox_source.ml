@@ -154,7 +154,9 @@ let test_keeper_tools_cleanup_is_retained_and_invoked () =
     bool
     "run setup retains the full keeper tool bundle"
     true
-    (contains ~needle:"Keeper_tools_agent_core_bundle.make_tool_bundle" run_tools_setup_src);
+    (contains
+       ~needle:"Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface"
+       run_tools_setup_src);
   check
     bool
     "run setup exposes the cleanup callback"

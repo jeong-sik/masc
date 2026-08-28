@@ -168,7 +168,7 @@ let make_fixture
   ignore (Masc.Keeper_registry.For_testing.register ~base_path meta.name meta);
   ignore (Masc.Keeper_registry.For_testing.register ~base_path "tool-matrix" meta);
   let tools =
-    KTO.make_tools
+    KTO.For_testing.make_tools
       ~config
       ~meta
       ~publication_recovery

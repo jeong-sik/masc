@@ -221,6 +221,10 @@ let test_skill_name_selection_is_structured_and_filters_task () =
   check int "Task composition is filtered" 0 (List.length selected.composition_skills);
   let json = Keeper_effective_tool_surface.to_yojson (Available selected) in
   check string
+    "operator projection does not claim to be a frozen executed turn"
+    "computed_current"
+    Yojson.Safe.Util.(member "projection_basis" json |> to_string);
+  check string
     "selection mode"
     "names"
     Yojson.Safe.Util.(member "skill_selection" json |> member "mode" |> to_string);
@@ -386,6 +390,57 @@ let test_projection_names_equal_turn_surface_authority () =
           |> Yojson.Safe.Util.member "properties"
           |> Yojson.Safe.Util.member "name"
           = `Null))
+;;
+
+let test_narrow_projection_names_equal_turn_surface_authority () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let snapshot = skill_snapshot () in
+  let task_reference = reference_by_name snapshot "guide" in
+  match
+    project
+      ~snapshot
+      ~tool_groups:(Some [ "board" ])
+      ~skill_names:None
+      ~task_skill_references:[ task_reference ]
+      ~native_posture:Runtime_native_tools.Native_read
+      ()
+  with
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Ok surface ->
+    let global_skill_catalog, diagnostics =
+      Keeper_skill_catalog.of_snapshot snapshot
+    in
+    check int "snapshot projection diagnostics" 0 (List.length diagnostics);
+    let task_selection =
+      match
+        Keeper_task_skill_turn.resolve_for_task
+          ~snapshot
+          ~task_id:"task-001"
+          [ task_reference ]
+      with
+      | Ok selection -> selection
+      | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+    in
+    let capability_surface =
+      Keeper_capability_surface.create
+        ~tool_groups:(Some [ "board" ])
+        ~skill_names:None
+        ~global_skill_catalog
+        ~task_skills:(Keeper_task_skill_turn.skills task_selection)
+    in
+    let expected =
+      Keeper_run_tools_setup.expected_model_tool_names
+        ~identity_tool_names:[]
+        ~skill_catalog:(Keeper_capability_surface.skill_catalog capability_surface)
+        ~model_visible_descriptors:
+          (Keeper_capability_surface.descriptors capability_surface)
+        ()
+    in
+    let observed = names surface in
+    check (list string) "narrow projection and turn setup names are identical"
+      expected observed;
+    check bool "off-surface filesystem tool stays absent" false
+      (List.mem "Read" observed)
 ;;
 
 let test_external_composition_preserves_snapshot_provenance () =
@@ -958,6 +1013,8 @@ let () =
     [ ( "projection"
       , [ test_case "names equal turn setup authority" `Quick
             test_projection_names_equal_turn_surface_authority
+        ; test_case "narrow names equal turn setup authority" `Quick
+            test_narrow_projection_names_equal_turn_surface_authority
         ; test_case "Skill names filter Task and expose unavailable" `Quick
             test_skill_name_selection_is_structured_and_filters_task
         ; test_case "different Keeper declarations change names and digest" `Quick

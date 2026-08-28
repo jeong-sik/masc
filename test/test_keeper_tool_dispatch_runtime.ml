@@ -5774,7 +5774,7 @@ let test_stale_spawn_handles_remain_correction_capable () =
        in
        Spawn_turn_registry.with_turn_registry (Some registry) @@ fun () ->
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery

@@ -39,7 +39,7 @@ let initial_terminal_effect_state = function
   | Some _ | None -> Keeper_tools_agent_core.Terminal_effect_open
 ;;
 
-let make_tool_bundle_for_descriptors
+let make_tool_bundle_for_descriptors_with_policy
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
@@ -175,9 +175,8 @@ let make_tool_bundle_for_descriptors
       gate_context
   in
   (* Every descriptor authorized by this caller is materialized through the
-     canonical Keeper handler. [make_tool_bundle] supplies the full
-     model-visible set; bounded internal roles supply their own closed typed
-     subset. *)
+     canonical Keeper handler. A Keeper turn supplies its frozen Tool Group
+     surface; bounded internal roles supply their own closed typed subset. *)
   (* The bundle lives for exactly one Agent run. Its typed tool-boundary
      state is request-scoped and observed by the AGENT_CORE tool-boundary probe only
      after the whole tool batch and checkpoint sink have completed. A generic
@@ -519,6 +518,41 @@ let make_tool_bundle_for_descriptors
   }
 ;;
 
+let make_tool_bundle_for_capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot
+      ?clock
+      ?continuation_channel
+      ?gate_context
+      ?hitl_resolution
+      ?identity_tools
+      ?composition_plan_index
+      ?skill_activation_context
+      ?turn_ctx_cell
+      ~capability_surface
+      ()
+  =
+  make_tool_bundle_for_descriptors_with_policy
+    ~config
+    ~meta
+    ~publication_recovery
+    ~ctx_snapshot
+    ?clock
+    ?continuation_channel
+    ?gate_context
+    ?hitl_resolution
+    ~skill_catalog:(Keeper_capability_surface.skill_catalog capability_surface)
+    ?identity_tools
+    ?composition_plan_index
+    ?skill_activation_context
+    ~allow_unrecorded_skill_surface:false
+    ?turn_ctx_cell
+    ~descriptors:(Keeper_capability_surface.descriptors capability_surface)
+    ()
+;;
+
 let make_tool_bundle_with_policy
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -544,7 +578,7 @@ let make_tool_bundle_with_policy
   let descriptors =
     Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
   in
-  make_tool_bundle_for_descriptors
+  make_tool_bundle_for_descriptors_with_policy
     ~config
     ~meta
     ~publication_recovery
@@ -561,66 +595,6 @@ let make_tool_bundle_with_policy
     ?turn_ctx_cell
     ~descriptors
     ()
-;;
-
-let make_tool_bundle
-      ~config
-      ~meta
-      ~publication_recovery
-      ~ctx_snapshot
-      ?clock
-      ?continuation_channel
-      ?gate_context
-      ?hitl_resolution
-      ?skill_catalog
-      ?identity_tools
-      ?composition_plan_index
-      ?skill_activation_context
-      ?turn_ctx_cell
-      ()
-  =
-  make_tool_bundle_with_policy
-    ~config
-    ~meta
-    ~publication_recovery
-    ~ctx_snapshot
-    ?clock
-    ?continuation_channel
-    ?gate_context
-    ?hitl_resolution
-    ?skill_catalog
-    ?identity_tools
-    ?composition_plan_index
-    ?skill_activation_context
-    ~allow_unrecorded_skill_surface:false
-    ?turn_ctx_cell
-    ()
-;;
-
-let make_tools
-      ~(config : Workspace.config)
-      ~(meta : Keeper_meta_contract.keeper_meta)
-      ~(publication_recovery :
-          Keeper_publication_recovery_availability.turn_context)
-      ~(ctx_snapshot : Keeper_types.working_context)
-      ?clock
-      ?skill_catalog
-      ?skill_activation_context
-      ?turn_ctx_cell
-      ()
-  : Agent_core.Tool.t list
-  =
-  (make_tool_bundle
-     ~config
-     ~meta
-     ~publication_recovery
-     ~ctx_snapshot
-     ?clock
-     ?skill_catalog
-     ?skill_activation_context
-     ?turn_ctx_cell
-     ())
-    .tools
 ;;
 
 module For_testing = struct
@@ -683,7 +657,7 @@ module For_testing = struct
         ?skill_catalog
         ()
     =
-    (make_tool_bundle_for_descriptors
+    (make_tool_bundle_for_descriptors_with_policy
        ~config
        ~meta
        ~publication_recovery

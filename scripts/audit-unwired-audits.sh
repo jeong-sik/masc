@@ -23,9 +23,9 @@ cd "$(git rev-parse --show-toplevel)"
 
 # Measured, not computed: 14 is what the widened scan reports on main. The
 # previous 9 came from a narrower pattern that skipped scripts/ci/ entirely
-# and did not match lint-* names, so three self-declared gates
-# (check-logging-consistency, lint-cancel-guard, tla-mutation-lint-ratchet)
-# were invisible to it. See #27626.
+# and did not match lint-* names, so self-declared gates
+# (check-logging-consistency, lint-cancel-guard) were invisible to it.
+# See #27626.
 UNWIRED_BASELINE=11
 
 all="$(mktemp)"

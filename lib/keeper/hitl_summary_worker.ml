@@ -167,6 +167,7 @@ let build_context_bundle ~(entry : pending_approval) =
     ; "input", entry.input
     ]
   in
+  let host_context = Keeper_gate_host_context.for_approval entry in
   match entry.request_context with
   | Some request_context ->
     let request_context, thinking_dropped =
@@ -178,9 +179,15 @@ let build_context_bundle ~(entry : pending_approval) =
       (request_identity
        @ [ "partial_context", `Bool false
          ; "thinking_blocks_omitted", `Int thinking_dropped
+         ; "host_context", host_context
          ; "request_context", request_context
          ])
-  | None -> `Assoc (request_identity @ [ "partial_context", `Bool true ])
+  | None ->
+    `Assoc
+      (request_identity
+       @ [ "partial_context", `Bool true
+         ; "host_context", host_context
+         ])
 ;;
 
 let message role text = Agent_core.Types.text_message role text

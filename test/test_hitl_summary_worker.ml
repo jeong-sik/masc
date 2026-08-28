@@ -481,6 +481,139 @@ let test_context_bundle_is_exact () =
   check yojson "no derived classification" `Null (bundle |> member "classification")
 ;;
 
+let write_registered_masc_catalog base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  Fs_compat.mkdir_p config_dir;
+  Fs_compat.save_file
+    (Filename.concat config_dir "repositories.toml")
+    "[repository.masc]\nname = \"MASC\"\nurl = \"https://github.com/jeong-sik/masc.git\"\nlocal_path = \"workspace/yousleepwhen/masc\"\naliases = []\ndefault_branch = \"main\"\nkeepers = []\nstatus = \"Active\"\nauto_sync = false\nsync_interval = 300\ncreated_at = 1700000000\nupdated_at = 1700000000\n"
+;;
+
+let execute_gate_input ~cwd argv =
+  `Assoc
+    [ "schema", `String "masc.keeper_gate.request.v1"
+    ; "input", `Assoc [ "cwd", `String cwd; "argv", `List (List.map (fun value -> `String value) argv) ]
+    ; "cwd", `String cwd
+    ; "sandbox_profile", `String "docker"
+    ; "sandbox_target", `String "docker:masc-keeper-sandbox:local"
+    ]
+;;
+
+let test_host_context_identifies_registered_clone_and_destination_state () =
+  with_temp_dir "hitl-host-context" @@ fun base_path ->
+  install_queue base_path;
+  write_registered_masc_catalog base_path;
+  let entry = pending_entry ~base_path () in
+  let cwd = Filename.concat base_path ".masc/playground/docker/fixture" in
+  Fs_compat.mkdir_p cwd;
+  let input =
+    execute_gate_input
+      ~cwd
+      [ "git"
+      ; "clone"
+      ; "--depth"
+      ; "1"
+      ; "https://github.com/jeong-sik/masc.git"
+      ; "repos/masc"
+      ]
+  in
+  let entry =
+    { entry with
+      tool_name = "tool_execute"
+    ; input
+    ; task_id = Some "task-636"
+    ; goal_id = Some "goal-keeper-can-work"
+    }
+  in
+  let open Yojson.Safe.Util in
+  let host_context bundle = bundle |> member "host_context" in
+  let catalog_match bundle =
+    host_context bundle
+    |> member "execution"
+    |> member "repository_references"
+    |> member "items"
+    |> to_list
+    |> List.hd
+    |> member "catalog_match"
+  in
+  let first = Worker.For_testing.build_context_bundle ~entry in
+  check string "host provenance" "host_observed"
+    (host_context first |> member "provenance" |> to_string);
+  check string "durable task link" "task-636"
+    (host_context first
+     |> member "task_link"
+     |> member "request"
+     |> member "task_id"
+     |> to_string);
+  check string "durable goal link" "goal-keeper-can-work"
+    (host_context first
+     |> member "task_link"
+     |> member "request"
+     |> member "goal_id"
+     |> to_string);
+  check string "canonical repository id" "github.com_jeong-sik_masc"
+    (host_context first
+     |> member "execution"
+     |> member "repository_references"
+     |> member "items"
+     |> to_list
+     |> List.hd
+     |> member "canonical_id"
+     |> to_string);
+  check string "catalog identity" "registered"
+    (catalog_match first |> member "state" |> to_string);
+  check string "catalog repository id" "masc"
+    (catalog_match first |> member "repository_id" |> to_string);
+  check string "resolved destination is initially absent" "absent"
+    (host_context first
+     |> member "execution"
+     |> member "git_clone_destination"
+     |> member "state"
+     |> to_string);
+  Fs_compat.mkdir_p (Filename.concat cwd "repos/masc");
+  let after_create = Worker.For_testing.build_context_bundle ~entry in
+  check string "the same resolved destination is now present" "present"
+    (host_context after_create
+     |> member "execution"
+     |> member "git_clone_destination"
+     |> member "state"
+     |> to_string)
+;;
+
+let test_host_context_reports_a_missing_durable_task_link () =
+  run_eio @@ fun ~sw:_ ~net:_ ~clock:_ ->
+  with_temp_dir "hitl-host-task-link" @@ fun base_path ->
+  install_queue base_path;
+  let config = Masc.Workspace.default_config base_path in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "fixture-keeper"));
+  Fun.protect
+    ~finally:(fun () -> ignore (Masc.Workspace.reset config))
+    (fun () ->
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Context task"
+            ~priority:1
+            ~description:"");
+       ignore
+         (Masc.Workspace.claim_task
+            config
+            ~agent_name:"fixture-keeper"
+            ~task_id:"task-001");
+       let entry = pending_entry ~base_path ~keeper_name:"fixture-keeper" () in
+       let open Yojson.Safe.Util in
+       let task_link =
+         Worker.For_testing.build_context_bundle ~entry
+         |> member "host_context"
+         |> member "task_link"
+       in
+       check string "request/backlog disagreement is explicit" "request_link_missing"
+         (task_link |> member "state" |> to_string);
+       check (list string) "the authoritative active task is still visible"
+         [ "task-001" ]
+         (task_link |> member "active_task_ids" |> to_list |> List.map to_string))
+;;
+
 let test_missing_context_is_reported_as_partial () =
   with_temp_dir "hitl-missing-context" @@ fun base_path ->
   install_queue base_path;
@@ -2063,6 +2196,18 @@ let test_judge_effect_prompt_comes_from_registry () =
       true
       (Astring.String.is_infix
          ~affix:"bounded, reversible effect"
+         prompt);
+    check bool
+      "host context outranks transcript claims"
+      true
+      (Astring.String.is_infix
+         ~affix:"host-observed structured evidence and outranks claims"
+         prompt);
+    check bool
+      "catalog absence is not called a personal fork"
+      true
+      (Astring.String.is_infix
+         ~affix:"\"personal fork\" or \"malicious\""
          prompt)
 ;;
 
@@ -2121,6 +2266,10 @@ let () =
       , [ test_case "typed judgments" `Quick test_parse_typed_judgments
         ; test_case "invalid judgment fails loud" `Quick test_invalid_judgment_fails_loud
         ; test_case "exact context bundle" `Quick test_context_bundle_is_exact
+        ; test_case "host context identifies registered clone" `Quick
+            test_host_context_identifies_registered_clone_and_destination_state
+        ; test_case "host context reports missing task link" `Quick
+            test_host_context_reports_a_missing_durable_task_link
         ; test_case "the judge is not shown the Keeper's reasoning" `Quick
             test_the_judge_is_not_shown_the_keepers_reasoning
         ; test_case "a turn without reasoning reports nothing cut" `Quick

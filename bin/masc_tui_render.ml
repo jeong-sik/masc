@@ -9531,26 +9531,14 @@ let render_keeper_calls (state : state) =
         ( call
         , Option.bind call.Masc.Tui_decode.kc_output (fun result ->
               Masc.Keeper_chat_tool_trail.tool_result_digest ~result)
-        , Option.map
-            (fun identity ->
-               [ Printf.sprintf
-                   "↳ assembler %s · %s"
-                   identity.Masc.Tui_decode.pei_assembler_run_id
-                   (Masc.Tui_decode.proposal_provenance_status_label
-                      identity.Masc.Tui_decode.pei_provenance_status)
-               ; Printf.sprintf
-                   "  proposal %s"
-                   identity.Masc.Tui_decode.pei_proposal_id
-               ])
-            call.Masc.Tui_decode.kc_proposal_execution ))
+        , call.Masc.Tui_decode.kc_proposal_execution ))
       entries
   in
   let max_scroll =
     Message_layout.last_page_start ~height:content_height
       (List.map
          (fun (_, digest, proposal) ->
-            1
-            + Option.fold ~none:0 ~some:List.length proposal
+            Option.fold ~none:1 ~some:(fun _ -> min 3 content_height) proposal
             + (if Option.is_some digest then 1 else 0))
          rows)
   in
@@ -9583,12 +9571,22 @@ let render_keeper_calls (state : state) =
           box_empty buf cols;
           decr remaining
       | Some (call, digest, proposal) ->
-          incr idx;
-          let open Masc.Tui_decode in
-          let glyph, style =
-            if call.kc_success then ("✓", Ansi.reset)
-            else ("✗", (Theme.bad ()))
+          let proposal_core_rows =
+            Option.fold ~none:1 ~some:(fun _ -> min 3 content_height) proposal
           in
+          if !remaining < proposal_core_rows
+          then (
+            while !remaining > 0 do
+              box_empty buf cols;
+              decr remaining
+            done)
+          else (
+            incr idx;
+            let open Masc.Tui_decode in
+            let glyph, style =
+              if call.kc_success then ("✓", Ansi.reset)
+              else ("✗", (Theme.bad ()))
+            in
           (* The Acting feed already spells a call's duration, from the same
              milliseconds. This was a second spelling of the first two rungs
              with no third: a call past a minute would have read [312.4s]
@@ -9596,56 +9594,74 @@ let render_keeper_calls (state : state) =
              that -- the longest was 18.1s -- so this removes a duplicate
              rather than a wrong reading. Duplicated ladders are how the two
              that were wrong got that way. *)
-          let duration =
-            match call.kc_duration_ms with
-            | Some ms -> Masc_tui_acting.elapsed_text ms
-            | None -> "-"
-          in
-          let turn =
-            match call.kc_turn with Some t -> string_of_int t | None -> "-"
-          in
-          let subject =
-            match
-              Masc.Keeper_chat_tool_trail.tool_subject ~name:call.kc_tool
-                ~args:call.kc_input
-            with
-            | Some subject -> subject
-            | None -> ""
-          in
-          let line =
-            Printf.sprintf "  %-8s %s %-24s %-8s %-6s %s"
-              (Terminal_text.clock_timestamp
-                 (Masc_domain.iso8601_of_unix_seconds call.kc_at))
-              glyph
-              (fit_width (Terminal_text.single_line call.kc_tool) 24)
-              duration turn
-              (Terminal_text.single_line subject)
-          in
-          box_line_styled buf cols ~style line;
-          decr remaining;
-          Option.iter
-            (List.iter (fun proposal_line ->
-               if !remaining > 0
-               then (
-                 box_line_styled buf cols ~style:Ansi.dim
-                   (Printf.sprintf "  %-8s %s   %s" "" " "
-                      (Terminal_text.single_line proposal_line));
-                 decr remaining)))
-            proposal;
+            let duration =
+              match call.kc_duration_ms with
+              | Some ms -> Masc_tui_acting.elapsed_text ms
+              | None -> "-"
+            in
+            let turn =
+              match call.kc_turn with Some t -> string_of_int t | None -> "-"
+            in
+            let subject =
+              match
+                Masc.Keeper_chat_tool_trail.tool_subject ~name:call.kc_tool
+                  ~args:call.kc_input
+              with
+              | Some subject -> subject
+              | None -> ""
+            in
+            let line =
+              Printf.sprintf "  %-8s %s %-24s %-8s %-6s %s"
+                (Terminal_text.clock_timestamp
+                   (Masc_domain.iso8601_of_unix_seconds call.kc_at))
+                glyph
+                (fit_width (Terminal_text.single_line call.kc_tool) 24)
+                duration turn
+                (Terminal_text.single_line subject)
+            in
+            let draw_line ~style text =
+              box_line_styled buf cols ~style text;
+              decr remaining
+            in
+            (match proposal, content_height with
+             | Some _, 1 ->
+               draw_line ~style:(Theme.warn ())
+                 "  proposal identity needs at least two content rows"
+             | Some identity, 2 ->
+               draw_line ~style
+                 (Printf.sprintf
+                    "  %s %-18s · assembler %s · %s"
+                    glyph
+                    (fit_width (Terminal_text.single_line call.kc_tool) 18)
+                    identity.pei_assembler_run_id
+                    (proposal_provenance_status_label
+                       identity.pei_provenance_status));
+               draw_line ~style:Ansi.dim
+                 (Printf.sprintf "    proposal %s" identity.pei_proposal_id)
+             | Some identity, _ ->
+               draw_line ~style line;
+               draw_line ~style:Ansi.dim
+                 (Printf.sprintf
+                    "             ↳ assembler %s · %s"
+                    identity.pei_assembler_run_id
+                    (proposal_provenance_status_label
+                       identity.pei_provenance_status));
+               draw_line ~style:Ansi.dim
+                 (Printf.sprintf "               proposal %s" identity.pei_proposal_id)
+             | None, _ -> draw_line ~style line);
           (* What the call answered. The row above says one ran and what it
              was called with; this is the only place that says what came
              back, which is the question a failed call leaves open. It takes
              a failed call's colour so a reason does not read as ordinary
              output. A call that answered nothing draws no row rather than an
              empty one. *)
-          (match digest with
-           | Some digest when !remaining > 0 ->
-               box_line_styled buf cols
+            (match digest with
+             | Some digest when !remaining > 0 ->
+               draw_line
                  ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
                  (Printf.sprintf "  %-8s %s   %s" "" " "
-                    (Terminal_text.single_line ("\xe2\x86\x92 " ^ digest)));
-               decr remaining
-           | Some _ | None -> ())
+                    (Terminal_text.single_line ("\xe2\x86\x92 " ^ digest)))
+             | Some _ | None -> ()))
     done;
     (* How many calls the height actually reached, not how many would fit if
        each took one row. A call that answered something takes two, so

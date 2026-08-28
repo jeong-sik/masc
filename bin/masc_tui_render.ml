@@ -1809,6 +1809,34 @@ let render_approvals (state : state) =
       else 0
     in
     let now_unix = Unix.gettimeofday () in
+    (* The name column, sized to the names it has to hold rather than to a
+       number chosen once. Sixteen cells cut "rw-e0-r9-20260820-review" to
+       "rw-e0-r9-202608~", and two keepers whose names share a long prefix
+       then read alike -- which is the whole job of the column.
+
+       The cells come out of the last one, which carries the server's input
+       preview. That preview is a JSON envelope, so at this width it shows
+       "{\"schema\":\"ma~" and nothing a reader can act on; ten fewer of those
+       characters costs nothing and buys the identifier back. The cap keeps
+       one long name from taking the row. *)
+    (* Sanitised here, not at the call below. These are external names and
+       every path that reads one goes through [Terminal_text] -- measuring is
+       a path like any other, and a measurement taken off the raw field would
+       size the column to control characters the screen never draws. *)
+    let approval_row_name = function
+      | Operator_row a -> Terminal_text.single_line a.ap_actor
+      | Keeper_tool_row held ->
+        Terminal_text.single_line held.Tui_decode.kta_keeper
+      | Gate_row pending ->
+        Terminal_text.single_line pending.Tui_decode.gp_keeper
+    in
+    let name_width =
+      List.fold_left
+        (fun widest row ->
+          max widest (Message_layout.display_width (approval_row_name row)))
+        16 approvals
+      |> min 26
+    in
     for i = 0 to content_height - 1 do
       let idx = i + scroll_offset in
       if idx < count then begin
@@ -1819,7 +1847,7 @@ let render_approvals (state : state) =
                 Terminal_text.single_line_or ~default:"-" a.ap_target_id
               in
               Printf.sprintf "  %s  %s  %s  %s"
-                (fit_width (Terminal_text.single_line a.ap_actor) 16)
+                (fit_width (Terminal_text.single_line a.ap_actor) name_width)
                 (fit_width (Terminal_text.single_line a.ap_action_type) 20)
                 (fit_width (Terminal_text.single_line a.ap_target_type) 16)
                 target_id
@@ -1832,11 +1860,13 @@ let render_approvals (state : state) =
                   (held.kta_asked_at +. held.kta_timeout_sec -. now_unix)
               in
               Printf.sprintf "  %s  %s  %s  %s"
-                (fit_width (Terminal_text.single_line held.kta_keeper) 16)
+                (fit_width (Terminal_text.single_line held.kta_keeper) name_width)
                 (fit_width
                    ("tool: " ^ Terminal_text.single_line held.kta_tool)
                    20)
-                (fit_width (Printf.sprintf "%.0fs left" remaining) 16)
+                (fit_width
+                   (Masc_tui_answering.duration_text remaining ^ " left")
+                   16)
                 (Terminal_text.single_line held.kta_question ^ " — "
                 ^ Terminal_text.single_line_or ~default:"(not provided)"
                     held.kta_because)
@@ -1857,7 +1887,7 @@ let render_approvals (state : state) =
               Printf.sprintf "  %s  %s  %s  %s"
                 (fit_width
                    (Terminal_text.single_line pending.Tui_decode.gp_keeper)
-                   16)
+                   name_width)
                 (fit_width
                    ("gate: "
                    ^ Terminal_text.single_line

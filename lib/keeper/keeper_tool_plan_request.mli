@@ -24,6 +24,14 @@ type template_error =
       }
   | Template_invalid_pointer of { pointer : string }
   | Template_duplicate_object_field of string
+  | Template_duplicate_field of
+      { kind : string
+      ; field : string
+      }
+  | Template_unknown_field of
+      { kind : string
+      ; field : string
+      }
 
 type error =
   | Request_not_an_object of { found : string }
@@ -48,6 +56,11 @@ type error =
       ; error : template_error
       }
   | Unknown_request_field of { field : string }
+  | Duplicate_request_field of { field : string }
+  | Node_duplicate_field of
+      { index : int
+      ; field : string
+      }
   | Plan_rejected of Keeper_tool_plan.error
 
 val input_schema : Yojson.Safe.t

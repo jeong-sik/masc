@@ -498,7 +498,45 @@ let test_tool_reference_schema_matches_the_strict_decoder () =
        ; "capability_id", `String "filesystem.read"
        ; "name", `String "Read"
        ])
-    false
+    false;
+  let blank =
+    `Assoc
+      [ "descriptor_id", `String "  "
+      ; "capability_id", `String "filesystem.read"
+      ]
+  in
+  check bool "blank descriptor decoder" false
+    (Result.is_ok (Surface.ordinary_tool_reference_of_yojson blank));
+  let pattern =
+    Yojson.Safe.Util.(
+      Surface.ordinary_tool_reference_schema
+      |> member "properties"
+      |> member "descriptor_id"
+      |> member "pattern"
+      |> to_string)
+  in
+  let validate_nonblank label descriptor_id expected_ok =
+    let value =
+      `Assoc
+        [ "descriptor_id", `String descriptor_id
+        ; "capability_id", `String "filesystem.read"
+        ]
+    in
+    check bool (label ^ " schema pattern") expected_ok
+      (Re.execp (Re.Pcre.regexp pattern) descriptor_id);
+    check bool (label ^ " decoder") expected_ok
+      (Result.is_ok (Surface.ordinary_tool_reference_of_yojson value))
+  in
+  validate_nonblank "multiline descriptor" "tool.read\nvariant" true;
+  validate_nonblank "ASCII whitespace descriptor" " \t\n\012\r" false;
+  validate_nonblank "non-breaking-space descriptor" "\194\160" true;
+  check string "schema declares decoder's nonblank syntax" "[^ \t\n\012\r]"
+    Yojson.Safe.Util.(
+      Surface.ordinary_tool_reference_schema
+      |> member "properties"
+      |> member "descriptor_id"
+      |> member "pattern"
+      |> to_string)
 ;;
 
 let tool_capability_by_internal_name surface internal_name =

@@ -39,6 +39,25 @@ type error =
       { descriptor_id : string
       ; capability_id : string
       }
+  | Prompt_variable_json_not_canonicalizable of
+      { variable : string
+      ; detail : string
+      }
+
+type output =
+  | Plan of
+      { plan_json : Yojson.Safe.t
+      ; plan : Keeper_tool_plan.t
+      }
+  | Cannot_assemble
+
+type output_error =
+  | Output_not_object
+  | Output_duplicate_field of string
+  | Output_unknown_field of string
+  | Output_missing_field of string
+  | Output_invalid_kind of Yojson.Safe.t
+  | Output_plan_rejected of Keeper_tool_plan_request.error
 
 type t
 
@@ -59,7 +78,18 @@ val ordinary_tool_references
 val descriptors : t -> Keeper_tool_descriptor.t list
 val capability_surface_sha256 : t -> string
 
-val prompt_variables : t -> (string * string) list
+val output_schema : Yojson.Safe.t
+(** Closed model-output sum: [{kind:"plan", plan:...}] or exactly
+    [{kind:"cannot_assemble"}]. *)
+
+val output_of_yojson
+  :  request:t
+  -> Yojson.Safe.t
+  -> (output, output_error) result
+
+val output_error_to_yojson : output_error -> Yojson.Safe.t
+
+val prompt_variables : t -> ((string * string) list, error) result
 (** Variables for {!Prompt_names.assembler}. JSON values are canonical compact
     JSON. Descriptor rows include their exact input schema. *)
 

@@ -36,6 +36,10 @@ type error =
       { descriptor_id : string
       ; capability_id : string
       }
+  | Prompt_variable_json_not_canonicalizable of
+      { variable : string
+      ; detail : string
+      }
 
 type t =
   { objective : string
@@ -46,11 +50,21 @@ type t =
   }
 
 let input_schema =
+  (* These are syntax constraints shared with the decoder. They do not select
+     capabilities: exact identity and availability are resolved only against
+     the supplied frozen surface below. *)
+  let nonblank_string =
+    `Assoc
+      [ "type", `String "string"
+      ; "minLength", `Int 1
+      ; "pattern", `String "[^ \t\n\012\r]"
+      ]
+  in
   `Assoc
     [ "type", `String "object"
     ; ( "properties"
       , `Assoc
-          [ "objective", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+          [ "objective", nonblank_string
           ; ( "execution"
             , `Assoc
                 [ "type", `String "string"
@@ -60,6 +74,7 @@ let input_schema =
             , `Assoc
                 [ "type", `String "array"
                 ; "minItems", `Int 1
+                ; "uniqueItems", `Bool true
                 ; "items", Surface.ordinary_tool_reference_schema
                 ] )
           ] )
@@ -217,10 +232,11 @@ let ordinary_tool_references request = request.ordinary_tool_references
 let descriptors request = request.descriptors
 let capability_surface_sha256 request = request.capability_surface_sha256
 
-let canonical_json json =
+let canonical_json ~variable json =
   match Keeper_chat_operation.canonical_json_string json with
-  | Ok bytes -> bytes
-  | Error detail -> invalid_arg ("constructed Assembler JSON is invalid: " ^ detail)
+  | Ok bytes -> Ok bytes
+  | Error detail ->
+    Error (Prompt_variable_json_not_canonicalizable { variable; detail })
 ;;
 
 let execution_to_string = function
@@ -234,20 +250,122 @@ let descriptor_json descriptor =
      @ [ "input_schema", descriptor.Descriptor.input_schema ])
 ;;
 
+let output_schema =
+  let closed properties required =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties", `Assoc properties
+      ; "required", `List (List.map (fun name -> `String name) required)
+      ; "additionalProperties", `Bool false
+      ]
+  in
+  `Assoc
+    [ ( "oneOf"
+      , `List
+          [ closed
+              [ "kind", `Assoc [ "const", `String "plan" ]
+              ; "plan", Keeper_tool_plan_request.input_schema
+              ]
+              [ "kind"; "plan" ]
+          ; closed
+              [ "kind", `Assoc [ "const", `String "cannot_assemble" ] ]
+              [ "kind" ]
+          ] )
+    ]
+;;
+
+type output =
+  | Plan of
+      { plan_json : Yojson.Safe.t
+      ; plan : Keeper_tool_plan.t
+      }
+  | Cannot_assemble
+
+type output_error =
+  | Output_not_object
+  | Output_duplicate_field of string
+  | Output_unknown_field of string
+  | Output_missing_field of string
+  | Output_invalid_kind of Yojson.Safe.t
+  | Output_plan_rejected of Keeper_tool_plan_request.error
+
+let output_of_yojson ~request = function
+  | `Assoc fields ->
+    (match first_duplicate fields with
+     | Some field -> Error (Output_duplicate_field field)
+     | None ->
+       let* kind =
+         match List.assoc_opt "kind" fields with
+         | Some value -> Ok value
+         | None -> Error (Output_missing_field "kind")
+       in
+       (match kind with
+        | `String "cannot_assemble" ->
+          (match fields with
+           | [ "kind", _ ] -> Ok Cannot_assemble
+           | _ ->
+             let field = List.find (fun (name, _) -> not (String.equal name "kind")) fields |> fst in
+             Error (Output_unknown_field field))
+        | `String "plan" ->
+          (match List.find_opt (fun (name, _) -> not (List.mem name [ "kind"; "plan" ])) fields with
+           | Some (field, _) -> Error (Output_unknown_field field)
+           | None ->
+             let* plan_json =
+               match List.assoc_opt "plan" fields with
+               | Some value -> Ok value
+               | None -> Error (Output_missing_field "plan")
+             in
+             Keeper_tool_plan_request.plan_of_json
+               ~descriptors:request.descriptors
+               plan_json
+             |> Result.map (fun plan -> Plan { plan_json; plan })
+             |> Result.map_error (fun error -> Output_plan_rejected error))
+        | value -> Error (Output_invalid_kind value)))
+  | _ -> Error Output_not_object
+;;
+
+let output_error_to_yojson = function
+  | Output_not_object -> `Assoc [ "kind", `String "output_not_object" ]
+  | Output_duplicate_field field ->
+    `Assoc [ "kind", `String "output_duplicate_field"; "field", `String field ]
+  | Output_unknown_field field ->
+    `Assoc [ "kind", `String "output_unknown_field"; "field", `String field ]
+  | Output_missing_field field ->
+    `Assoc [ "kind", `String "output_missing_field"; "field", `String field ]
+  | Output_invalid_kind actual ->
+    `Assoc [ "kind", `String "output_invalid_kind"; "actual", actual ]
+  | Output_plan_rejected error ->
+    `Assoc
+      [ "kind", `String "output_plan_rejected"
+      ; "error", Keeper_tool_plan_request.error_to_json error
+      ]
+;;
+
 let prompt_variables request =
-  [ "capability_surface_sha256", request.capability_surface_sha256
-  ; "execution", execution_to_string request.execution
-  ; "objective", request.objective
-  ; ( "ordinary_tool_references_json"
-    , canonical_json
-        (`List
-          (List.map
-             Surface.ordinary_tool_reference_to_yojson
-             request.ordinary_tool_references)) )
-  ; "plan_input_schema_json", canonical_json Keeper_tool_plan_request.input_schema
-  ; ( "tool_descriptors_json"
-    , canonical_json (`List (List.map descriptor_json request.descriptors)) )
-  ]
+  let* references =
+    canonical_json
+      ~variable:"ordinary_tool_references_json"
+      (`List
+        (List.map
+           Surface.ordinary_tool_reference_to_yojson
+           request.ordinary_tool_references))
+  in
+  let* output_schema =
+    canonical_json ~variable:"assembler_output_schema_json" output_schema
+  in
+  let* descriptors =
+    canonical_json
+      ~variable:"tool_descriptors_json"
+      (`List (List.map descriptor_json request.descriptors))
+  in
+  Ok
+    [ "capability_surface_sha256", request.capability_surface_sha256
+    ; "execution", execution_to_string request.execution
+    ; "objective", request.objective
+    ; "ordinary_tool_references_json", references
+    ; "assembler_output_schema_json", output_schema
+    ; "tool_descriptors_json", descriptors
+    ]
 ;;
 
 let error_to_yojson = function
@@ -298,5 +416,11 @@ let error_to_yojson = function
       [ "kind", `String "async_tool_not_statically_read_only"
       ; "descriptor_id", `String descriptor_id
       ; "capability_id", `String capability_id
+      ]
+  | Prompt_variable_json_not_canonicalizable { variable; detail } ->
+    `Assoc
+      [ "kind", `String "prompt_variable_json_not_canonicalizable"
+      ; "variable", `String variable
+      ; "detail", `String detail
       ]
 ;;

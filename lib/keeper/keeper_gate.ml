@@ -18,6 +18,7 @@ type authorization_source =
   | Exact_always_rule of string
   | Keeper_always_allow
   | Workspace_always_allow
+  | Readonly_sandbox
 
 type authorization =
   { source : authorization_source
@@ -213,6 +214,7 @@ let authorization_source_to_string = function
   | Exact_always_rule _ -> "exact_always_rule"
   | Keeper_always_allow -> "keeper_always_allow"
   | Workspace_always_allow -> "workspace_always_allow"
+  | Readonly_sandbox -> "readonly_sandbox"
 ;;
 
 let deferred_reason_to_string = function
@@ -248,6 +250,8 @@ let source_fields = function
     [ "authorization_source", `String "keeper_always_allow" ]
   | Workspace_always_allow ->
     [ "authorization_source", `String "workspace_always_allow" ]
+  | Readonly_sandbox ->
+    [ "authorization_source", `String "readonly_sandbox" ]
 ;;
 
 let request_turn_id request =
@@ -263,7 +267,7 @@ let approval_sse_audit_event = "approval:audit"
 let authorization_subject_id = function
   | One_shot_resolution approval_id -> Some approval_id
   | Exact_always_rule rule_id -> Some rule_id
-  | Keeper_always_allow | Workspace_always_allow -> None
+  | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox -> None
 ;;
 
 (* Authorization is already committed when these receipts exist.  A failed
@@ -378,6 +382,7 @@ let audit_authorization_source
   | Keeper_always_allow -> Keeper_approval_queue_rules_types.Keeper_always_allow
   | Workspace_always_allow ->
     Keeper_approval_queue_rules_types.Workspace_always_allow
+  | Readonly_sandbox -> Keeper_approval_queue_rules_types.Readonly_sandbox
 ;;
 
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
@@ -389,7 +394,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
       (match source with
        | One_shot_resolution approval_id -> approval_id
        | Exact_always_rule rule_id -> rule_id
-       | Keeper_always_allow | Workspace_always_allow ->
+       | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox ->
          Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
@@ -1716,7 +1721,25 @@ let observe_exact_rule_expired
 let decide_from_selected_mode request = function
   | Error detail -> defer request (Mode_state_invalid detail)
   | Ok Keeper_gate_mode.Manual -> defer request Human_requested
-  | Ok Keeper_gate_mode.Auto_judge -> defer request Judge_requested
+  | Ok Keeper_gate_mode.Auto_judge ->
+    (* Observation-only argv inside the docker sandbox has a deterministic
+       safety answer; paying the judge (or the human queue) for it is how a
+       bare `ls` became an approval prompt. Manual mode is untouched: an
+       operator who asked to see everything still sees everything. *)
+    if
+      Keeper_gate_readonly.readonly_sandbox_execute
+        ~operation:request.operation
+        ~input:request.input
+    then (
+      let source = Readonly_sandbox in
+      let audit_receipt =
+        audit_allow
+          request
+          ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+          source
+      in
+      allow request source [ audit_receipt ])
+    else defer request Judge_requested
   | Ok Keeper_gate_mode.Always_allow ->
     let source = Workspace_always_allow in
     let audit_receipt =

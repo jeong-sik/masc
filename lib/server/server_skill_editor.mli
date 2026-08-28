@@ -7,6 +7,12 @@
 
 type access = Read_only | Read_write
 
+type path_rejection =
+  | Outside_source
+  | Non_directory_component
+  | Non_regular_file
+  | Identity_changed
+
 type loaded = private
   { reference : Skill_reference.t
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
@@ -46,6 +52,16 @@ type create_outcome =
       ; reason : string
       }
 
+type delete_outcome =
+  | Deleted_and_published of
+      { reference : Skill_reference.t
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      }
+  | Deleted_but_unpublished of
+      { reference : Skill_reference.t
+      ; reason : string
+      }
+
 type error =
   | Invalid_workspace
   | Snapshot_not_registered
@@ -54,13 +70,19 @@ type error =
   | Source_not_ready
   | Source_file_missing
   | Source_read_failed
+  | Source_path_rejected of path_rejection
   | Source_read_only
+  | Confirmation_required
   | Package_already_exists
   | Invalid_package_id of string
   | Revision_conflict of { actual : Skill_reference.content_revision }
   | Source_too_large of { bytes : int; max_bytes : int }
   | Validation_failed of string
   | Write_failed of string
+  | Remove_failed of
+      { removed : bool
+      ; detail : string
+      }
 
 val load : base_path:string -> Skill_reference.t -> (loaded, error) result
 val preview : base_path:string -> Skill_reference.t -> source_text:string -> (preview, error) result
@@ -85,6 +107,17 @@ val create :
   refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
   (create_outcome, error) result
 
+(** Delete the exact [SKILL.md] selected by [reference]. [confirmed] must be
+    [true]. The exact content revision is checked again while holding the path
+    lock, before the durable unlink. Existing turns keep their immutable
+    snapshot; [refresh] only publishes the change for later turns. *)
+val delete :
+  base_path:string ->
+  reference:Skill_reference.t ->
+  confirmed:bool ->
+  refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
+  (delete_outcome, error) result
+
 val access_to_string : access -> string
 val error_code : error -> string
 val error_to_string : error -> string
@@ -93,3 +126,5 @@ val preview_to_yojson : preview -> Yojson.Safe.t
 val save_outcome_to_yojson : save_outcome -> Yojson.Safe.t
 val writable_source_to_yojson : writable_source -> Yojson.Safe.t
 val create_outcome_to_yojson : create_outcome -> Yojson.Safe.t
+val delete_outcome_to_yojson : delete_outcome -> Yojson.Safe.t
+val error_to_yojson : error -> Yojson.Safe.t

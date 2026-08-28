@@ -196,10 +196,24 @@ let schema_for_wire (target : request_target) (Domain_schema domain_schema) =
 
 let response_format (target : request_target) requirement =
   match requirement.minimum_guarantee with
-  (* Json_syntax is fulfilled by the prompt plus local parser/validator.  Do
-     not turn a caller's syntax requirement into a provider-native schema
-     request based on incidental target capabilities. *)
-  | Json_syntax -> Ok (Types.Off, Json_syntax_only, None)
+  (* Json_syntax is fulfilled by the prompt plus local parser/validator, and
+     is never escalated to a provider-native SCHEMA request — that stays the
+     caller's explicit [Provider_schema] opt-in. JSON MODE is different: it
+     enforces exactly the caller's stated requirement (syntactically valid
+     JSON) at the provider, so when the target declares it and the wire can
+     encode it, request it. Measured cause (2026-08-29): glm-5-turbo
+     (json-mode-capable, schema-incapable) failed the librarian lane's JSON
+     on 63 of 67 runs under Off — the tier existed in the capability
+     vocabulary but no requirement could reach it. Local validation still
+     runs either way, and the assurance stays [Json_syntax_only] because the
+     caller's guarantee has not changed. *)
+  | Json_syntax ->
+    if
+      target.capabilities.Caps.supports_response_format_json
+      && Provider_http_codec.supports_json_mode
+           (Provider_http_codec.of_config target.config)
+    then Ok (Types.JsonMode, Json_syntax_only, None)
+    else Ok (Types.Off, Json_syntax_only, None)
   | Provider_schema ->
     (match Caps.structured_output_support target.capabilities with
      | Caps.Native_json_schema ->
@@ -241,8 +255,12 @@ let text_json_instruction (Domain_schema schema) : Types.message =
 
 let messages_for_response_format requirement response_format messages =
   match response_format with
-  | Types.Off -> messages @ [ text_json_instruction requirement.schema ]
-  | Types.JsonMode | Types.JsonSchema _ -> messages
+  (* JSON mode enforces syntax only — the provider never sees the schema, so
+     the prompt must still carry it. Only a wire-level schema request
+     ([JsonSchema]) makes the instruction redundant. *)
+  | Types.Off | Types.JsonMode ->
+    messages @ [ text_json_instruction requirement.schema ]
+  | Types.JsonSchema _ -> messages
 ;;
 
 let exact_config (target : request_target) response_format =

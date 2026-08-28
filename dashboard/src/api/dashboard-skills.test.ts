@@ -386,11 +386,16 @@ describe('skill evidence contract', () => {
       coverage: {
         ...coverage,
         activation_scope: 'incomplete_retained_trace_snapshot',
-        activation_gaps: [{ code: 'ledger_unreadable' }],
+        activation_gaps: [{
+          code: 'ledger_unreadable',
+          trace_id: 'trace-proof',
+          cause_code: 'read_failed',
+          detail: 'permission denied',
+        }],
       },
     })
 
-    expect(decoded.coverage.activation_gaps).toEqual([{ code: 'ledger_unreadable' }])
+    expect(decoded.coverage.activation_gaps).toHaveLength(1)
   })
 
   it.each([
@@ -446,6 +451,104 @@ describe('skill evidence contract', () => {
     })).toThrow(SkillsContractError)
   })
 
+  it('rejects a known activation gap without its variant fields', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v5',
+      status: 'not_observed_in_retained_coverage',
+      reference,
+      activation: null,
+      composition: null,
+      coverage: {
+        ...coverage,
+        activation_scope: 'incomplete_retained_trace_snapshot',
+        activation_gaps: [{ code: 'ledger_unreadable' }],
+      },
+    })).toThrow(SkillsContractError)
+  })
+
+  it('accepts a timestamp tie expressed with different RFC3339 offsets', () => {
+    const decoded = decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v5',
+      status: 'observed',
+      reference,
+      activation: {
+        selection: 'most_recent_observed_timestamp_tie',
+        evidence: [
+          activationEvidence,
+          {
+            ...activationEvidence,
+            trace_id: 'trace-proof-2',
+            activation: {
+              ...activationPayload,
+              turn_ref: 'trace-proof-2#1',
+              activated_at: '2026-08-28T12:00:00+09:00',
+            },
+          },
+        ],
+      },
+      composition: null,
+      coverage,
+    })
+    expect(decoded.activation?.selection).toBe('most_recent_observed_timestamp_tie')
+  })
+
+  it('rejects activation semantics that the canonical ledger rejects', () => {
+    const invalidActivations = [
+      { ...activationPayload, turn_ref: 'trace-proof#1e0' },
+      {
+        ...activationPayload,
+        invocation: {
+          kind: 'instruction' as const,
+          origin: { kind: 'task_instruction' as const, task_ids: ['task-1', 'task-1'] },
+          served_content: {
+            kind: 'skill_resource' as const,
+            relative_path: '../secret',
+            bytes: 4,
+            sha256: 'short',
+          },
+        },
+      },
+      {
+        ...activationPayload,
+        delivery: {
+          boundary: { kind: 'model_response' as const, agent_core_turn: 1 },
+          runtime_id: 'codex.default',
+          delivered_at: '2026-08-28T03:00:00Z',
+          content_bytes: 4,
+          content_sha256: 'd'.repeat(64),
+        },
+      },
+    ]
+    for (const activation of invalidActivations) {
+      expect(() => decodeSkillEvidenceResponse({
+        schema: 'masc.skill-evidence/v5',
+        status: 'observed',
+        reference,
+        activation: {
+          selection: 'most_recent_observed',
+          evidence: { ...activationEvidence, activation },
+        },
+        composition: null,
+        coverage,
+      })).toThrow(SkillsContractError)
+    }
+  })
+
+  it('rejects activation candidates not backed by loaded ledgers', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v5',
+      status: 'observed',
+      reference,
+      activation: { selection: 'most_recent_observed', evidence: activationEvidence },
+      composition: null,
+      coverage: {
+        ...coverage,
+        activation_sessions_inspected: 0,
+        activation_ledgers_loaded: 0,
+      },
+    })).toThrow(SkillsContractError)
+  })
+
   it('rejects trace-store-unavailable with observed sessions', () => {
     expect(() => decodeSkillEvidenceResponse({
       schema: 'masc.skill-evidence/v5',
@@ -456,7 +559,12 @@ describe('skill evidence contract', () => {
       coverage: {
         ...coverage,
         activation_scope: 'trace_store_unavailable',
-        activation_gaps: [{ code: 'trace_root_unavailable' }],
+        activation_gaps: [{
+          code: 'trace_root_unavailable',
+          operation: 'stat_entry',
+          path: '/runtime/traces',
+          detail: 'permission denied',
+        }],
       },
     })).toThrow(SkillsContractError)
   })

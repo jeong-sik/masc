@@ -892,29 +892,126 @@ export async function fetchSkills(opts: GetOptions = {}): Promise<SkillsResponse
   return decodeSkillsResponse(raw)
 }
 
-const ownerGapCodes = new Set([
-  'keeper_catalog_unavailable',
-  'keeper_catalog_changed_during_resolution',
-  'invalid_persisted_keeper_name',
-  'keeper_meta_name_mismatch',
-  'keeper_meta_unavailable',
-  'runtime_manifest_unreadable',
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort()
+  return actual.length === expected.length
+    && [...expected].sort().every((field, index) => field === actual[index])
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string'
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && typeof value === 'number' && value > 0
+}
+
+const filesystemOperations = new Set([
+  'open_directory',
+  'read_directory',
+  'close_directory',
+  'stat_entry',
 ])
-const activationGapCodes = new Set([
-  'trace_root_unavailable',
-  'trace_root_not_directory',
-  'trace_entry_unreadable',
-  'invalid_trace_directory',
-  'symlink_trace_entry',
-  'trace_entry_not_directory',
-  'trace_inventory_changed_during_discovery',
-  'trace_root_changed_during_discovery',
-  'ledger_changed_during_discovery',
-  'ledger_unreadable',
+const fileKinds = new Set([
+  'regular',
+  'directory',
+  'character_device',
+  'block_device',
+  'symbolic_link',
+  'fifo',
+  'socket',
 ])
 
-function hasKnownGapCode(gap: Record<string, unknown>, codes: ReadonlySet<string>): boolean {
-  return typeof gap.code === 'string' && codes.has(gap.code)
+function isFilesystemGap(gap: Record<string, unknown>, code: string): boolean {
+  return hasExactKeys(gap, ['code', 'operation', 'path', 'detail'])
+    && gap.code === code
+    && isString(gap.operation)
+    && filesystemOperations.has(gap.operation)
+    && isString(gap.path)
+    && isString(gap.detail)
+}
+
+function isManifestCause(value: unknown): boolean {
+  if (!isRecord(value) || !isString(value.code)) return false
+  switch (value.code) {
+    case 'manifest_read_failed':
+      return hasExactKeys(value, ['code', 'detail']) && isString(value.detail)
+    case 'manifest_empty':
+      return hasExactKeys(value, ['code'])
+    case 'manifest_invalid_json':
+    case 'manifest_invalid_row':
+      return hasExactKeys(value, ['code', 'line_number', 'detail'])
+        && isPositiveInteger(value.line_number)
+        && isString(value.detail)
+    case 'manifest_identity_mismatch':
+      return hasExactKeys(value, [
+        'code', 'line_number', 'observed_keeper', 'observed_trace',
+      ])
+        && isPositiveInteger(value.line_number)
+        && isString(value.observed_keeper)
+        && isString(value.observed_trace)
+    default:
+      return false
+  }
+}
+
+function isOwnerGap(gap: Record<string, unknown>): boolean {
+  if (!isString(gap.code)) return false
+  switch (gap.code) {
+    case 'keeper_catalog_unavailable':
+      return hasExactKeys(gap, ['code', 'detail']) && isString(gap.detail)
+    case 'keeper_catalog_changed_during_resolution':
+      return hasExactKeys(gap, ['code'])
+    case 'invalid_persisted_keeper_name':
+      return hasExactKeys(gap, ['code', 'keeper']) && isString(gap.keeper)
+    case 'keeper_meta_name_mismatch':
+      return hasExactKeys(gap, ['code', 'keeper', 'metadata_name'])
+        && isString(gap.keeper)
+        && isString(gap.metadata_name)
+    case 'keeper_meta_unavailable':
+      return hasExactKeys(gap, ['code', 'keeper', 'detail'])
+        && isString(gap.keeper)
+        && isString(gap.detail)
+    case 'runtime_manifest_unreadable':
+      return hasExactKeys(gap, ['code', 'keeper', 'cause'])
+        && isString(gap.keeper)
+        && isManifestCause(gap.cause)
+    default:
+      return false
+  }
+}
+
+function isActivationGap(gap: Record<string, unknown>): boolean {
+  if (!isString(gap.code)) return false
+  switch (gap.code) {
+    case 'trace_root_unavailable':
+    case 'trace_entry_unreadable':
+      return isFilesystemGap(gap, gap.code)
+    case 'trace_root_not_directory':
+      return hasExactKeys(gap, ['code', 'kind'])
+        && isString(gap.kind)
+        && fileKinds.has(gap.kind)
+    case 'invalid_trace_directory':
+    case 'symlink_trace_entry':
+      return hasExactKeys(gap, ['code', 'entry']) && isString(gap.entry)
+    case 'trace_entry_not_directory':
+      return hasExactKeys(gap, ['code', 'trace_id', 'kind'])
+        && isString(gap.trace_id)
+        && isString(gap.kind)
+        && fileKinds.has(gap.kind)
+    case 'trace_inventory_changed_during_discovery':
+    case 'trace_root_changed_during_discovery':
+      return hasExactKeys(gap, ['code'])
+    case 'ledger_changed_during_discovery':
+      return hasExactKeys(gap, ['code', 'trace_id']) && isString(gap.trace_id)
+    case 'ledger_unreadable':
+      return hasExactKeys(gap, ['code', 'trace_id', 'cause_code', 'detail'])
+        && isString(gap.trace_id)
+        && isString(gap.cause_code)
+        && isString(gap.detail)
+    default:
+      return false
+  }
 }
 
 function isLowerHexRevision(value: string): boolean {
@@ -927,19 +1024,141 @@ function isLowerHexRevision(value: string): boolean {
   return true
 }
 
-function isCanonicalWholeSecondRfc3339(value: string): boolean {
-  const parsed = Date.parse(value)
-  return Number.isFinite(parsed)
-    && new Date(parsed).toISOString().replace('.000Z', 'Z') === value
+interface Rfc3339Instant {
+  value: number
+}
+
+function parseStrictRfc3339(value: string): Rfc3339Instant | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(value)
+  if (match === null) return null
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText,
+    fractionText = '', zone, sign, offsetHourText = '0', offsetMinuteText = '0'] = match
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const day = Number(dayText)
+  const hour = Number(hourText)
+  const minute = Number(minuteText)
+  const second = Number(secondText)
+  const offsetHour = Number(offsetHourText)
+  const offsetMinute = Number(offsetMinuteText)
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59
+    || offsetHour > 23 || offsetMinute > 59) return null
+  const monthBoundary = new Date(0)
+  monthBoundary.setUTCFullYear(year, month, 0)
+  const daysInMonth = monthBoundary.getUTCDate()
+  if (day < 1 || day > daysInMonth) return null
+  const civil = new Date(0)
+  civil.setUTCFullYear(year, month - 1, day)
+  civil.setUTCHours(hour, minute, second, 0)
+  const offset = zone === 'Z'
+    ? 0
+    : (offsetHour * 60 + offsetMinute) * (sign === '+' ? 60 : -60)
+  return {
+    value: civil.getTime() / 1000 - offset
+      + (fractionText === '' ? 0 : Number(`0.${fractionText}`)),
+  }
+}
+
+function compareRfc3339(left: Rfc3339Instant, right: Rfc3339Instant): number {
+  return left.value === right.value ? 0 : left.value < right.value ? -1 : 1
+}
+
+function sameRfc3339Instant(left: string, right: string): boolean {
+  const leftInstant = parseStrictRfc3339(left)
+  const rightInstant = parseStrictRfc3339(right)
+  return leftInstant !== null && rightInstant !== null
+    && compareRfc3339(leftInstant, rightInstant) === 0
 }
 
 function turnRefBelongsToTrace(turnRef: string, traceId: string): boolean {
   const separator = turnRef.lastIndexOf('#')
   if (separator <= 0) return false
-  const absoluteTurn = Number(turnRef.slice(separator + 1))
+  const turnText = turnRef.slice(separator + 1)
+  if (!/^[0-9]+$/.test(turnText)) return false
+  const absoluteTurn = Number(turnText)
   return turnRef.slice(0, separator) === traceId
     && Number.isSafeInteger(absoluteTurn)
     && absoluteTurn > 0
+}
+
+function isPortableName(value: string): boolean {
+  return value !== '.' && value !== '..' && /^[A-Za-z0-9._-]+$/.test(value)
+}
+
+function isTaskId(value: string): boolean {
+  return value.length > 0 && value.length <= 128 && /^[A-Za-z0-9_:-]+$/.test(value)
+}
+
+function hasUniqueStrings(values: readonly string[]): boolean {
+  return new Set(values).size === values.length
+}
+
+function isSkillResourcePath(value: string): boolean {
+  return value !== ''
+    && !value.startsWith('/')
+    && !value.includes('\\')
+    && !value.includes('\0')
+    && value.split('/').every(segment => segment !== '' && segment !== '.' && segment !== '..')
+}
+
+type SkillActionPayload = Schema.Schema.Type<typeof SkillActionSchema>
+type SkillActivationPayload = Schema.Schema.Type<typeof SkillActivationPayloadSchema>
+
+function actionIdentityKey(action: SkillActionPayload): string {
+  return JSON.stringify(action.identity)
+}
+
+function actionIdentityIsValid(action: SkillActionPayload): boolean {
+  return action.identity.kind === 'call_id'
+    ? action.identity.call_id.trim() !== ''
+    : action.identity.conversation_id.trim() !== '' && action.identity.step_index >= 0
+}
+
+function activationPayloadIsValid(
+  activation: SkillActivationPayload,
+  traceId: string,
+): boolean {
+  const activatedAt = parseStrictRfc3339(activation.activated_at)
+  const origin = activation.invocation.origin
+  const taskIds = origin.kind === 'task_instruction' || origin.kind === 'task_composition'
+    ? origin.task_ids
+    : []
+  const served = activation.invocation.kind === 'instruction'
+    ? activation.invocation.served_content
+    : null
+  const invocationValid = activation.invocation.kind === 'composition'
+    ? isPortableName(activation.invocation.tool_name)
+    : isLowerHexRevision(served!.sha256)
+      && (served!.kind === 'skill_body' || isSkillResourcePath(served!.relative_path))
+  const actionKeys = activation.actions.map(actionIdentityKey)
+  const deliveryTurn = activation.delivery?.boundary.agent_core_turn
+  const deliveryValid = activation.delivery === null
+    ? activation.actions.length === 0
+    : isLowerHexRevision(activation.delivery.content_sha256)
+      && activation.delivery.runtime_id.trim() !== ''
+      && parseStrictRfc3339(activation.delivery.delivered_at) !== null
+      && deliveryTurn !== undefined
+      && (activation.delivery.boundary.kind === 'model_response'
+        ? deliveryTurn > activation.agent_core_turn
+        : deliveryTurn >= activation.agent_core_turn)
+      && activation.actions.every(action => action.agent_core_turn >= deliveryTurn
+        && actionIdentityIsValid(action)
+        && action.runtime_id.trim() !== ''
+        && isPortableName(action.tool_name)
+        && parseStrictRfc3339(action.observed_at) !== null)
+  return isLowerHexRevision(activation.content_revision)
+    && isLowerHexRevision(activation.snapshot_revision)
+    && activatedAt !== null
+    && traceId.length <= 64
+    && /^[A-Za-z0-9_-]+$/.test(traceId)
+    && turnRefBelongsToTrace(activation.turn_ref, traceId)
+    && activation.runtime_id.trim() !== ''
+    && activation.skill_tool_use_id.trim() !== ''
+    && taskIds.every(isTaskId)
+    && hasUniqueStrings(taskIds)
+    && invocationValid
+    && hasUniqueStrings(actionKeys)
+    && deliveryValid
 }
 
 export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse {
@@ -972,8 +1191,8 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
     if (!ownerAgrees) {
       contractError('invalid_response', 'activation owner status disagrees with claims or gaps')
     }
-    if (!gaps.every(gap => hasKnownGapCode(gap, ownerGapCodes))) {
-      contractError('invalid_response', 'activation owner carries an unknown gap code')
+    if (!gaps.every(isOwnerGap)) {
+      contractError('invalid_response', 'activation owner carries an invalid typed gap')
     }
     const activation = evidence.activation
     if (activation.identity.source_id !== decoded.reference.identity.source_id
@@ -982,31 +1201,18 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
       || evidence.activation.content_revision !== decoded.reference.content_revision) {
       contractError('invalid_response', 'activation reference disagrees with evidence envelope')
     }
-    const deliveryTurn = activation.delivery?.boundary.agent_core_turn
-    const activationPayloadAgrees = isLowerHexRevision(activation.content_revision)
-      && isLowerHexRevision(activation.snapshot_revision)
-      && isCanonicalWholeSecondRfc3339(activation.activated_at)
-      && turnRefBelongsToTrace(activation.turn_ref, evidence.trace_id)
-      && (activation.delivery === null
-        ? activation.actions.length === 0
-        : isLowerHexRevision(activation.delivery.content_sha256)
-          && isCanonicalWholeSecondRfc3339(activation.delivery.delivered_at)
-          && Date.parse(activation.delivery.delivered_at) >= Date.parse(activation.activated_at)
-          && deliveryTurn !== undefined
-          && deliveryTurn >= activation.agent_core_turn
-          && activation.actions.every(action =>
-            action.agent_core_turn >= deliveryTurn
-            && isCanonicalWholeSecondRfc3339(action.observed_at)
-            && Date.parse(action.observed_at) >= Date.parse(activation.delivery!.delivered_at)))
-    if (!activationPayloadAgrees) {
+    if (!activationPayloadIsValid(activation, evidence.trace_id)) {
       contractError('invalid_response', 'activation payload violates typed occurrence invariants')
     }
     ownerGapCount += gaps.length
   }
   if (decoded.activation?.selection === 'most_recent_observed_timestamp_tie') {
     const traces = new Set(activationEvidence.map(evidence => evidence.trace_id))
-    const timestamps = new Set(activationEvidence.map(evidence => evidence.activation.activated_at))
-    if (traces.size !== activationEvidence.length || timestamps.size !== 1) {
+    const firstTimestamp = activationEvidence[0]?.activation.activated_at
+    const sameInstant = firstTimestamp !== undefined
+      && activationEvidence.every(evidence =>
+        sameRfc3339Instant(firstTimestamp, evidence.activation.activated_at))
+    if (traces.size !== activationEvidence.length || !sameInstant) {
       contractError('invalid_response', 'activation timestamp tie is inconsistent')
     }
   }
@@ -1053,11 +1259,14 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
   const activationCoverageAgrees = coverage.activation_ledgers_loaded
       <= coverage.activation_sessions_inspected
     && coverage.activation_owner_gap_count === ownerGapCount
-    && coverage.activation_gaps.every(gap => hasKnownGapCode(gap, activationGapCodes))
+    && coverage.activation_gaps.every(isActivationGap)
+    && activationEvidence.length <= coverage.activation_ledgers_loaded
     && (coverage.activation_scope === 'complete_retained_trace_snapshot'
       ? coverage.activation_gaps.length === 0
       : coverage.activation_scope === 'trace_store_unavailable'
-        ? coverage.activation_gaps.length > 0
+        ? coverage.activation_gaps.length === 1
+          && (coverage.activation_gaps[0]?.code === 'trace_root_unavailable'
+            || coverage.activation_gaps[0]?.code === 'trace_root_not_directory')
           && decoded.activation === null
           && coverage.activation_sessions_inspected === 0
           && coverage.activation_ledgers_loaded === 0

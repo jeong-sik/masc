@@ -8345,6 +8345,24 @@ let async_request_observation_lines (state : state) =
        summary_lines @ request_lines @ recovery_lines
      | Some _ | None -> [ Theme.bad (), " Async broker response is malformed" ])
 
+(* The Tools sections, named where the reader is standing. Same shape as
+   {!config_pane_strip}: a reader who has seen one has seen the other. *)
+let tools_pane_strip (state : state) =
+  let name pane label =
+    if state.tools_pane = pane then
+      Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
+    else Ansi.dim ^ " " ^ label ^ Ansi.reset
+  in
+  String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
+    [ name Masc_tui_types.Tools_surface "surface"
+    ; name Masc_tui_types.Tools_async "async"
+    ; name Masc_tui_types.Tools_activations "activations"
+    ; name Masc_tui_types.Tools_usage "usage"
+    ; name Masc_tui_types.Tools_catalog "catalog"
+    ]
+  ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
+;;
+
 let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -8361,8 +8379,11 @@ let render_tools (state : state) =
       now.Unix.tm_sec
   in
   let header =
-    Printf.sprintf "%s  effective Keeper + registered catalog  %s  %s"
-      (screen_title " MASC Tools") timestamp
+    (* The strip replaces the old subtitle. "effective Keeper + registered
+       catalog" named two of the five sections and the header is where a
+       reader looks for what a surface holds. *)
+    Printf.sprintf "%s  %s  %s  %s"
+      (screen_title " MASC Tools") (tools_pane_strip state) timestamp
       (connection_badge state)
   in
   box_top buf cols;
@@ -9040,16 +9061,18 @@ let render_tools (state : state) =
         in
         heading @ rows
   in
+  (* One section at a time. These used to be concatenated, and the first of
+     them is one row per tool -- ninety-five of them on this workspace -- so
+     the other four started past row 120 of a list a terminal shows twenty of.
+     They were not missing; they were behind a section that never ends, with
+     nothing saying so. *)
   let display_lines =
-    effective_lines
-    @ [ Ansi.dim, "" ]
-    @ async_request_observation_lines state
-    @ [ Ansi.dim, "" ]
-    @ activation_lines
-    @ [ Ansi.dim, "" ]
-    @ usage_matrix_lines
-    @ [ Ansi.dim, "" ]
-    @ catalog_lines
+    match state.tools_pane with
+    | Masc_tui_types.Tools_surface -> effective_lines
+    | Masc_tui_types.Tools_async -> async_request_observation_lines state
+    | Masc_tui_types.Tools_activations -> activation_lines
+    | Masc_tui_types.Tools_usage -> usage_matrix_lines
+    | Masc_tui_types.Tools_catalog -> catalog_lines
   in
   let chrome_rows = if Option.is_some state.tools_error then 7 else 5 in
   let content_height = max 1 (rows - chrome_rows) in

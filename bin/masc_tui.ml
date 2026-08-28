@@ -12153,6 +12153,22 @@ and is loaded on demand through keeper_skill.
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_librarian_input_read ()
+       | Some "p" | Some "P" when state.view = Tools ->
+           (* Five sections, one at a time. Concatenated they ran to 326 rows
+              on this workspace and the terminal draws twenty, so four of
+              them sat behind a per-tool list that never ends. [p] is the
+              same key that moves between the Config surface's panes. *)
+           state.tools_pane <-
+             (match state.tools_pane with
+              | Tools_surface -> Tools_async
+              | Tools_async -> Tools_activations
+              | Tools_activations -> Tools_usage
+              | Tools_usage -> Tools_catalog
+              | Tools_catalog -> Tools_surface);
+           (* The scroll belonged to the list that just went away. Carrying it
+              into a shorter section opens it part-way down for no reason the
+              reader gave. *)
+           state.tools_scroll <- 0
        | Some "p" | Some "P" when state.view = Config ->
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the

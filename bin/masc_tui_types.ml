@@ -1138,6 +1138,21 @@ type config_pane =
   | Config_prompts
   | Config_themes
 
+(* Which section the Tools surface is showing. They used to be one scrolling
+   list: five sections concatenated, and the first of them is the effective
+   surface, which is one row per tool. At ninety-five tools that list ran to
+   326 rows and a terminal draws about twenty, so the four sections behind it
+   -- the async broker, skill activations, skill usage, the catalog -- began
+   past row 120. Nothing on the screen said they were there.
+
+   The same shape the Config surface already has, and for the same reason. *)
+type tools_pane =
+  | Tools_surface
+  | Tools_async
+  | Tools_activations
+  | Tools_usage
+  | Tools_catalog
+
 type runtime_param_edit_mode = Friendly_value | Advanced_json
 
 type runtime_param_edit =
@@ -1334,6 +1349,7 @@ type state = {
      the prompt registry is the other, and a prompt is edited the same way —
      $EDITOR over the effective text, the server persists what comes back. *)
   mutable config_pane: config_pane;
+  mutable tools_pane: tools_pane;
   (* The reader's own choice of colours, and where the cursor sits while they
      look. [None] follows whatever the terminal reports, which is what masc
      did before there was a choice to make. *)
@@ -2061,6 +2077,7 @@ let create_state
   resource_scroll = 0;
   resource_focus = Left_pane;
   config_pane = Config_runtime;
+  tools_pane = Tools_surface;
   theme_choice = None;
   theme_cursor = 0;
   theme_before_preview = None;

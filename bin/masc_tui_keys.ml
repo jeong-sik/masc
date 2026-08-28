@@ -295,6 +295,8 @@ let for_surface = function
       @ listing_meta
   | Tools ->
       [ b Navigate "j/k" "scroll"
+      ; b Navigate "p" "section"
+          ~help:"surface / async / activations / usage / catalog"
       ; b Navigate "J/K" "Skill" ~help:"select a published Skill"
       ; b Navigate "[/]" "Keeper" ~help:"change the effective Keeper surface"
       ; b Act "e" "edit Skill"

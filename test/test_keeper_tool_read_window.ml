@@ -123,17 +123,7 @@ let allow_repo ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) repo_id =
   in
   (match Repo_store.save_all ~base_path:config.Workspace.base_path [ repo ] with
    | Ok () -> ()
-   | Error e -> Alcotest.fail ("failed to seed repository catalog: " ^ e));
-  let mapping : Repo_manager_types.keeper_repo_mapping =
-    Repo_manager_types.make_keeper_repo_mapping
-      ~keeper_id:meta.name
-      ~repository_ids:[ repo_id ]
-  in
-  match
-    Keeper_repo_mapping.save_mapping ~base_path:config.Workspace.base_path mapping
-  with
-  | Ok () -> ()
-  | Error e -> Alcotest.fail ("failed to seed keeper repo mapping: " ^ e)
+   | Error e -> Alcotest.fail ("failed to seed repository catalog: " ^ e))
 ;;
 
 let setup f =

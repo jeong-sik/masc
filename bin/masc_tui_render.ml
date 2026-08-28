@@ -2205,9 +2205,11 @@ let render_board_list (state : state) =
           ^ Ansi.reset
         in
         let score =
+          (* %+d prints the sign, so a negative tally reads "-3" where "+%d"
+             wrote "+-3". *)
           (board_score_style p.bp_votes)
           ^ Printf.sprintf "%-*s" board_score_w
-              (Printf.sprintf "+%d" p.bp_votes)
+              (Printf.sprintf "%+d" p.bp_votes)
           ^ Ansi.reset
         in
         let replies =
@@ -2801,7 +2803,9 @@ let planning_detail_pane (state : state)
       (fun (label, value) ->
          Option.map
            (fun iso ->
-              Printf.sprintf "  %-9s%s" (label ^ ":")
+              (* The field is one wider than the longest label ("reviewed:")
+                 so every value keeps one gap after its colon. *)
+              Printf.sprintf "  %-10s%s" (label ^ ":")
                 (Terminal_text.short_timestamp (Terminal_text.single_line iso)))
            value)
       [ "created", goal.pg_created_at

@@ -744,6 +744,9 @@ def keeper_row_selected(name: bytes) -> re.Pattern[bytes]:
 
 
 def keeper_metadata(name: str) -> dict[str, object]:
+    # No agent_name: RFC-0393 (#31198) cut name-encoded identity out of the
+    # keeper meta schema, and the current-schema validator rejects metas
+    # carrying fields it does not know.
     metadata: dict[str, object] = {
         "schema": "masc.keeper_meta.v1",
         "name": name,
@@ -5859,6 +5862,63 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
 
 
 KEEPER_LANES_PATH = "/api/v1/keepers/composite"
+STANDALONE_LANES_PATH = "/api/v1/dashboard/standalone-lanes"
+
+
+def standalone_lane_fixture(
+    lane_id: str, label: str, *, status: str = "idle"
+) -> dict[str, object]:
+    """One row of the observation matrix, in the wire shape the strict
+    decoder accepts: every known lane exactly once, observation_only set."""
+    return {
+        "lane_id": lane_id,
+        "label": label,
+        "required": True,
+        "observation_only": True,
+        "configured": True,
+        "configuration_state": "ready",
+        "admitted_slots": ["glm-coding.glm-5-turbo"],
+        "admission_error": None,
+        "status": status,
+        "retained_run_count": 12,
+        "running_count": 0,
+        "succeeded_count": 12,
+        "failed_count": 0,
+        "cancelled_count": 0,
+        "last_started_at": 1787557600.0,
+        "last_terminal_at": 1787557660.0,
+        "last_outcome": "succeeded",
+        "p50_elapsed_s": 8.0,
+        "selected_slots": [{"slot_id": "glm-coding.glm-5-turbo", "count": 12}],
+    }
+
+
+def standalone_lanes_response() -> HttpResponse:
+    return (
+        200,
+        {
+            "schema": "masc.standalone_llm_lanes.v1",
+            "generated_at": "2026-08-27T20:36:29Z",
+            "observed_at_unix": 1787557669.715736,
+            "exact_run_projection_count": 60,
+            "exact_run_source_total": 60,
+            "exact_run_projection_truncated": False,
+            "observation_only": True,
+            "lanes": [
+                standalone_lane_fixture(
+                    "board_attention_exact", "Board Attention", status="running"
+                ),
+                standalone_lane_fixture("hitl_auto_judge", "HITL Auto Judge"),
+                standalone_lane_fixture("librarian_exact", "Librarian"),
+                standalone_lane_fixture(
+                    "compaction_exact",
+                    "Compaction",
+                    status="no_retained_observation",
+                ),
+                standalone_lane_fixture("verifier_exact", "Verifier"),
+            ],
+        },
+    )
 
 
 def keeper_lanes_response(lanes: list[dict[str, object]]) -> HttpResponse:
@@ -5923,7 +5983,9 @@ def keeper_lanes_interaction(
             keeper_row_selected(b"beta"),
         )
         unread = tab_until(process, master_fd, output, b"MASC Lanes")
-        if b"(not loaded)" not in unread or b"(not loaded yet)" not in unread:
+        # The body note is "(not loaded yet — press r)": #30945 added the
+        # key hint without updating this needle.
+        if b"(not loaded)" not in unread or b"(not loaded yet" not in unread:
             raise AssertionError(
                 f"Lanes claimed a reading before one arrived: {unread!r}"
             )
@@ -6099,20 +6161,60 @@ def keeper_lanes_interaction(
             master_fd,
             output,
             b"r",
-            b"MASC Lanes (1 keepers)",
+            b"(1 keepers)",
         )
         if banded_alpha.search(shrunk) is None:
             raise AssertionError(
                 "successful lane shrink left no selected Keeper row: "
                 f"{shrunk!r}"
             )
+        # k from the first Keeper row walks up onto the observation matrix's
+        # last lane. A refresh must leave the band there: landing the Keeper
+        # cursor unconditionally dragged the selection down into the table on
+        # every tick, which made the standalone drill-down unreachable in
+        # practice. The fixture's idle cell changes ("1m" -> "1h") so the
+        # refresh's arrival is observable; an unchanged reading redraws
+        # nothing, and an empty diff would leave the needle wait hanging.
+        banded_verifier = re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier")
+        send_and_wait(process, master_fd, output, b"k", banded_verifier)
+        fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
+            [
+                keeper_lane_row(
+                    "alpha",
+                    phase="running",
+                    turn_phase="executing",
+                    idle_seconds=3661,
+                    runtime_state="done",
+                    selected_model="claude-opus-5",
+                    diagnosis="running_fiber_alive",
+                )
+            ]
+        )
+        send_and_wait(process, master_fd, output, b"r", b"1h")
+        drain_until_quiet(process, master_fd, output)
+        standalone_refresh = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=29,
+            columns=140,
+            needle=b"Verifier",
+            controls=(FULL_REDRAW,),
+        )
+        if banded_verifier.search(standalone_refresh) is None:
+            raise AssertionError(
+                "refresh dragged the standalone selection into the Keeper "
+                f"table: {standalone_refresh!r}"
+            )
+        # j past the last standalone row lands back on the first Keeper row.
+        send_and_wait(process, master_fd, output, b"j", banded_alpha)
         resize_and_wait(
             process,
             master_fd,
             output,
             rows=30,
             columns=140,
-            needle=b"MASC Lanes (1 keepers)",
+            needle=b"(1 keepers)",
         )
         chat_get_counts = history.served, memory.served, file_changes.served
         lane_chat = send_and_wait(
@@ -6156,7 +6258,7 @@ def keeper_lanes_interaction(
             master_fd,
             output,
             b"\x1b",
-            b"MASC Lanes (1 keepers)",
+            b"(1 keepers)",
         )
         if banded_alpha.search(lanes_return) is None:
             raise AssertionError(
@@ -6170,7 +6272,11 @@ def keeper_lanes_interaction(
             b"\x1b[C",
             b"Keepers \xe2\x96\xb8 \x1b[1malpha",
         )
-        if b"Name: alpha" not in CSI_RE.sub(b"", right_detail):
+        # The detail pane pads labels to 22 columns ("  %-22s"), so the plain
+        # text is "Name:" + 18 spaces + "alpha" -- a literal "Name: alpha"
+        # needle can never match. (This suite is not wired into CI, so the
+        # drift went unnoticed since #30915.)
+        if re.search(rb"Name:\s+alpha", CSI_RE.sub(b"", right_detail)) is None:
             raise AssertionError(
                 "Right did not open the selected lane's existing Keeper detail: "
                 f"{right_detail!r}"
@@ -6184,7 +6290,7 @@ def keeper_lanes_interaction(
             b"\r",
             b"Keepers \xe2\x96\xb8 \x1b[1malpha",
         )
-        if b"Name: alpha" not in CSI_RE.sub(b"", enter_detail):
+        if re.search(rb"Name:\s+alpha", CSI_RE.sub(b"", enter_detail)) is None:
             raise AssertionError(
                 "Enter did not preserve the lane-to-Keeper selection: "
                 f"{enter_detail!r}"
@@ -6233,18 +6339,28 @@ def keeper_lanes_interaction(
         os.write(master_fd, b"c")
         wait_for_terminal_input_consumed(slave_fd)
         drain_until_quiet(process, master_fd, output)
+        # NOTE: the repaint is driven by SIGWINCH, and XNU only signals when
+        # the size actually changes -- a same-size TIOCSWINSZ produces no
+        # redraw and this wait would hang. Alternate 31/32 so each resize
+        # below is a real change.
+        # The error line renders above the Keeper rows, so waiting on it
+        # returns mid-frame; wait on the selection band instead (it streams
+        # after) and check the error text in the accumulated frame.
         orphan_after_c = resize_and_wait(
             process,
             master_fd,
             output,
-            rows=31,
+            rows=32,
             columns=140,
-            needle=b"Cannot open chat: Keeper orphan-23 is not registered",
+            needle=banded_orphan,
             controls=(FULL_REDRAW,),
         )
-        if banded_orphan.search(orphan_after_c) is None:
+        if (
+            b"Cannot open chat: Keeper orphan-23 is not registered"
+            not in CSI_RE.sub(b"", orphan_after_c)
+        ):
             raise AssertionError(
-                f"unmatched lane c left its selected row: {orphan_after_c!r}"
+                f"unmatched lane c did not surface its error: {orphan_after_c!r}"
             )
         if chat_get_counts != (
             history.served,
@@ -6259,7 +6375,7 @@ def keeper_lanes_interaction(
             process,
             master_fd,
             output,
-            rows=32,
+            rows=31,
             columns=140,
             needle=b"orphan-22",
             controls=(FULL_REDRAW,),
@@ -7966,6 +8082,7 @@ def run_keyboard_regression(executable: str) -> None:
     lanes_fixtures = keeper_runtime_http_fixtures()
     lanes_gate = GatedHttpResponse(keeper_lanes_response([]))
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
+    lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
     lanes_history = SequencedHttpResponse([(200, [])])
     lanes_memory = SequencedHttpResponse([(200, {"keeper": "alpha", "entries": []})])
     lanes_file_changes = SequencedHttpResponse([file_changes_alpha_response()])

@@ -106,8 +106,6 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
     Keeper_meta_contract.blocker_class_to_string blocker_class
   in
   match blocker_class with
-  | Keeper_meta_contract.Stale_turn_timeout ->
-      Keeper_turn_disposition.Turn_wall_clock_timeout
   | Keeper_meta_contract.Agent_core_input_required ->
       Keeper_turn_disposition.Input_required
   | Keeper_meta_contract.Runtime_exhausted _ ->

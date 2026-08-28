@@ -394,7 +394,6 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'runtime_exhausted',
   'provider_runtime_error',
   'fiber_unresolved',
-  'stale_turn_timeout',
   'stale_termination_storm',
   'heartbeat_failures',
   'turn_failures',

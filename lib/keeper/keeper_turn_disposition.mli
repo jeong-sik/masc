@@ -21,7 +21,6 @@ type t =
   | Input_required
   (** Agent emitted a typed input request. Not a failure. Operator action:
           provide input or decline. *)
-  | Turn_wall_clock_timeout (** Turn exceeded its wall-clock budget. *)
   | Runtime_attempts_exhausted
   (** Runtime aggregate outcome: all candidate attempts were exhausted.
           Operators should inspect per-attempt root causes instead of treating
@@ -63,7 +62,6 @@ val next_action : t -> string option
     - [Success] → ["success"]
     - [Input_required] → ["input_required"]
     - [External_cancel] → ["external_cancel"]
-    - [Turn_wall_clock_timeout] → ["turn_wall_clock_timeout"]
     - [Runtime_attempts_exhausted] → ["runtime_attempts_exhausted"]
     - [Provider_error code] → [Keeper_turn_terminal_code.to_wire code]
     - [Unknown { raw_error }] → [raw_error] verbatim *)

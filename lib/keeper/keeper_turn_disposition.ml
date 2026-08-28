@@ -12,7 +12,6 @@ type t =
   | Success
   | External_cancel
   | Input_required
-  | Turn_wall_clock_timeout
   | Runtime_attempts_exhausted
   | Provider_error of Code.t
   | Unknown of { raw_error : string }
@@ -27,7 +26,6 @@ let severity = function
   | Success -> Ok
   | Input_required -> Ok
   | External_cancel
-  | Turn_wall_clock_timeout
   | Runtime_attempts_exhausted -> Warn
   | Provider_error _ -> Bad
   | Unknown _ -> Unknown_bad
@@ -37,8 +35,6 @@ let summary = function
   | Success -> "turn completed"
   | Input_required -> "agent paused to request human input"
   | External_cancel -> "keeper turn was cancelled before completion"
-  | Turn_wall_clock_timeout ->
-    "keeper turn hit a stale/no-progress timeout"
   | Runtime_attempts_exhausted ->
     "runtime attempts exhausted; inspect per-attempt root causes"
   | Provider_error code -> Printf.sprintf "keeper turn ended with %s" (Code.to_wire code)
@@ -51,7 +47,6 @@ let next_action = function
   | Success -> None
   | Input_required -> Some "provide_input_or_decline"
   | External_cancel -> Some "rerun_if_still_relevant"
-  | Turn_wall_clock_timeout -> Some "inspect_turn_timeout"
   | Runtime_attempts_exhausted -> Some "inspect_runtime_attempts"
   | Provider_error _ | Unknown _ -> Some "inspect_latest_error"
 ;;
@@ -60,7 +55,6 @@ let to_wire = function
   | Success -> "success"
   | Input_required -> "input_required"
   | External_cancel -> "external_cancel"
-  | Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
   | Runtime_attempts_exhausted -> "runtime_attempts_exhausted"
   | Provider_error code -> Code.to_wire code
   | Unknown { raw_error } -> raw_error
@@ -91,7 +85,6 @@ let of_wire wire =
   | "success" -> Success
   | "input_required" -> Input_required
   | "external_cancel" -> External_cancel
-  | "turn_wall_clock_timeout" -> Turn_wall_clock_timeout
   | "runtime_attempts_exhausted" -> Runtime_attempts_exhausted
   | other ->
     (match Code.of_wire_exact other with
@@ -103,7 +96,6 @@ let is_success = function
   | Success -> true
   | External_cancel
   | Input_required
-  | Turn_wall_clock_timeout
   | Runtime_attempts_exhausted
   | Provider_error _
   | Unknown _ -> false
@@ -114,14 +106,12 @@ let equal a b =
   | Success, Success
   | Input_required, Input_required
   | External_cancel, External_cancel
-  | Turn_wall_clock_timeout, Turn_wall_clock_timeout
   | Runtime_attempts_exhausted, Runtime_attempts_exhausted -> true
   | Provider_error a, Provider_error b -> String.equal (Code.to_wire a) (Code.to_wire b)
   | Unknown a, Unknown b -> String.equal a.raw_error b.raw_error
   | ( Success
     | Input_required
     | External_cancel
-    | Turn_wall_clock_timeout
     | Runtime_attempts_exhausted
     | Provider_error _
     | Unknown _ ), _ -> false

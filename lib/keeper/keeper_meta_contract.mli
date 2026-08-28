@@ -117,7 +117,6 @@ type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
   | Fiber_unresolved
-  | Stale_turn_timeout
   | Agent_core_context_window_exceeded
   | Agent_core_unrecognized_stop_reason
   | Agent_core_guardrail_violation

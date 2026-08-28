@@ -36,7 +36,6 @@ module Unified_types = Masc.Keeper_unified_turn_types
 let canonical_app_codes : (string * D.t) list =
   [ "success", D.Success
   ; "external_cancel", D.External_cancel
-  ; "turn_wall_clock_timeout", D.Turn_wall_clock_timeout
   ; "provider_error", D.Provider_error (Code.Provider_runtime_error "provider_error")
   ; "unknown_error", D.Unknown { raw_error = "unknown_error" }
   ]
@@ -93,10 +92,9 @@ let test_canonical_next_action_byte_compat () =
     (fun (wire, disp) ->
        let legacy = Legacy.of_code wire in
        let expected =
-         match wire, legacy.next_action with
-         | "turn_wall_clock_timeout", _ -> "Some:inspect_turn_timeout"
-         | _, Some s -> "Some:" ^ s
-         | _, None -> "None"
+         match legacy.next_action with
+         | Some s -> "Some:" ^ s
+         | None -> "None"
        in
        let actual =
          match D.next_action disp with
@@ -136,7 +134,6 @@ let test_runtime_wire_severity_byte_compat () =
 let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "External_cancel", D.External_cancel
-  ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
   ; "Unknown empty", D.Unknown { raw_error = "" }
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
   ; (* Runtime wires that Code.of_wire_exact recognises losslessly (no payload
@@ -218,13 +215,7 @@ let test_projection () =
 ;;
 
 let test_lossy_terminal_wire_never_manufactures_typed_cause () =
-  Alcotest.(check bool)
-    "current wall-clock timeout is typed"
-    true
-    (D.equal
-       D.Turn_wall_clock_timeout
-       (D.of_wire "turn_wall_clock_timeout"));
-  [ "stale_turn_timeout"; "exception" ]
+  [ "turn_wall_clock_timeout"; "stale_turn_timeout"; "exception" ]
   |> List.iter (fun wire ->
     match Code.of_wire_exact wire with
     | Some _ -> Alcotest.failf "%s unexpectedly decoded as a typed cause" wire

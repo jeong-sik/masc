@@ -121,7 +121,7 @@ describe('keeperActionVisibility', () => {
         status: 'active',
         phase: 'Paused',
         paused: true,
-        runtime_blocker_class: 'stale_turn_timeout',
+        runtime_blocker_class: 'fiber_unresolved',
       })
       const v = keeperActionVisibility(k)
       expect(v.canResume).toBe(true)

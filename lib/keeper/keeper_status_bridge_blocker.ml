@@ -130,11 +130,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       then
         "Keeper turn fiber ended without completion bookkeeping; inspect liveness/finalization wrapper and preserve the original root cause."
       else summary
-    | Stale_turn_timeout ->
-      if summary = ""
-      then
-        "Watchdog marked the turn stale; inspect watchdog timing and the underlying root cause separately."
-      else summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
     | Agent_core_context_window_exceeded

@@ -281,7 +281,7 @@ describe('parseKeeperCompositeSnapshot', () => {
           outcome: 'exhausted',
           degraded_retry_applied: false,
           degraded_retry_runtime: null,
-          fallback_reason: 'stale_turn_timeout',
+          fallback_reason: 'fiber_unresolved',
         },
         claim_attempt: {
           present: false,

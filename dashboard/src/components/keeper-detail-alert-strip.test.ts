@@ -104,7 +104,7 @@ describe('KeeperRuntimeAlertStrip', () => {
   it.each([
     ['runtime_attempts_exhausted', '런타임 재시도 소진'],
     ['fiber_unresolved', '미완료 작업(fiber) 정리 필요'],
-    ['stale_turn_timeout', '응답 지연(stale) 타임아웃'],
+    ['fiber_unresolved', '미완료 작업(fiber) 정리 필요'],
   ])('labels first-class status_bridge reason %s distinctly', (reason, label) => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
@@ -116,19 +116,6 @@ describe('KeeperRuntimeAlertStrip', () => {
     const text = container.textContent ?? ''
     expect(text).toContain(label)
     expect(text).not.toContain(reason)
-  })
-
-  it('labels turn-disposition timeout actions distinctly (no fold)', () => {
-    const { container } = render(h(KeeperRuntimeAlertStrip, {
-      keeper: keeper({
-        needs_attention: true,
-        next_human_action: 'inspect_turn_timeout',
-      }),
-    }))
-
-    const text = container.textContent ?? ''
-    expect(text).toContain('턴 타임아웃 원인 확인')
-    expect(text).not.toContain('inspect_turn_timeout')
   })
 
   it('labels provider runtime error tokens from the live keeper status surface', () => {
@@ -166,7 +153,6 @@ describe('KeeperRuntimeAlertStrip', () => {
   it.each([
     ['inspect_runtime_attempts', '재시도별 원인 확인'],
     ['inspect_turn_finalization', '턴 정리 상태 확인'],
-    ['inspect_stale_turn_root_cause', '응답 지연(stale) 원인 확인'],
     ['provide_input_or_decline', '입력 제공 또는 거절'],
   ])('labels first-class next_human_action %s distinctly', (action, label) => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
@@ -185,7 +171,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         stop_cause: {
-          code: 'stale_turn_timeout',
+          code: 'fiber_unresolved',
           source: 'runtime_blocker_class',
           label: 'Turn timeout',
           summary: 'turn wall clock exceeded before completion',
@@ -202,10 +188,10 @@ describe('KeeperRuntimeAlertStrip', () => {
     const text = container.textContent ?? ''
     // Per-turn stop cause is rendered through the canonical terminal code.
     expect(text).toContain('정지 원인')
-    expect(text).toContain('stale_turn_timeout')
-    expect(text).toContain('stale_turn_timeout')
+    expect(text).toContain('fiber_unresolved')
+    expect(text).toContain('fiber_unresolved')
     // Per-attempt success is gated out so the strip no longer shows
-    // "런타임 레인 · completed" next to "정지 원인 · stale_turn_timeout".
+    // "런타임 레인 · completed" next to "정지 원인 · fiber_unresolved".
     expect(text).not.toContain('런타임 레인')
     expect(text).not.toContain('마지막 시도')
   })
@@ -243,14 +229,14 @@ describe('KeeperRuntimeAlertStrip', () => {
         needs_attention: true,
         attention_reason: 'paused',
         next_human_action: 'inspect_blocker_before_resume',
-        runtime_blocker_class: 'stale_turn_timeout',
+        runtime_blocker_class: 'fiber_unresolved',
         runtime_blocker_summary: 'Turn timeout fired before resume.',
       }),
     }))
 
     expect(container.textContent).toContain('일시정지')
     expect(container.textContent).toContain('일시정지 원인')
-    expect(container.textContent).toContain('오래된 턴 만료')
+    expect(container.textContent).toContain('Fiber 미해결')
     expect(container.textContent).toContain('Turn timeout fired before resume.')
     expect(container.textContent).not.toContain('Agent Core budget timeout fired before the keeper hard timeout.')
     expect(container.textContent).toContain('원인 확인 후 재개')
@@ -264,7 +250,7 @@ describe('KeeperRuntimeAlertStrip', () => {
         phase: 'Paused',
         paused: false,
         needs_attention: true,
-        runtime_blocker_class: 'stale_turn_timeout',
+        runtime_blocker_class: 'fiber_unresolved',
       }),
     }))
 
@@ -280,7 +266,7 @@ describe('KeeperRuntimeAlertStrip', () => {
         phase: 'Running',
         paused: false,
         needs_attention: true,
-        runtime_blocker_class: 'stale_turn_timeout',
+        runtime_blocker_class: 'fiber_unresolved',
       }),
     }))
 

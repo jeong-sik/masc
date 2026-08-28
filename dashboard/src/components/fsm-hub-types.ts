@@ -228,7 +228,6 @@ export function displayState(value: string): string {
 const FAILURE_REASON_BASE_LABELS = {
   heartbeat_consecutive_failures: '하트비트 연속 실패',
   turn_consecutive_failures: '턴 연속 실패',
-  stale_turn_timeout: 'Stale 턴 시간 초과',
   stale_termination_storm: 'Stale 종료 폭주',
   provider_runtime_error: '런타임 호출 오류',
   fiber_unresolved: 'Fiber 미해결',
@@ -342,13 +341,11 @@ export interface RuntimeAttemptObservation {
  *  not gate (fail open: operator still sees the attempt outcome). */
 const TURN_TERMINAL_FAILURE_CODES = new Set<string>([
   'turn_timeout',
-  'turn_wall_clock_timeout',
   'runtime_exhausted',
   'heartbeat_consecutive_failures',
   'turn_consecutive_failures',
   'provider_runtime_error',
   'fiber_unresolved',
-  'stale_turn_timeout',
   'provider_attempt_effect_fenced',
 ])
 
@@ -453,7 +450,6 @@ export function runtimeOutcomeLabel(value: string | null | undefined): string | 
 const TERMINAL_REASON_CODE_LABELS: Record<string, string> = {
   // Keeper_turn_terminal_code.to_wire
   healthy: '정상',
-  stale_turn_timeout: '오래된 턴 시간 초과',
   stale_termination_storm: 'Stale 종료 폭주',
   heartbeat_failures: '하트비트 실패',
   turn_failures: '턴 실패 반복',

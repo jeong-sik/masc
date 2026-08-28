@@ -238,7 +238,7 @@ describe('keeperIsStuckOnRecoverableBlocker', () => {
 
 describe('keeperCanWakeup', () => {
   it('stuck on canonical recoverable blocker ⇒ can wake', () => {
-    expect(keeperCanWakeup(k({ runtime_blocker_class: 'stale_turn_timeout' }))).toBe(true)
+    expect(keeperCanWakeup(k({ runtime_blocker_class: 'fiber_unresolved' }))).toBe(true)
   })
   it('plain running keeper ⇒ can wake (kick next turn)', () => {
     expect(keeperCanWakeup(k({ phase: 'Running' }))).toBe(true)
@@ -247,7 +247,7 @@ describe('keeperCanWakeup', () => {
     expect(keeperCanWakeup(k({ paused: true }))).toBe(false)
   })
   it('paused keeper with recoverable blocker ⇒ cannot wake', () => {
-    expect(keeperCanWakeup(k({ paused: true, runtime_blocker_class: 'stale_turn_timeout' }))).toBe(false)
+    expect(keeperCanWakeup(k({ paused: true, runtime_blocker_class: 'fiber_unresolved' }))).toBe(false)
   })
   it('offline keeper ⇒ cannot wake', () => {
     expect(keeperCanWakeup(k({ phase: 'Crashed' }))).toBe(false)

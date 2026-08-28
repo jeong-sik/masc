@@ -207,7 +207,6 @@ let registry_failure_reason_of_terminal_reason
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel
   | Keeper_turn_disposition.Input_required
-  | Keeper_turn_disposition.Turn_wall_clock_timeout
   | Keeper_turn_disposition.Unknown _ -> None
 ;;
 

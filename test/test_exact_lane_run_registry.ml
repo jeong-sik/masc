@@ -447,6 +447,51 @@ let test_completed_runs_are_bounded () =
   check bool "the oldest completed run is evicted" false (has "run-00001")
 ;;
 
+(* Lane audit W8: the retention bound is per lane. Under the old global
+   bound the busiest lane (librarian, every few turns per keeper) evicted
+   the quietest lane's entire history, so compaction's
+   retained_run_count = 0 was indistinguishable from "never ran". The three
+   compaction runs here are OLDER than every librarian run and must survive
+   a librarian overflow. *)
+let test_a_busy_lane_cannot_evict_a_quiet_lanes_history () =
+  let registry = R.create () in
+  let record ~run_id ~lane ~started_at =
+    R.register_running
+      registry
+      ~run_id
+      ~lane
+      ~actor:"keeper-a"
+      ~started_at
+      ~input:(R.Exact_input (`Assoc []));
+    mark_completed_exn
+      registry
+      ~run_id
+      ~outcome:R.Succeeded
+      ~elapsed_s:0.1
+      ~output:(`Assoc [])
+  in
+  for index = 1 to 3 do
+    record
+      ~run_id:(Printf.sprintf "compaction-%02d" index)
+      ~lane:R.Compaction
+      ~started_at:(float_of_int index)
+  done;
+  for index = 1 to R.max_completed_retained + 8 do
+    record
+      ~run_id:(Printf.sprintf "librarian-%05d" index)
+      ~lane:R.Librarian
+      ~started_at:(float_of_int (100 + index))
+  done;
+  let runs = R.list_runs registry in
+  let count lane =
+    List.length (List.filter (fun (run : R.run) -> run.R.lane = lane) runs)
+  in
+  check int "the quiet lane's whole history survives" 3 (count R.Compaction);
+  check int "the busy lane is bounded to its own quota"
+    R.max_completed_retained
+    (count R.Librarian)
+;;
+
 let test_exact_history_is_not_pruned_across_lanes () =
   let path = Filename.temp_file "exact-lane-runs-all-" ".jsonl" in
   remove_if_exists path;
@@ -737,6 +782,10 @@ let () =
             test_store_version_pins_the_registration_shape
         ; test_case "exact history is not cross-lane pruned" `Quick
             test_exact_history_is_not_pruned_across_lanes
+        ; Alcotest.test_case
+            "a busy lane cannot evict a quiet lane's history"
+            `Quick
+            test_a_busy_lane_cannot_evict_a_quiet_lanes_history
         ; test_case "all lanes matches independent constructor oracle" `Quick
             test_all_lanes_matches_the_independent_constructor_oracle
         ; test_case "retention is derived from the monitor page size" `Quick

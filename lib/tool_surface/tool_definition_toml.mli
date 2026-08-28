@@ -66,7 +66,8 @@ val load
     (non-empty string list, string params only), [default] (matching the
     declared scalar type), [minimum] / [maximum] (integer params only),
     [min_length] / [max_length] / [pattern] (string params only),
-    [max_items] (array params only), [additional_properties] (object params
+    [min_items] / [max_items] / [unique_items] (array params only),
+    [additional_properties] (object params
     only), [params] (object params only) and [items] (array params only).
     Everything else is an [Error] naming the offending key or value.
 

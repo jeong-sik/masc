@@ -428,6 +428,10 @@ let test_rejections () =
     "only valid for type string";
   check_rejects ~name:"t"
     ~contents:
+      (minimal "t" ^ "[[params]]\nname = \"p\"\ntype = \"string\"\nunique_items = true\n")
+    "only valid for type array";
+  check_rejects ~name:"t"
+    ~contents:
       (minimal "t"
        ^ "[[params]]\nname = \"p\"\ntype = \"string\"\nitems = { type = \"string\" }\n")
     "only valid for type array";
@@ -464,6 +468,33 @@ let test_patterns_must_be_provider_portable () =
   with
   | Ok _ -> ()
   | Error message -> failf "expected an anchored pattern to load: %s" message
+;;
+
+let test_array_unique_items () =
+  match
+    Tool_definition_toml.load
+      ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"items\"\ntype = \"array\"\nunique_items = true\nitems = { type = \"string\" }\n")
+  with
+  | Error message -> failf "expected unique_items to load: %s" message
+  | Ok { Tool_definition_toml.schema; _ } ->
+    let expected =
+      `Assoc
+        [ "type", `String "object"
+        ; ( "properties"
+          , `Assoc
+              [ ( "items"
+                , `Assoc
+                    [ "type", `String "array"
+                    ; "uniqueItems", `Bool true
+                    ; "items", `Assoc [ "type", `String "string" ]
+                    ] ) ] )
+        ]
+    in
+    check string "uniqueItems schema" (Yojson.Safe.to_string expected)
+      (Yojson.Safe.to_string schema.input_schema)
 ;;
 
 (* ── Embedded tree validation ─────────────────────────────────────────── *)
@@ -977,6 +1008,8 @@ let () =
             test_rejections
         ; test_case "patterns are portable to native Ollama" `Quick
             test_patterns_must_be_provider_portable
+        ; test_case "an array may require unique items" `Quick
+            test_array_unique_items
         ] )
     ; ( "validate_embedded"
       , [ test_case "walks tools/, skips the manifest, fails closed" `Quick

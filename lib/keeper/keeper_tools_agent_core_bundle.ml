@@ -324,6 +324,7 @@ let make_tool_bundle_for_descriptors_with_policy
                  | Keeper_tool_descriptor.Tool_time_now
                  | Keeper_tool_descriptor.Tool_tools_list
                  | Keeper_tool_descriptor.Tool_capability_search
+                 | Keeper_tool_descriptor.Tool_assemble_plan
                  | Keeper_tool_descriptor.Tool_context_status
                  | Keeper_tool_descriptor.Tool_artifact_read
                  | Keeper_tool_descriptor.Tool_memory_search

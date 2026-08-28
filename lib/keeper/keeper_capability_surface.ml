@@ -194,7 +194,7 @@ let ordinary_tool_reference_schema =
     `Assoc
       [ "type", `String "string"
       ; "minLength", `Int 1
-      ; "pattern", `String "[^ \t\n\012\r]"
+      ; "pattern", `String "^([^ \t\n\012\r]|[ \t\n\012\r])*[^ \t\n\012\r]([^ \t\n\012\r]|[ \t\n\012\r])*$"
       ]
   in
   `Assoc

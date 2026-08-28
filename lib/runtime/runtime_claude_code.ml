@@ -12,6 +12,7 @@ type config =
   ; admission_timeout_s : float
   ; native : Runtime_native_tools.posture
   ; timeout_s : float option
+  ; wall_clock_ceiling_s : float option
   }
 
 let default_timeout_s = 300.0
@@ -33,6 +34,7 @@ let default_config ~cwd =
   ; native = Runtime_native_tools.claude_code_default
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
+  ; wall_clock_ceiling_s = None
   }
 ;;
 
@@ -1316,8 +1318,12 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     Eio.Flow.close stderr_w;
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
+    let wall_clock =
+      Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
+    in
     let current_timeout_s () =
       timeout_s_for_phase config ~turn_admitted:!turn_admitted
+      |> Runtime_wall_clock.cap_window wall_clock
     in
     let send json =
       with_optional_timeout clock (current_timeout_s ()) (fun () ->
@@ -1325,6 +1331,13 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
         Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
+      if Runtime_wall_clock.expired wall_clock
+      then
+        Error
+          (Timeout
+             (Option.value config.wall_clock_ceiling_s
+                ~default:Runtime_wall_clock.default_ceiling_s))
+      else
       let timeout_s = current_timeout_s () in
       try
         with_optional_timeout clock timeout_s (fun () ->

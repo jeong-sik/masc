@@ -33,6 +33,11 @@ type config =
         of running the CLI directly. Setup and dispatch remain bounded by
         [admission_timeout_s]. Declared as [turn-timeout-s] in runtime config,
         where [0] selects [None]. *)
+  ; wall_clock_ceiling_s : float option
+    (** Whole-turn wall-clock ceiling measured from spawn ([None] selects the
+        shared hours-scale default). The idle timeout above resets on every
+        received message, so this is the only bound a turn of continuous
+        thin progress cannot outlive (#31242). *)
   }
 
 val default_timeout_s : float

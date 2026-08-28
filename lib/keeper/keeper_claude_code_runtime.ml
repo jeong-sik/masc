@@ -548,6 +548,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
            | None -> Some config.timeout_s
            | Some seconds when seconds <= 0.0 -> None
            | Some seconds -> Some seconds)
+      ; wall_clock_ceiling_s = None
       }
     in
     let terminal_error = ref None in

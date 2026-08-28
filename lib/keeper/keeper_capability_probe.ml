@@ -406,6 +406,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                     | None -> Some exec.timeout_s
                     | Some 0.0 -> None
                     | Some s -> Some s)
+               ; wall_clock_ceiling_s = None
                }
              in
              (match
@@ -442,6 +443,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                     | None -> Some exec.timeout_s
                     | Some 0.0 -> None
                     | Some s -> Some s)
+               ; wall_clock_ceiling_s = None
                }
              in
              (match
@@ -585,6 +587,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                           | None -> Some exec.timeout_s
                           | Some 0.0 -> None
                           | Some s -> Some s)
+                     ; wall_clock_ceiling_s = None
                      }
                    in
                    let started = now () in

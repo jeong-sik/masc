@@ -24,6 +24,7 @@ type config =
   ; disable_slash_commands : bool
   ; admission_timeout_s : float
   ; timeout_s : float option
+  ; wall_clock_ceiling_s : float option
   }
 
 let default_timeout_s = 300.0
@@ -65,6 +66,7 @@ let default_config ~cwd ~model =
   ; disable_slash_commands = true
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
+  ; wall_clock_ceiling_s = None
   }
 ;;
 
@@ -783,6 +785,9 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
     Eio.Switch.on_release sw (fun () ->
       if not !process_settled then signal_spawned_process proc stdin_w);
     let state = ref initial_protocol_state in
+    let wall_clock =
+      Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
+    in
     (try
        (* The result event completes the protocol — nothing after it is
           attribution or content (apply_event rejects post-result events).
@@ -790,8 +795,14 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
           hang while a child process keeps stdout open (#28912), which
           turned already-served turns into idle timeouts. *)
        while Option.is_none !state.result do
+         if Runtime_wall_clock.expired wall_clock then
+           abort_with_runtime_error
+             (Timeout
+                (Option.value config.wall_clock_ceiling_s
+                   ~default:Runtime_wall_clock.default_ceiling_s));
          let timeout_s =
            timeout_s_for_phase config ~turn_admitted:(Option.is_some !state.init)
+           |> Runtime_wall_clock.cap_window wall_clock
          in
          let line =
            with_optional_timeout clock timeout_s (fun () ->

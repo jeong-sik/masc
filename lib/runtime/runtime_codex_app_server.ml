@@ -21,6 +21,7 @@ type config =
   ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
   ; timeout_s : float option
+  ; wall_clock_ceiling_s : float option
   }
 
 let default_timeout_s = 300.0
@@ -44,6 +45,7 @@ let default_config () =
   ; native = Runtime_native_tools.codex_default
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
+  ; wall_clock_ceiling_s = None
   }
 ;;
 
@@ -1162,6 +1164,9 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
     Eio.Flow.close stderr_w;
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
+    let wall_clock =
+      Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
+    in
     let active_receive_timeout_s = ref initial_timeout_s in
     let send json =
       let payload = Yojson.Safe.to_string json in
@@ -1174,14 +1179,29 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
           (Printf.sprintf
              "codex app-server stdin: refusing invalid UTF-8 payload (field %s)"
              (Option.value (invalid_utf8_field json) ~default:"<unknown>"));
-      with_optional_timeout clock (Some config.admission_timeout_s) (fun () ->
-        Eio.Flow.copy_string payload stdin_w;
-        Eio.Flow.copy_string "\n" stdin_w)
+      with_optional_timeout clock
+        (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
+        (fun () ->
+          Eio.Flow.copy_string payload stdin_w;
+          Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
+      if Runtime_wall_clock.expired wall_clock
+      then
+        (* The transport cannot know whether turn/start was already accepted;
+           the entry points rewrap with the observed turn state. *)
+        Error
+          (Timeout
+             { seconds =
+                 Option.value config.wall_clock_ceiling_s
+                   ~default:Runtime_wall_clock.default_ceiling_s
+             ; turn_accepted = false
+             })
+      else
       try
-        with_optional_timeout clock !active_receive_timeout_s (fun () ->
-          Eio.Buf_read.line reader)
+        with_optional_timeout clock
+          (Runtime_wall_clock.cap_window wall_clock !active_receive_timeout_s)
+          (fun () -> Eio.Buf_read.line reader)
         |> parse_wire_line
       with
       | End_of_file ->

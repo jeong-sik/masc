@@ -552,32 +552,26 @@ let task_execution_links_json (task : Masc_domain.task) =
   | links -> Masc_domain.task_execution_links_to_yojson links
 ;;
 
-(* RFC-0267 Phase 1: project the registry's canonical goal_id onto the wire.
-   The task record carries no goal_id (the goal_task_links registry is SSOT);
-   this is a read-time projection so the Work board can nest jobs under goals.
-   A task may appear under multiple goals in the legacy registry — the first
-   match is chosen deterministically and the multi-goal case is logged rather
-   than hidden, surfacing the single-goal-per-task invariant violation.
-   The projection runs on every snapshot refresh, so an unchanged linkage
-   would re-warn on every poll (task-376 hit 631 WARNs on 2026-08-27);
-   warn once per distinct (task, goals) state instead. *)
-let multi_goal_warned : (string, unit) Hashtbl.t = Hashtbl.create 16
+(* RFC-0267 Phase 1: pick a goal_id for the wire so the Work board can nest
+   jobs under goals. The task record carries no goal_id; the goal_task_links
+   registry holds the association.
 
+   A goal is a north-star measure, not an owner. A task belongs to no goal,
+   one, or several, and all three are ordinary — the link says "this work
+   relates to that measure", nothing stronger. Nothing downstream may read a
+   goal as the authority over a task.
+
+   So this is a display choice, not a resolution: the board nests under one
+   heading, and the first link is that heading. It used to warn on the
+   several-goals case as a "single-goal-per-task invariant violation", which
+   named a rule the store never had — [Workspace_goal_index.goal_ids_for_task]
+   returns a sorted list because several is expected. The warning reported
+   normal data as a defect (141 lines against six task/goal pairs on
+   2026-08-27) and its dedup table existed only to make that quieter. *)
 let task_canonical_goal_id goal_task_index (task : Masc_domain.task) =
   match Hashtbl.find_opt goal_task_index task.id with
   | None | Some [] -> None
-  | Some [ goal_id ] -> Some goal_id
-  | Some (goal_id :: extra as all_goals) ->
-    let warn_key = task.id ^ "\000" ^ String.concat "," all_goals in
-    if not (Hashtbl.mem multi_goal_warned warn_key) then (
-      Hashtbl.replace multi_goal_warned warn_key ();
-      Log.Dashboard.warn
-        "[dashboard_execution] task %s linked to %d goals; projecting canonical %s (extra: %s)"
-        task.id
-        (1 + List.length extra)
-        goal_id
-        (String.concat "," extra));
-    Some goal_id
+  | Some (goal_id :: _) -> Some goal_id
 ;;
 
 let task_json ~goal_task_index (task : Masc_domain.task) =

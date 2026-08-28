@@ -2478,6 +2478,61 @@ let standalone_lane_json ?(status = "idle") ?(retained = 3)
     ; "selected_slots", `List selected_slots
     ]
 
+(* The start of the newest run. The fixture has carried it since this suite
+   was written and the decoder read it into an underscore, so the field
+   satisfied the strict contract and reached nothing -- the one number that
+   separates a lane doing work from a lane stuck was decoded and dropped one
+   layer short of the screen. *)
+let test_decode_standalone_lane_keeps_the_run_start () =
+  let json =
+    `Assoc
+      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      ; "generated_at", `String "2026-08-27T00:00:00Z"
+      ; "observed_at_unix", `Float 20.
+      ; "observation_only", `Bool true
+      ; "exact_run_projection_count", `Int 1
+      ; "exact_run_source_total", `Int 1
+      ; "exact_run_projection_truncated", `Bool false
+      ; "lanes",
+        `List
+          [ standalone_lane_json ~status:"running" ~running:1
+              "board_attention_exact" "Board Attention"
+          ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
+          ; standalone_lane_json "librarian_exact" "Librarian"
+          ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
+              "compaction_exact" "Compaction"
+          ; standalone_lane_json "verifier_exact" "Verifier"
+          ]
+      ]
+  in
+  let find id lanes =
+    match
+      List.find_opt
+        (fun (lane : Tui_decode.standalone_lane) ->
+          String.equal lane.sl_lane_id id)
+        lanes
+    with
+    | Some lane -> lane
+    | None -> Alcotest.failf "%s missing from the snapshot" id
+  in
+  match Tui_decode.decode_standalone_lanes_snapshot json with
+  | Error detail -> Alcotest.failf "decode failed: %s" detail
+  | Ok snapshot ->
+    (match
+       ( find "board_attention_exact" snapshot.sls_lanes
+       , find "compaction_exact" snapshot.sls_lanes )
+     with
+     | running, never_ran ->
+       Alcotest.(check (option (float 0.001)))
+         "the running lane carries its start" (Some 10.)
+         running.Tui_decode.sl_last_started_at;
+       (* Null is absent, not zero: a lane that never ran has no age, and an
+          epoch start would draw as fifty-six years of work. *)
+       Alcotest.(check (option (float 0.001)))
+         "a lane that never ran carries none" None
+         never_ran.Tui_decode.sl_last_started_at)
+;;
+
 let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
   let lanes =
     [ standalone_lane_json ~status:"running" ~running:1
@@ -4232,6 +4287,8 @@ let () =
       [
         Alcotest.test_case "keeps running and no-retained-observation states" `Quick
           test_decode_standalone_lanes_keeps_running_and_no_retained_observation;
+        Alcotest.test_case "keeps the newest run's start" `Quick
+          test_decode_standalone_lane_keeps_the_run_start;
         Alcotest.test_case "rejects duplicate lane ids" `Quick
           test_decode_standalone_lanes_rejects_duplicate_ids;
       ] );

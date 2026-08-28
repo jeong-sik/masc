@@ -151,6 +151,7 @@ type standalone_lane = {
   sl_succeeded_count : int;
   sl_failed_count : int;
   sl_cancelled_count : int;
+  sl_last_started_at : float option;
   sl_last_terminal_at : float option;
   sl_last_outcome : string option;
   sl_p50_elapsed_s : float option;
@@ -3214,7 +3215,7 @@ let decode_standalone_lane json =
   let* sl_succeeded_count = required_int_field json "succeeded_count" in
   let* sl_failed_count = required_int_field json "failed_count" in
   let* sl_cancelled_count = required_int_field json "cancelled_count" in
-  let* _last_started_at = required_nullable_float_field json "last_started_at" in
+  let* sl_last_started_at = required_nullable_float_field json "last_started_at" in
   let* sl_last_terminal_at = required_nullable_float_field json "last_terminal_at" in
   let* sl_last_outcome = required_nullable_string_field json "last_outcome" in
   let* sl_p50_elapsed_s = required_nullable_float_field json "p50_elapsed_s" in
@@ -3235,6 +3236,7 @@ let decode_standalone_lane json =
     ; sl_succeeded_count
     ; sl_failed_count
     ; sl_cancelled_count
+    ; sl_last_started_at
     ; sl_last_terminal_at
     ; sl_last_outcome
     ; sl_p50_elapsed_s

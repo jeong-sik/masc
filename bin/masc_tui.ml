@@ -12378,10 +12378,21 @@ and is loaded on demand through keeper_skill.
          is. A screen with nothing to say stops repainting entirely, which
          is also what makes the elapsed seconds honest: they tick because
          this is what redraws them. *)
-      let any_turn_running =
+      (* Every surface that draws a moving mark, not just the first one. A
+         lane can be running while no keeper turn is, and a frame counter
+         that only watched turns would leave that mark frozen on whatever
+         quarter it stopped at -- which reads as a lane stuck there. *)
+      let anything_running =
         List.exists Masc_tui_answering.is_running state.keeper_turns
+        || (match state.standalone_lanes with
+            | None -> false
+            | Some snapshot ->
+              List.exists
+                (fun (lane : Tui_decode.standalone_lane) ->
+                  lane.sl_status = Tui_decode.Standalone_running)
+                snapshot.Tui_decode.sls_lanes)
       in
-      if not any_turn_running then begin
+      if not anything_running then begin
         if state.activity_frame >= 0 then begin
           state.activity_frame <- -1;
           Render_schedule.request render_schedule Render_schedule.Background

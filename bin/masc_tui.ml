@@ -1274,6 +1274,12 @@ type async_msg =
       result
   | Standalone_lanes_loaded of
       int * (Masc.Tui_decode.standalone_lanes_snapshot, string) result
+  (* Keyed by the lane / run they answer for: an answer that lands after the
+     operator left the list or the run is not this view's answer. *)
+  | Lane_runs_loaded of
+      string * (Masc.Tui_decode.lane_run_summary list, string) result
+  | Lane_run_detail_loaded of
+      string * (Masc.Tui_decode.lane_run_detail, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
@@ -3089,6 +3095,63 @@ let launch_lanes_load state ~mailbox =
         (Standalone_lanes_loaded
            (standalone_generation, Error "Eio switch is unavailable"))
 
+let launch_lane_runs_load state ~mailbox ~lane_id =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_lane_runs ~host ~port ~lane:lane_id with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Lane_runs_loaded (lane_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Lane_runs_loaded (lane_id, Error "Eio switch is unavailable"))
+
+let launch_lane_run_detail_load state ~mailbox ~run_id =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_lane_run_detail ~host ~port ~run_id with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Lane_run_detail_loaded (run_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Lane_run_detail_loaded (run_id, Error "Eio switch is unavailable"))
+
+(* Opening a standalone lane's runs drops the previous lane's list so a stale
+   answer can never draw under the new heading. *)
+let open_lane_run_list state ~mailbox (lane : Tui_decode.standalone_lane) =
+  state.lanes_mode <- Lanes_run_list lane.sl_lane_id;
+  state.lane_runs <- None;
+  state.lane_runs_error <- None;
+  state.lane_runs_cursor <- 0;
+  state.lane_runs_scroll <- 0;
+  launch_lane_runs_load state ~mailbox ~lane_id:lane.sl_lane_id
+
+let open_lane_run_detail state ~mailbox ~lane_id ~run_id =
+  state.lanes_mode <- Lanes_run_detail (lane_id, run_id);
+  state.lane_run_detail <- None;
+  state.lane_run_detail_error <- None;
+  state.lane_run_detail_scroll <- 0;
+  launch_lane_run_detail_load state ~mailbox ~run_id
+
 let launch_verification_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -3149,6 +3212,9 @@ let search_land state index =
   | Keepers Keeper_list -> state.keeper_cursor <- index
   | Lanes ->
       state.lanes_cursor <- index;
+      (* Search text covers the Keeper rows only, so a landing is always in
+         the keeper section. *)
+      state.lanes_section <- Lanes_section_keeper;
       follow state.lanes_scroll (fun s -> state.lanes_scroll <- s)
   | Verification ->
       state.verification_cursor <- index;
@@ -4088,7 +4154,8 @@ let selected_surface_reference state =
     | Planning_detail goal_id -> Some (Link.reference Goal goal_id)
     | Planning_list ->
         Option.bind state.planning (fun snapshot ->
-            planning_visible_goals snapshot.pl_goals
+            planning_visible_goals ~filter:state.planning_filter
+              ~sort:state.planning_sort snapshot.pl_goals
             |> Fun.flip List.nth_opt state.planning_cursor
             |> Option.map (fun goal -> Link.reference Goal goal.pg_id))
   in
@@ -4139,11 +4206,16 @@ let selected_surface_reference state =
         (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
         (List.nth_opt state.keepers state.keeper_cursor)
   | Lanes ->
-      Option.bind state.lanes (fun snapshot ->
-          Option.map
-            (fun (lane : Tui_decode.keeper_lane) ->
-               Link.reference Keeper lane.kl_keeper)
-            (List.nth_opt snapshot.Tui_decode.kls_lanes state.lanes_cursor))
+      (match state.lanes_mode, state.lanes_section with
+       | Lanes_overview, Lanes_section_keeper ->
+           Option.bind state.lanes (fun snapshot ->
+               Option.map
+                 (fun (lane : Tui_decode.keeper_lane) ->
+                   Link.reference Keeper lane.kl_keeper)
+                 (List.nth_opt snapshot.Tui_decode.kls_lanes state.lanes_cursor))
+       (* A standalone lane row or a run drill-down names no Keeper to follow. *)
+       | Lanes_overview, Lanes_section_standalone
+       | Lanes_run_list _, _ | Lanes_run_detail _, _ -> None)
   | Verification ->
       (* The task, not the request: a verification request is a question about
          a task, and the task is the thing another surface can open. *)
@@ -4172,6 +4244,20 @@ let next_board_sort = function
   | Board_recent -> Board_updated
   | Board_updated -> Board_discussed
   | Board_discussed -> Board_hot
+
+(* A filter or sort change can leave the cursor past the end of the new
+   list; clamp it so the next j/k has somewhere to move from. *)
+let clamp_planning_cursor state =
+  let count =
+    match state.planning with
+    | None -> 0
+    | Some planning ->
+        List.length
+          (planning_visible_goals ~filter:state.planning_filter
+             ~sort:state.planning_sort planning.pl_goals)
+  in
+  if state.planning_cursor >= count then
+    state.planning_cursor <- max 0 (count - 1)
 
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
@@ -4642,7 +4728,8 @@ let apply_keeper_roster_load state = function
 let apply_planning_load state = function
   | Ok planning ->
       let goal_ids planning =
-        planning_visible_goals planning.pl_goals
+        planning_visible_goals ~filter:state.planning_filter
+          ~sort:state.planning_sort planning.pl_goals
         |> List.map (fun goal -> goal.pg_id)
       in
       let current =
@@ -7311,6 +7398,30 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.standalone_lanes <- Some snapshot;
             state.standalone_lanes_error <- None
         | Error detail -> state.standalone_lanes_error <- Some detail)
+  | Lane_runs_loaded (lane_id, result) ->
+      (match state.lanes_mode with
+       | Lanes_run_list open_lane when String.equal open_lane lane_id ->
+           (match result with
+            | Ok runs ->
+                state.lane_runs <- Some runs;
+                state.lane_runs_error <- None;
+                state.lane_runs_cursor <-
+                  max 0 (min state.lane_runs_cursor (List.length runs - 1))
+            | Error detail ->
+                (* Keep the previous rows visible; the error says they are
+                   stale, clearing them would turn a failed refresh into an
+                   empty reading. *)
+                state.lane_runs_error <- Some detail)
+       | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ -> ())
+  | Lane_run_detail_loaded (run_id, result) ->
+      (match state.lanes_mode with
+       | Lanes_run_detail (_, open_run) when String.equal open_run run_id ->
+           (match result with
+            | Ok detail ->
+                state.lane_run_detail <- Some detail;
+                state.lane_run_detail_error <- None
+            | Error detail -> state.lane_run_detail_error <- Some detail)
+       | Lanes_run_detail _ | Lanes_overview | Lanes_run_list _ -> ())
   | Harness_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -10028,7 +10139,24 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
-            | Overview | Acting | Keepers _ | Lanes | Approvals | Planning
+            | Lanes ->
+                (match state.lanes_mode with
+                 | Lanes_run_detail _ ->
+                     state.lane_run_detail_scroll <-
+                       max 0
+                         (state.lane_run_detail_scroll + (direction * page))
+                 | Lanes_run_list _ ->
+                     let count =
+                       match state.lane_runs with
+                       | None -> 0
+                       | Some runs -> List.length runs
+                     in
+                     state.lane_runs_cursor <-
+                       max 0
+                         (min (count - 1)
+                            (state.lane_runs_cursor + (direction * page)))
+                 | Lanes_overview -> ())
+            | Overview | Acting | Keepers _ | Approvals | Planning
             | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
        | Some "r" | Some "R" ->
@@ -10070,7 +10198,16 @@ and is loaded on demand through keeper_skill.
                  | None -> ())
             | Verification ->
                 launch_verification_load state ~mailbox:async_messages
-            | Lanes -> launch_lanes_load state ~mailbox:async_messages
+            | Lanes ->
+                launch_lanes_load state ~mailbox:async_messages;
+                (match state.lanes_mode with
+                 | Lanes_run_list lane_id ->
+                     launch_lane_runs_load state ~mailbox:async_messages
+                       ~lane_id
+                 | Lanes_run_detail (_, run_id) ->
+                     launch_lane_run_detail_load state ~mailbox:async_messages
+                       ~run_id
+                 | Lanes_overview -> ())
             | Harness -> launch_harness_load state ~mailbox:async_messages
             | Fusion ->
                 launch_fusion_runs_load state ~mailbox:async_messages;
@@ -10231,7 +10368,19 @@ and is loaded on demand through keeper_skill.
                 else state.view <- Overview
             | Lanes ->
                 state.lanes_action_error <- None;
-                state.view <- Overview
+                (match state.lanes_mode with
+                 | Lanes_run_detail (lane_id, _) ->
+                     state.lanes_mode <- Lanes_run_list lane_id;
+                     state.lane_run_detail <- None;
+                     state.lane_run_detail_error <- None;
+                     state.lane_run_detail_scroll <- 0
+                 | Lanes_run_list _ ->
+                     state.lanes_mode <- Lanes_overview;
+                     state.lane_runs <- None;
+                     state.lane_runs_error <- None;
+                     state.lane_runs_cursor <- 0;
+                     state.lane_runs_scroll <- 0
+                 | Lanes_overview -> state.view <- Overview)
             | Acting | Keepers Keeper_list -> state.view <- Overview
             | Approvals ->
                 (* Esc leaves the ask and returns to the list with the cursor
@@ -10338,8 +10487,24 @@ and is loaded on demand through keeper_skill.
                 state.changes_tree_diff <- None;
                 state.changes_tree_diff_error <- None;
                 state.changes_tree_diff_path <- None
+            | Lanes ->
+                (* Left closes a drill-down level but never leaves the surface;
+                   Esc owns leaving it. *)
+                (match state.lanes_mode with
+                 | Lanes_run_detail (lane_id, _) ->
+                     state.lanes_mode <- Lanes_run_list lane_id;
+                     state.lane_run_detail <- None;
+                     state.lane_run_detail_error <- None;
+                     state.lane_run_detail_scroll <- 0
+                 | Lanes_run_list _ ->
+                     state.lanes_mode <- Lanes_overview;
+                     state.lane_runs <- None;
+                     state.lane_runs_error <- None;
+                     state.lane_runs_cursor <- 0;
+                     state.lane_runs_scroll <- 0
+                 | Lanes_overview -> ())
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
-            | Keepers Keeper_list | Acting | Lanes | Approvals
+            | Keepers Keeper_list | Acting | Approvals
             | Repositories | Connectors | Runtime | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
@@ -10471,7 +10636,9 @@ and is loaded on demand through keeper_skill.
                      let goals =
                        match state.planning with
                        | None -> []
-                       | Some p -> planning_visible_goals p.pl_goals
+                       | Some p ->
+                           planning_visible_goals ~filter:state.planning_filter
+                             ~sort:state.planning_sort p.pl_goals
                      in
                      if state.planning_cursor < List.length goals - 1 then
                        state.planning_cursor <- state.planning_cursor + 1
@@ -10530,13 +10697,51 @@ and is loaded on demand through keeper_skill.
                    state.verification_cursor <- cursor;
                    state.verification_scroll <- scroll)
             | Lanes ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(1)
-                     ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
-                 in
-                 state.lanes_action_error <- None;
-                 state.lanes_cursor <- cursor;
-                 state.lanes_scroll <- scroll)
+                (match state.lanes_mode with
+                 | Lanes_run_detail _ ->
+                     state.lane_run_detail_scroll <-
+                       state.lane_run_detail_scroll + 1
+                 | Lanes_run_list _ ->
+                     (let cursor, scroll =
+                        move_row_cursor state ~delta:1
+                          ~cursor:state.lane_runs_cursor
+                          ~scroll:state.lane_runs_scroll
+                      in
+                      state.lane_runs_cursor <- cursor;
+                      state.lane_runs_scroll <- scroll)
+                 | Lanes_overview ->
+                     (match state.lanes_section with
+                      | Lanes_section_standalone ->
+                          let standalone_count =
+                            match state.standalone_lanes with
+                            | None -> 0
+                            | Some snapshot ->
+                                List.length snapshot.Tui_decode.sls_lanes
+                          in
+                          state.lanes_action_error <- None;
+                          if state.lanes_standalone_cursor < standalone_count - 1
+                          then
+                            state.lanes_standalone_cursor <-
+                              state.lanes_standalone_cursor + 1
+                          else
+                            (* Down past the last standalone row lands on the
+                               first Keeper row of the table below it. *)
+                            (match state.lanes with
+                             | Some snapshot
+                               when snapshot.Tui_decode.kls_lanes <> [] ->
+                                 state.lanes_section <- Lanes_section_keeper;
+                                 state.lanes_cursor <- 0;
+                                 state.lanes_scroll <- 0
+                             | Some _ | None -> ())
+                      | Lanes_section_keeper ->
+                          (let cursor, scroll =
+                             move_row_cursor state ~delta:(1)
+                               ~cursor:state.lanes_cursor
+                               ~scroll:state.lanes_scroll
+                           in
+                           state.lanes_action_error <- None;
+                           state.lanes_cursor <- cursor;
+                           state.lanes_scroll <- scroll)))
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <- state.harness_detail_scroll + 1
@@ -10773,13 +10978,50 @@ and is loaded on demand through keeper_skill.
                    state.verification_cursor <- cursor;
                    state.verification_scroll <- scroll)
             | Lanes ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(-1)
-                     ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
-                 in
-                 state.lanes_action_error <- None;
-                 state.lanes_cursor <- cursor;
-                 state.lanes_scroll <- scroll)
+                (match state.lanes_mode with
+                 | Lanes_run_detail _ ->
+                     state.lane_run_detail_scroll <-
+                       max 0 (state.lane_run_detail_scroll - 1)
+                 | Lanes_run_list _ ->
+                     (let cursor, scroll =
+                        move_row_cursor state ~delta:(-1)
+                          ~cursor:state.lane_runs_cursor
+                          ~scroll:state.lane_runs_scroll
+                      in
+                      state.lane_runs_cursor <- cursor;
+                      state.lane_runs_scroll <- scroll)
+                 | Lanes_overview ->
+                     (match state.lanes_section with
+                      | Lanes_section_standalone ->
+                          state.lanes_action_error <- None;
+                          state.lanes_standalone_cursor <-
+                            max 0 (state.lanes_standalone_cursor - 1)
+                      | Lanes_section_keeper ->
+                          let standalone_count =
+                            match state.standalone_lanes with
+                            | None -> 0
+                            | Some snapshot ->
+                                List.length snapshot.Tui_decode.sls_lanes
+                          in
+                          if state.lanes_cursor = 0 && standalone_count > 0
+                          then begin
+                            (* Up past the first Keeper row lands on the last
+                               standalone row: the observation matrix sits above
+                               the table on screen, so the cursor walks onto it. *)
+                            state.lanes_action_error <- None;
+                            state.lanes_section <- Lanes_section_standalone;
+                            state.lanes_standalone_cursor <-
+                              standalone_count - 1
+                          end
+                          else
+                            (let cursor, scroll =
+                               move_row_cursor state ~delta:(-1)
+                                 ~cursor:state.lanes_cursor
+                                 ~scroll:state.lanes_scroll
+                             in
+                             state.lanes_action_error <- None;
+                             state.lanes_cursor <- cursor;
+                             state.lanes_scroll <- scroll)))
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <-
@@ -11013,23 +11255,61 @@ and is loaded on demand through keeper_skill.
                        ~mailbox:async_messages keeper
                  | None -> ())
             | Lanes ->
-                (match selected_lane_keeper state with
-                 | None ->
-                     show_lanes_action_error state
-                       (if Option.is_some state.keepers_error then
-                          "Cannot open detail: Keeper roster is unavailable"
-                        else
-                          match selected_lane_name state with
-                          | None -> "Cannot open detail: no lane is selected"
-                          | Some keeper_name ->
-                              Printf.sprintf
-                                "Cannot open detail: Keeper %s is not registered"
-                                (Keeper_chat.terminal_safe_text keeper_name))
-                 | Some (keeper_cursor, keeper) ->
-                     state.lanes_action_error <- None;
-                     state.keeper_cursor <- keeper_cursor;
-                     open_keeper_detail state ~base_path
-                       ~mailbox:async_messages keeper)
+                (match state.lanes_mode with
+                 | Lanes_run_list lane_id ->
+                     (match state.lane_runs with
+                      | Some runs ->
+                          (match
+                             List.nth_opt runs state.lane_runs_cursor
+                           with
+                           | Some (run : Tui_decode.lane_run_summary) ->
+                               open_lane_run_detail state
+                                 ~mailbox:async_messages ~lane_id
+                                 ~run_id:run.lrs_run_id
+                           | None -> ())
+                      | None -> ())
+                 | Lanes_run_detail _ -> ()
+                 | Lanes_overview ->
+                     (match state.lanes_section with
+                      | Lanes_section_standalone ->
+                          (match selected_standalone_lane state with
+                           | Some (lane : Tui_decode.standalone_lane) ->
+                               if
+                                 String.equal lane.sl_lane_id
+                                   Runtime.verifier_exact_lane_id
+                               then
+                                 (* Verifier runs are recorded in the
+                                    verification registries, which have no LLM
+                                    prompt/output — say so rather than opening
+                                    an empty list or faking a payload. *)
+                                 show_lanes_action_error state
+                                   "Verifier lane runs record no LLM prompt/output; see the Verification surface"
+                               else begin
+                                 state.lanes_action_error <- None;
+                                 open_lane_run_list state
+                                   ~mailbox:async_messages lane
+                               end
+                           | None ->
+                               show_lanes_action_error state
+                                 "Cannot open runs: standalone lane observation is unavailable")
+                      | Lanes_section_keeper ->
+                          (match selected_lane_keeper state with
+                           | None ->
+                               show_lanes_action_error state
+                                 (if Option.is_some state.keepers_error then
+                                    "Cannot open detail: Keeper roster is unavailable"
+                                  else
+                                    match selected_lane_name state with
+                                    | None -> "Cannot open detail: no lane is selected"
+                                    | Some keeper_name ->
+                                        Printf.sprintf
+                                          "Cannot open detail: Keeper %s is not registered"
+                                          (Keeper_chat.terminal_safe_text keeper_name))
+                           | Some (keeper_cursor, keeper) ->
+                               state.lanes_action_error <- None;
+                               state.keeper_cursor <- keeper_cursor;
+                               open_keeper_detail state ~base_path
+                                 ~mailbox:async_messages keeper)))
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
                    thing is readable before [y] answers it. *)
@@ -11084,7 +11364,9 @@ and is loaded on demand through keeper_skill.
                      let goals =
                        match state.planning with
                        | None -> []
-                       | Some p -> planning_visible_goals p.pl_goals
+                       | Some p ->
+                           planning_visible_goals ~filter:state.planning_filter
+                             ~sort:state.planning_sort p.pl_goals
                      in
                      (match List.nth_opt goals state.planning_cursor with
                       | Some g ->
@@ -11162,6 +11444,10 @@ and is loaded on demand through keeper_skill.
             | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
+       | Some "f" | Some "F" when state.view = Planning ->
+           (* Client-side over the loaded goals: no refetch. *)
+           state.planning_filter <- next_planning_filter state.planning_filter;
+           clamp_planning_cursor state
        | Some "g" when state.view = Acting ->
            state.acting_scroll <- 0;
            state.acting_unseen <- 0
@@ -11421,30 +11707,36 @@ and is loaded on demand through keeper_skill.
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Lanes ->
-                (match selected_lane_keeper state with
-                 | Some (keeper_cursor, keeper)
-                   when keeper_available_for_new_message state keeper.k_name ->
-                     state.lanes_action_error <- None;
-                     state.keeper_cursor <- keeper_cursor;
-                     open_message_for_keeper
-                       ~return_to:Keeper_chat_return_lanes state keeper.k_name;
-                     launch_keeper_history_load state ~mailbox:async_messages
-                       ~keeper_name:keeper.k_name;
-                     state.view <- Keepers Keeper_message
-                 | Some _ ->
+                (match state.lanes_mode, state.lanes_section with
+                 | (Lanes_run_list _ | Lanes_run_detail _), _ -> ()
+                 | Lanes_overview, Lanes_section_standalone ->
                      show_lanes_action_error state
-                       "Cannot open chat: Keeper roster is unavailable"
-                 | None ->
-                     show_lanes_action_error state
-                       (if Option.is_some state.keepers_error then
-                          "Cannot open chat: Keeper roster is unavailable"
-                        else
-                          match selected_lane_name state with
-                          | None -> "Cannot open chat: no lane is selected"
-                          | Some keeper_name ->
-                              Printf.sprintf
-                                "Cannot open chat: Keeper %s is not registered"
-                                (Keeper_chat.terminal_safe_text keeper_name)))
+                       "Cannot open chat: a standalone lane has no Keeper"
+                 | Lanes_overview, Lanes_section_keeper ->
+                     (match selected_lane_keeper state with
+                      | Some (keeper_cursor, keeper)
+                        when keeper_available_for_new_message state keeper.k_name ->
+                          state.lanes_action_error <- None;
+                          state.keeper_cursor <- keeper_cursor;
+                          open_message_for_keeper
+                            ~return_to:Keeper_chat_return_lanes state keeper.k_name;
+                          launch_keeper_history_load state ~mailbox:async_messages
+                            ~keeper_name:keeper.k_name;
+                          state.view <- Keepers Keeper_message
+                      | Some _ ->
+                          show_lanes_action_error state
+                            "Cannot open chat: Keeper roster is unavailable"
+                      | None ->
+                          show_lanes_action_error state
+                            (if Option.is_some state.keepers_error then
+                               "Cannot open chat: Keeper roster is unavailable"
+                             else
+                               match selected_lane_name state with
+                               | None -> "Cannot open chat: no lane is selected"
+                               | Some keeper_name ->
+                                   Printf.sprintf
+                                     "Cannot open chat: Keeper %s is not registered"
+                                     (Keeper_chat.terminal_safe_text keeper_name))))
             | Keepers Keeper_list
               when Option.is_none state.keepers_error
                    && state.keeper_cursor < List.length state.keepers ->
@@ -11554,9 +11846,13 @@ and is loaded on demand through keeper_skill.
                      start_http_refresh state ~host:server_peer_host
                        ~port:state.port ~refresh_inflight:http_refresh_inflight
                        ~mailbox:async_messages)
+            | Planning ->
+                (* Client-side re-order of the loaded goals: no refetch. *)
+                state.planning_sort <- next_planning_sort state.planning_sort;
+                clamp_planning_cursor state
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
-            | Approvals | Planning | Schedules | Verification | Harness
+            | Approvals | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,

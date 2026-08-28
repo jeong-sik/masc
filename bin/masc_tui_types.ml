@@ -342,6 +342,24 @@ type planning_mode =
   | Planning_list
   | Planning_detail of string
 
+(** Lanes surface sub-mode. The overview lists the standalone LLM lane rows
+    above the Keeper table; [Lanes_run_list] drills into one standalone
+    lane's recent exact runs, and [Lanes_run_detail] reads one run's recorded
+    prompt and output. The lane id rides along so Left/Esc from a run returns
+    to the list it came from. *)
+type lanes_mode =
+  | Lanes_overview
+  | Lanes_run_list of string
+  | Lanes_run_detail of string * string
+
+(** Which Lanes overview section the row cursor is in. The Keeper rows keep
+    [lanes_cursor]; the standalone observation rows are fixed above the table
+    and have their own index, so the active section is a fact, not a pair of
+    cursors competing for the same keys. *)
+type lanes_section =
+  | Lanes_section_standalone
+  | Lanes_section_keeper
+
 (** One authority for the Fusion surface's list/detail state. The top-level
     [surface] only says Fusion is open; it does not repeat this mode. *)
 type fusion_mode =
@@ -465,6 +483,9 @@ type planning_goal = Tui_decode.planning_goal
   pg_target_value: string option;
   pg_proof: Tui_decode.goal_proof;
   pg_last_review_note: string option;
+  pg_last_review_at: string option;
+  pg_created_at: string option;
+  pg_updated_at: string option;
 }
 
 type planning_rollup = Tui_decode.planning_rollup
@@ -512,22 +533,99 @@ type planning_snapshot = Tui_decode.planning_snapshot
   pl_generated_at: string;
 }
 
-let planning_visible_goals (goals : planning_goal list) : planning_goal list =
+(* Which lifecycle slice the list shows. [Planning_filter_active] is the
+   default: dropped goals from long ago are archive, not the working set, and
+   a default that showed them read as clutter. *)
+type planning_filter =
+  | Planning_filter_all
+  | Planning_filter_active
+  | Planning_filter_completed
+  | Planning_filter_dropped
+
+let planning_filter_label = function
+  | Planning_filter_all -> "all"
+  | Planning_filter_active -> "active"
+  | Planning_filter_completed -> "completed"
+  | Planning_filter_dropped -> "dropped"
+
+let next_planning_filter = function
+  | Planning_filter_all -> Planning_filter_active
+  | Planning_filter_active -> Planning_filter_completed
+  | Planning_filter_completed -> Planning_filter_dropped
+  | Planning_filter_dropped -> Planning_filter_all
+
+(* How the visible goals are ordered. [Planning_sort_phase_priority] keeps the
+   historical lifecycle-then-priority grouping as the default. *)
+type planning_sort =
+  | Planning_sort_phase_priority
+  | Planning_sort_updated
+  | Planning_sort_due
+
+let planning_sort_label = function
+  | Planning_sort_phase_priority -> "phase/P1-P5"
+  | Planning_sort_updated -> "updated"
+  | Planning_sort_due -> "due"
+
+let next_planning_sort = function
+  | Planning_sort_phase_priority -> Planning_sort_updated
+  | Planning_sort_updated -> Planning_sort_due
+  | Planning_sort_due -> Planning_sort_phase_priority
+
+let planning_passes_filter filter (goal : planning_goal) =
+  match filter, goal.pg_phase with
+  | Planning_filter_all, _ -> true
+  | Planning_filter_active, (Goal_phase.Executing | Goal_phase.Verifying) -> true
+  | Planning_filter_completed, Goal_phase.Completed -> true
+  | Planning_filter_dropped, Goal_phase.Dropped -> true
+  | Planning_filter_active, (Goal_phase.Completed | Goal_phase.Dropped)
+  | Planning_filter_completed, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Dropped)
+  | Planning_filter_dropped, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed) ->
+      false
+
+(* RFC 3339 timestamps and ISO dates compare lexicographically, so the sort
+   keys stay strings; [None] always sorts last regardless of direction. *)
+let planning_compare_updated_desc left right =
+  match left, right with
+  | Some left, Some right -> String.compare right left
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> 0
+
+let planning_compare_due_asc left right =
+  match left, right with
+  | Some left, Some right -> String.compare left right
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> 0
+
+(* Filter first, then sort: the sort only ever sees rows the reader asked
+   for. Stable everywhere, so equal keys keep the server's newest-first
+   order rather than inventing another timestamp contract in the TUI. *)
+let planning_visible_goals ~filter ~sort (goals : planning_goal list)
+    : planning_goal list =
   let phase_rank = function
     | Goal_phase.Executing -> 0
     | Goal_phase.Verifying -> 1
     | Goal_phase.Completed -> 2
     | Goal_phase.Dropped -> 3
   in
-  (* The server already keeps equally-ranked goals newest first. Group the
-     lifecycle and priority here, but keep that useful recency ordering for
-     ties instead of inventing another timestamp contract in the TUI. *)
-  List.stable_sort
-    (fun left right ->
-       match Int.compare (phase_rank left.pg_phase) (phase_rank right.pg_phase) with
-       | 0 -> Int.compare left.pg_priority right.pg_priority
-       | order -> order)
-    goals
+  let compare =
+    match sort with
+    | Planning_sort_phase_priority ->
+        fun left right ->
+          (match
+             Int.compare (phase_rank left.pg_phase) (phase_rank right.pg_phase)
+           with
+           | 0 -> Int.compare left.pg_priority right.pg_priority
+           | order -> order)
+    | Planning_sort_updated ->
+        fun left right ->
+          planning_compare_updated_desc left.pg_updated_at right.pg_updated_at
+    | Planning_sort_due ->
+        fun left right ->
+          planning_compare_due_asc left.pg_due_date right.pg_due_date
+  in
+  List.stable_sort compare (List.filter (planning_passes_filter filter) goals)
 
 type board_sort =
   | Board_hot
@@ -1344,6 +1442,10 @@ type state = {
   mutable planning_cursor: int;
   mutable planning_scroll: int;
   mutable planning_mode: planning_mode;
+  (* Client-side over the already-loaded goals: [f]/[s] re-render without a
+     refetch. *)
+  mutable planning_filter: planning_filter;
+  mutable planning_sort: planning_sort;
   (* A goal lifecycle request armed for a second keypress, and what the last
      one answered. Arming rather than pressing keeps the detail view's plain
      letters safe: c/x/o are lifecycle only once, and any other key disarms. *)
@@ -1366,6 +1468,19 @@ type state = {
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_generation: int;
+  (* Run drill-down under the standalone observation rows. [lane_runs] is the
+     summary page of the lane named in [lanes_mode]; payloads stay behind the
+     per-run detail fetch, so the list never holds one. *)
+  mutable lanes_mode: lanes_mode;
+  mutable lanes_section: lanes_section;
+  mutable lanes_standalone_cursor: int;
+  mutable lane_runs: Tui_decode.lane_run_summary list option;
+  mutable lane_runs_error: string option;
+  mutable lane_runs_cursor: int;
+  mutable lane_runs_scroll: int;
+  mutable lane_run_detail: Tui_decode.lane_run_detail option;
+  mutable lane_run_detail_error: string option;
+  mutable lane_run_detail_scroll: int;
   (* Read from the same composite body as [lanes]. A Keeper the producer has
      not projected is simply absent from this list, which the Secrets tab
      shows as "no projection" rather than as an empty credential set. *)
@@ -1688,6 +1803,14 @@ let keeper_reading (state : state) (keeper : keeper) :
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+(** The standalone lane row under the cursor, when the cursor is in the
+    standalone section. *)
+let selected_standalone_lane (state : state) =
+  match state.lanes_section, state.standalone_lanes with
+  | Lanes_section_standalone, Some snapshot ->
+      List.nth_opt snapshot.Tui_decode.sls_lanes state.lanes_standalone_cursor
+  | Lanes_section_standalone, None | Lanes_section_keeper, _ -> None
+
 (** The typed Keeper identity on the selected Lanes row. *)
 let selected_lane_name (state : state) =
   match state.lanes with
@@ -1921,6 +2044,8 @@ let create_state
   planning_cursor = 0;
   planning_scroll = 0;
   planning_mode = Planning_list;
+  planning_filter = Planning_filter_active;
+  planning_sort = Planning_sort_phase_priority;
   goal_action_armed = None;
   goal_action_error = None;
   schedules = None;
@@ -1934,6 +2059,16 @@ let create_state
   standalone_lanes = None;
   standalone_lanes_error = None;
   standalone_lanes_generation = 0;
+  lanes_mode = Lanes_overview;
+  lanes_section = Lanes_section_keeper;
+  lanes_standalone_cursor = 0;
+  lane_runs = None;
+  lane_runs_error = None;
+  lane_runs_cursor = 0;
+  lane_runs_scroll = 0;
+  lane_run_detail = None;
+  lane_run_detail_error = None;
+  lane_run_detail_scroll = 0;
   keeper_secrets = [];
   lanes_error = None;
   lanes_action_error = None;
@@ -2200,6 +2335,7 @@ type clamped_scroll =
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
   | Planning_detail_scroll of int
+  | Lane_run_detail_scroll of int
   (* An open diff's rows are built by the drawing, out of the recorded before
      and after text, so the keypress cannot count them. It steps unbounded and
      the frame reports back what it could actually use: without that report
@@ -2221,6 +2357,7 @@ let apply_clamped_scroll (state : state) = function
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
+  | Lane_run_detail_scroll value -> state.lane_run_detail_scroll <- value
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
@@ -2313,6 +2450,27 @@ let standalone_lanes_chrome ~row_count ~error ~truncated =
 ;;
 
 let lanes_scrolled (state : state) =
+  match state.lanes_mode with
+  | Lanes_run_list _ ->
+      (* The run list replaces the two-section overview, so the typed model
+         counts its rows instead of the Keeper table's. *)
+      { sc_count =
+          (match state.lane_runs with
+           | None -> 0
+           | Some runs -> List.length runs)
+      ; sc_chrome = listing_chrome ~error:state.lane_runs_error
+      ; sc_overflow_takes_row = true
+      ; sc_preview_keep = None
+      }
+  | Lanes_run_detail _ ->
+      (* The detail's lines are built by the drawing; the frame reports the
+         clamp through [clamped_scroll], so no count is knowable here. *)
+      { sc_count = 0
+      ; sc_chrome = 0
+      ; sc_overflow_takes_row = false
+      ; sc_preview_keep = None
+      }
+  | Lanes_overview ->
   (* The renderer draws one title and one divider around either the five
      standalone rows or its single loading/error row. This belongs in the
      typed scroll model: subtracting it only while drawing lets key movement
@@ -2368,7 +2526,10 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
           (match state.verification with
            | None -> 0
            | Some s -> List.length s.Tui_decode.vs_requests)
-  | Lanes -> Some (lanes_scrolled state)
+  | Lanes ->
+      (match state.lanes_mode with
+       | Lanes_run_detail _ -> None
+       | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state))
   | Harness ->
       if Option.is_some state.harness_detail then None
       else
@@ -2447,10 +2608,13 @@ let surface_row_texts (state : state) : surface -> string list option = function
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
   | Lanes ->
-      Option.map
-        (fun s ->
-          List.map (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
-        state.lanes
+      (match state.lanes_mode with
+       | Lanes_run_list _ | Lanes_run_detail _ -> None
+       | Lanes_overview ->
+           Option.map
+             (fun s ->
+               List.map (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
+             state.lanes)
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else

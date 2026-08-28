@@ -269,6 +269,12 @@ type planning_goal = {
   pg_target_value : string option;
   pg_proof : goal_proof;
   pg_last_review_note : string option;
+  (* RFC 3339 server timestamps. Optional because an older server build may
+     not emit them; the TUI renders what is there rather than refusing the
+     goal. *)
+  pg_last_review_at : string option;
+  pg_created_at : string option;
+  pg_updated_at : string option;
 }
 
 type planning_rollup = {
@@ -1220,6 +1226,16 @@ let optional_bool_field json key =
   | `Null -> Ok None
   | bad -> field_type_error key "a boolean or null" bad
 
+(* Absent reads as [None] here: the exact-lane run summary omits its
+   completion fields entirely while a run is still running, rather than
+   sending null. *)
+let optional_float_field json key =
+  match member key json with
+  | `Float value -> Ok (Some value)
+  | `Int value -> Ok (Some (Float.of_int value))
+  | `Null -> Ok None
+  | bad -> field_type_error key "a float or null" bad
+
 let required_int_field json key =
   match member key json with
   | `Int value -> Ok value
@@ -1368,6 +1384,9 @@ let decode_planning_goal json =
   let* pg_metric = optional_string_field json "metric" in
   let* pg_target_value = optional_string_field json "target_value" in
   let* pg_last_review_note = optional_string_field json "last_review_note" in
+  let* pg_last_review_at = optional_string_field json "last_review_at" in
+  let* pg_created_at = optional_string_field json "created_at" in
+  let* pg_updated_at = optional_string_field json "updated_at" in
   let pg_proof = decode_goal_proof (member "verification" json) in
   Ok
     {
@@ -1380,6 +1399,9 @@ let decode_planning_goal json =
       pg_target_value;
       pg_proof;
       pg_last_review_note;
+      pg_last_review_at;
+      pg_created_at;
+      pg_updated_at;
     }
 
 let decode_planning_rollup json =
@@ -3909,6 +3931,100 @@ let decode_librarian_actual_input ~run_id json =
              |> String.split_on_char '\n'))
   | `Null -> Error "latest Librarian run has no actual_input"
   | _ -> Error "latest Librarian actual_input is not an object"
+;;
+
+(* One exact-lane run as the paged listing serves it: identity and outcome,
+   never the payloads (the payloads are why the listing omits them — see
+   Exact_lane_run_registry.run_summary_fields). Completion fields are absent
+   while the run is still running. *)
+type lane_run_summary =
+  { lrs_run_id : string
+  ; lrs_lane : string
+  ; lrs_actor : string
+  ; lrs_started_at : float
+  ; lrs_status : string
+  ; lrs_elapsed_s : float option
+  ; lrs_selected_slot : string option
+  }
+
+type lane_run_page =
+  { lrpg_runs : lane_run_summary list
+  ; lrpg_next : (float * string) option
+  }
+
+type lane_run_detail =
+  { lrd_run_id : string
+  ; lrd_lane : string
+  ; lrd_actor : string
+  ; lrd_started_at : float
+  ; lrd_status : string
+  ; lrd_elapsed_s : float option
+  ; lrd_selected_slot : string option
+  ; lrd_input_payload : Yojson.Safe.t
+  ; lrd_output : Yojson.Safe.t option
+  }
+
+let decode_lane_run_summary json =
+  let* lrs_run_id = required_string_field json "run_id" in
+  let* lrs_lane = required_string_field json "lane" in
+  let* lrs_actor = required_string_field json "actor" in
+  let* lrs_started_at = require_float_field json "started_at" in
+  let* lrs_status = required_string_field json "status" in
+  let* lrs_elapsed_s = optional_float_field json "elapsed_s" in
+  let* lrs_selected_slot = optional_string_field json "selected_slot" in
+  Ok
+    { lrs_run_id
+    ; lrs_lane
+    ; lrs_actor
+    ; lrs_started_at
+    ; lrs_status
+    ; lrs_elapsed_s
+    ; lrs_selected_slot
+    }
+;;
+
+(* The page answers every lane mixed together; the caller is after one. The
+   cursor still comes from the page's last row, filtered or not — filtering
+   first would stall paging on a page where the lane simply has no runs. *)
+let decode_lane_run_page ~lane json =
+  let* runs_json = required_list_field json "runs" in
+  let* has_more = required_bool_field json "has_more" in
+  let* runs = decode_list "runs" decode_lane_run_summary runs_json in
+  let lrpg_runs =
+    List.filter (fun run -> String.equal run.lrs_lane lane) runs
+  in
+  let* lrpg_next =
+    if not has_more
+    then Ok None
+    else
+      match List.rev runs with
+      | [] -> Error "exact lane page says has_more but has no cursor row"
+      | last :: _ -> Ok (Some (last.lrs_started_at, last.lrs_run_id))
+  in
+  Ok { lrpg_runs; lrpg_next }
+;;
+
+let decode_lane_run_detail json =
+  let* run = required_object_field json "run" in
+  let* summary = decode_lane_run_summary run in
+  let* input = required_object_field run "input" in
+  let* lrd_input_payload = required_member input "payload" in
+  let lrd_output =
+    match member "output" run with
+    | `Null -> None
+    | value -> Some value
+  in
+  Ok
+    { lrd_run_id = summary.lrs_run_id
+    ; lrd_lane = summary.lrs_lane
+    ; lrd_actor = summary.lrs_actor
+    ; lrd_started_at = summary.lrs_started_at
+    ; lrd_status = summary.lrs_status
+    ; lrd_elapsed_s = summary.lrs_elapsed_s
+    ; lrd_selected_slot = summary.lrs_selected_slot
+    ; lrd_input_payload
+    ; lrd_output
+    }
 ;;
 
 let decode_fleet_safety json =

@@ -663,6 +663,74 @@ let fetch_latest_librarian_input ~(host : string) ~(port : int) :
   in
   Masc.Tui_decode.decode_librarian_actual_input ~run_id detail
 
+(* The listing endpoint mixes every lane and never carries a payload, so one
+   lane's recent runs are a client-side filter over cursor pages. The page cap
+   matches the server retention bound (2 000 runs, 200 a page): past it the
+   lane's runs are simply older than anything the server still holds. *)
+let lane_run_list_limit = 50
+let lane_run_list_page_cap = 10
+
+(* One run's payloads can be megabytes of conversation history (a 136 MB
+   [conversation_history] field is why the listing drops payloads); beyond a
+   bound the TUI declines to parse rather than hanging the frame on a body it
+   would truncate anyway. *)
+let lane_run_detail_max_body_bytes = 4 * 1024 * 1024
+
+(** Recent run summaries of one exact lane, newest first. *)
+let fetch_lane_runs ~(host : string) ~(port : int) ~(lane : string) :
+    (Masc.Tui_decode.lane_run_summary list, string) result =
+  let open Result.Syntax in
+  let rec collect ~pages_left before acc =
+    if pages_left <= 0 then
+      Error "lane run listing exceeded 10 exact-lane pages"
+    else
+      let path =
+        match before with
+        | None -> "/api/v1/dashboard/exact-lane-runs?limit=200"
+        | Some (started_at, run_id) ->
+            Printf.sprintf
+              "/api/v1/dashboard/exact-lane-runs?limit=200&before_started_at=%.17g&before_run_id=%s"
+              started_at
+              (percent_encode_path_segment run_id)
+      in
+      let* listing = get_json ~host ~port ~path in
+      let* page = Masc.Tui_decode.decode_lane_run_page ~lane listing in
+      let acc = acc @ page.lrpg_runs in
+      if List.length acc >= lane_run_list_limit then
+        Ok
+          (List.filteri (fun index _ -> index < lane_run_list_limit) acc)
+      else
+        match page.lrpg_next with
+        | Some cursor -> collect ~pages_left:(pages_left - 1) (Some cursor) acc
+        | None -> Ok acc
+  in
+  collect ~pages_left:lane_run_list_page_cap None []
+
+(** The full record of one exact-lane run, prompt and output included. *)
+let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
+    (Masc.Tui_decode.lane_run_detail, string) result =
+  match
+    http_get ~host ~port
+      ~path:
+        ("/api/v1/dashboard/exact-lane-runs/"
+         ^ percent_encode_path_segment run_id)
+  with
+  | Error detail -> Error ("lane run detail request failed: " ^ detail)
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (Printf.sprintf "lane run detail returned %d: %s" status body)
+  | Ok (_, body) ->
+      if String.length body > lane_run_detail_max_body_bytes then
+        Error
+          (Printf.sprintf
+             "lane run record is %d bytes; the TUI does not render a payload \
+              above %d bytes"
+             (String.length body) lane_run_detail_max_body_bytes)
+      else
+        (match Yojson.Safe.from_string body with
+         | json -> Masc.Tui_decode.decode_lane_run_detail json
+         | exception Yojson.Json_error detail ->
+             Error ("lane run detail was not JSON: " ^ detail))
+
 (** Fetch the two independent observations the context inspector joins. A
     failure on one stays beside the other instead of blanking the whole view:
     turn records can still prove composition when exact prompt text was never

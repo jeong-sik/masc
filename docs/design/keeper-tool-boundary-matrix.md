@@ -100,6 +100,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_docker_container_name.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker.mli` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_microvm.ml` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_microvm.mli` - sandbox-runtime
 - `lib/keeper_sandbox_error/keeper_sandbox_error.ml` - sandbox-runtime
 - `lib/keeper_sandbox_error/keeper_sandbox_error.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_exec_failure.ml` - sandbox-runtime

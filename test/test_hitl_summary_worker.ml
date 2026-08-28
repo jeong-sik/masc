@@ -1987,7 +1987,32 @@ let test_judge_effect_prompt_comes_from_registry () =
     (Masc_test_deps.source_path "config/prompts");
   match Worker.For_testing.system_prompt () with
   | Error detail -> fail ("Gate judgment prompt unavailable: " ^ detail)
-  | Ok prompt -> check bool "prompt is non-empty" true (String.trim prompt <> "")
+  | Ok prompt ->
+    check bool "prompt is non-empty" true (String.trim prompt <> "");
+    check bool
+      "judge is scoped to effect safety"
+      true
+      (Astring.String.is_infix
+         ~affix:"authority is the concrete effect's safety"
+         prompt);
+    check bool
+      "missing task purpose alone does not escalate"
+      true
+      (Astring.String.is_infix
+         ~affix:"Missing task-purpose context by itself is not a safety ambiguity"
+         prompt);
+    check bool
+      "read-only examples are explicit"
+      true
+      (Astring.String.is_infix
+         ~affix:"remote repository metadata views"
+         prompt);
+    check bool
+      "non-destructive bounded effects do not require intent review"
+      true
+      (Astring.String.is_infix
+         ~affix:"bounded, reversible effect"
+         prompt)
 ;;
 
 

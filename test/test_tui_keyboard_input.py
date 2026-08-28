@@ -747,7 +747,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
     metadata: dict[str, object] = {
         "schema": "masc.keeper_meta.v1",
         "name": name,
-        "agent_name": f"keeper-{name}-agent",
         "instructions": "",
         "autonomous_instructions": None,
         "trace_id": f"trace-{name}",

@@ -106,33 +106,15 @@ module Agent_id : sig
 end = struct
   type t = string
 
-  (* Issue #8633: pattern was [^[a-zA-Z0-9._-]+$] which rejected the
-     [keeper:foo] colon-namespacing supported by the canonical
-     [Validation.Agent_id] (used by session-bound task workspace).
-     Real callers exist (server_routes_http_keeper_stream:413).
-     Pattern is now a strict superset of both: optional single colon
-     namespace + previously-allowed dots.
-
-     Issue #8625: length cap was 32 — also raised to 64 to match
-     [Validation.Agent_id.validate]. Generated worker IDs like
-     [codex-task-claimer-20260419t102609z] (36 chars) bound fine but
-     were rejected by board posts. (Supersedes PR #8631.) *)
-  let max_agent_id_len = 64
-  let valid_pattern =
-    Re.Pcre.re {|^[a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?$|} |> Re.compile
-
+  (* SSOT: [Validation.Agent_id] owns the agent id shape. This module carried
+     its own copy and drifted twice -- #8625 raised the length cap by hand to
+     match, #8633 re-widened the pattern by hand to match -- each time catching
+     up after the fact. It now delegates, so the two cannot disagree again, and
+     board inherits the path-separator and traversal checks it never had. *)
   let of_string s =
-    let s = String.trim s in
-    let len = String.length s in
-    if len >= 1 && len <= max_agent_id_len && Re.execp valid_pattern s then
-      Ok s
-    else
-      Error
-        (Validation_error
-           (Printf.sprintf
-              "Invalid agent_id: %s (max %d chars, must match \
-               [a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?)"
-              s max_agent_id_len))
+    match Validation.Agent_id.validate (String.trim s) with
+    | Ok id -> Ok (Validation.Agent_id.to_string id)
+    | Error reason -> Error (Validation_error (Printf.sprintf "Invalid agent_id: %s" reason))
 
   let to_string t = t
 end

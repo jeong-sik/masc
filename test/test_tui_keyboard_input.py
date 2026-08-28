@@ -5921,6 +5921,33 @@ def standalone_lanes_response() -> HttpResponse:
     )
 
 
+LANE_RUNS_PATH = "/api/v1/dashboard/exact-lane-runs?limit=200"
+
+
+def lane_runs_response(lane_id: str, count: int) -> HttpResponse:
+    """One page of exact-lane runs, in the wire shape the paged decoder
+    accepts: every run carries the lane the caller filters on, and has_more
+    is false so no cursor page follows."""
+    return (
+        200,
+        {
+            "runs": [
+                {
+                    "run_id": f"lr-{index:03d}",
+                    "lane": lane_id,
+                    "actor": "fixture",
+                    "started_at": 1787557000.0 + index,
+                    "status": "succeeded",
+                    "elapsed_s": 1.5,
+                    "selected_slot": "glm-coding.glm-5-turbo",
+                }
+                for index in range(count)
+            ],
+            "has_more": False,
+        },
+    )
+
+
 def keeper_lanes_response(lanes: list[dict[str, object]]) -> HttpResponse:
     return (
         200,
@@ -6115,12 +6142,26 @@ def keeper_lanes_interaction(
                 raise AssertionError(f"Lanes did not draw {needle!r}: {plain!r}")
 
         fixtures[KEEPER_LANES_PATH] = (503, {"error": "lane refresh failed"})
-        stale = send_and_wait(
+        send_and_wait(
             process,
             master_fd,
             output,
             b"r",
             b"keeper lanes load failed",
+        )
+        # The error row inserts above the Keeper rows, so only the rows at or
+        # below it repaint; the header -- whose timestamp may not have ticked
+        # -- can legitimately be absent from the slice send_and_wait returns
+        # (#31288). A resize forces a full redraw, and the assertion reads
+        # that complete frame instead. The band streams after the error row.
+        stale = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=29,
+            columns=140,
+            needle=banded_alpha,
+            controls=(FULL_REDRAW,),
         )
         stale_plain = CSI_RE.sub(b"", stale).decode("utf-8")
         for needle in (
@@ -6196,7 +6237,7 @@ def keeper_lanes_interaction(
             process,
             master_fd,
             output,
-            rows=29,
+            rows=30,
             columns=140,
             needle=b"Verifier",
             controls=(FULL_REDRAW,),
@@ -6206,13 +6247,61 @@ def keeper_lanes_interaction(
                 "refresh dragged the standalone selection into the Keeper "
                 f"table: {standalone_refresh!r}"
             )
+        # Enter on a standalone lane opens its run list -- with Verifier the
+        # one exception, since its runs live in the verification registries
+        # and get a notice pane instead. Two k's walk the band from Verifier
+        # down to Librarian, whose run list is the paged exact-run summary.
+        banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"k",
+            re.compile(rb"\x1b\[7m[^\x1b\n]*Compaction"),
+        )
+        send_and_wait(process, master_fd, output, b"k", banded_librarian)
+        # PgDn moves the run cursor by a page and the window must follow
+        # (#31290): before the follow, the selected row walked off the frame
+        # while the footer kept claiming scroll 0. The fetch caps the list at
+        # 50 (lane_run_list_limit), and 50 rows are taller than one window,
+        # so the scroll note renders and names the window's offset.
+        fixtures[LANE_RUNS_PATH] = lane_runs_response("librarian_exact", 60)
+        run_list = send_and_wait(
+            process, master_fd, output, b"\r", b"[50 runs, scroll 0]"
+        )
+        if re.search(rb"\x1b\[7m[^\x1b\n]*lr-000", run_list) is None:
+            raise AssertionError(
+                f"run list did not band its first row: {run_list!r}"
+            )
+        paged = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b[6~",
+            re.compile(rb"\[50 runs, scroll [1-9]"),
+        )
+        if re.search(rb"\x1b\[7m[^\x1b\n]*lr-\d\d\d", paged) is None:
+            raise AssertionError(
+                f"PgDn left the selected run off the frame: {paged!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", banded_librarian)
+        # Back on the last standalone row, so the j below still lands on the
+        # first Keeper row.
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            re.compile(rb"\x1b\[7m[^\x1b\n]*Compaction"),
+        )
+        send_and_wait(process, master_fd, output, b"j", banded_verifier)
         # j past the last standalone row lands back on the first Keeper row.
         send_and_wait(process, master_fd, output, b"j", banded_alpha)
         resize_and_wait(
             process,
             master_fd,
             output,
-            rows=30,
+            rows=31,
             columns=140,
             needle=b"(1 keepers)",
         )
@@ -6327,7 +6416,7 @@ def keeper_lanes_interaction(
             process,
             master_fd,
             output,
-            rows=31,
+            rows=32,
             columns=140,
             needle=orphan_name,
             controls=(FULL_REDRAW,),
@@ -6341,18 +6430,22 @@ def keeper_lanes_interaction(
         drain_until_quiet(process, master_fd, output)
         # NOTE: the repaint is driven by SIGWINCH, and XNU only signals when
         # the size actually changes -- a same-size TIOCSWINSZ produces no
-        # redraw and this wait would hang. Alternate 31/32 so each resize
-        # below is a real change.
+        # redraw and this wait would hang. The row counts below step 32/29/30/31
+        # so each resize is a real change.
         # The error line renders above the Keeper rows, so waiting on it
-        # returns mid-frame; wait on the selection band instead (it streams
-        # after) and check the error text in the accumulated frame.
+        # returns mid-frame; wait on the scroll note instead (it streams
+        # after) and check the error text in the accumulated frame. The band
+        # cannot be the needle here: the 32 -> 29 shrink leaves the scroll at
+        # 11 while only ~10 Keeper rows fit, so the selected orphan-23 row is
+        # legitimately below the window -- the table re-follows the cursor on
+        # the next move, not on resize.
         orphan_after_c = resize_and_wait(
             process,
             master_fd,
             output,
-            rows=32,
+            rows=29,
             columns=140,
-            needle=banded_orphan,
+            needle=b"keepers, scroll",
             controls=(FULL_REDRAW,),
         )
         if (
@@ -6361,6 +6454,43 @@ def keeper_lanes_interaction(
         ):
             raise AssertionError(
                 f"unmatched lane c did not surface its error: {orphan_after_c!r}"
+            )
+        # A refresh must not wipe an unread action error: Lanes_loaded's Ok
+        # arm cleared lanes_action_error on every tick, so the notice vanished
+        # before the operator could read it. The fixture's idle cell changes
+        # ("0s" -> "1h") so the refresh's arrival is observable, and the
+        # resize then forces a full redraw of the post-refresh state -- the
+        # error line is only proven present if it is in that frame.
+        fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
+            [
+                keeper_lane_row(
+                    f"orphan-{index:02d}",
+                    phase="running",
+                    turn_phase="idle",
+                    idle_seconds=3661,
+                    runtime_state=None,
+                    selected_model=None,
+                    diagnosis=None,
+                )
+                for index in range(orphan_count)
+            ]
+        )
+        send_and_wait(process, master_fd, output, b"r", b"1h")
+        refreshed_with_error = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=140,
+            needle=b"keepers, scroll",
+            controls=(FULL_REDRAW,),
+        )
+        if (
+            b"Cannot open chat: Keeper orphan-23 is not registered"
+            not in CSI_RE.sub(b"", refreshed_with_error)
+        ):
+            raise AssertionError(
+                f"refresh wiped the unread action error: {refreshed_with_error!r}"
             )
         if chat_get_counts != (
             history.served,

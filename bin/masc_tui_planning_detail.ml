@@ -1,6 +1,11 @@
 module Message_layout = Masc_tui_message_layout
 module Tui_decode = Masc.Tui_decode
 
+(* The field is one wider than the longest label ("reviewed:") so every value
+   keeps one gap after its colon. *)
+let timestamp_line ~label value =
+  Printf.sprintf "  %-10s%s" (label ^ ":") value
+
 type tone =
   | Proven
   | Refused

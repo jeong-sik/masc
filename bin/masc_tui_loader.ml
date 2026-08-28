@@ -234,7 +234,6 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_ids =
     List.map (fun keeper -> keeper.k_name) state.keepers
   in
-  let current_keepers_error = state.keepers_error in
   let selected_keeper_name =
     if state.keeper_cursor < 0 then None
     else
@@ -303,10 +302,9 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let next_keeper_ids =
     List.map (fun keeper -> keeper.k_name) state.keepers
   in
-  if
-    (not (List.equal String.equal current_keeper_ids next_keeper_ids))
-    || not (Option.equal String.equal current_keepers_error keepers_error)
-  then state.lanes_action_error <- None;
+  (* A roster change no longer dismisses an action notice: the notice answers
+     the operator's last action, and a refresh tick would otherwise wipe it
+     before it is read. User actions still clear it. *)
   (match
      Keeper_selection.reconcile ~current_ids:current_keeper_ids
        ~next_ids:next_keeper_ids ~current:current_navigation

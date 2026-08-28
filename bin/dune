@@ -558,6 +558,11 @@
  (modules masc_tui_board_selection))
 
 (library
+ (name masc_tui_board_score)
+ (wrapped false)
+ (modules masc_tui_board_score))
+
+(library
  (name masc_tui_planning_detail)
  (wrapped false)
  (modules masc_tui_planning_detail)
@@ -800,6 +805,7 @@
   masc_tui_approval_authority
   masc_tui_board_detail
   masc_tui_board_selection
+  masc_tui_board_score
   masc_tui_keeper_selection
   masc_tui_planning_selection
   masc_tui_planning_detail

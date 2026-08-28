@@ -83,8 +83,12 @@ let select_recent_messages ~max_messages messages =
   drop drop_count messages
 ;;
 
-let prompt_input_for_librarian (inp : Keeper_librarian.input) =
-  let max_messages = prompt_max_messages () in
+let prompt_input_for_librarian ?max_messages (inp : Keeper_librarian.input) =
+  let max_messages =
+    match max_messages with
+    | Some max_messages -> max_messages
+    | None -> prompt_max_messages ()
+  in
   { inp with
     messages =
       select_recent_messages
@@ -111,6 +115,13 @@ type exact_setup_error =
       }
   | Exact_flow_snapshot_failed of Exact_output.flow_snapshot_error
   | Exact_flow_start_failed of Exact_output.flow_start_error
+  | Exact_input_over_budget of { slot_id : string }
+    (** Even the librarian's fixed material (template, keeper instructions,
+        current facts) with zero conversation messages exceeds this admitted
+        slot's request-body limit — nothing left to shrink. *)
+  | Exact_request_projection_failed of { slot_id : string }
+    (** The pre-flight request-body projection itself failed for this slot;
+        distinct from over-budget, which is a measured size verdict. *)
 
 type outward_effect =
   | No_outward_effect
@@ -166,6 +177,15 @@ let exact_setup_error_to_string = function
   | Exact_flow_start_failed
       (Exact_output.Flow_id_generation_failed detail) ->
     "exact flow identity allocation failed: " ^ detail
+  | Exact_input_over_budget { slot_id } ->
+    Printf.sprintf
+      "librarian prompt exceeds slot request-body limit even with zero \
+       conversation messages slot=%s"
+      slot_id
+  | Exact_request_projection_failed { slot_id } ->
+    Printf.sprintf
+      "librarian request-body projection failed for slot=%s"
+      slot_id
 ;;
 
 let extraction_error_to_string = function
@@ -269,7 +289,77 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
-let prepare_attempt ~base_path ~keeper_id messages =
+let librarian_output_requirement =
+  Exact_output.make_output_requirement
+    ~schema:Keeper_structured_output_schema.librarian_current_output_schema
+    ~minimum_guarantee:Exact_output.Json_syntax
+;;
+
+(* Pre-flight size discipline, mirrored from the compaction lane — the one
+   lane that measured its request before sending it. The librarian's input
+   scales linearly with conversation text and previously had no byte bound at
+   all (only a 72-message COUNT cap), so an oversized prompt failed at the
+   provider, cost a full round-trip, and with a single admitted slot had
+   nowhere to advance (lane audit W1/W2, live p50 132s). Message count is the
+   shrink axis: dropping older messages only removes prompt bytes, so the
+   serialized size is monotone in the count and binary search applies. *)
+let prompt_fits_all_slots ~selected_slots messages =
+  let rec loop = function
+    | [] -> Ok true
+    | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
+      (match
+         Exact_output.project_request_body
+           ~target:slot.admitted_target
+           ~messages
+           librarian_output_requirement
+       with
+       | Error _ ->
+         Error
+           (Exact_setup_failed
+              (Exact_request_projection_failed { slot_id = slot.slot_id }))
+       | Ok projection ->
+         if projection.Exact_output.within_limit then loop rest else Ok false)
+  in
+  loop selected_slots
+;;
+
+(* [render_at k] renders the prompt with both message lists trimmed to the
+   newest [k] entries and returns it as the flow's message list. Returns the
+   fitted messages plus [Some k] when the full prompt had to shrink, so the
+   caller can record that the observed registration input and the dispatched
+   prompt differ. *)
+let fitted_messages ~selected_slots ~full_messages ~render_at =
+  let open Result.Syntax in
+  let* full_fits = prompt_fits_all_slots ~selected_slots full_messages in
+  if full_fits
+  then Ok (full_messages, None)
+  else (
+    let full = prompt_max_messages () in
+    let rec search best low high =
+      if low > high
+      then
+        match best with
+        | Some (messages, count) -> Ok (messages, Some count)
+        | None ->
+          let slot_id =
+            match selected_slots with
+            | (slot : Runtime_exact_output_registry.selected_slot) :: _ ->
+              slot.slot_id
+            | [] -> exact_lane_id
+          in
+          Error (Exact_setup_failed (Exact_input_over_budget { slot_id }))
+      else (
+        let midpoint = low + ((high - low) / 2) in
+        let* messages = render_at midpoint in
+        let* fits = prompt_fits_all_slots ~selected_slots messages in
+        if fits
+        then search (Some (messages, midpoint)) (midpoint + 1) high
+        else search best low (midpoint - 1))
+    in
+    search None 0 (max 0 (full - 1)))
+;;
+
+let resolve_librarian_slots ~base_path ~keeper_id =
   let open Result.Syntax in
   let* registry =
     Runtime_exact_output_registry.current ()
@@ -291,8 +381,13 @@ let prepare_attempt ~base_path ~keeper_id messages =
       Exact_setup_failed
         (Exact_lane_preference_unavailable detail))
   in
+  Ok resolved.Runtime_exact_output_registry.selected_slots
+;;
+
+let prepare_attempt ~selected_slots messages =
+  let open Result.Syntax in
   let* candidates =
-    flow_candidates resolved.selected_slots
+    flow_candidates selected_slots
     |> Result.map_error (fun error -> Exact_setup_failed error)
   in
   match candidates with
@@ -302,13 +397,8 @@ let prepare_attempt ~base_path ~keeper_id messages =
          (Exact_lane_unavailable
             (No_admitted_lane_slots { lane_id = exact_lane_id })))
   | first :: rest ->
-    let requirement =
-      Exact_output.make_output_requirement
-        ~schema:Keeper_structured_output_schema.librarian_current_output_schema
-        ~minimum_guarantee:Exact_output.Json_syntax
-    in
     let* snapshot =
-      Exact_output.snapshot_flow ~first ~rest ~messages requirement
+      Exact_output.snapshot_flow ~first ~rest ~messages librarian_output_requirement
       |> Result.map_error (fun error ->
         Exact_setup_failed (Exact_flow_snapshot_failed error))
     in
@@ -363,9 +453,14 @@ let execute_exact_output_classified
       ~keeper_id
       ~(selected_input : Keeper_librarian.input)
       ~messages
+      ~render_at
   =
   let open Result.Syntax in
-  let* attempt = prepare_attempt ~base_path ~keeper_id messages in
+  let* selected_slots = resolve_librarian_slots ~base_path ~keeper_id in
+  let* messages, fitted_message_count =
+    fitted_messages ~selected_slots ~full_messages:messages ~render_at
+  in
+  let* attempt = prepare_attempt ~selected_slots messages in
   let validate flow_success =
     let output = Exact_output.flow_success_output flow_success in
     match
@@ -393,7 +488,7 @@ let execute_exact_output_classified
       |> Exact_output.flow_success_candidate
       |> fun candidate -> candidate.visit.identity.candidate_id
     in
-    Ok (success.accepted, selected_slot)
+    Ok (success.accepted, selected_slot, fitted_message_count)
   | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
     Error (Exact_execution_failed (exact_execution_error cause))
   | Error
@@ -594,7 +689,15 @@ let run_best_effort
                |> Result.map (fun material -> material.rendered)
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
-             let* (selection, exact_output), selected_slot =
+             let render_at max_messages =
+               let shrunk = prompt_input_for_librarian ~max_messages inp in
+               match render_librarian_prompt shrunk with
+               | Ok rendered ->
+                 Ok [ message Agent_core.Types.User rendered ]
+               | Error detail -> Error (Prompt_render_failed detail)
+             in
+             let* (selection, exact_output), selected_slot, fitted_message_count
+               =
                execute_exact_output_classified
                  ~clock
                  ~net
@@ -602,7 +705,17 @@ let run_best_effort
                  ~keeper_id
                  ~selected_input:prompt_input
                  ~messages:[ message Agent_core.Types.User prompt ]
+                 ~render_at
              in
+             (match fitted_message_count with
+              | None -> ()
+              | Some count ->
+                Log.Keeper.info
+                  ~keeper_name:keeper_id
+                  "librarian prompt shrunk to fit slot request-body limits \
+                   messages=%d (registered input shows the full material)"
+                  count);
+
              let+ snapshot =
                Keeper_memory_os_current.replace
                ~clock

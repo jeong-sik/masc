@@ -158,6 +158,95 @@ let test_keeper_preference_reorders_the_librarian_lane () =
   | Error detail -> fail detail
 ;;
 
+(* Lane audit W1/W2: the librarian's byte-budget fit. A slot whose
+   request-body limit cannot hold the full prompt shrinks the message window
+   through render_at; a prompt whose fixed material alone exceeds the limit
+   is the typed over-budget setup error instead of a provider round-trip. *)
+let test_fit_shrinks_to_slot_budget_and_reports_zero_fit () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env
+    ~net
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+  @@ fun () ->
+  let server =
+    Fixture.start_server
+      ~sw
+      ~net
+      ~clock
+      (Fixture.Reply (Fixture.openai_response selection_output))
+  in
+  let snapshot =
+    Fixture.resolver_snapshot
+      ~source:"librarian-fit-budget"
+      ~request_body_limits:[ "librarian-tight", 4096 ]
+      [ { Fixture.id = "librarian-tight"; base_url = server.base_url } ]
+  in
+  (match
+     Runtime_exact_output_registry.publish
+       ~lanes:
+         [ { Runtime_schema.id = "librarian_exact"
+           ; slot_ids = [ "librarian-tight" ]
+           }
+         ]
+       snapshot
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Runtime_exact_output_registry.publication_error_to_string error));
+  let selected_slots =
+    match Runtime_exact_output_registry.current () with
+    | Error error ->
+      fail (Runtime_exact_output_registry.publication_error_to_string error)
+    | Ok registry ->
+      (match
+         Runtime_exact_output_registry.resolve_lane registry
+           ~lane_id:"librarian_exact"
+       with
+       | Ok resolved -> resolved.Runtime_exact_output_registry.selected_slots
+       | Error error ->
+         fail
+           (Runtime_exact_output_registry.lane_resolution_error_to_string error))
+  in
+  let message text =
+    Agent_core.Types.make_message
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text text ]
+  in
+  let big = String.make 20_000 'x' in
+  let render_at k = Ok [ message (String.make (200 * (k + 1)) 'y') ] in
+  (match
+     Runtime.fitted_messages
+       ~selected_slots
+       ~full_messages:[ message big ]
+       ~render_at
+   with
+   | Ok (_, None) -> fail "an oversized prompt reported no shrink"
+   | Ok (fitted, Some count) ->
+     check bool "shrunk window is non-empty" true (count >= 0);
+     check bool "fitted prompt is smaller than the full prompt" true
+       (match fitted with
+        | [ { Agent_core.Types.content = [ Agent_core.Types.Text text ]; _ } ] ->
+          String.length text < String.length big
+        | _ -> false)
+   | Error error -> fail (Runtime.extraction_error_to_string error));
+  match
+    Runtime.fitted_messages
+      ~selected_slots
+      ~full_messages:[ message big ]
+      ~render_at:(fun _ -> Ok [ message big ])
+  with
+  | Ok _ -> fail "a prompt over budget at every window size fitted"
+  | Error error ->
+    check bool "zero-fit is the typed over-budget error" true
+      (Astring.String.is_infix ~affix:"request-body limit"
+         (Runtime.extraction_error_to_string error))
+;;
+
 let () =
   run
     "Keeper Librarian exact-lane preference"
@@ -166,6 +255,10 @@ let () =
             "Keeper preference selects first slot and commits"
             `Quick
             test_keeper_preference_reorders_the_librarian_lane
+        ; test_case
+            "fit shrinks to slot budget and types zero-fit"
+            `Quick
+            test_fit_shrinks_to_slot_budget_and_reports_zero_fit
         ] )
     ]
 ;;

@@ -654,8 +654,14 @@ let run_best_effort
                ?selected_slot:(selected_slot_of_extraction_error error)
                (Exact_lane_run_registry.Failed
                   { code = "librarian_failed"
-                  ; detail =
-                      "Librarian pass failed; inspect the operator logs and Memory journal"
+                  ; (* The registry row is what the standalone-lanes dashboard
+                       and the TUI surface, so it carries the same typed cause
+                       the operator log line does. The fixed "inspect the
+                       operator logs" sentence here made all 138 live failures
+                       on 2026-08-27..28 indistinguishable while the causes
+                       (domain-contract violations vs provider execution
+                       failures) sat one WARN line away. *)
+                    detail
                   })
                failed_output;
              Otel_metric_store.inc_counter

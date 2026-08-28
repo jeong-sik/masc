@@ -17,6 +17,11 @@ type outcome =
       }
   | Commit_failed of { detail : string }
   | Raised of { detail : string }
+  | Review_cancelled of { detail : string }
+      (** The review fiber was cancelled mid-flight (shutdown, owner stop).
+          Before this constructor a cancelled review left no completion at
+          all — the run stayed Running in memory and vanished on the next
+          replay (lane audit W6). *)
 
 type tool_observation =
   { tool_name : string

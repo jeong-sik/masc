@@ -458,7 +458,14 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
     complete outcome;
     outcome
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Cancel.Cancelled _ as exn ->
+    (* Same discipline as the task verifier: the cancelled review completes
+       its observation row before the cancellation continues (W6). *)
+    Eio.Cancel.protect (fun () ->
+      persist
+        (Goal_verification_run_registry.Review_cancelled
+           { detail = "review fiber cancelled: " ^ Printexc.to_string exn }));
+    raise exn
   | exn ->
     Goal_verification_run_registry.mark_completed
       registry

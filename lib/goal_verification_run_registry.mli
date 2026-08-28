@@ -10,6 +10,9 @@ type outcome =
   | Committed
   | Deferred of { detail : string }
   | Raised of { detail : string }
+  | Review_cancelled of { detail : string }
+      (** The review fiber was cancelled mid-flight; without this a cancelled
+          goal review left no completion and vanished on replay (W6). *)
 
 type run_status =
   | Running

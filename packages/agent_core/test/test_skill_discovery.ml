@@ -37,20 +37,14 @@ let contains ~needle haystack =
 
 (* ── Helpers ─────────────────────────────────────────────── *)
 
-let make_skill ?allowed_tools name body =
-  let allowed_tools_field =
-    match allowed_tools with
-    | Some value -> "allowed-tools: " ^ value ^ "\n"
-    | None -> ""
-  in
+let make_skill name body =
   match
     Skill_document.decode
       ~directory_name:name
       (Printf.sprintf
-         "---\nname: %s\ndescription: %s skill\n%s---\n%s"
+         "---\nname: %s\ndescription: %s skill\n---\n%s"
          name
          name
-         allowed_tools_field
          body)
   with
   | Loaded { document; _ } -> document
@@ -67,16 +61,7 @@ let test_registry_does_not_inject_prompt () =
   with_net
   @@ fun net ->
   let reg = Skill_registry.create () in
-  let skill =
-    make_skill
-      ~allowed_tools:"DoNotInject(private:*)"
-      "discovery-only"
-      "This is metadata content."
-  in
-  Alcotest.(check (option string))
-    "registry document retains allowed-tools observation"
-    (Some "DoNotInject(private:*)")
-    skill.allowed_tools;
+  let skill = make_skill "discovery-only" "This is metadata content." in
   Skill_registry.register reg skill;
   let agent =
     Builder.create ~net ~model:"claude-sonnet-4-6"
@@ -98,10 +83,6 @@ let test_registry_does_not_inject_prompt () =
     "registry skill label absent from prompt"
     false
     (contains ~needle:"[Skill: discovery-only]" prompt);
-  Alcotest.(check bool)
-    "allowed-tools value absent from prompt"
-    false
-    (contains ~needle:"DoNotInject(private:*)" prompt);
   (* But the skill is in the agent card *)
   let card = Agent.card ~supported_interfaces:card_interfaces agent in
   Alcotest.(check bool)

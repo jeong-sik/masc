@@ -1393,7 +1393,7 @@ let test_tool_progress_keeps_stream_open () =
     | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
 ;;
 
-let test_allowed_tools_tokenizer_chars_are_validated () =
+let test_dynamic_tool_tokenizer_chars_are_validated () =
   let tool : Runtime_claude_code.dynamic_tool =
     { name = "bad,tool"
     ; description = "invalid fixture"
@@ -1694,7 +1694,7 @@ let () =
         ; test_case
             "allowedTools tokenizer chars validated"
             `Quick
-            test_allowed_tools_tokenizer_chars_are_validated
+            test_dynamic_tool_tokenizer_chars_are_validated
         ] )
     ; ( "hard-cut"
       , [ test_case

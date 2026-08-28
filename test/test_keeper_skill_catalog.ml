@@ -686,7 +686,7 @@ let test_invocation_policy_fields_are_rejected () =
     ]
 ;;
 
-let test_allowed_tools_is_discarded () =
+let test_tool_preapproval_hint_has_no_keeper_policy () =
   let document =
     {|---
 name: release-checklist
@@ -700,12 +700,12 @@ allowed-tools: Read Bash(git:*)
   match Skill_catalog.parse_skill ~directory:"release-checklist" document with
   | Error error ->
     fail
-      ("an optional Agent Skills field stopped the skill loading: "
+      ("the official optional field stopped the skill loading: "
        ^ Skill_catalog.error_to_string error)
   | Ok skill ->
     check string "the skill is the one it names" "release-checklist" skill.name;
-    check bool "the field is not retained as runtime policy" false
-      (String_util.contains_substring skill.body "allowed-tools")
+    check bool "frontmatter does not become instruction policy" false
+      (String_util.contains_substring skill.body "Bash(git:*)")
 ;;
 
 let test_composition_skill_joins_projection () =
@@ -820,8 +820,8 @@ let () =
             "invocation policy fields are rejected"
             `Quick
             test_invocation_policy_fields_are_rejected
-        ; test_case "allowed-tools is discarded" `Quick
-            test_allowed_tools_is_discarded
+        ; test_case "allowed-tools has no Keeper policy" `Quick
+            test_tool_preapproval_hint_has_no_keeper_policy
         ; test_case
             "fence info near-miss is an advisory diagnostic"
             `Quick

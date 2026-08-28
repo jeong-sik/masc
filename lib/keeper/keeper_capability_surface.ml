@@ -1,9 +1,109 @@
+type capability_availability =
+  | Active
+  | Outside_tool_surface
+  | Outside_skill_surface
+  | Not_model_invocable
+  | Invalid_definition
+  | Missing_task_skill
+  | Missing_configured_skill
+
+type skill_exposure =
+  | Model_visible
+  | Operator_only
+
+type tool_capability =
+  { descriptor : Keeper_tool_descriptor.t
+  ; availability : capability_availability
+  }
+
+type skill_identity =
+  | Exact_skill of Keeper_skill_inventory.skill_inventory_item
+  | Missing_configured_skill_name of string
+
+type skill_capability =
+  { identity : skill_identity
+  ; exposure : skill_exposure
+  ; availability : capability_availability
+  }
+
 type t =
   { descriptors : Keeper_tool_descriptor.t list
   ; skill_projection : Keeper_skill_catalog.turn_projection
+  ; tool_capabilities : tool_capability list
+  ; skill_capabilities : skill_capability list
+  ; skill_snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   }
 
-let create ~tool_groups ~skill_names ~global_skill_catalog ~task_skills =
+let descriptor_is_active descriptors (candidate : Keeper_tool_descriptor.t) =
+  List.exists
+    (fun (active : Keeper_tool_descriptor.t) -> String.equal active.id candidate.id)
+    descriptors
+;;
+
+let valid_skill_availability
+      ~skill_names
+      ~skill_projection
+      (valid : Keeper_skill_inventory.valid_skill)
+  =
+  if Keeper_skill_catalog.exact_is_executable skill_projection valid.reference
+  then Active
+  else
+    match skill_names with
+    | Some names when not (List.exists (String.equal valid.reference.identity.name) names) ->
+      Outside_skill_surface
+    | None | Some _ -> Not_model_invocable
+;;
+
+let skill_capability ~skill_names ~skill_projection = function
+  | Keeper_skill_inventory.Valid valid as item ->
+    let availability =
+      valid_skill_availability ~skill_names ~skill_projection valid
+    in
+    { identity = Exact_skill item
+    ; exposure = (match availability with Active -> Model_visible | _ -> Operator_only)
+    ; availability
+    }
+  | Keeper_skill_inventory.Invalid _ as item ->
+    { identity = Exact_skill item
+    ; exposure = Operator_only
+    ; availability = Invalid_definition
+    }
+;;
+
+let inventory_item_has_name name = function
+  | Keeper_skill_inventory.Valid valid ->
+    String.equal valid.reference.identity.name name
+  | Keeper_skill_inventory.Invalid invalid ->
+    (match invalid.reference with
+     | Some reference -> String.equal reference.identity.name name
+     | None -> String.equal invalid.directory name)
+;;
+
+let missing_skill_capabilities ~skill_names ~skill_inventory =
+  match skill_names with
+  | None -> []
+  | Some names ->
+    let inventory_items = Keeper_skill_inventory.items skill_inventory in
+    names
+    |> Json_util.dedupe_keep_order
+    |> List.filter_map (fun name ->
+      if List.exists (inventory_item_has_name name) inventory_items
+      then None
+      else
+        Some
+          { identity = Missing_configured_skill_name name
+          ; exposure = Operator_only
+          ; availability = Missing_configured_skill
+          })
+;;
+
+let create
+      ~tool_groups
+      ~skill_names
+      ~global_skill_catalog
+      ~skill_inventory
+      ~task_skills
+  =
   let tool_surface =
     Keeper_tool_descriptor.tool_groups_to_surface tool_groups
   in
@@ -17,9 +117,113 @@ let create ~tool_groups ~skill_names ~global_skill_catalog ~task_skills =
       ~global:global_skill_catalog
       ~task:task_skills
   in
-  { descriptors; skill_projection }
+  let tool_capabilities =
+    Keeper_tool_descriptor.model_visible_descriptors ()
+    |> List.map (fun descriptor ->
+      { descriptor
+      ; availability =
+          (if descriptor_is_active descriptors descriptor
+           then Active
+           else Outside_tool_surface)
+      })
+  in
+  let skill_capabilities =
+    Keeper_skill_inventory.items skill_inventory
+    |> List.map (skill_capability ~skill_names ~skill_projection)
+    |> fun capabilities ->
+    capabilities
+    @ missing_skill_capabilities
+        ~skill_names
+        ~skill_inventory
+  in
+  { descriptors
+  ; skill_projection
+  ; tool_capabilities
+  ; skill_capabilities
+  ; skill_snapshot_revision = Keeper_skill_inventory.snapshot_revision skill_inventory
+  }
 ;;
 
 let descriptors surface = surface.descriptors
 let skill_projection surface = surface.skill_projection
 let skill_catalog surface = surface.skill_projection.catalog
+let tool_capabilities surface = surface.tool_capabilities
+let skill_capabilities surface = surface.skill_capabilities
+let skill_snapshot_revision surface = surface.skill_snapshot_revision
+
+let capability_availability_to_string = function
+  | Active -> "active"
+  | Outside_tool_surface -> "outside_tool_surface"
+  | Outside_skill_surface -> "outside_skill_surface"
+  | Not_model_invocable -> "not_model_invocable"
+  | Invalid_definition -> "invalid_definition"
+  | Missing_task_skill -> "missing_task_skill"
+  | Missing_configured_skill -> "missing_configured_skill"
+;;
+
+let skill_kind_to_fields = function
+  | Keeper_skill_inventory.Instruction -> [ "kind", `String "instruction" ]
+  | Keeper_skill_inventory.Composition entry ->
+    [ "kind", `String "composition"
+    ; ( "tool_name"
+      , `String (Keeper_tool_composition_catalog.tool_name entry) )
+    ]
+;;
+
+let skill_exposure_to_string = function
+  | Model_visible -> "model_visible"
+  | Operator_only -> "operator_only"
+;;
+
+let invalid_reference_fields (invalid : Keeper_skill_inventory.invalid_skill) =
+  match invalid.reference with
+  | Some reference -> [ "reference", Skill_reference.to_yojson reference ]
+  | None ->
+    [ "reference", `Null
+    ; ( "source_id"
+      , `String (Skill_source_config.source_id_to_string invalid.source_id) )
+    ; ( "package_id"
+      , Option.fold
+          ~none:`Null
+          ~some:(fun package_id ->
+            `String (Skill_reference.package_id_to_string package_id))
+          invalid.package_id )
+    ; "directory", `String invalid.directory
+    ; ( "content_revision"
+      , Option.fold
+          ~none:`Null
+          ~some:(fun revision ->
+            `String (Skill_reference.content_revision_to_string revision))
+          invalid.content_revision )
+    ]
+;;
+
+let skill_capability_to_yojson capability =
+  let availability =
+    capability_availability_to_string capability.availability
+  in
+  match capability.identity with
+  | Missing_configured_skill_name name ->
+    `Assoc
+      [ "reference", `Null
+      ; "name", `String name
+      ; "kind", `String "missing_configured"
+      ; "exposure", `String (skill_exposure_to_string capability.exposure)
+      ; "availability", `String availability
+      ]
+  | Exact_skill (Keeper_skill_inventory.Valid valid) ->
+    `Assoc
+      ([ "reference", Skill_reference.to_yojson valid.reference
+       ; "description", `String valid.description
+       ; "exposure", `String (skill_exposure_to_string capability.exposure)
+       ; "availability", `String availability
+       ]
+       @ skill_kind_to_fields valid.kind)
+  | Exact_skill (Keeper_skill_inventory.Invalid invalid) ->
+    `Assoc
+      (invalid_reference_fields invalid
+       @ [ "kind", `String "invalid"
+         ; "exposure", `String (skill_exposure_to_string capability.exposure)
+         ; "availability", `String availability
+         ])
+;;

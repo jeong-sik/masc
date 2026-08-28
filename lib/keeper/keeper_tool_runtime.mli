@@ -29,6 +29,10 @@ type context =
   ; gate_grant : Keeper_gate.cycle_grant option
     (** Exact human decision delivered to this Keeper lane. Permission-capable
         handlers must match it against the normalized request before use. *)
+  ; capability_surface : Keeper_capability_surface.t option
+    (** Immutable Tool and Skill authority for the enclosing Keeper turn.
+        Direct compatibility callers may omit it; production Keeper bundles
+        always supply it. *)
   }
 
 val descriptor_for_internal : string -> Keeper_tool_descriptor.t option

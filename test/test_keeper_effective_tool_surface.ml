@@ -426,6 +426,7 @@ let test_narrow_projection_names_equal_turn_surface_authority () =
         ~tool_groups:(Some [ "board" ])
         ~skill_names:None
         ~global_skill_catalog
+        ~skill_inventory:(Keeper_skill_inventory.of_snapshot snapshot)
         ~task_skills:(Keeper_task_skill_turn.skills task_selection)
     in
     let expected =

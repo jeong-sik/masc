@@ -267,6 +267,7 @@ let prepare_agent_setup
       ~tool_groups:meta.tool_groups
       ~skill_names
       ~global_skill_catalog
+      ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
       ~task_skills:(Keeper_task_skill_turn.skills task_skill_selection)
   in
   let turn_skill_projection =

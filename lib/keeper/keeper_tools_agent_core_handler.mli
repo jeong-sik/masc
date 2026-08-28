@@ -29,6 +29,7 @@ val make_keeper_tool_handler
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
   -> ?gate_grant:Keeper_gate.cycle_grant
+  -> ?capability_surface:Keeper_capability_surface.t
   -> ?record_gate_result:
        (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?observe_execution_evidence:

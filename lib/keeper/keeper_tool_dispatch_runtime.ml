@@ -106,6 +106,7 @@ let runtime_context
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?capability_surface
       ()
   =
   Keeper_tool_runtime.
@@ -122,6 +123,7 @@ let runtime_context
     ; continuation_channel
     ; gate_context
     ; gate_grant
+    ; capability_surface
     }
 ;;
 
@@ -140,6 +142,7 @@ let execute_keeper_tool_descriptor_with_outcome
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?capability_surface
       ~(descriptor : Keeper_tool_descriptor.t)
       ~(input : Yojson.Safe.t)
       ()
@@ -161,6 +164,7 @@ let execute_keeper_tool_descriptor_with_outcome
         ?continuation_channel
         ?gate_context
         ?gate_grant
+        ?capability_surface
         ()
     in
     (match Keeper_tool_runtime.handle context ~descriptor ~args:input with
@@ -201,6 +205,7 @@ let execute_keeper_tool_call_with_outcome
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?capability_surface
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
@@ -222,6 +227,7 @@ let execute_keeper_tool_call_with_outcome
            ?continuation_channel
            ?gate_context
            ?gate_grant
+           ?capability_surface
            ()
        in
        let descriptor_dispatch =

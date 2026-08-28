@@ -12,9 +12,20 @@ open Keeper_types_profile
 val handle_time_now : args:Yojson.Safe.t -> Yojson.Safe.t
 
 val handle_tools_list
+  :  capability_surface:Keeper_capability_surface.t
+  -> args:Yojson.Safe.t
+  -> unit
+  -> Keeper_tool_execution.t
+(** Real Keeper-turn handler. Both list and query read only the immutable
+    capability surface supplied by the production bundle. *)
+
+val handle_tools_list_from_meta
   :  meta:keeper_meta
   -> args:Yojson.Safe.t
+  -> unit
   -> Keeper_tool_execution.t
+(** Compatibility seam for direct dispatch tests and callers that do not own
+    a Keeper turn. Production Keeper bundles do not use it. *)
 
 val network_read_gate_operation : string
 

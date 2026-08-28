@@ -24,7 +24,8 @@
   masc
   masc.skill_config
   masc.skill_reference
-  masc.skill_snapshot))
+  masc.skill_snapshot
+  masc_test_deps))
 
 (test
  (name test_server_skill_editor)

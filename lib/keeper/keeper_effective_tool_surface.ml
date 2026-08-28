@@ -155,6 +155,7 @@ let project
         ~tool_groups
         ~skill_names
         ~global_skill_catalog
+        ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
         ~task_skills:(Keeper_task_skill_turn.skills task_selection)
     in
     let descriptors = Keeper_capability_surface.descriptors capability_surface in

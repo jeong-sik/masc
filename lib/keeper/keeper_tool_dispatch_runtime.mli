@@ -46,6 +46,7 @@ val execute_keeper_tool_descriptor_with_outcome
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
   -> ?gate_grant:Keeper_gate.cycle_grant
+  -> ?capability_surface:Keeper_capability_surface.t
   -> descriptor:Keeper_tool_descriptor.t
   -> input:Yojson.Safe.t
   -> unit
@@ -66,6 +67,7 @@ val execute_keeper_tool_call_with_outcome
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
   -> ?gate_grant:Keeper_gate.cycle_grant
+  -> ?capability_surface:Keeper_capability_surface.t
   -> name:string
   -> input:Yojson.Safe.t
   -> unit

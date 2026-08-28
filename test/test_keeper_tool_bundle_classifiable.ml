@@ -251,7 +251,12 @@ let assert_exact_activation snapshot expected
        activation.snapshot_revision)
 ;;
 
-let with_bundle_tools ?(record_activations = true) ?tool_groups f =
+let with_bundle_tools
+      ?(record_activations = true)
+      ?tool_groups
+      ?capability_tool_groups
+      f
+  =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let dir =
     Filename.concat
@@ -317,9 +322,13 @@ let with_bundle_tools ?(record_activations = true) ?tool_groups f =
        in
        let capability_surface =
          Keeper_capability_surface.create
-           ~tool_groups:meta.tool_groups
+           ~tool_groups:
+             (match capability_tool_groups with
+              | Some groups -> Some groups
+              | None -> meta.tool_groups)
            ~skill_names:None
            ~global_skill_catalog:skill_catalog
+           ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
            ~task_skills:[]
        in
        let bundle =
@@ -336,19 +345,25 @@ let with_bundle_tools ?(record_activations = true) ?tool_groups f =
            ()
        in
        Fun.protect ~finally:bundle.cleanup (fun () ->
-         f config meta skill_snapshot composition_plan_index bundle.tools))
+         f
+           config
+           meta
+           skill_snapshot
+           composition_plan_index
+           capability_surface
+           bundle.tools))
 ;;
 
 let with_bundle f =
   with_bundle_tools
-  @@ fun _config _meta _skill_snapshot composition_plan_index tools ->
+  @@ fun _config _meta _skill_snapshot composition_plan_index _surface tools ->
   f composition_plan_index
     (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools)
 ;;
 
 let test_narrow_surface_controls_production_bundle () =
   with_bundle_tools ~tool_groups:[ "board" ]
-  @@ fun _config _meta _skill_snapshot _composition_plan_index tools ->
+  @@ fun _config _meta _skill_snapshot _composition_plan_index _surface tools ->
   let names =
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools
   in
@@ -381,6 +396,86 @@ let run_tool ?(tool_use_id = "bundle-instruction-activation")
   | Error err -> err.Agent_core.Llm_provider.Types.message
 ;;
 
+let fetch_blob_exn ~base_path reference =
+  match
+    Tool_blob_store.fetch
+      (Tool_blob_store.create ~base_path)
+      ~sha256:reference.Tool_output.sha256
+  with
+  | Ok (Some payload) -> payload
+  | Ok None -> fail "capability output blob is absent"
+  | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
+;;
+
+let decode_tool_json ~base_path content =
+  match Tool_output.decode_from_agent_core content with
+  | Tool_output.Not_marker -> Yojson.Safe.from_string content
+  | Tool_output.Invalid_marker { detail } -> fail detail
+  | Tool_output.Decoded reference ->
+    let stored = fetch_blob_exn ~base_path reference |> Yojson.Safe.from_string in
+    if String.equal reference.mime Tool_output.artifact_manifest_mime
+    then
+      (match Tool_output.artifact_manifest_of_json stored with
+       | Tool_output.Decoded_artifact_manifest { structured_content; _ } ->
+         structured_content
+       | Tool_output.Not_artifact_manifest ->
+         fail "capability output artifact is not a typed result manifest"
+       | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
+    else stored
+;;
+
+let test_tools_list_reads_the_supplied_capability_surface () =
+  with_bundle_tools ~capability_tool_groups:[ "board" ]
+  @@ fun config meta _snapshot _composition_plan_index capability_surface tools ->
+  check bool "fixture metadata remains unrestricted" true
+    (Option.is_none meta.tool_groups);
+  let tool =
+    match
+      List.find_opt
+        (fun (tool : Agent_core.Tool.t) ->
+           String.equal tool.schema.name "keeper_tools_list")
+        tools
+    with
+    | Some tool -> tool
+    | None -> fail "keeper_tools_list is absent from the supplied surface"
+  in
+  let observed =
+    run_tool ~tool_use_id:"bundle-capability-surface" tool (`Assoc [])
+    |> decode_tool_json ~base_path:config.base_path
+  in
+  let expected =
+    Keeper_tool_shared_runtime.keeper_tools_list_json_for_surface
+      ~capability_surface
+    |> Yojson.Safe.from_string
+  in
+  check string "production bundle uses the exact supplied surface"
+    (Yojson.Safe.to_string expected)
+    (Yojson.Safe.to_string observed);
+  let read =
+    Yojson.Safe.Util.(observed |> member "descriptor_surface" |> to_list)
+    |> List.find_opt (fun descriptor ->
+      String.equal
+        "agent.read_file"
+        Yojson.Safe.Util.(descriptor |> member "id" |> to_string))
+  in
+  match read with
+  | None -> fail "complete inventory omitted Read"
+  | Some descriptor ->
+    check string "metadata did not widen the frozen Tool surface"
+      "outside_tool_surface"
+      Yojson.Safe.Util.(descriptor |> member "availability" |> to_string);
+    let search =
+      run_tool
+        ~tool_use_id:"bundle-capability-search-scope"
+        tool
+        (`Assoc [ "query", `String "board" ])
+      |> decode_tool_json ~base_path:config.base_path
+    in
+    check string "query names its intentionally narrower boundary"
+      "active_tools_only"
+      Yojson.Safe.Util.(search |> member "search_scope" |> to_string)
+;;
+
 let run_composition_tool ?expected_failure (tool : Agent_core.Tool.t) =
   let invocation =
     Agent_core.Tool_contract.Invocation.create
@@ -404,7 +499,7 @@ let run_composition_tool ?expected_failure (tool : Agent_core.Tool.t) =
 ;;
 
 let test_composition_activation_is_durable ?expected_failure ~skill_name tool_name =
-  with_bundle_tools (fun config meta snapshot _composition_plan_index tools ->
+  with_bundle_tools (fun config meta snapshot _composition_plan_index _surface tools ->
     let tool =
       match
         List.find_opt
@@ -485,14 +580,14 @@ let test_skill_bundle_without_activation_context_is_rejected () =
        "Skill-bearing Keeper bundle requires a frozen activation context")
     (fun () ->
        with_bundle_tools ~record_activations:false
-         (fun _config _meta _snapshot _composition_plan_index _tools -> ()))
+         (fun _config _meta _snapshot _composition_plan_index _surface _tools -> ()))
 ;;
 
 (* The point of the tool is that a body reaches the keeper. A tool that is on
    the surface and classifiable but answers nothing would pass every other
    assertion here. *)
 let test_the_skill_tool_serves_the_body () =
-  with_bundle_tools (fun config meta snapshot _composition_plan_index tools ->
+  with_bundle_tools (fun config meta snapshot _composition_plan_index _surface tools ->
     match
       List.find_opt
         (fun (tool : Agent_core.Tool.t) ->
@@ -552,7 +647,7 @@ let test_the_skill_tool_serves_the_body () =
    references this keeper carries, revision included, so the next call can
    be the right one. *)
 let test_a_revisionless_ask_is_taught_the_exact_reference () =
-  with_bundle_tools (fun _config _meta _snapshot _composition_plan_index tools ->
+  with_bundle_tools (fun _config _meta _snapshot _composition_plan_index _surface tools ->
     match
       List.find_opt
         (fun (tool : Agent_core.Tool.t) ->
@@ -693,6 +788,8 @@ let () =
             test_bundle_matches_expected_projection
         ; test_case "narrow surface controls production bundle" `Quick
             test_narrow_surface_controls_production_bundle
+        ; test_case "tools list reads supplied capability surface" `Quick
+            test_tools_list_reads_the_supplied_capability_surface
         ; test_case "the skill tool serves the body" `Quick
             test_the_skill_tool_serves_the_body
         ; test_case "a revisionless ask is taught the exact reference" `Quick

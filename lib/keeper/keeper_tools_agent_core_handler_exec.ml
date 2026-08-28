@@ -32,6 +32,7 @@ let execute_with_observers
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?capability_surface
       ?agent_core_invocation
       ~(input : Yojson.Safe.t)
       ()
@@ -67,6 +68,7 @@ let execute_with_observers
             ?continuation_channel
             ?gate_context
             ?gate_grant
+            ?capability_surface
             ~name
             ~input
             ()
@@ -85,6 +87,7 @@ let execute_with_observers
             ?continuation_channel
             ?gate_context
             ?gate_grant
+            ?capability_surface
             ~descriptor
             ~input
             ())

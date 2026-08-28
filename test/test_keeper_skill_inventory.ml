@@ -112,6 +112,34 @@ let valid_named name inventory =
   | None -> failf "valid Skill %S missing from inventory" name
 ;;
 
+let capability_surface ?(skill_names = None) ?(tool_groups = None) frozen =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let global_skill_catalog, diagnostics =
+    Masc.Keeper_skill_catalog.of_snapshot frozen
+  in
+  check int "catalog diagnostics" 0 (List.length diagnostics);
+  Masc.Keeper_capability_surface.create
+    ~tool_groups
+    ~skill_names
+    ~global_skill_catalog
+    ~skill_inventory:(Inventory.of_snapshot frozen)
+    ~task_skills:[]
+;;
+
+let exact_capability_by_reference surface reference =
+  Masc.Keeper_capability_surface.skill_capabilities surface
+  |> List.find_opt (fun (capability : Masc.Keeper_capability_surface.skill_capability) ->
+    match capability.identity with
+    | Exact_skill (Inventory.Valid valid) ->
+      Skill_reference.equal valid.reference reference
+    | Exact_skill (Inventory.Invalid invalid) ->
+      Option.exists (Skill_reference.equal reference) invalid.reference
+    | Missing_configured_skill_name _ -> false)
+  |> function
+  | Some capability -> capability
+  | None -> fail "exact Skill capability is absent"
+;;
+
 let test_valid_instruction_and_exact_reference () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let frozen =
@@ -233,6 +261,108 @@ let test_catalog_status_tracks_source_precedence () =
   | valid -> failf "expected two exact valid items, got %d" (List.length valid)
 ;;
 
+let test_capability_surface_keeps_active_and_outside_tools () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen = snapshot config [ [] ] in
+  let surface = capability_surface ~tool_groups:(Some [ "board" ]) frozen in
+  let capabilities = Masc.Keeper_capability_surface.tool_capabilities surface in
+  check bool "restricted surface has active Tools" true
+    (List.exists
+       (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+          capability.availability = Masc.Keeper_capability_surface.Active)
+       capabilities);
+  check bool "restricted surface retains outside Tools" true
+    (List.exists
+       (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+          capability.availability
+          = Masc.Keeper_capability_surface.Outside_tool_surface)
+       capabilities)
+;;
+
+let test_empty_selection_makes_valid_skill_operator_only () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot config [ [ candidate ~directory:"release-checklist" instruction_document ] ]
+  in
+  let reference =
+    match Snapshot.entries frozen with
+    | [ entry ] -> Snapshot.entry_reference entry
+    | _ -> fail "fixture entry count changed"
+  in
+  let capability =
+    capability_surface ~skill_names:(Some []) frozen
+    |> fun surface -> exact_capability_by_reference surface reference
+  in
+  check bool "empty selection is outside Skill surface" true
+    (capability.availability = Masc.Keeper_capability_surface.Outside_skill_surface);
+  check bool "outside Skill is operator-only" true
+    (capability.exposure = Masc.Keeper_capability_surface.Operator_only)
+;;
+
+let test_shadowed_and_invalid_skills_keep_typed_availability () =
+  let config =
+    parse_config
+      (config_text
+         (source_row ~id:"first" ~path:"first-skills"
+          ^ source_row ~id:"second" ~path:"second-skills"))
+  in
+  let first = "---\nname: review\ndescription: First source.\n---\nfirst body\n" in
+  let second = "---\nname: review\ndescription: Second source.\n---\nsecond body\n" in
+  let malformed = "---\nname: broken\n---\nbody\n" in
+  let frozen =
+    snapshot
+      config
+      [ [ candidate ~directory:"review" first; candidate ~directory:"broken" malformed ]
+      ; [ candidate ~directory:"review" second ]
+      ]
+  in
+  let inventory = Inventory.of_snapshot frozen in
+  let shadow =
+    match
+      valid_items inventory
+      |> List.find_opt (fun (valid : Inventory.valid_skill) ->
+        valid.catalog_status = Inventory.Shadowed)
+    with
+    | Some shadow -> shadow
+    | None -> fail "shadowed Skill is absent"
+  in
+  let shadow_capability =
+    capability_surface frozen
+    |> fun surface -> exact_capability_by_reference surface shadow.reference
+  in
+  check bool "shadow is not model invocable" true
+    (shadow_capability.availability
+     = Masc.Keeper_capability_surface.Not_model_invocable);
+  let broken_capabilities =
+    Masc.Keeper_capability_surface.skill_capabilities
+      (capability_surface ~skill_names:(Some [ "broken" ]) frozen)
+  in
+  let invalid_capabilities =
+    broken_capabilities
+    |> List.filter (fun capability ->
+      capability.Masc.Keeper_capability_surface.availability
+      = Masc.Keeper_capability_surface.Invalid_definition)
+  in
+  check int "configured broken Skill has one invalid row" 1
+    (List.length invalid_capabilities);
+  let invalid_capability =
+    match invalid_capabilities with
+    | [ capability ] -> capability
+    | _ -> fail "invalid Skill capability count changed after assertion"
+  in
+  check bool "invalid definition stays typed" true
+    (invalid_capability.availability
+     = Masc.Keeper_capability_surface.Invalid_definition);
+  let missing_count =
+    broken_capabilities
+    |> List.filter (fun capability ->
+      capability.Masc.Keeper_capability_surface.availability
+      = Masc.Keeper_capability_surface.Missing_configured_skill)
+    |> List.length
+  in
+  check int "invalid configured Skill is not double-reported missing" 0 missing_count
+;;
+
 let () =
   run
     "keeper_skill_inventory"
@@ -244,6 +374,12 @@ let () =
             test_invalid_sibling_isolated_with_digest
         ; test_case "catalog source precedence" `Quick
             test_catalog_status_tracks_source_precedence
+        ; test_case "restricted Tool availability" `Quick
+            test_capability_surface_keeps_active_and_outside_tools
+        ; test_case "empty Skill selection" `Quick
+            test_empty_selection_makes_valid_skill_operator_only
+        ; test_case "shadowed and invalid Skill availability" `Quick
+            test_shadowed_and_invalid_skills_keep_typed_availability
         ] )
     ]
 ;;

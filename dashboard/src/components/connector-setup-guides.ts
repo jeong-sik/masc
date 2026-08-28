@@ -116,7 +116,7 @@ export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
         text: "메모리/프로세스 한도 기본값 확인: `MASC_KEEPER_SANDBOX_MEMORY=2g`, `MASC_KEEPER_SANDBOX_PIDS_LIMIT=128`, `MASC_KEEPER_SANDBOX_TMPFS_SIZE=256m`. 사용 keeper가 더 필요하면 서버 기동 env에서 조정.",
       },
       {
-        text: "sandbox_profile을 'docker'로 저장한 뒤 해당 keeper의 다음 Execute 호출 로그를 확인. 실패하면 sandbox_last_error 필드가 이 화면 위쪽에 노출됩니다.",
+        text: "sandbox_profile을 'docker'로 저장한 뒤 해당 keeper의 다음 Execute 호출 로그를 확인. 실패하면 keeper_last_error 필드가 이 화면 위쪽에 노출됩니다.",
       },
     ],
     references: [

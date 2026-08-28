@@ -721,7 +721,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         trust,
         sandbox_profile: normalizeKeeperSandboxProfile(row.sandbox_profile),
         sandbox_target: asString(row.sandbox_target) ?? null,
-        sandbox_last_error: asString(row.sandbox_last_error) ?? null,
+        keeper_last_error: asString(row.keeper_last_error) ?? null,
         blocked_task_count: asNumber(row.blocked_task_count) ?? null,
         goal_progress: isRecord(row.goal_progress)
           ? {

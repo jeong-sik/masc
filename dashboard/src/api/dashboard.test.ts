@@ -3105,7 +3105,7 @@ describe('fetchKeeperConfig', () => {
       autonomous_wake_prompt: '백로그를 확인하고 하나 진행해.',
       sandbox_profile: 'docker',
       network_mode: 'none',
-      sandbox_last_error: 'sandbox docker exec failed',
+      keeper_last_error: 'sandbox docker exec failed',
       allowed_paths: '/tmp/workspace',
       effective_allowed_paths: ['/tmp/workspace'],
       prompt: {
@@ -3203,7 +3203,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.autonomous_wake_prompt).toBe('백로그를 확인하고 하나 진행해.')
     expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
-    expect(result.sandbox_last_error).toBe('sandbox docker exec failed')
+    expect(result.keeper_last_error).toBe('sandbox docker exec failed')
     expect(result.execution.models).toEqual(['llama:test-balanced'])
     expect(result.execution.verify).toBe(true)
     expect(result.execution.selected_runtime_id).toBe('keeper_unified')

@@ -286,6 +286,7 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_succeeded_count = 0
   ; sl_failed_count = 0
   ; sl_cancelled_count = 0
+  ; sl_last_started_at = None
   ; sl_last_terminal_at = None
   ; sl_last_outcome = None
   ; sl_p50_elapsed_s = None

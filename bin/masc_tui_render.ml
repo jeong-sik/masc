@@ -4064,8 +4064,29 @@ let standalone_lane_status_style = function
   | Tui_decode.Standalone_unavailable -> (Theme.bad ())
   | Tui_decode.Standalone_no_retained_observation -> Ansi.gray
 
-let standalone_lane_row width (lane : Tui_decode.standalone_lane) =
+let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
   let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
+  (* A lane that is running says so twice and neither says for how long: the
+     word "running", and a count of how many. The server has sent the start
+     of the newest run all along and the decoder threw it away under an
+     underscore, so the one fact an operator weighs -- is this a lane doing
+     work or a lane stuck -- was decoded and dropped one layer from the
+     screen.
+
+     Same treatment as a keeper mid-turn: the mark moves while it runs, and
+     the word carries the elapsed. A lane with no start recorded keeps the
+     still mark rather than inventing an age. *)
+  let mark, status =
+    match lane.sl_status, lane.sl_last_started_at with
+    | Tui_decode.Standalone_running, Some started_at ->
+      ( Masc_tui_answering.running_glyph ~frame
+      , status ^ " " ^ Masc_tui_answering.elapsed_text ~now started_at )
+    | ( ( Tui_decode.Standalone_running | Tui_decode.Standalone_idle
+        | Tui_decode.Standalone_degraded | Tui_decode.Standalone_unavailable
+        | Tui_decode.Standalone_no_retained_observation )
+      , _ ) ->
+      ("\xe2\x97\x8f", status)
+  in
   let slots =
     match lane.sl_admitted_slots with
     | [] -> "no admitted slot"
@@ -4088,8 +4109,8 @@ let standalone_lane_row width (lane : Tui_decode.standalone_lane) =
   let prefix = standalone_lane_status_style lane.sl_status in
   let line =
     Printf.sprintf
-      "  %s● %-15s %-14s%s slots %-20s active %d  runs %d  ok/fail/cancel %d/%d/%d  p50 %s  observed %s"
-      prefix lane.sl_label status Ansi.reset slots lane.sl_running_count
+      "  %s%s %-15s %-14s%s slots %-20s active %d  runs %d  ok/fail/cancel %d/%d/%d  p50 %s  observed %s"
+      prefix mark lane.sl_label status Ansi.reset slots lane.sl_running_count
       lane.sl_retained_run_count lane.sl_succeeded_count lane.sl_failed_count
       lane.sl_cancelled_count p50 observed_slots
   in
@@ -4144,7 +4165,10 @@ let render_lanes_overview (state : state) =
    | Some snapshot ->
        List.iteri
          (fun index (lane : Tui_decode.standalone_lane) ->
-           let row = standalone_lane_row inner lane in
+           let row =
+             standalone_lane_row ~now:(Unix.gettimeofday ())
+               ~frame:state.activity_frame inner lane
+           in
            if
              state.lanes_section = Lanes_section_standalone
              && index = state.lanes_standalone_cursor

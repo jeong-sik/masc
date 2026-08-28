@@ -691,6 +691,7 @@ type standalone_lane = {
   sl_succeeded_count : int;
   sl_failed_count : int;
   sl_cancelled_count : int;
+  sl_last_started_at : float option;
   sl_last_terminal_at : float option;
   sl_last_outcome : string option;
   sl_p50_elapsed_s : float option;

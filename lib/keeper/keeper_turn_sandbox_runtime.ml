@@ -586,12 +586,16 @@ let start_microvm_container ?timeout_sec (t : t) =
              ~container_root:t.container_root
              ~network_args:
                (Keeper_sandbox_microvm.network_args ~dns t.network_mode)
-             (* Config only, for now. The secret projection and the GitHub
-                identity both hand back a [cleanup] that the Docker lane runs
-                under [Eio_guard] at turn end; a keeper-lifetime guest outlives
-                that scope, so wiring them here without moving cleanup to guest
-                teardown would delete the credential files out from under a
-                running guest. Config has no cleanup and is safe to pass now. *)
+             (* Config and the GitHub identity. Config has no cleanup, so it
+                travels as-is. The identity does: the Docker lane runs that
+                cleanup under [Eio_guard] at turn end, which would delete the
+                credential out from under a guest that outlives the turn, so
+                the guest holds its snapshot for its own lifetime instead
+                ([keep] on adopt, released at teardown).
+
+                The secret projection is still absent. It hands back the same
+                turn-scoped cleanup and has no keeper-lifetime holder yet, so
+                a microvm keeper reaches its connectors without it. *)
              ~mount_args:
                (Keeper_sandbox_runtime.docker_config_mount_args
                   ~base_path:t.config.base_path

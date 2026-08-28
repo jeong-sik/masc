@@ -120,6 +120,12 @@ val run_bash_with_status :
   unit ->
   (Unix.process_status * string, string) result
 
+val release_microvm_identity : t -> unit
+(** Release the GitHub identity snapshot a keeper-lifetime guest had
+    mounted. Turn cleanup deliberately skips this for microvm -- the guest
+    outlives the turn and the snapshot is a directory it has mounted -- so
+    the caller that removes the guest calls this after it is gone. *)
+
 val teardown_keeper_vm_by_name :
   ?timeout_sec:float ->
   config:Workspace.config ->

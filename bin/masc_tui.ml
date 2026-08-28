@@ -1322,6 +1322,7 @@ type async_msg =
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
   | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
+  | Skills_catalog_loaded of (Masc.Tui_decode.skills_catalog, string) result
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_assignment list,
@@ -1851,6 +1852,25 @@ let launch_tools_load state ~mailbox =
     in
     enqueue_async mailbox (Tools_loaded result)
   in
+  (* The skills catalog (usage + flows) is a separate read and must not
+     delay the tool list: a slow catalog costs its own section, not the
+     screen. *)
+  let run_catalog () =
+    let result =
+      try Masc_tui_loader.load_skills_catalog ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Skills_catalog_loaded result)
+  in
+  (match Eio_context.get_switch_opt () with
+   | Some sw ->
+       Eio.Fiber.fork_daemon ~sw (fun () ->
+           run_catalog ();
+           `Stop_daemon)
+   | None ->
+       enqueue_async mailbox
+         (Skills_catalog_loaded (Error "Eio switch is unavailable")));
   match Eio_context.get_switch_opt () with
   | Some sw ->
       Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -7344,6 +7364,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.tools_error <- None;
           normalize_tools_skill_cursor state
       | Error detail -> state.tools_error <- Some detail)
+  | Skills_catalog_loaded result -> (
+      match result with
+      | Ok catalog ->
+          state.skills_catalog <- Some catalog;
+          state.skills_catalog_error <- None
+      | Error detail -> state.skills_catalog_error <- Some detail)
   | Runtime_catalog_loaded result -> (
       match result with
       | Ok (runtimes, assignments) ->

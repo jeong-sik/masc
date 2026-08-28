@@ -1608,6 +1608,8 @@ type state = {
      other surfaces read. *)
   mutable tools_inventory: Tui_decode.tool_snapshot option;
   mutable tools_error: string option;
+  mutable skills_catalog: Tui_decode.skills_catalog option;
+  mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
@@ -2206,6 +2208,8 @@ let create_state
   system_logs_error = None;
   tools_inventory = None;
   tools_error = None;
+  skills_catalog = None;
+  skills_catalog_error = None;
   tools_scroll = 0;
   tools_skill_cursor = 0;
   tools_skill_evidence = None;

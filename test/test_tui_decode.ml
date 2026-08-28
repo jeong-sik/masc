@@ -1496,6 +1496,152 @@ let test_decode_tool_snapshot_reads_the_live_shape () =
              t.Tui_decode.tl_direct_call
        | ts -> Alcotest.failf "expected one tool, got %d" (List.length ts))
 
+let skills_catalog_json ?(usage = true) ?(flow = true) () =
+  let usage_json =
+    if usage then
+      `List
+        [ `Assoc
+            [ ("keeper", `String "taskmaster")
+            ; ("invocations", `Int 12)
+            ; ("deliveries", `Int 12)
+            ; ("actions", `Int 9)
+            ; ("last_used_at", `String "2026-08-28T03:04:05Z")
+            ] ]
+    else `Null
+  in
+  let profile_json =
+    if flow then
+      `Assoc
+        [ ( "flow",
+            `Assoc
+              [ ( "nodes",
+                  `List
+                    [ `Assoc
+                        [ ("id", `String "fetch")
+                        ; ("tool_name", `String "masc_board_list")
+                        ; ("dependencies", `List [])
+                        ; ("batch_index", `Int 0)
+                        ; ("batch_size", `Int 1)
+                        ; ("execution_mode", `String "serial")
+                        ; ("statically_read_only", `Bool true)
+                        ] ] )
+              ; ( "batches",
+                  `List
+                    [ `Assoc
+                        [ ("index", `Int 0)
+                        ; ("execution_mode", `String "serial")
+                        ; ("node_ids", `List [ `String "fetch" ])
+                        ] ] )
+              ] )
+        ; ("plan", `Assoc [])
+        ; ("context", `Assoc [])
+        ]
+    else `Null
+  in
+  `Assoc
+    [ ("schema", `String "masc.skill-snapshot/v1")
+    ; ("state", `String "ready")
+    ; ( "surfaces",
+        `List
+          [ `Assoc
+              [ ( "reference",
+                  `Assoc
+                    [ ( "identity",
+                        `Assoc
+                            [ ("source_id", `String "workspace")
+                            ; ("package_id", `String "pkg")
+                            ; ("name", `String "work-intake")
+                            ] )
+                    ; ("content_revision", `String "rev1")
+                    ] )
+              ; ("kind", `String "composition")
+              ; ("usage", usage_json)
+              ; ("profile", profile_json)
+              ] ] )
+    ]
+
+let test_decode_skills_catalog_reads_usage_and_flow () =
+  match Tui_decode.decode_skills_catalog (skills_catalog_json ()) with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok catalog ->
+      Alcotest.(check string) "state" "ready" catalog.Tui_decode.sc_state;
+      (match catalog.Tui_decode.sc_surfaces with
+       | [ surface ] ->
+           Alcotest.(check string) "skill name" "work-intake"
+             surface.Tui_decode.scs_name;
+           Alcotest.(check string) "kind" "composition"
+             surface.Tui_decode.scs_kind;
+           (match surface.Tui_decode.scs_usage with
+            | [ row ] ->
+                Alcotest.(check string) "usage keeper" "taskmaster"
+                  row.Tui_decode.su_keeper;
+                Alcotest.(check int) "invocations" 12
+                  row.Tui_decode.su_invocations;
+                Alcotest.(check int) "actions" 9 row.Tui_decode.su_actions
+            | rows ->
+                Alcotest.failf "expected one usage row, got %d"
+                  (List.length rows));
+           (match surface.Tui_decode.scs_flow with
+            | Some { Tui_decode.sf_batches = [ batch ]; _ } ->
+                Alcotest.(check string) "batch mode" "serial"
+                  batch.Tui_decode.sfb_execution_mode
+            | other ->
+                Alcotest.failf "expected one serial batch in the flow (got %d)"
+                  (match other with
+                   | None -> 0
+                   | Some { Tui_decode.sf_batches; _ } ->
+                       List.length sf_batches))
+       | surfaces ->
+           Alcotest.failf "expected one surface, got %d" (List.length surfaces))
+
+(* The ledger side warms independently of the catalog: a surface may answer
+   with null usage and no profile before any keeper has run it. That must
+   read as "tracked but unused", not fail the whole catalog. *)
+let test_decode_skills_catalog_tolerates_warming_nulls () =
+  match
+    Tui_decode.decode_skills_catalog
+      (skills_catalog_json ~usage:false ~flow:false ())
+  with
+  | Error err -> Alcotest.failf "decode failed on warming nulls: %s" err
+  | Ok catalog ->
+      (match catalog.Tui_decode.sc_surfaces with
+       | [ surface ] ->
+           Alcotest.(check bool) "usage reads empty" true
+             (surface.Tui_decode.scs_usage = []);
+           Alcotest.(check bool) "flow reads None" true
+             (surface.Tui_decode.scs_flow = None)
+       | surfaces ->
+           Alcotest.failf "expected one surface, got %d"
+             (List.length surfaces))
+
+let test_decode_skills_catalog_rejects_a_wrong_kind_type () =
+  let bad_surface =
+    `Assoc
+      [ ( "reference",
+          `Assoc
+            [ ( "identity",
+                `Assoc
+                    [ ("source_id", `String "workspace")
+                    ; ("package_id", `String "pkg")
+                    ; ("name", `String "broken")
+                    ] )
+          ; ("content_revision", `String "rev1")
+          ] )
+      ; ("kind", `Int 3)
+      ]
+  in
+  match
+    Tui_decode.decode_skills_catalog
+      (`Assoc
+         [ ("state", `String "ready")
+         ; ("surfaces", `List [ bad_surface ])
+         ])
+  with
+  | Error err ->
+      Alcotest.(check bool) "error names the field" true
+        (String.length err > 0)
+  | Ok _ -> Alcotest.fail "a surface with a non-string kind must be rejected"
+
 (* The server answers a cold cache with its warming placeholder: the same
    envelope, an empty inventory, and a flag saying so. Reading only the list
    made that identical to a workspace with no tools, and the pane said "no
@@ -4340,5 +4486,14 @@ let () =
           test_decode_gate_null_queue_is_empty_with_modes;
         Alcotest.test_case "a row missing its id is an error" `Quick
           test_decode_gate_row_missing_id_is_an_error;
+      ] );
+    ( "skills_catalog",
+      [
+        Alcotest.test_case "reads usage rows and the execution flow" `Quick
+          test_decode_skills_catalog_reads_usage_and_flow;
+        Alcotest.test_case "tolerates warming null usage and profile" `Quick
+          test_decode_skills_catalog_tolerates_warming_nulls;
+        Alcotest.test_case "rejects a non-string kind" `Quick
+          test_decode_skills_catalog_rejects_a_wrong_kind_type;
       ] );
   ]

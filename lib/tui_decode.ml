@@ -2050,6 +2050,70 @@ let decode_skill_activation_projection json =
   | unknown ->
       Error (Printf.sprintf "skill_activations.status has unknown value %S" unknown)
 
+(* ── Workspace skills catalog (/api/v1/skills) ─────────────────────
+   The dashboard renders the full surface set; the TUI Tools screen reads
+   per-skill usage rows (cross-keeper tracking) and reuses the skill_flow
+   decoder the effective-surface profiles already share. Usage is absent
+   while the ledger side is warming, so [usage]/[profile] decode as
+   empty/None rather than failing the whole catalog. *)
+
+type skill_usage_row =
+  { su_keeper : string
+  ; su_invocations : int
+  ; su_deliveries : int
+  ; su_actions : int
+  ; su_last_used_at : string option
+  }
+
+type skills_catalog_surface =
+  { scs_name : string
+  ; scs_kind : string
+  ; scs_usage : skill_usage_row list
+  ; scs_flow : skill_flow option
+  }
+
+type skills_catalog =
+  { sc_state : string
+  ; sc_surfaces : skills_catalog_surface list
+  }
+
+let decode_skill_usage_row json =
+  let* su_keeper = required_string_field json "keeper" in
+  let* su_invocations = required_int_field json "invocations" in
+  let* su_deliveries = required_int_field json "deliveries" in
+  let* su_actions = required_int_field json "actions" in
+  let* su_last_used_at = optional_string_field json "last_used_at" in
+  Ok { su_keeper; su_invocations; su_deliveries; su_actions; su_last_used_at }
+
+let decode_skills_catalog_surface json =
+  let* reference = required_object_field json "reference" in
+  let* identity = required_object_field reference "identity" in
+  let* scs_name = required_string_field identity "name" in
+  let* scs_kind = required_string_field json "kind" in
+  let* usage_json = optional_list_field json "usage" in
+  let* scs_usage = decode_list "usage" decode_skill_usage_row usage_json in
+  let* scs_flow =
+    match member "profile" json with
+    | `Assoc _ as profile ->
+        let* flow_field = required_member profile "flow" in
+        (match flow_field with
+         | `Null -> Ok None
+         | `Assoc _ as flow ->
+             decode_skill_flow flow |> Result.map Option.some
+         | bad -> field_type_error "profile.flow" "an object or null" bad)
+    | `Null -> Ok None
+    | bad -> field_type_error "profile" "an object or null" bad
+  in
+  Ok { scs_name; scs_kind; scs_usage; scs_flow }
+
+let decode_skills_catalog json =
+  let* sc_state = required_string_field json "state" in
+  let* surfaces_json = optional_list_field json "surfaces" in
+  let* sc_surfaces =
+    decode_list "surfaces" decode_skills_catalog_surface surfaces_json
+  in
+  Ok { sc_state; sc_surfaces }
+
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the
      inventory; this reads the inventory and leaves the rest to the dashboard,

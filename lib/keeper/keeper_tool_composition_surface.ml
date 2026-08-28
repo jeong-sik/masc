@@ -189,17 +189,67 @@ type composition_skill =
   ; entry : Catalog.entry
   }
 
+(* The catalogue the model reads, one line per Skill.
+
+   This listed the whole [Skill_reference] JSON per Skill, because the tool
+   took one and the model had to be able to build it. That is 185 bytes a
+   Skill of which 12 identify it -- the rest is a JSON envelope and a 64-hex
+   content revision -- and it ships on every turn.
+
+   The key is what the tool takes now, so the line carries it and nothing
+   else. The revision is gone from the model's side entirely: the turn's
+   frozen snapshot already fixes which revision a key resolves to, and asking
+   the model to copy the hash back was asking it to restate what the server
+   was about to look up anyway. *)
 let instruction_skill_description (instruction_skills : instruction_skill list) =
   let listed =
     instruction_skills
     |> List.map (fun (skill : instruction_skill) ->
-         Printf.sprintf
-           "%s: %s"
-           (Skill_reference.to_yojson skill.reference |> Yojson.Safe.to_string)
+         Printf.sprintf "%s: %s"
+           (Skill_reference.key skill.reference)
            skill.description)
     |> String.concat "\n"
   in
   skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
+;;
+
+(* A closed choice, rebuilt each turn from the Skills that turn froze. The
+   model cannot name one that is not there, which is the property the exact
+   reference used to buy by making the name unguessable. The standard's own
+   integration guide asks for exactly this ("constrain the name parameter to
+   the set of valid skill names, e.g. as an enum in the tool schema"). *)
+let instruction_skill_input_schema (instruction_skills : instruction_skill list) =
+  let keys =
+    instruction_skills
+    |> List.map (fun (skill : instruction_skill) ->
+         `String (Skill_reference.key skill.reference))
+  in
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ ( "skill"
+            , `Assoc
+                [ "type", `String "string"
+                ; "enum", `List keys
+                ; ( "description"
+                  , `String
+                      "Exact source/package/name key of one Skill from the \
+                       Available list above." )
+                ] )
+          ; ( "file"
+            , `Assoc
+                [ "type", `String "string"
+                ; ( "description"
+                  , `String
+                      "Optional bundled resource path relative to the Skill \
+                       root, exactly as SKILL.md names it. Omit it to read \
+                       the frozen Skill body." )
+                ] )
+          ] )
+    ; "required", `List [ `String "skill" ]
+    ; "additionalProperties", `Bool false
+    ]
 ;;
 
 type 'evidence schema_tool_origin =
@@ -1132,7 +1182,6 @@ let make_request_control_tool
    than built here. Which skills are readable is workspace state and is
    appended below; the argument's shape and the sentence saying when to reach
    for the tool are not, and the model-prose ratchet is what says so. *)
-let skill_reference_input_schema = skill_tool_schema.input_schema
 
 let instruction_skill ?resource_location ~reference ~description ~body () =
   { reference; description; body; resource_location }
@@ -1144,7 +1193,7 @@ let instruction_skill_schema_tool
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~name:skill_tool_schema.name
     ~description:(instruction_skill_description instruction_skills)
-    ~input_schema:skill_reference_input_schema
+    ~input_schema:(instruction_skill_input_schema instruction_skills)
     (fun _ _ -> invalid_arg "schema-only instruction Skill tool cannot execute")
 ;;
 
@@ -1172,20 +1221,34 @@ type skill_input_error =
   | Duplicate_resource_path
   | Invalid_resource_path of Skill_resource_path.error
 
-let skill_reference_and_resource_path input =
+(* Resolve the key the model named against the Skills this turn froze.
+
+   The exactness did not move: it is the same list the catalogue was printed
+   from, so a key resolves to the one revision that turn is holding. What
+   moved is who carries the hash -- the server, which already had it, instead
+   of the model, which had to copy it correctly. *)
+let reference_of_key (instruction_skills : instruction_skill list) key =
+  List.find_map
+    (fun (skill : instruction_skill) ->
+      if String.equal (Skill_reference.key skill.reference) key
+      then Some skill.reference
+      else None)
+    instruction_skills
+;;
+
+let skill_reference_and_resource_path ~instruction_skills input =
   match input with
   | `Assoc fields ->
-    let reference_json =
-      `Assoc (List.filter (fun (field, _) -> not (String.equal field "file")) fields)
-    in
     let resource_fields =
       List.filter_map
         (fun (field, value) -> if String.equal field "file" then Some value else None)
         fields
     in
-    (match Skill_reference.of_yojson reference_json with
-     | Error _ -> Error Invalid_skill_reference
-     | Ok reference ->
+    (match List.assoc_opt "skill" fields with
+     | Some (`String key) ->
+       (match reference_of_key instruction_skills key with
+        | None -> Error Invalid_skill_reference
+        | Some reference ->
        (match resource_fields with
         | [] -> Ok (reference, None)
         | [ `String value ] ->
@@ -1194,6 +1257,10 @@ let skill_reference_and_resource_path input =
           |> Result.map_error (fun error -> Invalid_resource_path error)
         | [ _ ] -> Error (Invalid_resource_path Skill_resource_path.Empty)
         | _ :: _ :: _ -> Error Duplicate_resource_path))
+     (* A key that is not a string, or absent. The enum keeps a well-formed
+        call from arriving here; a malformed one still has to be refused
+        rather than guessed at. *)
+     | Some _ | None -> Error Invalid_skill_reference)
   | _ ->
     Error Invalid_skill_reference
 ;;
@@ -1238,11 +1305,12 @@ let make_instruction_skill_tool
     ~model_projection:Tool_output.bounded_inline_model_projection
     ~name
     ~description
-    ~input_schema:skill_reference_input_schema
+    ~input_schema:(instruction_skill_input_schema instruction_skills)
     (fun execution_env input ->
       let start_time = Time_compat.now () in
       match
-        Tool_input_validation.validate_args ~schema:skill_reference_input_schema ~name
+        Tool_input_validation.validate_args
+          ~schema:(instruction_skill_input_schema instruction_skills) ~name
           ~args:input ()
       with
       | Error rejection -> rejection
@@ -1254,7 +1322,7 @@ let make_instruction_skill_tool
              ~start_time
              "keeper_skill execution requires Agent-Core invocation identity"
          | Some invocation ->
-        (match skill_reference_and_resource_path input with
+        (match skill_reference_and_resource_path ~instruction_skills input with
          | Error Invalid_skill_reference ->
            Tool_result.make_err
              ~tool_name:name

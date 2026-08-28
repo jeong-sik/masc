@@ -72,6 +72,20 @@ val make : identity:identity -> content_revision:content_revision -> t
 val equal_identity : identity -> identity -> bool
 val equal : t -> t -> bool
 
+val identity_key : identity -> string
+val key : t -> string
+(** The identity as one [source/package/name] string.
+
+    Three parts because two are not unique: one source publishes many packages
+    and one package holds many Skills. The content revision is absent — the
+    turn's frozen snapshot already fixes which revision an identity resolves
+    to, so a caller that has the snapshot does not need the model to echo the
+    hash back to it.
+
+    Not a parser: nothing reconstructs an identity from this. It is a name to
+    offer as a closed choice and to resolve against a list that was already
+    projected. *)
+
 val identity_to_yojson : identity -> Yojson.Safe.t
 val to_yojson : t -> Yojson.Safe.t
 val pp : Format.formatter -> t -> unit

@@ -515,9 +515,17 @@ let test_exact_reference_consumer_rejects_name_fallback () =
      |> Option.value ~default:"absent")
     (Option.map Yojson.Safe.to_string schema_tool.schema.input_schema
      |> Option.value ~default:"absent");
-  let exact_output = run_skill_tool tool (Reference.to_yojson reference) in
-  check bool "exact input reads body" true
+  (* The key the catalogue offers, resolved against the Skills this turn
+     froze. The whole reference used to be the input; the exactness did not
+     move, only who carries the revision. *)
+  let key_input = `Assoc [ "skill", `String (Reference.key reference) ] in
+  let exact_output = run_skill_tool tool key_input in
+  check bool "the offered key reads the body" true
     (String_util.contains_substring exact_output "EXACT_BODY");
+  (* The shape the tool used to take is not a second way in. *)
+  let reference_output = run_skill_tool tool (Reference.to_yojson reference) in
+  check bool "the old reference shape is refused" false
+    (String_util.contains_substring reference_output "EXACT_BODY");
   let activation_attempts = ref 0 in
   let failing_tool =
     Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
@@ -530,14 +538,84 @@ let test_exact_reference_consumer_rejects_name_fallback () =
       ()
   in
   let failed_output =
-    run_skill_tool failing_tool (Reference.to_yojson reference)
+    run_skill_tool failing_tool key_input
   in
   check int "activation attempted once" 1 !activation_attempts;
   check bool "body withheld when activation recording fails" false
     (String_util.contains_substring failed_output "EXACT_BODY");
-  let legacy_output = run_skill_tool tool (`Assoc [ "name", `String "guide" ]) in
-  check bool "name fallback rejected" false
-    (String_util.contains_substring legacy_output "EXACT_BODY")
+  (* A bare name is still not a key: the key is source/package/name, and two
+     packages from one source can hold the same name. *)
+  let legacy_output = run_skill_tool tool (`Assoc [ "skill", `String "guide" ]) in
+  check bool "a bare name is not a key" false
+    (String_util.contains_substring legacy_output "EXACT_BODY");
+  (* A key the turn did not offer resolves to nothing rather than to
+     something near it. *)
+  let absent_output =
+    run_skill_tool tool (`Assoc [ "skill", `String "only/guide/not-here" ])
+  in
+  check bool "a key this turn did not offer is refused" false
+    (String_util.contains_substring absent_output "EXACT_BODY")
+;;
+
+(* What this change was for. The catalogue used to carry the whole
+   [Skill_reference] JSON per Skill -- a 64-hex content revision inside a
+   nested envelope -- because the tool took one and the model had to be able
+   to build it. It ships on every turn.
+
+   The key carries the same identity in a fraction of the bytes, and the
+   revision leaves the model's side entirely: the turn's frozen snapshot
+   already fixes which one a key resolves to.
+
+   Pinned as a ratio rather than a byte count so it measures the property
+   (the envelope is gone) and not this workspace's Skill names. *)
+let test_the_catalogue_costs_a_key_not_a_reference () =
+  let config = config (source_row ~id:"only" ~path:"skills") in
+  let snapshot =
+    snapshot config [ [ "guide", document ~name:"guide" ~description:"d" "BODY" ] ]
+  in
+  let source_id =
+    match config.sources with
+    | [ source ] -> source.id
+    | _ -> fail "expected one source"
+  in
+  let reference = exact_reference snapshot ~source_id ~package_id:"guide" ~name:"guide" in
+  let selected = resolve_one snapshot reference in
+  let skills = [ instruction_skill reference selected.skill ] in
+  let described =
+    Masc.Keeper_tool_composition_surface.For_testing.instruction_skill_description
+      skills
+  in
+  let reference_json =
+    Reference.to_yojson reference |> Yojson.Safe.to_string
+  in
+  let key = Reference.key reference in
+  check bool
+    "the catalogue names the Skill by its key"
+    true
+    (String_util.contains_substring described key);
+  check bool
+    "and no longer carries the reference envelope"
+    false
+    (String_util.contains_substring described reference_json);
+  (* The revision is the bulk of what left, and it is what the model had to
+     copy correctly. Read out of the reference's own JSON rather than through
+     an accessor the interface does not offer. *)
+  let revision =
+    match Reference.to_yojson reference with
+    | `Assoc fields ->
+      (match List.assoc_opt "content_revision" fields with
+       | Some (`String value) -> value
+       | Some _ | None -> fail "the reference carries no content_revision")
+    | _ -> fail "a reference is an object"
+  in
+  check bool
+    "the content revision is not in the catalogue at all"
+    false
+    (String_util.contains_substring described revision);
+  check bool
+    "the key is a fraction of the reference it replaced"
+    true
+    (String.length key * 3 < String.length reference_json)
 ;;
 
 let test_resolved_body_stays_frozen_after_new_snapshot () =
@@ -620,17 +698,18 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
            ()
        in
        let input =
-         match Reference.to_yojson reference with
-         | `Assoc fields ->
-           `Assoc (("file", `String "references/PROOF.md") :: fields)
-         | _ -> assert false
+         `Assoc
+           [ "skill", `String (Reference.key reference)
+           ; "file", `String "references/PROOF.md"
+           ]
        in
        let output = run_skill_tool tool input in
        check string "requested resource is the exact provider wire body" "12345678" output;
        let escaped =
-         match Reference.to_yojson reference with
-         | `Assoc fields -> `Assoc (("file", `String "../OUTSIDE.md") :: fields)
-         | _ -> assert false
+         `Assoc
+           [ "skill", `String (Reference.key reference)
+           ; "file", `String "../OUTSIDE.md"
+           ]
        in
        let escaped_output = run_skill_tool tool escaped in
        check bool
@@ -648,10 +727,10 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
            ()
        in
        let oversized =
-         match Reference.to_yojson reference with
-         | `Assoc fields ->
-           `Assoc (("file", `String "references/TOO-LARGE.md") :: fields)
-         | _ -> assert false
+         `Assoc
+           [ "skill", `String (Reference.key reference)
+           ; "file", `String "references/TOO-LARGE.md"
+           ]
        in
        let oversized_output = run_skill_tool bounded_tool oversized in
        check int "oversized resource records no activation" 0 !activation_attempts;
@@ -661,13 +740,11 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
        check bool "oversized resource returns no contents" false
          (String_util.contains_substring oversized_output "123456789");
        let duplicate =
-         match Reference.to_yojson reference with
-         | `Assoc fields ->
-           `Assoc
-             (("file", `String "references/PROOF.md")
-              :: ("file", `String "references/OTHER.md")
-              :: fields)
-         | _ -> assert false
+         `Assoc
+           [ "skill", `String (Reference.key reference)
+           ; "file", `String "references/PROOF.md"
+           ; "file", `String "references/OTHER.md"
+           ]
        in
        let duplicate_output = run_skill_tool tool duplicate in
        check bool "duplicate resource fields are typed rejection" true
@@ -717,10 +794,10 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
            ()
        in
        let boundary_input =
-         match Reference.to_yojson boundary_reference with
-         | `Assoc fields ->
-           `Assoc (("file", `String "references/BOUNDARY.md") :: fields)
-         | _ -> assert false
+         `Assoc
+           [ "skill", `String (Reference.key boundary_reference)
+           ; "file", `String "references/BOUNDARY.md"
+           ]
        in
        let boundary_output = run_skill_tool boundary_tool boundary_input in
        check int
@@ -785,6 +862,8 @@ let () =
             test_exact_reference_consumer_rejects_name_fallback
         ; test_case "resolved body remains frozen" `Quick
             test_resolved_body_stays_frozen_after_new_snapshot
+        ; Alcotest.test_case "the catalogue costs a key, not a reference" `Quick
+            test_the_catalogue_costs_a_key_not_a_reference
         ; test_case "resource read is exact and deferred" `Quick
             test_resource_is_read_only_when_exact_file_is_requested
         ; test_case "revision mismatch remains typed" `Quick

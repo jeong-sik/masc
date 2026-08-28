@@ -126,6 +126,28 @@ let equal left right =
   && equal_content_revision left.content_revision right.content_revision
 ;;
 
+(* The identity as one string a model can be given a closed choice of.
+
+   Three parts, because two is not unique: one source publishes many packages
+   and one package holds many Skills, so [source/name] can name two different
+   documents. The content revision is deliberately absent -- the turn's frozen
+   snapshot already fixes which revision this identity resolves to, and asking
+   the model to echo 64 hex characters back is copying what the server
+   already knows.
+
+   Separator is [/] because the parts are already path-shaped and none of
+   them may contain one: a package id with a separator is rejected at
+   construction ([Package_id_contains_separator]). *)
+let identity_key identity =
+  String.concat "/"
+    [ Skill_source_config.source_id_to_string identity.source_id
+    ; (identity.package_id :> string)
+    ; identity.name
+    ]
+;;
+
+let key reference = identity_key reference.identity
+
 let identity_to_yojson identity =
   `Assoc
     [ ( "source_id"

@@ -75,6 +75,10 @@ def fixture(action_identity=None):
             "tracked_checkout_clean": True,
             "server_started_at": "2026-08-27T00:00:00Z",
             "server_runtime_instance_id": INSTANCE,
+            "source_fingerprint": "e" * 64,
+            "executable_sha256": "f" * 64,
+            "executable_provenance_path": "/tmp/server.provenance.json",
+            "executable_provenance_sha256": "1" * 64,
             "tui_build": {
                 "manifest_sha256": "c" * 64,
                 "executable_sha256": "d" * 64,
@@ -633,6 +637,10 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             "build": {
                 "binary_commit": HEAD,
                 "binary_commit_source": "embedded",
+                "source_fingerprint": "e" * 64,
+                "executable_sha256": "f" * 64,
+                "executable_provenance_path": "/tmp/server.provenance.json",
+                "executable_provenance_sha256": "1" * 64,
                 "runtime_instance_id": INSTANCE,
                 "started_at": "2026-08-27T00:00:00Z",
             },
@@ -652,6 +660,10 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         health["build"]["runtime_instance_id"] = "018f1d5e-7b3c-7abc-8def-0123456789ac"
         with self.assertRaisesRegex(capture.CaptureError, "process identity changed"):
             capture.validate_live_server(evidence, health)
+        health["build"]["runtime_instance_id"] = INSTANCE
+        health["build"]["source_fingerprint"] = "2" * 64
+        with self.assertRaisesRegex(capture.CaptureError, "source_fingerprint changed"):
+            capture.validate_live_server(evidence, health)
 
     def test_verifies_every_producer_artifact_and_dashboard_screenshot(self):
         evidence, dashboard_payload, dashboard = fixture()
@@ -662,6 +674,10 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 "build": {
                     "binary_commit": HEAD,
                     "binary_commit_source": "embedded",
+                    "source_fingerprint": "e" * 64,
+                    "executable_sha256": "f" * 64,
+                    "executable_provenance_path": "/tmp/server.provenance.json",
+                    "executable_provenance_sha256": "1" * 64,
                     "runtime_instance_id": INSTANCE,
                     "started_at": "2026-08-27T00:00:00Z",
                 },
@@ -736,6 +752,10 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 "build": {
                     "binary_commit": HEAD,
                     "binary_commit_source": "embedded",
+                    "source_fingerprint": "e" * 64,
+                    "executable_sha256": "f" * 64,
+                    "executable_provenance_path": "/tmp/server.provenance.json",
+                    "executable_provenance_sha256": "1" * 64,
                     "runtime_instance_id": INSTANCE,
                     "started_at": "2026-08-27T00:00:00Z",
                 },

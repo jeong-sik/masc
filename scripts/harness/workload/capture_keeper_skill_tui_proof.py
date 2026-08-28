@@ -481,6 +481,24 @@ def validate_live_server(
         build.get("started_at") == expected_started_at,
         "live server process changed after proof",
     )
+    repeated_build_identity = {
+        "source_fingerprint": string_field(
+            source, "source_fingerprint", "evidence.source"
+        ),
+        "executable_sha256": string_field(
+            source, "executable_sha256", "evidence.source"
+        ),
+        "executable_provenance_path": string_field(
+            source, "executable_provenance_path", "evidence.source"
+        ),
+        "executable_provenance_sha256": string_field(
+            source, "executable_provenance_sha256", "evidence.source"
+        ),
+    }
+    for field, expected in repeated_build_identity.items():
+        require(
+            build.get(field) == expected, f"live server {field} changed after proof"
+        )
     expected_base = string_field(runtime, "effective_base_path", "evidence.runtime")
     expected_root = string_field(runtime, "effective_masc_root", "evidence.runtime")
     require(
@@ -494,6 +512,7 @@ def validate_live_server(
     return {
         "binary_commit": expected_sha,
         "binary_commit_source": "embedded",
+        **repeated_build_identity,
         "runtime_instance_id": expected_instance,
         "started_at": expected_started_at,
         "effective_base_path": expected_base,

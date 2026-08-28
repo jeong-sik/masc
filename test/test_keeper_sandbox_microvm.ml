@@ -463,6 +463,30 @@ let test_docker_lane_keeps_the_full_env () =
         then Alcotest.failf "docker lane dropped %S the microvm lane carries" arg)
       (microvm_env ~base_path))
 
+(* task-847: git alone never reads gh's hosts.yml — without this wiring an
+   https push prompts for a username no terminal can answer, and the
+   projected token sits unused ("could not read Username", measured on a
+   replayed push with a valid token). Every git in the sandbox is told to
+   ask gh, and terminal prompts are off so an unconfigured identity fails
+   immediately instead of hanging. *)
+let test_docker_lane_wires_git_to_the_gh_credential_helper () =
+  with_config_base (fun base_path ->
+    let docker_env =
+      Masc.Keeper_sandbox_runtime.sandbox_exec_env_args
+        ~microvm:false
+        ~base_path
+        ~container_root:env_container_root
+    in
+    List.iter
+      (fun required ->
+        if not (List.mem required docker_env)
+        then Alcotest.failf "docker env is missing %S" required)
+      [ "GIT_CONFIG_COUNT=1"
+      ; "GIT_CONFIG_KEY_0=credential.https://github.com.helper"
+      ; "GIT_CONFIG_VALUE_0=!gh auth git-credential"
+      ; "GIT_TERMINAL_PROMPT=0"
+      ])
+
 
 (* Sweep selection. A guest is keeper-lifetime, so the only safe reason to
    remove one is that the server which booted it is gone -- age would kill a
@@ -564,6 +588,10 @@ let () =
             test_guest_env_follows_the_config_mount
         ; Alcotest.test_case "omits stores it has no mount for" `Quick
             test_guest_env_omits_stores_it_has_no_mount_for
+        ; Alcotest.test_case
+            "docker lane wires git to the gh credential helper"
+            `Quick
+            test_docker_lane_wires_git_to_the_gh_credential_helper
         ; Alcotest.test_case "docker lane keeps the full env" `Quick
             test_docker_lane_keeps_the_full_env
         ] )

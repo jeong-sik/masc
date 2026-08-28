@@ -734,9 +734,17 @@ let test_keeper_up_materializes_missing_profile_source () =
     ; max_context_override = Some 128_001
     }
   in
-  (match Turn_up_config.persist ~config ~parsed ~meta with
+  let expected_revision =
+    match Turn_up_config.current_config_revision ~config ~keeper_name:name with
+    | Ok revision -> revision
+    | Error error ->
+      Alcotest.failf "keeper config revision read failed: %s" error
+  in
+  (match Turn_up_config.persist ~expected_revision ~config ~parsed ~meta () with
    | Ok _ -> ()
-   | Error error -> Alcotest.failf "keeper config persistence failed: %s" error);
+   | Error error ->
+     Alcotest.failf "keeper config persistence failed: %s"
+       (Turn_up_config.error_to_string error));
   let toml_path = Filename.concat keepers_dir (name ^ ".toml") in
   Alcotest.(check bool) "keeper TOML created" true (Sys.file_exists toml_path);
   match Profile.load_keeper_toml toml_path with

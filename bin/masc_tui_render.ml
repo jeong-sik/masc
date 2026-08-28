@@ -511,6 +511,22 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
         (match identity.Tui_decode.sid_executable_in_worktree with
          | Some true -> [ Masc_tui_footer.Server_worktree_binary ]
          | Some false | None -> [])
+        @
+        (* This TUI's own embedded commit against the server's: the pair
+           that told "restart masc" apart from "the feature is not merged"
+           by hand every time. Silent when either side cannot testify. *)
+        (let self = Masc.Build_identity.current () in
+         match
+           Masc_tui_footer.build_mismatch_item
+             ~tui_commit:self.Masc.Build_identity.binary_commit
+             ~tui_age_s:
+               (Option.map float_of_int
+                  self.Masc.Build_identity.binary_commit_age_seconds)
+             ~server_commit:identity.Tui_decode.sid_binary_commit
+             ~server_age_s:identity.Tui_decode.sid_binary_commit_age_s
+         with
+         | Some item -> [ item ]
+         | None -> [])
   in
   (* A workspace disagreement rides the footer every surface already draws,
      rather than replacing the screen. The reads that would be wrong under a
@@ -536,18 +552,34 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
       List.filter_map
         (fun (row : Tui_decode.keeper_turn_row) ->
           match row.ktr_state with
-          | Tui_decode.Keeper_turn_running _ -> Some row.ktr_keeper_name
+          | Tui_decode.Keeper_turn_running { started_at_unix; _ } ->
+              Some (row.ktr_keeper_name, started_at_unix)
           | Tui_decode.Keeper_turn_idle
           | Tui_decode.Keeper_turn_unavailable _ -> None)
         state.keeper_turns
     in
     let running =
       match state.msg_target_keeper_name with
-      | Some target when List.mem target running ->
-          target :: List.filter (fun name -> name <> target) running
+      | Some target when List.mem_assoc target running ->
+          (target, List.assoc target running)
+          :: List.filter (fun (name, _) -> name <> target) running
       | Some _ | None -> running
     in
-    match running with [] -> [] | _ -> [ Masc_tui_footer.Keeper_answering running ]
+    match running with
+    | [] -> []
+    | (_, lead_started_at) :: _ ->
+        (* The lead keeper's elapsed time rides the badge: a turn that has
+           been running for twenty minutes reads as the stall it probably
+           is, from every surface. Clamped so clock skew never counts up
+           from the future. *)
+        let lead_elapsed_s =
+          Some
+            (int_of_float
+               (Float.max 0. (Unix.gettimeofday () -. lead_started_at)))
+        in
+        [ Masc_tui_footer.Keeper_answering
+            { names = List.map fst running; lead_elapsed_s }
+        ]
   in
   (* The glow after a finish: the newest one leads, the rest fold into +N.
      [advance_finishes] already dropped expired entries and keepers that
@@ -4058,17 +4090,17 @@ let render_lanes_overview (state : state) =
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
-(* Status colours for exact-lane runs. The strings are the producer's
-   [status_label] vocabulary, matched in full; anything new reads muted until
+(* Status colours for exact-lane runs, keyed on the decoded variant; a label
+   the producer adds later decodes to [Lane_run_other] and reads muted until
    it is named here. *)
 let lane_run_status_style = function
-  | "succeeded" -> Theme.ok ()
-  | "cancelled" -> Theme.warn ()
-  | "failed"
-  | "completion_persistence_failed"
-  | "completion_durability_unknown" -> Theme.bad ()
-  | "running" -> Theme.info ()
-  | _ -> Theme.muted ()
+  | Tui_decode.Lane_run_succeeded -> Theme.ok ()
+  | Tui_decode.Lane_run_cancelled -> Theme.warn ()
+  | Tui_decode.Lane_run_failed
+  | Tui_decode.Lane_run_completion_persistence_failed
+  | Tui_decode.Lane_run_completion_durability_unknown -> Theme.bad ()
+  | Tui_decode.Lane_run_running -> Theme.info ()
+  | Tui_decode.Lane_run_other _ -> Theme.muted ()
 
 let lane_run_clock started_at =
   let tm = Unix.localtime started_at in
@@ -4158,7 +4190,8 @@ let render_lane_run_list (state : state) ~lane_id =
               (lane_run_clock run.lrs_started_at)
               (fit_width (Terminal_text.single_line run.lrs_actor) 16)
               (lane_run_status_style run.lrs_status)
-              run.lrs_status Ansi.reset elapsed
+              (Tui_decode.lane_run_status_label run.lrs_status)
+              Ansi.reset elapsed
               (fit_width
                  (Terminal_text.single_line_or ~default:"—"
                     run.lrs_selected_slot)
@@ -4217,7 +4250,7 @@ let lane_run_detail_lines (detail : Tui_decode.lane_run_detail) =
   ; Ansi.reset, "  Actor: " ^ Terminal_text.single_line detail.lrd_actor
   ; Ansi.dim, "  Started: " ^ lane_run_clock detail.lrd_started_at
   ; ( lane_run_status_style detail.lrd_status
-    , "  Status: " ^ detail.lrd_status ^ elapsed_slot )
+    , "  Status: " ^ Tui_decode.lane_run_status_label detail.lrd_status ^ elapsed_slot )
   ; Ansi.dim, ""
   ; Ansi.bold, "  INPUT (prompt payload)"
   ]

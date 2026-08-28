@@ -20,10 +20,24 @@ type status_item =
      build is serving live traffic. Said only when the health probe says so;
      an older server that cannot say stays silent. *)
   | Server_worktree_binary
+  (* This TUI binary and the server were built from different commits.
+     [older] names which side to rebuild when both ages are known; built by
+     {!build_mismatch_item}, never by hand. *)
+  | Tui_build_mismatch of
+      { tui : string
+      ; server : string
+      ; older : [ `Tui | `Server | `Unknown ]
+      }
   (* Keepers mid-turn right now, first name first. The operator who sent a
      message and walked to another surface reads the answer's progress here
-     instead of standing on the chat pane. Empty list draws nothing. *)
-  | Keeper_answering of string list
+     instead of standing on the chat pane. Empty list draws nothing.
+     [lead_elapsed_s] is how long the first keeper's turn has been running,
+     derived by the caller against its own clock; a stalled turn shows up as
+     a badge that keeps counting instead of a name that never changes. *)
+  | Keeper_answering of
+      { names : string list
+      ; lead_elapsed_s : int option
+      }
   (* A turn that just finished: the other half of the walked-away question.
      [seconds_ago] is derived by the caller against its own clock; [more]
      counts further finishes folded behind this one. *)
@@ -61,6 +75,13 @@ type projected_status =
   ; retention : retention
   }
 
+(* Minute precision past the first minute: the footer refreshes with the
+   poll, and pretending to seconds it does not have would read as drift. *)
+let coarse_age seconds =
+  if seconds < 60 then Printf.sprintf "%ds" seconds
+  else Printf.sprintf "%dm" (seconds / 60)
+;;
+
 let status_item_projection = function
   | Refresh_interval seconds when Float.is_finite seconds && seconds > 0. ->
     Some
@@ -94,20 +115,36 @@ let status_item_projection = function
       { text = "WORKTREE server (not the root build)"
       ; retention = Workspace_conflict
       }
-  | Keeper_answering [] -> None
-  | Keeper_answering [ name ] ->
-    Some { text = "\xe2\x97\x8c answering " ^ name; retention = Live_activity }
-  | Keeper_answering (name :: rest) ->
+  | Tui_build_mismatch { tui; server; older } ->
+    let action =
+      match older with
+      | `Tui -> "restart masc"
+      | `Server -> "server is older \xe2\x80\x94 redeploy"
+      | `Unknown -> "generations differ"
+    in
     Some
       { text =
-          Printf.sprintf "\xe2\x97\x8c answering %s +%d" name (List.length rest)
+          Printf.sprintf "TUI %s \xe2\x89\xa0 server %s (%s)"
+            (short_commit tui) (short_commit server) action
+      ; retention = Workspace_conflict
+      }
+  | Keeper_answering { names = []; _ } -> None
+  | Keeper_answering { names = name :: rest; lead_elapsed_s } ->
+    let elapsed =
+      match lead_elapsed_s with
+      | None -> ""
+      | Some seconds -> " " ^ coarse_age seconds
+    in
+    let tail =
+      match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)
+    in
+    Some
+      { text =
+          Printf.sprintf "\xe2\x97\x8c answering %s%s%s" name elapsed tail
       ; retention = Live_activity
       }
   | Keeper_answered { name; seconds_ago; more } ->
-    let ago =
-      if seconds_ago < 60 then Printf.sprintf "%ds" (max 0 seconds_ago)
-      else Printf.sprintf "%dm" (seconds_ago / 60)
-    in
+    let ago = coarse_age (max 0 seconds_ago) in
     let tail = if more > 0 then Printf.sprintf " +%d" more else "" in
     Some
       { text =
@@ -124,6 +161,26 @@ let body hints statuses =
   | _ ->
     Printf.sprintf "  %s  | %s" hints
       (String.concat " | " (List.map (fun status -> status.text) statuses))
+
+(** The generation check behind {!Tui_build_mismatch}: [None] when the two
+    binaries match, or when either side cannot testify (a TUI built outside
+    git has no embedded commit; an older server sends none) — unknown must
+    not warn. When both commit ages are known, the older side names the
+    action; otherwise the mismatch is stated without blaming a lane. *)
+let build_mismatch_item ~tui_commit ~tui_age_s ~server_commit ~server_age_s =
+  match tui_commit, server_commit with
+  | None, _ -> None
+  | _, "" -> None
+  | Some tui, server when String.equal tui server -> None
+  | Some tui, server ->
+    let older =
+      match tui_age_s, server_age_s with
+      | Some tui_age, Some server_age ->
+        if Float.compare tui_age server_age > 0 then `Tui else `Server
+      | Some _, None | None, Some _ | None, None -> `Unknown
+    in
+    Some (Tui_build_mismatch { tui; server; older })
+;;
 
 let omission_order =
   [ Refresh_context

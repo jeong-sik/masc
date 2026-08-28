@@ -19,8 +19,13 @@
 
    A scheme is bundled when masc can draw it faithfully, and that is decided
    by running the readability contracts in test_tui_theme_contrast, not by
-   judgement. Fifty were measured on 2026-08-28: thirty-eight are in, twelve
-   are out. The twelve fail in three distinct ways.
+   judgement. Fifty were measured on 2026-08-28: thirty-eight passed and
+   twelve did not, in the three ways below. One of the thirty-eight,
+   material-palenight, was then removed for a reason the contracts cannot see
+   -- its upstream carries no licence and its author has objected to reuse --
+   which leaves thirty-seven. THIRD-PARTY-THEMES.md records that separately,
+   because "masc cannot draw it" and "masc should not ship it" are different
+   answers and only the first one a test can give.
 
    - The lift moves the hue too far, past the 8 degrees the contract allows:
      edge-light 8.5, rose-pine-dawn 8.4, primer-light 9.8, catppuccin-latte
@@ -312,15 +317,6 @@ let bundled =
        ; "908caa"; "e0def4"; "e0def4"; "56526e"
        ; "eb6f92"; "f6c177"; "ea9a97"; "3e8fb0"
        ; "9ccfd8"; "c4a7e7"; "f6c177"; "56526e"
-      |]
-  }
-  ; { name = "material-palenight"
-  ; light = false
-  ; palette =
-      [| "292D3E"; "444267"; "32374D"; "676E95"
-       ; "8796B0"; "959DCB"; "959DCB"; "FFFFFF"
-       ; "F07178"; "F78C6C"; "FFCB6B"; "C3E88D"
-       ; "89DDFF"; "82AAFF"; "C792EA"; "FF5370"
       |]
   }
   ; { name = "tomorrow-night"

@@ -514,6 +514,55 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   }
 }
 
+// Re-base a runtime draft onto a freshly loaded config after a revision
+// conflict, keeping exactly the fields the user changed relative to the base
+// they saw. Re-saving a stale-base draft against the fresh config would
+// diff the *old base values* as if the user had edited them, silently
+// reverting the other writer's changes on untouched fields.
+export function rebaseRuntimeDraftOnFreshConfig(
+  draft: RuntimeDraft,
+  seen: KeeperConfig,
+  fresh: KeeperConfig,
+): RuntimeDraft {
+  const base = initRuntimeDraftFromConfig(seen)
+  const rebased = initRuntimeDraftFromConfig(fresh)
+  if (draft.runtime_id !== base.runtime_id) rebased.runtime_id = draft.runtime_id
+  if (draft.autoboot_enabled !== base.autoboot_enabled) {
+    rebased.autoboot_enabled = draft.autoboot_enabled
+  }
+  if (draft.max_context_override !== base.max_context_override) {
+    rebased.max_context_override = draft.max_context_override
+  }
+  if (draft.sandbox_profile !== base.sandbox_profile) {
+    rebased.sandbox_profile = draft.sandbox_profile
+  }
+  if (draft.mention_targets_text !== base.mention_targets_text) {
+    rebased.mention_targets_text = draft.mention_targets_text
+  }
+  if (draft.network_mode !== base.network_mode) rebased.network_mode = draft.network_mode
+  if (draft.allowed_paths_text !== base.allowed_paths_text) {
+    rebased.allowed_paths_text = draft.allowed_paths_text
+  }
+  if (draft.proactive_enabled !== base.proactive_enabled) {
+    rebased.proactive_enabled = draft.proactive_enabled
+  }
+  if (draft.autonomous_wake_prompt !== base.autonomous_wake_prompt) {
+    rebased.autonomous_wake_prompt = draft.autonomous_wake_prompt
+  }
+  const draftSelection = draft.skill_selection
+  const baseSelection = base.skill_selection
+  const selectionChanged =
+    draftSelection.mode !== baseSelection.mode
+    || (draftSelection.mode === 'names'
+        && baseSelection.mode === 'names'
+        && draftSelection.names_text !== baseSelection.names_text)
+    || (draftSelection.mode === 'all'
+        && baseSelection.mode === 'all'
+        && draftSelection.prior_names_text !== baseSelection.prior_names_text)
+  if (selectionChanged) rebased.skill_selection = { ...draftSelection }
+  return rebased
+}
+
 export function keeperRuntimeConfigWriteUnsupportedReason(c: KeeperConfig): string | null {
   const name = c.name?.trim()
   if (!name) {
@@ -1745,9 +1794,30 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         err instanceof ApiRequestError
         && err.errorCode === 'keeper_config_revision_conflict'
       ) {
-        runtimeDraft.value = null
+        // The config the user saw is the closure [c]; capture the in-flight
+        // draft before the reload subscription resets it from the fresh
+        // config, then re-apply only the user's own edits on the fresh base.
+        const staleDraft =
+          runtimeDraft.value?.keeperName === keeperName
+            ? runtimeDraft.value.draft
+            : null
+        const seenConfig = c
         await loadKeeperConfig(keeperName, { force: true })
-        showToast('Keeper 설정이 다른 화면에서 변경되어 최신 값을 다시 불러왔습니다', 'warning')
+        const freshState = configState.value
+        if (staleDraft && freshState.status === 'loaded') {
+          runtimeDraft.value = {
+            keeperName,
+            draft: rebaseRuntimeDraftOnFreshConfig(
+              staleDraft,
+              seenConfig,
+              freshState.data,
+            ),
+          }
+        }
+        showToast(
+          'Keeper 설정이 다른 화면에서 변경되어 최신 값을 불러왔습니다. 편집한 내용은 남겨뒀으니 확인 후 다시 저장해주세요',
+          'warning',
+        )
         return
       }
       if (keeperConfigFailureRequiresAuthoritativeReload(err)) {
@@ -1856,10 +1926,14 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         err instanceof ApiRequestError
         && err.errorCode === 'keeper_config_revision_conflict'
       ) {
-        editMode.value = false
-        editDraft.value = null
+        // Single-field draft: keep the user's text and stay in edit mode.
+        // The next save diffs against the freshly loaded config, so only the
+        // still-changed instructions field is sent with the fresh revision.
         await loadKeeperConfig(keeperName, { force: true })
-        showToast('Keeper 설정이 다른 화면에서 변경되어 최신 값을 다시 불러왔습니다', 'warning')
+        showToast(
+          'Keeper 설정이 다른 화면에서 변경되어 최신 값을 불러왔습니다. 편집한 내용은 남겨뒀으니 확인 후 다시 저장해주세요',
+          'warning',
+        )
         return
       }
       if (keeperConfigFailureRequiresAuthoritativeReload(err)) {

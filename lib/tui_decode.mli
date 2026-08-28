@@ -1038,12 +1038,26 @@ val decode_librarian_actual_input :
 (* One exact-lane run as the paged listing serves it: identity and outcome,
    never the payloads. Completion fields are absent while the run is still
    running. *)
+
+(* The producer's [Exact_lane_run_registry.status_label] vocabulary as a
+   variant; an unrecognized label keeps its text under [Lane_run_other]. *)
+type lane_run_status =
+  | Lane_run_running
+  | Lane_run_succeeded
+  | Lane_run_cancelled
+  | Lane_run_failed
+  | Lane_run_completion_persistence_failed
+  | Lane_run_completion_durability_unknown
+  | Lane_run_other of string
+
+val lane_run_status_label : lane_run_status -> string
+
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_lane : string
   ; lrs_actor : string
   ; lrs_started_at : float
-  ; lrs_status : string
+  ; lrs_status : lane_run_status
   ; lrs_elapsed_s : float option
   ; lrs_selected_slot : string option
   }
@@ -1058,7 +1072,7 @@ type lane_run_detail =
   ; lrd_lane : string
   ; lrd_actor : string
   ; lrd_started_at : float
-  ; lrd_status : string
+  ; lrd_status : lane_run_status
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
   ; lrd_input_payload : Yojson.Safe.t

@@ -177,20 +177,6 @@ let resolve_current_binding ~assigned_task_ids ~planning_current =
   }
 ;;
 
-let planning_context_state
-      (ctx : context)
-      (binding : current_binding)
-      (active_tasks : Masc_domain.task list)
-  =
-  match binding.primary_owned with
-  | None -> { planning_missing_task = None }
-  | Some task_id ->
-    (match Planning_eio.load ctx.config ~task_id with
-     | Error _ ->
-       { planning_missing_task = Some task_id }
-     | Ok plan_ctx ->
-       { planning_missing_task = None })
-;;
 
 let status_summary_string (ctx : context) =
   Workspace.ensure_initialized ctx.config;
@@ -314,7 +300,6 @@ let status_summary_string (ctx : context) =
   let binding =
     resolve_current_binding ~assigned_task_ids ~planning_current:current_task
   in
-  let planning_state = planning_context_state ctx binding active_tasks in
   let attention_items =
     let items = [] in
     let items =
@@ -331,16 +316,6 @@ let status_summary_string (ctx : context) =
               (String.concat "/" credential_state.credential_candidates)
           ]
       else items
-    in
-    let items =
-      match planning_state.planning_missing_task with
-      | Some task_id ->
-        items
-        @ [ Printf.sprintf
-              "Owned task %s has no planning context."
-              task_id
-          ]
-      | None -> items
     in
     let items =
       if Option.is_some binding.primary_owned && not binding.current_task_set
@@ -387,7 +362,6 @@ let status_summary_string (ctx : context) =
        ~cancelled_count
        ~binding
        ~task_goal_index
-       ~planning_state
        ~attention_items
        ~state
        ~backlog

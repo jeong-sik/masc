@@ -44,7 +44,7 @@ let domain_of_tool name =
   then Some "work"
   else if
     is "masc_run" || is "masc_fusion" || is "masc_start" || is "masc_pause"
-    || is "masc_resume" || is "masc_deliver" || is "masc_gc"
+    || is "masc_resume" || is "masc_gc"
   then Some "run"
   else if is "masc_keeper" then Some "keeper ops"
   else if
@@ -56,7 +56,6 @@ let domain_of_tool name =
   else if
     is "masc_config" || is "masc_tool_help" || is "masc_runtime"
     || is "masc_dashboard" || is "masc_messages" || is "masc_broadcast"
-    || is "masc_note_add"
   then Some "system"
   else None
 

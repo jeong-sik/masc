@@ -545,7 +545,6 @@ let test_rest_generate_openapi_document () =
   check bool "status summary non-empty" true
     (String.length (status_entry |> member "summary" |> to_string) > 0);
   check_operation_tags "masc_status" [ "tasks" ];
-  check_operation_tags "masc_plan_init" [ "planning" ];
   check_operation_tags "masc_broadcast" [ "messaging" ];
   let agent_core_aliases =
     status_entry |> member "x-agent-core" |> member "aliases" |> to_list

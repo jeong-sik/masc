@@ -55,10 +55,3 @@ type current_binding =
   ; claim_first_suppressed : bool
   }
 
-(** Planning-context anomaly snapshot.
-
-    - [planning_missing_task]: task id referenced by the planning
-      slot but not present in the backlog. *)
-type planning_context_state =
-  { planning_missing_task : string option
-  }

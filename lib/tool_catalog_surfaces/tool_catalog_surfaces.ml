@@ -46,10 +46,7 @@ let public_mcp_surface_tools =
     "masc_goal_list"
   ; "masc_goal_upsert"
   ; "masc_goal_transition"
-  ; "masc_plan_init"
-  ; "masc_plan_get"
   ; "masc_plan_set_task"
-  ; "masc_plan_update"
   ; (* Heartbeat *)
     "masc_heartbeat"
   ; (* Keeper runtime front door. *)
@@ -154,10 +151,8 @@ let spawned_agent_surface_tools =
   ; "masc_board_sub_board_delete"
   ; "masc_tool_help"
   ; (* Phase 2: surface SSOT *)
-    "masc_deliver"
-  ; "masc_plan_clear_task"
+    "masc_plan_clear_task"
   ; "masc_plan_get_task"
-  ; "masc_note_add"
   ; "masc_update_priority"
   ]
 ;;

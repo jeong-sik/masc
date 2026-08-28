@@ -169,14 +169,9 @@ let custom_tool_titles : (string * string) list = [
   ("masc_broadcast", "Broadcast Message");
   ("masc_messages", "Read Messages");
   (* Planning *)
-  ("masc_plan_init", "Initialize Plan");
-  ("masc_plan_get", "Get Plan");
-  ("masc_plan_update", "Update Plan");
   ("masc_plan_set_task", "Bind Current Task");
   ("masc_plan_get_task", "Get Current Task");
   ("masc_plan_clear_task", "Clear Current Task");
-  ("masc_note_add", "Add Note");
-  ("masc_deliver", "Deliver Result");
   (* Heartbeat *)
   ("masc_heartbeat", "Send Heartbeat");
   (* Operations *)

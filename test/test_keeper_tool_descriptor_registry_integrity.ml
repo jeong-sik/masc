@@ -408,9 +408,6 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "masc_tool_help"
     ; "masc_agent_card"
     ; "masc_agent_timeline"
-    ; "masc_plan_init"
-    ; "masc_plan_update"
-    ; "masc_plan_get"
     ; "masc_plan_set_task"
     ];
   List.iter

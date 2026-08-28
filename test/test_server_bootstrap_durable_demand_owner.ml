@@ -119,6 +119,35 @@ let test_a_name_with_no_durable_work_carries_no_demand () =
       fail "the classification could not run")
 ;;
 
+let test_an_executable_owner_is_woken_for_durable_demand () =
+  match
+    Maintenance.Recovery_for_testing.durable_demand_recovery_action
+      Keeper_activation_readiness.Executable
+  with
+  | Maintenance.Recovery_for_testing.Wake_executable_owner -> ()
+  | _ -> fail "an executable owner was not assigned a fresh wake hint"
+;;
+
+let test_a_recoverable_owner_is_supervised_for_durable_demand () =
+  match
+    Maintenance.Recovery_for_testing.durable_demand_recovery_action
+      Keeper_activation_readiness.Recoverable
+  with
+  | Maintenance.Recovery_for_testing.Supervise_recoverable_owner -> ()
+  | _ -> fail "a recoverable owner was not assigned supervisor recovery"
+;;
+
+let test_a_disabled_owner_retains_its_durable_demand () =
+  match
+    Maintenance.Recovery_for_testing.durable_demand_recovery_action
+      (Keeper_activation_readiness.Retained_disabled
+         Keeper_activation_readiness.Retained_autoboot_disabled)
+  with
+  | Maintenance.Recovery_for_testing.Retain_non_executable_owner
+      "autoboot_disabled" -> ()
+  | _ -> fail "a disabled owner did not retain its durable demand"
+;;
+
 let () =
   run
     "server_bootstrap_durable_demand_owner"
@@ -127,6 +156,14 @@ let () =
             test_durable_work_under_an_unknown_name_is_absent_not_unknown
         ; test_case "a name with no durable work carries no demand" `Quick
             test_a_name_with_no_durable_work_carries_no_demand
+        ] )
+    ; ( "recovery_action"
+      , [ test_case "executable owner receives a fresh wake hint" `Quick
+            test_an_executable_owner_is_woken_for_durable_demand
+        ; test_case "recoverable owner starts supervisor recovery" `Quick
+            test_a_recoverable_owner_is_supervised_for_durable_demand
+        ; test_case "disabled owner retains durable demand" `Quick
+            test_a_disabled_owner_retains_its_durable_demand
         ] )
     ]
 ;;

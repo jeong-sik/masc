@@ -374,18 +374,19 @@ let test_backlog_trigger_split () =
     }
   in
   let triggers = UM.observed_triggers_of_observation obs in
-  check bool "claimable backlog trigger remains visible" true
-    (List.mem "new_unclaimed_task" triggers);
   check bool "matched backlog trigger is explicit" true
-    (List.mem "claimable_task" triggers)
+    (List.mem "claimable_task" triggers);
+  (* A claimable backlog is one observation, so it earns one label. Two names
+     on the same predicate let a reader weigh urgency by counting signals and
+     read two where the world offered one. *)
+  check int "claimable backlog is reported once" 1
+    (List.length (List.filter (String.equal "claimable_task") triggers))
 
 let test_unclaimable_backlog_is_not_a_claim_trigger () =
   let obs =
     { base_observation with unclaimed_task_count = 3; claimable_tasks = [] }
   in
   let triggers = UM.observed_triggers_of_observation obs in
-  check bool "unclaimable backlog is not a new task trigger" false
-    (List.mem "new_unclaimed_task" triggers);
   check bool "unclaimable backlog is not a claimable task trigger" false
     (List.mem "claimable_task" triggers)
 

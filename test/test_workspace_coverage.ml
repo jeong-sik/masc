@@ -2181,6 +2181,37 @@ let test_get_active_agents_merges_state_with_file_backed_agents () =
       (str_contains output "keeper-state-only-agent → idle"))
 ;;
 
+(* A roster read that fails answers with an empty list, which is the same
+   answer as "nobody is up". Before this the difference lived only in a log
+   line, so a status screen showed a short roster and said nothing. *)
+let test_roster_read_failure_is_reported_beside_the_roster () =
+  with_test_env (fun config ->
+    let previous = Atomic.get Workspace_hooks.runtime_agents_fn in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.runtime_agents_fn previous)
+      (fun () ->
+        Atomic.set Workspace_hooks.runtime_agents_fn (fun _ ->
+          failwith "roster source is down");
+        let agents, failures = Workspace.get_active_agents_observed config in
+        Alcotest.(check bool)
+          "the read that failed is named"
+          true
+          (List.exists
+             (fun failure -> str_contains failure "roster source is down")
+             failures);
+        Alcotest.(check bool)
+          "the sources that answered still answer"
+          true
+          (List.length agents >= 0);
+        Atomic.set Workspace_hooks.runtime_agents_fn (fun _ -> []);
+        let _, no_failures = Workspace.get_active_agents_observed config in
+        Alcotest.(check (list string))
+          "an empty roster that did not fail names nothing"
+          []
+          no_failures)
+    )
+;;
+
 let test_get_active_agents_filters_inactive_runtime_agents () =
   with_test_env (fun config ->
     let previous = Atomic.get Workspace_hooks.runtime_agents_fn in
@@ -3358,6 +3389,10 @@ let () =
             "get active agents filters inactive runtime agents"
             `Quick
             test_get_active_agents_filters_inactive_runtime_agents
+        ; Alcotest.test_case
+            "a roster read that failed is named beside the roster"
+            `Quick
+            test_roster_read_failure_is_reported_beside_the_roster
         ; Alcotest.test_case "get messages raw" `Quick test_get_messages_raw
         ; Alcotest.test_case "is agent joined" `Quick test_is_agent_session_bound
         ] )

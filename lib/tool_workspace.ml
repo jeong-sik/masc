@@ -124,12 +124,17 @@ let safe_current_task (ctx : context) ~session_bound =
       None)
 ;;
 
-let safe_get_agents (ctx : context) =
-  try Workspace.get_active_agents ctx.config with
+(* The roster and what went wrong while reading it. Two layers can fail here:
+   one source inside the merge, reported through the returned list, and the
+   whole read, caught below. Both used to end at a log line and an empty list,
+   which reaches an operator as a roster that is simply short. *)
+let safe_get_agents_observed (ctx : context) =
+  try Workspace.get_active_agents_observed ctx.config with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Log.Workspace.warn "get_active_agents failed: %s" (Stdlib.Printexc.to_string exn);
-    []
+    let detail = Stdlib.Printexc.to_string exn in
+    Log.Workspace.warn "get_active_agents failed: %s" detail;
+    [], [ "active agent roster: " ^ detail ]
 ;;
 
 let resolve_current_binding ~assigned_task_ids ~planning_current =
@@ -222,8 +227,9 @@ let status_summary_string (ctx : context) =
   let current_task = safe_current_task ctx ~session_bound in
   let effective_cluster_name = effective_cluster_name ctx.config in
   let active_task_assignees = Workspace.active_task_assignees_by_task_id backlog in
+  let roster, observation_failures = safe_get_agents_observed ctx in
   let agents =
-    safe_get_agents ctx
+    roster
     |> List.map (fun (agent : Masc_domain.agent) ->
       match agent.current_task with
       | Some task_id
@@ -373,7 +379,21 @@ let status_summary_string (ctx : context) =
       "⚠ Backlog observation is recovery-backed and non-authoritative. Recheck the primary backlog before mutation.\n"
       ^ snapshot
   in
-  Ok (snapshot, recovered_from)
+  (* The backlog already says when it is recovery-backed. An observation
+     outside the backlog said nothing: it logged and answered with an empty
+     list, so the roster below simply came back short. Name it in the screen a
+     person reads, next to the line that reports the backlog. *)
+  let snapshot =
+    match observation_failures with
+    | [] -> snapshot
+    | failures ->
+      Printf.sprintf
+        "⚠ Observation incomplete — %s. The roster below is missing whatever \
+         that read would have carried.\n%s"
+        (String.concat "; " failures)
+        snapshot
+  in
+  Ok (snapshot, recovered_from, observation_failures)
 ;;
 
 let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
@@ -396,7 +416,7 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
        ~start_time
        ~code:Internal_error
        message
-   | Ok (snapshot, recovered_from) ->
+   | Ok (snapshot, recovered_from, observation_failures) ->
      let revision =
        Snapshot_protocol.revision_of_json
          ~namespace:"status"
@@ -407,6 +427,8 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
                  (if Option.is_none recovered_from
                   then "primary"
                   else "recovery_non_authoritative") )
+           ; ( "observation_failures"
+             , `List (List.map (fun failure -> `String failure) observation_failures) )
            ; "snapshot", `String snapshot
            ])
      in
@@ -424,7 +446,10 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
                 (if Option.is_none recovered_from
                  then "primary"
                  else "recovery_non_authoritative") )
-            :: ("degraded", `Bool (Option.is_some recovered_from))
+            :: ( "observation_failures"
+               , `List (List.map (fun failure -> `String failure) observation_failures) )
+            :: ( "degraded"
+               , `Bool (Option.is_some recovered_from || observation_failures <> []) )
             :: fields)
        | payload -> payload
      in

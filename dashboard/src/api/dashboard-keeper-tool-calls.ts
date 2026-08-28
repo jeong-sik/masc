@@ -123,6 +123,13 @@ export type ToolCallEntry = {
   composition_tool?: string
   composition_run_id?: string
   composition_node_id?: string
+  assembler_run_id?: string
+  proposal_id?: string
+  proposal_provenance_status?:
+    | 'retained_match'
+    | 'retained_unconfirmed'
+    | 'not_retained'
+    | 'retained_contradiction'
   composition_execution?: ToolCallCompositionExecution
   parent_tool_use_id?: string
   // Goal id(s) this call was attributed to (conditional on the row carrying
@@ -290,6 +297,15 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     composition_tool: asString(raw.composition_tool),
     composition_run_id: asString(raw.composition_run_id),
     composition_node_id: asString(raw.composition_node_id),
+    assembler_run_id: asString(raw.assembler_run_id),
+    proposal_id: asString(raw.proposal_id),
+    proposal_provenance_status:
+      raw.proposal_provenance_status === 'retained_match' ||
+      raw.proposal_provenance_status === 'retained_unconfirmed' ||
+      raw.proposal_provenance_status === 'not_retained' ||
+      raw.proposal_provenance_status === 'retained_contradiction'
+        ? raw.proposal_provenance_status
+        : undefined,
     composition_execution:
       raw.composition_execution === 'inline' || raw.composition_execution === 'async'
         ? raw.composition_execution

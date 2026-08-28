@@ -419,6 +419,9 @@ describe('keeper tool telemetry fetchers', () => {
             composition_tool: 'keeper_research_pipeline',
             composition_run_id: 'run-42',
             composition_node_id: 'fetch_sources',
+            assembler_run_id: 'exact-assembler-run-42',
+            proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            proposal_provenance_status: 'retained_match',
             composition_execution: 'async',
             parent_tool_use_id: 'outer-7',
             goal_ids: ['g-1', 'g-2'],
@@ -442,6 +445,9 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.composition_tool).toBe('keeper_research_pipeline')
     expect(entry?.composition_run_id).toBe('run-42')
     expect(entry?.composition_node_id).toBe('fetch_sources')
+    expect(entry?.assembler_run_id).toBe('exact-assembler-run-42')
+    expect(entry?.proposal_id).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    expect(entry?.proposal_provenance_status).toBe('retained_match')
     expect(entry?.composition_execution).toBe('async')
     expect(entry?.parent_tool_use_id).toBe('outer-7')
   })

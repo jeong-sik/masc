@@ -349,9 +349,13 @@ let is_microvm (t : t) =
 ;;
 
 (* Shared exec prefix: [<cli> exec [-i] --user u:g -w cwd [env...]].
-   The microvm lane runs Apple's [container] and omits the sandbox env
-   args: they name config and workspace-state mounts the guest does not
-   have, and an env pointing at absent paths is worse than none. *)
+   The microvm lane runs Apple's [container] and takes only the config
+   env. Config is the one mount the guest is given (#31353), and the
+   config env is what names it: the mount lands at the runtime base,
+   outside the playground the guest runs in, so nothing finds it by
+   walking up from the working directory. The workspace-state env stays
+   out -- those mounts the guest really does not have, and an env
+   pointing at absent paths is worse than none. *)
 let exec_prefix (t : t) ~container_cwd ~stdin =
   let cli =
     if is_microvm t
@@ -359,12 +363,10 @@ let exec_prefix (t : t) ~container_cwd ~stdin =
     else Keeper_sandbox_runtime.docker_command_argv ()
   in
   let env_args =
-    if is_microvm t
-    then []
-    else
-      Keeper_sandbox_runtime.docker_sandbox_env_args
-        ~base_path:t.config.base_path
-        ~container_root:t.container_root
+    Keeper_sandbox_runtime.sandbox_exec_env_args
+      ~microvm:(is_microvm t)
+      ~base_path:t.config.base_path
+      ~container_root:t.container_root
   in
   cli
   @ [ "exec" ]

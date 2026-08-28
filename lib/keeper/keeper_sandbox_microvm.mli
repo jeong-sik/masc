@@ -1,9 +1,10 @@
 (** Apple [container] argv for the [Micro_vm] sandbox profile.
 
-    Command construction only: nothing here starts a VM, and dispatch still
-    refuses [Micro_vm]. See the implementation for the measured cost of the
-    backend and for the two Docker hardening flags [container run] does not
-    accept. *)
+    Command construction only: nothing here starts a VM. Dispatch does --
+    [Keeper_turn_sandbox_runtime] runs these argv for a keeper whose profile
+    is [Micro_vm], and has since #31340. See the implementation for the
+    measured cost of the backend and for the two Docker hardening flags
+    [container run] does not accept. *)
 
 val command_argv : unit -> string list
 

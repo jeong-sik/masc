@@ -21,6 +21,15 @@ let argv ?(network = Profile.Network_none) () =
 
 let contains needle haystack = List.exists (String.equal needle) haystack
 
+let index_of needle haystack =
+  let rec go i = function
+    | [] -> None
+    | x :: _ when String.equal x needle -> Some i
+    | _ :: rest -> go (i + 1) rest
+  in
+  go 0 haystack
+
+
 let adjacent ~flag ~value argv =
   let rec go = function
     | a :: b :: rest -> (String.equal a flag && String.equal b value) || go (b :: rest)
@@ -178,6 +187,7 @@ let test_turn_start_argv_shape () =
       ~host_root:"/base/.masc/playground/microvm/probe"
       ~container_root:"/home/keeper/playground/probe"
       ~network_args:(M.network_args ~dns:None Profile.Network_none)
+      ~mount_args:[ "-v"; "/base/.masc/config:/home/keeper/.masc/config:ro" ]
       ~image:"masc-keeper-sandbox:local"
   in
   List.iter
@@ -185,6 +195,17 @@ let test_turn_start_argv_shape () =
        if contains flag a
        then Alcotest.failf "turn_start_argv passes %s (container rejects it)" flag)
     M.unsupported_docker_flags;
+  (* The caller's projections have to reach the guest, and they have to sit
+     before the image: container reads everything after the image name as the
+     command. A mount that lands after it becomes an argument to [tail]. *)
+  if not (contains "/base/.masc/config:/home/keeper/.masc/config:ro" a)
+  then Alcotest.fail "turn_start_argv drops mount_args";
+  (match
+     ( index_of "-v" a
+     , index_of "masc-keeper-sandbox:local" a )
+   with
+   | Some mount_at, Some image_at when mount_at < image_at -> ()
+   | _ -> Alcotest.fail "mount_args must precede the image");
   (match List.rev a with
    | "/dev/null" :: "-f" :: "tail" :: image :: _ ->
      Alcotest.(check string) "detached hold process follows the image"
@@ -211,6 +232,7 @@ let test_turn_start_argv_shape () =
       ~host_root:"/base/.masc/playground/microvm/probe"
       ~container_root:"/home/keeper/playground/probe"
       ~network_args:[]
+      ~mount_args:[]
       ~image:"masc-keeper-sandbox:local"
   in
   if not (adjacent ~flag:"--cpus" ~value:"8" sized)

@@ -39,9 +39,13 @@ val image_present : image:string -> timeout_sec:float -> (unit, string) result
 
 (** Turn-container argv. Same lifecycle as the Docker turn lane: detached
     guest holding [tail -f /dev/null], commands by [exec], removed on
-    [stop] via [--rm]. A microvm turn mounts the playground and nothing
-    else — no secret projection, no GitHub identity, no config or
-    workspace-state mounts; keepers needing those stay on [Docker]. *)
+    [stop] via [--rm]. The playground is mounted here; everything else the
+    guest may see arrives through [mount_args], which the caller builds --
+    config, GitHub identity, secret files and [--env-file]. Workspace-state
+    mounts and the /etc/passwd identity mounts remain absent.
+
+    [mount_args] is passed in Docker's own spelling: measured 2026-08-28,
+    container accepts [-v host:container:ro] and [--env-file] unchanged. *)
 
 val turn_start_argv :
   container_name:string ->
@@ -53,6 +57,7 @@ val turn_start_argv :
   host_root:string ->
   container_root:string ->
   network_args:string list ->
+  mount_args:string list ->
   image:string ->
   string list
 

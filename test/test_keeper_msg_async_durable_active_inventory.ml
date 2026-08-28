@@ -151,6 +151,152 @@ let test_reports_terminal_residue () =
     | Error _ -> fail "terminal residue rejected the whole inventory")
 ;;
 
+let completed_request ~base_path ~sw ~request_context =
+  let settled, resolve_settled = Eio.Promise.create () in
+  let request_id =
+    Async.submit
+      ~request_context
+      ~on_worker_settled:(fun settlement -> Eio.Promise.resolve resolve_settled settlement)
+      ~background_sw:sw
+      ~base_path
+      ~caller
+      ~keeper_name:"context-keeper"
+      ~f:(fun _request_sw -> Masc.Keeper_types_profile.tool_result_ok "done")
+      ()
+    |> accepted_request_id
+  in
+  (match Eio.Promise.await settled with
+   | Async.Status_settlement
+       { entry = { status = Async.Done _; _ }
+       ; durability = Async.Durable
+       ; origin = Async.Transition_commit
+       } ->
+     request_id
+   | _ -> failf "request %s did not settle durably" request_id)
+;;
+
+let rewrite_request_context request_context json =
+  match json with
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (name, value) ->
+            if String.equal name "request_context"
+            then name, request_context
+            else name, value)
+         fields)
+  | _ -> fail "durable request record is not an object"
+;;
+
+let test_conflicting_partition_request_context_is_unreadable () =
+  with_temp_base "keeper-msg-context-conflict-" (fun base_path ->
+    Eio_main.run
+    @@ fun _env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let request_id =
+      completed_request
+        ~base_path
+        ~sw
+        ~request_context:
+          [ "proposal_id", `String "proposal-a"
+          ; "assembler_run_id", `String "assembler-run"
+          ]
+    in
+    let terminal_path =
+      Async.For_testing.terminal_record_path ~base_path ~request_id
+      |> Option.get
+    in
+    let active_path = Filename.concat (active_dir ~base_path) (request_id ^ ".json") in
+    let same_context_in_another_object_order =
+      Yojson.Safe.from_file terminal_path
+      |> rewrite_request_context
+           (`Assoc
+              [ "proposal_id", `String "proposal-a"
+              ; "assembler_run_id", `String "assembler-run"
+              ])
+    in
+    Fs_compat.mkdir_p (Filename.dirname active_path);
+    Yojson.Safe.to_file active_path same_context_in_another_object_order;
+    (match Async.poll ~base_path ~caller request_id with
+     | Async.Found { status = Async.Done _; _ } -> ()
+     | _ -> fail "request context object order changed immutable identity");
+    let conflicting =
+      Yojson.Safe.from_file terminal_path
+      |> rewrite_request_context
+           (`Assoc
+              [ "assembler_run_id", `String "assembler-run"
+              ; "proposal_id", `String "proposal-b"
+              ])
+    in
+    Yojson.Safe.to_file active_path conflicting;
+    match Async.poll ~base_path ~caller request_id with
+    | Async.Unreadable reason ->
+      check
+        string
+        "immutable request context conflict"
+        "conflicting request identities coexist across persistence partitions"
+        reason
+    | Async.Found _ -> fail "conflicting request context was accepted"
+    | Async.Absent -> fail "conflicting request context disappeared"
+    | Async.Rejected _ -> fail "conflicting request context was access-rejected")
+;;
+
+let test_duplicate_request_context_is_rejected_at_submit_and_decode () =
+  with_temp_base "keeper-msg-context-duplicates-" (fun base_path ->
+    Eio_main.run
+    @@ fun _env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let worker_ran = ref false in
+    (match
+       Async.submit
+         ~request_context:
+           [ "proposal_id", `String "proposal-a"
+           ; "proposal_id", `String "proposal-b"
+           ]
+         ~background_sw:sw
+         ~base_path
+         ~caller
+         ~keeper_name:"context-keeper"
+         ~f:(fun _request_sw ->
+           worker_ran := true;
+           Masc.Keeper_types_profile.tool_result_ok "unexpected")
+         ()
+     with
+     | Error (Async.Submit_invalid_request_context _) -> ()
+     | Error error ->
+       failf
+         "wrong duplicate-context rejection: %s"
+         (Async.submit_error_to_json error |> Yojson.Safe.to_string)
+     | Ok _ -> fail "duplicate request context was accepted");
+    check bool "invalid context starts no worker" false !worker_ran;
+    let request_id =
+      completed_request
+        ~base_path
+        ~sw
+        ~request_context:[ "proposal_id", `String "proposal-a" ]
+    in
+    let terminal_path =
+      Async.For_testing.terminal_record_path ~base_path ~request_id
+      |> Option.get
+    in
+    let duplicate_context =
+      `Assoc
+        [ "proposal_id", `String "proposal-a"
+        ; "proposal_id", `String "proposal-b"
+        ]
+    in
+    Yojson.Safe.from_file terminal_path
+    |> rewrite_request_context duplicate_context
+    |> Yojson.Safe.to_file terminal_path;
+    match Async.poll ~base_path ~caller request_id with
+    | Async.Unreadable _ -> ()
+    | Async.Found _ -> fail "persisted duplicate request context was decoded"
+    | Async.Absent -> fail "persisted duplicate request context disappeared"
+    | Async.Rejected _ -> fail "persisted duplicate request context was access-rejected")
+;;
+
 let error_kind_by_basename errors basename =
   errors
   |> List.find_map (fun (error : Async.active_inventory_record_error) ->
@@ -223,6 +369,12 @@ let () =
         ; quick
             "reports malformed and non-regular children"
             test_reports_malformed_link_non_file_and_name
+        ; quick
+            "conflicting partition context is unreadable"
+            test_conflicting_partition_request_context_is_unreadable
+        ; quick
+            "duplicate context rejects submit and durable decode"
+            test_duplicate_request_context_is_rejected_at_submit_and_decode
         ; quick "missing active partition is empty" test_missing_partition_is_empty
         ] )
     ]

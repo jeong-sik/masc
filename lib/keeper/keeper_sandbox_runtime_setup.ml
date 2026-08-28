@@ -460,6 +460,18 @@ let docker_sandbox_env_args ~base_path ~container_root =
   @ docker_mounted_stores_env_args ~base_path ~container_root
 ;;
 
+(* Which env a keeper's exec carries, by lane. An env may name only what
+   was mounted, and the two lanes are given different mounts: the microvm
+   guest has config alone, so it takes the config env alone. It needs that
+   one -- the config mount lands at the runtime base, outside the playground
+   the guest works in, so nothing reaches it by walking up from the working
+   directory. *)
+let sandbox_exec_env_args ~microvm ~base_path ~container_root =
+  if microvm
+  then docker_config_env_args ~base_path ~container_root
+  else docker_sandbox_env_args ~base_path ~container_root
+;;
+
 let docker_identity_dir ~host_root = Filename.concat host_root ".docker-identity"
 
 let docker_user_identity_mount_args ~host_root ~uid ~gid =

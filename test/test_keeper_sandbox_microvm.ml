@@ -382,6 +382,85 @@ let test_live_turn_runtime_cat () =
      | Error message ->
        Alcotest.failf "teardown of an absent guest must be Ok: %s" message)
 
+(* The config mount and the config env are one decision made twice. #31353
+   gave the guest the mount and left the env behind, which put the config at
+   a path no process in the guest was told about. These pin them together. *)
+
+let env_container_root = "/keeper"
+
+let with_config_base f =
+  let root =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-microvm-env-%d" (Unix.getpid ()))
+  in
+  let masc = Filename.concat root ".masc" in
+  let config = Filename.concat masc "config" in
+  List.iter
+    (fun dir -> try Sys.mkdir dir 0o700 with Sys_error _ -> ())
+    [ root; masc; config ];
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun dir -> try Sys.rmdir dir with Sys_error _ -> ())
+        [ config; masc; root ])
+    (fun () -> f root)
+
+let microvm_env ~base_path =
+  Masc.Keeper_sandbox_runtime.sandbox_exec_env_args
+    ~microvm:true
+    ~base_path
+    ~container_root:env_container_root
+
+let config_mounted ~base_path =
+  Masc.Keeper_sandbox_runtime.docker_config_mount_args
+    ~base_path
+    ~container_root:env_container_root
+  <> []
+
+let test_guest_env_follows_the_config_mount () =
+  (* Both read the same host config root, so a guest that was given the
+     mount must also be given the env naming it. Asserted for a base path
+     that has a config and one that does not. *)
+  with_config_base (fun base_path ->
+    Alcotest.(check bool)
+      "a mounted config is a named config"
+      (config_mounted ~base_path)
+      (microvm_env ~base_path <> []));
+  let absent = Filename.concat (Filename.get_temp_dir_name ()) "masc-absent-base" in
+  Alcotest.(check bool)
+    "an absent config is neither mounted nor named"
+    (config_mounted ~base_path:absent)
+    (microvm_env ~base_path:absent <> [])
+
+let test_guest_env_omits_stores_it_has_no_mount_for () =
+  with_config_base (fun base_path ->
+    let names_stores =
+      List.exists
+        (fun arg ->
+          String.length arg >= 26
+          && String.equal (String.sub arg 0 26) "MASC_KEEPER_MOUNTED_STORES")
+        (microvm_env ~base_path)
+    in
+    Alcotest.(check bool)
+      "the guest has no workspace-state mounts to name"
+      false
+      names_stores)
+
+let test_docker_lane_keeps_the_full_env () =
+  with_config_base (fun base_path ->
+    let docker_env =
+      Masc.Keeper_sandbox_runtime.sandbox_exec_env_args
+        ~microvm:false
+        ~base_path
+        ~container_root:env_container_root
+    in
+    List.iter
+      (fun arg ->
+        if not (List.mem arg docker_env)
+        then Alcotest.failf "docker lane dropped %S the microvm lane carries" arg)
+      (microvm_env ~base_path))
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -412,5 +491,13 @@ let () =
             test_inspect_state_parser
         ; Alcotest.test_case "live guest cat (MASC_MICROVM_LIVE=1)" `Slow
             test_live_turn_runtime_cat
+        ] )
+    ; ( "guest env"
+      , [ Alcotest.test_case "env follows the config mount" `Quick
+            test_guest_env_follows_the_config_mount
+        ; Alcotest.test_case "omits stores it has no mount for" `Quick
+            test_guest_env_omits_stores_it_has_no_mount_for
+        ; Alcotest.test_case "docker lane keeps the full env" `Quick
+            test_docker_lane_keeps_the_full_env
         ] )
     ]

@@ -256,6 +256,19 @@ val docker_sandbox_env_args
   -> container_root:string
   -> string list
 
+(** The [--env] argv a keeper's exec carries, chosen by lane. An env may
+    name only what was mounted: the microvm guest is given the config
+    mount and nothing else, so it takes {!docker_config_env_args} alone,
+    while the Docker lane takes the full {!docker_sandbox_env_args}. The
+    microvm guest cannot go without it -- the config mount lands at the
+    runtime base, outside the playground the guest works in, and nothing
+    reaches it by walking up from the working directory. *)
+val sandbox_exec_env_args
+  :  microvm:bool
+  -> base_path:string
+  -> container_root:string
+  -> string list
+
 (** Docker [-v ...] argv fragment that supplies passwd/group entries for
     the numeric host uid/gid used inside the keeper container. *)
 val docker_user_identity_mount_args

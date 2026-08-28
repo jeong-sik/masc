@@ -2331,12 +2331,14 @@ export async function fetchRuntimeParams(): Promise<RuntimeParam[]> {
   return raw.parameters.map(decodeRuntimeParam)
 }
 
-/** Override one knob. The server validates against the registered bounds. */
+/** Override one knob. The server validates against the registered bounds.
+ * The body field is `param_key` — `Server_runtime_param_request` rejects a
+ * body without it as `Missing_param_key`, so `{ key }` never saved anything. */
 export async function setRuntimeParam(key: string, value: unknown): Promise<void> {
-  await post<unknown>('/api/v1/runtime/params/set', { key, value })
+  await post<unknown>('/api/v1/runtime/params/set', { param_key: key, value })
 }
 
 /** Drop the override, so the knob goes back to its env-backed default. */
 export async function clearRuntimeParam(key: string): Promise<void> {
-  await post<unknown>('/api/v1/runtime/params/clear', { key })
+  await post<unknown>('/api/v1/runtime/params/clear', { param_key: key })
 }

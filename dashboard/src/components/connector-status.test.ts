@@ -167,12 +167,10 @@ function sampleKeepersResponse(overrides?: Partial<Record<string, unknown>>) {
     keepers: [
       {
         name: 'luna',
-        runtimeLabel: 'keeper-luna-agent',
         status: 'idle',
       },
       {
         name: 'nova',
-        runtimeLabel: 'keeper-nova-agent',
         status: 'busy',
       },
     ],
@@ -284,7 +282,6 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('sangsu')
     expect(text).toContain('luna')
     expect(text).toContain('nova')
-    expect(text).toContain('keeper-luna-agent')
     expect(text).toContain('Observed workspace bindings')
     expect(text).toContain('Recent gate events')
     expect(text).toContain('keeper_error')
@@ -1056,7 +1053,6 @@ describe('ConnectorStatusPanel', () => {
     expect(novaGroup).not.toBeNull()
     const novaText = novaGroup!.textContent ?? ''
     expect(novaText).toContain('status busy')
-    expect(novaText).toContain('runtime keeper-nova-agent')
   })
 
   it('mounts under the v2 connector status surface class', async () => {
@@ -1080,14 +1076,12 @@ describe('ConnectorStatusPanel', () => {
 })
 
 describe('filterKeeperGroups', () => {
-  // Shape-compatible sample. `filterKeeperGroups` only reads `name` and
-  // `keeper.runtimeLabel` so bindings
-  // are allowed to be empty and `unknown` never matters.
+  // Shape-compatible sample. `filterKeeperGroups` only reads `name`, so
+  // bindings are allowed to be empty and `unknown` never matters.
   type GroupLike = {
     name: string
     keeper: {
       name: string
-      runtimeLabel: string
       status: string
     } | null
     bindings: Array<{ channel_id: string; keeper_name: string }>
@@ -1098,7 +1092,6 @@ describe('filterKeeperGroups', () => {
     name: string,
     keeper: GroupLike['keeper'] = {
       name,
-      runtimeLabel: '',
       status: 'idle',
     },
   ): GroupLike {
@@ -1136,22 +1129,12 @@ describe('filterKeeperGroups', () => {
     expect(filtered[0]!.name).toBe('Nova')
   })
 
-  it('matches on the resolved runtime label', async () => {
+  it('does not match on a retired runtime-label spelling', async () => {
+    // RFC-0393 removed the keeper-<name>-agent alias; only the name matches.
     const filterKeeperGroups = await loadFilter()
-    const rows = [
-      group('nova', { name: 'nova', runtimeLabel: 'keeper-nova-agent', status: 'idle' }),
-    ]
-    expect(filterKeeperGroups(rows, 'keeper-nova-agent')).toHaveLength(1)
-  })
-
-  it('does not reopen the wire identity after the runtime label is resolved', async () => {
-    const filterKeeperGroups = await loadFilter()
-    const rows = [group('nova', { name: 'nova', runtimeLabel: '', status: 'idle' })]
+    const rows = [group('nova', { name: 'nova', status: 'idle' })]
     expect(filterKeeperGroups(rows, 'nova')).toHaveLength(1)
-    const onlyRuntime = [
-      group('nova', { name: 'nova', runtimeLabel: '', status: 'idle' }),
-    ]
-    expect(filterKeeperGroups(onlyRuntime, 'keeper-nova-agent')).toEqual([])
+    expect(filterKeeperGroups(rows, 'keeper-nova-agent')).toEqual([])
   })
 
   it('returns an empty array when no rows match', async () => {

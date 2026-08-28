@@ -6,6 +6,9 @@ import {
   decodeGateKeepers,
 } from './gate-keepers'
 
+// Keep this fixture keyed to keeper_list_row_json in
+// lib/keeper/keeper_tool_surface_ops.ml — the schema is strict both ways,
+// so a fixture that drifts from the producer only validates itself.
 function keeperWire(name = 'planner') {
   return {
     runtime_class: 'keeper',
@@ -16,8 +19,11 @@ function keeperWire(name = 'planner') {
       created_at: '2026-08-12T00:00:00Z',
       updated_at: '2026-08-12T00:01:00Z',
     },
-    agent_name: `keeper-${name}-agent`,
     status: 'running',
+    phase: 'active',
+    health: 'healthy',
+    paused: false,
+    next_action: null,
     keepalive_running: true,
     autoboot_enabled: true,
     proactive_enabled: false,
@@ -42,7 +48,6 @@ function issueWire(name = 'broken') {
       next_action: 'fix_keeper_toml_or_keeper_instructions',
     },
     meta: null,
-    agent_name: null,
     created_at: null,
     updated_at: null,
   }
@@ -71,7 +76,6 @@ describe('decodeGateKeepers', () => {
     expect(data).toEqual({
       keepers: [{
         name: 'planner',
-        runtimeLabel: 'keeper-planner-agent',
         status: 'running',
       }],
       directoryIssues: [],
@@ -101,7 +105,6 @@ describe('decodeGateKeepers', () => {
       keepers: [{
         ...row,
         meta,
-        agent_name: 'keeper-broken-agent',
         created_at: meta.created_at,
         updated_at: meta.updated_at,
         autoboot_enabled: false,
@@ -118,17 +121,6 @@ describe('decodeGateKeepers', () => {
       }],
       listing: { total: 1, limit: 200, truncated: false },
     })
-  })
-
-  it('resolves an identical runtime identity to an empty display label once', () => {
-    const row = keeperWire('planner')
-    const data = Effect.runSync(decodeGateKeepers({
-      count: 1,
-      keepers: [{ ...row, agent_name: row.name }],
-      ...listingWire(1),
-    }))
-
-    expect(data.keepers[0]?.runtimeLabel).toBe('')
   })
 
   it('accepts an explicit empty directory', () => {

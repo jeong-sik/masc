@@ -11,7 +11,6 @@ import type { GateKeeper, KeeperListing } from '../api/gate-keepers'
 
 const mkKeeper = (name: string): GateKeeper => ({
   name,
-  runtimeLabel: '',
   status: 'idle',
 })
 

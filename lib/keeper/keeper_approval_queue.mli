@@ -354,6 +354,8 @@ val list_pending_dashboard_json_for_workspace :
 val list_pending_entries_for_workspace :
   base_path:string -> (pending_approval list, storage_error) result
 
+val pending_read_errors_for_workspace : base_path:string -> storage_error list
+
 val retire_summary_owner :
   base_path:string ->
   keeper_name:string ->

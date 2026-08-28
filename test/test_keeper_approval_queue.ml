@@ -3238,7 +3238,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (`Assoc
             [ "version", `Int 9
             ; "next_sequence", `Int 1
-            ; "pending", `List [ `String "malformed-entry" ]
+            ; "pending", `String "malformed-pending-array"
             ; "deliveries", `List []
             ]);
        let before =
@@ -3273,7 +3273,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
             (`Assoc
                [ "version", `Int 9
                ; "next_sequence", `Int 1
-               ; "pending", `List [ `String "malformed-entry" ]
+               ; "pending", `String "malformed-pending-array"
                ; "deliveries", `List []
                ]));
        let after =
@@ -3283,6 +3283,74 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
            ()
        in
        Alcotest.(check bool) "malformed snapshot observed" true (after -. before >= 1.0))
+;;
+
+let test_partial_pending_snapshot_preserves_readable_entries () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let approval_id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-partial-read"
+           ~input:(`Assoc [ "request", `String "readable" ])
+       in
+       let snapshot =
+         match read_pending_snapshot ~base_path with
+         | `Assoc fields ->
+           (match List.assoc_opt "pending" fields with
+            | Some (`List entries) ->
+              `Assoc
+                ( ("pending", `List (entries @ [ `String "malformed-entry" ]))
+                  :: List.remove_assoc "pending" fields )
+            | _ -> Alcotest.fail "pending snapshot array expected")
+         | _ -> Alcotest.fail "pending snapshot object expected"
+       in
+       write_pending_snapshot ~base_path snapshot;
+       let original = read_pending_snapshot ~base_path in
+       AQ.For_testing.reset_runtime_state ();
+       let before =
+         Masc.Otel_metric_store.metric_value_or_zero
+           Masc.Otel_metric_store.metric_persistence_read_drops
+           ~labels:[ "surface", "keeper_gate_pending"; "reason", "invalid_payload" ]
+           ()
+       in
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "one valid pending entry installed" 1 report.loaded_pending;
+       let entries = require_ok "partial pending list" (AQ.list_pending_entries_for_workspace ~base_path) in
+       (match entries with
+        | [ entry ] -> Alcotest.(check string) "valid entry remains visible" approval_id entry.id
+        | _ -> Alcotest.fail "expected exactly one readable pending entry");
+       Alcotest.(check int)
+         "one pending entry read error is exposed"
+         1
+         (List.length (AQ.pending_read_errors_for_workspace ~base_path));
+       (match
+          AQ.submit_pending
+            ~keeper_name:"queue-partial-read"
+            ~tool_name:"external-effect"
+            ~input:(`Assoc [ "target", `String "must-not-overwrite" ])
+            ~base_path
+            ()
+        with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail "partially readable store must remain unavailable");
+       Alcotest.(check bool)
+         "partially readable source is preserved"
+         true
+         (Yojson.Safe.equal original (read_pending_snapshot ~base_path));
+       let after =
+         Masc.Otel_metric_store.metric_value_or_zero
+           Masc.Otel_metric_store.metric_persistence_read_drops
+           ~labels:[ "surface", "keeper_gate_pending"; "reason", "invalid_payload" ]
+           ()
+       in
+       Alcotest.(check bool) "partial entry error observed" true (after -. before >= 1.0))
 ;;
 
 let test_unsupported_version_snapshot_requires_runtime_reset () =
@@ -4652,6 +4720,10 @@ let () =
             "malformed snapshot is explicit"
             `Quick
             test_malformed_snapshot_fails_install_and_is_observed
+        ; Alcotest.test_case
+            "partial pending snapshot preserves readable entries"
+            `Quick
+            test_partial_pending_snapshot_preserves_readable_entries
         ; Alcotest.test_case
             "unsupported version requires runtime reset"
             `Quick

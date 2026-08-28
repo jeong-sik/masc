@@ -313,6 +313,12 @@ let replay_results_store_surface = "keeper_gate_replay_results"
 let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
 let unavailable_stores : storage_error SMap.t Atomic.t = Atomic.make SMap.empty
+(* A partially readable snapshot remains unavailable for mutations, but its
+   valid entries can still be shown to the operator. Keep the per-entry read
+   errors separately so the projection distinguishes "no approvals" from
+   "some approvals could not be read" without rewriting the source file. *)
+let pending_read_errors : storage_error list SMap.t Atomic.t =
+  Atomic.make SMap.empty
 let replay_projection_errors : storage_error SMap.t Atomic.t =
   Atomic.make SMap.empty
 ;;
@@ -1154,6 +1160,24 @@ let parse_list ~surface parse = function
   | _ -> Error (surface ^ " must be an array")
 ;;
 
+let parse_list_with_entry_errors ~surface parse = function
+  | `List values ->
+    let rec loop index acc errors = function
+      | [] -> Ok (List.rev acc, List.rev errors)
+      | value :: rest ->
+        (match parse value with
+         | Ok parsed -> loop (index + 1) (parsed :: acc) errors rest
+         | Error reason ->
+           loop
+             (index + 1)
+             acc
+             (Printf.sprintf "%s[%d]: %s" surface index reason :: errors)
+             rest)
+    in
+    loop 0 [] [] values
+  | _ -> Error (surface ^ " must be an array")
+;;
+
 let replay_result_row_of_yojson json =
   match json with
   | `Assoc fields ->
@@ -1267,8 +1291,8 @@ let snapshot_of_yojson ~base_path json =
     let* next_sequence = required_positive_int ~surface "next_sequence" fields in
     let* pending_json = required_member ~surface "pending" fields in
     let* delivery_json = required_member ~surface "deliveries" fields in
-    let* pending_entries =
-      parse_list
+    let* pending_entries, pending_entry_errors =
+      parse_list_with_entry_errors
         ~surface:"gate_pending.pending"
         (pending_entry_of_yojson ~base_path)
         pending_json
@@ -1299,7 +1323,7 @@ let snapshot_of_yojson ~base_path json =
     let* () =
       validate_snapshot_sequences ~next_sequence pending_entries delivery_entries
     in
-    Ok (pending_map, delivery_map, next_sequence)
+    Ok (pending_map, delivery_map, next_sequence, pending_entry_errors)
   | _ -> Error "gate_pending snapshot must be a JSON object"
 ;;
 
@@ -1370,11 +1394,14 @@ let classify_restarted_deliveries map =
     (false, SMap.empty)
 ;;
 
-let load_snapshot_unlocked ~base_path =
+let load_snapshot_unlocked ~base_path :
+    (pending_approval SMap.t * persisted_delivery SMap.t * int * storage_error list,
+     storage_error)
+    result =
   let path = pending_store_path ~base_path in
   try
     if not (Sys.file_exists path)
-    then Ok (SMap.empty, SMap.empty, first_sequence)
+    then Ok (SMap.empty, SMap.empty, first_sequence, [])
     else (
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
@@ -1385,14 +1412,28 @@ let load_snapshot_unlocked ~base_path =
         Error { path; reason }
       | Ok json ->
         (match snapshot_of_yojson ~base_path json with
-         | Ok (loaded_pending, loaded_deliveries, loaded_next_sequence) ->
+         | Ok
+             ( loaded_pending
+             , loaded_deliveries
+             , loaded_next_sequence
+             , pending_entry_errors ) ->
+           let pending_read_errors =
+             List.map (fun reason -> { path; reason }) pending_entry_errors
+           in
+           List.iter
+             (fun (error : storage_error) ->
+                report_pending_read_drop
+                  ~reason:Read_drop_reason.Invalid_payload
+                  ~path
+                  ~detail:error.reason)
+             pending_read_errors;
            let pending_changed, loaded_pending =
              classify_restarted_pending loaded_pending
            in
            let deliveries_changed, loaded_deliveries =
              classify_restarted_deliveries loaded_deliveries
            in
-           if pending_changed || deliveries_changed
+           if pending_read_errors = [] && (pending_changed || deliveries_changed)
            then
              (match
                 save_snapshot_file_unlocked
@@ -1406,8 +1447,17 @@ let load_snapshot_unlocked ~base_path =
                 Log.Server.warn
                   "gate_pending restart exact-state classification workspace=%s"
                   base_path;
-                Ok (loaded_pending, loaded_deliveries, loaded_next_sequence))
-           else Ok (loaded_pending, loaded_deliveries, loaded_next_sequence)
+                Ok
+                  ( loaded_pending
+                  , loaded_deliveries
+                  , loaded_next_sequence
+                  , pending_read_errors ))
+           else
+             Ok
+               ( loaded_pending
+               , loaded_deliveries
+               , loaded_next_sequence
+               , pending_read_errors )
          | Error reason ->
            report_pending_read_drop
              ~reason:Read_drop_reason.Invalid_payload
@@ -3400,10 +3450,17 @@ let install_persistence_internal ~after_load ~base_path =
      being published between the read and the replacement below. *)
   let installed =
     with_pending_store_lock (fun () ->
+      Atomic.set
+        pending_read_errors
+        (SMap.remove base_path (Atomic.get pending_read_errors));
       let loaded_snapshot =
         match load_snapshot_unlocked ~base_path with
         | Error _ as error -> error
-        | Ok (loaded_pending, loaded_deliveries, loaded_next_sequence) ->
+        | Ok
+            ( loaded_pending
+            , loaded_deliveries
+            , loaded_next_sequence
+            , pending_read_errors ) ->
           let loaded_deliveries, replay_projection_error =
             load_replay_results_unlocked
               ~base_path
@@ -3413,7 +3470,8 @@ let install_persistence_internal ~after_load ~base_path =
             ( loaded_pending
             , loaded_deliveries
             , loaded_next_sequence
-            , replay_projection_error )
+            , replay_projection_error
+            , pending_read_errors )
       in
       after_load ();
       match loaded_snapshot with
@@ -3424,7 +3482,8 @@ let install_persistence_internal ~after_load ~base_path =
           ( loaded_pending
           , loaded_deliveries
           , loaded_next_sequence
-          , replay_projection_error ) ->
+          , replay_projection_error
+          , pending_entry_read_errors ) ->
         let current_pending =
           remove_base_entries ~base_path (Atomic.get pending) Fun.id
         in
@@ -3470,7 +3529,14 @@ let install_persistence_internal ~after_load ~base_path =
               mark_store_unavailable_unlocked ~base_path error;
               Error error
             | None ->
-              clear_store_unavailable_unlocked ~base_path;
+              (match pending_entry_read_errors with
+               | [] -> clear_store_unavailable_unlocked ~base_path
+               | first :: _ -> mark_store_unavailable_unlocked ~base_path first);
+              Atomic.set
+                pending_read_errors
+                (match pending_entry_read_errors with
+                 | [] -> SMap.remove base_path (Atomic.get pending_read_errors)
+                 | errors -> SMap.add base_path errors (Atomic.get pending_read_errors));
               Atomic.set
                 replay_projection_errors
                 (match replay_projection_error with
@@ -3545,6 +3611,7 @@ module For_testing = struct
       Atomic.set pending SMap.empty;
       Atomic.set deliveries SMap.empty;
       Atomic.set unavailable_stores SMap.empty;
+      Atomic.set pending_read_errors SMap.empty;
       Atomic.set replay_projection_errors SMap.empty;
       Atomic.set store_revisions SMap.empty;
       Atomic.set next_sequences SMap.empty)
@@ -3710,12 +3777,24 @@ let pending_entries_in_sequence_order () =
 let list_pending_entries_for_workspace ~base_path =
   with_pending_store_lock (fun () ->
     match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+    | Some _ when SMap.mem base_path (Atomic.get pending_read_errors) ->
+      pending_entries_in_sequence_order ()
+      |> List.filter (fun (entry : pending_approval) ->
+        String.equal entry.audit_base_path base_path)
+      |> fun entries -> Ok entries
     | Some error -> Error error
     | None ->
       pending_entries_in_sequence_order ()
       |> List.filter (fun (entry : pending_approval) ->
         String.equal entry.audit_base_path base_path)
       |> fun entries -> Ok entries)
+;;
+
+let pending_read_errors_for_workspace ~base_path =
+  with_pending_store_lock (fun () ->
+    Option.value
+      (SMap.find_opt base_path (Atomic.get pending_read_errors))
+      ~default:[])
 ;;
 
 let get_pending_entry_for_workspace ~base_path ~id =

@@ -1140,10 +1140,19 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
     | Some name -> [ name ], []
     | None -> keeper_names_or_error_rows config
   in
+  let pending_approval_store_read_errors =
+    Keeper_approval_queue.pending_read_errors_for_workspace
+      ~base_path:config.Workspace.base_path
+  in
   let pending_approvals, pending_approval_state, pending_approval_read_error_rows =
     match read_pending ~base_path:config.Workspace.base_path with
     | Ok entries ->
-      entries, Keeper_approval_queue.approval_queue_ready_state_json, []
+      ( entries
+      , (match pending_approval_store_read_errors with
+         | [] -> Keeper_approval_queue.approval_queue_ready_state_json
+         | first :: _ ->
+           Keeper_approval_queue.approval_queue_unavailable_state_json first)
+      , List.map pending_approval_read_error pending_approval_store_read_errors )
     | Error error ->
       ( []
       , Keeper_approval_queue.approval_queue_unavailable_state_json error

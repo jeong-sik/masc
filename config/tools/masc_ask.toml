@@ -3,28 +3,23 @@ description = """
 Ask the operator a question that carries named choices, then keep working.
 
 The question is recorded durably and appears on every surface the operator \
-watches. Your turn does not stop and your lane is not held. The answer may \
-arrive in a minute or after a night, and it reaches you as a separate wake.
+watches. Your turn does not stop and your lane is not held; the answer \
+arrives as a separate wake.
 
 Use this when the next step depends on a choice that is not yours to make. \
 Do not use it to confirm work you could verify yourself, and do not use it \
-to ask whether you may run a tool -- that is what the approval gate is for.
+to ask whether you may run a tool -- that is the approval gate's job. When \
+weighing whether the choice is really yours, remember the asymmetry: a \
+question costs one person one minute; a wrong silent guess burns hours \
+unattended.
 
-The opposite mistake is the expensive one. A question costs one person one \
-minute. A wrong silent guess in an unattended run burns hours before anyone \
-sees it went wrong, and the work it produced has to be thrown away. When you \
-are weighing whether the choice is really yours, that asymmetry is the answer.
+Several open questions is not an error, but a human answers the top one and \
+leaves the rest -- ask what actually blocks your next step.
 
-The result tells you how many of your questions are still open. Several at \
-once is not an error, but a human reading a list answers the top one and \
-leaves the rest -- so ask what actually blocks your next step, not everything \
-you are curious about.
-
-Put the reason in `context`. A reader who cannot see why you are asking \
-cannot tell a decision that matters from one that does not.
-
-Give a choice a `choice_id` that will still mean the same thing after \
-someone rewords its label: the answer names the id, never the label."""
+Put the reason in `context`: a reader who cannot see why you are asking \
+cannot weigh the decision. Give a `choice_id` that still means the same \
+thing after someone rewords its label: the answer names the id, never the \
+label."""
 additional_properties = false
 
 [[params]]

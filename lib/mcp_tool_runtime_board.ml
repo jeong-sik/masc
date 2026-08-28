@@ -496,7 +496,17 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       in
       Some result_tr
 
-  | "masc_board_list" | "masc_board_post_get"
+  | "masc_board_post_get" ->
+      (* The read carries the caller's own vote back as a "내 투표" marker.
+         The identity is the server's, through the same rewrite as vote's
+         [voter]: a model-supplied viewer is corrected, never trusted —
+         otherwise a read could impersonate another reader's vote state. *)
+      let arguments =
+        enforce_caller_identity ~tool:name ~field:"viewer" ~agent_name arguments
+      in
+      Some (Board_tool.handle_tool name arguments)
+
+  | "masc_board_list"
   | "masc_board_stats"
   | "masc_board_search" | "masc_board_profile"
   | "masc_board_hearths"

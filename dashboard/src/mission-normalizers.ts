@@ -42,7 +42,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     // route publishes the same axis under `diagnostic.health_state`. Two
     // placements, one axis — `isKeeperOffline` parses either.
     health: asString(raw.health) ?? null,
-    agent_name: asString(raw.agent_name),
     status: asString(raw.status),
     context_ratio: asNumber(raw.context_ratio),
     generation: asNumber(raw.generation),

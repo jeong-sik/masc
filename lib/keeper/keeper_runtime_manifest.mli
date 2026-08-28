@@ -15,7 +15,7 @@
     The manifest is structured in five layers.  Each layer has a single
     authoritative source of truth and a clear boundary:
 
-    - {b Layer 1 — Identity}: [keeper_name], [agent_name], [trace_id],
+    - {b Layer 1 — Identity}: [keeper_name], [trace_id],
       [generation].  Stable across every event in a turn.  SSOT is the
       keeper registry entry at turn start.
 
@@ -127,7 +127,6 @@ val with_compaction_outcome :
 val make :
   ?ts:string ->
   keeper_name:string ->
-  ?agent_name:string ->
   trace_id:string ->
   ?keeper_turn_id:int ->
   ?agent_core_turn_count:int ->

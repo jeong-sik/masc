@@ -96,7 +96,7 @@ describe('RegistrySurface', () => {
 
   it('renders keepers on the design card vocabulary', () => {
     mocks.keepers.value = [
-      keeper({ name: 'alpha', agent_name: 'resource-agent', runtime_canonical: 'ollama.gemma4' }),
+      keeper({ name: 'alpha', runtime_canonical: 'ollama.gemma4' }),
     ]
     render(h(RegistrySurface, null), container)
 
@@ -110,7 +110,7 @@ describe('RegistrySurface', () => {
     const card = container.querySelector('.reg-kgrid .reg-keeper')
     expect(card).not.toBeNull()
     expect(card!.querySelector('.rk-top .rk-id .rk-name')?.textContent).toBe('alpha')
-    expect(card!.querySelector('.rk-facet.prov .rk-f-val')?.textContent).toBe('resource-agent')
+    expect(card!.querySelector('.rk-facet.prov .rk-f-val')?.textContent).toBe('직접 정의')
     expect(card!.querySelector('.rk-facet.rt .rk-f-val')?.textContent).toBe('ollama.gemma4')
     expect(container.querySelector('.reg-panel-h .rp-count')?.textContent).toBe('1')
   })

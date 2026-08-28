@@ -235,7 +235,7 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
 
 export function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionWorkerSupportBrief | null {
   if (!isRecord(raw)) return null
-  const name = asString(raw.name) ?? asString(raw.agent_name)
+  const name = asString(raw.name)
   const note = asString(raw.note)
   const focus = asString(raw.focus)
   const state = asString(raw.state)
@@ -246,7 +246,6 @@ export function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExe
   const evidenceSource = parseEvidenceSource(asString(raw.evidence_source))
   return {
     name,
-    agent_name: asString(raw.agent_name),
     keeper_name: asString(raw.keeper_name) ?? null,
     keeper_id: asString(raw.keeper_id) ?? null,
     status: asString(raw.status),
@@ -279,7 +278,6 @@ export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecut
   return {
     name,
     keeper_id: asString(raw.keeper_id) ?? null,
-    agent_name: asString(raw.agent_name) ?? null,
     status: asString(raw.status),
     tone: normalizeExecutionTone(raw.tone),
     state,

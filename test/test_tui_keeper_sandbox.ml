@@ -19,13 +19,7 @@ let observed =
         "containers": [],
         "preflight": null,
         "container_error": null,
-        "why_no_container": "no visible managed sandbox container; network_mode=inherit uses one-shot Docker containers on sandboxed tool calls, and those containers still mount the keeper playground",
-        "identity": {
-          "agent_name": "keeper-alpha",
-          "expected_agent_name": "keeper-alpha",
-          "agent_name_matches": true,
-          "warnings": []
-        }
+        "why_no_container": "no visible managed sandbox container; network_mode=inherit uses one-shot Docker containers on sandboxed tool calls, and those containers still mount the keeper playground"
       }
     }|}
 
@@ -56,8 +50,6 @@ let test_declared_effective_observed_flow () =
     ; "one-shot"
     ; "Docker"
     ; "containers"
-    ; "Identity"
-    ; "matches canonical name"
     ]
 
 let test_live_container_and_errors_are_visible () =
@@ -85,13 +77,7 @@ let test_live_container_and_errors_are_visible () =
             "ttl_sec": 60.0
           }],
           "container_error": "docker list partial",
-          "why_no_container": null,
-          "identity": {
-            "agent_name": "wrong",
-            "expected_agent_name": "keeper-alpha",
-            "agent_name_matches": false,
-            "warnings": ["repair identity"]
-          }
+          "why_no_container": null
         }
       }|}
   in
@@ -105,8 +91,6 @@ let test_live_container_and_errors_are_visible () =
     ; "pid 4242"
     ; "docker list partial"
     ; "previous launch failed"
-    ; "wrong expected keeper-alpha"
-    ; "repair identity"
     ]
 
 let test_hostile_text_is_sanitized_before_state () =

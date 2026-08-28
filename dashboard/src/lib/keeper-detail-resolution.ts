@@ -37,8 +37,7 @@ export function resolveKeeperForDetail(
 ): Keeper | null {
   if (liveMatch) return liveMatch
   if (fallback == null) return null
-  const fallbackMatchesName =
-    fallback.name === keeperName || fallback.agent_name === keeperName
+  const fallbackMatchesName = fallback.name === keeperName
   if (!fallbackMatchesName) return null
   // Trust the cached fallback only during registry-empty transitions.
   return liveRegistryCount === 0 ? fallback : null

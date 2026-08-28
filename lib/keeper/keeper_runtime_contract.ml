@@ -67,14 +67,13 @@ let path_resolution_contract_json =
            under .masc." )
     ]
 
-let runtime_observability_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
+let runtime_observability_contract_json_from_fields ~keeper_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
     ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
     ?runtime_profile () : Yojson.Safe.t =
   `Assoc
     [
       ("keeper_name", `String keeper_name);
-      ("agent_name", string_opt_json agent_name);
       ("trace_id", string_opt_json trace_id);
       ("session_id", string_opt_json session_id);
       ("generation", int_opt_json generation);
@@ -89,13 +88,12 @@ let runtime_observability_contract_json_from_fields ~keeper_name ?agent_name ?tr
       ("runtime_profile", string_opt_json runtime_profile);
     ]
 
-let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
+let runtime_contract_json_from_fields ~keeper_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
     ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
     ?runtime_profile () : Yojson.Safe.t =
   runtime_observability_contract_json_from_fields
     ~keeper_name
-    ?agent_name
     ?trace_id
     ?session_id
     ?generation

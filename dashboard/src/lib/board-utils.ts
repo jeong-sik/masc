@@ -115,8 +115,6 @@ export function boardActorRuntimeName(
   authorName: string,
   identity?: BoardActorIdentity | null,
 ): string | null {
-  const runtime = identity?.runtime_agent_name?.trim()
-  if (runtime) return runtime
   const raw = identity?.raw?.trim()
   if (raw && raw !== authorName) return raw
   return null
@@ -152,7 +150,6 @@ export function boardActorSigilLabel(
 ): string {
   return firstSpecificActorLabel([
     identity?.display_name,
-    identity?.runtime_agent_name,
     identity?.id,
     identity?.raw,
     identity?.key,

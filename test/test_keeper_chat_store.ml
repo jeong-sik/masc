@@ -2769,7 +2769,7 @@ let test_transcript_absent_returns_empty () =
 let test_purge_plan_removes_chat_store () =
   let module Shutdown = Masc.Keeper_shutdown_types in
   let context =
-    { Shutdown.requested_name = "keeper"; agent_name = "keeper" }
+    { Shutdown.requested_name = "keeper" }
   in
   let plan = Shutdown.dashboard_purge_artifact_plan ~keeper_name:"keeper" context in
   Alcotest.(check bool)

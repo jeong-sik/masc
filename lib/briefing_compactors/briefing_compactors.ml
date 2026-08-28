@@ -8,7 +8,6 @@ let compact_keeper_json keeper_json =
     [
       ("name", string_json_opt (member_assoc "name" keeper_json));
       ("status", string_json_opt (member_assoc "status" keeper_json));
-      ("agent_name", string_json_opt (member_assoc "agent_name" keeper_json));
       ("generation", int_json (member_assoc "generation" keeper_json));
       ("context_ratio", float_json (member_assoc "context_ratio" keeper_json));
       ("last_turn_ago_s", float_json (member_assoc "last_turn_ago_s" keeper_json));

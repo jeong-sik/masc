@@ -9,7 +9,7 @@ import type { DashboardKeeperWaitingInventory } from '../api'
 import { KeeperLaneStrip } from '../components/keeper-workspace/keeper-lane-strip'
 import type { Keeper } from '../types'
 
-const keeper = { name: 'sangsu', agent_name: 'agent-sangsu' } as Keeper
+const keeper = { name: 'sangsu' } as Keeper
 
 const inventory: DashboardKeeperWaitingInventory = {
   schema: 'masc.dashboard.keeper_waiting_inventory.v3',

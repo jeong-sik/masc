@@ -118,7 +118,6 @@ let comment_of_signal
 let keeper_context ?(mention_keeper_ids = [ "alpha" ]) () =
   `Assoc
     [ "lane_keeper_name", `String "alpha"
-    ; "agent_name", `String "alpha-agent"
     ; "keeper_record_id", `Null
     ; "keeper_runtime_uid", `Null
     ; "instructions", `String "continue"

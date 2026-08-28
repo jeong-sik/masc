@@ -158,7 +158,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     pipeline_stage: asString(raw.pipeline_stage) ?? null,
     paused: asBoolean(raw.paused) ?? null,
     registered: asBoolean(raw.registered),
-    agent_name: asString(raw.agent_name),
     status: asString(raw.status),
     context_ratio: contextMeasured ? asNumber(raw.context_ratio) ?? null : null,
     context_tokens: contextMeasured ? asNumber(raw.context_tokens) ?? null : null,

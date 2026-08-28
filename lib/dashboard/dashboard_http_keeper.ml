@@ -79,7 +79,6 @@ let degraded_keeper_dashboard_row
   in
   `Assoc
     ([ ("name", `String m.name)
-     ; ("agent_name", `String m.name)
      ; ( "keeper_id"
        , match m.keeper_id with
          | Some keeper_id -> `String (Keeper_id.Uid.to_string keeper_id)
@@ -119,7 +118,6 @@ let invalid_profile_dashboard_row ~keeper_name error =
   in
   `Assoc
     [ ("name", `String keeper_name)
-    ; ("agent_name", `String keeper_name)
     ; ("phase", `String "Offline")
     ; ("lifecycle_phase", `String "Offline")
     ; ("pipeline_stage", `String "offline")
@@ -732,7 +730,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("outcomes", outcomes_json);
             ] @ runtime_blocker_fields @ attention_fields @ [
               ("supervisor_diagnostics", supervisor_diagnostics);
-              ("agent_name", `String m.name);
               ( "keeper_id",
                 match m.keeper_id with
                 | Some keeper_id ->
@@ -959,7 +956,6 @@ let execution_trust_row_of_dashboard_row row =
   in
   `Assoc
     [ ("name", field "name")
-    ; ("agent_name", field "agent_name")
     ; ("keeper_id", field "keeper_id")
     ; ("phase", field "phase")
     ; ("pipeline_stage", field "pipeline_stage")
@@ -998,7 +994,6 @@ let execution_trust_row_of_meta
   in
   `Assoc
     [ ("name", `String m.name)
-    ; ("agent_name", `String m.name)
     ; ( "keeper_id"
       , match m.keeper_id with
         | Some keeper_id -> `String (Keeper_id.Uid.to_string keeper_id)

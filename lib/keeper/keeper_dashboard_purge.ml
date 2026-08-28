@@ -222,9 +222,7 @@ let existing_operation (config : Workspace.config) requested_name =
 ;;
 
 let submit ~config ~actor ({ requested_name; keeper_name; meta } : target) =
-  let context : Keeper_shutdown_types.dashboard_purge_context =
-    { requested_name; agent_name = meta.name }
-  in
+  let context : Keeper_shutdown_types.dashboard_purge_context = { requested_name } in
   let request : Keeper_shutdown_prepare_join.request =
     { actor
     ; cleanup_intent =

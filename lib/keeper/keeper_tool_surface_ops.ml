@@ -202,7 +202,6 @@ let keeper_list_error_row_json ~runtime_class config name err =
     | Some meta ->
         [
           ("meta", keeper_brief_meta_json meta);
-          ("agent_name", `String meta.name);
           ("created_at", `String meta.created_at);
           ("updated_at", `String meta.updated_at);
           ("autoboot_enabled", `Bool meta.autoboot_enabled);
@@ -211,7 +210,6 @@ let keeper_list_error_row_json ~runtime_class config name err =
     | None ->
         [
           ("meta", `Null);
-          ("agent_name", `Null);
           ("created_at", `Null);
           ("updated_at", `Null);
         ]
@@ -282,8 +280,7 @@ let keeper_list_row_json ~runtime_class config name =
         (`Assoc (
           [
             ("runtime_class", `String runtime_class); ("name", `String meta.name);
-            ("meta", keeper_brief_meta_json meta); ("agent_name", `String meta.name);
-            ("status", `String status); ("phase", `String phase);
+            ("meta", keeper_brief_meta_json meta);             ("status", `String status); ("phase", `String phase);
             ("health", `String health);
             ("paused", `Bool meta.paused);
             ("next_action", next_action);

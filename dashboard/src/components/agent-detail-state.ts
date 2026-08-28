@@ -72,7 +72,7 @@ export function missionAgentBrief(agentName: string | null): DashboardMissionAge
 export function continuityBriefForAgent(agentName: string | null): DashboardExecutionContinuityBrief | null {
   if (!agentName) return null
   return executionContinuityBriefs.value.find(
-    brief => brief.agent_name === agentName || brief.name === agentName,
+    brief => brief.name === agentName,
   ) ?? null
 }
 
@@ -84,7 +84,7 @@ export function workerBriefForAgent(agentName: string | null) {
 /** Collect lowercase name variants for an agent (including keeper aliases). */
 function agentMatchNames(agentName: string): string[] {
   const keeper = findKeeper(agentName)
-  return [agentName, keeper?.name, keeper?.agent_name]
+  return [agentName, keeper?.name]
     .filter((n): n is string => n != null && n !== '')
     .map(n => n.toLowerCase())
 }

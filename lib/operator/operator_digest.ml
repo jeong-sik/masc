@@ -207,7 +207,6 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
         [
           ("source", `String "keeper_status_bridge");
           ("keeper_name", `String meta.name);
-          ("agent_name", `String meta.name);
           ("paused", `Bool meta.paused);
           ("attention", `Assoc attention_fields);
           ("runtime_blocker", `Assoc blocker_fields);

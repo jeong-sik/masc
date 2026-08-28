@@ -384,12 +384,12 @@ describe('countRuntimeKinds', () => {
         makeAgent({
           name: 'keeper-sangsu-agent',
           status: 'busy',
+          keeper_name: 'sangsu',
         }),
       ],
       [
         {
           name: 'sangsu',
-          agent_name: 'keeper-sangsu-agent',
           status: 'offline',
           phase: 'Paused',
           pipeline_stage: 'paused',
@@ -425,7 +425,6 @@ describe('countRuntimeKinds', () => {
         {
           name: 'ramarama',
           keeper_id: 'keeper-uuid-1',
-          agent_name: 'keeper-ramarama-agent',
           status: 'active',
         } as Keeper,
       ],
@@ -457,20 +456,19 @@ describe('countRuntimeKinds', () => {
       [
         {
           name: 'taskmaster',
-          agent_name: 'keeper-taskmaster-agent',
           status: 'active',
         } as Keeper,
       ],
     )
 
     expect(result).toEqual({
-      agents: 1,
+      agents: 2,
       keepers: 1,
       pausedKeepers: 0,
       transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 1,
-      totalRuntimes: 2,
+      totalRuntimes: 3,
     })
   })
 
@@ -485,7 +483,6 @@ describe('countRuntimeKinds', () => {
       [
         {
           name: 'foo',
-          agent_name: 'keeper-foo-agent',
           status: 'active',
         } as Keeper,
       ],
@@ -735,6 +732,7 @@ describe('AgentRoster live-only cards', () => {
     agents.value = [
       makeAgent({
         name: 'codex-mcp-client',
+        keeper_name: 'nick0cave',
         current_task: 'agent fallback task',
         model: 'gpt-5.4',
       }),
@@ -742,7 +740,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'nick0cave',
-        agent_name: 'codex-mcp-client',
         status: 'idle',
         last_heartbeat: '2026-04-23T09:59:00Z',
         last_activity_ago_s: 75,
@@ -774,7 +771,6 @@ describe('AgentRoster live-only cards', () => {
       keeper_briefs: [
         {
           name: 'nick0cave',
-          agent_name: 'codex-mcp-client',
           current_work: 'stale keeper brief work',
           latest_tool_names: ['stale_tool'],
         },
@@ -799,7 +795,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'rondo',
-        agent_name: 'keeper-rondo-agent',
         status: 'active',
         phase: 'Running',
         registered: true,
@@ -839,7 +834,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'rondo',
-        agent_name: 'keeper-rondo-agent',
         status: 'active',
         phase: 'Running',
         registered: true,
@@ -866,7 +860,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'rondo',
-        agent_name: 'keeper-rondo-agent',
         status: 'active',
         phase: 'Running',
         registered: true,
@@ -897,7 +890,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'sangsu',
-        agent_name: 'keeper-sangsu-agent',
         status: 'active',
         phase: 'Running',
         pipeline_stage: 'idle',
@@ -979,12 +971,11 @@ describe('AgentRoster live-only cards', () => {
     expect(container.querySelector('h1')?.textContent).toBe('Keeper Fleet')
   })
 
-  it('uses the explicit agent_name relation while showing only the keeper display name', async () => {
-    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+  it('uses the typed keeper_name relation while showing only the keeper display name', async () => {
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active', keeper_name: 'sangsu' })]
     keepers.value = [
       {
         name: 'sangsu',
-        agent_name: 'keeper-sangsu-agent',
         keeper_id: 'sangsu',
         status: 'active',
         phase: 'Running',
@@ -1011,7 +1002,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'taskmaster',
-        agent_name: 'keeper-taskmaster-agent',
         status: 'active',
         phase: 'Running',
         registered: true,
@@ -1036,7 +1026,6 @@ describe('AgentRoster live-only cards', () => {
       {
         name: 'shared-name',
         keeper_id: 'keeper-uuid-shared',
-        agent_name: 'keeper-shared-name-agent',
         status: 'active',
         phase: 'Running',
         registered: true,
@@ -1066,11 +1055,10 @@ describe('AgentRoster live-only cards', () => {
   })
 
   it('renders the runtime column in the fleet list row (previously only visible in the aside)', async () => {
-    agents.value = [makeAgent({ name: 'keeper-nick0cave-agent', status: 'active' })]
+    agents.value = [makeAgent({ name: 'keeper-nick0cave-agent', status: 'active', keeper_name: 'nick0cave' })]
     keepers.value = [
       {
         name: 'nick0cave',
-        agent_name: 'keeper-nick0cave-agent',
         status: 'active',
         phase: 'Running',
         registered: true,
@@ -1097,7 +1085,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'albini',
-        agent_name: 'keeper-albini-agent',
         status: 'active',
         phase: 'Running',
         registered: true,
@@ -1123,7 +1110,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'albini',
-        agent_name: 'keeper-albini-agent',
         status: 'idle',
         phase: 'Running',
         pipeline_stage: 'idle',
@@ -1149,7 +1135,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'albini',
-        agent_name: 'keeper-albini-agent',
         status: 'paused',
         phase: 'Paused',
         pipeline_stage: 'paused',
@@ -1159,7 +1144,6 @@ describe('AgentRoster live-only cards', () => {
       } as Keeper,
       {
         name: 'rondo',
-        agent_name: 'keeper-rondo-agent',
         status: 'idle',
         phase: 'Running',
         pipeline_stage: 'idle',
@@ -1167,7 +1151,6 @@ describe('AgentRoster live-only cards', () => {
       } as Keeper,
       {
         name: 'qa-king',
-        agent_name: 'keeper-qa-king-agent',
         status: 'offline',
         phase: 'Offline',
         pipeline_stage: 'offline',
@@ -1198,7 +1181,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'albini',
-        agent_name: 'keeper-albini-agent',
         status: 'paused',
         phase: 'Paused',
         pipeline_stage: 'paused',
@@ -1231,31 +1213,31 @@ describe('AgentRoster live-only cards', () => {
   it('paints a per-row tone rail keyed to runtime band (keeper-v2 Fleet)', async () => {
     keepers.value = [
       {
-        name: 'runner', agent_name: 'keeper-runner-agent', status: 'idle',
+        name: 'runner', status: 'idle',
         phase: 'Running', pipeline_stage: 'idle', keepalive_running: true,
       } as Keeper,
       {
-        name: 'rester', agent_name: 'keeper-rester-agent', status: 'paused',
+        name: 'rester', status: 'paused',
         phase: 'Paused', pipeline_stage: 'paused', paused: true, keepalive_running: false,
       } as Keeper,
       {
-        name: 'gone', agent_name: 'keeper-gone-agent', status: 'offline',
+        name: 'gone', status: 'offline',
         phase: 'Offline', pipeline_stage: 'offline', keepalive_running: false,
       } as Keeper,
       {
-        name: 'compact', agent_name: 'keeper-compact-agent', status: 'busy',
+        name: 'compact', status: 'busy',
         phase: 'Compacting', pipeline_stage: 'compacting', keepalive_running: true,
       } as Keeper,
       {
-        name: 'handoff', agent_name: 'keeper-handoff-agent', status: 'busy',
+        name: 'handoff', status: 'busy',
         phase: 'HandingOff', pipeline_stage: 'handoff', keepalive_running: true,
       } as Keeper,
       {
-        name: 'drain', agent_name: 'keeper-drain-agent', status: 'busy',
+        name: 'drain', status: 'busy',
         phase: 'Draining', pipeline_stage: 'draining', keepalive_running: true,
       } as Keeper,
       {
-        name: 'restart', agent_name: 'keeper-restart-agent', status: 'busy',
+        name: 'restart', status: 'busy',
         phase: 'Restarting', pipeline_stage: 'restarting', keepalive_running: true,
       } as Keeper,
     ]
@@ -1397,12 +1379,11 @@ describe('AgentRoster live-only cards', () => {
 
   it('explains roster axes and renders blocker labels before raw codes', async () => {
     agents.value = [
-      makeAgent({ name: 'keeper-executor-agent', status: 'active' }),
+      makeAgent({ name: 'keeper-executor-agent', status: 'active', keeper_name: 'executor' }),
     ]
     keepers.value = [
       {
         name: 'executor',
-        agent_name: 'keeper-executor-agent',
         status: 'active',
         runtime_blocker_class: 'fiber_unresolved',
         runtime_blocker_summary: 'fiber_unresolved',
@@ -1430,6 +1411,7 @@ describe('AgentRoster live-only cards', () => {
       makeAgent({
         name: 'keeper-executor-agent',
         status: 'busy',
+        keeper_name: 'executor',
         current_task: 'task-463',
         last_seen: '2026-05-24T14:01:04Z',
       }),
@@ -1437,7 +1419,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'executor',
-        agent_name: 'keeper-executor-agent',
         status: 'paused',
         phase: 'Paused',
         pipeline_stage: 'paused',
@@ -1481,12 +1462,12 @@ describe('AgentRoster live-only cards', () => {
       makeAgent({
         name: 'keeper-sangsu-agent',
         status: 'active',
+        keeper_name: 'sangsu',
       }),
     ]
     keepers.value = [
       {
         name: 'sangsu',
-        agent_name: 'keeper-sangsu-agent',
         status: 'active',
         phase: 'Running',
         pipeline_stage: 'idle',
@@ -1530,12 +1511,12 @@ describe('AgentRoster live-only cards', () => {
       makeAgent({
         name: 'keeper-sangsu-agent',
         status: 'active',
+        keeper_name: 'sangsu',
       }),
     ]
     keepers.value = [
       {
         name: 'sangsu',
-        agent_name: 'keeper-sangsu-agent',
         status: 'active',
         phase: 'Running',
         pipeline_stage: 'idle',
@@ -1573,11 +1554,10 @@ describe('AgentRoster live-only cards', () => {
   // woken* turn must render distinctly from one on its own proactive
   // cadence — the whole point of exposing typed `run_state`.
   it('surfaces known and future wake causes without a silent default', async () => {
-    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active', keeper_name: 'sangsu' })]
     keepers.value = [
       {
         name: 'sangsu',
-        agent_name: 'keeper-sangsu-agent',
         status: 'active',
         phase: 'Running',
         pipeline_stage: 'idle',
@@ -1651,11 +1631,10 @@ describe('AgentRoster live-only cards', () => {
   })
 
   it('surfaces the queue depth from run_state for a waiting keeper', async () => {
-    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active', keeper_name: 'sangsu' })]
     keepers.value = [
       {
         name: 'sangsu',
-        agent_name: 'keeper-sangsu-agent',
         status: 'active',
         phase: 'Running',
         pipeline_stage: 'idle',
@@ -1702,7 +1681,6 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'sangsu',
-        agent_name: 'keeper-sangsu-agent',
         status: 'active',
         runtime_canonical: 'agentCore.primary',
         active_model: 'claude-code:auto',
@@ -1729,11 +1707,10 @@ describe('AgentRoster live-only cards', () => {
   })
 
   it('lists live recommended-action attention reasons in the selected keeper aside', async () => {
-    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active', keeper_name: 'sangsu' })]
     keepers.value = [
       {
         name: 'sangsu',
-        agent_name: 'keeper-sangsu-agent',
         status: 'active',
         phase: 'Running',
         registered: true,
@@ -1802,11 +1779,10 @@ describe('AgentRoster live-only cards', () => {
   })
 
   it('omits the aside attention list when no live recommended actions target the keeper', async () => {
-    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active', keeper_name: 'sangsu' })]
     keepers.value = [
       {
         name: 'sangsu',
-        agent_name: 'keeper-sangsu-agent',
         status: 'active',
         phase: 'Running',
         registered: true,
@@ -1829,11 +1805,10 @@ describe('AgentRoster live-only cards', () => {
   })
 
   it('surfaces the honest worktree-isolation badge for local-sandbox keepers', async () => {
-    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active', keeper_name: 'sangsu' })]
     keepers.value = [
       {
         name: 'sangsu',
-        agent_name: 'keeper-sangsu-agent',
         keeper_id: 'sangsu-uuid-77',
         status: 'active',
         phase: 'Running',
@@ -1859,11 +1834,10 @@ describe('AgentRoster live-only cards', () => {
   })
 
   it('keeps a distinct projected keeper id without inferring an agent alias', async () => {
-    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active', keeper_name: 'sangsu' })]
     keepers.value = [
       {
         name: 'sangsu',
-        agent_name: 'keeper-sangsu-agent',
         keeper_id: 'sangsu-uuid-77',
         status: 'active',
         phase: 'Running',
@@ -1922,11 +1896,10 @@ describe('AgentRoster keeper-v2 fleet.jsx parity chrome', () => {
   let container: HTMLDivElement
 
   function seedKeeperRow(overrides: Partial<Keeper> = {}): void {
-    agents.value = [makeAgent({ name: 'keeper-nick0cave-agent', status: 'active' })]
+    agents.value = [makeAgent({ name: 'keeper-nick0cave-agent', status: 'active', keeper_name: 'nick0cave' })]
     keepers.value = [
       {
         name: 'nick0cave',
-        agent_name: 'keeper-nick0cave-agent',
         status: 'active',
         phase: 'Running',
         registered: true,

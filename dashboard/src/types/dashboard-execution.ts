@@ -411,7 +411,6 @@ export interface DashboardExecutionQueueItem {
 
 export interface DashboardExecutionWorkerSupportBrief {
   name: string
-  agent_name?: string
   keeper_name?: string | null
   keeper_id?: string | null
   status?: Agent['status'] | string
@@ -434,7 +433,6 @@ export interface DashboardExecutionWorkerSupportBrief {
 export interface DashboardExecutionContinuityBrief {
   name: string
   keeper_id?: string | null
-  agent_name?: string | null
   status?: string
   tone?: DashboardExecutionTone
   state: DashboardExecutionContinuityState
@@ -694,7 +692,6 @@ export interface DashboardGoalsTreeResponse {
 
 export interface GoalDetailKeeper {
   name: string
-  agent_name: string
   current_task_id: string | null
   sandbox_profile: string
   network_mode: string

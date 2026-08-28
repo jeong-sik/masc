@@ -686,7 +686,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         emoji: asString(row.emoji),
         koreanName: asString(row.koreanName) ?? asString(row.korean_name),
         keeper_id: asString(row.keeper_id) ?? null,
-        agent_name: asString(row.agent_name),
         trace_id: asString(row.trace_id),
         model,
         primary_model: undefined,

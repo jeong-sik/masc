@@ -814,7 +814,6 @@ let log_call
       let runtime_contract =
         Keeper_runtime_contract.runtime_observability_contract_json_from_fields
           ~keeper_name
-          ?agent_name
           ?trace_id
           ?session_id
           ?keeper_turn_id

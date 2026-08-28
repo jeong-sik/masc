@@ -143,16 +143,15 @@ let emit_turn_end_safely ~keeper_name () =
         keeper_name
         (Printexc.to_string e)
 
-let runtime_manifest_context ~keeper_name ~agent_name ~trace_id
+let runtime_manifest_context ~keeper_name ~trace_id
     ~keeper_turn_id : Keeper_runtime_manifest.turn_context =
   {
     manifest_keeper_name = keeper_name;
-    manifest_agent_name = Some agent_name;
     manifest_trace_id = trace_id;
     manifest_keeper_turn_id = Some keeper_turn_id;
   }
 
-let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
+let append_runtime_manifest ~config ~keeper_name ~trace_id
     ~runtime_id ?status ?decision ?keeper_turn_id
     ?agent_core_turn_count ?elapsed_ms ?logical_seq ?checkpoint_path ?receipt_path
     ?compaction_source ~site event =
@@ -161,7 +160,7 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
     | None -> decision
     | Some keeper_turn_id ->
       let ctx =
-        runtime_manifest_context ~keeper_name ~agent_name ~trace_id
+        runtime_manifest_context ~keeper_name ~trace_id
           ~keeper_turn_id
       in
       let decision =
@@ -176,7 +175,7 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
                 ?agent_core_turn_count ?elapsed_ms ?logical_seq ?compaction_source ())
            decision)
   in
-  Keeper_runtime_manifest.make ~keeper_name ~agent_name ~trace_id
+  Keeper_runtime_manifest.make ~keeper_name ~trace_id
     ?keeper_turn_id ?agent_core_turn_count ?logical_seq ~event ~runtime_id ?status
     ?decision ?checkpoint_path ?receipt_path ()
   |> Keeper_runtime_manifest.append_best_effort ~site config
@@ -241,7 +240,6 @@ type append_manifest_fn =
 let make_append_manifest
     ~config
     ~keeper_name
-    ~agent_name
     ~trace_id
     ~runtime_id
     ~(turn_start : Mtime.t)
@@ -269,7 +267,6 @@ let make_append_manifest
   append_runtime_manifest
     ~config
     ~keeper_name
-    ~agent_name
     ~trace_id
     ~runtime_id
     ?status ?decision ?keeper_turn_id ?agent_core_turn_count

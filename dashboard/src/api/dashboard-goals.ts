@@ -266,14 +266,12 @@ function requireReadyApprovalQueue(raw: Record<string, unknown>) {
 function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
   if (!isRecord(raw)) return null
   const name = asString(raw.name)
-  const agentName = asString(raw.agent_name)
   const sandboxProfile = asString(raw.sandbox_profile)
   const networkMode = asString(raw.network_mode)
   const runtimeName = asString(raw.runtime_id)
-  if (!name || !agentName || !sandboxProfile || !networkMode || !runtimeName) return null
+  if (!name || !sandboxProfile || !networkMode || !runtimeName) return null
   return {
     name,
-    agent_name: agentName,
     current_task_id: asNullableString(raw.current_task_id),
     sandbox_profile: sandboxProfile,
     network_mode: networkMode,

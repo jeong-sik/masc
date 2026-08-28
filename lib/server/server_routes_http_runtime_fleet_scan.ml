@@ -815,13 +815,13 @@ let non_keeper_active_task_owner_json row =
     ]
 
 type keeper_agent_binding_scan = {
-  enabled_agent_bindings : (string * string) list;
+  enabled_keeper_names : string list;
   disabled_agent_names : string list;
   binding_read_errors : (string * string) list;
 }
 
 let empty_keeper_agent_binding_scan =
-  { enabled_agent_bindings = []; disabled_agent_names = []; binding_read_errors = [] }
+  { enabled_keeper_names = []; disabled_agent_names = []; binding_read_errors = [] }
 
 let keeper_agent_bindings config =
   Keeper_meta_store.configured_keeper_names config
@@ -833,8 +833,7 @@ let keeper_agent_bindings config =
              if effective_autoboot_enabled config name meta then
                {
                  scan with
-                 enabled_agent_bindings =
-                   (meta.name, meta.name) :: scan.enabled_agent_bindings;
+                 enabled_keeper_names = meta.name :: scan.enabled_keeper_names;
                }
              else
                {
@@ -850,18 +849,14 @@ let keeper_agent_bindings config =
        empty_keeper_agent_binding_scan
   |> fun scan ->
   {
-    enabled_agent_bindings =
-      List.sort_uniq compare_string_pair scan.enabled_agent_bindings;
+    enabled_keeper_names = sorted_unique_strings scan.enabled_keeper_names;
     disabled_agent_names = sorted_unique_strings scan.disabled_agent_names;
     binding_read_errors =
       List.sort_uniq compare_string_pair scan.binding_read_errors;
   }
 
-let keeper_names_for_agent agent_bindings assignee =
-  agent_bindings
-  |> List.filter_map (fun (agent_name, keeper_name) ->
-       if String.equal agent_name assignee then Some keeper_name else None)
-  |> sorted_unique_strings
+let keeper_names_for_agent enabled_keeper_names assignee =
+  List.filter (String.equal assignee) enabled_keeper_names
 
 let is_credentialed_external_client config assignee =
   (not (List.mem assignee (Keeper_meta_store.keeper_names config)))
@@ -873,7 +868,7 @@ let is_credentialed_external_client config assignee =
 let active_task_owner_fiber_scan config ~executable_names =
   let executable_set = string_set_of_list executable_names in
   let binding_scan = keeper_agent_bindings config in
-  let agent_bindings = binding_scan.enabled_agent_bindings in
+  let agent_bindings = binding_scan.enabled_keeper_names in
   let meta_read_errors = binding_scan.binding_read_errors in
   match Workspace.read_backlog_observation_with_source_r config with
   | Error err ->

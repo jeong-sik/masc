@@ -8,17 +8,18 @@ import {
 } from './keeper-sse-match'
 
 describe('keeper SSE matching', () => {
-  it('canonicalizes keeper runtime aliases for event matching', () => {
+  it('matches events by the keeper name itself — nothing is parsed out of the string', () => {
     const event = {
       type: 'keeper_tool_call',
-      agent_name: 'keeper-sangsu-agent',
+      agent_name: 'sangsu',
       tool_name: 'keeper_context_status',
     } as SSEEvent
 
     expect(sseKeeperName(event)).toBe('sangsu')
     expect(sseEventMatchesKeeper(event, 'sangsu')).toBe(true)
-    expect(sseEventMatchesKeeper(event, 'keeper-sangsu-agent')).toBe(true)
+    expect(sseEventMatchesKeeper(event, 'SangSu')).toBe(true)
     expect(sseEventMatchesKeeper(event, 'other')).toBe(false)
+    expect(sseEventMatchesKeeper(event, 'keeper-sangsu-agent')).toBe(false)
   })
 
   it('distinguishes committed evidence refresh from physical tool execution', () => {

@@ -15,7 +15,6 @@ describe('normalizeKeeperBrief', () => {
 
     expect(brief).toEqual({
       name: 'sangsu',
-      agent_name: null,
       status: 'active',
       generation: undefined,
       context_ratio: null,

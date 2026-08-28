@@ -291,7 +291,7 @@ let with_compaction_outcome ~compaction_outcome decision =
     `Assoc [ "decision", other; compaction_outcome_key, outcome_json ]
 ;;
 
-let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
+let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ~trace_id
     ?keeper_turn_id ?agent_core_turn_count ?logical_seq ~event ?runtime_id
     ?(status = "ok") ?(decision = `Assoc []) ?receipt_path ?checkpoint_path
     ?tool_call_log_path () =
@@ -299,7 +299,6 @@ let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     schema_version;
     ts;
     keeper_name;
-    agent_name;
     trace_id;
     keeper_turn_id;
     agent_core_turn_count;
@@ -314,7 +313,7 @@ let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
 let make_for_context ctx ~event ?agent_core_turn_count ?logical_seq ?runtime_id
     ?status ?decision ?receipt_path ?checkpoint_path ?tool_call_log_path () =
   make ~keeper_name:ctx.manifest_keeper_name
-    ?agent_name:ctx.manifest_agent_name ~trace_id:ctx.manifest_trace_id
+    ~trace_id:ctx.manifest_trace_id
     ?keeper_turn_id:ctx.manifest_keeper_turn_id ?agent_core_turn_count ?logical_seq
     ~event ?runtime_id ?status ?decision ?receipt_path ?checkpoint_path
     ?tool_call_log_path ()
@@ -435,7 +434,6 @@ let to_json manifest =
       ("schema_version", `Int manifest.schema_version);
       ("ts", `String manifest.ts);
       ("keeper_name", `String manifest.keeper_name);
-      ("agent_name", json_of_string_opt manifest.agent_name);
       ("trace_id", `String manifest.trace_id);
         ("keeper_turn_id", json_of_int_opt manifest.keeper_turn_id);
       ("agent_core_turn_count", json_of_int_opt manifest.agent_core_turn_count);
@@ -453,7 +451,6 @@ let public_to_json manifest =
       ("schema_version", `Int manifest.schema_version);
       ("ts", `String manifest.ts);
       ("keeper_name", `String manifest.keeper_name);
-      ("agent_name", json_of_string_opt manifest.agent_name);
       ("trace_id", `String manifest.trace_id);
       ("keeper_turn_id", json_of_int_opt manifest.keeper_turn_id);
       ("agent_core_turn_count", json_of_int_opt manifest.agent_core_turn_count);
@@ -526,7 +523,6 @@ let links_of_json = function
 type parsed_row = {
   ts : string;
   keeper_name : string;
-  agent_name : string option;
   trace_id : string;
   keeper_turn_id : int option;
   agent_core_turn_count : int option;
@@ -662,7 +658,6 @@ let parse_row = function
           else
             required_string "ts" fields >>= fun ts ->
             required_string "keeper_name" fields >>= fun keeper_name ->
-            optional_string "agent_name" fields >>= fun agent_name ->
             required_string "trace_id" fields >>= fun trace_id ->
             optional_int "keeper_turn_id" fields >>= fun keeper_turn_id ->
             optional_int "agent_core_turn_count" fields >>= fun agent_core_turn_count ->
@@ -679,7 +674,6 @@ let parse_row = function
               {
                 ts;
                 keeper_name;
-                agent_name;
                 trace_id;
                 keeper_turn_id;
                 agent_core_turn_count;
@@ -707,7 +701,6 @@ let active_row (row : parsed_row) event : t =
     schema_version;
     ts = row.ts;
     keeper_name = row.keeper_name;
-    agent_name = row.agent_name;
     trace_id = row.trace_id;
     keeper_turn_id = row.keeper_turn_id;
     agent_core_turn_count = row.agent_core_turn_count;

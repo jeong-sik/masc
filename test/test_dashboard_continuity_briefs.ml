@@ -15,7 +15,6 @@ let keeper ?(health = "offline") ?(status = "offline") ?(tool_audit_at = "")
   `Assoc
     [
       ("name", `String "omega");
-      ("agent_name", `String "omega");
       ("keeper_id", `String "k-executor");
       ("diagnostic", `Assoc [ ("health_state", `String health) ]);
       (* Still on the wire and still passed through to the row, but no longer

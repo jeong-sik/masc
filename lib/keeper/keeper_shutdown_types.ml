@@ -34,7 +34,6 @@ type meta_disposition =
 
 type dashboard_purge_context =
   { requested_name : string
-  ; agent_name : string
   }
 
 type cleanup_reason =
@@ -411,7 +410,6 @@ let dashboard_purge_context_equal
     (right : dashboard_purge_context)
   =
   String.equal left.requested_name right.requested_name
-  && String.equal left.agent_name right.agent_name
 ;;
 
 let cleanup_reason_equal left right =
@@ -442,7 +440,7 @@ let cleanup_reason_equal left right =
 
 let dashboard_purge_artifact_plan ~keeper_name context =
   let agent_aliases =
-    [ context.requested_name; keeper_name; context.agent_name ]
+    [ context.requested_name; keeper_name ]
     |> List.filter_map String_util.trim_nonempty
     |> List.sort_uniq String.compare
   in

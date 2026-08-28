@@ -404,7 +404,6 @@ let test_agent_core_checkpoint_starts_official_client_turn () =
                 ~runtime_manifest_context:
                   { Keeper_runtime_manifest.manifest_keeper_name =
                       "claude-fixture"
-                  ; manifest_agent_name = Some "claude-fixture-agent"
                   ; manifest_trace_id = "claude-fixture-trace"
                   ; manifest_keeper_turn_id = Some 1
                   }

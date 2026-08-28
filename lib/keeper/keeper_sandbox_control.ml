@@ -566,12 +566,6 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
             Some
               "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted")
 
-let identity_json (meta : keeper_meta) =
-  `Assoc
-    [
-      ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-    ]
-
 let live_status_json ?(include_preflight = true)
     ?preflight_override
     ?containers_override
@@ -631,5 +625,4 @@ let live_status_json ?(include_preflight = true)
           repository_checkouts_json ~config ~meta
         else
           `Assoc [ "state", `String "not_inspected"; "entries", `List [] ] );
-      ("identity", identity_json meta);
     ]

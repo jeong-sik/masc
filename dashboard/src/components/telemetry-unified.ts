@@ -307,7 +307,6 @@ function telemetryTurnActor(entry: TelemetryEntry): string | null {
   const payload = telemetryPayloadRecord(entry)
   return asNullableString(entry.agent_name)
     ?? asNullableString(recordField(payload, 'agent_name'))
-    ?? asNullableString(recordField(entry.runtime_contract, 'agent_name'))
     ?? asNullableString(entry.keeper_name)
     ?? asNullableString(recordField(entry.runtime_contract, 'keeper_name'))
     ?? asNullableString(entry.keeper)
@@ -462,7 +461,7 @@ function entryPreview(e: TelemetryEntry): string {
       return parts.length > 0 ? `${eventType}: ${parts.join(' · ')}` : eventType
     }
     case 'execution_receipt': {
-      const keeper = asNullableString(e.keeper_name) ?? asNullableString(e.agent_name) ?? '(unknown keeper)'
+      const keeper = asNullableString(e.keeper_name) ?? '(unknown keeper)'
       const outcome = asNullableString(e.outcome) ?? asNullableString(e.operator_disposition) ?? '(no outcome)'
       const reason = asNullableString(e.terminal_reason_code)
       return reason ? `${keeper} receipt ${outcome} (${reason})` : `${keeper} receipt ${outcome}`

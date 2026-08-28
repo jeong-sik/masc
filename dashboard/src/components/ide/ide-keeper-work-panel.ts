@@ -389,7 +389,7 @@ function findKeeper(name: string, keeperList: ReadonlyArray<Keeper>): Keeper | n
   const target = name.toLowerCase()
   if (!target) return keeperList[0] ?? null
   return keeperList.find(keeper => {
-    const keys = keeperIdentityKeys(keeper.keeper_id, keeper.name, keeper.agent_name)
+    const keys = keeperIdentityKeys(keeper.keeper_id, keeper.name)
     return keys.includes(target) || keys.includes(`keeper:${target}`)
   }) ?? null
 }
@@ -398,7 +398,7 @@ function taskMatchesKeeper(task: Task, keeperName: string, keeper: Keeper | null
   if (!task.assignee) return false
   const taskKeys = assigneeKeys(task.assignee)
   const keeperKeys = new Set([
-    ...keeperIdentityKeys(keeper?.keeper_id, keeper?.name ?? keeperName, keeper?.agent_name),
+    ...keeperIdentityKeys(keeper?.keeper_id, keeper?.name ?? keeperName),
     ...assigneeKeys(keeperName),
   ])
   return taskKeys.some(key => keeperKeys.has(key))

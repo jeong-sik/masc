@@ -217,7 +217,7 @@ function CharacterPlate({ name }: { name: string }) {
   const activityLabel = keeperActivity?.label ?? '마지막 확인'
   const ctxRatio = keeper?.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
-  const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
+  const keeperIdent = keeperIdentityHint(keeper?.name)
   const isKeeper = keeper != null
   const workerState = worker?.state
   const workerFocus = worker?.focus

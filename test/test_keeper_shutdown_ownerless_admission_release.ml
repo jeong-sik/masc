@@ -445,9 +445,7 @@ let test_predicate_answers_every_cleanup_reason () =
     check_reason
       "ownerless-dashboard-purge"
       (Dashboard_keeper_purge
-         { requested_name = "ownerless-dashboard-purge"
-         ; agent_name = "ownerless-dashboard-purge"
-         })
+         { requested_name = "ownerless-dashboard-purge" })
       ~is_removal_evidence:true)
 ;;
 
@@ -583,7 +581,7 @@ let pending_completion_operation name =
       (Finalized
          { evidence with completion = Completion_pending Dashboard_keeper_purged })
     ~cleanup_intent:
-      { reason = Dashboard_keeper_purge { requested_name = name; agent_name = name }
+      { reason = Dashboard_keeper_purge { requested_name = name }
       ; remove_session = true
       }
 ;;

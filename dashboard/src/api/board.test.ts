@@ -581,8 +581,7 @@ describe('fetchBoard', () => {
             key: 'keeper:analyst',
             display_name: 'analyst',
             raw: 'keeper-analyst-agent',
-            source: 'keeper_alias_contract',
-            runtime_agent_name: 'keeper-analyst-agent',
+            source: 'keeper_registry_name',
           },
         },
       ],
@@ -615,8 +614,7 @@ describe('fetchBoard', () => {
       kind: 'keeper',
       id: 'analyst',
       raw: 'keeper-analyst-agent',
-      source: 'keeper_alias_contract',
-      runtime_agent_name: 'keeper-analyst-agent',
+      source: 'keeper_registry_name',
     })
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('voter=')

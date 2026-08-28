@@ -25,7 +25,6 @@ let heartbeat ?(timestamp = "2026-08-21T12:00:00Z")
     ; "ts_unix", `Float 1787313600.0
     ; "channel", `String "heartbeat"
     ; "name", `String name
-    ; "agent_name", `String "codex"
     ; "trace_id", `String "trace-current"
     ; "message_count", `Int count
     ]

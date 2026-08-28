@@ -23,7 +23,7 @@ function selectedKeeperMatches(keeperName: string): boolean {
   const selected = selectedKeeper.value
   if (!selected) return false
   const trimmed = keeperName.trim()
-  return selected.name === trimmed || selected.agent_name === trimmed
+  return selected.name === trimmed
 }
 
 function baseAgentDirectoryRoute(): { tab: TabId; params: Record<string, string> } {

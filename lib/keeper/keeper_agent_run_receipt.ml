@@ -135,7 +135,6 @@ let finalize
   in
   let receipt =
     { Keeper_execution_receipt.keeper_name = meta.name
-    ; agent_name = meta.name
     ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
     ; turn_count = !receipt_turn_count_ref
     ; agent_core_turn_count = !receipt_turn_count_ref
@@ -247,7 +246,7 @@ let finalize
       Keeper_runtime_manifest.with_clock_refs ~clock_refs decision
     in
     Keeper_runtime_manifest.make ~ts:receipt.ended_at
-      ~keeper_name:receipt.keeper_name ~agent_name:receipt.agent_name
+      ~keeper_name:receipt.keeper_name
       ~trace_id:receipt.trace_id
       ~keeper_turn_id:manifest_keeper_turn_id ~event
       ?agent_core_turn_count

@@ -258,10 +258,7 @@ let dashboard_purge_cleanup requested_name
     : Shutdown_types.cleanup_intent
   =
   { reason =
-      Shutdown_types.Dashboard_keeper_purge
-        { requested_name
-        ; agent_name = meta.name
-        }
+      Shutdown_types.Dashboard_keeper_purge { requested_name }
   ; remove_session = true
   }
 ;;

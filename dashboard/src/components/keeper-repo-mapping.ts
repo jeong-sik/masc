@@ -339,9 +339,6 @@ export function KeeperRepoMapping() {
                 <div class="px-3 py-2.5 border-b border-card-border/30 bg-card/40 flex items-center justify-between gap-3 v2-monitoring-toolbar">
                   <div class="flex items-center gap-2 min-w-0">
                     <span class="text-xs font-semibold text-text-strong truncate">${keeperName}</span>
-                    ${keeper.agent_name ? html`
-                      <span class="text-3xs text-text-dim font-mono truncate">${keeper.agent_name}</span>
-                    ` : null}
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
                     ${changed ? html`

@@ -339,7 +339,7 @@ async function loadActivity(task: Task): Promise<void> {
 
   try {
     const keeper = findKeeper(task.assignee)
-    const timelineName = keeper?.agent_name ?? task.assignee
+    const timelineName = keeper?.name ?? task.assignee
     const isKeeper = keeper !== null
     const trajectoryName = isKeeper ? task.assignee : null
 

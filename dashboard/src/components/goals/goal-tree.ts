@@ -709,7 +709,6 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="text-sm font-semibold text-text-strong">${keeper.name}</div>
-          <div class="mt-1 text-2xs text-text-muted">${keeper.agent_name}</div>
         </div>
         <div class="flex flex-wrap justify-end gap-1.5">
           ${trust?.disposition ? html`

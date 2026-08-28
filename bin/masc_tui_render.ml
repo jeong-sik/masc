@@ -4305,10 +4305,18 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
       ("\xe2\x9c\x97", status)
     | Tui_decode.Standalone_no_retained_observation, _ -> ("\xc2\xb7", status)
   in
+  (* Why the lane cannot admit, where the cell used to restate that it cannot.
+     "no admitted slot" says the same thing the status word beside it already
+     says; the projection carries the reason -- an unconfigured lane and a lane
+     whose registry could not be read are different problems and the operator
+     acts on them differently -- and nothing drew it. *)
   let slots =
-    match lane.sl_admitted_slots with
-    | [] -> "no admitted slot"
-    | slots -> String.concat "," slots
+    match lane.sl_admitted_slots, lane.sl_admission_error with
+    | [], Some reason -> reason
+    | [], None -> "no admitted slot"
+    | admitted, None -> String.concat "," admitted
+    | admitted, Some reason ->
+      String.concat "," admitted ^ " \xc2\xb7 " ^ reason
   in
   let observed_slots =
     match lane.sl_selected_slots with

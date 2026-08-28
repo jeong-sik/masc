@@ -20,7 +20,6 @@ type derived_phase =
   | Phase_running
   | Phase_failing
   | Phase_compacting
-  | Phase_handing_off
   | Phase_draining
   | Phase_paused
   | Phase_stopped

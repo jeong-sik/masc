@@ -16,7 +16,7 @@ import {
 // in dashboard/src/api/schemas/keeper-composite.ts.
 const KSM_STATES = [
   'offline', 'running', 'failing', 'compacting',
-  'handing_off', 'draining', 'paused', 'stopped', 'crashed',
+      'draining', 'paused', 'stopped', 'crashed',
   'restarting',
 ]
 const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted']
@@ -69,11 +69,11 @@ describe('buildCompositeFsmSpec', () => {
     expect(ids).toEqual(KMC_STATES)
   })
 
-  it('total node count = 5 parents + 28 children = 33', () => {
+  it('total node count = 5 parents + 27 children = 32', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const childCount = KSM_STATES.length + KTC_STATES.length + KDP_STATES.length
       + KCL_STATES.length + KMC_STATES.length
-    expect(childCount).toBe(28)
+    expect(childCount).toBe(27)
     expect(spec.nodes).toHaveLength(5 + childCount)
   })
 
@@ -101,7 +101,7 @@ describe('buildCompositeFsmSpec', () => {
   })
 
   it('marks the active KSM child as warn for buffer-class phases', () => {
-    for (const phase of ['compacting', 'handing_off', 'draining', 'paused', 'restarting']) {
+    for (const phase of ['compacting', 'draining', 'paused', 'restarting']) {
       const spec = buildCompositeFsmSpec({ ...defaultParams, phase })
       expect(spec.nodes.find(n => n.id === `KSM:${phase}`)!.type).toBe('warn')
     }

@@ -65,7 +65,7 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
 /** Plain-english safety-property descriptions per invariant key. */
 const INVARIANT_DESCRIPTIONS: Record<string, string> = {
   phase_turn_alignment:
-    'KSM phase (Running / Compacting / HandingOff / …) 와 KTC turn lane 이 일치해야 함. drift 가 발생하면 두 state machine 이 keeper mode 에 대해 의견 불일치.',
+    'KSM phase (Running / Compacting / Draining / …) 와 KTC turn lane 이 일치해야 함. drift 가 발생하면 두 state machine 이 keeper mode 에 대해 의견 불일치.',
   no_runtime_before_measurement:
     'Runtime selection 은 measurement phase 가 auto-rule 을 capture 하기 전에 시작되면 안 됨. violation 은 보통 guardrail/drift check 없이 provider call 이 발사된 경우.',
   compaction_atomicity:

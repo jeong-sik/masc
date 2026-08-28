@@ -20,7 +20,7 @@ import type { Keeper, KeeperPhase } from '../types/core'
 
 const ALL_PHASES: KeeperPhase[] = [
   'Offline', 'Running', 'Failing', 'Compacting',
-  'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting',
+  'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting',
 ]
 
 function keeperInPhase(phase: KeeperPhase): Keeper {
@@ -71,11 +71,6 @@ describe('keeperDisplayStatus stays inside the token union', () => {
       'heartbeat alive with no lifecycle phase',
       { name: 'k', status: 'offline', last_heartbeat: new Date().toISOString() } as Keeper,
       'idle',
-    ],
-    [
-      'HandingOff via keeper.phase — PascalCase lowercases to handingoff, not handoff',
-      { name: 'k', status: 'offline', phase: 'HandingOff', last_heartbeat: new Date().toISOString() } as Keeper,
-      'handoff',
     ],
     ['backend status idle', { name: 'k', status: 'idle' } as Keeper, 'idle'],
     ['backend status listening', { name: 'k', status: 'listening' } as Keeper, 'listening'],

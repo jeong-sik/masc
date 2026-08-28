@@ -232,7 +232,6 @@ const RUNNING_PHASES_EXCLUDING_RESTARTING: ReadonlySet<string> = new Set<string>
   'Running',
   'Failing',
   'Compacting',
-  'HandingOff',
   'Draining',
 ])
 
@@ -268,7 +267,6 @@ const RUNNING_HEALTH: ReadonlySet<string> = new Set<string>([
 export const ATTENTION_PHASES: ReadonlySet<string> = new Set<string>([
   'Failing',
   'Compacting',
-  'HandingOff',
   'Draining',
   'Crashed',
   'Restarting',

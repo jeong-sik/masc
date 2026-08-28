@@ -102,7 +102,7 @@ export function phaseTokenFromKeeper(keeper: Keeper): KeeperPhaseToken {
  *  the same token vocabulary the rest of the dashboard uses, then maps to a
  *  Korean label from the fleet-tone SSOT (no parallel PHASE_LABEL_KO here —
  *  that table moved to `lib/fleet-tone.ts`). Previously returned the raw
- *  `lifecycle_phase` enum, which leaked "Running"/"Compacting"/"HandingOff"
+ *  `lifecycle_phase` enum, which leaked raw phase names
  *  into the UI. */
 export function keeperPhaseLabel(keeper: Keeper): string {
   if (keeper.config_error?.blocking === true) return '설정 차단'

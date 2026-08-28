@@ -52,7 +52,7 @@ describe('appendCompositeObservation', () => {
   })
 
   it('trims to maxEntries', () => {
-    const phases = ['Stable', 'Running', 'Compacting', 'HandingOff', 'Failing', 'Draining'] as const
+    const phases = ['Stable', 'Running', 'Compacting', 'Failing', 'Draining'] as const
     const observations = Array.from({ length: 30 }, (_, i) => obs({ ts: i, phase: phases[i % phases.length]! }))
     const extra = obs({ ts: 100, phase: 'Failing' })
     const result = appendCompositeObservation(observations, extra, 10)
@@ -111,7 +111,7 @@ describe('deriveTransitionHistory', () => {
   })
 
   it('trims to maxEntries', () => {
-    const phases = ['Stable', 'Running', 'Compacting', 'HandingOff', 'Failing'] as const
+    const phases = ['Stable', 'Running', 'Compacting', 'Failing'] as const
     const observations: CompositeObservation[] = []
     for (let i = 0; i < 50; i++) {
       observations.push(obs({ ts: i * 10, phase: phases[i % phases.length]! }))
@@ -205,10 +205,6 @@ describe('inferTransitionReason', () => {
     expect(result).toContain('compaction')
   })
 
-  it('returns reason for KSM to HandingOff', () => {
-    const result = inferTransitionReason('KSM', 'Running', 'HandingOff')
-    expect(result).toContain('인계')
-  })
 })
 
 describe('derivePhaseLog', () => {
@@ -233,7 +229,7 @@ describe('derivePhaseLog', () => {
   })
 
   it('trims to maxEntries', () => {
-    const phases = ['Stable', 'Running', 'Compacting', 'HandingOff', 'Failing'] as const
+    const phases = ['Stable', 'Running', 'Compacting', 'Failing'] as const
     const observations: CompositeObservation[] = []
     for (let i = 0; i < 50; i++) {
       observations.push(obs({ ts: i * 10, phase: phases[i % phases.length]! }))

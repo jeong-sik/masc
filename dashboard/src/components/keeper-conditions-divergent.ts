@@ -2,12 +2,9 @@
 // the current FSM phase, surfaced as amber chips in the Agent Modal.
 //
 // Why this matters: Keeper state-machine conditions drive the phase
-// transition function. When
-// the keeper is healthy, conditions are consistent with the phase —
+// transition function. When the keeper is healthy, conditions are consistent with the phase —
 // e.g. [phase=Running ∧ heartbeat_healthy=true]. A *divergence* is a
-// condition observed in a state the phase hasn't yet acknowledged,
-// e.g. [phase=Running ∧ context_handoff_needed=true]: the observer can
-// see the signal, but the FSM hasn't transitioned to HandingOff yet.
+// condition observed in a state the phase hasn't yet acknowledged.
 //
 // Showing all 16 booleans is noise; showing none hides the "why aren't
 // we transitioning?" signal. The middle ground is to surface only the
@@ -32,11 +29,6 @@ export const isTerminated = (p: KeeperPhase | null | undefined): boolean =>
 /** Rule table — each entry returns a ko-language reason when divergent,
  *  null when the condition is consistent with (or expected by) the phase. */
 const DIVERGENCE_RULES: Partial<Record<keyof KeeperConditions, DivergenceFn>> = {
-  context_handoff_needed: (v, p) =>
-    v && (p === 'Running' || p === 'Failing')
-      ? '핸드오프 필요 신호가 있지만 아직 HandingOff/Compacting으로 전환 전'
-      : null,
-
   stop_requested: (v, p) =>
     v && p !== 'Draining' && !isTerminated(p)
       ? '정지 요청됐으나 Draining 미진입'

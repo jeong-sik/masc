@@ -1038,14 +1038,6 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('T-9999')
   })
 
-  it('renders the handoff gloss and no event flush while HandingOff', () => {
-    const k = mkKeeper({ lifecycle_phase: 'HandingOff' })
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
-    expect(container.textContent).toContain('핸드오프 진행')
-    expect(container.querySelector('.drain-gloss')?.textContent).toContain('인계 중')
-    expect(container.querySelector('.drain-eventq')).toBeNull()
-  })
-
   it('lists queued stimuli from the waiting inventory while Draining', () => {
     const inventory = {
       schema: 'masc.dashboard.keeper_waiting_inventory.v3',

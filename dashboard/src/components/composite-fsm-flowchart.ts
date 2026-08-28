@@ -39,8 +39,6 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     ksm_failing --> ksm_running
     ksm_running --> ksm_compacting["Compacting"]
     ksm_compacting --> ksm_running
-    ksm_running --> ksm_handingoff["HandingOff"]
-    ksm_handingoff --> ksm_running
     ksm_running --> ksm_paused["Paused"]
     ksm_paused --> ksm_running
     ksm_running --> ksm_draining["Draining"]

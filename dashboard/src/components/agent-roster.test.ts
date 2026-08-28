@@ -556,13 +556,6 @@ describe('countRuntimeKinds', () => {
           keepalive_running: true,
         } as Keeper,
         {
-          name: 'handoff',
-          status: 'busy',
-          phase: 'HandingOff',
-          pipeline_stage: 'handoff',
-          keepalive_running: true,
-        } as Keeper,
-        {
           name: 'paused',
           status: 'paused',
           phase: 'Paused',
@@ -584,10 +577,10 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 1,
-      transientKeepers: 2,
+      transientKeepers: 1,
       offlineKeepers: 1,
-      keeperRows: 5,
-      totalRuntimes: 5,
+      keeperRows: 4,
+      totalRuntimes: 4,
     })
   })
 
@@ -1229,10 +1222,6 @@ describe('AgentRoster live-only cards', () => {
         phase: 'Compacting', pipeline_stage: 'compacting', keepalive_running: true,
       } as Keeper,
       {
-        name: 'handoff', status: 'busy',
-        phase: 'HandingOff', pipeline_stage: 'handoff', keepalive_running: true,
-      } as Keeper,
-      {
         name: 'drain', status: 'busy',
         phase: 'Draining', pipeline_stage: 'draining', keepalive_running: true,
       } as Keeper,
@@ -1251,7 +1240,7 @@ describe('AgentRoster live-only cards', () => {
     const rows = Array.from(
       container.querySelectorAll('[data-testid="keeper-operations-row"]'),
     ) as HTMLElement[]
-    expect(rows.length).toBe(7)
+    expect(rows.length).toBe(6)
     // every row carries a tone the rail CSS can paint
     // `busy` joins the valid set after the RuntimeBand 5th-value
     // extension; the CSS `[data-tone="busy"]` selectors in fleet.css are now
@@ -1263,18 +1252,17 @@ describe('AgentRoster live-only cards', () => {
     // band → tone: paused=warn, offline=idle (the unambiguous bands).
     // Draining routes to `paused` band → warn rail (matches
     // prototype `data.jsx:37,49` `pause` glyph / `warn` tone pairing). It
-    // is NOT in the transient group, so the transient-count chip drops
-    // from 4 to 3.
+    // is NOT in the transient group.
     expect(toneByName('rester')).toBe('warn')
     expect(toneByName('gone')).toBe('idle')
     expect(toneByName('drain')).toBe('warn')
-    for (const name of ['compact', 'handoff', 'restart']) {
+    for (const name of ['compact', 'restart']) {
       expect(toneByName(name)).toBe('busy')
     }
     const text = container.textContent ?? ''
-    expect(text).toContain('전이 중 · 3')
+    expect(text).toContain('전이 중 · 2')
     expect(text).toContain('일시정지 rows 2')
-    expect(text).toContain('전이 rows 3')
+    expect(text).toContain('전이 rows 2')
     expect(text).toContain('transient')
     expect(text).toContain('중지 rows 1')
   })

@@ -22,7 +22,7 @@ export function isObservedStall(
     // KSM stalled detection silently disabled for every non-terminal phase.
     if (value === 'failing') return observedForSec >= 90
     if (value === 'compacting') return observedForSec >= 90
-    if (value === 'handing_off' || value === 'draining') return observedForSec >= 60
+    if (value === 'draining') return observedForSec >= 60
     return false
   }
   if (key === 'turn') {
@@ -67,8 +67,6 @@ function laneMeaning(
           return { tone: 'warn', meaning: 'context overflow latched — healthy turn 재개 전 해소 필요' }
         case 'compacting':
           return { tone: 'warn', meaning: 'post-turn compaction 이 lifecycle 점유 중' }
-        case 'handing_off':
-          return { tone: 'warn', meaning: 'handoff 가 keeper 를 stop 방향으로 drain 중' }
         case 'draining':
           return { tone: 'warn', meaning: 'keeper 가 in-flight work 를 drain 중 (stop 전)' }
         default:

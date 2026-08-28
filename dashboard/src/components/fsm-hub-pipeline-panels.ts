@@ -160,7 +160,6 @@ export function OperationalMeaningPanel({
 const PHASE_BAR_FILL: Record<string, string> = {
   Running: 'var(--emerald)',
   Compacting: 'var(--amber-bright)',
-  HandingOff: 'var(--purple)',
   Failing: 'var(--color-status-err)',
   Draining: 'var(--color-status-warn)',
   Stable: 'var(--color-fg-muted)',
@@ -249,7 +248,6 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   offline: '키퍼가 아직 시작되지 않음',
   running: '키퍼가 활성 상태로 턴 실행 중',
   failing: '에러 발생, 재시도 또는 복구 진행',
-  handing_off: '다음 generation 으로 상태 이관 중',
   draining: '종료 전 현재 작업 마무리 중',
   paused: '운영자 pause 또는 재시도 한계',
   stopped: 'clean terminal stop',

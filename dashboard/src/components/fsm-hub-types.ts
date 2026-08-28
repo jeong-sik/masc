@@ -188,7 +188,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   // KSM
   running: PHASE_LABEL_KO.running,
   failing: PHASE_LABEL_KO.failing,
-  handing_off: PHASE_LABEL_KO.handoff,
   draining: PHASE_LABEL_KO.draining,
   offline: '오프라인',
   paused: PHASE_LABEL_KO.paused,
@@ -197,7 +196,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   restarting: PHASE_LABEL_KO.restarting,
   Running: PHASE_LABEL_KO.running,
   Compacting: PHASE_LABEL_KO.compacting,
-  HandingOff: PHASE_LABEL_KO.handoff,
   Failing: PHASE_LABEL_KO.failing,
   Crashed: PHASE_LABEL_KO.crashed,
   Offline: '오프라인',

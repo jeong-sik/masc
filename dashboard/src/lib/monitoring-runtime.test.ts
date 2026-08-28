@@ -82,10 +82,8 @@ describe('isTransientPhase', () => {
   // comment in `monitoring-runtime.ts`.
   it.each([
     ['Compacting', 'PascalCase KeeperPhase'],
-    ['HandingOff', 'PascalCase KeeperPhase'],
     ['Restarting', 'PascalCase KeeperPhase'],
     ['compacting', 'lowercase PipelineStage'],
-    ['handoff', 'lowercase PipelineStage'],
     ['restarting', 'lowercase PipelineStage'],
   ])('returns true for transient phase %s (%s)', (phase) => {
     expect(isTransientPhase(phase)).toBe(true)
@@ -295,21 +293,15 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.hint).toBe('오래 응답이 없어 실제 상태 확인이 필요합니다.')
   })
 
-  // The three autonomous transient FSM phases
-  // (Compacting / HandingOff / Restarting) route to the `transient` band.
+  // The autonomous transient FSM phases (Compacting / Restarting) route to
+  // the `transient` band.
   // `Draining` is NOT in this set — operator-initiated stop routes to the
   // `paused` band (see `Draining → paused band routing`
   // block below).
   //
-  // Wire spelling notes: composite.phase uses snake_case for `handing_off`
-  // but single-word lowercase for the rest (`compacting`/`restarting`) — see
-  // `keeper-store-normalize.ts:110` `BACKEND_PHASE_LOWERCASE_MAP`. `handoff`
-  // is the PipelineStage spelling (types/core.ts:945) used for
-  // `keeper.pipeline_stage`; it does not appear in the composite wire.
   describe('transient band routing', () => {
     const transientPhases: ReadonlyArray<[string, string]> = [
       ['compacting', 'lowercase composite.phase'],
-      ['handing_off', 'snake_case composite.phase (lowercase map SSOT)'],
       ['restarting', 'lowercase composite.phase'],
     ]
 
@@ -321,7 +313,7 @@ describe('summarizeKeeperMonitoring', () => {
             name: 'keeper-transient',
             status: 'busy',
             phase: 'Running',
-            pipeline_stage: phase === 'handing_off' ? 'handoff' : phase,
+            pipeline_stage: phase,
           } as Keeper,
           { keeper: 'keeper-transient', phase } as unknown as Parameters<
             typeof summarizeKeeperMonitoring
@@ -334,7 +326,6 @@ describe('summarizeKeeperMonitoring', () => {
 
     it.each([
       ['Compacting', 'PascalCase keeper.phase'],
-      ['HandingOff', 'PascalCase keeper.phase'],
       ['Restarting', 'PascalCase keeper.phase'],
     ] as const)(
       'routes %s (%s) to the transient band',
@@ -343,7 +334,7 @@ describe('summarizeKeeperMonitoring', () => {
           name: 'keeper-transient-pascal',
           status: 'busy',
           phase,
-          pipeline_stage: phase === 'HandingOff' ? 'handoff' : (phase.toLowerCase() as PipelineStage),
+          pipeline_stage: phase.toLowerCase() as PipelineStage,
         } as Keeper)
         expect(summary.band.key).toBe('transient')
       },

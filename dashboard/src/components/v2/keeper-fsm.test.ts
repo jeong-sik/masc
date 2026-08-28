@@ -21,13 +21,12 @@ import {
   fsmActions,
 } from './keeper-fsm'
 
-// The 13 canonical PascalCase tokens of `KeeperPhase` (live wire).
+// The canonical PascalCase tokens of `KeeperPhase` (live wire).
 const ALL_PHASES: readonly KeeperPhase[] = [
   'Offline',
   'Restarting',
   'Running',
   'Compacting',
-  'HandingOff',
   'Failing',
   'Draining',
   'Paused',
@@ -38,7 +37,7 @@ const ALL_PHASES: readonly KeeperPhase[] = [
 describe('keeper-fsm SSOT closed-sum', () => {
   it('FSM_STATES matches the canonical phase set', () => {
     expect(new Set(FSM_STATES)).toEqual(new Set([
-      'Offline', 'Restarting', 'Running', 'Compacting', 'HandingOff',
+      'Offline', 'Restarting', 'Running', 'Compacting',
       'Failing', 'Draining', 'Paused', 'Stopped',
       'Crashed',
     ]))
@@ -54,9 +53,9 @@ describe('keeper-fsm SSOT closed-sum', () => {
     expect(typeof pulse).toBe('boolean')
   })
 
-  it('PHASE_PULSE: only the 5 active/transient phases pulse (prototype verbatim)', () => {
+  it('PHASE_PULSE: only active/transient phases pulse', () => {
     const expectedPulsing = new Set<KeeperPhase>([
-      'Running', 'Compacting', 'HandingOff', 'Restarting', 'Failing',
+      'Running', 'Compacting', 'Restarting', 'Failing',
     ])
     for (const phase of ALL_PHASES) {
       expect(phasePulse(phase)).toBe(expectedPulsing.has(phase))
@@ -77,7 +76,7 @@ describe('keeper-fsm SSOT closed-sum', () => {
 
   it('phaseStatus buckets: run/pause/off partition (prototype PHASE_STATUS)', () => {
     const expectedRun = new Set<KeeperPhase>([
-      'Running', 'Compacting', 'HandingOff', 'Restarting', 'Failing',
+      'Running', 'Compacting', 'Restarting', 'Failing',
     ])
     const expectedPause = new Set<KeeperPhase>(['Paused', 'Draining'])
     for (const phase of ALL_PHASES) {
@@ -92,7 +91,7 @@ describe('keeper-fsm SSOT closed-sum', () => {
     expect(Array.isArray(actions)).toBe(true)
     // transient / terminal phases expose no actions
     const transientOrTerminal: ReadonlySet<KeeperPhase> = new Set([
-      'Compacting', 'HandingOff', 'Draining', 'Restarting',
+      'Compacting', 'Draining', 'Restarting',
     ])
     if (transientOrTerminal.has(phase)) {
       expect(actions).toHaveLength(0)

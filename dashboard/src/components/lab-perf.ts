@@ -43,7 +43,7 @@ const MSGS = [
   '컨텍스트 임계치 접근',
   'masc_compact 완료 (−61%)',
   'masc_trace_window 실패',
-  'HandingOff 인계 시작',
+  '태스크 인계 메모 기록',
   'preflight green',
   'round-lock 재진입 차단',
   'PR 코멘트 동기화',

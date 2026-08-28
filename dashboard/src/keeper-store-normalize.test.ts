@@ -7,7 +7,6 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('running')).toBe('Running')
     expect(toKeeperPhase('failing')).toBe('Failing')
     expect(toKeeperPhase('compacting')).toBe('Compacting')
-    expect(toKeeperPhase('handing_off')).toBe('HandingOff')
     expect(toKeeperPhase('draining')).toBe('Draining')
     expect(toKeeperPhase('paused')).toBe('Paused')
     expect(toKeeperPhase('stopped')).toBe('Stopped')
@@ -18,12 +17,10 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
   it('accepts PascalCase input for forward compatibility', () => {
     expect(toKeeperPhase('Offline')).toBe('Offline')
     expect(toKeeperPhase('Running')).toBe('Running')
-    expect(toKeeperPhase('HandingOff')).toBe('HandingOff')
   })
 
   it('trims surrounding whitespace before matching', () => {
     expect(toKeeperPhase(' running ')).toBe('Running')
-    expect(toKeeperPhase(' HandingOff ')).toBe('HandingOff')
   })
 
   it('returns null for unknown or empty values', () => {
@@ -31,6 +28,8 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase(undefined)).toBeNull()
     expect(toKeeperPhase('')).toBeNull()
     expect(toKeeperPhase('unknown_phase')).toBeNull()
+    expect(toKeeperPhase('handing_off')).toBeNull()
+    expect(toKeeperPhase('HandingOff')).toBeNull()
     expect(toKeeperPhase('RUNNING')).toBeNull()
   })
 })
@@ -59,13 +58,6 @@ describe('normalizeKeepers phase field', () => {
     expect(keeper?.lifecycle_phase).toBe('Offline')
     expect(keeper?.pipeline_stage).toBe('offline')
     expect(keeper?.pipeline_stage_detail).toBe('launch_pending_no_fiber')
-  })
-
-  it('normalizes handing_off to HandingOff', () => {
-    const [keeper] = normalizeKeepers([
-      { name: 'handoff-test', status: 'active', phase: 'handing_off' },
-    ])
-    expect(keeper?.phase).toBe('HandingOff')
   })
 
   it('returns null for unknown phase', () => {

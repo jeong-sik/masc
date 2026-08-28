@@ -47,11 +47,10 @@ describe('keeperStatusTone', () => {
   })
   it('maps transient phases to busy (working-through, not paused)', () => {
     // Fleet SSOT PHASE_TONE (lib/fleet-tone.ts) classifies the transient
-    // FSM phases (Compacting / HandingOff / Restarting) as `busy` — the
+    // FSM phases (Compacting / Restarting) as `busy` — the
     // blue rail, not the amber pause pill. They are operator-initiated
     // movement, not a stopped runtime.
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Compacting' }))).toBe('busy')
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'HandingOff' }))).toBe('busy')
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Restarting' }))).toBe('busy')
   })
   it('maps operator-initiated Draining to warn (not busy)', () => {
@@ -101,7 +100,6 @@ describe('keeperPhaseLabel', () => {
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Running' }))).toBe('실행 중')
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Compacting' }))).toBe('압축 중')
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Failing' }))).toBe('오류 발생')
-    expect(keeperPhaseLabel(mk({ lifecycle_phase: 'HandingOff' }))).toBe('인계 중')
   })
   it('collapses unknown tokens to the 확인 필요 fallback (no raw wire string leak)', () => {
     // Closed-sum SSOT: phaseTokenFromKeeper returns 'unknown' for unmapped
@@ -146,7 +144,6 @@ describe('keeperFleetTone', () => {
 describe('phaseTokenFromKeeper', () => {
   it('lowercases PascalCase lifecycle_phase to the closed token space', () => {
     expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'Compacting' }))).toBe('compacting')
-    expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'HandingOff' }))).toBe('handoff')
     expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'Draining' }))).toBe('draining')
   })
   it('returns unknown for tokens outside the closed sum', () => {

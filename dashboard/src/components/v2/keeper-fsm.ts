@@ -35,13 +35,12 @@ export interface FsmAction {
   readonly danger?: boolean
 }
 
-// The 12 canonical FSM phases (prototype FSM_STATES).
+// The canonical FSM phases.
 export const FSM_STATES = [
   'Offline',
   'Restarting',
   'Running',
   'Compacting',
-  'HandingOff',
   'Failing',
   'Draining',
   'Paused',
@@ -49,13 +48,12 @@ export const FSM_STATES = [
   'Crashed',
 ] as const
 
-// phase → status-dot tone (11 phases collapse into 5 buckets).
+// phase → status-dot tone.
 const PHASE_TONE: Readonly<Record<KeeperPhase, KeeperTone>> = {
   Running: 'ok',
   Paused: 'warn',
   Draining: 'warn',
   Compacting: 'busy',
-  HandingOff: 'busy',
   Restarting: 'busy',
   Failing: 'bad',
   Crashed: 'bad',
@@ -68,7 +66,6 @@ const PHASE_TONE: Readonly<Record<KeeperPhase, KeeperTone>> = {
 const PHASE_PULSE: Readonly<Record<KeeperPhase, boolean>> = {
   Running: true,
   Compacting: true,
-  HandingOff: true,
   Restarting: true,
   Failing: true,
   Paused: false,
@@ -78,13 +75,12 @@ const PHASE_PULSE: Readonly<Record<KeeperPhase, boolean>> = {
   Offline: false,
 }
 
-// phase → KR hover gloss. 12 entries verbatim from prototype data.jsx:19-32.
+// phase → KR hover gloss.
 const PHASE_INFO: Readonly<Record<KeeperPhase, string>> = {
   Offline: '오프라인 — 실행 중이 아님',
   Restarting: '재시작 중',
   Running: '실행 중 — 작업/라운드 순환',
   Compacting: '컨텍스트 압축 중',
-  HandingOff: '작업을 다른 keeper 에게 인계하는 중',
   Failing: '실패 처리 중',
   Draining: '정상 종료를 위해 작업을 비우는 중',
   Paused: '슈퍼바이저가 일시정지함',
@@ -96,13 +92,12 @@ const PHASE_INFO: Readonly<Record<KeeperPhase, string>> = {
 const A_STOP: FsmAction = { id: 'stop', label: '중지', glyph: '⏹', via: 'Draining', to: 'Stopped', ms: 1500, danger: true, hint: '작업을 비우고 종료 (Drain → Stopped)' }
 
 // phase → ordered operator actions. Phases absent here (Compacting,
-// HandingOff, Draining, Restarting) expose no action — they are
+// Draining, Restarting) expose no action — they are
 // transient or terminal.
 const FSM_ACTIONS: Readonly<Partial<Record<KeeperPhase, readonly FsmAction[]>>> = {
   Running: [
     { id: 'pause', label: '일시정지', glyph: '⏸', to: 'Paused', hint: '슈퍼바이저가 잠시 멈춤 — 컨텍스트·소유 태스크 보존, 즉시 재개 가능' },
     { id: 'compact', label: '컴팩션', glyph: '◉', via: 'Compacting', to: 'Running', ms: 1700, hint: '컨텍스트를 지금 압축하고 실행 복귀' },
-    { id: 'handoff', label: '핸드오프', glyph: '⇄', via: 'HandingOff', to: 'Stopped', ms: 1700, hint: '소유 태스크를 인계하고 이 세션 정리' },
     A_STOP,
   ],
   Paused: [
@@ -127,7 +122,6 @@ const FSM_ACTIONS: Readonly<Partial<Record<KeeperPhase, readonly FsmAction[]>>> 
 const RUN_PHASES: ReadonlySet<KeeperPhase> = new Set<KeeperPhase>([
   'Running',
   'Compacting',
-  'HandingOff',
   'Restarting',
   'Failing',
 ])
@@ -170,7 +164,6 @@ const KEEPER_PHASE_REGISTRY: Readonly<Record<string, true>> = Object.freeze(
     Restarting: true,
     Running: true,
     Compacting: true,
-    HandingOff: true,
     Failing: true,
     Draining: true,
     Paused: true,

@@ -1298,9 +1298,16 @@ let recovered_work_for_base_path ~base_path =
           ({ judgment = (Keeper_approval_queue_rules_types.Approve | Keeper_approval_queue_rules_types.Deny); _ }
            as summary) ->
         Some (Finalize_judgment (entry, summary))
+      (* #31474 classified the cancellation quarantine as retryable for the
+         drain path but left the BOOT recovery filter skipping it — so a
+         restart, the very event that creates these rows, also refused to
+         clean them. Route it to worker activation here too: [Activate_worker]
+         feeds [start_auto_judge_entry], which dispatches retry for the
+         retryable class. *)
+      | Auto_judge_retryable_cancellation ->
+        Some (Activate_worker entry)
       | Auto_judge_finalizable
           { judgment = Keeper_approval_queue_rules_types.Require_human; _ }
-      | Auto_judge_retryable_cancellation
       | Auto_judge_ineligible ->
         None
     in

@@ -324,6 +324,8 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   in
   let base_path = config.Workspace.base_path in
   let cancel_keeper = "event-source-ref-cancel-source" in
+  let orphan_keeper = "event-source-ref-orphan-source" in
+  let dormant_keeper = "event-source-ref-dormant-source" in
   let transfer_keeper = "event-source-ref-transfer-source" in
   let target_keeper = "event-source-ref-target" in
   let cancel_meta =
@@ -335,10 +337,15 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   let target_meta =
     make_meta ~name:target_keeper ~trace_id:"event-source-ref-target-trace"
   in
+  let dormant_meta =
+    make_meta ~name:dormant_keeper ~trace_id:"event-source-ref-dormant-trace"
+  in
   let stimulus post_id arrived_at : Keeper_event_queue.stimulus =
     { post_id; urgency = Normal; arrived_at; payload = Bootstrap }
   in
   let cancelled_source = stimulus "event-source-ref-cancel" 1.0 in
+  let orphan_source = stimulus "event-source-ref-orphan" 1.5 in
+  let dormant_source = stimulus "event-source-ref-dormant" 1.75 in
   let transferred_source = stimulus "event-source-ref-transfer" 2.0 in
   let unrelated_source = stimulus "event-source-ref-unrelated" 3.0 in
   let later_unrelated_source = stimulus "event-source-ref-later" 4.0 in
@@ -515,6 +522,76 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
          (cancel_replay_response
           |> Yojson.Safe.Util.member "result"
           |> result_status);
+       enqueue orphan_keeper orphan_source;
+       let orphan_selection =
+         load_state orphan_keeper |> selection_for orphan_source
+       in
+       let orphan_cancel_request =
+         request_body
+           "cancel"
+           orphan_selection
+           [ ( "operator_operation_id"
+             , `String "event-source-ref-orphan-cancel-operation" )
+           ; "reason", `String "source keeper was removed"
+           ]
+       in
+       let orphan_raw, orphan_response =
+         post_event_operator
+           ~keeper_name:orphan_keeper
+           orphan_cancel_request
+       in
+       check bool "orphan cancellation HTTP request succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" orphan_raw);
+       check string "orphan cancellation applies once" "applied"
+         (orphan_response |> Yojson.Safe.Util.member "result" |> result_status);
+       check int "orphan cancellation removes the exact source" 0
+         (Keeper_event_queue_state.pending (load_state orphan_keeper)
+          |> Keeper_event_queue.length);
+       let orphan_replay_raw, orphan_replay_response =
+         post_event_operator
+           ~keeper_name:orphan_keeper
+           orphan_cancel_request
+       in
+       check bool "orphan cancellation replay succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" orphan_replay_raw);
+       check string "orphan replay uses its durable receipt"
+         "already_applied"
+         (orphan_replay_response
+          |> Yojson.Safe.Util.member "result"
+          |> result_status);
+       check bool "orphan cancellation releases lifecycle reservation" true
+         (Option.is_none
+            (Masc.Keeper_lifecycle_reservation.current
+               ~base_path
+               ~keeper_name:orphan_keeper));
+       Masc.Keeper_meta_store.replace_snapshot config dormant_meta
+       |> require_ok "persist dormant keeper metadata";
+       enqueue dormant_keeper dormant_source;
+       let dormant_selection =
+         load_state dormant_keeper |> selection_for dormant_source
+       in
+       let dormant_request =
+         request_body
+           "cancel"
+           dormant_selection
+           [ ( "operator_operation_id"
+             , `String "event-source-ref-dormant-cancel-operation" )
+           ; "reason", `String "must not cancel a dormant keeper"
+           ]
+       in
+       let dormant_raw, _ =
+         post_event_operator ~keeper_name:dormant_keeper dormant_request
+       in
+       check bool "dormant keeper cancellation is rejected" true
+         (String.starts_with ~prefix:"HTTP/1.1 409" dormant_raw);
+       check int "dormant keeper retains its source" 1
+         (Keeper_event_queue_state.pending (load_state dormant_keeper)
+          |> Keeper_event_queue.length);
+       check bool "rejected cancellation releases lifecycle reservation" true
+         (Option.is_none
+            (Masc.Keeper_lifecycle_reservation.current
+               ~base_path
+               ~keeper_name:dormant_keeper));
        let transfer_selection =
          load_state transfer_keeper |> selection_for transferred_source
        in

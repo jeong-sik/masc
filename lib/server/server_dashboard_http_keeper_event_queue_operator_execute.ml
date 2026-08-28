@@ -448,8 +448,55 @@ let run_admitted_request
 
 let run_fresh_request ~config ~base_path ~keeper_name request =
   match Keeper_registry.get ~base_path keeper_name with
-  | None -> Error "keeper is not registered"
-  | Some entry ->
+  | None ->
+    (match request with
+     | Transfer _ | Reprioritize _ -> Error "keeper is not registered"
+     | Cancel _ ->
+       (* Cancellation is the recovery path for a queue whose owner was
+          intentionally removed.  Reserve the lifecycle key before proving
+          that both live and durable owner identities are absent; registration
+          and Keeper creation use the same reservation boundary, so no owner
+          can appear between admission and the durable transition commit. *)
+       (match
+          Keeper_lifecycle_reservation.acquire
+            ~base_path
+            ~keeper_name
+            ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
+        with
+        | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+          Error
+            ("keeper lifecycle is reserved: "
+             ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
+        | Ok token ->
+          let release () =
+            match Keeper_lifecycle_reservation.release token with
+            | Keeper_lifecycle_reservation.Released -> ()
+            | ( Keeper_lifecycle_reservation.Release_missing
+              | Keeper_lifecycle_reservation.Release_not_owner _ ) as outcome ->
+              Log.Keeper.error
+                "orphan event cancellation reservation release failed keeper=%s outcome=%s"
+                keeper_name
+                (Keeper_lifecycle_reservation.release_outcome_to_string outcome)
+          in
+          Fun.protect
+            ~finally:(fun () -> Eio.Cancel.protect release)
+            (fun () ->
+               match Keeper_registry.get ~base_path keeper_name with
+               | Some _ -> Error "keeper registered during orphan cancellation admission"
+               | None ->
+                 (match Keeper_meta_store.read_meta config keeper_name with
+                  | Error detail ->
+                    Error ("keeper metadata is unavailable: " ^ detail)
+                  | Ok (Some _) ->
+                    Error
+                      "keeper metadata exists; boot or resume the owner before cancelling events"
+                  | Ok None ->
+                    run_admitted_request
+                      ~config
+                      ~base_path
+                      ~keeper_name
+                      request))))
+  | Some _ ->
     (match
        Keeper_owner_registry.run_maintenance_if_idle
          ~base_path

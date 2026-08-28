@@ -59,13 +59,17 @@ export interface StandaloneLanesSnapshot {
   lanes: StandaloneLaneSnapshotRow[]
 }
 
-const LANE_IDS: readonly string[] = [
+// The four registry spellings come from Exact_lane_run_registry.lane_key and
+// the fifth from Runtime.verifier_exact_lane_id — the language-boundary copy,
+// pinned to those sources by standalone-lanes-parity.test.ts. `satisfies`
+// keeps this list and the StandaloneLaneId union from drifting apart.
+export const LANE_IDS = [
   'board_attention_exact',
   'hitl_auto_judge',
   'librarian_exact',
   'compaction_exact',
   'verifier_exact',
-]
+] as const satisfies readonly StandaloneLaneId[]
 const STATUSES: readonly string[] = ['running', 'idle', 'degraded', 'no_retained_observation', 'unavailable']
 const CONFIGURATION_STATES: readonly string[] = ['ready', 'degraded', 'unconfigured', 'unavailable']
 const OUTCOMES: readonly string[] = ['succeeded', 'failed', 'cancelled']
@@ -106,7 +110,7 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
   const laneId = string(raw.lane_id, `${context}.lane_id`)
   const status = string(raw.status, `${context}.status`)
   const configurationState = string(raw.configuration_state, `${context}.configuration_state`)
-  if (!LANE_IDS.includes(laneId)) fail(`${context}.lane_id is unknown`)
+  if (!(LANE_IDS as readonly string[]).includes(laneId)) fail(`${context}.lane_id is unknown`)
   if (!STATUSES.includes(status)) fail(`${context}.status is unknown`)
   if (!CONFIGURATION_STATES.includes(configurationState)) {
     fail(`${context}.configuration_state is unknown`)

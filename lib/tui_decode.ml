@@ -3301,12 +3301,11 @@ let decode_standalone_lanes_snapshot json =
   let* items = required_list_field json "lanes" in
   let* sls_lanes = decode_list "lanes" decode_standalone_lane items in
   let expected_lane_ids =
-    [ "board_attention_exact"
-    ; "hitl_auto_judge"
-    ; "librarian_exact"
-    ; "compaction_exact"
-    ; Runtime.verifier_exact_lane_id
-    ]
+    (* The registry owns the exact-lane spellings; only the verifier lane
+       lives outside it. Spelling them here again was the drift the
+       lane_key export exists to close. *)
+    Runtime.verifier_exact_lane_id
+    :: List.map Exact_lane_run_registry.lane_key Exact_lane_run_registry.all_lanes
     |> List.sort String.compare
   in
   let observed_lane_ids =
@@ -4090,7 +4089,11 @@ let decode_librarian_run_page json =
     | [] -> Ok None
     | run :: rest ->
         let* lane = required_string_field run "lane" in
-        if String.equal lane "librarian_exact" then
+        if
+          String.equal
+            lane
+            (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Librarian)
+        then
           let* run_id = required_string_field run "run_id" in
           Ok (Some run_id)
         else find_librarian rest

@@ -54,6 +54,51 @@ let test_the_detail_pane_compares_before_repeating_the_operation () =
        ~fields:[ "gp_display_tool"; "gp_operation" ]
      > 1)
 
+(* The subject column took [cols - 76] -- everything the fixed parts did not
+   use. On rows whose subject is a keeper name, that spent ninety cells on
+   [edgar.a.poe] and left the recurrence past it reading [daily 08:00:00 A~]:
+   the timezone, which is the part of a recurrence a reader cannot infer.
+
+   Measured from the rows now, the way the Approvals and Fusion tables measure
+   theirs. The rule that builds the subject moved out of the row loop for it,
+   so the width and the cell cannot read different strings. *)
+let test_the_schedule_subject_is_measured_not_given_the_line () =
+  (* Twice: once to measure the column, once to fill the cell. One call would
+     mean the width came from somewhere else, which is the state this replaced. *)
+  Alcotest.(check int) "one rule builds the subject, and the width reads it" 2
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_schedule_list" ~callee:"schedule_row_subject");
+  Alcotest.(check bool) "the column is measured against the rows" true
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"render_schedule_list" ~callees:[]
+       ~identifiers:[ "subject_width" ]
+     > 0)
+
+(* The Lanes summary drew one mark for four states while the style beside it
+   was green, red or grey. On a column of identical marks the lane failing 133
+   of 1095 runs looked exactly like the four that were fine, and the only two
+   channels that separated them were a colour and a word.
+
+   [standalone_lane_row] is in the same unlinkable executable, so the marks are
+   asserted here: three distinct ones, matching the three the style makes. *)
+let test_a_lane_mark_says_what_its_colour_says () =
+  (* Each mark separately, not three occurrences of any of them: folding two
+     states back onto one mark leaves the total at three and a count would
+     still pass. This failed to catch exactly that before it was written this
+     way. *)
+  List.iter
+    (fun (mark, what) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the %s class has its own mark" what)
+        true
+        (Ast_grep.count_string_literals_in_value_binding ~module_path:render
+           ~binding_name:"standalone_lane_row" ~literals:[ mark ]
+         > 0))
+    [ ("\xe2\x97\x8f", "running or idle")
+    ; ("\xe2\x9c\x97", "degraded or unavailable")
+    ; ("\xc2\xb7", "nothing retained")
+    ]
+
 let () =
   Alcotest.run "masc_tui_approval_row_wiring"
     [ ( "approvals"
@@ -64,5 +109,9 @@ let () =
         ; Alcotest.test_case "the operation is compared before repeating"
             `Quick
             test_the_detail_pane_compares_before_repeating_the_operation
+        ; Alcotest.test_case "a lane mark says what its colour says" `Quick
+            test_a_lane_mark_says_what_its_colour_says
+        ; Alcotest.test_case "the schedule subject is measured" `Quick
+            test_the_schedule_subject_is_measured_not_given_the_line
         ] )
     ]

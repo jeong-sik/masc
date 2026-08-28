@@ -3205,7 +3205,12 @@ let standalone_lane_status_to_string = function
   | Standalone_running -> "running"
   | Standalone_idle -> "idle"
   | Standalone_degraded -> "degraded"
-  | Standalone_no_retained_observation -> "no retained observation"
+  (* Thirteen cells, not twenty-three. This is what the screen prints in a
+     column sized for the other four words, and the long spelling pushed its
+     whole row nine columns right of every other one. The row already says
+     the rest -- [runs 0], [observed none] -- so the state word only has to
+     name the state. *)
+  | Standalone_no_retained_observation -> "none retained"
   | Standalone_unavailable -> "unavailable"
 
 let decode_standalone_lane_slot_count json =

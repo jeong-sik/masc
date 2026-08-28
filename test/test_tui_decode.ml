@@ -2568,9 +2568,27 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
         (Tui_decode.standalone_lane_status_to_string first.sl_status);
       let compaction = List.nth snapshot.sls_lanes 3 in
       Alcotest.(check string)
-        "no retained observation"
-        "no retained observation"
+        "none retained"
+        "none retained"
         (Tui_decode.standalone_lane_status_to_string compaction.sl_status)
+
+(* The screen draws these words in a column sized for the longest one. It was
+   sized fourteen and this said twenty-three, so the Compaction row's whole
+   right-hand side sat nine columns clear of every other row. *)
+let test_every_lane_status_word_fits_its_column () =
+  List.iter
+    (fun status ->
+      let word = Tui_decode.standalone_lane_status_to_string status in
+      Alcotest.(check bool)
+        (Printf.sprintf "%s fits" word)
+        true
+        (String.length word <= 14))
+    [ Tui_decode.Standalone_running
+    ; Tui_decode.Standalone_idle
+    ; Tui_decode.Standalone_degraded
+    ; Tui_decode.Standalone_unavailable
+    ; Tui_decode.Standalone_no_retained_observation
+    ]
 
 let test_decode_standalone_lanes_rejects_duplicate_ids () =
   let duplicate = standalone_lane_json "board_attention_exact" "Board" in
@@ -4677,6 +4695,8 @@ let () =
           test_decode_standalone_lane_keeps_the_run_start;
         Alcotest.test_case "rejects duplicate lane ids" `Quick
           test_decode_standalone_lanes_rejects_duplicate_ids;
+        Alcotest.test_case "every lane status word fits its column" `Quick
+          test_every_lane_status_word_fits_its_column;
       ] );
     ( "decode_lane_runs",
       [

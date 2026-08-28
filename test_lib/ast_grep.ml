@@ -227,6 +227,20 @@ let count_field_accesses_outside_calls_in_value_binding
       | _ -> false)
 ;;
 
+(* String literals a binding draws, by value. A screen mark is a literal, and
+   a table that draws one mark for several states says less than the style
+   beside it does -- which is a thing to assert, and not one the type checker
+   can. Keeping the AST here means a caller needs no Ppxlib of its own. *)
+let count_string_literals_in_value_binding ~module_path ~binding_name ~literals =
+  count_expressions_outside_calls_in_value_binding ~module_path ~binding_name
+    ~callees:[]
+    ~matches:(fun expression ->
+      match expression.pexp_desc with
+      | Pexp_constant { pconst_desc = Pconst_string (text, _, _); _ } ->
+        List.mem text literals
+      | _ -> false)
+;;
+
 let count_identifiers_outside_calls_in_value_binding
       ~module_path
       ~binding_name

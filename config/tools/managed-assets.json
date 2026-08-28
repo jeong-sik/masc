@@ -9,6 +9,7 @@
     "analyze_image.toml",
     "keeper_artifact_read.toml",
     "keeper_broadcast.toml",
+    "keeper_capability_search.toml",
     "keeper_composition_cancel.toml",
     "keeper_composition_status.toml",
     "keeper_context_status.toml",

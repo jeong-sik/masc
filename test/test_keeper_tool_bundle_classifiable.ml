@@ -464,16 +464,83 @@ let test_tools_list_reads_the_supplied_capability_surface () =
     check string "metadata did not widen the frozen Tool surface"
       "outside_tool_surface"
       Yojson.Safe.Util.(descriptor |> member "availability" |> to_string);
+    let search_tool =
+      match
+        List.find_opt
+          (fun (tool : Agent_core.Tool.t) ->
+             String.equal tool.schema.name "keeper_capability_search")
+          tools
+      with
+      | Some tool -> tool
+      | None -> fail "keeper_capability_search is absent from the supplied surface"
+    in
     let search =
       run_tool
         ~tool_use_id:"bundle-capability-search-scope"
-        tool
-        (`Assoc [ "query", `String "board" ])
+        search_tool
+        (`Assoc [ "query", `String "tool_read_file" ])
       |> decode_tool_json ~base_path:config.base_path
     in
-    check string "query names its intentionally narrower boundary"
-      "active_tools_only"
-      Yojson.Safe.Util.(search |> member "search_scope" |> to_string)
+    check string "search uses the frozen capability authority"
+      "frozen_capability_surface"
+      Yojson.Safe.Util.(search |> member "search_scope" |> to_string);
+    check string "search reports the supplied surface digest"
+      (Keeper_capability_surface.digest capability_surface)
+      Yojson.Safe.Util.(search |> member "surface_digest" |> to_string);
+    let matches = Yojson.Safe.Util.(search |> member "matches" |> to_list) in
+    check bool "search includes an outside Tool candidate" true
+      (List.exists
+         (fun row ->
+            String.equal
+              "outside_tool_surface"
+              Yojson.Safe.Util.(
+                row
+                |> member "candidate"
+                |> member "capability"
+                |> member "availability"
+                |> to_string))
+         matches)
+;;
+
+let test_nested_plan_search_keeps_frozen_surface_identity () =
+  with_bundle_tools ~capability_tool_groups:[ "board" ]
+  @@ fun config _meta _snapshot _composition_plan_index capability_surface tools ->
+  let plan_tool =
+    match
+      List.find_opt
+        (fun (tool : Agent_core.Tool.t) ->
+           String.equal
+             tool.schema.name
+             Keeper_tool_composition_catalog.plan_execute_tool_name)
+        tools
+    with
+    | Some tool -> tool
+    | None -> fail "keeper_plan_execute is absent from the supplied surface"
+  in
+  let result =
+    run_tool
+      ~tool_use_id:"bundle-nested-capability-search"
+      plan_tool
+      (`Assoc
+         [ ( "nodes"
+           , `List
+               [ `Assoc
+                   [ "id", `String "search"
+                   ; "tool", `String "keeper_capability_search"
+                   ; ( "input"
+                     , `Assoc
+                         [ "kind", `String "literal"
+                         ; ( "value"
+                           , `Assoc [ "query", `String "tool_read_file" ] )
+                         ] )
+                   ]
+               ] )
+         ])
+    |> decode_tool_json ~base_path:config.base_path
+    |> Yojson.Safe.to_string
+  in
+  check bool "nested search reports the same frozen surface digest" true
+    (contains ~needle:(Keeper_capability_surface.digest capability_surface) result)
 ;;
 
 let run_composition_tool ?expected_failure (tool : Agent_core.Tool.t) =
@@ -790,6 +857,8 @@ let () =
             test_narrow_surface_controls_production_bundle
         ; test_case "tools list reads supplied capability surface" `Quick
             test_tools_list_reads_the_supplied_capability_surface
+        ; test_case "nested search keeps frozen surface identity" `Quick
+            test_nested_plan_search_keeps_frozen_surface_identity
         ; test_case "the skill tool serves the body" `Quick
             test_the_skill_tool_serves_the_body
         ; test_case "a revisionless ask is taught the exact reference" `Quick

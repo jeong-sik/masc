@@ -2,22 +2,24 @@
     catalog. SQLite FTS5 owns tokenization and BM25 ranking; this module adds
     no stop-word, substring, regular-expression, or intent heuristics. *)
 
-type document =
-  { id : string
+type 'a document =
+  { payload : 'a
   ; name : string
   ; description : string
   ; category : string
+  ; invocation_name : string option
   }
 
-type hit =
-  { document : document
-  ; rank : float
+type 'a hit =
+  { document : 'a document
+  ; bm25 : float
   }
 
 type error =
   | Empty_query
+  | Frozen_surface_required
   | Index_unavailable of string
   | Invalid_query of string
 
-val search : query:string -> document list -> (hit list, error) result
+val search : query:string -> 'a document list -> ('a hit list, error) result
 val error_to_yojson : error -> Yojson.Safe.t

@@ -15,66 +15,105 @@ let handle_time_now ~args:_ =
   `Assoc [ "now_iso", `String now_iso; "now_unix", `Float now_unix ]
 ;;
 
-let handle_tools_list_with ~list_json ~search_json ~args =
-  match Json_util.assoc_member_opt "query" args with
-  | None ->
-    Keeper_tool_execution.success (list_json ())
-  | Some (`String query) ->
-    (match search_json ~query with
-     | Ok data -> Keeper_tool_execution.success_data data
-     | Error error ->
-       let data =
-         `Assoc
-           [ "error", Keeper_capability_search.error_to_yojson error ]
-       in
-       let class_ =
-         match error with
-         | Keeper_capability_search.Index_unavailable _ ->
-           Tool_result.Runtime_failure
-         | Keeper_capability_search.Empty_query
-         | Keeper_capability_search.Invalid_query _ ->
-           Tool_result.Policy_rejection
-       in
-       Keeper_tool_execution.failure_data
-         ~class_
-         ~metadata:data
-         ~message:"Keeper capability search rejected the query."
-         data)
-  | Some other ->
+let unexpected_tools_list_arguments args =
+  match args with
+  | `Assoc [] -> None
+  | other ->
     let data =
       `Assoc
          [ ( "error"
            , `Assoc
-               [ "kind", `String "invalid_query_type"
+               [ "kind", `String "unexpected_arguments"
                ; "received", `String (Json_util.kind_name other)
                ] )
          ]
     in
-    Keeper_tool_execution.failure_data
-      ~class_:Tool_result.Policy_rejection
-      ~metadata:data
-      ~message:"keeper_tools_list query must be a string."
-      data
+    Some
+      (Keeper_tool_execution.failure_data
+         ~class_:Tool_result.Policy_rejection
+         ~metadata:data
+         ~message:"keeper_tools_list does not accept arguments."
+         data)
 ;;
 
 let handle_tools_list ~capability_surface ~args () =
-  handle_tools_list_with
-    ~list_json:(fun () ->
-      Keeper_tool_shared_runtime.keeper_tools_list_json_for_surface
-        ~capability_surface)
-    ~search_json:(fun ~query ->
-      Keeper_tool_shared_runtime.keeper_tools_search_json_for_surface
-        ~capability_surface
-        ~query)
-    ~args
+  match unexpected_tools_list_arguments args with
+  | Some failure -> failure
+  | None ->
+    Keeper_tool_execution.success
+      (Keeper_tool_shared_runtime.keeper_tools_list_json_for_surface
+         ~capability_surface)
 ;;
 
 let handle_tools_list_from_meta ~meta ~args () =
-  handle_tools_list_with
-    ~list_json:(fun () -> Keeper_tool_shared_runtime.keeper_tools_list_json ~meta)
-    ~search_json:(fun ~query ->
-      Keeper_tool_shared_runtime.keeper_tools_search_json ~meta ~query)
-    ~args
+  match unexpected_tools_list_arguments args with
+  | Some failure -> failure
+  | None ->
+    Keeper_tool_execution.success
+      (Keeper_tool_shared_runtime.keeper_tools_list_json ~meta)
+;;
+
+let capability_search_failure error =
+  let data =
+    `Assoc [ "error", Keeper_capability_search.error_to_yojson error ]
+  in
+  let class_ =
+    match error with
+    | Keeper_capability_search.Index_unavailable _ -> Tool_result.Runtime_failure
+    | Keeper_capability_search.Empty_query
+    | Keeper_capability_search.Frozen_surface_required
+    | Keeper_capability_search.Invalid_query _ -> Tool_result.Policy_rejection
+  in
+  Keeper_tool_execution.failure_data
+    ~class_
+    ~metadata:data
+    ~message:"Keeper capability search rejected the query."
+    data
+;;
+
+let capability_search_query = function
+  | `Assoc fields ->
+    (match List.assoc_opt "query" fields with
+     | Some (`String query) -> Ok query
+     | Some other ->
+       Error
+         (`Assoc
+            [ "kind", `String "invalid_query_type"
+            ; "received", `String (Json_util.kind_name other)
+            ])
+     | None -> Error (`Assoc [ "kind", `String "missing_query" ]))
+  | other ->
+    Error
+      (`Assoc
+         [ "kind", `String "invalid_arguments"
+         ; "received", `String (Json_util.kind_name other)
+         ])
+;;
+
+let invalid_capability_search_arguments error =
+  let data = `Assoc [ "error", error ] in
+  Keeper_tool_execution.failure_data
+    ~class_:Tool_result.Policy_rejection
+    ~metadata:data
+    ~message:"keeper_capability_search requires a string query."
+    data
+;;
+
+let handle_capability_search ~capability_surface ~args () =
+  match capability_search_query args with
+  | Error error -> invalid_capability_search_arguments error
+  | Ok query ->
+    (match
+       Keeper_tool_shared_runtime.keeper_capability_search_json_for_surface
+         ~capability_surface
+         ~query
+     with
+     | Ok data -> Keeper_tool_execution.success_data data
+     | Error error -> capability_search_failure error)
+;;
+
+let handle_capability_search_from_meta ~args:_ () =
+  capability_search_failure Keeper_capability_search.Frozen_surface_required
 ;;
 
 type external_gate_block =

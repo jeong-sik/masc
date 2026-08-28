@@ -119,6 +119,7 @@ type runtime_handler =
   | Tool_write_file
   | Tool_time_now
   | Tool_tools_list
+  | Tool_capability_search
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
@@ -261,6 +262,7 @@ let runtime_handler_to_string = function
   | Tool_write_file -> "tool_write_file"
   | Tool_time_now -> "tool_time_now"
   | Tool_tools_list -> "tool_tools_list"
+  | Tool_capability_search -> "tool_capability_search"
   | Tool_context_status -> "tool_context_status"
   | Tool_artifact_read -> "tool_artifact_read"
   | Tool_memory_search -> "tool_memory_search"
@@ -332,6 +334,7 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_masc_library_dispatch -> Memory_group
   | Tool_time_now
   | Tool_tools_list
+  | Tool_capability_search
   | Tool_context_status
   | Tool_ide_annotate -> Meta_group
 ;;
@@ -503,6 +506,7 @@ let descriptor
       | Tool_write_file
       | Tool_time_now
       | Tool_tools_list
+      | Tool_capability_search
       | Tool_context_status
       | Tool_artifact_read
       | Tool_memory_search
@@ -971,6 +975,12 @@ let keeper_tools_list_schema =
   match find_base_schema_opt "keeper_tools_list" with
   | Some schema -> schema
   | None -> invalid_arg "missing base tool schema for keeper_tools_list"
+;;
+
+let keeper_capability_search_schema =
+  match find_base_schema_opt "keeper_capability_search" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_capability_search"
 ;;
 
 (* Declared twice until now: here and in the library shard, whose file is
@@ -1921,6 +1931,19 @@ let internal_descriptors : t list =
        ~ordinary_execution_mode:Concurrent
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_tools_list
+       ()
+     |> with_eval_tags [ "capability_introspection" ])
+  ; (in_process_descriptor_with_schema_source
+       ~capability_identity:Internal_name_identity
+       ~keeper_model_projection:Internal_name
+       ~input_schema_source:Canonical_registry
+       ~id:"keeper.capability_search"
+       ~name:"keeper_capability_search"
+       ~description:keeper_capability_search_schema.description
+       ~input_schema:keeper_capability_search_schema.input_schema
+       ~ordinary_execution_mode:Concurrent
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_capability_search
        ()
      |> with_eval_tags [ "capability_introspection" ])
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)

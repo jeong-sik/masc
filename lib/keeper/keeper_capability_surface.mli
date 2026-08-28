@@ -39,6 +39,10 @@ type skill_capability = private
   ; availability : capability_availability
   }
 
+type candidate =
+  | Ordinary_tool of tool_capability
+  | Skill of skill_capability
+
 val create
   :  tool_groups:string list option
   -> skill_names:string list option
@@ -56,6 +60,18 @@ val skill_capabilities : t -> skill_capability list
     invalid catalog item. An invalid configured Skill is reported once as
     [Invalid_definition], never again as [Missing_configured_skill]. *)
 val skill_snapshot_revision : t -> Skill_catalog_snapshot.snapshot_revision
+val candidates : t -> candidate list
+val digest_material_to_yojson : t -> Yojson.Safe.t
+(** Canonical digest input. Tool rows bind the exact input schema in addition
+    to their public discovery projection. *)
+val digest : t -> string
+(** SHA-256 of the ordered, typed Tool and Skill capability projection. *)
 
 val capability_availability_to_string : capability_availability -> string
+val tool_capability_to_yojson : tool_capability -> Yojson.Safe.t
 val skill_capability_to_yojson : skill_capability -> Yojson.Safe.t
+val candidate_to_yojson : candidate -> Yojson.Safe.t
+val candidate_name : candidate -> string
+val candidate_description : candidate -> string
+val candidate_category : candidate -> string
+val candidate_invocation_name : candidate -> string option

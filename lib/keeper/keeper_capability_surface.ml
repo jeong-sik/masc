@@ -26,6 +26,10 @@ type skill_capability =
   ; availability : capability_availability
   }
 
+type candidate =
+  | Ordinary_tool of tool_capability
+  | Skill of skill_capability
+
 type t =
   { descriptors : Keeper_tool_descriptor.t list
   ; skill_projection : Keeper_skill_catalog.turn_projection
@@ -150,6 +154,10 @@ let skill_catalog surface = surface.skill_projection.catalog
 let tool_capabilities surface = surface.tool_capabilities
 let skill_capabilities surface = surface.skill_capabilities
 let skill_snapshot_revision surface = surface.skill_snapshot_revision
+let candidates surface =
+  List.map (fun capability -> Ordinary_tool capability) surface.tool_capabilities
+  @ List.map (fun capability -> Skill capability) surface.skill_capabilities
+;;
 
 let capability_availability_to_string = function
   | Active -> "active"
@@ -173,6 +181,23 @@ let skill_kind_to_fields = function
 let skill_exposure_to_string = function
   | Model_visible -> "model_visible"
   | Operator_only -> "operator_only"
+;;
+
+let catalog_status_to_string = function
+  | Keeper_skill_inventory.Effective -> "effective"
+  | Keeper_skill_inventory.Shadowed -> "shadowed"
+;;
+
+let tool_capability_to_yojson capability =
+  `Assoc
+    (Keeper_tool_descriptor.discovery_fields capability.descriptor
+     @ [ ( "model_names"
+         , Json_util.json_string_list
+             (Keeper_tool_descriptor.keeper_model_names capability.descriptor) )
+       ; ( "availability"
+         , `String
+             (capability_availability_to_string capability.availability) )
+       ])
 ;;
 
 let invalid_reference_fields (invalid : Keeper_skill_inventory.invalid_skill) =
@@ -215,6 +240,7 @@ let skill_capability_to_yojson capability =
     `Assoc
       ([ "reference", Skill_reference.to_yojson valid.reference
        ; "description", `String valid.description
+       ; "catalog_status", `String (catalog_status_to_string valid.catalog_status)
        ; "exposure", `String (skill_exposure_to_string capability.exposure)
        ; "availability", `String availability
        ]
@@ -223,7 +249,101 @@ let skill_capability_to_yojson capability =
     `Assoc
       (invalid_reference_fields invalid
        @ [ "kind", `String "invalid"
+         ; "error", Keeper_skill_inventory.invalid_error_to_yojson invalid.error
          ; "exposure", `String (skill_exposure_to_string capability.exposure)
          ; "availability", `String availability
          ])
+;;
+
+let skill_name = function
+  | Missing_configured_skill_name name -> name
+  | Exact_skill (Keeper_skill_inventory.Valid valid) ->
+    valid.reference.identity.name
+  | Exact_skill (Keeper_skill_inventory.Invalid invalid) ->
+    (match invalid.reference with
+     | Some reference -> reference.identity.name
+     | None -> invalid.directory)
+;;
+
+let candidate_name = function
+  | Ordinary_tool capability -> capability.descriptor.internal_name
+  | Skill capability -> skill_name capability.identity
+;;
+
+let candidate_description = function
+  | Ordinary_tool capability -> capability.descriptor.description
+  | Skill { identity = Exact_skill (Keeper_skill_inventory.Valid valid); _ } ->
+    valid.description
+  | Skill { identity = Exact_skill (Keeper_skill_inventory.Invalid invalid); _ } ->
+    Keeper_skill_inventory.invalid_error_to_yojson invalid.error
+    |> Yojson.Safe.to_string
+  | Skill { identity = Missing_configured_skill_name _; _ } ->
+    "Configured Skill is absent from the frozen catalog."
+;;
+
+let candidate_category = function
+  | Ordinary_tool capability ->
+    Keeper_tool_descriptor.keeper_tool_group_to_string
+      capability.descriptor.keeper_tool_group
+  | Skill _ -> "skill"
+;;
+
+let candidate_invocation_name = function
+  | Ordinary_tool capability ->
+    (match Keeper_tool_descriptor.keeper_model_names capability.descriptor with
+     | [ name ] -> Some name
+     | [] -> None
+     | _ :: _ :: _ -> None)
+  | Skill { identity = Exact_skill (Keeper_skill_inventory.Valid valid); _ } ->
+    (match valid.kind with
+     | Keeper_skill_inventory.Instruction -> Some "keeper_skill"
+     | Keeper_skill_inventory.Composition entry ->
+       Some (Keeper_tool_composition_catalog.tool_name entry))
+  | Skill
+      { identity = (Exact_skill (Keeper_skill_inventory.Invalid _)
+                   | Missing_configured_skill_name _)
+      ; _
+      } -> None
+;;
+
+let candidate_to_yojson = function
+  | Ordinary_tool capability ->
+    `Assoc
+      [ "candidate_kind", `String "ordinary_tool"
+      ; "capability", tool_capability_to_yojson capability
+      ]
+  | Skill capability ->
+    `Assoc
+      [ "candidate_kind", `String "skill"
+      ; "capability", skill_capability_to_yojson capability
+      ]
+;;
+
+let digest_candidate_to_yojson = function
+  | Ordinary_tool capability as candidate ->
+    `Assoc
+      [ "candidate", candidate_to_yojson candidate
+      ; "input_schema", capability.descriptor.input_schema
+      ]
+  | Skill _ as candidate -> candidate_to_yojson candidate
+;;
+
+let digest_material_to_yojson surface =
+  `Assoc
+    [ ( "skill_snapshot_revision"
+      , `String
+          (Skill_catalog_snapshot.snapshot_revision_to_string
+             surface.skill_snapshot_revision) )
+    ; ( "candidates"
+      , `List (List.map digest_candidate_to_yojson (candidates surface)) )
+    ]
+;;
+
+let digest surface =
+  let canonical =
+    digest_material_to_yojson surface
+    |> Yojson.Safe.sort
+    |> Yojson.Safe.to_string
+  in
+  Digestif.SHA256.(digest_string canonical |> to_hex)
 ;;

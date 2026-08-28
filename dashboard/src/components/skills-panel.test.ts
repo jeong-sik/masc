@@ -1,10 +1,27 @@
-import { describe, expect, it } from 'vitest'
+import { html } from 'htm/preact'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   SkillReference,
   SkillSnapshotEntry,
   SkillSurface,
 } from '../api/dashboard-skills'
+
+const editorApiMocks = vi.hoisted(() => ({
+  previewSkillSource: vi.fn(),
+  readSkillSource: vi.fn(),
+  saveSkillSource: vi.fn(),
+}))
+
+vi.mock('../api/dashboard-skills', async importOriginal => ({
+  ...await importOriginal<typeof import('../api/dashboard-skills')>(),
+  previewSkillSource: editorApiMocks.previewSkillSource,
+  readSkillSource: editorApiMocks.readSkillSource,
+  saveSkillSource: editorApiMocks.saveSkillSource,
+}))
+
 import { decodeSkillsResponse, SkillsContractError } from '../api/dashboard-skills'
+import { ApiRequestError } from '../api/core'
 import {
   capabilityLabel,
   contextLabel,
@@ -13,10 +30,16 @@ import {
   mergeSkillRows,
   resourceReadBoundLabel,
   skillRowKey,
+  SkillSourceEditor,
   sortSkillRows,
   stateMessage,
   usageLabel,
 } from './skills-panel'
+
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
 
 function entry(
   name: string,
@@ -357,5 +380,253 @@ describe('labels', () => {
     expect(resourceReadBoundLabel({ kind: 'unreadable' })).toBe(
       'resource read max unavailable',
     )
+  })
+})
+
+const editorProfile = {
+  reference: reference(intake),
+  kind: 'instruction',
+  activation_tool: 'keeper_skill',
+  execution: 'model_orchestrated',
+  capabilities: {
+    as_skill: true,
+    as_tool: false,
+    batch: false,
+    parallel: false,
+    async: false,
+    tool_scope: 'registered_tools_only',
+  },
+  context: {
+    body_bytes: 100,
+    eager_body_bytes: 0,
+    discovery_bytes: 40,
+    tool_schema_bytes: null,
+  },
+  plan: {
+    node_count: 0,
+    batch_count: 0,
+    parallel_batch_count: 0,
+    max_parallelism: 0,
+    statically_read_only: null,
+  },
+  declaration: null,
+  flow: null,
+}
+
+const editorPreview = {
+  reference: reference(intake),
+  profile: editorProfile,
+  diagnostics: [],
+}
+
+describe('SkillSourceEditor', () => {
+  it('loads, previews, and saves the current draft in order', async () => {
+    const currentReference = reference(intake)
+    const nextReference = { ...currentReference, content_revision: 'next-revision' }
+    editorApiMocks.readSkillSource.mockResolvedValue({
+      status: 'ready',
+      reference: currentReference,
+      snapshot_revision: 'snapshot-1',
+      source_text: 'old source',
+      access: 'read_write',
+    })
+    editorApiMocks.previewSkillSource.mockResolvedValue({
+      reference: nextReference,
+      profile: { ...editorProfile, reference: nextReference },
+      diagnostics: [],
+    })
+    editorApiMocks.saveSkillSource.mockResolvedValue({
+      status: 'saved_and_published',
+      preview: {
+        reference: nextReference,
+        profile: { ...editorProfile, reference: nextReference },
+        diagnostics: [],
+      },
+      snapshot_revision: 'snapshot-2',
+    })
+    const onPublished = vi.fn()
+    const view = render(html`<${SkillSourceEditor}
+      reference=${currentReference}
+      onPublished=${onPublished}
+    />`)
+
+    fireEvent.click(view.getByTestId('skill-edit-open'))
+    const textarea = await view.findByTestId('skill-source-draft') as HTMLTextAreaElement
+    expect(textarea.value).toBe('old source')
+    fireEvent.input(textarea, { target: { value: 'new source' } })
+
+    fireEvent.click(view.getByText('Preview'))
+    await view.findByTestId('skill-source-preview')
+    expect(editorApiMocks.previewSkillSource).toHaveBeenCalledWith(
+      currentReference,
+      'new source',
+    )
+
+    fireEvent.click(view.getByTestId('skill-source-save'))
+    await waitFor(() => expect(editorApiMocks.saveSkillSource).toHaveBeenCalledWith(
+      currentReference,
+      'new source',
+    ))
+    await waitFor(() => expect(onPublished).toHaveBeenCalledWith(
+      'Skill saved and published at next-revisio.',
+    ))
+  })
+
+  it('keeps the draft and gives reload/reapply guidance on a typed 409 conflict', async () => {
+    const currentReference = reference(intake)
+    editorApiMocks.readSkillSource.mockResolvedValue({
+      status: 'ready',
+      reference: currentReference,
+      snapshot_revision: 'snapshot-1',
+      source_text: 'old source',
+      access: 'read_write',
+    })
+    editorApiMocks.previewSkillSource.mockResolvedValue({
+      reference: currentReference,
+      profile: editorProfile,
+      diagnostics: [],
+    })
+    editorApiMocks.saveSkillSource.mockRejectedValue(new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/skills/editor/save',
+      status: 409,
+      responseData: { code: 'revision_conflict' },
+    }))
+    const view = render(html`<${SkillSourceEditor}
+      reference=${currentReference}
+      onPublished=${vi.fn()}
+    />`)
+
+    fireEvent.click(view.getByTestId('skill-edit-open'))
+    const textarea = await view.findByTestId('skill-source-draft') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'draft to preserve' } })
+    fireEvent.click(view.getByText('Preview'))
+    await view.findByTestId('skill-source-preview')
+    fireEvent.click(view.getByTestId('skill-source-save'))
+
+    const conflict = await view.findByTestId('skill-source-conflict')
+    expect(conflict.textContent).toContain('reload the Skills workspace')
+    expect(conflict.textContent).toContain('reapply it')
+    expect((view.getByTestId('skill-source-draft') as HTMLTextAreaElement).value)
+      .toBe('draft to preserve')
+  })
+
+  it('does not accept a preview response for a draft changed while it was pending', async () => {
+    const currentReference = reference(intake)
+    let resolvePreview!: (value: typeof editorPreview) => void
+    editorApiMocks.readSkillSource.mockResolvedValue({
+      status: 'ready',
+      reference: currentReference,
+      snapshot_revision: 'snapshot-1',
+      source_text: 'old source',
+      access: 'read_write',
+    })
+    editorApiMocks.previewSkillSource.mockReturnValue(new Promise(resolve => {
+      resolvePreview = resolve
+    }))
+    const view = render(html`<${SkillSourceEditor}
+      reference=${currentReference}
+      onPublished=${vi.fn()}
+    />`)
+
+    fireEvent.click(view.getByTestId('skill-edit-open'))
+    const textarea = await view.findByTestId('skill-source-draft') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'source sent to preview' } })
+    fireEvent.click(view.getByText('Preview'))
+    await waitFor(() => expect(editorApiMocks.previewSkillSource).toHaveBeenCalledWith(
+      currentReference,
+      'source sent to preview',
+    ))
+    fireEvent.input(textarea, { target: { value: 'newer unpreviewed source' } })
+
+    resolvePreview({
+      reference: currentReference,
+      profile: editorProfile,
+      diagnostics: [],
+    })
+
+    await waitFor(() => expect(view.queryByTestId('skill-source-preview')).toBeNull())
+    expect((view.getByTestId('skill-source-save') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('ignores a preview response from an editor generation that was closed', async () => {
+    const currentReference = reference(intake)
+    let resolvePreview!: (value: typeof editorPreview) => void
+    editorApiMocks.readSkillSource.mockResolvedValue({
+      status: 'ready',
+      reference: currentReference,
+      snapshot_revision: 'snapshot-1',
+      source_text: 'old source',
+      access: 'read_write',
+    })
+    editorApiMocks.previewSkillSource.mockReturnValue(new Promise(resolve => {
+      resolvePreview = resolve
+    }))
+    const view = render(html`<${SkillSourceEditor}
+      reference=${currentReference}
+      onPublished=${vi.fn()}
+    />`)
+
+    fireEvent.click(view.getByTestId('skill-edit-open'))
+    const textarea = await view.findByTestId('skill-source-draft') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'source from closed editor' } })
+    fireEvent.click(view.getByText('Preview'))
+    await waitFor(() => expect(editorApiMocks.previewSkillSource).toHaveBeenCalledOnce())
+    fireEvent.click(view.getByText('Close'))
+
+    resolvePreview(editorPreview)
+
+    await waitFor(() => expect(view.queryByTestId('skill-source-editor')).toBeNull())
+    expect(view.queryByTestId('skill-source-preview')).toBeNull()
+  })
+
+  it('locks the draft and close action until a save settles', async () => {
+    const currentReference = reference(intake)
+    let resolveSave!: (value: {
+      status: 'saved_and_published'
+      preview: typeof editorPreview
+      snapshot_revision: string
+    }) => void
+    editorApiMocks.readSkillSource.mockResolvedValue({
+      status: 'ready',
+      reference: currentReference,
+      snapshot_revision: 'snapshot-1',
+      source_text: 'old source',
+      access: 'read_write',
+    })
+    editorApiMocks.previewSkillSource.mockResolvedValue({
+      reference: currentReference,
+      profile: editorProfile,
+      diagnostics: [],
+    })
+    editorApiMocks.saveSkillSource.mockReturnValue(new Promise(resolve => {
+      resolveSave = resolve
+    }))
+    const onPublished = vi.fn()
+    const view = render(html`<${SkillSourceEditor}
+      reference=${currentReference}
+      onPublished=${onPublished}
+    />`)
+
+    fireEvent.click(view.getByTestId('skill-edit-open'))
+    const textarea = await view.findByTestId('skill-source-draft') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'source to save' } })
+    fireEvent.click(view.getByText('Preview'))
+    await view.findByTestId('skill-source-preview')
+    fireEvent.click(view.getByTestId('skill-source-save'))
+
+    await waitFor(() => expect(editorApiMocks.saveSkillSource).toHaveBeenCalledWith(
+      currentReference,
+      'source to save',
+    ))
+    expect((view.getByTestId('skill-source-draft') as HTMLTextAreaElement).readOnly).toBe(true)
+    expect((view.getByText('Close') as HTMLButtonElement).disabled).toBe(true)
+
+    resolveSave({
+      status: 'saved_and_published',
+      preview: editorPreview,
+      snapshot_revision: 'snapshot-2',
+    })
+    await waitFor(() => expect(onPublished).toHaveBeenCalledOnce())
   })
 })

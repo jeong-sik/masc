@@ -314,6 +314,7 @@
   test_exec_dispatch
   test_keeper_tool_execute_typed_input
   test_keeper_sandbox_containment
+  test_keeper_microvm_teardown_on_shutdown
   test_keeper_sandbox_microvm
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
@@ -653,6 +654,7 @@
   test_exec_dispatch
   test_keeper_tool_execute_typed_input
   test_keeper_sandbox_containment
+  test_keeper_microvm_teardown_on_shutdown
   test_keeper_sandbox_microvm
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner

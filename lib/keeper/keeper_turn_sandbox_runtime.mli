@@ -120,6 +120,16 @@ val run_bash_with_status :
   unit ->
   (Unix.process_status * string, string) result
 
+val teardown_keeper_vm_by_name :
+  ?timeout_sec:float ->
+  config:Workspace.config ->
+  keeper_name:string ->
+  unit ->
+  (unit, string) result
+(** {!teardown_keeper_vm} for callers that hold the keeper's name and not its
+    meta -- shutdown finalization, which runs after the registry entry is
+    gone. The guest name derives from the name alone. *)
+
 val teardown_keeper_vm :
   ?timeout_sec:float ->
   config:Workspace.config ->

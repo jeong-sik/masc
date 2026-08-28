@@ -823,7 +823,7 @@ let reserve_pre_worker_start
        ^ Keeper_approval_queue.exact_attempt_error_to_string error)
 ;;
 
-let rec spawn_claimed_auto_judge_entry_with
+let rec run_reserved_auto_judge_entry_with
       ~(spawn_worker : hitl_worker_spawner)
       (entry : Keeper_approval_queue_rules_types.pending_approval)
   =
@@ -907,14 +907,88 @@ let rec spawn_claimed_auto_judge_entry_with
     fail_before_worker
       ~reason:"Auto Judge unavailable: server root switch is not installed"
   in
+  start_after_reservation ()
+
+and spawn_claimed_auto_judge_entry_with
+      ~(spawn_worker : hitl_worker_spawner)
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
+  =
   match reserve_pre_worker_start entry with
-  | Ok () -> start_after_reservation ()
+  | Ok () -> run_reserved_auto_judge_entry_with ~spawn_worker entry
   | Error reason ->
     release_auto_judge entry;
     Error reason
 
+and spawn_claimed_auto_judge_entry_detached_with
+      ~(spawn_worker : hitl_worker_spawner)
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
+  =
+  match reserve_pre_worker_start entry with
+  | Error reason ->
+    release_auto_judge entry;
+    Error reason
+  | Ok () ->
+    (match Eio_context.get_root_switch_opt () with
+     | None ->
+       let reason = "Auto Judge unavailable: server root switch is not installed" in
+       let reason =
+         mark_pre_worker_unavailable
+           entry
+           ~reason_code:
+             Keeper_approval_queue_rules_types
+             .Summary_pre_worker_auto_judge_unavailable
+           ~operator_detail:reason
+         |> durable_pre_worker_unavailable_error reason
+       in
+       release_auto_judge entry;
+       Error reason
+     | Some sw ->
+       (try
+          Eio.Fiber.fork ~sw (fun () ->
+            match run_reserved_auto_judge_entry_with ~spawn_worker entry with
+            | Ok _ -> ()
+            | Error reason ->
+              Log.Keeper.error
+                ~keeper_name:entry.keeper_name
+                "Auto Judge detached worker start failed approval=%s: %s"
+                entry.id
+                reason);
+          Ok Started
+        with
+        | Eio.Cancel.Cancelled _ as exn ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          let reason =
+            "Auto Judge detached worker launch was cancelled: "
+            ^ Printexc.to_string exn
+          in
+          Eio.Cancel.protect (fun () ->
+            ignore
+              (mark_pre_worker_unavailable
+                 entry
+                 ~reason_code:
+                   Keeper_approval_queue_rules_types
+                   .Summary_pre_worker_auto_judge_unavailable
+                 ~operator_detail:reason);
+            release_auto_judge entry);
+          Printexc.raise_with_backtrace exn backtrace
+        | exn ->
+          let reason =
+            "Auto Judge detached worker launch failed: " ^ Printexc.to_string exn
+          in
+          let reason =
+            mark_pre_worker_unavailable
+              entry
+              ~reason_code:
+                Keeper_approval_queue_rules_types
+                .Summary_pre_worker_auto_judge_unavailable
+              ~operator_detail:reason
+            |> durable_pre_worker_unavailable_error reason
+          in
+          release_auto_judge entry;
+          Error reason))
+
 and spawn_claimed_auto_judge_entry entry =
-  spawn_claimed_auto_judge_entry_with
+  spawn_claimed_auto_judge_entry_detached_with
     ~spawn_worker:Hitl_summary_worker.spawn
     entry
 
@@ -927,9 +1001,12 @@ and spawn_auto_judge_entry_with
   else Ok Skipped
 
 and spawn_auto_judge_entry entry =
-  spawn_auto_judge_entry_with
-    ~spawn_worker:Hitl_summary_worker.spawn
-    entry
+  if claim_auto_judge entry
+  then
+    spawn_claimed_auto_judge_entry_detached_with
+      ~spawn_worker:Hitl_summary_worker.spawn
+      entry
+  else Ok Skipped
 
 and retry_auto_judge_entry
       ~requested_by
@@ -1969,6 +2046,18 @@ module For_testing = struct
     | Ok Started -> Ok true
     | Ok Skipped -> Ok false
     | Error reason -> Error reason
+  ;;
+
+  let spawn_auto_judge_entry_with_detached_worker ~spawn_worker entry =
+    if claim_auto_judge entry
+    then
+      match
+        spawn_claimed_auto_judge_entry_detached_with ~spawn_worker entry
+      with
+      | Ok Started -> Ok true
+      | Ok Skipped -> Ok false
+      | Error reason -> Error reason
+    else Ok false
   ;;
 
   let resume_persisted_auto_judges_with_exact_completion =

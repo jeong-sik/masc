@@ -1927,6 +1927,61 @@ let test_pre_worker_start_failure_preserves_unbound_pending () =
        ())
 ;;
 
+let test_detached_worker_start_survives_keeper_turn_stop () =
+  run_eio @@ fun ~sw:_ ~net:_ ~clock:_ ->
+  with_temp_dir "hitl-detached-worker-start" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       select_auto_judge_mode base_path;
+       let entry = pending_entry ~base_path () in
+       let worker_entered, resolve_worker_entered = Eio.Promise.create () in
+       let allow_worker_finish, resolve_allow_worker_finish = Eio.Promise.create () in
+       let worker_finished, resolve_worker_finished = Eio.Promise.create () in
+       let keeper_turn_stopped =
+         match
+           Eio.Switch.run
+           @@ fun turn_sw ->
+           Eio_context.with_turn_switch turn_sw
+           @@ fun () ->
+           (match
+              Gate.For_testing.spawn_auto_judge_entry_with_detached_worker
+                ~spawn_worker:
+                  (fun ~sw:_ ~entry:_ ~on_summary:_ ~on_finish () ->
+                     Eio.Promise.resolve resolve_worker_entered ();
+                     Eio.Promise.await allow_worker_finish;
+                     on_finish Worker.Terminalization_identity_unbound;
+                     Eio.Promise.resolve resolve_worker_finished ();
+                     Ok Worker.Worker_forked)
+                entry
+            with
+            | Ok true -> ()
+            | Ok false -> fail "detached Gate worker did not acquire the entry"
+            | Error detail -> fail detail);
+           Eio.Switch.fail
+             turn_sw
+             Masc.Keeper_owner_signals.Stop_active_child
+         with
+         | exception Masc.Keeper_owner_signals.Stop_active_child -> true
+         | exception
+             Eio.Cancel.Cancelled Masc.Keeper_owner_signals.Stop_active_child ->
+           true
+         | () -> false
+       in
+       check bool "Keeper turn received its stop signal" true keeper_turn_stopped;
+       Eio.Promise.await worker_entered;
+       Eio.Promise.resolve resolve_allow_worker_finish ();
+       Eio.Promise.await worker_finished;
+       check
+         (list string)
+         "server-root worker released the owner after the stopped turn"
+         []
+         (Gate.For_testing.active_auto_judges_for_owner
+            ~base_path
+            ~keeper_name:entry.keeper_name))
+;;
+
 let test_visible_uncertainty_withholds_production_drain () =
   run_eio_without_context @@ fun ~sw ~net ~clock ~mono_clock ->
   with_temp_dir "hitl-uncertain-lifecycle" @@ fun base_path ->
@@ -2366,6 +2421,10 @@ let () =
             "pre-worker start failure preserves unbound pending"
             `Quick
             test_pre_worker_start_failure_preserves_unbound_pending
+        ; test_case
+            "worker start survives Keeper turn stop"
+            `Quick
+            test_detached_worker_start_survives_keeper_turn_stop
         ; test_case
             "visible uncertainty withholds production drain"
             `Quick

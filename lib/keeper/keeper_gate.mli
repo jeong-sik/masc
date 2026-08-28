@@ -261,6 +261,13 @@ module For_testing : sig
   (** Run the production atomic claim, active-owner lifecycle, cleanup, and
       conclusive-only drain with only the worker spawner injected. *)
 
+  val spawn_auto_judge_entry_with_detached_worker
+    :  spawn_worker:hitl_worker_spawner
+    -> Keeper_approval_queue_rules_types.pending_approval
+    -> (bool, string) result
+  (** Run the production server-root launcher with only the worker spawner
+      injected. The worker-start path survives the submitting Keeper turn. *)
+
   val resume_persisted_auto_judges_with_exact_completion :
     complete_summary_exact_attempt:exact_completion ->
     base_path:string ->

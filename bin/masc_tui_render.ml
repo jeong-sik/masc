@@ -9530,12 +9530,29 @@ let render_keeper_calls (state : state) =
       (fun (call : Masc.Tui_decode.keeper_call) ->
         ( call
         , Option.bind call.Masc.Tui_decode.kc_output (fun result ->
-              Masc.Keeper_chat_tool_trail.tool_result_digest ~result) ))
+              Masc.Keeper_chat_tool_trail.tool_result_digest ~result)
+        , Option.map
+            (fun identity ->
+               [ Printf.sprintf
+                   "↳ assembler %s · %s"
+                   identity.Masc.Tui_decode.pei_assembler_run_id
+                   (Masc.Tui_decode.proposal_provenance_status_label
+                      identity.Masc.Tui_decode.pei_provenance_status)
+               ; Printf.sprintf
+                   "  proposal %s"
+                   identity.Masc.Tui_decode.pei_proposal_id
+               ])
+            call.Masc.Tui_decode.kc_proposal_execution ))
       entries
   in
   let max_scroll =
     Message_layout.last_page_start ~height:content_height
-      (List.map (fun (_, digest) -> if Option.is_some digest then 2 else 1) rows)
+      (List.map
+         (fun (_, digest, proposal) ->
+            1
+            + Option.fold ~none:0 ~some:List.length proposal
+            + (if Option.is_some digest then 1 else 0))
+         rows)
   in
   let scroll = max 0 (min state.keeper_calls_scroll max_scroll) in
   (* How many calls the rows below actually reached. Filled by the drawing so
@@ -9565,7 +9582,7 @@ let render_keeper_calls (state : state) =
       | None ->
           box_empty buf cols;
           decr remaining
-      | Some (call, digest) ->
+      | Some (call, digest, proposal) ->
           incr idx;
           let open Masc.Tui_decode in
           let glyph, style =
@@ -9606,6 +9623,15 @@ let render_keeper_calls (state : state) =
           in
           box_line_styled buf cols ~style line;
           decr remaining;
+          Option.iter
+            (List.iter (fun proposal_line ->
+               if !remaining > 0
+               then (
+                 box_line_styled buf cols ~style:Ansi.dim
+                   (Printf.sprintf "  %-8s %s   %s" "" " "
+                      (Terminal_text.single_line proposal_line));
+                 decr remaining)))
+            proposal;
           (* What the call answered. The row above says one ran and what it
              was called with; this is the only place that says what came
              back, which is the question a failed call leaves open. It takes

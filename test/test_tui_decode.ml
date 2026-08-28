@@ -297,6 +297,65 @@ let test_keeper_calls_carry_what_the_call_answered () =
        ; row ~output:(`Assoc [ "code", `Int 0 ])
        ])
 
+let test_keeper_calls_decode_atomic_proposal_execution_identity () =
+  let base_row =
+    match keeper_call_row ~keeper:"largo" ~tool:"keeper_proposal_execute" () with
+    | `Assoc fields -> fields
+    | _ -> assert false
+  in
+  let payload row =
+    `Assoc
+      [ "keeper", `String "largo"
+      ; "count", `Int 1
+      ; "health", `String "ok"
+      ; "entries", `List [ `Assoc row ]
+      ]
+  in
+  let valid_row =
+    base_row
+    @ [ "assembler_run_id", `String "exact-assembler-run-42"
+      ; "proposal_id", `String (String.make 64 'a')
+      ; "proposal_provenance_status", `String "retained_unconfirmed"
+      ]
+  in
+  (match
+     Tui_decode.decode_keeper_calls_snapshot
+       ~requested_keeper:"largo"
+       (payload valid_row)
+   with
+   | Error detail -> Alcotest.failf "valid proposal identity rejected: %s" detail
+   | Ok { Tui_decode.kcs_entries = [ call ]; _ } ->
+     (match call.Tui_decode.kc_proposal_execution with
+      | Some identity ->
+        Alcotest.(check string) "Assembler run"
+          "exact-assembler-run-42"
+          identity.Tui_decode.pei_assembler_run_id;
+        Alcotest.(check string) "proposal id"
+          (String.make 64 'a')
+          identity.Tui_decode.pei_proposal_id;
+        Alcotest.(check string) "typed provenance"
+          "retained_unconfirmed"
+          (Tui_decode.proposal_provenance_status_label
+             identity.Tui_decode.pei_provenance_status)
+      | None -> Alcotest.fail "complete proposal identity was dropped")
+   | Ok _ -> Alcotest.fail "valid proposal identity returned the wrong rows");
+  Alcotest.(check bool) "partial identity rejects" true
+    (Result.is_error
+       (Tui_decode.decode_keeper_calls_snapshot
+          ~requested_keeper:"largo"
+          (payload
+             (base_row @ [ "proposal_id", `String (String.make 64 'a') ]))));
+  Alcotest.(check bool) "unknown provenance rejects" true
+    (Result.is_error
+       (Tui_decode.decode_keeper_calls_snapshot
+          ~requested_keeper:"largo"
+          (payload
+             (base_row
+              @ [ "assembler_run_id", `String "run"
+                ; "proposal_id", `String (String.make 64 'a')
+                ; "proposal_provenance_status", `String "guessed"
+                ]))))
+
 let test_keeper_calls_require_the_envelope () =
   Alcotest.(check bool) "no entries list is an error" true
     (Result.is_error
@@ -4977,6 +5036,8 @@ let () =
           test_keeper_calls_require_the_envelope
       ; Alcotest.test_case "carries what the call answered" `Quick
           test_keeper_calls_carry_what_the_call_answered
+      ; Alcotest.test_case "proposal identity is atomic and typed" `Quick
+          test_keeper_calls_decode_atomic_proposal_execution_identity
       ] );
     ( "parse_log_entry",
       [

@@ -1447,6 +1447,25 @@ type system_log_level =
   | System_error
   | System_level_unknown of string
 
+type proposal_provenance_status =
+  | Proposal_retained_match
+  | Proposal_retained_unconfirmed
+  | Proposal_not_retained
+  | Proposal_retained_contradiction
+
+type proposal_execution_identity =
+  { pei_assembler_run_id : string
+  ; pei_proposal_id : string
+  ; pei_provenance_status : proposal_provenance_status
+  }
+
+let proposal_provenance_status_label = function
+  | Proposal_retained_match -> "retained_match"
+  | Proposal_retained_unconfirmed -> "retained_unconfirmed"
+  | Proposal_not_retained -> "not_retained"
+  | Proposal_retained_contradiction -> "retained_contradiction"
+;;
+
 type keeper_call = {
   kc_at : float;
   kc_tool : string;
@@ -1457,6 +1476,7 @@ type keeper_call = {
   kc_turn : int option;
   kc_task_id : string option;
   kc_model : string option;
+  kc_proposal_execution : proposal_execution_identity option;
 }
 
 type keeper_calls_snapshot = {
@@ -2953,6 +2973,37 @@ let decode_keeper_call json =
     | `String value when String.trim value <> "" -> Some value
     | _ -> None
   in
+  let* kc_proposal_execution =
+    match
+      ( member "assembler_run_id" json
+      , member "proposal_id" json
+      , member "proposal_provenance_status" json )
+    with
+    | `Null, `Null, `Null -> Ok None
+    | `String assembler_run_id, `String proposal_id, `String status
+      when String.trim assembler_run_id <> "" && String.trim proposal_id <> "" ->
+      let* pei_provenance_status =
+        match status with
+        | "retained_match" -> Ok Proposal_retained_match
+        | "retained_unconfirmed" -> Ok Proposal_retained_unconfirmed
+        | "not_retained" -> Ok Proposal_not_retained
+        | "retained_contradiction" -> Ok Proposal_retained_contradiction
+        | value ->
+          Error
+            (Printf.sprintf
+               "keeper call has unknown proposal provenance status %S"
+               value)
+      in
+      Ok
+        (Some
+           { pei_assembler_run_id = assembler_run_id
+           ; pei_proposal_id = proposal_id
+           ; pei_provenance_status
+           })
+    | _ ->
+      Error
+        "keeper call proposal execution identity must contain non-empty assembler_run_id, proposal_id, and proposal_provenance_status together"
+  in
   Ok
     ( keeper
     , { kc_at
@@ -2964,6 +3015,7 @@ let decode_keeper_call json =
       ; kc_turn
       ; kc_task_id = string_opt "task_id"
       ; kc_model = string_opt "model"
+      ; kc_proposal_execution
       } )
 
 let decode_keeper_calls_snapshot ~requested_keeper json =

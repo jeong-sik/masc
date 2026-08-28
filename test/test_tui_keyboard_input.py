@@ -5467,6 +5467,9 @@ def keeper_calls_fixture() -> HttpResponse:
                     "success": True,
                     "duration_ms": 28.4,
                     "turn": 2143,
+                    "assembler_run_id": "exact-assembler-run-42",
+                    "proposal_id": "a" * 64,
+                    "proposal_provenance_status": "retained_match",
                 },
                 {
                     "ts": 1787535017.4,
@@ -5513,6 +5516,9 @@ def keeper_calls_interaction() -> Interaction:
             ("\u2717 tool_execute".encode(), "the failed call"),
             (b"14.5s", "the failure's duration"),
             (b"lib/a.ml", "the subject the trail names"),
+            (b"exact-assembler-run-42", "the Assembler producer run"),
+            (b"aaaaaaaaaaaa", "the proposal identity"),
+            (b"retained_match", "the provenance verdict"),
         ):
             if needle not in pane:
                 raise AssertionError(f"Keeper Calls did not draw {what}: {pane!r}")

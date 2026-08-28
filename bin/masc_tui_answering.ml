@@ -73,13 +73,7 @@ let lane_word = function
 
    Negative spans (clock skew between server and terminal) clamp to zero
    rather than counting up from the future. *)
-let duration_text seconds =
-  let seconds = int_of_float (Float.max 0. seconds) in
-  if seconds < 60 then Printf.sprintf "%ds" seconds
-  else if seconds < 3600 then
-    Printf.sprintf "%dm%02ds" (seconds / 60) (seconds mod 60)
-  else Printf.sprintf "%dh%02dm" (seconds / 3600) (seconds mod 3600 / 60)
-;;
+let duration_text = Masc_tui_message_layout.span_text
 
 let elapsed_text ~now started_at = duration_text (now -. started_at)
 

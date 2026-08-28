@@ -3421,7 +3421,7 @@ describe('fetchKeeperConfig', () => {
       ['runtime_exhausted', '런타임 후보 소진'],
       ['provider_runtime_error', '런타임 호출 오류'],
       ['fiber_unresolved', 'Fiber 미해결'],
-      ['stale_turn_timeout', '오래된 턴 만료'],
+      ['fiber_unresolved', 'Fiber 미해결'],
       ['agent_core_context_window_exceeded', 'Agent Core 컨텍스트 윈도 초과'],
       ['agent_core_unrecognized_stop_reason', 'Agent Core 미식별 정지 사유'],
       ['agent_core_guardrail_violation', 'Agent Core 가드레일 위반'],

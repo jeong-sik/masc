@@ -472,11 +472,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
         trust: {
           disposition: 'Alert',
           operator_disposition: 'pause_runtime',
-          operator_disposition_reason: 'stale_turn_timeout',
+          operator_disposition_reason: 'fiber_unresolved',
           needs_attention: true,
-          attention_reason: 'stale_turn_timeout',
+          attention_reason: 'fiber_unresolved',
           latest_terminal_reason: {
-            code: 'stale_turn_timeout',
+            code: 'fiber_unresolved',
             source: 'execution_receipt',
             severity: 'bad',
             summary: 'Turn execution exceeded the keeper turn deadline',
@@ -490,11 +490,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.trust).toMatchObject({
       disposition: 'Alert',
       operator_disposition: 'pause_runtime',
-      operator_disposition_reason: 'stale_turn_timeout',
+      operator_disposition_reason: 'fiber_unresolved',
       needs_attention: true,
-      attention_reason: 'stale_turn_timeout',
+      attention_reason: 'fiber_unresolved',
       latest_terminal_reason: {
-        code: 'stale_turn_timeout',
+        code: 'fiber_unresolved',
         source: 'execution_receipt',
         severity: 'bad',
         summary: 'Turn execution exceeded the keeper turn deadline',
@@ -503,7 +503,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       latest_next_action: 'inspect_runtime_blocker',
     })
     expect(keeper?.stop_cause).toMatchObject({
-      code: 'stale_turn_timeout',
+      code: 'fiber_unresolved',
       source: 'terminal_reason_code',
       summary: 'Turn execution exceeded the keeper turn deadline',
       next_action: 'inspect_runtime_blocker',
@@ -515,7 +515,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       {
         name: 'blocked-keeper',
         status: 'active',
-        runtime_blocker_class: 'stale_turn_timeout',
+        runtime_blocker_class: 'fiber_unresolved',
         runtime_blocker_summary: 'turn has not made progress',
         trust: {
           latest_terminal_reason: {
@@ -529,7 +529,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     expect(keeper?.stop_cause).toMatchObject({
-      code: 'stale_turn_timeout',
+      code: 'fiber_unresolved',
       source: 'runtime_blocker_class',
       summary: 'turn has not made progress',
     })
@@ -787,7 +787,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         keepalive_running: true,
         pause_state: 'paused',
         runtime_blocker_state: 'blocked',
-        runtime_blocker_class: 'stale_turn_timeout',
+        runtime_blocker_class: 'fiber_unresolved',
         runtime_blocker_summary: 'Provider turn timed out.',
         last_blocker: 'missing social headers',
         created_at: '2026-04-03T14:59:29Z',
@@ -801,7 +801,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       keepalive_running: true,
       pause_state: 'paused',
       runtime_blocker_state: 'blocked',
-      runtime_blocker_class: 'stale_turn_timeout',
+      runtime_blocker_class: 'fiber_unresolved',
       runtime_blocker_summary: 'Provider turn timed out.',
       last_blocker: 'missing social headers',
       created_at: '2026-04-03T14:59:29Z',
@@ -826,14 +826,14 @@ describe('normalizeKeeperTrustTerminalReason — exported helper', () => {
 
   it('returns a full terminal reason when code is present', () => {
     const result = normalizeKeeperTrustTerminalReason({
-      code: 'stale_turn_timeout',
+      code: 'fiber_unresolved',
       source: 'execution_receipt',
       severity: 'bad',
       summary: 'keeper exceeded the turn deadline',
       next_action: 'inspect_runtime_blocker',
     })
     expect(result).toEqual({
-      code: 'stale_turn_timeout',
+      code: 'fiber_unresolved',
       source: 'execution_receipt',
       severity: 'bad',
       summary: 'keeper exceeded the turn deadline',

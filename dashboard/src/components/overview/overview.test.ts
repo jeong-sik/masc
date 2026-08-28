@@ -559,7 +559,7 @@ describe('deriveKeeperAttentionReason', () => {
   it('uses runtime blocker semantics without a separate continuation approval state', () => {
     const reason = deriveKeeperAttentionReason(makeKeeper({
       name: 'gate',
-      runtime_blocker_class: 'stale_turn_timeout',
+      runtime_blocker_class: 'fiber_unresolved',
     }))
     expect(reason.sev).toBe('warn')
     expect(reason.act).toBe('상태 상세')

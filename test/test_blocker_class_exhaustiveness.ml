@@ -27,7 +27,6 @@ let all_variants : blocker_class list =
   ; Runtime_exhausted Capacity_exhausted
   ; Capacity_backpressure
   ; Fiber_unresolved
-  ; Stale_turn_timeout
   ; Agent_core_context_window_exceeded
   ; Agent_core_unrecognized_stop_reason
   ; Agent_core_guardrail_violation

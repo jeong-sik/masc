@@ -438,7 +438,6 @@ const runtimeBlockerLabels = {
   runtime_exhausted: '런타임 후보 소진',
   provider_runtime_error: '런타임 호출 오류',
   fiber_unresolved: 'Fiber 미해결',
-  stale_turn_timeout: '오래된 턴 만료',
   stale_termination_storm: 'Stale 종료 폭주',
   heartbeat_failures: '하트비트 실패',
   turn_failures: '턴 실패 반복',
@@ -482,9 +481,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'fiber_unresolved') {
     return 'Keeper fiber가 종료 상태를 확정하지 못해 supervisor 확인이 필요합니다.'
-  }
-  if (blockerClass === 'stale_turn_timeout') {
-    return '오래된 턴 제한 시간이 만료되어 최신 실행 상태 확인이 필요합니다.'
   }
   if (blockerClass === 'stale_termination_storm') {
     return 'Stale watchdog 종료가 반복되어 restart 전에 원인 확인이 필요합니다.'

@@ -50,7 +50,6 @@ export function asKeeperRuntimeBlockerClass(
 const BACKEND_KEEPER_META_BLOCKER_CLASSES = [
   'runtime_exhausted',
   'fiber_unresolved',
-  'stale_turn_timeout',
   'agent_core_context_window_exceeded',
   'agent_core_unrecognized_stop_reason',
   'agent_core_guardrail_violation',

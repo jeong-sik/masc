@@ -85,15 +85,6 @@ type blocker_class =
         down before completion bookkeeping ran).  Maps 1:1 to the
         supervisor's [Keeper_registry.Fiber_unresolved] observation key, so
         blocker_class stamping mirrors the same diagnosis on keeper_meta. *)
-  | Stale_turn_timeout
-    (** 2026-05-05 cycle 9: stale watchdog forced fiber termination
-        because the running turn exceeded [idle_turn] threshold (~5m).
-        Maps to [Keeper_registry.Stale_turn_timeout _] cohort.  Like
-        [Fiber_unresolved], this path runs through
-        [force_unresolved_watchdog_crash]. Without this variant, dashboards and
-        per-keeper meta lacked a structured blocker class for the majority
-        cohort during a fleet stall (observed: 6/14 keepers in
-        cohort=stale_turn_timeout). *)
   | Agent_core_context_window_exceeded
   | Agent_core_unrecognized_stop_reason
   | Agent_core_guardrail_violation
@@ -126,7 +117,6 @@ let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
   | Fiber_unresolved -> "fiber_unresolved"
-  | Stale_turn_timeout -> "stale_turn_timeout"
   | Agent_core_context_window_exceeded -> "agent_core_context_window_exceeded"
   | Agent_core_unrecognized_stop_reason -> "agent_core_unrecognized_stop_reason"
   | Agent_core_guardrail_violation -> "agent_core_guardrail_violation"
@@ -147,7 +137,6 @@ let blocker_class_of_serialized_string = function
   | "runtime_exhausted" -> Some (Runtime_exhausted (Other_detail "runtime_exhausted"))
   | "capacity_backpressure" -> Some Capacity_backpressure
   | "fiber_unresolved" -> Some Fiber_unresolved
-  | "stale_turn_timeout" -> Some Stale_turn_timeout
   | "agent_core_context_window_exceeded" -> Some Agent_core_context_window_exceeded
   | "agent_core_unrecognized_stop_reason" -> Some Agent_core_unrecognized_stop_reason
   | "agent_core_guardrail_violation" -> Some Agent_core_guardrail_violation

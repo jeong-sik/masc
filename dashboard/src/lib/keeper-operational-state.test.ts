@@ -208,7 +208,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     // stale marker → blocker stays meaningful (fail-closed). Mirrors the
     // older-backend case where runtime_attention may omit the field.
     const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ runtime_blocker_class: 'stale_turn_timeout' }),
+      keeper: makeKeeper({ runtime_blocker_class: 'fiber_unresolved' }),
       composite: makeComposite({
         runtime_attention: attention({ execution_current: undefined }),
       }),
@@ -216,7 +216,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     expect(state).toMatchObject({
       kind: 'stuck',
       attention: 'clean',
-      reason: 'stale_turn_timeout',
+      reason: 'fiber_unresolved',
     })
   })
 
@@ -366,7 +366,7 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         phase: 'Running',
-        runtime_blocker_class: 'stale_turn_timeout',
+        runtime_blocker_class: 'fiber_unresolved',
       }),
       composite: makeComposite({
         runtime_attention: attention({ execution_current: true }),
@@ -379,7 +379,7 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         phase: 'Running',
-        runtime_blocker_class: 'stale_turn_timeout',
+        runtime_blocker_class: 'fiber_unresolved',
       }),
       composite: makeComposite({
         runtime_attention: attention({
@@ -392,7 +392,7 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
       kind: 'running',
       attention: 'clean',
       turnPhase: 'idle',
-      staleBlocker: 'stale_turn_timeout',
+      staleBlocker: 'fiber_unresolved',
     })
   })
 })
@@ -549,7 +549,7 @@ describe('KeeperOperationalState.attention axis — RFC-0135 §13 Goal-2 (2026-0
     // kind=offline × attention=needs_attention
     ['offline', { phase: 'Offline' }, { runtime_attention: attention({ needs_attention: true }) }, 'needs_attention'],
     // kind=stuck × attention=blocked
-    ['stuck', { runtime_blocker_class: 'stale_turn_timeout' as KeeperRuntimeBlockerClass }, { runtime_attention: attention({ blocked: true }) }, 'blocked'],
+    ['stuck', { runtime_blocker_class: 'fiber_unresolved' as KeeperRuntimeBlockerClass }, { runtime_attention: attention({ blocked: true }) }, 'blocked'],
     // kind=running × attention=clean
     ['running', {}, { runtime_attention: attention({}) }, 'clean'],
   ])('kind=%s × attention=%s — axes orthogonal', (kind, keeperOverrides, compositeOverrides, expectedAttention) => {
@@ -592,7 +592,7 @@ describe('KeeperOperationalState remaining Goal-2 axes — RFC-0135 strict close
   it('displaySummary is present on the state and keeps composite-preferred precedence', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
-        runtime_blocker_class: 'stale_turn_timeout',
+        runtime_blocker_class: 'fiber_unresolved',
         runtime_blocker_summary: 'flat summary',
         attention_reason: 'attention memo',
       }),

@@ -370,7 +370,7 @@ describe('fleetBandScore', () => {
 
 describe('rowUrgencyScore', () => {
   it('scores runtime blocker highest', () => {
-    const withBlocker = makeRow({ runtime_blocker_class: 'stale_turn_timeout' })
+    const withBlocker = makeRow({ runtime_blocker_class: 'fiber_unresolved' })
     const without = makeRow()
     expect(rowUrgencyScore(withBlocker)).toBeGreaterThan(rowUrgencyScore(without))
   })
@@ -390,7 +390,7 @@ describe('rowUrgencyScore', () => {
 
 describe('compareFleetRows', () => {
   it('sorts by band score descending', () => {
-    const a = makeRow({ name: 'a', runtime_blocker_class: 'stale_turn_timeout' })
+    const a = makeRow({ name: 'a', runtime_blocker_class: 'fiber_unresolved' })
     const b = makeRow({ name: 'b' })
     expect(compareFleetRows(a, b)).toBeLessThan(0) // attention before active
   })
@@ -443,7 +443,7 @@ describe('statusClass', () => {
   })
 
   it('returns warn for runtime blocker', () => {
-    expect(statusClass(makeRow({ runtime_blocker_class: 'stale_turn_timeout' }))).toContain('var(--color-status-warn)')
+    expect(statusClass(makeRow({ runtime_blocker_class: 'fiber_unresolved' }))).toContain('var(--color-status-warn)')
   })
 
   it('returns warn for stale diagnostic health state', () => {
@@ -652,7 +652,7 @@ describe('buildFleetRows', () => {
 
 describe('buildRuntimeWarnings', () => {
   it('warns about runtime blockers', () => {
-    const rows = [makeRow({ runtime_blocker_class: 'stale_turn_timeout' })]
+    const rows = [makeRow({ runtime_blocker_class: 'fiber_unresolved' })]
     const warnings = buildRuntimeWarnings(rows)
     expect(warnings.length).toBe(1)
     expect(warnings[0]).toContain('runtime blockers')

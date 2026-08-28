@@ -80,7 +80,7 @@ describe('mission keeper runtime helpers', () => {
       status: 'idle',
       paused: true,
       keepalive_running: true,
-      runtime_blocker_class: 'stale_turn_timeout',
+      runtime_blocker_class: 'fiber_unresolved',
       runtime_blocker_summary: 'Provider turn timed out.',
       last_blocker: 'missing social headers',
     } as Keeper
@@ -96,7 +96,7 @@ describe('mission keeper runtime helpers', () => {
       status: 'idle',
       paused: true,
       keepalive_running: true,
-      runtime_blocker_class: 'stale_turn_timeout',
+      runtime_blocker_class: 'fiber_unresolved',
       runtime_blocker_summary: 'Provider turn timed out.',
     } as Keeper
 
@@ -108,7 +108,7 @@ describe('mission keeper runtime helpers', () => {
   it('labels backend runtime blocker classes used by keeper_status_bridge', () => {
     expect(keeperRuntimeBlockerLabel('runtime_exhausted')).toBe('런타임 후보 소진')
     expect(keeperRuntimeBlockerLabel('fiber_unresolved')).toBe('Fiber 미해결')
-    expect(keeperRuntimeBlockerLabel('stale_turn_timeout')).toBe('오래된 턴 만료')
+    expect(keeperRuntimeBlockerLabel('fiber_unresolved')).toBe('Fiber 미해결')
     expect(keeperRuntimeBlockerLabel('stale_termination_storm')).toBe('Stale 종료 폭주')
     expect(keeperRuntimeBlockerLabel('heartbeat_failures')).toBe('하트비트 실패')
     expect(keeperRuntimeBlockerLabel('turn_failures')).toBe('턴 실패 반복')

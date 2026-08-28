@@ -414,16 +414,16 @@ describe('normalizeOperatorSnapshot', () => {
           name: 'blocked-keeper',
           status: 'active',
           needs_attention: true,
-          attention_reason: 'stale_turn_timeout',
+          attention_reason: 'fiber_unresolved',
           next_human_action: 'inspect_runtime_blocker',
           runtime_trust: {
             disposition: 'Alert',
             operator_disposition: 'pause_runtime',
-            operator_disposition_reason: 'stale_turn_timeout',
+            operator_disposition_reason: 'fiber_unresolved',
             needs_attention: true,
-            attention_reason: 'stale_turn_timeout',
+            attention_reason: 'fiber_unresolved',
             latest_terminal_reason: {
-              code: 'stale_turn_timeout',
+              code: 'fiber_unresolved',
               source: 'execution_receipt',
               severity: 'bad',
               summary: 'Turn execution exceeded the keeper turn deadline',
@@ -441,10 +441,10 @@ describe('normalizeOperatorSnapshot', () => {
     expect(keeper.runtime_trust).toMatchObject({
       disposition: 'Alert',
       operator_disposition: 'pause_runtime',
-      operator_disposition_reason: 'stale_turn_timeout',
+      operator_disposition_reason: 'fiber_unresolved',
       needs_attention: true,
       latest_terminal_reason: {
-        code: 'stale_turn_timeout',
+        code: 'fiber_unresolved',
         severity: 'bad',
         summary: 'Turn execution exceeded the keeper turn deadline',
         next_action: 'inspect_runtime_blocker',

@@ -17,8 +17,7 @@
 // different operator copy, because the backend already paid to distinguish
 // them. keeper-attention-labels.drift.test.ts reads those backend OCaml emit
 // sites and fails the build if any produced token has no label here, so this
-// list cannot silently drift behind the backend the way it did before
-// (`stale_turn_timeout` was emitted for a release with no label).
+// list cannot silently drift behind the backend the way it did before.
 //
 // One-time warn per (kind, token) so dev consoles surface backend tokens that
 // have no Korean label, without spamming on every render.
@@ -35,7 +34,7 @@ function warnUnknownAttentionToken(kind: 'attention_reason' | 'next_human_action
 // Backend emit sites for `attention_reason` (the drift guard reads these):
 //   - lib/keeper/keeper_status_bridge.ml needs_attention block
 //     (approval_pending, paused,
-//      runtime_attempts_exhausted, provider_runtime_error, stale_turn_timeout,
+//      runtime_attempts_exhausted, provider_runtime_error,
 //      fiber_unresolved, runtime_blocked)
 //   - lib/dashboard/dashboard_goals.ml ('runtime_trust_snapshot_unavailable')
 //   - lib/keeper/keeper_execution_receipt.ml operator disposition reasons that
@@ -45,7 +44,6 @@ export const ATTENTION_REASONS = [
   'paused',
   'runtime_attempts_exhausted',
   'provider_runtime_error',
-  'stale_turn_timeout',
   'fiber_unresolved',
   'runtime_blocked',
   'approval_queue_unavailable',
@@ -69,7 +67,6 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   paused: '일시정지',
   runtime_attempts_exhausted: '런타임 재시도 소진',
   provider_runtime_error: '런타임 호출 오류',
-  stale_turn_timeout: '응답 지연(stale) 타임아웃',
   fiber_unresolved: '미완료 작업(fiber) 정리 필요',
   runtime_blocked: '런타임 근거 확인 필요',
   approval_queue_unavailable: '승인 큐 확인 불가',
@@ -122,7 +119,7 @@ export function attentionReasonLabel(reason: string | null, paused: boolean): st
 //   - lib/keeper/keeper_status_bridge.ml needs_attention block (paired 1:1 with
 //     the corresponding attention_reason)
 //   - lib/keeper/keeper_turn_disposition.ml next_action
-//     (provide_input_or_decline, rerun_if_still_relevant, inspect_turn_timeout,
+//     (provide_input_or_decline, rerun_if_still_relevant,
 //      inspect_runtime_attempts, inspect_latest_error)
 //   - lib/dashboard/dashboard_goals.ml ('inspect_keeper_runtime_trust')
 //   - lib/keeper/keeper_status_bridge.ml runtime_trust fallback
@@ -132,13 +129,11 @@ export const NEXT_HUMAN_ACTIONS = [
   'inspect_blocker_before_resume',
   'inspect_runtime_attempts',
   'inspect_provider_runtime_cause',
-  'inspect_stale_turn_root_cause',
   'inspect_turn_finalization',
   'inspect_runtime_blocker',
   'resume_or_review',
   'provide_input_or_decline',
   'rerun_if_still_relevant',
-  'inspect_turn_timeout',
   'inspect_latest_error',
   'inspect_keeper_runtime_trust',
   'reset_runtime_state',
@@ -150,13 +145,11 @@ const NEXT_HUMAN_ACTION_LABELS: Record<NextHumanAction, string> = {
   inspect_blocker_before_resume: '원인 확인 후 재개',
   inspect_runtime_attempts: '재시도별 원인 확인',
   inspect_provider_runtime_cause: 'Provider 런타임 원인 확인',
-  inspect_stale_turn_root_cause: '응답 지연(stale) 원인 확인',
   inspect_turn_finalization: '턴 정리 상태 확인',
   inspect_runtime_blocker: '런타임 근거 확인',
   resume_or_review: '재개 또는 설정 검토',
   provide_input_or_decline: '입력 제공 또는 거절',
   rerun_if_still_relevant: '필요 시 재실행',
-  inspect_turn_timeout: '턴 타임아웃 원인 확인',
   inspect_latest_error: '최근 오류 확인',
   inspect_keeper_runtime_trust: '런타임 신뢰 스냅샷 확인',
   reset_runtime_state: '런타임 상태 초기화',

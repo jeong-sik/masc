@@ -215,7 +215,7 @@ describe('summarizeKeeperMonitoring', () => {
       status: 'idle',
       phase: 'Running',
       last_heartbeat: new Date().toISOString(),
-      runtime_blocker_class: 'stale_turn_timeout',
+      runtime_blocker_class: 'fiber_unresolved',
       runtime_blocker_summary: 'turn timed out after queue wait',
     } as Keeper)
 
@@ -230,7 +230,7 @@ describe('summarizeKeeperMonitoring', () => {
       status: 'idle',
       phase: 'Running',
       last_heartbeat: new Date().toISOString(),
-      runtime_blocker_class: 'stale_turn_timeout',
+      runtime_blocker_class: 'fiber_unresolved',
       runtime_blocker_summary: 'turn timed out after queue wait',
     } as Keeper
 
@@ -358,7 +358,7 @@ describe('summarizeKeeperMonitoring', () => {
           status: 'busy',
           phase: 'Running',
           pipeline_stage: 'compacting',
-          runtime_blocker_class: 'stale_turn_timeout',
+          runtime_blocker_class: 'fiber_unresolved',
           runtime_blocker_summary: 'turn timed out after queue wait',
         } as Keeper,
         { keeper: 'keeper-transient-blocked', phase: 'compacting' } as unknown as Parameters<

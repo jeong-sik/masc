@@ -154,7 +154,7 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
   it('shows a pending approval gate before stale runtime blocker summaries', () => {
     const note = rosterStateNote(
       k({
-        runtime_blocker_class: 'stale_turn_timeout',
+        runtime_blocker_class: 'fiber_unresolved',
         runtime_blocker_summary: '턴 응답 만료',
         current_gate: {
           kind: 'approval_required',

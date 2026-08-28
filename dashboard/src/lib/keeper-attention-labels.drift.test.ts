@@ -4,9 +4,8 @@
 // `next_human_action` wire codes — they are literals or canonical shared
 // constants emitted from OCaml.
 // keeper-attention-labels.ts hand-mirrors that vocabulary, and that mirror
-// silently drifted before: the backend emitted `stale_turn_timeout` for a
-// release while the frontend union had no arm for it, so the dashboard showed
-// the raw English token instead of a Korean label.
+// silently drifted before, so the dashboard showed the raw English token
+// instead of a Korean label.
 //
 // This test reads the actual backend emit sites and asserts every token they
 // produce is a known union member here. It is the build-time enforcement the

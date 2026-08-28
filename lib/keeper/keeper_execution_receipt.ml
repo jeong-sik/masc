@@ -137,7 +137,6 @@ let operator_disposition (receipt : t)
     | Input_required -> true
     | Success
     | External_cancel
-    | Turn_wall_clock_timeout
     | Runtime_attempts_exhausted
     | Provider_error _
     | Unknown _ -> false

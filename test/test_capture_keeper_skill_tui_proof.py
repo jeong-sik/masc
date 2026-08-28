@@ -314,6 +314,54 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             with self.assertRaisesRegex(capture.CaptureError, "surface cycle"):
                 capture.goto_tools(Page(), 1.0)
 
+    def test_tools_activations_navigation_follows_the_observed_pane_ring(self):
+        class Page:
+            def wait_for_timeout(self, _milliseconds):
+                pass
+
+        screens = iter(
+            [
+                "MASC Tools  ▸surface | async | activations | usage | catalog",
+                "MASC Tools   surface |▸async | activations | usage | catalog",
+                "MASC Tools   surface | async |▸activations | usage | catalog",
+            ]
+        )
+        with (
+            mock.patch.object(capture, "screen_text", side_effect=screens),
+            mock.patch.object(capture, "press") as press,
+        ):
+            visited = capture.select_tools_activations(Page(), 1.0)
+
+        self.assertEqual(visited, ["surface", "async", "activations"])
+        self.assertEqual([call.args[1] for call in press.call_args_list], ["p", "p"])
+
+    def test_tools_activations_navigation_rejects_a_complete_pane_cycle(self):
+        class Page:
+            def wait_for_timeout(self, _milliseconds):
+                pass
+
+        screens = iter(
+            [
+                "MASC Tools  ▸surface | async | activations | usage | catalog",
+                "MASC Tools   surface |▸async | activations | usage | catalog",
+                "MASC Tools  ▸surface | async | activations | usage | catalog",
+            ]
+        )
+        with (
+            mock.patch.object(capture, "screen_text", side_effect=screens),
+            mock.patch.object(capture, "press"),
+        ):
+            with self.assertRaisesRegex(capture.CaptureError, "Tools pane cycle"):
+                capture.select_tools_activations(Page(), 1.0)
+
+    def test_tools_pane_parser_keeps_an_unfamiliar_observed_pane(self):
+        self.assertEqual(
+            capture.selected_tools_pane_from_screen(
+                "MASC Tools   surface |▸future | activations"
+            ),
+            "future",
+        )
+
     def test_exact_keeper_selection_does_not_require_offscreen_receipts(self):
         with (
             mock.patch.object(
@@ -331,13 +379,16 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
     def test_action_must_be_inside_exact_receipt_block(self):
         same = "\n".join(
             [
+                'exact={"content_revision":"one"}',
                 "invoked turn=1 id=call-skill-1 runtime=one",
                 "action turn=1 runtime=one tool=x call=call-action-1",
             ]
         )
         another = "\n".join(
             [
+                'exact={"content_revision":"one"}',
                 "invoked turn=1 id=call-skill-1 runtime=one",
+                'exact={"content_revision":"two"}',
                 "invoked turn=2 id=call-skill-2 runtime=one",
                 "action turn=2 runtime=one tool=x call=call-action-1",
             ]
@@ -351,8 +402,13 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 another, "call-skill-1", "call=call-action-1"
             )
         )
+        self.assertNotIn(
+            'exact={"content_revision":"two"}',
+            capture.exact_receipt_block(another, "call-skill-1") or "",
+        )
         prefix_collision = "\n".join(
             [
+                'exact={"content_revision":"ten"}',
                 "invoked turn=1 id=call-skill-10 runtime=one",
                 "action turn=1 runtime=one tool=x call=call-action-1",
             ]
@@ -368,6 +424,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             [
                 "MASC Tools 14:10:47 [connected]",
                 "session=session-1  ledger=ledger-1",
+                'exact={"content_revision":"one"}',
                 "invoked turn=1 id=call-skill-1 runtime=one",
                 "action turn=1 runtime=one tool=x call=call-action-1",
             ]
@@ -384,6 +441,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
     def test_exact_receipt_block_detects_changed_runtime_tool_and_turn(self):
         before = "\n".join(
             [
+                'exact={"content_revision":"one"}',
                 "invoked turn=1 id=call-skill-1 runtime=one",
                 "action turn=1 runtime=one tool=x call=call-action-1",
             ]
@@ -394,6 +452,84 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             capture.exact_receipt_block(before, "call-skill-1"),
             capture.exact_receipt_block(after, "call-skill-1"),
         )
+
+    def test_exact_receipt_block_detects_changed_exact_identity(self):
+        before = "\n".join(
+            [
+                'exact={"content_revision":"one"}',
+                "invoked turn=1 id=call-skill-1 runtime=one",
+                "action turn=1 runtime=one tool=x call=call-action-1",
+            ]
+        )
+        after = before.replace('"one"', '"two"')
+
+        self.assertNotEqual(
+            capture.exact_receipt_block(before, "call-skill-1"),
+            capture.exact_receipt_block(after, "call-skill-1"),
+        )
+
+    def test_ledger_projection_accepts_exact_or_observed_prefix(self):
+        revision = "abcdef0123456789"
+
+        self.assertTrue(
+            capture.ledger_projection_matches(
+                f"session=trace-one  ledger={revision}", "trace-one", revision
+            )
+        )
+        self.assertTrue(
+            capture.ledger_projection_matches(
+                "session=trace-one  ledger=abcdef012345…", "trace-one", revision
+            )
+        )
+        self.assertFalse(
+            capture.ledger_projection_matches(
+                "session=trace-one  ledger=deadbeef…", "trace-one", revision
+            )
+        )
+
+    def test_scroll_collects_header_before_an_offscreen_exact_receipt(self):
+        class Page:
+            def wait_for_timeout(self, _milliseconds):
+                pass
+
+        top = "\n".join(
+            [
+                "MASC Tools 14:10:47 [connected]",
+                "Skill Use — keeper-one (8 receipts)",
+                "session=trace-one  ledger=abcdef012345…",
+                "invoked=8 actions=8 invalid=0",
+            ]
+        )
+        middle = "MASC Tools 14:10:47 [connected]\nolder receipts"
+        receipt = "\n".join(
+            [
+                "MASC Tools 14:10:47 [connected]",
+                'exact={"content_revision":"one"}',
+                "invoked turn=8 id=call-skill-1 runtime=one",
+                "action turn=8 runtime=one tool=x call=call-action-1",
+            ]
+        )
+        screens = iter([top, middle, middle, receipt, receipt])
+        with (
+            mock.patch.object(capture, "screen_text", side_effect=screens),
+            mock.patch.object(capture, "press") as press,
+        ):
+            visible, observations = capture.scroll_to_skill_receipt(
+                Page(),
+                keeper="keeper-one",
+                session_id="trace-one",
+                ledger_revision="abcdef0123456789",
+                skill_tool_use_id="call-skill-1",
+                action="call=call-action-1",
+                timeout=1.0,
+            )
+
+        self.assertEqual(visible, receipt)
+        self.assertEqual(
+            observations["skill_header"], "Skill Use — keeper-one (8 receipts)"
+        )
+        self.assertIn("id=call-skill-1", observations["receipt_block"])
+        self.assertEqual([call.args[1] for call in press.call_args_list], ["j", "j"])
 
     def test_tools_surface_connection_rejects_disconnected(self):
         self.assertTrue(

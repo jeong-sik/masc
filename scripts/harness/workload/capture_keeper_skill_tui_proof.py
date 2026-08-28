@@ -720,6 +720,48 @@ def selected_keeper_from_screen(value: str) -> str | None:
     return None
 
 
+def selected_tools_pane_from_screen(value: str) -> str | None:
+    for line in value.splitlines():
+        if "MASC Tools" not in line:
+            continue
+        for token in line.split():
+            pane_token = token.lstrip("|")
+            if not pane_token.startswith("▸"):
+                continue
+            pane = pane_token[1:]
+            return pane if pane != "" else None
+    return None
+
+
+def select_tools_activations(page: Any, timeout: float) -> list[str]:
+    deadline = time.monotonic() + timeout
+    current = selected_tools_pane_from_screen(screen_text(page))
+    while current is None and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
+        current = selected_tools_pane_from_screen(screen_text(page))
+    if current is None:
+        raise CaptureError("TUI did not expose its selected Tools pane")
+    visited = [current]
+    while current != "activations" and time.monotonic() < deadline:
+        press(page, "p")
+        next_pane = current
+        while next_pane == current and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+            observed = selected_tools_pane_from_screen(screen_text(page))
+            if observed is not None:
+                next_pane = observed
+        require(next_pane != current, "TUI Tools pane selection did not advance")
+        if next_pane in visited:
+            raise CaptureError("TUI completed a Tools pane cycle without activations")
+        visited.append(next_pane)
+        current = next_pane
+    require(
+        current == "activations",
+        "TUI did not select the activations pane before timeout",
+    )
+    return visited
+
+
 def select_exact_keeper(page: Any, keeper: str, timeout: float) -> list[str]:
     deadline = time.monotonic() + timeout
     current = selected_keeper_from_screen(screen_text(page))
@@ -749,16 +791,20 @@ def select_exact_keeper(page: Any, keeper: str, timeout: float) -> list[str]:
 def exact_receipt_block(value: str, skill_tool_use_id: str) -> str | None:
     lines = value.splitlines()
     id_marker = f"id={skill_tool_use_id}"
-    token_lines = [line.strip(" │").split() for line in lines]
+    normalized_lines = [line.strip(" │") for line in lines]
+    token_lines = [line.split() for line in normalized_lines]
     starts = [index for index, tokens in enumerate(token_lines) if id_marker in tokens]
     if len(starts) != 1:
         return None
-    start = starts[0]
+    id_line = starts[0]
+    if id_line == 0 or not normalized_lines[id_line - 1].startswith("exact="):
+        return None
+    start = id_line - 1
     end = next(
         (
             index
             for index in range(start + 1, len(lines))
-            if any(token.startswith("id=") for token in token_lines[index])
+            if normalized_lines[index].startswith("exact=")
         ),
         len(lines),
     )
@@ -779,21 +825,78 @@ def tools_surface_is_connected(value: str) -> bool:
     )
 
 
-def scroll_to_markers(page: Any, markers: list[str], timeout: float) -> str:
+def ledger_projection_matches(line: str, session_id: str, ledger_revision: str) -> bool:
+    normalized = line.strip(" │")
+    prefix = f"session={session_id}  ledger="
+    if not normalized.startswith(prefix):
+        return False
+    displayed = normalized[len(prefix) :]
+    if displayed.endswith("…"):
+        displayed = displayed[:-1]
+        return displayed != "" and ledger_revision.startswith(displayed)
+    return displayed == ledger_revision
+
+
+def scroll_to_skill_receipt(
+    page: Any,
+    *,
+    keeper: str,
+    session_id: str,
+    ledger_revision: str,
+    skill_tool_use_id: str,
+    action: str,
+    timeout: float,
+) -> tuple[str, dict[str, str]]:
     deadline = time.monotonic() + timeout
+    observations: dict[str, str] = {}
     while time.monotonic() < deadline:
         visible = screen_text(page)
-        if all(marker in visible for marker in markers):
-            return visible
+        normalized_lines = [line.strip(" │") for line in visible.splitlines()]
+        if "skill_header" not in observations:
+            header_prefix = f"Skill Use — {keeper} ("
+            header = next(
+                (
+                    line
+                    for line in normalized_lines
+                    if line.startswith(header_prefix) and line.endswith(" receipts)")
+                ),
+                None,
+            )
+            if header is not None:
+                observations["skill_header"] = header
+        if "session_line" not in observations:
+            session_line = next(
+                (
+                    line
+                    for line in normalized_lines
+                    if ledger_projection_matches(line, session_id, ledger_revision)
+                ),
+                None,
+            )
+            if session_line is not None:
+                observations["session_line"] = session_line
+        if "invalid_line" not in observations:
+            invalid_line = next(
+                (line for line in normalized_lines if "invalid=0" in line.split()),
+                None,
+            )
+            if invalid_line is not None:
+                observations["invalid_line"] = invalid_line
+        receipt = exact_receipt_block(visible, skill_tool_use_id)
+        if receipt is not None and receipt_block_contains(
+            visible, skill_tool_use_id, action
+        ):
+            observations["receipt_block"] = receipt
+        if len(observations) == 4 and receipt is not None:
+            return visible, observations
         press(page, "j")
         page.wait_for_timeout(25)
         advanced = screen_text(page)
         if advanced == visible:
-            missing = [marker for marker in markers if marker not in visible]
-            raise CaptureError(f"TUI reached the bottom before markers: {missing}")
-    raise CaptureError(
-        "TUI markers did not become visible before the configured timeout"
-    )
+            required = {"skill_header", "session_line", "invalid_line", "receipt_block"}
+            missing = sorted(required - observations.keys())
+            raise CaptureError(f"TUI reached the bottom before observations: {missing}")
+    raise CaptureError("TUI Skill receipt observations did not complete before timeout")
 
 
 def write_json(path: Path, value: Any) -> bytes:
@@ -894,14 +997,16 @@ def main() -> int:
                 visited_keepers = select_exact_keeper(
                     page, selected["keeper"], args.timeout
                 )
-                markers = [
-                    f"Skill Use — {selected['keeper']}",
-                    f"session={selected['session_id']}  ledger={selected['ledger_revision']}",
-                    f"id={selected['skill_tool_use_id']}",
-                    "invalid=0",
-                    selected["action_markers"][0],
-                ]
-                visible = scroll_to_markers(page, markers, args.timeout)
+                visited_tools_panes = select_tools_activations(page, args.timeout)
+                visible, observations = scroll_to_skill_receipt(
+                    page,
+                    keeper=selected["keeper"],
+                    session_id=selected["session_id"],
+                    ledger_revision=selected["ledger_revision"],
+                    skill_tool_use_id=selected["skill_tool_use_id"],
+                    action=selected["action_markers"][0],
+                    timeout=args.timeout,
+                )
                 require(
                     tools_surface_is_connected(visible),
                     "TUI Tools surface is not connected before screenshot",
@@ -955,7 +1060,7 @@ def main() -> int:
 
     screenshot_payload = screenshot.read_bytes()
     result = {
-        "schema": "masc.keeper-skill-tui-proof.v1",
+        "schema": "masc.keeper-skill-tui-proof.v2",
         "captured_at": utc_now(),
         "source": {
             "expected_sha": selected["expected_sha"],
@@ -983,9 +1088,11 @@ def main() -> int:
         "server": server_identity,
         "selection": {
             "visited_keepers": visited_keepers,
+            "visited_tools_panes": visited_tools_panes,
         },
         "producer_artifacts": verified_producer_artifacts,
         "terminal": terminal,
+        "observations": observations,
         "visible_text": visible,
         "visible_text_sha256": digest_bytes(visible.encode()),
         "screenshot": {

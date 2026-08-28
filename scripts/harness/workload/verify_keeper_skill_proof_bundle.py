@@ -24,7 +24,7 @@ import keeper_skill_use_proof as proof_collector
 SCHEMA = "masc.keeper-skill-proof-verification/v1"
 JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v2"
 PROOF_SCHEMA = "masc.keeper-skill-use-proof.v2"
-TUI_SCHEMA = "masc.keeper-skill-tui-proof.v1"
+TUI_SCHEMA = "masc.keeper-skill-tui-proof.v2"
 BUILD_SCHEMA = "masc.tui-build-evidence/v1"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -80,6 +80,18 @@ def require(condition: bool, detail: str) -> None:
 
 def digest(payload: bytes) -> str:
     return sha256(payload).hexdigest()
+
+
+def ledger_projection_matches(line: str, session_id: str, ledger_revision: str) -> bool:
+    normalized = line.strip(" │")
+    prefix = f"session={session_id}  ledger="
+    if not normalized.startswith(prefix):
+        return False
+    displayed = normalized[len(prefix) :]
+    if displayed.endswith("…"):
+        displayed = displayed[:-1]
+        return displayed != "" and ledger_revision.startswith(displayed)
+    return displayed == ledger_revision
 
 
 def utc_now() -> str:
@@ -876,16 +888,39 @@ def verify_bundle(
         tui.get("visible_text_sha256") == digest(visible_text.encode()),
         "TUI visible text SHA differs",
     )
-    required_visible_markers = [
-        f"Skill Use — {proof_identity['keeper']}",
-        f"session={proof_identity['session_id']}  ledger={proof_identity['ledger_revision']}",
-        f"id={selected_id}",
-        "invalid=0",
-        expected_markers[0],
-    ]
+    observations = object_field(tui, "observations", "TUI proof")
+    skill_header = string_field(observations, "skill_header", "TUI observations")
+    session_line = string_field(observations, "session_line", "TUI observations")
+    invalid_line = string_field(observations, "invalid_line", "TUI observations")
+    receipt_block = string_field(observations, "receipt_block", "TUI observations")
     require(
-        all(marker in visible_text for marker in required_visible_markers),
-        "TUI visible text does not contain the exact Skill receipt markers",
+        skill_header.startswith(f"Skill Use — {proof_identity['keeper']} (")
+        and skill_header.endswith(" receipts)"),
+        "TUI observation does not contain the exact Skill header",
+    )
+    require(
+        ledger_projection_matches(
+            session_line,
+            string_field(proof_identity, "session_id", "proof identity"),
+            string_field(proof_identity, "ledger_revision", "proof identity"),
+        ),
+        "TUI ledger projection differs",
+    )
+    require(
+        "invalid=0" in invalid_line.split(),
+        "TUI invalid-transition observation differs",
+    )
+    receipt_lines = [line.strip(" │") for line in receipt_block.splitlines()]
+    require(
+        len(receipt_lines) >= 2
+        and receipt_lines[0].startswith("exact=")
+        and f"id={selected_id}" in receipt_block
+        and expected_markers[0] in receipt_block,
+        "TUI exact receipt observation differs",
+    )
+    require(
+        receipt_block in visible_text,
+        "TUI screenshot viewport does not contain the exact receipt observation",
     )
     screenshot = object_field(tui, "screenshot", "TUI proof")
     tui_screenshot_name = string_field(screenshot, "path", "TUI screenshot")

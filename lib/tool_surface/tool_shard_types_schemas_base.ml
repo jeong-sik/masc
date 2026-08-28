@@ -18,5 +18,6 @@ let base_tools : Masc_domain.tool_schema list =
     Tool_shard_types_schemas_base_toml.memory_write
   ; (* Tool self-introspection — lets the keeper enumerate its own capabilities *)
     Tool_shard_types_schemas_base_toml.tools_list
+  ; Tool_shard_types_schemas_base_toml.capability_search
   ]
 ;;

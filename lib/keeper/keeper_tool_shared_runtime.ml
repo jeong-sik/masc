@@ -471,86 +471,58 @@ let keeper_tools_list_json_for_surface ~capability_surface =
     (`Assoc
        (assoc
         @ [ "schema", `String "masc.keeper.capability_surface.v1"
-          ; "search_scope", `String "active_tools_only"
           ; ( "skill_snapshot_revision"
             , `String
                 (Keeper_capability_surface.skill_snapshot_revision capability_surface
                  |> Skill_catalog_snapshot.snapshot_revision_to_string) )
+          ; ( "surface_digest"
+            , `String (Keeper_capability_surface.digest capability_surface) )
           ; "descriptor_surface", `List descriptor_surface
           ; "skills", `List skills
           ]))
 ;;
 
-let keeper_tools_search_json_for_descriptors descriptors ~query =
-  let active_name_set, active_descriptors =
-    active_descriptor_names_for_descriptors descriptors
-  in
+let keeper_capability_search_json_for_surface ~capability_surface ~query =
   let documents =
-    List.map
-      (fun (name, descriptor) ->
-         let category =
-           Keeper_tool_descriptor.keeper_tool_group_to_string
-             descriptor.Keeper_tool_descriptor.keeper_tool_group
-         in
+    Keeper_capability_surface.candidates capability_surface
+    |> List.map (fun candidate ->
          Keeper_capability_search.
-           { id = descriptor.id; name; description = descriptor.description; category })
-      active_descriptors
+           { payload = candidate
+           ; name = Keeper_capability_surface.candidate_name candidate
+           ; description =
+               Keeper_capability_surface.candidate_description candidate
+           ; category = Keeper_capability_surface.candidate_category candidate
+           ; invocation_name =
+               Keeper_capability_surface.candidate_invocation_name candidate
+           })
   in
   match Keeper_capability_search.search ~query documents with
   | Error _ as error -> error
   | Ok hits ->
-    let rec render index rows = function
-      | [] ->
-        Ok
-          (`Assoc
-             [ "query", `String query
-             ; "search_scope", `String "active_tools_only"
-             ; "match_count", `Int (List.length rows)
-             ; "matches", `List (List.rev rows)
-             ])
-      | (hit : Keeper_capability_search.hit) :: rest ->
-        (match
-           List.find_map
-             (fun (name, descriptor) ->
-                if String.equal name hit.document.name
-                   && String.equal descriptor.Keeper_tool_descriptor.id hit.document.id
-                then Some descriptor
-                else None)
-             active_descriptors
-         with
-         | None ->
-           Error
-             (Keeper_capability_search.Index_unavailable
-                "capability index returned an identity outside its authorized input")
-         | Some descriptor ->
-           let row =
-             `Assoc
-               ([ "rank", `Int index
-                ; "score", `Float hit.rank
-                ; "matched_name", `String hit.document.name
-                ; "category", `String hit.document.category
-                ]
-                @ Keeper_tool_descriptor.discovery_fields descriptor
-                @ [ ( "active_names"
-                    , Json_util.json_string_list
-                        (descriptor_active_names active_name_set descriptor) ) ])
-           in
-           render (index + 1) (row :: rows) rest)
+    let matches =
+      hits
+      |> List.map (fun hit ->
+        `Assoc
+          [ "bm25", `Float hit.Keeper_capability_search.bm25
+          ; "matched_name", `String hit.document.name
+          ; "category", `String hit.document.category
+          ; ( "invocation_name"
+            , Option.fold
+                ~none:`Null
+                ~some:(fun name -> `String name)
+                hit.document.invocation_name )
+          ; ( "candidate"
+            , Keeper_capability_surface.candidate_to_yojson
+                hit.document.payload )
+          ])
     in
-    render 1 [] hits
-;;
-
-let keeper_tools_search_json ~(meta : keeper_meta) ~query =
-  let descriptors =
-    Keeper_tool_descriptor.tool_groups_to_surface meta.tool_groups
-    |> fun surface ->
-    Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
-  in
-  keeper_tools_search_json_for_descriptors descriptors ~query
-;;
-
-let keeper_tools_search_json_for_surface ~capability_surface ~query =
-  keeper_tools_search_json_for_descriptors
-    (Keeper_capability_surface.descriptors capability_surface)
-    ~query
+    Ok
+      (`Assoc
+         [ "schema", `String "masc.keeper.capability_search.v1"
+         ; "query", `String query
+         ; "search_scope", `String "frozen_capability_surface"
+         ; "surface_digest", `String (Keeper_capability_surface.digest capability_surface)
+         ; "match_count", `Int (List.length matches)
+         ; "matches", `List matches
+         ])
 ;;

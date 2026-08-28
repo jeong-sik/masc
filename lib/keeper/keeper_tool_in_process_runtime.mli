@@ -16,8 +16,7 @@ val handle_tools_list
   -> args:Yojson.Safe.t
   -> unit
   -> Keeper_tool_execution.t
-(** Real Keeper-turn handler. Both list and query read only the immutable
-    capability surface supplied by the production bundle. *)
+(** Real Keeper-turn handler. The list surface has no search affordance. *)
 
 val handle_tools_list_from_meta
   :  meta:keeper_meta
@@ -26,6 +25,19 @@ val handle_tools_list_from_meta
   -> Keeper_tool_execution.t
 (** Compatibility seam for direct dispatch tests and callers that do not own
     a Keeper turn. Production Keeper bundles do not use it. *)
+
+val handle_capability_search
+  :  capability_surface:Keeper_capability_surface.t
+  -> args:Yojson.Safe.t
+  -> unit
+  -> Keeper_tool_execution.t
+
+val handle_capability_search_from_meta
+  :  args:Yojson.Safe.t
+  -> unit
+  -> Keeper_tool_execution.t
+(** Compatibility dispatch cannot reconstruct a frozen Skill inventory and
+    therefore returns [frozen_surface_required]. *)
 
 val network_read_gate_operation : string
 

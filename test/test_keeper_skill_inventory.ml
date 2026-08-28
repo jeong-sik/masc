@@ -140,6 +140,28 @@ let exact_capability_by_reference surface reference =
   | None -> fail "exact Skill capability is absent"
 ;;
 
+let search_candidates surface query =
+  let documents =
+    Masc.Keeper_capability_surface.candidates surface
+    |> List.map (fun candidate ->
+      Masc.Keeper_capability_search.
+        { payload = candidate
+        ; name = Masc.Keeper_capability_surface.candidate_name candidate
+        ; description =
+            Masc.Keeper_capability_surface.candidate_description candidate
+        ; category = Masc.Keeper_capability_surface.candidate_category candidate
+        ; invocation_name =
+            Masc.Keeper_capability_surface.candidate_invocation_name candidate
+        })
+  in
+  match Masc.Keeper_capability_search.search ~query documents with
+  | Ok hits -> hits
+  | Error error ->
+    fail
+      (Yojson.Safe.to_string
+         (Masc.Keeper_capability_search.error_to_yojson error))
+;;
+
 let test_valid_instruction_and_exact_reference () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let frozen =
@@ -363,6 +385,202 @@ let test_shadowed_and_invalid_skills_keep_typed_availability () =
   check int "invalid configured Skill is not double-reported missing" 0 missing_count
 ;;
 
+let test_search_keeps_duplicate_exact_skill_references () =
+  let config =
+    parse_config
+      (config_text
+         (source_row ~id:"first" ~path:"first-skills"
+          ^ source_row ~id:"second" ~path:"second-skills"))
+  in
+  let first = "---\nname: review\ndescription: Review first.\n---\nbody\n" in
+  let second = "---\nname: review\ndescription: Review second.\n---\nbody\n" in
+  let surface =
+    snapshot
+      config
+      [ [ candidate ~directory:"review" first ]
+      ; [ candidate ~directory:"review" second ]
+      ]
+    |> capability_surface
+  in
+  let references =
+    search_candidates surface "review"
+    |> List.filter_map (fun hit ->
+      match hit.Masc.Keeper_capability_search.document.payload with
+      | Masc.Keeper_capability_surface.Skill
+          { identity = Exact_skill (Inventory.Valid valid); _ } ->
+        Some valid.reference
+      | Ordinary_tool _
+      | Skill
+          { identity = (Exact_skill (Inventory.Invalid _)
+                       | Missing_configured_skill_name _)
+          ; _
+          } -> None)
+  in
+  check int "both same-name Skills survive" 2 (List.length references);
+  match references with
+  | [ first; second ] ->
+    check bool "same-name hits retain different exact refs" false
+      (Skill_reference.equal first second)
+  | _ -> fail "expected two exact Skill references"
+;;
+
+let test_search_includes_outside_tool_and_skill () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot config [ [ candidate ~directory:"release-checklist" instruction_document ] ]
+  in
+  let surface =
+    capability_surface
+      ~tool_groups:(Some [ "board" ])
+      ~skill_names:(Some [])
+      frozen
+  in
+  let outside_tool =
+    search_candidates surface "tool_read_file"
+    |> List.exists (fun hit ->
+      match hit.Masc.Keeper_capability_search.document.payload with
+      | Masc.Keeper_capability_surface.Ordinary_tool capability ->
+        capability.availability = Masc.Keeper_capability_surface.Outside_tool_surface
+      | Skill _ -> false)
+  in
+  check bool "outside Tool is searchable" true outside_tool;
+  let outside_skill =
+    search_candidates surface "\"release-checklist\""
+    |> List.exists (fun hit ->
+      match hit.Masc.Keeper_capability_search.document.payload with
+      | Masc.Keeper_capability_surface.Skill capability ->
+        capability.availability
+        = Masc.Keeper_capability_surface.Outside_skill_surface
+      | Ordinary_tool _ -> false)
+  in
+  check bool "outside Skill is searchable" true outside_skill
+;;
+
+let test_invalid_skill_search_is_isolated () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot
+      config
+      [ [ candidate ~directory:"release-checklist" instruction_document
+        ; candidate ~directory:"broken" "---\nname: broken\n---\nbody\n"
+        ] ]
+  in
+  let hits = search_candidates (capability_surface frozen) "broken" in
+  check int "only invalid Skill matches" 1 (List.length hits);
+  match hits with
+  | [ hit ] ->
+    (match hit.Masc.Keeper_capability_search.document.payload with
+     | Masc.Keeper_capability_surface.Skill capability ->
+       check bool "invalid availability retained" true
+         (capability.availability = Masc.Keeper_capability_surface.Invalid_definition)
+     | Ordinary_tool _ -> fail "invalid Skill query returned a Tool")
+  | _ -> fail "invalid Skill search count changed after assertion"
+;;
+
+let test_search_returns_every_fts_hit_without_cutoff () =
+  let documents =
+    List.init 32 (fun index ->
+      Masc.Keeper_capability_search.
+        { payload = index
+        ; name = Printf.sprintf "candidate-%d" index
+        ; description = "sharedneedle"
+        ; category = "test"
+        ; invocation_name = None
+        })
+  in
+  match Masc.Keeper_capability_search.search ~query:"sharedneedle" documents with
+  | Ok hits -> check int "no top-N cutoff" 32 (List.length hits)
+  | Error error ->
+    fail
+      (Yojson.Safe.to_string
+         (Masc.Keeper_capability_search.error_to_yojson error))
+;;
+
+let test_surface_digest_binds_exact_tool_input_schema () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let surface = capability_surface (snapshot config [ [] ]) in
+  let descriptor =
+    Masc.Keeper_capability_surface.tool_capabilities surface
+    |> List.find_opt (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+      String.equal capability.descriptor.internal_name "tool_read_file")
+    |> function
+    | Some capability -> capability.descriptor
+    | None -> fail "Read capability is absent from digest fixture"
+  in
+  let material = Masc.Keeper_capability_surface.digest_material_to_yojson surface in
+  let row =
+    Yojson.Safe.Util.(material |> member "candidates" |> to_list)
+    |> List.find_opt (fun row ->
+      String.equal
+        "tool_read_file"
+        Yojson.Safe.Util.(
+          row
+          |> member "candidate"
+          |> member "capability"
+          |> member "internal_name"
+          |> to_string))
+    |> function
+    | Some row -> row
+    | None -> fail "Read digest material is absent"
+  in
+  check string "digest material retains exact input schema"
+    (Yojson.Safe.to_string (Yojson.Safe.sort descriptor.input_schema))
+    Yojson.Safe.Util.(row |> member "input_schema" |> Yojson.Safe.sort |> Yojson.Safe.to_string);
+  let altered_material =
+    match material with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "candidates"
+              then
+                ( name
+                , match value with
+                  | `List rows ->
+                    `List
+                      (List.map
+                         (fun row ->
+                            let is_read =
+                              match
+                                Yojson.Safe.Util.(
+                                  row
+                                  |> member "candidate"
+                                  |> member "capability"
+                                  |> member "internal_name")
+                              with
+                              | `String name -> String.equal name "tool_read_file"
+                              | _ -> false
+                            in
+                            if not is_read
+                            then row
+                            else
+                              match row with
+                              | `Assoc fields ->
+                                `Assoc
+                                  (List.map
+                                     (fun (field, value) ->
+                                        if String.equal field "input_schema"
+                                        then field, `Assoc []
+                                        else field, value)
+                                     fields)
+                              | other -> other)
+                         rows)
+                  | other -> other )
+              else name, value)
+           fields)
+    | other -> other
+  in
+  let altered_digest =
+    altered_material
+    |> Yojson.Safe.sort
+    |> Yojson.Safe.to_string
+    |> Digestif.SHA256.digest_string
+    |> Digestif.SHA256.to_hex
+  in
+  check bool "input schema change changes digest" false
+    (String.equal (Masc.Keeper_capability_surface.digest surface) altered_digest)
+;;
+
 let () =
   run
     "keeper_skill_inventory"
@@ -380,6 +598,16 @@ let () =
             test_empty_selection_makes_valid_skill_operator_only
         ; test_case "shadowed and invalid Skill availability" `Quick
             test_shadowed_and_invalid_skills_keep_typed_availability
+        ; test_case "duplicate-name search keeps exact refs" `Quick
+            test_search_keeps_duplicate_exact_skill_references
+        ; test_case "outside Tool and Skill search" `Quick
+            test_search_includes_outside_tool_and_skill
+        ; test_case "invalid Skill search isolation" `Quick
+            test_invalid_skill_search_is_isolated
+        ; test_case "search has no cutoff" `Quick
+            test_search_returns_every_fts_hit_without_cutoff
+        ; test_case "surface digest binds exact Tool schema" `Quick
+            test_surface_digest_binds_exact_tool_input_schema
         ] )
     ]
 ;;

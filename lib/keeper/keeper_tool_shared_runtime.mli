@@ -182,16 +182,9 @@ val keeper_tools_list_json_for_surface
     turn. Unlike the compatibility projection above, this function never
     reads Keeper metadata or either catalog again. *)
 
-val keeper_tools_search_json
-  :  meta:Keeper_meta_contract.keeper_meta
-  -> query:string
-  -> (Yojson.Safe.t, Keeper_capability_search.error) result
-(** Search only the same already-authorized descriptor set rendered by
-    {!keeper_tools_list_json}. *)
-
-val keeper_tools_search_json_for_surface
+val keeper_capability_search_json_for_surface
   :  capability_surface:Keeper_capability_surface.t
   -> query:string
   -> (Yojson.Safe.t, Keeper_capability_search.error) result
-(** Search only active ordinary Tools from the frozen turn surface. Skill FTS
-    search is intentionally outside this PR and is named in the response. *)
+(** Search the complete typed Tool and Skill inventory frozen for one turn.
+    SQLite FTS5 chooses candidates only; it does not invoke them. *)

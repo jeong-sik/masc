@@ -330,6 +330,7 @@ let descriptions_owned_elsewhere =
   ; "keeper_person_note_set"
   ; "keeper_time_now"
   ; "keeper_tools_list"
+  ; "keeper_capability_search"
   ]
 ;;
 
@@ -585,6 +586,7 @@ let test_seed_eval_tags_are_registered () =
       descriptor.Descriptor.eval_tags
   in
   check "keeper_tools_list" [ "capability_introspection" ];
+  check "keeper_capability_search" [ "capability_introspection" ];
   check "keeper_surface_read" [ "surface_context_read" ];
   check "masc_agent_card" [ "agent_profile_lookup" ];
   check "keeper_time_now" []
@@ -1332,6 +1334,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
   Alcotest.(check (list string))
     "only explicitly audited handlers opt into concurrent batches"
     [ "keeper_artifact_read"
+    ; "keeper_capability_search"
     ; "keeper_library_read"
     ; "keeper_library_search"
     ; "keeper_tasks_audit"

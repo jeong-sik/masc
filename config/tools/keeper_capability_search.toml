@@ -1,0 +1,15 @@
+name = "keeper_capability_search"
+description = """
+Search the complete Tool and Skill capability inventory frozen for this Keeper \
+turn. SQLite FTS5 ranks lexical candidates with BM25. Results retain exact \
+typed capability identity and availability but never invoke a candidate."""
+additional_properties = false
+
+[[params]]
+name = "query"
+type = "string"
+required = true
+description = """
+FTS5 query over exact capability name, description, category, and invocation \
+name. No substring, regex, stop-word, threshold, top-N, or intent-expansion \
+heuristic is added."""

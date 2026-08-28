@@ -71,6 +71,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_search_files
   | Tool_time_now
   | Tool_tools_list
+  | Tool_capability_search
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
@@ -132,6 +133,7 @@ let handle_shell_ir ctx descriptor args =
   | Tool_write_file
   | Tool_time_now
   | Tool_tools_list
+  | Tool_capability_search
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
@@ -184,6 +186,18 @@ let handle_in_process ctx descriptor args =
        | Compatibility_meta ->
          Keeper_tool_in_process_runtime.handle_tools_list_from_meta
            ~meta:ctx.meta
+           ~args
+           ())
+  | Tool_capability_search ->
+    Some
+      (match ctx.capability_authority with
+       | Frozen_surface capability_surface ->
+         Keeper_tool_in_process_runtime.handle_capability_search
+           ~capability_surface
+           ~args
+           ()
+       | Compatibility_meta ->
+         Keeper_tool_in_process_runtime.handle_capability_search_from_meta
            ~args
            ())
   | Tool_context_status ->

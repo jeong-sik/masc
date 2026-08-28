@@ -58,3 +58,4 @@ val of_snapshot : Skill_catalog_snapshot.t -> t
 
 val snapshot_revision : t -> Skill_catalog_snapshot.snapshot_revision
 val items : t -> skill_inventory_item list
+val invalid_error_to_yojson : invalid_error -> Yojson.Safe.t

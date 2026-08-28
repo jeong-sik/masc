@@ -443,6 +443,10 @@ let explicit_metadata : (string * metadata) list =
       hidden_runtime_tool
         "Keeper tool-list runtime tool; callable but hidden from the public MCP schema surface."
         read_state_tool );
+    ( "keeper_capability_search",
+      hidden_runtime_tool
+        "Keeper capability-search runtime tool; callable but hidden from the public MCP schema surface."
+        read_state_tool );
     (* Keeper shard schemas are registered directly by [Unified_tool_registry],
        not through [Tool_spec].  Their callable names still need an explicit
        permission authority here; descriptor policy remains the SSOT for

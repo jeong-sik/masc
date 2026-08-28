@@ -106,3 +106,44 @@ let of_snapshot snapshot =
 
 let snapshot_revision inventory = inventory.snapshot_revision
 let items inventory = inventory.items
+
+let snapshot_rejection_to_yojson = function
+  | Skill_catalog_snapshot.Document_rejected diagnostics ->
+    `Assoc
+      [ "kind", `String "document_rejected"
+      ; ( "diagnostics"
+        , `List
+            (List.map
+               (fun diagnostic ->
+                  `String
+                    (Agent_core.Skill_document.diagnostic_to_string diagnostic))
+               diagnostics) )
+      ]
+  | Skill_catalog_snapshot.Document_unreadable { path; detail } ->
+    `Assoc
+      [ "kind", `String "document_unreadable"
+      ; "path", `String path
+      ; "detail", `String detail
+      ]
+  | Skill_catalog_snapshot.Exact_identity_duplicate { first_directory } ->
+    `Assoc
+      [ "kind", `String "exact_identity_duplicate"
+      ; "first_directory", `String first_directory
+      ]
+  | Skill_catalog_snapshot.Invalid_package_id _ ->
+    `Assoc [ "kind", `String "invalid_package_id" ]
+;;
+
+let invalid_error_to_yojson = function
+  | Snapshot_rejection reason ->
+    `Assoc
+      [ "origin", `String "snapshot"
+      ; "reason", snapshot_rejection_to_yojson reason
+      ]
+  | Catalog_rejection error ->
+    `Assoc
+      [ "origin", `String "catalog"
+      ; "kind", `String "catalog_rejection"
+      ; "detail", `String (Keeper_skill_catalog.error_to_string error)
+      ]
+;;

@@ -1179,6 +1179,25 @@ let sgr_wheel_key (parameters : string) (final : char) : string option =
         else None
     | [] -> None
 
+(** Decode an SGR mouse report into the position of a plain left-button press.
+
+    Only the unmodified press (button [0], final [M]) answers: a release
+    (final [m]) would act twice per click, and modifier/motion bits mean the
+    operator was dragging or chord-clicking rather than choosing a row. The
+    position is 1-based, the way the terminal reports it, and stays row/column
+    ordered the way a frame thinks. Everything else stays [None] for the same
+    reason [sgr_wheel_key] gives: an unconsumed report must not masquerade as
+    a claimed key. *)
+let sgr_left_press (parameters : string) (final : char) : (int * int) option =
+  if final <> 'M' then None
+  else
+    match String.split_on_char ';' parameters with
+    | [ "<0"; column; row ] -> (
+        match int_of_string_opt column, int_of_string_opt row with
+        | Some column, Some row when column > 0 && row > 0 -> Some (row, column)
+        | _, _ -> None)
+    | _ -> None
+
 (** Decode the button byte of a legacy X10 mouse report ([CSI M] followed by
     three raw bytes) into the same key an SGR report produces.
 

@@ -1240,6 +1240,13 @@ val verification_verdict_outcome :
     (["<64;10;5"]), [final] the CSI final byte. *)
 val sgr_wheel_key : string -> char -> string option
 
+(** Decode one SGR mouse report into the [(row, column)] of an unmodified
+    left-button press (button [0], final [M]), 1-based as the terminal
+    reports it. Releases, modifier chords, drags and wheel reports return
+    [None] — acting on those would double-fire or claim a gesture nobody
+    meant. *)
+val sgr_left_press : string -> char -> (int * int) option
+
 (** Decode the button byte of a legacy X10 mouse report ([CSI M] plus three raw
     bytes) into [wheel-up] / [wheel-down].
 

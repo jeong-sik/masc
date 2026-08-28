@@ -270,6 +270,164 @@ let test_without_a_surface_the_order_is_the_strips () =
       Alcotest.(check string) "then the strip's first surface" "Overview" second
   | _ -> Alcotest.fail "expected at least two sections"
 
+(* --- Lanes drill-down: the lane notice, the combined "/" search list, and
+   the click geometry of the overview frame. --- *)
+
+let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
+  { Tui_decode.sl_lane_id = lane_id
+  ; sl_label = label
+  ; sl_required = false
+  ; sl_status = Tui_decode.Standalone_idle
+  ; sl_configuration_state = "ready"
+  ; sl_admitted_slots = []
+  ; sl_admission_error = None
+  ; sl_retained_run_count = 0
+  ; sl_running_count = 0
+  ; sl_succeeded_count = 0
+  ; sl_failed_count = 0
+  ; sl_cancelled_count = 0
+  ; sl_last_terminal_at = None
+  ; sl_last_outcome = None
+  ; sl_p50_elapsed_s = None
+  ; sl_selected_slots = []
+  }
+
+(* The five lanes the projection fixes, in its order
+   (server_standalone_lane_projection.ml). *)
+let five_standalone_lanes =
+  [ standalone_lane ~lane_id:"board_attention_exact" ~label:"Board Attention"
+  ; standalone_lane ~lane_id:"hitl_auto_judge" ~label:"HITL Auto Judge"
+  ; standalone_lane ~lane_id:"librarian_exact" ~label:"Librarian"
+  ; standalone_lane ~lane_id:"compaction_exact" ~label:"Compaction"
+  ; standalone_lane ~lane_id:"verifier_exact" ~label:"Verifier"
+  ]
+
+let standalone_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
+  { Tui_decode.sls_observed_at_unix = 0.
+  ; sls_exact_run_projection_count = 0
+  ; sls_exact_run_source_total = 0
+  ; sls_exact_run_projection_truncated = false
+  ; sls_lanes = lanes
+  }
+
+let keeper_lane name : Tui_decode.keeper_lane =
+  { Tui_decode.kl_keeper = name
+  ; kl_phase = Tui_decode.Lane_phase_running
+  ; kl_turn_phase = Tui_decode.Lane_turn_idle
+  ; kl_idle_seconds = 0
+  ; kl_last_outcome = None
+  ; kl_diagnosis = None
+  }
+
+let keeper_snapshot lanes : Tui_decode.keeper_lanes_snapshot =
+  { Tui_decode.kls_generated_at = 0.
+  ; kls_count = List.length lanes
+  ; kls_lanes = lanes
+  }
+
+let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Lanes;
+  state.standalone_lanes <- Some (standalone_snapshot five_standalone_lanes);
+  state.lanes <- Some (keeper_snapshot (List.map keeper_lane keepers));
+  state
+
+let test_lane_notice_footer_names_the_way_back () =
+  (* The notice is static: no j/k, no Enter -- only the way back and the
+     shared tail. *)
+  check str "the lane notice keeps only the way back"
+    "Left / Esc:back  r:refresh  Tab:next  q:quit"
+    Masc_tui_keys.footer_hints_lane_notice
+
+let test_lane_notice_says_what_is_recorded () =
+  let rendered =
+    List.map
+      (function
+        | Lane_notice_heading text -> "H" ^ text
+        | Lane_notice_text text -> "T" ^ text
+        | Lane_notice_dim text -> "D" ^ text)
+      verifier_lane_notice_lines
+  in
+  Alcotest.(check (list string))
+    "the notice names the boundary and where to read runs"
+    [ "H  This lane records no LLM prompt/output"
+    ; "T"
+    ; "T  Verifier runs are kept by the verification registries, not the"
+    ; "T  exact-lane run store. A run records its outcome, elapsed time, and"
+    ; "T  tool observations with output excerpts -- never a prompt."
+    ; "T"
+    ; "D  Read them on the Verification surface: Tab to Verify, or press :"
+    ; "D  and type \"go verify\"."
+    ]
+    rendered
+
+let test_lanes_search_texts_lead_with_the_standalone_labels () =
+  let state = lanes_state () in
+  Alcotest.(check (option (list string)))
+    "standalone labels first, then Keeper names"
+    (Some
+       [ "Board Attention"; "HITL Auto Judge"; "Librarian"; "Compaction"
+       ; "Verifier"; "alpha"; "beta" ])
+    (surface_row_texts state Lanes)
+
+let test_lanes_sub_modes_stay_unsearchable () =
+  let state = lanes_state () in
+  state.lanes_mode <- Lanes_run_list "librarian_exact";
+  Alcotest.(check (option (list string))) "run list keeps / closed" None
+    (surface_row_texts state Lanes);
+  state.lanes_mode <- Lanes_lane_notice "verifier_exact";
+  Alcotest.(check (option (list string))) "lane notice keeps / closed" None
+    (surface_row_texts state Lanes)
+
+let hit_to_string = function
+  | Lanes_hit_standalone index -> Printf.sprintf "standalone %d" index
+  | Lanes_hit_keeper index -> Printf.sprintf "keeper %d" index
+  | Lanes_hit_none -> "none"
+
+let check_hit state ~terminal_rows ~row expected =
+  check str (Printf.sprintf "row %d" row) expected
+    (hit_to_string (lanes_overview_hit state ~terminal_rows ~row))
+
+(* The overview frame, row by row: 1 strip, 2 box top, 3 header, 4 divider,
+   5 matrix heading, 6-10 the five standalone rows, 11 divider, 12 Keeper
+   column header, 13 divider, 14 on the Keeper rows. *)
+let test_overview_hit_reads_the_frame_rows () =
+  let state = lanes_state () in
+  check_hit state ~terminal_rows:40 ~row:5 "none";
+  check_hit state ~terminal_rows:40 ~row:6 "standalone 0";
+  check_hit state ~terminal_rows:40 ~row:10 "standalone 4";
+  check_hit state ~terminal_rows:40 ~row:11 "none";
+  check_hit state ~terminal_rows:40 ~row:13 "none";
+  check_hit state ~terminal_rows:40 ~row:14 "keeper 0";
+  check_hit state ~terminal_rows:40 ~row:15 "keeper 1";
+  check_hit state ~terminal_rows:40 ~row:16 "none"
+
+let test_overview_hit_pays_for_the_error_rows () =
+  let state = lanes_state () in
+  state.lanes_error <- Some "lane fixture failed";
+  (* One load error spends a row and a divider before the first Keeper row. *)
+  check_hit state ~terminal_rows:40 ~row:15 "none";
+  check_hit state ~terminal_rows:40 ~row:16 "keeper 0";
+  state.lanes_action_error <- Some "Cannot open detail: no lane is selected";
+  check_hit state ~terminal_rows:40 ~row:17 "none";
+  check_hit state ~terminal_rows:40 ~row:18 "keeper 0"
+
+let test_overview_hit_waits_for_the_matrix () =
+  (* The matrix's single loading note is not a lane row. *)
+  let state = lanes_state () in
+  state.standalone_lanes <- None;
+  check_hit state ~terminal_rows:40 ~row:6 "none";
+  check_hit state ~terminal_rows:40 ~row:9 "none";
+  check_hit state ~terminal_rows:40 ~row:10 "keeper 0"
+
+let test_overview_hit_follows_the_window () =
+  (* A scrolled window: content height 1, scroll 1, so the one visible Keeper
+     row names the second Keeper. *)
+  let state = lanes_state ~keepers:[ "alpha"; "beta"; "gamma" ] () in
+  state.lanes_scroll <- 1;
+  check_hit state ~terminal_rows:17 ~row:14 "keeper 1";
+  check_hit state ~terminal_rows:17 ~row:15 "none"
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -301,6 +459,10 @@ let () =
             test_lanes_run_list_footer_names_the_drill_down
         ; Alcotest.test_case "Lanes run detail appends the scroll position" `Quick
             test_lanes_run_detail_footer_appends_the_scroll_position
+        ; Alcotest.test_case "lane notice footer names the way back" `Quick
+            test_lane_notice_footer_names_the_way_back
+        ; Alcotest.test_case "lane notice says what is recorded" `Quick
+            test_lane_notice_says_what_is_recorded
         ; Alcotest.test_case "Overview footer projects by focus" `Quick
             test_overview_footer_projects_by_focus
         ; Alcotest.test_case "System logs lost the keys it never had" `Quick
@@ -317,5 +479,19 @@ let () =
             test_the_keeper_sub_modes_do_not_share_a_section
         ; Alcotest.test_case "without a surface the order is the strip's" `Quick
             test_without_a_surface_the_order_is_the_strips
+        ] )
+    ; ( "lanes rows"
+      , [ Alcotest.test_case "search leads with the standalone labels" `Quick
+            test_lanes_search_texts_lead_with_the_standalone_labels
+        ; Alcotest.test_case "sub-modes stay unsearchable" `Quick
+            test_lanes_sub_modes_stay_unsearchable
+        ; Alcotest.test_case "a click reads the frame rows" `Quick
+            test_overview_hit_reads_the_frame_rows
+        ; Alcotest.test_case "a click pays for the error rows" `Quick
+            test_overview_hit_pays_for_the_error_rows
+        ; Alcotest.test_case "a click waits for the matrix" `Quick
+            test_overview_hit_waits_for_the_matrix
+        ; Alcotest.test_case "a click follows the window" `Quick
+            test_overview_hit_follows_the_window
         ] )
     ]

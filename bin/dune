@@ -679,6 +679,7 @@
   masc_tui_operator_projection
   masc_tui_paste
   masc_tui_paste_spill
+  masc_tui_scroll
   masc_tui_utf8_input
   masc_tui_send_disposition
   unix

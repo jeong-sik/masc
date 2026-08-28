@@ -1558,6 +1558,10 @@ let decode_activation ~expected_trace_id json =
    | None -> Ok { activation with delivery; actions })
 ;;
 
+let activation_of_yojson ~expected_trace_id json =
+  decode_activation ~expected_trace_id json
+;;
+
 let exact_key_equal (left : activation) (right : activation) =
   String.equal left.skill_tool_use_id right.skill_tool_use_id
 ;;

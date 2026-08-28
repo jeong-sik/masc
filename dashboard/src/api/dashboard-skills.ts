@@ -428,6 +428,84 @@ const CompositionNodeSchema = Schema.Struct({
   truncated_to: Schema.NullOr(NonNegativeSafeIntegerSchema),
 })
 
+const TaskInstructionOriginSchema = Schema.Struct({
+  kind: Schema.Literal('task_instruction'),
+  task_ids: Schema.NonEmptyArray(Schema.NonEmptyString),
+})
+const SessionInstructionOriginSchema = Schema.Struct({
+  kind: Schema.Literal('session_instruction'),
+})
+const TaskCompositionOriginSchema = Schema.Struct({
+  kind: Schema.Literal('task_composition'),
+  task_ids: Schema.NonEmptyArray(Schema.NonEmptyString),
+})
+const SessionCompositionOriginSchema = Schema.Struct({
+  kind: Schema.Literal('session_composition'),
+})
+const ServedContentSchema = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal('skill_body'),
+    bytes: NonNegativeSafeIntegerSchema,
+    sha256: Schema.NonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('skill_resource'),
+    relative_path: Schema.NonEmptyString,
+    bytes: NonNegativeSafeIntegerSchema,
+    sha256: Schema.NonEmptyString,
+  }),
+)
+const SkillInvocationSchema = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal('instruction'),
+    origin: Schema.Union(TaskInstructionOriginSchema, SessionInstructionOriginSchema),
+    served_content: ServedContentSchema,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('composition'),
+    origin: Schema.Union(TaskCompositionOriginSchema, SessionCompositionOriginSchema),
+    tool_name: Schema.NonEmptyString,
+  }),
+)
+const ActionIdentitySchema = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal('call_id'), call_id: Schema.NonEmptyString }),
+  Schema.Struct({
+    kind: Schema.Literal('provider_step'),
+    conversation_id: Schema.NonEmptyString,
+    step_index: NonNegativeSafeIntegerSchema,
+  }),
+)
+const SkillActionSchema = Schema.Struct({
+  identity: ActionIdentitySchema,
+  tool_name: Schema.NonEmptyString,
+  runtime_id: Schema.NonEmptyString,
+  agent_core_turn: NonNegativeSafeIntegerSchema,
+  observed_at: Schema.NonEmptyString,
+})
+const SkillDeliverySchema = Schema.Struct({
+  boundary: Schema.Struct({
+    kind: Schema.Literal('model_response', 'official_client_result_handoff'),
+    agent_core_turn: NonNegativeSafeIntegerSchema,
+  }),
+  runtime_id: Schema.NonEmptyString,
+  delivered_at: Schema.NonEmptyString,
+  content_bytes: NonNegativeSafeIntegerSchema,
+  content_sha256: Schema.NonEmptyString,
+})
+const SkillActivationPayloadSchema = Schema.Struct({
+  identity: SkillIdentitySchema,
+  content_revision: Schema.NonEmptyString,
+  snapshot_revision: Schema.NonEmptyString,
+  turn_ref: Schema.NonEmptyString,
+  runtime_id: Schema.NonEmptyString,
+  skill_tool_use_id: Schema.NonEmptyString,
+  agent_core_turn: NonNegativeSafeIntegerSchema,
+  invocation: SkillInvocationSchema,
+  delivery: Schema.NullOr(SkillDeliverySchema),
+  actions: Schema.Array(SkillActionSchema),
+  activated_at: Schema.NonEmptyString,
+})
+
 const SkillEvidenceResponseSchema = Schema.Struct({
   schema: Schema.Literal('masc.skill-evidence/v5'),
   status: Schema.Literal('observed', 'not_observed_in_retained_coverage'),
@@ -451,7 +529,7 @@ const SkillEvidenceResponseSchema = Schema.Struct({
           })),
           gaps: Schema.Array(UnknownRecordSchema),
         }),
-        activation: UnknownRecordSchema,
+        activation: SkillActivationPayloadSchema,
       }),
     }),
     Schema.Struct({
@@ -472,7 +550,7 @@ const SkillEvidenceResponseSchema = Schema.Struct({
           })),
           gaps: Schema.Array(UnknownRecordSchema),
         }),
-        activation: UnknownRecordSchema,
+        activation: SkillActivationPayloadSchema,
       })),
     }),
   )),
@@ -814,6 +892,56 @@ export async function fetchSkills(opts: GetOptions = {}): Promise<SkillsResponse
   return decodeSkillsResponse(raw)
 }
 
+const ownerGapCodes = new Set([
+  'keeper_catalog_unavailable',
+  'keeper_catalog_changed_during_resolution',
+  'invalid_persisted_keeper_name',
+  'keeper_meta_name_mismatch',
+  'keeper_meta_unavailable',
+  'runtime_manifest_unreadable',
+])
+const activationGapCodes = new Set([
+  'trace_root_unavailable',
+  'trace_root_not_directory',
+  'trace_entry_unreadable',
+  'invalid_trace_directory',
+  'symlink_trace_entry',
+  'trace_entry_not_directory',
+  'trace_inventory_changed_during_discovery',
+  'trace_root_changed_during_discovery',
+  'ledger_changed_during_discovery',
+  'ledger_unreadable',
+])
+
+function hasKnownGapCode(gap: Record<string, unknown>, codes: ReadonlySet<string>): boolean {
+  return typeof gap.code === 'string' && codes.has(gap.code)
+}
+
+function isLowerHexRevision(value: string): boolean {
+  if (value.length !== 64) return false
+  for (const character of value) {
+    if (!((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f'))) {
+      return false
+    }
+  }
+  return true
+}
+
+function isCanonicalWholeSecondRfc3339(value: string): boolean {
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed)
+    && new Date(parsed).toISOString().replace('.000Z', 'Z') === value
+}
+
+function turnRefBelongsToTrace(turnRef: string, traceId: string): boolean {
+  const separator = turnRef.lastIndexOf('#')
+  if (separator <= 0) return false
+  const absoluteTurn = Number(turnRef.slice(separator + 1))
+  return turnRef.slice(0, separator) === traceId
+    && Number.isSafeInteger(absoluteTurn)
+    && absoluteTurn > 0
+}
+
 export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse {
   const decoded = decodeWithSchema(SkillEvidenceResponseSchema, raw, 'invalid_response')
   const observed = decoded.activation !== null || decoded.composition !== null
@@ -844,17 +972,43 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
     if (!ownerAgrees) {
       contractError('invalid_response', 'activation owner status disagrees with claims or gaps')
     }
-    const identity = isRecord(evidence.activation.identity)
-      ? evidence.activation.identity
-      : null
-    if (identity === null
-      || identity.source_id !== decoded.reference.identity.source_id
-      || identity.package_id !== decoded.reference.identity.package_id
-      || identity.name !== decoded.reference.identity.name
+    if (!gaps.every(gap => hasKnownGapCode(gap, ownerGapCodes))) {
+      contractError('invalid_response', 'activation owner carries an unknown gap code')
+    }
+    const activation = evidence.activation
+    if (activation.identity.source_id !== decoded.reference.identity.source_id
+      || activation.identity.package_id !== decoded.reference.identity.package_id
+      || activation.identity.name !== decoded.reference.identity.name
       || evidence.activation.content_revision !== decoded.reference.content_revision) {
       contractError('invalid_response', 'activation reference disagrees with evidence envelope')
     }
+    const deliveryTurn = activation.delivery?.boundary.agent_core_turn
+    const activationPayloadAgrees = isLowerHexRevision(activation.content_revision)
+      && isLowerHexRevision(activation.snapshot_revision)
+      && isCanonicalWholeSecondRfc3339(activation.activated_at)
+      && turnRefBelongsToTrace(activation.turn_ref, evidence.trace_id)
+      && (activation.delivery === null
+        ? activation.actions.length === 0
+        : isLowerHexRevision(activation.delivery.content_sha256)
+          && isCanonicalWholeSecondRfc3339(activation.delivery.delivered_at)
+          && Date.parse(activation.delivery.delivered_at) >= Date.parse(activation.activated_at)
+          && deliveryTurn !== undefined
+          && deliveryTurn >= activation.agent_core_turn
+          && activation.actions.every(action =>
+            action.agent_core_turn >= deliveryTurn
+            && isCanonicalWholeSecondRfc3339(action.observed_at)
+            && Date.parse(action.observed_at) >= Date.parse(activation.delivery!.delivered_at)))
+    if (!activationPayloadAgrees) {
+      contractError('invalid_response', 'activation payload violates typed occurrence invariants')
+    }
     ownerGapCount += gaps.length
+  }
+  if (decoded.activation?.selection === 'most_recent_observed_timestamp_tie') {
+    const traces = new Set(activationEvidence.map(evidence => evidence.trace_id))
+    const timestamps = new Set(activationEvidence.map(evidence => evidence.activation.activated_at))
+    if (traces.size !== activationEvidence.length || timestamps.size !== 1) {
+      contractError('invalid_response', 'activation timestamp tie is inconsistent')
+    }
   }
   if (decoded.composition !== null) {
     if (referenceKey(decoded.composition.reference) !== referenceKey(decoded.reference)) {
@@ -888,6 +1042,7 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
   const { composition_scope: scope, composition_records_read: read } = decoded.coverage
   const coverageAgrees = scope === 'exact_reference_latest_completed'
     ? (decoded.composition === null ? read === 0 : read === 1)
+      && decoded.coverage.composition_unavailable.length === 0
     : decoded.composition === null
       && read === 0
       && decoded.coverage.composition_unavailable.length > 0
@@ -898,9 +1053,16 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
   const activationCoverageAgrees = coverage.activation_ledgers_loaded
       <= coverage.activation_sessions_inspected
     && coverage.activation_owner_gap_count === ownerGapCount
+    && coverage.activation_gaps.every(gap => hasKnownGapCode(gap, activationGapCodes))
     && (coverage.activation_scope === 'complete_retained_trace_snapshot'
       ? coverage.activation_gaps.length === 0
-      : coverage.activation_gaps.length > 0)
+      : coverage.activation_scope === 'trace_store_unavailable'
+        ? coverage.activation_gaps.length > 0
+          && decoded.activation === null
+          && coverage.activation_sessions_inspected === 0
+          && coverage.activation_ledgers_loaded === 0
+          && coverage.activation_owner_gap_count === 0
+        : coverage.activation_gaps.length > 0)
   if (!activationCoverageAgrees) {
     contractError('invalid_response', 'activation coverage disagrees with retained snapshot')
   }

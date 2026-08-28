@@ -4784,8 +4784,8 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
 
 let skill_evidence_fixture () =
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v4"
-    ; "status", `String "not_observed_in_current_coverage"
+    [ "schema", `String "masc.skill-evidence/v5"
+    ; "status", `String "not_observed_in_retained_coverage"
     ; ( "reference"
       , `Assoc
           [ ( "identity"
@@ -4802,30 +4802,33 @@ let skill_evidence_fixture () =
       , `Assoc
           [ "composition_scope", `String "exact_reference_latest_completed"
           ; "composition_records_read", `Int 0
+          ; "composition_unavailable", `List []
           ; "coverage_complete", `Bool false
-          ; "activation_scope", `String "current_keeper_sessions"
+          ; "activation_scope", `String "complete_retained_trace_snapshot"
+          ; "activation_sessions_inspected", `Int 3
           ; "activation_ledgers_loaded", `Int 2
-          ; "unavailable", `List [ `String "keeper: ledger_unreadable" ]
+          ; "activation_gaps", `List []
+          ; "activation_owner_gap_count", `Int 0
           ] )
     ]
 ;;
 
-let test_decode_skill_evidence_reads_exact_v4_coverage () =
+let test_decode_skill_evidence_reads_exact_v5_coverage () =
   match Tui_decode.decode_skill_evidence (skill_evidence_fixture ()) with
   | Error detail -> Alcotest.fail detail
   | Ok evidence ->
     (match evidence.se_status with
-     | Tui_decode.Skill_evidence_not_observed_in_current_coverage -> ()
+     | Tui_decode.Skill_evidence_not_observed_in_retained_coverage -> ()
      | Tui_decode.Skill_evidence_observed ->
        Alcotest.fail "bounded absence decoded as observed");
     Alcotest.(check int)
       "activation ledgers"
       2
       evidence.se_coverage.sec_activation_ledgers_loaded;
-    Alcotest.(check (list string))
-      "unavailable details"
-      [ "keeper: ledger_unreadable" ]
-      evidence.se_coverage.sec_unavailable
+    Alcotest.(check int)
+      "retained sessions"
+      3
+      evidence.se_coverage.sec_activation_sessions_inspected
 ;;
 
 let test_decode_skill_evidence_accepts_declared_composition_scopes () =
@@ -4839,8 +4842,16 @@ let test_decode_skill_evidence_accepts_declared_composition_scopes () =
                 ( name
                 , match value with
                   | `Assoc coverage ->
-                    `Assoc (("composition_scope", `String scope)
-                            :: List.remove_assoc "composition_scope" coverage)
+                    let coverage =
+                      ("composition_scope", `String scope)
+                      :: List.remove_assoc "composition_scope" coverage
+                    in
+                    if String.equal scope "unavailable"
+                    then
+                      `Assoc
+                        (("composition_unavailable", `List [ `String "index" ])
+                         :: List.remove_assoc "composition_unavailable" coverage)
+                    else `Assoc coverage
                   | _ -> value )
               else name, value)
            fields)
@@ -4908,10 +4919,13 @@ let test_decode_skill_evidence_requires_every_coverage_field () =
   let required =
     [ "composition_scope"
     ; "composition_records_read"
+    ; "composition_unavailable"
     ; "coverage_complete"
     ; "activation_scope"
+    ; "activation_sessions_inspected"
     ; "activation_ledgers_loaded"
-    ; "unavailable"
+    ; "activation_gaps"
+    ; "activation_owner_gap_count"
     ]
   in
   List.iter
@@ -4940,6 +4954,90 @@ let test_decode_skill_evidence_requires_every_coverage_field () =
           |> Tui_decode.decode_skill_evidence
           |> Result.is_error))
     required
+;;
+
+let test_decode_skill_evidence_reads_typed_activation_owner () =
+  let reference =
+    `Assoc
+      [ ( "identity"
+        , `Assoc
+            [ "source_id", `String "workspace"
+            ; "package_id", `String "proof"
+            ; "name", `String "proof"
+            ] )
+      ; "content_revision", `String (String.make 64 'a')
+      ]
+  in
+  let activation =
+    `Assoc
+      [ "selection", `String "most_recent_observed"
+      ; ( "evidence"
+        , `Assoc
+            [ "trace_id", `String "trace-proof"
+            ; ( "owner"
+              , `Assoc
+                  [ "status", `String "known"
+                  ; ( "claims"
+                    , `List
+                        [ `Assoc
+                            [ "keeper", `String "rondo"
+                            ; "source", `String "runtime_manifest"
+                            ]
+                        ] )
+                  ; "gaps", `List []
+                  ] )
+            ; ( "activation"
+              , `Assoc
+                  [ "identity", Yojson.Safe.Util.member "identity" reference
+                  ; ( "content_revision"
+                    , Yojson.Safe.Util.member "content_revision" reference )
+                  ; "snapshot_revision", `String (String.make 64 'b')
+                  ; "turn_ref", `String "trace-proof#1"
+                  ; "runtime_id", `String "codex.default"
+                  ; "activated_at", `String "2026-08-29T00:00:00Z"
+                  ; "skill_tool_use_id", `String "skill-call-1"
+                  ; "agent_core_turn", `Int 1
+                  ; ( "invocation"
+                    , `Assoc
+                        [ "kind", `String "instruction"
+                        ; "origin", `Assoc [ "kind", `String "session_instruction" ]
+                        ; ( "served_content"
+                          , `Assoc
+                              [ "kind", `String "skill_body"
+                              ; "bytes", `Int 4
+                              ; "sha256", `String (String.make 64 'c')
+                              ] )
+                        ] )
+                  ; "delivery", `Null
+                  ; "actions", `List []
+                  ] )
+            ] )
+      ]
+  in
+  let json =
+    match skill_evidence_fixture () with
+    | `Assoc fields ->
+      `Assoc
+        (fields
+         |> List.remove_assoc "status"
+         |> List.remove_assoc "activation"
+         |> fun fields ->
+         ("status", `String "observed") :: ("activation", activation) :: fields)
+    | _ -> Alcotest.fail "Skill evidence fixture is not an object"
+  in
+  match Tui_decode.decode_skill_evidence json with
+  | Error detail -> Alcotest.fail detail
+  | Ok
+      { se_activation =
+          Some (Tui_decode.Skill_evidence_most_recent_observed item)
+      ; _
+      } ->
+    Alcotest.(check string) "trace" "trace-proof" item.sea_trace_id;
+    Alcotest.(check (list string))
+      "owner claim"
+      [ "rondo" ]
+      (List.map (fun claim -> claim.Tui_decode.seo_keeper) item.sea_owner_claims)
+  | Ok _ -> Alcotest.fail "typed activation selection was not preserved"
 ;;
 
 let () =
@@ -5379,8 +5477,8 @@ let () =
           test_decode_skills_catalog_rejects_a_wrong_kind_type;
       ] );
     ( "skill_evidence",
-      [ Alcotest.test_case "reads exact v4 coverage" `Quick
-          test_decode_skill_evidence_reads_exact_v4_coverage
+      [ Alcotest.test_case "reads exact v5 coverage" `Quick
+          test_decode_skill_evidence_reads_exact_v5_coverage
       ; Alcotest.test_case "accepts declared composition scopes" `Quick
           test_decode_skill_evidence_accepts_declared_composition_scopes
       ; Alcotest.test_case "rejects v1 and status disagreement" `Quick
@@ -5389,5 +5487,7 @@ let () =
           test_decode_skill_evidence_requires_observation_fields
       ; Alcotest.test_case "requires every coverage field" `Quick
           test_decode_skill_evidence_requires_every_coverage_field
+      ; Alcotest.test_case "reads typed activation owner" `Quick
+          test_decode_skill_evidence_reads_typed_activation_owner
       ] );
   ]

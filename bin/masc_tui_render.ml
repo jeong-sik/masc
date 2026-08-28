@@ -5911,8 +5911,7 @@ let render_keeper_message (state : state) =
         ->
           let request_id = Keeper_chat_transcript.request_id live in
           let request_label = Keeper_chat.compact_request_id request_id in
-          let entry ?(markdown_source = Message_layout.Markdown_streaming) style
-              role_label body =
+          let entry ~markdown_source style role_label body =
             (* One alignment, on the label the row actually carries. Aligning
                the continuation mark and then aligning the result again pays
                the badge's width twice, so the second call trims what the
@@ -5950,7 +5949,15 @@ let render_keeper_message (state : state) =
 
              The index counts trail positions, not surviving rows, which is
              what the cache key needs: hiding reasoning must not renumber the
-             text entries and invalidate every cached render below it. *)
+             text entries and invalidate every cached render below it.
+
+             Every live stretch rides the growing-markdown cache, reasoning and
+             tool blocks included: a frame whose text did not move reuses the
+             rows outright, and only the new suffix is parsed when it did.
+             Tool rows rewrite earlier lines when a call settles, which is not
+             an append; the cache detects that (the new text no longer starts
+             with the old) and falls back to one full render, the same work
+             the uncached streaming path did on every frame. *)
           List.filter_map Fun.id
           @@ List.mapi
                (fun entry_index (item : Keeper_chat_transcript.trail_item) ->
@@ -5960,7 +5967,14 @@ let render_keeper_message (state : state) =
                   None
               | Keeper_chat_transcript.Trail_thinking lines ->
                   Some
-                    (entry Message_layout.Thinking "THINKING"
+                    (entry
+                       ~markdown_source:
+                         (Message_layout.Markdown_growing
+                            { keeper_name;
+                              request_id;
+                              entry_index;
+                            })
+                       Message_layout.Thinking "THINKING"
                        (if state.msg_reasoning_visibility = Reasoning_folded
                         then folded_thinking_summary (String.concat "\n" lines)
                         else String.concat "\n" lines))
@@ -5970,7 +5984,14 @@ let render_keeper_message (state : state) =
                       (tool_projection_mode state) block
                   in
                   Some
-                    (entry (tool_block_style projection) "TOOLS"
+                    (entry
+                       ~markdown_source:
+                         (Message_layout.Markdown_growing
+                            { keeper_name;
+                              request_id;
+                              entry_index;
+                            })
+                       (tool_block_style projection) "TOOLS"
                        (String.concat "\n" (projected_tool_rows projection)))
               | Keeper_chat_transcript.Trail_text text ->
                   Some

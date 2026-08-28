@@ -215,29 +215,74 @@ describe('existing Skill editor contract', () => {
 })
 
 const coverage = {
-  composition_scan_limit: 5000,
-  composition_rows_scanned: 17,
+  composition_scope: 'exact_reference_latest_completed' as const,
+  composition_records_read: 0,
   coverage_complete: false as const,
   activation_scope: 'current_keeper_sessions' as const,
   activation_ledgers_loaded: 2,
   unavailable: [],
 }
 
+const compositionNode = {
+  node_id: 'clock',
+  execution_id: 'exec-1',
+  tool_name: 'keeper_time_now',
+  input: {},
+  schedule: {
+    planned_index: 0,
+    batch_index: 0,
+    batch_size: 1,
+    execution_mode: 'serial' as const,
+  },
+  result: {
+    disposition: 'completed' as const,
+    data: {},
+    tool_name: 'keeper_time_now',
+    duration_ms: 1,
+  },
+  tool_use_id: '',
+  failure_effect_disposition: null,
+  deferred_kind: null,
+  result_bytes: 2,
+  truncated_to: null,
+}
+
+const compositionEvidence = {
+  schema: 'masc.skill-composition-evidence/v1' as const,
+  reference,
+  composition_run_id: '01a045f2-cd8b-7000-a3f7-1d718a712204',
+  parent_tool_use_id: '',
+  parent_turn: 7,
+  parent_planned_index: 0,
+  request_id: null,
+  keeper: 'rondo',
+  composition_tool: 'keeper_compose_proof',
+  composition_execution: 'inline' as const,
+  result: {
+    disposition: 'completed' as const,
+    duration_ms: 1,
+    data: { actions: [compositionNode] },
+    tool_name: 'keeper_compose_proof',
+  },
+  executor_settlements: [compositionNode],
+  recorded_at: 1,
+}
+
 describe('skill evidence contract', () => {
   it('rejects the retired bounded-evidence schema', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v1',
+      schema: 'masc.skill-evidence/v2',
       status: 'never_observed',
       reference,
       activation: null,
       composition: null,
-      coverage,
+      coverage: { ...coverage, composition_records_read: 1 },
     })).toThrow(SkillsContractError)
   })
 
   it('keeps instruction activation and composition result in one exact envelope', () => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v2',
+      schema: 'masc.skill-evidence/v4',
       status: 'observed',
       reference,
       activation: {
@@ -249,20 +294,50 @@ describe('skill evidence contract', () => {
           actions: [],
         },
       },
-      composition: {
-        run: { success: true, composition_run_id: 'run-1' },
-        nodes: [{ tool_name: 'keeper_time_now' }],
-      },
-      coverage,
+      composition: compositionEvidence,
+      coverage: { ...coverage, composition_records_read: 1 },
     })
 
     expect(decoded.activation?.keeper).toBe('rondo')
-    expect(decoded.composition?.nodes).toHaveLength(1)
+    expect(decoded.composition?.executor_settlements).toHaveLength(1)
+  })
+
+  it('rejects async evidence without its durable request identity', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v4',
+      status: 'observed',
+      reference,
+      activation: null,
+      composition: {
+        ...compositionEvidence,
+        composition_execution: 'async',
+        request_id: null,
+      },
+      coverage: { ...coverage, composition_records_read: 1 },
+    })).toThrow(SkillsContractError)
+  })
+
+  it('rejects impossible node batch and truncation invariants', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v4',
+      status: 'observed',
+      reference,
+      activation: null,
+      composition: {
+        ...compositionEvidence,
+        executor_settlements: [{
+          ...compositionNode,
+          schedule: { ...compositionNode.schedule, batch_index: 1 },
+          truncated_to: 3,
+        }],
+      },
+      coverage: { ...coverage, composition_records_read: 1 },
+    })).toThrow(SkillsContractError)
   })
 
   it('rejects observed status without any observed evidence', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v2',
+      schema: 'masc.skill-evidence/v4',
       status: 'observed',
       reference,
       activation: null,
@@ -273,7 +348,7 @@ describe('skill evidence contract', () => {
 
   it('keeps partial ledger coverage visible when nothing was observed', () => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v2',
+      schema: 'masc.skill-evidence/v4',
       status: 'not_observed_in_current_coverage',
       reference,
       activation: null,
@@ -285,6 +360,24 @@ describe('skill evidence contract', () => {
     })
 
     expect(decoded.coverage.unavailable).toEqual(['sangsu: ledger_unreadable'])
+  })
+
+  it.each([
+    'exact_reference_latest_completed',
+    'unavailable',
+  ] as const)('accepts the declared composition scope %s', (composition_scope) => {
+    const decoded = decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v4',
+      status: 'not_observed_in_current_coverage',
+      reference,
+      activation: null,
+      composition: null,
+      coverage: composition_scope === 'unavailable'
+        ? { ...coverage, composition_scope, unavailable: ['index unreadable'] }
+        : { ...coverage, composition_scope },
+    })
+
+    expect(decoded.coverage.composition_scope).toBe(composition_scope)
   })
 })
 

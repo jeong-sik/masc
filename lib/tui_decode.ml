@@ -5500,9 +5500,13 @@ type skill_evidence_status =
   | Skill_evidence_observed
   | Skill_evidence_not_observed_in_current_coverage
 
+type skill_evidence_composition_scope =
+  | Skill_evidence_exact_reference_latest_completed
+  | Skill_evidence_composition_unavailable
+
 type skill_evidence_coverage =
-  { sec_composition_scan_limit : int
-  ; sec_composition_rows_scanned : int
+  { sec_composition_scope : skill_evidence_composition_scope
+  ; sec_composition_records_read : int
   ; sec_activation_ledgers_loaded : int
   ; sec_unavailable : string list
   }
@@ -5533,16 +5537,29 @@ let decode_skill_evidence_nonnegative_int field json =
 ;;
 
 let decode_skill_evidence json =
-  if member "schema" json <> `String "masc.skill-evidence/v2"
+  if member "schema" json <> `String "masc.skill-evidence/v4"
   then Error "Skill evidence schema is unsupported"
   else
-    let* _reference =
+    let* reference =
       match Skill_reference.of_yojson (member "reference" json) with
       | Ok reference -> Ok reference
       | Error _ -> Error "Skill evidence reference is invalid"
     in
     let* se_activation = decode_skill_evidence_optional_object "activation" json in
     let* se_composition = decode_skill_evidence_optional_object "composition" json in
+    let* () =
+      match se_composition with
+      | None -> Ok ()
+      | Some composition ->
+        (match Keeper_skill_composition_evidence.of_yojson composition with
+         | Ok evidence
+           when Skill_reference.equal
+                  reference
+                  (Keeper_skill_composition_evidence.reference evidence) ->
+           Ok ()
+         | Ok _ -> Error "Skill composition evidence reference disagrees with envelope"
+         | Error _ -> Error "Skill composition evidence record is invalid")
+    in
     let observed = Option.is_some se_activation || Option.is_some se_composition in
     let* se_status =
       match member "status" json, observed with
@@ -5565,14 +5582,16 @@ let decode_skill_evidence json =
         | `String "current_keeper_sessions" -> Ok ()
         | _ -> Error "Skill evidence activation scope is unsupported"
       in
-      let* sec_composition_scan_limit =
-        match member "composition_scan_limit" coverage with
-        | `Int value when value > 0 -> Ok value
-        | _ -> Error "Skill evidence composition scan limit must be positive"
+      let* sec_composition_scope =
+        match member "composition_scope" coverage with
+        | `String "exact_reference_latest_completed" ->
+          Ok Skill_evidence_exact_reference_latest_completed
+        | `String "unavailable" -> Ok Skill_evidence_composition_unavailable
+        | _ -> Error "Skill evidence composition scope is unsupported"
       in
-      let* sec_composition_rows_scanned =
+      let* sec_composition_records_read =
         decode_skill_evidence_nonnegative_int
-          "composition_rows_scanned"
+          "composition_records_read"
           coverage
       in
       let* sec_activation_ledgers_loaded =
@@ -5591,13 +5610,22 @@ let decode_skill_evidence json =
           decode [] values
         | _ -> Error "Skill evidence unavailable rows must be a list"
       in
+      let* () =
+        match sec_composition_scope, se_composition, sec_composition_records_read with
+        | Skill_evidence_exact_reference_latest_completed, Some _, 1 -> Ok ()
+        | Skill_evidence_exact_reference_latest_completed, None, 0 -> Ok ()
+        | Skill_evidence_composition_unavailable, None, 0
+          when sec_unavailable <> [] ->
+          Ok ()
+        | _ -> Error "Skill evidence composition coverage disagrees with its record"
+      in
       Ok
         { se_status
         ; se_activation
         ; se_composition
         ; se_coverage =
-            { sec_composition_scan_limit
-            ; sec_composition_rows_scanned
+            { sec_composition_scope
+            ; sec_composition_records_read
             ; sec_activation_ledgers_loaded
             ; sec_unavailable
             }

@@ -149,19 +149,28 @@ masc_keeper_down(name="reviewer")
 대부분이 기계가 쓴 것입니다. 이건 예상된 모습이고, 보드에 하나의 피드 대신
 하위 보드와 검색이 있는 이유이기도 합니다.
 
-## Gate
+## Gate와 외부 서비스 보안
 
-도구 호출이 사람 승인을 기다릴지는 **세 층**이 정합니다. 넓은 쪽에서 좁은 쪽으로
-확인하고, 승인을 안 물어보는 이유는 이 중 아무 층이나 될 수 있습니다.
+도구 호출이 사람 승인을 기다릴지는 **네 층**이 정합니다. 넓은 쪽에서 좁은 쪽으로
+확인하고, 승인을 안 물어보는 이유는 이 중 아무 층이나 될 수 있습니다:
 
 | 층 | 어디 있나 | 적용 범위 |
 |---|---|---|
-| 모드 | `gate/mode.json` | 런타임 전체 |
-| Keeper 항목 | Keeper TOML 의 `always_allow` | Keeper 하나 |
+| 워크스페이스 모드 | `gate/mode.json` | 런타임 전체 워크스페이스 도구 |
+| 외부 서비스 모드 | `gate/external-mode.json` | 외부 서비스 쓰기 (Jira, GitHub, Slack) |
+| Keeper 항목 | Keeper TOML의 `always_allow` | Keeper 하나의 워크스페이스 도구 |
 | 상시 규칙 | `gate/always-allowed.json` | Keeper 하나 · 도구 하나 · 요청 모양 하나 |
 
-상시 규칙은 자기가 어느 승인에서 나왔는지 기록합니다. 그래서 뜬금없어 보이는
-규칙도 누가 언제 허용했는지까지 거슬러 갈 수 있습니다.
+외부 서비스 쓰기는 워크스페이스의 `always_allow`와 격리되어 있습니다. 워크스페이스가
+항상 허용 상태라도 Jira나 GitHub 쓰기 작업은 별도의 권한 부여나 내구성 있는 Gate 승인을
+거쳐야 합니다.
+
+### 네이티브 도구 포스처 (`[keeper.tools]`)
+
+공식 클라이언트(Claude Code, Codex, Antigravity) 연결 시 키퍼별로 `native = "none" | "read" | "full"`
+포스처를 지정합니다. `Auto` 모드에서는 `full` 레인이 안전하게 `read`로 자동 강등되며
+(`masc.keeper.native_posture_degraded` 이벤트 발행), 검토되지 않은 부작용 액션을
+MASC 승인 게이트로 보호합니다.
 
 Gate 는 승인 절차입니다. 샌드박스도 아니고 자격증명 경계도 아닙니다.
 `local` 프로파일은 내 컴퓨터에서 내 권한으로 그대로 돕니다.

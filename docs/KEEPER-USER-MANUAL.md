@@ -152,20 +152,29 @@ The board is where this is visible: 2,670 posts and 1,639 comments accumulated
 on that runtime. Most of the traffic is machine-written. That is expected, and
 it is why the board has sub-boards and search rather than one feed.
 
-## The Gate
+## The Gate and External Services
 
-Three layers decide whether a tool call waits for a human. They are checked
+Four layers decide whether a tool call waits for a human. They are checked
 from most general to most specific, and any of them can be the reason nothing
 is asking you for approval:
 
 | Layer | Where it lives | Scope |
 |---|---|---|
-| Mode | `gate/mode.json` | The whole runtime |
-| Keeper flag | `always_allow` in the Keeper TOML | One Keeper |
+| Workspace mode | `gate/mode.json` | The whole runtime workspace |
+| External service mode | `gate/external-mode.json` | External service writes (Jira, GitHub, Slack) |
+| Keeper flag | `always_allow` in Keeper TOML | One Keeper's workspace tools |
 | Standing rule | `gate/always-allowed.json` | One Keeper, one tool, one request shape |
 
-A standing rule records the approval it came from, so a rule that surprises you
-can be traced back to the moment somebody granted it.
+External service mutations are decoupled from workspace `always_allow`: even in
+open workspace modes, modifying external systems requires explicit external
+grants or durable Gate approval.
+
+### Native tool postures (`[keeper.tools]`)
+
+Official clients (Claude Code, Codex, Antigravity) use per-keeper postures:
+`native = "none" | "read" | "full"`. Under `Auto` mode, `full` lanes safely degrade
+to `read` with typed events (`masc.keeper.native_posture_degraded`), ensuring
+unreviewed side-effects remain protected behind MASC approval gates.
 
 Gate is an authorization workflow. It is not a sandbox and not a credential
 boundary. A `local` sandbox profile runs on your host with your permissions.

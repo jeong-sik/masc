@@ -6,7 +6,7 @@
     Its siblings ({!Tool_local_runtime},
     {!Tool_local_runtime_http}) do
     [include Tool_local_runtime_core], so this module's surface
-    propagates as a re-export through every consumer.  The
+    propagates as a re-export through every consumer.
     The concrete [llama_process] record carries observed process metadata
     without exposing a second cmdline-discovery path from this core module. *)
 

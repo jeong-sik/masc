@@ -224,7 +224,8 @@ val validate_existing_state_read_only_result :
 (** Decode existing durable state and replay its v6 WAL without checkpointing
     or WAL compaction. A WAL-only owner is replayed from the row's exact
     complete pre-transition state;
-    absence of both artifacts is an explicit error. *)
+    absence of both artifacts is an explicit error, matching
+    {!load_state_result}. *)
 
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

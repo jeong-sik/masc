@@ -2786,6 +2786,55 @@ let test_override_only_auto_judge_owner_is_recovered () =
             (AQ.For_testing.get_pending_entry_unchecked ~id:bystander_id)))
 ;;
 
+(* The operator recovery entry point shares the sweep's per-owner admission
+   (#31321 residue): on an always_allow workspace with one keeper pinned to
+   auto_judge, the old workspace-mode guard refused with "requires auto_judge
+   mode" — the exact stalled-owner configuration the escape hatch exists
+   for. It must now run and report, not refuse. *)
+let test_operator_recovery_admits_override_only_workspace () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-recovery-override" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let config = Masc.Workspace.default_config base_path in
+       (match
+          Masc.Keeper_gate_mode.set config ~actor:"test"
+            Masc.Keeper_gate_mode.Always_allow
+        with
+        | Ok _ -> ()
+        | Error e -> Alcotest.fail e);
+       (match
+          Masc.Keeper_gate_mode.set_for_keeper config ~actor:"test"
+            ~keeper_name
+            (Some Masc.Keeper_gate_mode.Auto_judge)
+        with
+        | Ok _ -> ()
+        | Error e -> Alcotest.fail e);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "request", `String "recovery-override" ])
+       in
+       ignore id;
+       (* This fixture publishes no exact-output registry, so the call may
+          stop at the later topology-readiness gate; the regression under
+          test is only the FIRST gate — the workspace-mode refusal that
+          used to fire before any per-owner resolution. *)
+       match Gate.request_operator_auto_judge_recovery ~base_path with
+       | Ok _ -> ()
+       | Error e ->
+           Alcotest.(check bool)
+             ("refusal is not the workspace-mode guard: " ^ e)
+             false
+             (String_util.contains_substring e "requires auto_judge mode"))
+;;
+
 let test_current_snapshot_rejects_unbound_available_summary () =
   let base_path = temp_dir () in
   let keeper_name = "queue-recovered-exact-unbound" in
@@ -4477,6 +4526,10 @@ let () =
             "override-only auto_judge owner is recovered"
             `Quick
             test_override_only_auto_judge_owner_is_recovered
+        ; Alcotest.test_case
+            "operator recovery admits an override-only workspace"
+            `Quick
+            test_operator_recovery_admits_override_only_workspace
         ; Alcotest.test_case
             "current snapshot rejects unbound available summary"
             `Quick

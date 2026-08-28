@@ -32,7 +32,12 @@ type resolve_result =
           must refuse the call: answering with the host or with another
           backend's runtime would run the work somewhere the keeper did not
           ask for, which is how a docker-declared keeper spent weeks
-          executing on the host (#31178). *)
+          executing on the host (#31178).
+
+          No profile constructs this today -- Docker and Micro_vm both
+          resolve to a runtime. It is kept so the next backend lands with a
+          refusal already spelled at every consumer, rather than reaching for
+          a neighbour's runtime because there is nowhere else to go. *)
 
 type t
 

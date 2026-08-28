@@ -279,6 +279,39 @@ let docker_run_argv
       ~image
       ~ttl_sec
   =
+  match meta.sandbox_profile with
+  | Keeper_types_profile_sandbox.Micro_vm ->
+    (* Same preparation, different command. Everything above this point --
+       secret projection, GitHub identity, mounts, uid/gid -- is the keeper's
+       contract and does not depend on what runs the guest, so it is reused
+       rather than rebuilt. Only the two flags container rejects are dropped;
+       [Keeper_sandbox_microvm] names that trade. *)
+    Keeper_sandbox_microvm.command_argv ()
+    @ [ "run"; "--rm"; "--name"; container_name ]
+    @ [ "-i"; "--user"; Printf.sprintf "%d:%d" uid gid ]
+    @ Keeper_sandbox_runtime.docker_sandbox_env_args
+        ~base_path:config.base_path
+        ~container_root
+    @ Env_config_sandbox.Hardening.read_only_rootfs_args ()
+    @ [ "--tmpfs"; Env_config_sandbox.Hardening.tmpfs_mount (); "--cap-drop=ALL" ]
+    @ [ "--memory"
+      ; Env_config_sandbox.Hardening.memory ()
+      ; "-v"
+      ; host_root ^ ":" ^ container_root ^ ":rw"
+      ; "--workdir"
+      ; container_cwd
+      ]
+    @ Keeper_sandbox_runtime.docker_config_mount_args
+        ~base_path:config.base_path
+        ~container_root
+    @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
+        ~base_path:config.base_path
+        ~container_root
+    @ secret_args
+    @ network_args
+    @ identity_mounts
+    @ [ image; "bash"; "-l"; "-s" ]
+  | Keeper_types_profile_sandbox.Local | Keeper_types_profile_sandbox.Docker ->
   Keeper_sandbox_runtime.docker_command_argv ()
   @ [ "run"; "--rm"; "--name"; container_name ]
   @ Keeper_sandbox_runtime.docker_label_args

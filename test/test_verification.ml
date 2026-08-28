@@ -2804,6 +2804,40 @@ let test_verification_evidence_decode_requires_both_keys () =
     ; ("a non-object", `List [])
     ]
 
+(* task-808 was refused for a missing artifact and approved four minutes later
+   with the file still absent, so the answer has to be the same both times. Only
+   the reference that leads to no file is named: a note carries its own text, an
+   artifact that read carries its content, and a file that exists but cannot be
+   read is something a reviewer can still reason about. *)
+let test_unresolved_artifact_references_are_named () =
+  let items =
+    [ VS.Evidence_note "narrative evidence"
+    ; VS.Evidence_artifact
+        { reference = "artifact:proof.txt"
+        ; content = "read from disk"
+        ; bytes = 14
+        ; truncated = false
+        }
+    ; VS.Evidence_artifact_unreadable
+        { reference = "artifact:missing.txt"; reason = VS.Evidence_missing }
+    ; VS.Evidence_artifact_unreadable
+        { reference = "artifact:locked.txt"
+        ; reason = VS.Evidence_read_error "Unix.Unix_error(EACCES, open, _)"
+        }
+    ; VS.Evidence_invalid_reference
+    ]
+  in
+  Alcotest.(check (list string))
+    "only the reference that leads to no file is named"
+    [ "artifact:missing.txt" ]
+    (Masc.Completion_authority_agent.For_testing.unresolved_artifact_references
+       items);
+  Alcotest.(check (list string))
+    "evidence that all resolves names nothing"
+    []
+    (Masc.Completion_authority_agent.For_testing.unresolved_artifact_references
+       [ VS.Evidence_note "narrative evidence" ])
+
 let () =
   Alcotest.run "Verification" [
     "verification_evidence wire", [
@@ -2922,5 +2956,7 @@ let () =
         test_submitted_evidence_requires_exact_task_assignment_identity;
       Alcotest.test_case "keeper task projection has no evidence or verdict action" `Quick
         test_keeper_task_projection_never_exposes_snapshot_or_verdict_action;
+      Alcotest.test_case "a reference to no file is named, not weighed" `Quick
+        test_unresolved_artifact_references_are_named;
     ];
   ]

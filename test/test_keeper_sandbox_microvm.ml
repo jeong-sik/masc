@@ -463,13 +463,11 @@ let test_docker_lane_keeps_the_full_env () =
         then Alcotest.failf "docker lane dropped %S the microvm lane carries" arg)
       (microvm_env ~base_path))
 
-(* task-847: git alone never reads gh's hosts.yml — without this wiring an
-   https push prompts for a username no terminal can answer, and the
-   projected token sits unused ("could not read Username", measured on a
-   replayed push with a valid token). Every git in the sandbox is told to
-   ask gh, and terminal prompts are off so an unconfigured identity fails
-   immediately instead of hanging. *)
-let test_docker_lane_wires_git_to_the_gh_credential_helper () =
+(* task-847: a sandbox has no terminal, so a git that wants to prompt fails
+   immediately instead of hanging the call. The credential wiring itself is
+   the identity snapshot's knowledge, not this env's — pinned in the
+   keeper_github_identity suite. *)
+let test_docker_lane_disables_git_terminal_prompts () =
   with_config_base (fun base_path ->
     let docker_env =
       Masc.Keeper_sandbox_runtime.sandbox_exec_env_args
@@ -477,14 +475,14 @@ let test_docker_lane_wires_git_to_the_gh_credential_helper () =
         ~base_path
         ~container_root:env_container_root
     in
+    if not (List.mem "GIT_TERMINAL_PROMPT=0" docker_env)
+    then Alcotest.fail "docker env is missing GIT_TERMINAL_PROMPT=0";
     List.iter
-      (fun required ->
-        if not (List.mem required docker_env)
-        then Alcotest.failf "docker env is missing %S" required)
+      (fun stale ->
+        if List.exists (fun arg -> arg = stale) docker_env
+        then Alcotest.failf "credential wiring leaked back into the env: %S" stale)
       [ "GIT_CONFIG_COUNT=1"
       ; "GIT_CONFIG_KEY_0=credential.https://github.com.helper"
-      ; "GIT_CONFIG_VALUE_0=!gh auth git-credential"
-      ; "GIT_TERMINAL_PROMPT=0"
       ])
 
 
@@ -589,9 +587,9 @@ let () =
         ; Alcotest.test_case "omits stores it has no mount for" `Quick
             test_guest_env_omits_stores_it_has_no_mount_for
         ; Alcotest.test_case
-            "docker lane wires git to the gh credential helper"
+            "docker lane disables git terminal prompts"
             `Quick
-            test_docker_lane_wires_git_to_the_gh_credential_helper
+            test_docker_lane_disables_git_terminal_prompts
         ; Alcotest.test_case "docker lane keeps the full env" `Quick
             test_docker_lane_keeps_the_full_env
         ] )

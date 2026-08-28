@@ -555,6 +555,71 @@ let empty_local_tool_config_snapshot () =
   snapshot, cleanup
 ;;
 
+let git_credential_config_file_name = "gitconfig"
+
+(* The hostnames this identity is logged into. hosts.yml is gh-owned and
+   stable in shape: a top-level key is a line that starts at column zero and
+   ends with ':'. Nothing else in the file has that shape. *)
+let hostnames_of_hosts_yml contents =
+  String.split_on_char '\n' contents
+  |> List.filter_map (fun line ->
+    let len = String.length line in
+    if len < 2 || line.[0] = ' ' || line.[0] = '\t' || line.[len - 1] <> ':'
+    then None
+    else (
+      let host = String.trim (String.sub line 0 (len - 1)) in
+      if String.equal host "" || String.contains host ' ' || String.contains host '"'
+      then None
+      else Some host))
+;;
+
+(* git never consults gh's hosts.yml on its own: an https push without a
+   credential helper prompts for a username, and a sandbox has no terminal
+   to answer, so a projected token sits unused ("could not read Username",
+   measured on a replayed push with a valid token — task-847). The identity
+   snapshot therefore carries the same wiring [gh auth setup-git] writes,
+   derived from the hosts this identity actually holds, and only when it
+   holds any. The file is derived state, deliberately outside the identity
+   revision digest: the digest answers "did the login change", and this file
+   is a pure function of it. *)
+let write_git_credential_config ~snapshot =
+  match
+    Fs_compat.load_owned_regular_file
+      ~ownership_root:snapshot
+      (Filename.concat snapshot "hosts.yml")
+  with
+  | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
+  | Ok None -> Ok false
+  | Ok (Some contents) ->
+    (match hostnames_of_hosts_yml contents with
+     | [] -> Ok false
+     | hosts ->
+       let stanza host =
+         Printf.sprintf
+           "[credential \"https://%s\"]\n\thelper = \n\thelper = !gh auth git-credential\n"
+           host
+       in
+       (* gh's own setup-git pairs github.com with its gist host. *)
+       let hosts =
+         if List.exists (String.equal "github.com") hosts
+            && not (List.exists (String.equal "gist.github.com") hosts)
+         then hosts @ [ "gist.github.com" ]
+         else hosts
+       in
+       let content = String.concat "" (List.map stanza hosts) in
+       let target = Filename.concat snapshot git_credential_config_file_name in
+       Unix.chmod snapshot 0o700;
+       let result =
+         match Fs_compat.save_file_atomic target content with
+         | Error _ as error -> error
+         | Ok () ->
+           Unix.chmod target 0o400;
+           Ok true
+       in
+       Unix.chmod snapshot 0o500;
+       result)
+;;
+
 let runtime_env_for_tool ~config ~keeper_name env =
   match existing_config_dir ~config ~keeper_name with
   | Error _ as error -> error
@@ -608,19 +673,36 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
           cleanup ();
           Error error
         | Ok revision ->
-          let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
-          Ok
-            { args =
-                [ "--env"
-                ; "GH_CONFIG_DIR=" ^ container_dir
-                ; "-v"
-                ; snapshot ^ ":" ^ container_dir ^ ":ro"
-                ]
-            ; identity_state = Configured host_dir
-            ; host_snapshot_dir = snapshot
-            ; revision
-            ; cleanup
-            }))
+          (match write_git_credential_config ~snapshot with
+           | Error error ->
+             cleanup ();
+             Error error
+           | Ok has_git_wiring ->
+             let container_dir =
+               container_config_dir ~container_masc_dir ~keeper_name
+             in
+             let git_wiring_args =
+               if has_git_wiring
+               then
+                 [ "--env"
+                 ; "GIT_CONFIG_GLOBAL="
+                   ^ Filename.concat container_dir git_credential_config_file_name
+                 ]
+               else []
+             in
+             Ok
+               { args =
+                   [ "--env"
+                   ; "GH_CONFIG_DIR=" ^ container_dir
+                   ; "-v"
+                   ; snapshot ^ ":" ^ container_dir ^ ":ro"
+                   ]
+                   @ git_wiring_args
+               ; identity_state = Configured host_dir
+               ; host_snapshot_dir = snapshot
+               ; revision
+               ; cleanup
+               })))
 ;;
 
 let login_argv ~hostname =

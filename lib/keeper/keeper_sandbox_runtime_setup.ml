@@ -278,26 +278,13 @@ let docker_user_env_args () =
   ]
 ;;
 
-(* git does not consult gh's hosts.yml on its own: an https push without a
-   credential helper prompts for a username, and a container has no terminal
-   to answer, so the push dies as "could not read Username". Measured
-   2026-08-29 (task-847): polisher pushed to the keepers' fork only because
-   the model had hand-written [credential.helper = !gh auth git-credential]
-   into its own clone, while sangsu — same-shaped valid token in its
-   projected hosts.yml — failed on the identical replayed push. Wire the
-   helper for every git in the sandbox through git's environment
-   configuration, scoped to github.com, and disable terminal prompts so an
-   unconfigured identity fails immediately instead of hanging. *)
+(* A sandbox has no terminal, so a git that wants to prompt must fail
+   immediately instead of hanging the call. Which credentials git can use is
+   not this module's knowledge: the identity snapshot carries its own
+   credential-helper wiring, derived from the hosts it is logged into
+   ([Keeper_github_identity.write_git_credential_config], task-847). *)
 let docker_git_credential_env_args () =
-  [ "--env"
-  ; "GIT_CONFIG_COUNT=1"
-  ; "--env"
-  ; "GIT_CONFIG_KEY_0=credential.https://github.com.helper"
-  ; "--env"
-  ; "GIT_CONFIG_VALUE_0=!gh auth git-credential"
-  ; "--env"
-  ; "GIT_TERMINAL_PROMPT=0"
-  ]
+  [ "--env"; "GIT_TERMINAL_PROMPT=0" ]
 ;;
 
 let trim_env_opt key =

@@ -12,6 +12,20 @@ type recovery_disposition =
   | Quarantine_retained
   | Original_restored_with_quarantine_retained
 
+type cancellation_stage =
+  | Quarantine_settlement
+  | After_quarantine
+  | After_verification
+  | Snapshot_refresh
+
+type recovery_cause =
+  | Recovery_operation_failed of string
+  | Recovery_cancelled of cancellation_stage
+
+type delete_unpublished_reason =
+  | Publication_failed of string
+  | Publication_cancelled
+
 type loaded =
   { reference : Skill_reference.t
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
@@ -59,7 +73,7 @@ type delete_outcome =
       }
   | Deleted_but_unpublished of
       { reference : Skill_reference.t
-      ; reason : string
+      ; reason : delete_unpublished_reason
       ; recovery_id : string
       ; disposition : recovery_disposition
       }
@@ -89,13 +103,14 @@ type error =
   | Quarantine_failed of
       { candidate_moved : bool
       ; recovery_id : string option
-      ; detail : string
+      ; disposition : recovery_disposition option
+      ; cause : recovery_cause
       }
   | Recovery_required of
       { observed : Skill_reference.content_revision option
       ; recovery_id : string
       ; disposition : recovery_disposition
-      ; detail : string
+      ; cause : recovery_cause
       }
 
 type target =
@@ -126,6 +141,34 @@ let recovery_disposition_to_string = function
   | Quarantine_retained -> "quarantine_retained"
   | Original_restored_with_quarantine_retained ->
     "original_restored_with_quarantine_retained"
+;;
+
+let cancellation_stage_to_string = function
+  | Quarantine_settlement -> "quarantine_settlement"
+  | After_quarantine -> "after_quarantine"
+  | After_verification -> "after_verification"
+  | Snapshot_refresh -> "snapshot_refresh"
+;;
+
+let recovery_cause_to_string = function
+  | Recovery_operation_failed detail -> detail
+  | Recovery_cancelled stage ->
+    "cancelled:" ^ cancellation_stage_to_string stage
+;;
+
+let delete_unpublished_reason_to_string = function
+  | Publication_failed reason -> reason
+  | Publication_cancelled -> "snapshot refresh cancelled"
+;;
+
+let recovery_cause_to_yojson = function
+  | Recovery_operation_failed detail ->
+    `Assoc [ "kind", `String "operation_failed"; "detail", `String detail ]
+  | Recovery_cancelled stage ->
+    `Assoc
+      [ "kind", `String "cancelled"
+      ; "stage", `String (cancellation_stage_to_string stage)
+      ]
 ;;
 
 let error_code = function
@@ -177,19 +220,41 @@ let error_to_string = function
     Printf.sprintf "SKILL.md is too large: %d bytes (maximum %d)" bytes max_bytes
   | Validation_failed detail -> "Skill validation failed: " ^ detail
   | Write_failed detail -> "Skill durable write failed: " ^ detail
-  | Quarantine_failed { candidate_moved; recovery_id; detail = _ } ->
+  | Quarantine_failed { candidate_moved; recovery_id; disposition = _; cause } ->
     Printf.sprintf
-      "Skill quarantine failed after candidate move=%b%s"
+      "Skill quarantine failed after candidate move=%b%s; cause=%s"
       candidate_moved
       (match recovery_id with
        | None -> ""
        | Some recovery_id -> "; recovery_id=" ^ recovery_id)
-  | Recovery_required { recovery_id; disposition; observed = _; detail = _ } ->
+      (recovery_cause_to_string cause)
+  | Recovery_required { recovery_id; disposition; observed = _; cause } ->
     Printf.sprintf
       "Skill deletion stopped with preserved recovery data; recovery_id=%s; \
-       disposition=%s"
+       disposition=%s; cause=%s"
       recovery_id
       (recovery_disposition_to_string disposition)
+      (recovery_cause_to_string cause)
+;;
+
+let error_recovery = function
+  | Delete_revision_conflict { recovery_id; disposition; _ }
+  | Recovery_required { recovery_id; disposition; _ } ->
+    Some (recovery_id, disposition)
+  | Quarantine_failed
+      { candidate_moved = true
+      ; recovery_id = Some recovery_id
+      ; disposition = Some disposition
+      ; _
+      } ->
+    Some (recovery_id, disposition)
+  | Invalid_workspace | Snapshot_not_registered | Snapshot_uninitialized
+  | Reference_not_current | Source_not_ready | Source_file_missing
+  | Source_read_failed | Source_path_rejected _ | Source_read_only
+  | Confirmation_required | Package_already_exists | Invalid_package_id _
+  | Revision_conflict _ | Source_too_large _ | Validation_failed _
+  | Write_failed _ | Quarantine_failed _ ->
+    None
 ;;
 
 let current_snapshot ~base_path =
@@ -557,7 +622,7 @@ type quarantine =
 
 type restore_result =
   | Restored
-  | Restore_recovery_required of recovery_disposition * string
+  | Restore_recovery_required of recovery_disposition * recovery_cause
 
 let recovery_root_name = ".masc-skill-delete-recovery"
 
@@ -604,7 +669,11 @@ let ensure_private_recovery_root source_root =
   | Error detail ->
     Error
       (Quarantine_failed
-         { candidate_moved = false; recovery_id = None; detail })
+         { candidate_moved = false
+         ; recovery_id = None
+         ; disposition = None
+         ; cause = Recovery_operation_failed detail
+         })
   | Ok () -> inspect_private_recovery_root ~source_root recovery_root
 ;;
 
@@ -630,7 +699,8 @@ let create_quarantine source_root =
         (Quarantine_failed
            { candidate_moved = false
            ; recovery_id = Some recovery_id
-           ; detail
+           ; disposition = None
+           ; cause = Recovery_operation_failed detail
            })
     | `Created ->
       (match run_quarantine_io (fun () ->
@@ -648,7 +718,8 @@ let create_quarantine source_root =
           (Quarantine_failed
              { candidate_moved = false
              ; recovery_id = Some recovery_id
-             ; detail
+             ; disposition = None
+             ; cause = Recovery_operation_failed detail
              }))
   in
   create ()
@@ -667,7 +738,7 @@ let cleanup_empty_quarantine quarantine =
       detail
 ;;
 
-let quarantine_candidate ~before_quarantine (target : target) =
+let quarantine_candidate ~before_quarantine ~after_move (target : target) =
   let* quarantine = create_quarantine target.source_root in
   let hook_result =
     try before_quarantine (); Ok () with
@@ -681,62 +752,105 @@ let quarantine_candidate ~before_quarantine (target : target) =
       (Quarantine_failed
          { candidate_moved = false
          ; recovery_id = Some quarantine.recovery_id
-         ; detail
+         ; disposition = None
+         ; cause = Recovery_operation_failed detail
          })
   | Ok () ->
     let moved = ref false in
-    (match run_quarantine_io (fun () ->
-       Unix.rename target.path quarantine.path;
-       moved := true;
-       Keeper_fs_durable_directory.fsync_directory (Filename.dirname target.path);
-       Keeper_fs_durable_directory.fsync_directory quarantine.directory)
-     with
-     | Ok () -> Ok quarantine
-     | Error detail ->
+    let move_result =
+      try
+        Eio.Cancel.protect (fun () ->
+          Eio_guard.run_in_systhread (fun () ->
+            Unix.rename target.path quarantine.path;
+            moved := true;
+            after_move ();
+            Keeper_fs_durable_directory.fsync_directory
+              (Filename.dirname target.path);
+            Keeper_fs_durable_directory.fsync_directory quarantine.directory);
+          Eio_guard.check_if_ready ());
+        `Moved
+      with
+      | Eio.Cancel.Cancelled _ as exn -> `Cancelled exn
+      | exn -> `Failed (Printexc.to_string exn)
+    in
+    (match move_result with
+     | `Moved -> Ok quarantine
+     | `Cancelled exn when not !moved -> raise exn
+     | `Cancelled _ ->
+       Error
+         (Quarantine_failed
+            { candidate_moved = true
+            ; recovery_id = Some quarantine.recovery_id
+            ; disposition = Some Quarantine_retained
+            ; cause = Recovery_cancelled Quarantine_settlement
+            })
+     | `Failed detail ->
        if not !moved then cleanup_empty_quarantine quarantine;
        Error
          (Quarantine_failed
             { candidate_moved = !moved
             ; recovery_id = Some quarantine.recovery_id
-            ; detail
+            ; disposition = if !moved then Some Quarantine_retained else None
+            ; cause = Recovery_operation_failed detail
             }))
 ;;
 
 let restore_quarantined_candidate (target : target) (quarantine : quarantine) =
   let linked = ref false in
-  match run_quarantine_io (fun () ->
-    Unix.link quarantine.path target.path;
-    linked := true;
-    Keeper_fs_durable_directory.fsync_directory (Filename.dirname target.path))
+  let retained_disposition () =
+    if !linked
+    then Original_restored_with_quarantine_retained
+    else Quarantine_retained
+  in
+  try
+    match run_quarantine_io (fun () ->
+      Unix.link quarantine.path target.path;
+      linked := true;
+      Keeper_fs_durable_directory.fsync_directory (Filename.dirname target.path))
+    with
+    | Error detail ->
+      Restore_recovery_required
+        (retained_disposition (), Recovery_operation_failed detail)
+    | Ok () ->
+      (match
+         Keeper_fs.remove_file_durable
+           ~ownership_root:target.source_root
+           quarantine.path
+       with
+       | Ok () ->
+         cleanup_empty_quarantine quarantine;
+         Restored
+       | Error error ->
+         let disposition =
+           if error.removed
+           then Original_restored
+           else Original_restored_with_quarantine_retained
+         in
+         Restore_recovery_required
+           ( disposition
+           , Recovery_operation_failed
+               (Keeper_fs.durable_remove_error_to_string error) ))
   with
-  | Error detail ->
-    let disposition =
-      if !linked
-      then Original_restored_with_quarantine_retained
-      else Quarantine_retained
-    in
-    Restore_recovery_required (disposition, detail)
-  | Ok () ->
-    (match
-       Keeper_fs.remove_file_durable
-         ~ownership_root:target.source_root
-         quarantine.path
-     with
-     | Ok () ->
-       cleanup_empty_quarantine quarantine;
-       Restored
-     | Error error ->
-       let disposition =
-         if error.removed
-         then Original_restored
-         else Original_restored_with_quarantine_retained
-       in
-       Restore_recovery_required
-         (disposition, Keeper_fs.durable_remove_error_to_string error))
+  | Eio.Cancel.Cancelled _ ->
+    Restore_recovery_required
+      (retained_disposition (), Recovery_cancelled After_quarantine)
+;;
+
+let protect_quarantined_candidate quarantine operation =
+  try Eio.Cancel.protect operation with
+  | Eio.Cancel.Cancelled _ ->
+    Error
+      (Recovery_required
+         { observed = None
+         ; recovery_id = quarantine.recovery_id
+         ; disposition = Quarantine_retained
+         ; cause = Recovery_cancelled After_quarantine
+         })
 ;;
 
 let delete_with
       ~before_quarantine
+      ~after_move
       ~after_quarantine
       ~after_verification
       ~base_path
@@ -758,20 +872,24 @@ let delete_with
         else
           let* _, actual = read_current target in
           let* () = require_expected_revision reference actual in
-          let* quarantine = quarantine_candidate ~before_quarantine target in
+          let* quarantine =
+            quarantine_candidate ~before_quarantine ~after_move target
+          in
+          protect_quarantined_candidate quarantine (fun () ->
           let after_quarantine_result =
             try after_quarantine (); Ok () with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn -> Error (Printexc.to_string exn)
+            | Eio.Cancel.Cancelled _ ->
+              Error (Recovery_cancelled After_quarantine)
+            | exn -> Error (Recovery_operation_failed (Printexc.to_string exn))
           in
           (match after_quarantine_result with
-           | Error detail ->
+           | Error cause ->
              Error
                (Recovery_required
                   { observed = None
                   ; recovery_id = quarantine.recovery_id
                   ; disposition = Quarantine_retained
-                  ; detail
+                  ; cause
                   })
            | Ok () ->
              (match
@@ -785,7 +903,9 @@ let delete_with
                   { observed = None
                   ; recovery_id = quarantine.recovery_id
                   ; disposition = Quarantine_retained
-                  ; detail = Fs_compat.owned_regular_file_read_error_to_string error
+                  ; cause =
+                      Recovery_operation_failed
+                        (Fs_compat.owned_regular_file_read_error_to_string error)
                   })
            | Ok None ->
              Error
@@ -793,7 +913,9 @@ let delete_with
                   { observed = None
                   ; recovery_id = quarantine.recovery_id
                   ; disposition = Quarantine_retained
-                  ; detail = "quarantined candidate disappeared before verification"
+                  ; cause =
+                      Recovery_operation_failed
+                        "quarantined candidate disappeared before verification"
                   })
            | Ok (Some quarantined_source) ->
              let observed =
@@ -809,46 +931,60 @@ let delete_with
                        ; recovery_id = quarantine.recovery_id
                        ; disposition = Original_restored
                        })
-                | Restore_recovery_required (disposition, detail) ->
+                | Restore_recovery_required (disposition, cause) ->
                   Error
                     (Recovery_required
                        { observed = Some observed
                        ; recovery_id = quarantine.recovery_id
                        ; disposition
-                       ; detail
+                       ; cause
                        }))
              else
                let after_verification_result =
                  try after_verification (); Ok () with
-                 | Eio.Cancel.Cancelled _ as exn -> raise exn
-                 | exn -> Error (Printexc.to_string exn)
+                 | Eio.Cancel.Cancelled _ ->
+                   Error (Recovery_cancelled After_verification)
+                 | exn ->
+                   Error (Recovery_operation_failed (Printexc.to_string exn))
                in
                (match after_verification_result with
-                | Error detail ->
+                | Error cause ->
                   Error
                     (Recovery_required
                        { observed = Some observed
                        ; recovery_id = quarantine.recovery_id
                        ; disposition = Quarantine_retained
-                       ; detail
+                       ; cause
                        })
                 | Ok () ->
-                  (match refresh () with
-                   | Error reason ->
+                  let refresh_result =
+                    try `Returned (refresh ()) with
+                    | Eio.Cancel.Cancelled _ -> `Cancelled
+                  in
+                  (match refresh_result with
+                   | `Cancelled ->
                      Ok
                        (Deleted_but_unpublished
                           { reference
-                          ; reason
+                          ; reason = Publication_cancelled
                           ; recovery_id = quarantine.recovery_id
                           ; disposition = Quarantine_retained
                           })
-                   | Ok publication ->
+                   | `Returned (Error reason) ->
+                     Ok
+                       (Deleted_but_unpublished
+                          { reference
+                          ; reason = Publication_failed reason
+                          ; recovery_id = quarantine.recovery_id
+                          ; disposition = Quarantine_retained
+                          })
+                   | `Returned (Ok publication) ->
                      (match published_snapshot publication with
                       | Error reason ->
                         Ok
                           (Deleted_but_unpublished
                              { reference
-                             ; reason
+                             ; reason = Publication_failed reason
                              ; recovery_id = quarantine.recovery_id
                              ; disposition = Quarantine_retained
                              })
@@ -870,15 +1006,17 @@ let delete_with
                              (Deleted_but_unpublished
                                 { reference
                                 ; reason =
-                                    "deleted reference remained present after publication"
+                                    Publication_failed
+                                      "deleted reference remained present after publication"
                                 ; recovery_id = quarantine.recovery_id
                                 ; disposition = Quarantine_retained
-                                }))))))))
+                                })))))))))
 ;;
 
 let delete ~base_path ~reference ~confirmed ~refresh =
   delete_with
     ~before_quarantine:(fun () -> ())
+    ~after_move:(fun () -> ())
     ~after_quarantine:(fun () -> ())
     ~after_verification:(fun () -> ())
     ~base_path
@@ -896,6 +1034,7 @@ module For_testing = struct
 
   let delete
         ~before_quarantine
+        ~after_move
         ~after_quarantine
         ~after_verification
         ~base_path
@@ -905,6 +1044,7 @@ module For_testing = struct
     =
     delete_with
       ~before_quarantine
+      ~after_move
       ~after_quarantine
       ~after_verification
       ~base_path
@@ -993,7 +1133,7 @@ let delete_outcome_to_yojson = function
     `Assoc
       [ "status", `String "deleted_but_unpublished"
       ; "reference", Skill_reference.to_yojson reference
-      ; "reason", `String reason
+      ; "reason", `String (delete_unpublished_reason_to_string reason)
       ; "recovery_id", `String recovery_id
       ; ( "recovery_disposition"
         , `String (recovery_disposition_to_string disposition) )
@@ -1020,14 +1160,21 @@ let error_to_yojson error =
          ]
        | Source_path_rejected rejection ->
          [ "path_rejection", `String (path_rejection_to_string rejection) ]
-       | Quarantine_failed { candidate_moved; recovery_id; detail = _ } ->
+       | Quarantine_failed
+           { candidate_moved; recovery_id; disposition; cause } ->
          [ "candidate_moved", `Bool candidate_moved
          ; ( "recovery_id"
            , match recovery_id with
              | None -> `Null
              | Some recovery_id -> `String recovery_id )
+         ; ( "recovery_disposition"
+           , match disposition with
+             | None -> `Null
+             | Some disposition ->
+               `String (recovery_disposition_to_string disposition) )
+         ; "cause", recovery_cause_to_yojson cause
          ]
-       | Recovery_required { observed; recovery_id; disposition; detail = _ } ->
+       | Recovery_required { observed; recovery_id; disposition; cause } ->
          [ ( "actual_revision"
            , match observed with
              | None -> `Null
@@ -1036,6 +1183,7 @@ let error_to_yojson error =
          ; "recovery_id", `String recovery_id
          ; ( "recovery_disposition"
            , `String (recovery_disposition_to_string disposition) )
+         ; "cause", recovery_cause_to_yojson cause
          ]
        | Invalid_workspace | Snapshot_not_registered | Snapshot_uninitialized
        | Reference_not_current | Source_not_ready | Source_file_missing

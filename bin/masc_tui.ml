@@ -8635,26 +8635,21 @@ and is loaded on demand through keeper_skill.
                     (Printf.sprintf "%s · %s/%s" status source_id package_id);
                   launch_tools_load state ~mailbox:async_messages))))
   in
-  let handle_skill_run () =
+  let handle_skill_evidence () =
     match selected_tools_skill_profile state with
     | None -> add_event state "error" "no published Skill selected"
-    | Some profile when String.equal profile.esp_kind "instruction" ->
-      add_event
-        state
-        "system"
-        "instruction Skill results belong to the Keeper turn; inspect Skill Activations or Keeper calls"
     | Some profile ->
       let key =
         Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string
       in
       (match
-         Masc_tui_http.post_skill_run
+         Masc_tui_http.post_skill_evidence
            ~host:server_peer_host
            ~port:state.port
            profile.esp_reference
        with
-       | Error detail -> add_event state "error" ("Skill run lookup failed: " ^ detail)
-       | Ok json -> state.tools_skill_run <- Some (key, json))
+       | Error detail -> add_event state "error" ("Skill evidence lookup failed: " ^ detail)
+       | Ok json -> state.tools_skill_evidence <- Some (key, json))
   in
   let handle_skill_edit () =
     match selected_tools_skill_profile state with
@@ -9933,7 +9928,7 @@ and is loaded on demand through keeper_skill.
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
-       | Some "\r" when state.view = Tools -> handle_skill_run ()
+       | Some "\r" when state.view = Tools -> handle_skill_evidence ()
        | Some ("\r" | "\n" | "enter")
          when state.view = Config && state.config_pane = Config_params ->
            handle_runtime_param_edit_open ~advanced:false ()

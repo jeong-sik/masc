@@ -1725,11 +1725,11 @@ let post_skill_editor_create ~host ~port ~source_id ~package_id ~source_text =
            ]))
 ;;
 
-let post_skill_run ~host ~port reference =
+let post_skill_evidence ~host ~port reference =
   post_json
     ~host
     ~port
-    ~path:"/api/v1/skills/runs"
+    ~path:"/api/v1/skills/evidence"
     ~body:(skill_editor_body reference None)
 ;;
 

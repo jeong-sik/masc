@@ -35,6 +35,7 @@ export interface StandaloneLaneSnapshotRow {
   configured: boolean | null
   configurationState: StandaloneLaneConfigurationState
   admittedSlots: string[]
+  droppedSlots: string[]
   admissionError: string | null
   status: StandaloneLaneStatus
   retainedRunCount: number
@@ -118,6 +119,7 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
     fail(`${context}.configuration_state is unknown`)
   }
   if (!Array.isArray(raw.admitted_slots)) fail(`${context}.admitted_slots must be an array`)
+  if (!Array.isArray(raw.dropped_slots)) fail(`${context}.dropped_slots must be an array`)
   if (!Array.isArray(raw.selected_slots)) fail(`${context}.selected_slots must be an array`)
   if (typeof raw.required !== 'boolean') fail(`${context}.required must be a boolean`)
   if (raw.observation_only !== true) fail(`${context}.observation_only must be true`)
@@ -134,6 +136,7 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
     configured: raw.configured as boolean | null,
     configurationState: configurationState as StandaloneLaneConfigurationState,
     admittedSlots: raw.admitted_slots.map((slot, slotIndex) => string(slot, `${context}.admitted_slots[${slotIndex}]`)),
+    droppedSlots: raw.dropped_slots.map((slot, slotIndex) => string(slot, `${context}.dropped_slots[${slotIndex}]`)),
     admissionError: nullableString(raw.admission_error, `${context}.admission_error`),
     status: status as StandaloneLaneStatus,
     retainedRunCount: count(raw.retained_run_count, `${context}.retained_run_count`),

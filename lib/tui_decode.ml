@@ -145,6 +145,7 @@ type standalone_lane = {
   sl_status : standalone_lane_status;
   sl_configuration_state : string;
   sl_admitted_slots : string list;
+  sl_dropped_slots : string list;
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -3233,6 +3234,15 @@ let decode_standalone_lane json =
         | _ -> Error "admitted_slots: expected a string")
       admitted_slots
   in
+  let* dropped_slots = required_list_field json "dropped_slots" in
+  let* sl_dropped_slots =
+    decode_list
+      "dropped_slots"
+      (function
+        | `String slot_id -> Ok slot_id
+        | _ -> Error "dropped_slots: expected a string")
+      dropped_slots
+  in
   let* sl_admission_error = required_nullable_string_field json "admission_error" in
   let* status = required_string_field json "status" in
   let* sl_status = standalone_lane_status_of_string status in
@@ -3256,6 +3266,7 @@ let decode_standalone_lane json =
     ; sl_status
     ; sl_configuration_state
     ; sl_admitted_slots
+    ; sl_dropped_slots
     ; sl_admission_error
     ; sl_retained_run_count
     ; sl_running_count

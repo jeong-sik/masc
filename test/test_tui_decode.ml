@@ -2459,6 +2459,7 @@ let standalone_lane_json ?(status = "idle") ?(retained = 3)
     ; "configured", `Bool true
     ; "configuration_state", `String "ready"
     ; "admitted_slots", `List [ `String "qwen-primary" ]
+    ; "dropped_slots", `List []
     ; "admission_error", `Null
     ; "status", `String status
     ; "retained_run_count", `Int retained

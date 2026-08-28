@@ -1,6 +1,7 @@
 type lane_configuration =
   | Configured of
       { admitted_slots : string list
+      ; dropped_slots : string list
       ; admission_error : string option
       }
   | Unconfigured of string
@@ -258,14 +259,15 @@ let lane_json
   let configuration = resolve_lane spec.lane_id in
   let configured, config_state, admitted_slots, admission_error =
     match configuration with
-    | Configured { admitted_slots; admission_error } ->
+    | Configured { admitted_slots; dropped_slots; admission_error } ->
       Some true,
       (if admitted_slots = [] then "degraded" else "ready"),
-      admitted_slots,
+      (admitted_slots, dropped_slots),
       admission_error
-    | Unconfigured error -> Some false, "unconfigured", [], Some error
-    | Registry_unavailable error -> None, "unavailable", [], Some error
+    | Unconfigured error -> Some false, "unconfigured", ([], []), Some error
+    | Registry_unavailable error -> None, "unavailable", ([], []), Some error
   in
+  let admitted_slots, dropped_slots = admitted_slots in
   let status =
     match configuration with
     | Registry_unavailable _ | Unconfigured _ -> "unavailable"
@@ -289,6 +291,7 @@ let lane_json
     ; "configured", (match configured with None -> `Null | Some value -> `Bool value)
     ; "configuration_state", `String config_state
     ; "admitted_slots", `List (List.map (fun slot -> `String slot) admitted_slots)
+    ; "dropped_slots", `List (List.map (fun slot -> `String slot) dropped_slots)
     ; "admission_error", json_string_opt admission_error
     ; "status", `String status
     ; "retained_run_count", `Int (List.length runs)
@@ -341,6 +344,18 @@ let snapshot_json_with
 ;;
 
 let live_lane_configuration registry lane_id =
+  (* Publication keeps declared-but-inadmissible slots as typed observations;
+     surfacing them per lane is what lets an operator distinguish "configured
+     single" from "configured double, one silently dropped" without going
+     back to the boot log. *)
+  let dropped_slots =
+    Runtime_exact_output_registry.rejected_slots registry
+    |> List.filter_map
+         (fun (rejected : Runtime_exact_output_registry.rejected_slot) ->
+            if String.equal rejected.lane_id lane_id
+            then Some rejected.slot_id
+            else None)
+  in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Ok { selected_slots } ->
     Configured
@@ -348,6 +363,7 @@ let live_lane_configuration registry lane_id =
           List.map
             (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
             selected_slots
+      ; dropped_slots
       ; admission_error = None
       }
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
@@ -357,6 +373,7 @@ let live_lane_configuration registry lane_id =
   | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
     Configured
       { admitted_slots = []
+      ; dropped_slots
       ; admission_error =
           Some
             (Runtime_exact_output_registry.lane_resolution_error_to_string

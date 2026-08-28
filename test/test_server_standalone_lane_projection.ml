@@ -74,7 +74,10 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
   in
   let resolve_lane lane_id =
     Projection.Configured
-      { admitted_slots = [ lane_id ^ "-primary" ]; admission_error = None }
+      { admitted_slots = [ lane_id ^ "-primary" ]
+      ; dropped_slots = []
+      ; admission_error = None
+      }
   in
   let json =
     Projection.For_testing.snapshot_json_with
@@ -178,8 +181,15 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
       }
     ]
   in
-  let resolve_lane _lane_id =
-    Projection.Configured { admitted_slots = [ "slot" ]; admission_error = None }
+  let resolve_lane lane_id =
+    Projection.Configured
+      { admitted_slots = [ "slot" ]
+      ; dropped_slots =
+          (if String.equal lane_id "librarian_exact"
+           then [ "slot-typo" ]
+           else [])
+      ; admission_error = None
+      }
   in
   let json =
     Projection.For_testing.snapshot_json_with
@@ -208,6 +218,21 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
     true
     (match field "librarian_exact" "p50_elapsed_s" with
      | `Float value -> Float.equal value 8.
+     | _ -> false);
+  (* Lane audit W4: a declared-but-inadmissible slot is visible per lane, so
+     "configured single" and "configured double, one dropped" stop looking
+     identical on this surface. *)
+  check bool
+    "dropped slots are surfaced per lane"
+    true
+    (match field "librarian_exact" "dropped_slots" with
+     | `List [ `String "slot-typo" ] -> true
+     | _ -> false);
+  check bool
+    "a lane with nothing dropped says so"
+    true
+    (match field "hitl_auto_judge" "dropped_slots" with
+     | `List [] -> true
      | _ -> false)
 ;;
 
@@ -242,7 +267,10 @@ let test_latest_terminal_uses_completion_time () =
       ~now:120.
       ~resolve_lane:(fun lane_id ->
         Projection.Configured
-          { admitted_slots = [ lane_id ^ "-primary" ]; admission_error = None })
+          { admitted_slots = [ lane_id ^ "-primary" ]
+      ; dropped_slots = []
+      ; admission_error = None
+      })
       ~exact_runs_total:10
       ~exact_runs
       ~verification_runs:[]

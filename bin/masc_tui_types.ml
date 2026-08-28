@@ -1246,6 +1246,10 @@ type state = {
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
      is open. *)
+  (* Whether footers spell their key hints ([tui].hints_visible at boot,
+     [h] on the help sheet for the session). Off leaves "?:help" as the one
+     remaining hint -- the door back for the reader who knows the keys. *)
+  mutable hints_visible: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
@@ -2013,6 +2017,7 @@ let create_state
   help_open = false;
   agenda_open = false;
   agenda_scroll = 0;
+  hints_visible = true;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;

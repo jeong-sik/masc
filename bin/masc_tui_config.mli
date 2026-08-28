@@ -28,3 +28,8 @@ val lift_colours : base_path:string -> bool option
     visible. Off, the scheme's own colour goes out untouched, which is what
     every other terminal UI does and what a reader on a high-contrast scheme
     wants: for them the lift moves a colour their theme placed on purpose. *)
+
+val hints_visible_of_doc : Keeper_toml_loader.toml_doc -> bool option
+val hints_visible : base_path:string -> bool option
+(** [tui].hints_visible: whether footers spell their key hints. [None]
+    where the file, the table or the key is absent -- reads as "yes". *)

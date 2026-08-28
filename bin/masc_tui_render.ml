@@ -485,6 +485,10 @@ let lexed_span (text, kind) =
 ;;
 
 let footer_line ?(status = []) (state : state) ~max_cells ~hints =
+  (* Hints off trades the key text for status room; "?:help" stays as the
+     door back. One seam for every surface, which is what makes the setting
+     a setting instead of per-screen behaviour. *)
+  let hints = if state.hints_visible then hints else "?:help" in
   (* An armed "/" search shows its query where every surface already looks
      for its keys. One seam instead of a per-surface indicator. *)
   let hints =
@@ -10637,7 +10641,9 @@ let render_help (state : state) =
   let buf = Buffer.create 4096 in
   framed_top buf cols;
   framed_line buf cols (screen_title " Help" ^ "  " ^ Ansi.dim
-    ^ "Esc or ? to close" ^ Ansi.reset);
+    ^ "Esc or ? to close \xc2\xb7 h:hints "
+    ^ (if state.hints_visible then "off" else "on")
+    ^ " (persist: [tui] hints_visible in runtime.toml)" ^ Ansi.reset);
   framed_divider buf cols;
   let lines = help_lines state in
   let rendered_rows = Masc_tui_help.sheet ~cols lines in

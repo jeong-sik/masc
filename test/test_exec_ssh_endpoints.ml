@@ -160,6 +160,64 @@ let test_scalar_endpoint_rejected () =
     check bool "names table shape" true
       (contains "must be a TOML table" (render_errors errors))
 
+let test_duplicate_endpoint_table_rejected () =
+  (* otoml raises on the duplicate table header before the registry parser
+     runs; the load must still fail closed. *)
+  let toml = endpoint_toml "dev" "" ^ endpoint_toml "dev" "" in
+  match parse_cfg toml with
+  | Ok _ -> fail "duplicate endpoint table must be rejected"
+  | Error _ -> ()
+
+let test_port_bounds () =
+  let reject extra expected =
+    match parse_cfg (endpoint_toml "dev" extra) with
+    | Ok _ -> fail (Printf.sprintf "port bound %S must be rejected" extra)
+    | Error errors ->
+      check bool "names the bound" true
+        (contains expected (render_errors errors))
+  in
+  reject "port = 0" "positive integer";
+  reject "port = 70000" "65535"
+
+let test_capabilities_non_string_rejected () =
+  let extra = "capabilities = [1]" in
+  match parse_cfg (endpoint_toml "dev" extra) with
+  | Ok _ -> fail "non-string capability must be rejected"
+  | Error errors ->
+    check bool "names the key" true
+      (contains "capabilities" (render_errors errors))
+
+let test_padded_host_rejected () =
+  let toml =
+    {|
+[exec.ssh.endpoints.dev]
+host = " builder.local "
+user = "masc-exec"
+remote_root = "/srv/masc/playground"
+|}
+  in
+  match parse_cfg toml with
+  | Ok _ -> fail "padded host must be rejected"
+  | Error errors ->
+    check bool "names whitespace" true
+      (contains "whitespace" (render_errors errors))
+
+let test_relative_remote_root_rejected () =
+  let toml =
+    {|
+[exec.ssh.endpoints.dev]
+host = "builder.local"
+user = "masc-exec"
+remote_root = "srv/masc"
+|}
+  in
+  match parse_cfg toml with
+  | Ok _ -> fail "relative remote_root must be rejected"
+  | Error errors ->
+    let rendered = render_errors errors in
+    check bool "names the key" true (contains "remote_root" rendered);
+    check bool "names absolute" true (contains "absolute" rendered)
+
 let test_absent_section_is_empty_registry () =
   match parse_cfg "" with
   | Error errors -> fail (render_errors errors)
@@ -179,8 +237,17 @@ let () =
         ; test_case "endpoint name validation" `Quick test_endpoint_name_validation
         ; test_case "stray exec key rejected" `Quick test_stray_exec_key_rejected
         ; test_case "scalar endpoint rejected" `Quick test_scalar_endpoint_rejected
+        ; test_case "duplicate table rejected" `Quick
+            test_duplicate_endpoint_table_rejected
+        ; test_case "padded host rejected" `Quick test_padded_host_rejected
+        ; test_case "relative remote_root rejected" `Quick
+            test_relative_remote_root_rejected
+        ; test_case "port bounds" `Quick test_port_bounds
         ] )
     ; ( "capabilities"
       , [ test_case "unknown warn-and-ignore" `Quick
-            test_unknown_capability_warn_and_ignore ] )
+            test_unknown_capability_warn_and_ignore
+        ; test_case "non-string rejected" `Quick
+            test_capabilities_non_string_rejected
+        ] )
     ]

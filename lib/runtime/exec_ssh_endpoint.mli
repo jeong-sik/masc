@@ -22,8 +22,19 @@ val default_known_hosts_file : name:string -> string
     same convention as {!default_identity_file}. *)
 
 val default_port : int
+(** [22]. *)
+
 val default_connect_timeout_sec : int
+(** [10] — maps to ssh [ConnectTimeout]. *)
+
 val default_max_concurrent_sessions : int
+(** [8] — sessions multiplex onto one ControlMaster connection; sshd
+    [MaxSessions] defaults to 10, so the ceiling is explicit. *)
+
+(* Path convention: the defaults above are stored relative to the workspace
+   base path, and an operator-written explicit RELATIVE [identity_file] or
+   [known_hosts_file] resolves the same way — consumers join either form onto
+   the workspace base (Phase 1 tasks 6/9 contract). *)
 
 type t =
   { name : string  (** Registry key — the [<name>] in the table header. *)

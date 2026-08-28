@@ -1177,28 +1177,74 @@ let exec_ssh_endpoint_keys =
   ]
 ;;
 
-let exec_ssh_string_array_field ~(path : string) (tbl : Otoml.t) (key : string)
-  : (string list, parse_error list) result
+(* Required endpoint strings reject surrounding whitespace rather than
+   storing padding verbatim — symmetric with [exact_non_empty_string_opt_field]
+   on the optional fields of the same record. *)
+let exec_ssh_required_string ~(path : string) (tbl : Otoml.t) ~(key : string)
+  : (string, parse_error list) result
   =
-  match Otoml.find_opt tbl Fun.id [ key ] with
-  | None -> Ok []
-  | Some value ->
-    (try Ok (Otoml.get_array Otoml.get_string value) with
-     | Otoml.Type_error msg ->
-       Error
-         (error
-            (path ^ "." ^ key)
-            (Printf.sprintf "%s must be an array of strings; got %s" key msg)))
+  match
+    required_non_empty_string
+      tbl
+      ~path
+      ~key
+      ~message:(Printf.sprintf "endpoint requires non-empty '%s'" key)
+  with
+  | Error _ as error -> error
+  | Ok value when value <> String.trim value ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (key ^ " must not have leading or trailing whitespace"))
+  | Ok value -> Ok value
+;;
+
+(* The shim maps keeper paths under [remote_root] (spec §4.2 path mapping); a
+   relative root would make that translation cwd-dependent, so the value is
+   rejected at load — the same fail-closed shape as the [healthcheck.path must
+   be absolute] check in [parse_provider]. *)
+let exec_ssh_remote_root_field ~(path : string) (tbl : Otoml.t)
+  : (string, parse_error list) result
+  =
+  (* Non-emptiness is proven by [exec_ssh_required_string], so the [0] index
+     cannot raise. *)
+  match exec_ssh_required_string ~path tbl ~key:"remote_root" with
+  | Error _ as error -> error
+  | Ok remote_root when Char.equal remote_root.[0] '/' -> Ok remote_root
+  | Ok remote_root ->
+    Error
+      (error
+         (path ^ ".remote_root")
+         (Printf.sprintf "remote_root must be absolute, got %S" remote_root))
+;;
+
+(* ssh accepts ports 1..65535; [positive_int_opt_field] covers the lower
+   bound, this adds the upper one so a typo is a load error instead of a
+   dispatch-time ssh failure. *)
+let exec_ssh_port_field ~(path : string) (tbl : Otoml.t)
+  : (int option, parse_error list) result
+  =
+  match positive_int_opt_field ~path ~key:"port" tbl with
+  | Error _ as error -> error
+  | Ok (Some port) when port > 65535 ->
+    Error
+      (error
+         (path ^ ".port")
+         (Printf.sprintf "port must be in 1..65535; got %d" port))
+  | Ok port -> Ok port
 ;;
 
 (** Parse one [\[exec.ssh.endpoints.<name>\]] table. Every key must be one of
     {!exec_ssh_endpoint_keys}; any other key fails the load so a misspelled
     knob is never silently dropped. [host], [user], and [remote_root] are
-    required non-empty strings; every other key carries the spec default. The
-    two file defaults resolve here, where the endpoint name is in scope, to
-    base-relative paths with the name substituted (see {!Exec_ssh_endpoint}).
-    Unknown [capabilities] values warn-and-ignore per the spec table — they
-    are Phase 2 reservations, not Phase 1 knobs. *)
+    required non-empty strings and reject surrounding whitespace (padding is
+    a typo, not a value); [remote_root] must additionally be absolute, since
+    the shim's path mapping is defined against it. [port] must be in
+    1..65535; every other key carries the spec default. The two file defaults
+    resolve here, where the endpoint name is in scope, to base-relative paths
+    with the name substituted (see {!Exec_ssh_endpoint}). Unknown
+    [capabilities] values warn-and-ignore per the spec table — they are
+    Phase 2 reservations, not Phase 1 knobs. *)
 let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   : (Exec_ssh_endpoint.t, parse_error list) result
   =
@@ -1223,28 +1269,10 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
     | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
     | Otoml.TomlTableArray _ -> error path "endpoint must be a TOML table"
   in
-  let host_result =
-    required_non_empty_string
-      tbl
-      ~path
-      ~key:"host"
-      ~message:"endpoint requires non-empty 'host'"
-  in
-  let user_result =
-    required_non_empty_string
-      tbl
-      ~path
-      ~key:"user"
-      ~message:"endpoint requires non-empty 'user'"
-  in
-  let remote_root_result =
-    required_non_empty_string
-      tbl
-      ~path
-      ~key:"remote_root"
-      ~message:"endpoint requires non-empty 'remote_root'"
-  in
-  let port_result = positive_int_opt_field ~path ~key:"port" tbl in
+  let host_result = exec_ssh_required_string ~path tbl ~key:"host" in
+  let user_result = exec_ssh_required_string ~path tbl ~key:"user" in
+  let remote_root_result = exec_ssh_remote_root_field ~path tbl in
+  let port_result = exec_ssh_port_field ~path tbl in
   let identity_file_result = exact_non_empty_string_opt_field ~path tbl "identity_file" in
   let known_hosts_file_result =
     exact_non_empty_string_opt_field ~path tbl "known_hosts_file"
@@ -1255,8 +1283,18 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   let max_concurrent_sessions_result =
     positive_int_opt_field ~path ~key:"max_concurrent_sessions" tbl
   in
-  let env_allowlist_result = exec_ssh_string_array_field ~path tbl "env_allowlist" in
-  let capabilities_result = exec_ssh_string_array_field ~path tbl "capabilities" in
+  let string_array_field key =
+    Result.map
+      (Option.value ~default:[])
+      (typed_find
+         "an array of strings"
+         path
+         tbl
+         key
+         (Otoml.get_array Otoml.get_string))
+  in
+  let env_allowlist_result = string_array_field "env_allowlist" in
+  let capabilities_result = string_array_field "capabilities" in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let field_errors =
     errs host_result
@@ -1308,24 +1346,27 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
                 false))
            declared_capabilities
        in
-       let or_default default = function Some value -> value | None -> default in
        Ok
          { Exec_ssh_endpoint.name
          ; host
          ; user
-         ; port = or_default Exec_ssh_endpoint.default_port port
+         ; port = Option.value ~default:Exec_ssh_endpoint.default_port port
          ; identity_file =
-             or_default (Exec_ssh_endpoint.default_identity_file ~name) identity_file
+             Option.value
+               ~default:(Exec_ssh_endpoint.default_identity_file ~name)
+               identity_file
          ; known_hosts_file =
-             or_default
-               (Exec_ssh_endpoint.default_known_hosts_file ~name)
+             Option.value
+               ~default:(Exec_ssh_endpoint.default_known_hosts_file ~name)
                known_hosts_file
          ; remote_root
          ; connect_timeout_sec =
-             or_default Exec_ssh_endpoint.default_connect_timeout_sec connect_timeout_sec
+             Option.value
+               ~default:Exec_ssh_endpoint.default_connect_timeout_sec
+               connect_timeout_sec
          ; max_concurrent_sessions =
-             or_default
-               Exec_ssh_endpoint.default_max_concurrent_sessions
+             Option.value
+               ~default:Exec_ssh_endpoint.default_max_concurrent_sessions
                max_concurrent_sessions
          ; env_allowlist
          ; capabilities

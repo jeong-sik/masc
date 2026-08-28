@@ -216,7 +216,6 @@ let respond_sse_register_error ~(deps : Server_mcp_transport_http_types.deps)
 let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~origin ~session_id ~protocol_version
     ~reason ~retry_after_s reqd =
   let reason_label = Sse_reject_reason.to_label reason in
-  Transport_metrics.inc_sse_reject ~reason:reason_label;
   let retry_after_s = Float.max retry_after_s 0.001 in
   let retry_after_header =
     retry_after_s |> Float.ceil |> int_of_float |> max 1 |> string_of_int
@@ -236,4 +235,8 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
       :: json_headers ~deps session_id protocol_version origin)
   in
   let response = Httpun.Response.create ~headers `Too_many_requests in
+  Transport_metrics.inc_sse_reject ~reason:reason_label;
+  Transport_metrics.record_http_rate_limit_response
+    ~protocol:Transport_metrics.H1
+    ~scope:Transport_metrics.Sse_connection;
   safe_respond_with_string reqd response body

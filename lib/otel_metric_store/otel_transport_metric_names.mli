@@ -182,5 +182,9 @@ val metric_http_accepts : string
 (** Primary HTTP listener accept-loop errors. Labels: [mode]. *)
 val metric_http_accept_errors : string
 
+(** HTTP 429 responses emitted by the server-side transport limiters.
+    Labels: [protocol] and [scope]. *)
+val metric_http_rate_limit_responses : string
+
 (** Primary HTTP listener active accepted connections. *)
 val metric_http_active_connections : string

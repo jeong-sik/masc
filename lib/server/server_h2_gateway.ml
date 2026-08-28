@@ -253,6 +253,9 @@ let h2_request_handler _client_addr h2_reqd =
       read_loop ()
     in
     let h2_respond_agent_rate_limited h2_reqd ~rl_key =
+      Transport_metrics.record_http_rate_limit_response
+        ~protocol:Transport_metrics.H2
+        ~scope:Transport_metrics.Agent;
       h2_respond_json h2_reqd
         (Rate_limit.too_many_agent_requests_body ())
         ~status:`Too_many_requests

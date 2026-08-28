@@ -1463,6 +1463,7 @@
   test_tool_metrics_persist
   test_model_inference_metrics
   test_keeper_tool_call_log
+  test_keeper_skill_composition_evidence
   test_keeper_tool_call_file_change
   test_tool_unified
   test_build_identity
@@ -1604,6 +1605,7 @@
   test_model_inference_metrics
   test_tool_unified
   test_keeper_tool_call_log
+  test_keeper_skill_composition_evidence
   test_keeper_tool_call_file_change
   test_build_identity
   test_lifecycle

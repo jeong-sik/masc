@@ -138,7 +138,6 @@ let append_metrics_snapshot
          ~channel
          ~checkpoint_bytes:lifecycle.checkpoint_bytes
          ~message_count:lifecycle.message_count
-         ~handoff_json:lifecycle.handoff_json
          ())
 ;;
 
@@ -621,10 +620,6 @@ let handle
     ~lifecycle
     ~wall_tokens_per_second
     ~terminal_outcome;
-  run_projection KTP.Lifecycle_broadcast (fun () ->
-    KUM.broadcast_lifecycle_events
-      ~name:updated_meta.name
-      ~handoff_json:lifecycle.handoff_json);
   run_projection KTP.Decision_record (fun () ->
     KUM.append_decision_record
       ~config

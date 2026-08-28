@@ -16,7 +16,6 @@ type terminal_effect =
   | Lifecycle_projection
   | Metrics_snapshot
   | Activity_graph
-  | Lifecycle_broadcast
   | Decision_record
   | Usage_metrics
   | Terminal_fsm_projection

@@ -1,5 +1,5 @@
-(** Keeper_post_turn — post-turn checkpoint preservation, handoff rollover,
-    and explicit compaction recovery.
+(** Keeper_post_turn — post-turn checkpoint preservation and explicit
+    compaction recovery.
 
     Orchestrates end-of-turn checkpoint wire-ins. Compaction is never inferred
     here; manual and provider-overflow callers enter the explicit recovery
@@ -12,14 +12,11 @@
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
-(** Combined post-turn outcome for checkpoint preservation, rollover, and
-    per-turn context metrics. Explicit compaction has its own request path. *)
+(** Combined post-turn outcome for checkpoint preservation and per-turn
+    context metrics. Explicit compaction has its own request path. *)
 type post_turn_lifecycle =
   { updated_meta : Keeper_meta_contract.keeper_meta
   ; checkpoint : Agent_core.Checkpoint.t option
-  ; handoff_json : Yojson.Safe.t option
-  ; handoff_attempted : bool
-  ; handoff_failure_reason : string option
   ; checkpoint_bytes : int
   ; message_count : int
   }

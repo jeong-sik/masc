@@ -29,9 +29,6 @@ open Keeper_context_core
 type post_turn_lifecycle = {
   updated_meta : keeper_meta;
   checkpoint : Agent_core.Checkpoint.t option;
-  handoff_json : Yojson.Safe.t option;
-  handoff_attempted : bool;
-  handoff_failure_reason : string option;
   checkpoint_bytes : int;
   message_count : int;
 }
@@ -266,9 +263,6 @@ let apply_post_turn_lifecycle
       {
         updated_meta;
         checkpoint = None;
-        handoff_json = None;
-        handoff_attempted = false;
-        handoff_failure_reason = None;
         checkpoint_bytes = 0;
         message_count = 0;
       }
@@ -279,9 +273,6 @@ let apply_post_turn_lifecycle
       {
         updated_meta = meta_after_context_check;
         checkpoint = Some cp;
-        handoff_json = None;
-        handoff_attempted = false;
-        handoff_failure_reason = None;
         checkpoint_bytes = serialized_bytes ctx;
         message_count = message_count ctx;
       }

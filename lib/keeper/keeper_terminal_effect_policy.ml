@@ -9,7 +9,6 @@ type terminal_effect =
   | Lifecycle_projection
   | Metrics_snapshot
   | Activity_graph
-  | Lifecycle_broadcast
   | Decision_record
   | Usage_metrics
   | Terminal_fsm_projection
@@ -21,7 +20,6 @@ let all =
   ; Lifecycle_projection
   ; Metrics_snapshot
   ; Activity_graph
-  ; Lifecycle_broadcast
   ; Decision_record
   ; Usage_metrics
   ; Terminal_fsm_projection
@@ -36,7 +34,6 @@ let criticality = function
   | Lifecycle_projection
   | Metrics_snapshot
   | Activity_graph
-  | Lifecycle_broadcast
   | Decision_record
   | Usage_metrics
   | Terminal_fsm_projection ->
@@ -50,7 +47,6 @@ let effect_label = function
   | Lifecycle_projection -> "lifecycle_projection"
   | Metrics_snapshot -> "metrics_snapshot"
   | Activity_graph -> "activity_graph"
-  | Lifecycle_broadcast -> "lifecycle_broadcast"
   | Decision_record -> "decision_record"
   | Usage_metrics -> "usage_metrics"
   | Terminal_fsm_projection -> "terminal_fsm_projection"

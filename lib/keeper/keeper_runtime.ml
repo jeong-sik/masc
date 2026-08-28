@@ -607,7 +607,7 @@ let start_supervisor_sweep ctx =
                  hot-reload only reconciles Running keepers; the other
                  other phases skip (a Stopped/Crashed
                  keeper has no in-memory meta to update; a Compacting
-                 or HandingOff keeper is mid-transition and reconcile
+                 keeper is mid-transition and reconcile
                  would race; Offline / Paused / Failing /
                  Draining / Restarting are all transient or paused
                  states). A future phase (e.g. Migrating, Healing)

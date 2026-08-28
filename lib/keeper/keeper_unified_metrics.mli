@@ -157,7 +157,6 @@ val append_metrics_snapshot :
   channel:Keeper_world_observation.keeper_cycle_channel ->
   checkpoint_bytes:int ->
   message_count:int ->
-  handoff_json:Yojson.Safe.t option ->
   unit ->
   unit
 
@@ -177,11 +176,6 @@ val append_decision_record :
   ?error:string ->
   ?terminal_reason:Keeper_turn_terminal.t ->
   unit ->
-  unit
-
-val broadcast_lifecycle_events :
-  name:string ->
-  handoff_json:Yojson.Safe.t option ->
   unit
 
 val broadcast_compaction :

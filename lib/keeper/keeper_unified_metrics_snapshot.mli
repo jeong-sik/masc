@@ -10,6 +10,5 @@ val append_metrics_snapshot :
   channel:Keeper_world_observation.keeper_cycle_channel ->
   checkpoint_bytes:int ->
   message_count:int ->
-  handoff_json:Yojson.Safe.t option ->
   unit ->
   unit

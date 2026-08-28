@@ -1565,6 +1565,11 @@ type skill_flow = {
   sf_batches : skill_flow_batch list;
 }
 
+type effective_skill_load_reason =
+  | Skill_catalog_default
+  | Skill_keeper_profile
+  | Skill_task of string
+
 type effective_skill_profile = {
   esp_reference : Skill_reference.t;
   esp_name : string;
@@ -1572,6 +1577,7 @@ type effective_skill_profile = {
   esp_execution : string;
   esp_body_bytes : int;
   esp_discovery_bytes : int;
+  esp_load_reasons : effective_skill_load_reason list;
   esp_node_count : int;
   esp_batch_count : int;
   esp_max_parallelism : int;
@@ -1598,6 +1604,8 @@ type effective_tool_surface =
       ets_skill_profiles : effective_skill_profile list;
       ets_tool_surface_bytes : int;
       ets_skill_tool_surface_bytes : int;
+      ets_skill_discovery_bytes : int;
+      ets_skill_eager_body_bytes : int;
       ets_skill_body_bytes : int;
       ets_tools : effective_tool list;
       ets_tool_surface_sha256 : string option;
@@ -1903,6 +1911,18 @@ let decode_skill_flow json =
   let* sf_batches = decode_list "skill flow batches" decode_skill_flow_batch batches in
   Ok { sf_nodes; sf_batches }
 
+let decode_effective_skill_load_reason json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "catalog_default" -> Ok Skill_catalog_default
+  | "keeper_profile" -> Ok Skill_keeper_profile
+  | "task" ->
+    let* task_id = required_string_field json "task_id" in
+    Ok (Skill_task task_id)
+  | value ->
+    Error (Printf.sprintf "effective Skill load reason has unknown kind %S" value)
+;;
+
 let decode_effective_skill_profile json =
   let* reference = required_object_field json "reference" in
   let* esp_reference =
@@ -1916,6 +1936,13 @@ let decode_effective_skill_profile json =
   let* context = required_object_field json "context" in
   let* esp_body_bytes = required_int_field context "body_bytes" in
   let* esp_discovery_bytes = required_int_field context "discovery_bytes" in
+  let* load_reasons = required_list_field json "load_reasons" in
+  let* esp_load_reasons =
+    decode_list
+      "effective Skill profile load reasons"
+      decode_effective_skill_load_reason
+      load_reasons
+  in
   let* plan = required_object_field json "plan" in
   let* esp_node_count = required_int_field plan "node_count" in
   let* esp_batch_count = required_int_field plan "batch_count" in
@@ -1933,6 +1960,7 @@ let decode_effective_skill_profile json =
     ; esp_execution
     ; esp_body_bytes
     ; esp_discovery_bytes
+    ; esp_load_reasons
     ; esp_node_count
     ; esp_batch_count
     ; esp_max_parallelism
@@ -1989,6 +2017,12 @@ let decode_effective_tool_surface json =
       let ets_skill_tool_surface_bytes =
         Option.value ~default:0 ets_skill_tool_surface_bytes
       in
+      let* ets_skill_discovery_bytes =
+        required_int_field json "skill_discovery_bytes"
+      in
+      let* ets_skill_eager_body_bytes =
+        required_int_field json "skill_eager_body_bytes"
+      in
       let* skill_body_bytes = optional_int_field json "skill_body_bytes" in
       let ets_skill_body_bytes = Option.value ~default:0 skill_body_bytes in
       let* tools_json = required_list_field json "tools" in
@@ -2015,6 +2049,8 @@ let decode_effective_tool_surface json =
              ets_skill_profiles;
              ets_tool_surface_bytes;
              ets_skill_tool_surface_bytes;
+             ets_skill_discovery_bytes;
+             ets_skill_eager_body_bytes;
              ets_skill_body_bytes;
              ets_tools;
              ets_tool_surface_sha256;

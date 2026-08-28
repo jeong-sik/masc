@@ -8228,6 +8228,8 @@ let render_tools (state : state) =
                    ets_skill_profiles;
                    ets_tool_surface_bytes;
                    ets_skill_tool_surface_bytes;
+                   ets_skill_discovery_bytes;
+                   ets_skill_eager_body_bytes;
                    ets_skill_body_bytes;
                    ets_tools;
                    ets_tool_surface_sha256;
@@ -8288,18 +8290,34 @@ let render_tools (state : state) =
                  then "on-demand"
                  else profile.esp_execution
                in
-               (if index = state.tools_skill_cursor then Theme.selection else Ansi.dim),
-               Printf.sprintf
-                 " %s %-22s %-11s nodes=%d batches=%d parallel=%d discovery=%dB body=%dB"
-                 (if index = state.tools_skill_cursor then "▸" else " ")
-                 (Terminal_text.single_line profile.esp_name)
-                 (Terminal_text.single_line execution)
-                 profile.esp_node_count
-                 profile.esp_batch_count
-                 profile.esp_max_parallelism
-                 profile.esp_discovery_bytes
-                 profile.esp_body_bytes)
+               let reasons =
+                 profile.esp_load_reasons
+                 |> List.map (function
+                      | Masc.Tui_decode.Skill_catalog_default -> "catalog default"
+                      | Skill_keeper_profile -> "Keeper profile"
+                      | Skill_task task_id -> "Task " ^ task_id)
+                 |> String.concat " + "
+               in
+               [ ( (if index = state.tools_skill_cursor
+                    then Theme.selection
+                    else Ansi.dim)
+                 , Printf.sprintf
+                     " %s %-22s %-11s nodes=%d batches=%d parallel=%d discovery=%dB body=%dB"
+                     (if index = state.tools_skill_cursor then "▸" else " ")
+                     (Terminal_text.single_line profile.esp_name)
+                     (Terminal_text.single_line execution)
+                     profile.esp_node_count
+                     profile.esp_batch_count
+                     profile.esp_max_parallelism
+                     profile.esp_discovery_bytes
+                     profile.esp_body_bytes )
+               ; Ansi.dim,
+                 "     why loaded: "
+                 ^ Terminal_text.single_line
+                     (if String.equal reasons "" then "unattributed" else reasons)
+               ])
             ets_skill_profiles
+          |> List.concat
         in
         let selected_skill_flow_lines =
           match List.nth_opt ets_skill_profiles state.tools_skill_cursor with
@@ -8494,8 +8512,12 @@ let render_tools (state : state) =
           "   deferred resource bound=" ^ Terminal_text.single_line resource_bound;
           Ansi.bold,
           Printf.sprintf
-            "   Skill footprint: %dB/%dB tool context · %dB catalog bodies · eager body 0B"
-            ets_skill_tool_surface_bytes ets_tool_surface_bytes ets_skill_body_bytes;
+            "   Skill context: profile discovery=%dB · eager=%dB · deferred bodies=%dB · skill tool schema=%dB/%dB all tools"
+            ets_skill_discovery_bytes
+            ets_skill_eager_body_bytes
+            ets_skill_body_bytes
+            ets_skill_tool_surface_bytes
+            ets_tool_surface_bytes;
           Ansi.bold,
           "   Skills — J/K select · Enter evidence · e edit · c new instruction · C new composition";
           Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]

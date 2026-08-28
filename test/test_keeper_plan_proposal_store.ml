@@ -2,6 +2,7 @@ open Alcotest
 
 module Descriptor = Masc.Keeper_tool_descriptor
 module Plan = Masc.Keeper_plan_proposal
+module Execution_request = Masc.Keeper_plan_proposal_execution_request
 module Store = Masc.Keeper_plan_proposal_store
 module Surface = Masc.Keeper_capability_surface
 
@@ -27,6 +28,69 @@ let reference name =
   |> function
   | Ok reference -> reference
   | Error _ -> failf "descriptor %S did not form an exact reference" name
+;;
+
+let test_execution_request_is_closed_and_typed () =
+  let proposal_id = String.make 64 'a' in
+  let valid =
+    `Assoc
+      [ "proposal_id", `String proposal_id
+      ; "approval_tools", `List [ `String "keeper_time_now" ]
+      ]
+  in
+  (match Execution_request.of_yojson valid with
+   | Ok request ->
+     check string "proposal id roundtrip" proposal_id
+       (Execution_request.proposal_id request |> Plan.Proposal_id.to_string);
+     check (list string) "approval tools roundtrip" [ "keeper_time_now" ]
+       (Execution_request.approval_tools request)
+   | Error error ->
+     failf "valid execution request rejected: %s"
+       (Execution_request.error_to_yojson error |> Yojson.Safe.to_string));
+  let rejects expected json =
+    match Execution_request.of_yojson json with
+    | Error error ->
+      check string "typed request error" expected
+        Yojson.Safe.Util.(Execution_request.error_to_yojson error |> member "kind" |> to_string)
+    | Ok _ -> failf "invalid execution request accepted: %s" (Yojson.Safe.to_string json)
+  in
+  rejects "duplicate_field"
+    (`Assoc
+      [ "proposal_id", `String proposal_id
+      ; "proposal_id", `String proposal_id
+      ; "approval_tools", `List [ `String "keeper_time_now" ]
+      ]);
+  rejects "empty_approval_tools"
+    (`Assoc
+      [ "proposal_id", `String proposal_id; "approval_tools", `List [] ]);
+  rejects "empty_approval_tool"
+    (`Assoc
+      [ "proposal_id", `String proposal_id
+      ; "approval_tools", `List [ `String "" ]
+      ]);
+  let schema_nonempty_whitespace = " \n\t" in
+  (match
+     Execution_request.of_yojson
+       (`Assoc
+         [ "proposal_id", `String proposal_id
+         ; "approval_tools", `List [ `String schema_nonempty_whitespace ]
+         ])
+   with
+   | Ok request ->
+     check
+       (list string)
+       "minLength=1 parity preserves nonempty whitespace"
+       [ schema_nonempty_whitespace ]
+       (Execution_request.approval_tools request)
+   | Error error ->
+     failf
+       "schema-valid nonempty whitespace was rejected: %s"
+       (Execution_request.error_to_yojson error |> Yojson.Safe.to_string));
+  rejects "invalid_proposal_id"
+    (`Assoc
+      [ "proposal_id", `String "not-a-digest"
+      ; "approval_tools", `List [ `String "keeper_time_now" ]
+      ])
 ;;
 
 let time_plan ?(node_id = "clock") () =
@@ -583,6 +647,8 @@ let () =
         ; test_case "async requires static readonly descriptors" `Quick test_async_requires_every_descriptor_to_be_statically_read_only
         ; test_case "stored schema is closed and versioned" `Quick test_closed_stored_schema_rejects_duplicate_unknown_and_version
         ; test_case "error JSON covers typed sums" `Quick test_error_json_codecs_cover_every_top_level_sum
+        ; test_case "execution request is closed and schema-parity typed" `Quick
+            test_execution_request_is_closed_and_typed
         ] )
     ; ( "store"
       , [ test_case "roundtrip deduplicates without dispatch" `Quick test_store_roundtrip_deduplicates_without_dispatch

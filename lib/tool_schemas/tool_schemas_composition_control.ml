@@ -12,3 +12,4 @@ let schema_of_name name : Masc_domain.tool_schema =
 
 let status_schema = schema_of_name "keeper_composition_status"
 let cancel_schema = schema_of_name "keeper_composition_cancel"
+let proposal_execute_schema = schema_of_name "keeper_proposal_execute"

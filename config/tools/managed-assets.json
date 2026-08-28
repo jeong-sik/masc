@@ -18,6 +18,7 @@
     "keeper_memory_search.toml",
     "keeper_memory_write.toml",
     "keeper_person_note_set.toml",
+    "keeper_proposal_execute.toml",
     "keeper_surface_post.toml",
     "keeper_surface_read.toml",
     "keeper_task_claim.toml",

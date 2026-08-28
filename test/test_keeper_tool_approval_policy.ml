@@ -196,6 +196,37 @@ let test_a_malformed_plan_is_asked_about () =
       (asks ~composition_plan_index:None ~tool_name:"keeper_plan_execute" ~input:no_input))
 ;;
 
+let proposal_input tools =
+  `Assoc
+    [ "proposal_id", `String (String.make 64 'a')
+    ; "approval_tools", `List (List.map (fun tool -> `String tool) tools)
+    ]
+;;
+
+let test_stored_proposal_of_reads_runs_unasked () =
+  check bool "a stored proposal of reads is not asked about" false
+    (asks
+       ~composition_plan_index:None
+       ~tool_name:Masc.Keeper_tool_composition_catalog.proposal_execute_tool_name
+       ~input:(proposal_input [ "Read"; "Grep" ]))
+;;
+
+let test_stored_proposal_with_a_write_asks () =
+  check bool "a stored proposal with Execute is asked about" true
+    (asks
+       ~composition_plan_index:None
+       ~tool_name:Masc.Keeper_tool_composition_catalog.proposal_execute_tool_name
+       ~input:(proposal_input [ "Read"; "Execute" ]))
+;;
+
+let test_stored_proposal_without_tool_sequence_asks () =
+  check bool "a stored proposal without approval_tools is asked about" true
+    (asks
+       ~composition_plan_index:None
+       ~tool_name:Masc.Keeper_tool_composition_catalog.proposal_execute_tool_name
+       ~input:no_input)
+;;
+
 (* The invariant every task in this goal is checked against: nothing that runs
    unasked today may start asking. Read directly and Read inside a plan must
    give the same answer. *)
@@ -268,6 +299,12 @@ let () =
             test_ad_hoc_plan_with_a_write_asks
         ; test_case "a malformed plan is asked about" `Quick
             test_a_malformed_plan_is_asked_about
+        ; test_case "a stored proposal of reads runs unasked" `Quick
+            test_stored_proposal_of_reads_runs_unasked
+        ; test_case "a stored proposal with a write asks" `Quick
+            test_stored_proposal_with_a_write_asks
+        ; test_case "a stored proposal without tools asks" `Quick
+            test_stored_proposal_without_tool_sequence_asks
         ; test_case "no direct call became asked" `Quick
             test_no_direct_call_became_asked
         ] )

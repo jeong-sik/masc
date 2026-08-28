@@ -3,9 +3,11 @@ module Executor = Keeper_tool_plan_executor
 module Activation_ledger = Keeper_skill_activation_ledger
 
 let plan_execute_tool_name = Catalog.plan_execute_tool_name
+let proposal_execute_tool_name = Catalog.proposal_execute_tool_name
 let composition_run_summary_tool_name = "keeper_composition_run_summary"
 
 let plan_execute_tool_kind = Keeper_tool_descriptor.Batch_plan_tool
+let proposal_execute_tool_kind = Keeper_tool_descriptor.Batch_plan_tool
 
 (* Composition tools are materialized Agent_core tools outside the Keeper
    descriptor registry, so their tool kind is observable through their own
@@ -134,6 +136,7 @@ let carried_references_text (instruction_skills : instruction_skill list) =
 type 'evidence schema_tool_origin =
   | Declared_composition of 'evidence
   | Plan_execute
+  | Proposal_execute
   | Async_status
   | Async_cancel
 
@@ -158,6 +161,14 @@ let schema_tool_rows ?(skill_compositions = []) () =
         ~description:plan_execute_description
         ~input_schema:Keeper_tool_plan_request.input_schema )
   in
+  let proposal_execute_tool =
+    ( Proposal_execute
+    , schema_tool
+        ~name:proposal_execute_tool_name
+        ~description:Tool_schemas_composition_control.proposal_execute_schema.description
+        ~input_schema:
+          Tool_schemas_composition_control.proposal_execute_schema.input_schema )
+  in
   if
     List.exists
       (fun ((entry : Catalog.entry), _) -> entry.execution = Catalog.Async)
@@ -165,6 +176,7 @@ let schema_tool_rows ?(skill_compositions = []) () =
   then
     composition_tools
     @ [ plan_execute_tool
+      ; proposal_execute_tool
       ; ( Async_status
         , schema_tool
             ~name:Catalog.status_tool_name
@@ -176,7 +188,7 @@ let schema_tool_rows ?(skill_compositions = []) () =
             ~description:Tool_schemas_composition_control.cancel_schema.description
             ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema )
       ]
-  else composition_tools @ [ plan_execute_tool ]
+  else composition_tools @ [ plan_execute_tool; proposal_execute_tool ]
 ;;
 
 let schedule_to_json (schedule : Agent_core.Tool_contract.schedule) =
@@ -1889,12 +1901,267 @@ let make_tools_with_authority
                         ~start_time
                         "composition result manifest persistence failed")))))
   in
+  let proposal_execute_tool =
+    let module Execution_request = Keeper_plan_proposal_execution_request in
+    let module Proposal = Keeper_plan_proposal in
+    let module Store = Keeper_plan_proposal_store in
+    let tool_name = proposal_execute_tool_name in
+    let tool_kind = proposal_execute_tool_kind in
+    let reject ~start_time ~class_ data =
+      Tool_result.make_err
+        ~tool_name
+        ~class_
+        ~start_time
+        ~data
+        ~metadata:data
+        (Yojson.Safe.to_string data)
+    in
+    let execute_loaded ~start_time ~parent_invocation proposal =
+      let plan = Proposal.plan proposal in
+      match Executor.outer_completion plan with
+      | Agent_core.Tool_contract.Terminal_after_success _ ->
+        reject
+          ~start_time
+          ~class_:Tool_result.Policy_rejection
+          (`Assoc
+            [ "error", `String "proposal_contains_terminal_tool"
+            ; ( "proposal_id"
+              , `String
+                  (Proposal.id proposal |> Proposal.Proposal_id.to_string) )
+            ])
+      | Agent_core.Tool_contract.Continue_after_success ->
+        let turn_context =
+          Option.map
+            (fun cell ->
+               Keeper_tool_call_log_context.get_turn_context_record
+                 ~cell
+                 ())
+            turn_ctx_cell
+        in
+        let run_id = Keeper_tool_plan.Run_id.fresh () in
+        let composition_run_id =
+          Keeper_tool_plan.Composition_run_id.fresh ()
+        in
+        let execution =
+          execute_keeper_plan
+            ~capability_authority
+            ~plan
+            ~run_id
+            ~composition_run_id
+            ~parent_invocation
+            ~config
+            ~meta
+            ~publication_recovery
+            ~ctx_snapshot
+            ?turn_sandbox_factory
+            ?clock
+            ?continuation_channel
+            ?gate_context
+            ?gate_grant
+            ?record_gate_result
+            ?on_completed
+            ?on_deferred
+            ?on_external_effect_deferred
+            ?on_failed
+            ?observe_node_result:
+              (Option.map
+                 (fun turn_context ->
+                    observe_node_result
+                      ~composition_tool:tool_name
+                      ~composition_execution:Catalog.Inline
+                      ~composition_tool_kind:tool_kind
+                      ~composition_run_id
+                      ~parent_invocation
+                      ~meta
+                      ~turn_context)
+                 turn_context)
+            ()
+        in
+        (match execution with
+         | Error
+             ({ Executor.effect_disposition =
+                  ( Tool_result.Proven_post_effect
+                  | Tool_result.Effect_outcome_unknown )
+              ; _
+              } as failure) ->
+           Option.iter
+             (fun mark_failed ->
+                mark_failed
+                  { Keeper_tools_agent_core.failure_class =
+                      failure_class failure
+                  ; effect_disposition = failure.effect_disposition
+                  ; diagnostic =
+                      (failure_data ~tool_name ~tool_kind failure
+                       |> Yojson.Safe.to_string)
+                  })
+             on_failed
+         | Ok _
+         | Error
+             { Executor.effect_disposition = Tool_result.Proven_pre_effect
+             ; _
+             } ->
+           ());
+        let result =
+          match execution with
+          | Ok settled ->
+            Tool_result.make_ok
+              ~tool_name
+              ~start_time
+              ~data:
+                (`Assoc
+                  [ "composition_tool", `String tool_name
+                  ; tool_kind_field tool_kind
+                  ; ( "proposal_id"
+                    , `String
+                        (Proposal.id proposal
+                         |> Proposal.Proposal_id.to_string) )
+                  ; "actions", `List (List.map node_result_to_json settled)
+                  ])
+              ()
+          | Error _ ->
+            result_of_execution
+              ~tool_name
+              ~tool_kind
+              ~start_time
+              execution
+        in
+        (match
+           Tool_bridge.attach_artifact_manifest
+             ~base_path:config.base_path
+             result
+         with
+         | Ok result -> result
+         | Error { message; _ } ->
+           Option.iter
+             (fun mark_failed ->
+                mark_failed
+                  { Keeper_tools_agent_core.failure_class =
+                      Tool_result.Runtime_failure
+                  ; effect_disposition = Tool_result.Effect_outcome_unknown
+                  ; diagnostic =
+                      "composition result manifest persistence failed: "
+                      ^ message
+                  })
+             on_failed;
+           Tool_result.make_err
+             ~tool_name
+             ~class_:Tool_result.Runtime_failure
+             ~start_time
+             "composition result manifest persistence failed")
+    in
+    Tool_bridge.agent_core_tool_of_masc_with_execution_env
+      ~descriptor:
+        (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
+      ~base_path:config.base_path
+      ?on_externalization_error
+      ~name:tool_name
+      ~description:
+        Tool_schemas_composition_control.proposal_execute_schema.description
+      ~input_schema:
+        Tool_schemas_composition_control.proposal_execute_schema.input_schema
+      (fun execution_env input ->
+         let start_time = Time_compat.now () in
+         match
+           Tool_input_validation.validate_args
+             ~schema:
+               Tool_schemas_composition_control.proposal_execute_schema.input_schema
+             ~name:tool_name
+             ~args:input
+             ()
+         with
+         | Error rejection -> rejection
+         | Ok _ ->
+           (match Agent_core.Tool.Execution_env.invocation execution_env with
+            | None ->
+              Tool_result.runtime_err
+                ~tool_name
+                ~start_time
+                "proposal execution requires Agent-Core invocation identity"
+            | Some parent_invocation ->
+              (match Execution_request.of_yojson input with
+               | Error error ->
+                 reject
+                   ~start_time
+                   ~class_:Tool_result.Policy_rejection
+                   (`Assoc
+                     [ "error", `String "proposal_execution_request_rejected"
+                     ; "detail", Execution_request.error_to_yojson error
+                     ])
+               | Ok request ->
+                 (match capability_authority with
+                  | Keeper_tool_runtime.Compatibility_meta ->
+                    reject
+                      ~start_time
+                      ~class_:Tool_result.Policy_rejection
+                      (`Assoc
+                        [ "error", `String "frozen_surface_required"
+                        ; "tool", `String tool_name
+                        ])
+                  | Keeper_tool_runtime.Frozen_surface _ ->
+                    (match
+                       Store.load
+                         ~descriptors
+                         config
+                         (Execution_request.proposal_id request)
+                     with
+                     | Error error ->
+                       reject
+                         ~start_time
+                         ~class_:Tool_result.Workflow_rejection
+                         (`Assoc
+                           [ "error", `String "proposal_load_failed"
+                           ; "detail", Store.error_to_yojson error
+                           ])
+                     | Ok proposal ->
+                       let stored_approval_tools =
+                         Proposal.plan proposal
+                         |> Keeper_tool_plan.nodes
+                         |> List.map
+                              (fun (node : Keeper_tool_plan.node) ->
+                                 node.tool_name)
+                       in
+                       if
+                         not
+                           (List.equal
+                              String.equal
+                              (Execution_request.approval_tools request)
+                              stored_approval_tools)
+                       then
+                         reject
+                           ~start_time
+                           ~class_:Tool_result.Policy_rejection
+                           (`Assoc
+                             [ ( "error"
+                               , `String
+                                   "proposal_approval_tools_mismatch" )
+                             ; ( "expected_approval_tools"
+                               , Json_util.json_string_list
+                                   stored_approval_tools )
+                             ])
+                       else
+                         (match Proposal.execution proposal with
+                          | Proposal.Async ->
+                            reject
+                              ~start_time
+                              ~class_:Tool_result.Workflow_rejection
+                              (`Assoc
+                                [ "error", `String "not_supported"
+                                ; "mode", `String "async"
+                                ])
+                          | Proposal.Inline ->
+                            execute_loaded
+                              ~start_time
+                              ~parent_invocation
+                              proposal))))))
+  in
   let has_async =
     List.exists
       (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
       declared_entries
   in
-  let composition_tools = composition_tools @ [ plan_execute_tool ] in
+  let composition_tools =
+    composition_tools @ [ plan_execute_tool; proposal_execute_tool ]
+  in
   (* A keeper with no instruction skills gets no tool: an empty [Available]
      list would ask the model to reach for something that answers nothing. *)
   let composition_tools =

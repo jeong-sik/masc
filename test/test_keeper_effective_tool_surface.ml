@@ -315,6 +315,14 @@ let test_projection_names_equal_turn_surface_authority () =
             | Keeper_effective_tool_surface.Composition_skill _ -> true
             | _ -> false)
          surface.tools);
+    check bool "proposal execution is a composition plan" true
+      (List.exists
+         (fun (tool : Keeper_effective_tool_surface.tool) ->
+            String.equal
+              tool.name
+              Keeper_tool_composition_catalog.proposal_execute_tool_name
+            && tool.origin = Keeper_effective_tool_surface.Composition_plan)
+         surface.tools);
     check bool "official client digest exists" true
       (Option.is_some surface.tool_surface_sha256);
     check bool "whole tool surface bytes are measured" true

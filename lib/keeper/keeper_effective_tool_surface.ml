@@ -109,7 +109,8 @@ let composition_rows skill_catalog =
          match origin with
          | Keeper_tool_composition_surface.Declared_composition provenance ->
            Composition_skill { provenance }
-         | Keeper_tool_composition_surface.Plan_execute -> Composition_plan
+         | Keeper_tool_composition_surface.Plan_execute
+         | Keeper_tool_composition_surface.Proposal_execute -> Composition_plan
          | Keeper_tool_composition_surface.Async_status
          | Keeper_tool_composition_surface.Async_cancel -> Composition_control
        in

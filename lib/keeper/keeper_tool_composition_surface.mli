@@ -5,6 +5,7 @@
 (** Model-visible name of the model-defined plan tool. Registered even when no
     composition catalog exists. *)
 val plan_execute_tool_name : string
+val proposal_execute_tool_name : string
 
 val composition_run_summary_tool_name : string
 (** Internal durable row name for one terminal composition run. It is not a
@@ -13,10 +14,12 @@ val composition_run_summary_tool_name : string
 (** Execution-semantics kind (RFC-0386) of the model-defined plan tool:
     [Keeper_tool_descriptor.Batch_plan_tool]. *)
 val plan_execute_tool_kind : Keeper_tool_descriptor.tool_kind
+val proposal_execute_tool_kind : Keeper_tool_descriptor.tool_kind
 
 type 'evidence schema_tool_origin =
   | Declared_composition of 'evidence
   | Plan_execute
+  | Proposal_execute
   | Async_status
   | Async_cancel
 

@@ -191,11 +191,28 @@ let omission_order =
   ; Workspace_conflict
   ]
 
+(* What ends a row that had to give something up. The ellipsis says items
+   were dropped; the key says where they went.
+
+   The ellipsis alone stops one question short. It reports a cut and leaves
+   the reader unable to tell whether one key is hidden or six, and on the
+   surfaces that reach here -- Keepers, Approvals, Board, Verification,
+   Harness, Changes, Tools at eighty columns -- the dropped keys have no
+   other way of being found. [?] opens the sheet, and [help_sections
+   ~current] puts the reader's own surface at the top of it, so what was
+   dropped is the first thing on the screen that follows.
+
+   The key travels alone where something else already marked the cut.
+   Cell truncation ends in [~], and [~...?] marks one cut twice -- a row that
+   was cut is cut, and saying so in two alphabets is noise. *)
+let more_key = "?"
+let cut_marker = "\xe2\x80\xa6" ^ more_key
+
 (* Hints are "key:action" items separated by two spaces. When even an empty
    status tail leaves the row too wide, whole items drop from the back and
-   an ellipsis marks the cut -- a reader sees "later keys omitted", never
-   half a word. Items keep their order: the surface put the load-bearing
-   keys first. *)
+   {!cut_marker} ends the row -- a reader sees "later keys omitted, press
+   this", never half a word. Items keep their order: the surface put the
+   load-bearing keys first. *)
 let split_on_double_space text =
   let n = String.length text in
   let rec loop start i acc =
@@ -216,12 +233,11 @@ let drop_hint_items ~max_cells hints =
     split_on_double_space hints
     |> List.filter (fun item -> not (String.equal (String.trim item) ""))
   in
-  let ellipsis = "\xe2\x80\xa6" in
   let rec fit kept =
     match kept with
     | [] -> None
     | _ ->
-      let candidate = "  " ^ String.concat "  " kept ^ "  " ^ ellipsis in
+      let candidate = "  " ^ String.concat "  " kept ^ "  " ^ cut_marker in
       if Masc_tui_message_layout.display_width candidate <= max_cells
       then Some candidate
       else fit (List.filteri (fun i _ -> i < List.length kept - 1) kept)
@@ -234,9 +250,18 @@ let rec fit_body ~max_cells ~hints ~omissions statuses =
   else
     match statuses, omissions with
     | [], _ ->
+      (* Nothing left to drop whole, so the hints themselves give way. Whole
+         items go first ({!drop_hint_items}); cell truncation is what is left
+         when even one item will not fit. Both end in {!cut_marker}, which
+         says the row was cut and says where the rest is. *)
       (match drop_hint_items ~max_cells hints with
        | Some fitted -> fitted
-       | None -> Masc_tui_message_layout.fit_width rendered max_cells)
+       | None ->
+         let room =
+           max_cells - Masc_tui_message_layout.display_width more_key
+         in
+         if room <= 0 then Masc_tui_message_layout.fit_width rendered max_cells
+         else Masc_tui_message_layout.fit_width rendered room ^ more_key)
     | _, retention :: rest ->
       fit_body ~max_cells ~hints ~omissions:rest
         (List.filter (fun status -> status.retention <> retention) statuses)

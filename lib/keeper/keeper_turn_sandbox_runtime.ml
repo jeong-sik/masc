@@ -467,70 +467,142 @@ let resolve_image (t : t) =
    on Docker until the guest grows them. Stale-container reaping is the
    Docker sweep's; a leaked microvm guest is collected by hand until a
    sweep lands ([container list --format json] carries the same labels). *)
+(* One guest per keeper, not per turn: the name is stable, an already
+   running guest is adopted instead of booted (amortising the 4.0-4.4s VM
+   start to once per keeper), and turn cleanup leaves it running. State
+   accumulated inside the guest between turns belongs to the same keeper.
+   Teardown is [teardown_keeper_vm]; nothing wires it to keeper_down yet,
+   so a deleted keeper leaves its guest until that lands (~400 MB each,
+   [container stop <name>] by hand). *)
+let keeper_vm_name (t : t) =
+  Printf.sprintf
+    "masc-keeper-vm-%s-%s"
+    (Workspace_utils.safe_filename t.meta.name)
+    (String.sub (Keeper_sandbox_runtime.base_path_hash t.config.base_path) 0 8)
+;;
+
 let start_microvm_container ?timeout_sec (t : t) =
   let image = resolve_image t in
   if String.trim image = ""
   then Error "keeper sandbox docker image is not configured"
   else (
-    let image_timeout =
-      match timeout_sec with
-      | Some sec -> sec
-      | None -> Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
+    let container_name = keeper_vm_name t in
+    let adopt () =
+      set_state t (Running { container_name });
+      Ok container_name
     in
-    match Keeper_sandbox_microvm.image_present ~image ~timeout_sec:image_timeout with
-    | Error _ as err -> err
-    | Ok () ->
-      let container_name = container_name_of t in
-      let dns =
-        match Env_config_sandbox.Runtime.microvm_dns () with
-        | "" -> None
-        | server -> Some server
+    match probe_microvm_container_state ?timeout_sec container_name with
+    | Ok Keeper_sandbox_runtime.Docker_container_running -> adopt ()
+    | Error probe_error ->
+      Error (Printf.sprintf "microvm_start_failed: %s" probe_error)
+    | Ok Keeper_sandbox_runtime.Docker_container_stopped
+    | Ok Keeper_sandbox_runtime.Docker_container_absent ->
+      (* A stopped guest survived [--rm] (host reboot mid-life); clear the
+         name before booting. Absent makes this a no-op. *)
+      let (_ : Unix.process_status * string) =
+        run_argv_with_status
+          ?timeout_sec
+          (Keeper_sandbox_microvm.delete_force_argv ~container_name)
       in
-      let argv =
-        Keeper_sandbox_microvm.turn_start_argv
-          ~container_name
-          ~label_args:
-            (Keeper_sandbox_runtime.docker_label_args
-               ~base_path:t.config.base_path
-               ~keeper_name:t.meta.name
-               ~container_kind:Keeper_sandbox_runtime.turn_container_kind
-               ~network_label:
-                 (Keeper_types_profile_sandbox.network_mode_to_string
-                    t.network_mode)
-               ~turn_id:t.turn_id
-               ())
-          ~uid:t.uid
-          ~gid:t.gid
-          ~memory:(Env_config_sandbox.Hardening.memory ())
-          ~host_root:t.host_root
-          ~container_root:t.container_root
-          ~network_args:(Keeper_sandbox_microvm.network_args ~dns t.network_mode)
-          ~image
+      let image_timeout =
+        match timeout_sec with
+        | Some sec -> sec
+        | None -> Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
       in
-      let st, out = run_argv_with_status ?timeout_sec argv in
-      match st with
-      | Unix.WEXITED 0 ->
-        (match inspect_container_exists ?timeout_sec ~microvm:true container_name with
-         | Ok () ->
-           set_state t (Running { container_name });
-           Ok container_name
-         | Error inspect_out ->
-           let (_ : Unix.process_status * string) =
-             run_argv_with_status
-               ?timeout_sec
-               (Keeper_sandbox_microvm.stop_argv ~container_name)
-           in
-           Error
-             (Printf.sprintf
-                "microvm_start_failed: container ran but inspect cannot see \
-                 %s: %s"
-                container_name
-                inspect_out))
-      | _ ->
-        Error
-          (Printf.sprintf
-             "microvm_start_failed: %s"
-             (Keeper_sandbox_runtime.docker_failure_output_for_log out)))
+      (match
+         Keeper_sandbox_microvm.image_present ~image ~timeout_sec:image_timeout
+       with
+       | Error _ as err -> err
+       | Ok () ->
+         let dns =
+           match Env_config_sandbox.Runtime.microvm_dns () with
+           | "" -> None
+           | server -> Some server
+         in
+         let argv =
+           Keeper_sandbox_microvm.turn_start_argv
+             ~container_name
+             ~label_args:
+               (Keeper_sandbox_runtime.docker_label_args
+                  ~base_path:t.config.base_path
+                  ~keeper_name:t.meta.name
+                  ~container_kind:
+                    Keeper_sandbox_microvm.keeper_vm_container_kind
+                  ~network_label:
+                    (Keeper_types_profile_sandbox.network_mode_to_string
+                       t.network_mode)
+                  ())
+             ~uid:t.uid
+             ~gid:t.gid
+             ~memory:(Env_config_sandbox.Hardening.memory ())
+             ~host_root:t.host_root
+             ~container_root:t.container_root
+             ~network_args:
+               (Keeper_sandbox_microvm.network_args ~dns t.network_mode)
+             ~image
+         in
+         let st, out = run_argv_with_status ?timeout_sec argv in
+         (match st with
+          | Unix.WEXITED 0 ->
+            (match
+               inspect_container_exists ?timeout_sec ~microvm:true container_name
+             with
+             | Ok () -> adopt ()
+             | Error inspect_out ->
+               let (_ : Unix.process_status * string) =
+                 run_argv_with_status
+                   ?timeout_sec
+                   (Keeper_sandbox_microvm.stop_argv ~container_name)
+               in
+               Error
+                 (Printf.sprintf
+                    "microvm_start_failed: container ran but inspect cannot \
+                     see %s: %s"
+                    container_name
+                    inspect_out))
+          | _ ->
+            (* Two turns of one keeper can race to boot the shared name;
+               the loser's run fails on the name and the guest the winner
+               booted is the one both wanted. *)
+            (match
+               probe_microvm_container_state ?timeout_sec container_name
+             with
+             | Ok Keeper_sandbox_runtime.Docker_container_running -> adopt ()
+             | Ok _ | Error _ ->
+               Error
+                 (Printf.sprintf
+                    "microvm_start_failed: %s"
+                    (Keeper_sandbox_runtime.docker_failure_output_for_log out))))))
+;;
+
+let teardown_keeper_vm ?timeout_sec ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  let container_name =
+    Printf.sprintf
+      "masc-keeper-vm-%s-%s"
+      (Workspace_utils.safe_filename meta.name)
+      (String.sub (Keeper_sandbox_runtime.base_path_hash config.base_path) 0 8)
+  in
+  let stop_st, stop_out =
+    run_argv_with_status
+      ?timeout_sec
+      (Keeper_sandbox_microvm.stop_argv ~container_name)
+  in
+  let (_ : Unix.process_status * string) =
+    run_argv_with_status
+      ?timeout_sec
+      (Keeper_sandbox_microvm.delete_force_argv ~container_name)
+  in
+  match stop_st with
+  | Unix.WEXITED 0 -> Ok ()
+  | _ ->
+    (* A missing guest is a successful teardown; anything else surfaces. *)
+    (match probe_microvm_container_state ?timeout_sec container_name with
+     | Ok Keeper_sandbox_runtime.Docker_container_absent -> Ok ()
+     | Ok _ | Error _ ->
+       Error
+         (Printf.sprintf
+            "microvm_teardown_failed: %s"
+            (Keeper_sandbox_runtime.docker_failure_output_for_log stop_out)))
 ;;
 
 let start_container ?timeout_sec (t : t) =
@@ -1172,11 +1244,13 @@ let cleanup (t : t) =
     let rm_timeout =
       Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ()
     in
+    (* A microvm guest is keeper-lifetime: turn cleanup only drops the
+       handle. [teardown_keeper_vm] is the remove path. *)
+    if is_microvm t
+    then ignore container_name
+    else
     let rm_argv =
-      if is_microvm t
-      then Keeper_sandbox_microvm.stop_argv ~container_name
-      else
-        Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ]
+      Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ]
     in
     let status_label st =
       match st with

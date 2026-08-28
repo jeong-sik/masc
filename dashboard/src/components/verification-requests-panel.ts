@@ -90,16 +90,12 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
   const hasSubmittedEvidence = row.submitted_evidence.length > 0
   const hasEvidenceProjectionError = row.evidence_projection_error != null
   const hasTaskTitle = row.task_title !== ''
-  const hasRequestSummary = row.request_summary !== ''
-  const hasNextAction = row.next_action != null && row.next_action !== ''
   const hasDetails =
     hasContract ||
     hasRequiredArtifacts ||
     hasSubmittedEvidence ||
     hasEvidenceProjectionError ||
-    hasTaskTitle ||
-    hasRequestSummary ||
-    hasNextAction
+    hasTaskTitle
   return html`
     <tr class="v2-workspace-row border-b border-[var(--color-border-default)] last:border-b-0 align-top">
       <td class="py-2 pr-2">
@@ -140,22 +136,6 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
                         <div>
                           <${DetailLabel}>Task Title</${DetailLabel}>
                           <div class="text-[var(--color-fg-primary)]">${row.task_title}</div>
-                        </div>
-                      `
-                    : null}
-                  ${hasRequestSummary
-                    ? html`
-                        <div>
-                          <${DetailLabel}>Verification Summary</${DetailLabel}>
-                          <div class="text-[var(--color-fg-primary)]">${row.request_summary}</div>
-                        </div>
-                      `
-                    : null}
-                  ${hasNextAction
-                    ? html`
-                        <div>
-                          <${DetailLabel}>Next Action</${DetailLabel}>
-                          <div class="text-[var(--color-fg-primary)]">${row.next_action}</div>
                         </div>
                       `
                     : null}

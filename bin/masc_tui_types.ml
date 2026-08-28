@@ -1506,6 +1506,15 @@ type state = {
   mutable runtime_catalog: Tui_decode.runtime_option list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
+  (* Lazy loads for the two detail panes; the id names which row the answer
+     belongs to so a stale load is discarded, not drawn under another item.
+     [None] doubles as "in flight" right after entry resets it. *)
+  mutable goal_timeline:
+    (string * (Tui_decode.goal_timeline, string) result) option;
+  mutable task_history:
+    (string * (Tui_decode.task_history_event list, string) result) option;
+  mutable verification_evidence:
+    (string * (Tui_decode.verification_evidence, string) result) option;
   mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
   mutable keeper_calls_error: string option;
   mutable keeper_calls_scroll: int;
@@ -2179,6 +2188,9 @@ let create_state
   runtime_catalog = [];
   runtime_assignments = [];
   runtime_catalog_error = None;
+  goal_timeline = None;
+  task_history = None;
+  verification_evidence = None;
   keeper_calls = None;
   keeper_calls_error = None;
   keeper_calls_scroll = 0;
@@ -2675,7 +2687,7 @@ let lanes_scrolled (state : state) =
       ; sc_preview_keep = None
       }
   | Lanes_overview ->
-  (* The renderer draws one title and one divider around either the five
+  (* The renderer draws one title and one divider around either the registered
      standalone rows or its single loading/error row. This belongs in the
      typed scroll model: subtracting it only while drawing lets key movement
      land on Keeper rows the frame cannot show. *)

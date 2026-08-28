@@ -126,11 +126,6 @@ let core_remote_operation_names =
     @ [
         "masc_status";
         "masc_messages";
-        "masc_plan_init";
-        "masc_plan_get";
-        "masc_plan_update";
-        "masc_note_add";
-        "masc_deliver";
         "masc_operator_snapshot";
         "masc_operator_digest";
         "masc_operator_action";

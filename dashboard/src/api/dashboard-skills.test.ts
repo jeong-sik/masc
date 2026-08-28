@@ -1,10 +1,23 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  classifySkillEditorError,
   decodeAsyncRequestObservation,
   decodeSkillCreateReceipt,
+  decodeSkillEditorLoaded,
+  decodeSkillEditorPreview,
+  decodeSkillEditorSaveReceipt,
   decodeSkillEvidenceResponse,
+  previewSkillSource,
+  readSkillSource,
+  saveSkillSource,
   SkillsContractError,
 } from './dashboard-skills'
+import { ApiRequestError } from './core'
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 // Server_skill_editor.create_outcome_to_yojson sends exactly these two
 // statuses; the old client defaulted anything else to 'created', a status
@@ -44,6 +57,162 @@ const reference = {
   },
   content_revision: 'a'.repeat(64),
 }
+
+const editorProfile = {
+  reference,
+  kind: 'instruction',
+  activation_tool: 'keeper_skill',
+  execution: 'model_orchestrated',
+  capabilities: {
+    as_skill: true,
+    as_tool: false,
+    batch: false,
+    parallel: false,
+    async: false,
+    tool_scope: 'registered_tools_only',
+  },
+  context: {
+    body_bytes: 120,
+    eager_body_bytes: 0,
+    discovery_bytes: 48,
+    tool_schema_bytes: null,
+  },
+  plan: {
+    node_count: 0,
+    batch_count: 0,
+    parallel_batch_count: 0,
+    max_parallelism: 0,
+    statically_read_only: null,
+  },
+  declaration: null,
+  flow: null,
+}
+
+const editorPreview = {
+  profile: {
+    ...editorProfile,
+    reference: {
+      ...reference,
+      content_revision: 'b'.repeat(64),
+    },
+  },
+  diagnostics: [],
+}
+
+describe('existing Skill editor contract', () => {
+  it('strictly decodes loaded, preview, and save receipts', () => {
+    expect(decodeSkillEditorLoaded({
+      status: 'ready',
+      reference,
+      snapshot_revision: 'snapshot-1',
+      source_text: '---\nname: release-checklist\n---\n',
+      access: 'read_write',
+    })).toMatchObject({ access: 'read_write', reference })
+
+    expect(decodeSkillEditorPreview({
+      ok: true,
+      status: 'valid',
+      preview: editorPreview,
+    })).toEqual(editorPreview)
+
+    expect(() => decodeSkillEditorPreview({
+      ok: true,
+      status: 'valid',
+      preview: { ...editorPreview, reference },
+    })).toThrow(SkillsContractError)
+
+    expect(decodeSkillEditorSaveReceipt({
+      status: 'saved_and_published',
+      preview: editorPreview,
+      snapshot_revision: 'snapshot-2',
+    })).toMatchObject({ status: 'saved_and_published', preview: editorPreview })
+
+    expect(() => decodeSkillEditorSaveReceipt({
+      status: 'saved',
+      preview: editorPreview,
+    })).toThrow(SkillsContractError)
+  })
+
+  it('classifies only the typed 409 revision conflict', () => {
+    expect(classifySkillEditorError(new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/skills/editor/save',
+      status: 409,
+      responseData: { code: 'revision_conflict' },
+    }))).toBe('revision_conflict')
+    expect(classifySkillEditorError(new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/skills/editor/save',
+      status: 409,
+      responseData: { code: 'package_already_exists' },
+    }))).toBe('other')
+    expect(classifySkillEditorError(new Error('revision_conflict'))).toBe('other')
+  })
+
+  it('posts the exact reference and source text to each editor route', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'ready',
+        reference,
+        snapshot_revision: 'snapshot-1',
+        source_text: 'old source',
+        access: 'read_write',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: true,
+        status: 'valid',
+        preview: editorPreview,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'saved_and_published',
+        preview: editorPreview,
+        snapshot_revision: 'snapshot-2',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await readSkillSource(reference)
+    await previewSkillSource(reference, 'new source')
+    await saveSkillSource(reference, 'new source')
+
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/v1/skills/editor/read',
+      '/api/v1/skills/editor/preview',
+      '/api/v1/skills/editor/save',
+    ])
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({ reference })
+    expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string)).toEqual({
+      reference,
+      source_text: 'new source',
+    })
+    expect(JSON.parse(fetchMock.mock.calls[2]![1]!.body as string)).toEqual({
+      reference,
+      source_text: 'new source',
+    })
+  })
+
+  it('waits for a delayed durable save response beyond the ordinary POST timeout', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn((_path: string, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject(new DOMException('Aborted', 'AbortError'))
+      })
+      window.setTimeout(() => {
+        resolve(new Response(JSON.stringify({
+          status: 'saved_and_published',
+          preview: editorPreview,
+          snapshot_revision: 'snapshot-2',
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }, 31_000)
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const save = saveSkillSource(reference, 'new source')
+    await vi.advanceTimersByTimeAsync(31_000)
+
+    await expect(save).resolves.toMatchObject({ status: 'saved_and_published' })
+    expect(fetchMock.mock.calls[0]![1]?.signal).toBeUndefined()
+  })
+})
 
 const coverage = {
   composition_scan_limit: 5000,

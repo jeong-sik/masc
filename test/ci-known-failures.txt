@@ -25,15 +25,12 @@
 # forty. A deadline that covers the build measures the build.
 
 # --- assertions that fail -------------------------------------------------
-test_dashboard                               # Keepers: a keepers section with an entry
-test_dashboard_namespace_truth               # read_model: a keeper-only workspace
 test_fs_compat                               # save_file_atomic: strict payload cancellation
 test_fs_compat_capability_exact_read         # conformance: fatal backtrace propagation
 test_fs_compat_capability_head               # authority: absent publish
 test_fs_compat_capability_write              # publication: replace fatal and cancellation
-test_keeper_board_attention_exact_flow       # production adapter: resumable status gate
 test_keeper_fs_directory_durability          # durable commit observer: observer exception
-test_keeper_keepalive_helpers                # current_task_reconciliation
+test_keeper_board_attention_exact_flow       # production adapter: resumable status gate
 test_keeper_tool_matrix                      # inventory: the AGENT_CORE bundle
 test_server_mcp_session_persist              # persistence: save/forget/load round-trip
 

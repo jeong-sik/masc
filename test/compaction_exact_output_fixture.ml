@@ -4,6 +4,7 @@ module EO = Agent_core.Exact_output
 
 type server_behavior =
   | Reply of string
+  | Replies of string list
   | Abort_after_request
   | Delay_then_reply of float * string
 
@@ -34,11 +35,18 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
   let handler _conn _request body =
     let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
     add_request requests request_body;
-    Atomic.incr posts;
+    let request_index = Atomic.fetch_and_add posts 1 in
     ignore (Eio.Promise.try_resolve resolve_first_request_arrived ());
     Option.iter (fun hook -> hook ()) on_request_before_reply;
     match behavior with
     | Reply response -> Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+    | Replies responses ->
+      let response =
+        match List.nth_opt responses request_index with
+        | Some response -> response
+        | None -> Alcotest.failf "no fixture reply for request %d" request_index
+      in
+      Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
     | Abort_after_request -> raise Exit
     | Delay_then_reply (delay_s, response) ->
       Eio.Time.sleep clock delay_s;

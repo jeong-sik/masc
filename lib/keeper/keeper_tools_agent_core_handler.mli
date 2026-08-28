@@ -15,6 +15,40 @@
     callers pass [?prepare_input] so validation and translation follow the
     descriptor's typed policy before dispatch. *)
 val make_keeper_tool_handler
+  :  capability_surface:Keeper_capability_surface.t
+  -> name:string
+  -> ?descriptor:Keeper_tool_descriptor.t
+  -> ?model_name:string
+  -> input_schema:Yojson.Safe.t
+  -> config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> publication_recovery:
+       Keeper_publication_recovery_availability.turn_context
+  -> ctx_snapshot:Keeper_types.working_context
+  -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
+  -> ?record_gate_result:
+       (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
+  -> ?observe_execution_evidence:
+       (failure_effect_disposition:Tool_result.failure_effect_disposition option
+        -> deferred_kind:Keeper_tool_execution.deferred_kind option
+        -> unit)
+  -> ?on_completed:
+       (Keeper_tool_execution.terminal_effect_receipt option -> unit)
+  -> ?on_deferred:(unit -> unit)
+  -> ?on_external_effect_deferred:(unit -> unit)
+  -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
+  -> ?prepare_input:
+       (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)
+  -> unit
+  -> ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t
+  -> Yojson.Safe.t
+  -> Tool_result.result
+
+val make_keeper_tool_handler_from_meta
   :  name:string
   -> ?descriptor:Keeper_tool_descriptor.t
   -> ?model_name:string
@@ -46,3 +80,5 @@ val make_keeper_tool_handler
   -> ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t
   -> Yojson.Safe.t
   -> Tool_result.result
+(** Explicit compatibility path for tests and callers without an enclosing
+    Keeper turn. It may project introspection from metadata. *)

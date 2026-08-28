@@ -435,6 +435,7 @@ let parse_runtime_config_raw_body body_str =
 type skill_editor_body =
   { reference : Skill_reference.t
   ; source_text : string option
+  ; confirmed : bool option
   }
 
 let parse_skill_editor_body body_str =
@@ -447,11 +448,20 @@ let parse_skill_editor_body body_str =
          (match Skill_reference.of_yojson reference_json with
           | Error _ -> Error "reference must be an exact Skill reference"
           | Ok reference ->
-            (match Json_util.assoc_member_opt "source_text" json with
-             | None -> Ok { reference; source_text = None }
-             | Some (`String source_text) ->
-               Ok { reference; source_text = Some source_text }
-             | Some _ -> Error "source_text must be a string")))
+            let ( let* ) = Result.bind in
+            let* source_text =
+              match Json_util.assoc_member_opt "source_text" json with
+              | None -> Ok None
+              | Some (`String source_text) -> Ok (Some source_text)
+              | Some _ -> Error "source_text must be a string"
+            in
+            let* confirmed =
+              match Json_util.assoc_member_opt "confirmed" json with
+              | None -> Ok None
+              | Some (`Bool confirmed) -> Ok (Some confirmed)
+              | Some _ -> Error "confirmed must be a boolean"
+            in
+            Ok { reference; source_text; confirmed }))
     | _ -> Error "JSON object body required"
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
@@ -495,24 +505,24 @@ let parse_skill_create_body body_str =
 
 let skill_editor_error_status = function
   | Server_skill_editor.Source_read_only -> `Forbidden
-  | Revision_conflict _ | Package_already_exists -> `Conflict
+  | Revision_conflict _ | Delete_revision_conflict _ | Recovery_required _
+  | Package_already_exists ->
+    `Conflict
   | Snapshot_not_registered | Snapshot_uninitialized | Reference_not_current
   | Source_not_ready | Source_file_missing ->
     `Not_found
-  | Invalid_workspace | Source_read_failed | Write_failed _ ->
+  | Invalid_workspace | Source_read_failed | Write_failed _ | Quarantine_failed _ ->
     `Internal_server_error
   | Source_too_large _ -> `Payload_too_large
-  | Invalid_package_id _ | Validation_failed _ -> `Bad_request
+  | Source_path_rejected _ | Confirmation_required | Invalid_package_id _
+  | Validation_failed _ ->
+    `Bad_request
 
 let respond_skill_editor_error ~request reqd error =
   Http.Response.json_value
     ~status:(skill_editor_error_status error)
     ~request
-    (`Assoc
-      [ "ok", `Bool false
-      ; "code", `String (Server_skill_editor.error_code error)
-      ; "error", `String (Server_skill_editor.error_to_string error)
-      ])
+    (Server_skill_editor.error_to_yojson error)
     reqd
 ;;
 
@@ -754,6 +764,38 @@ let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome 
     Log.Dashboard.warn "Skill write audit failed: %s" (Printexc.to_string exn)
 ;;
 
+let audit_skill_delete state agent_name ~reference ~status ~recovery ~outcome =
+  try
+    Audit_log.log_action
+      (Mcp_server.workspace_config state)
+      ~agent_id:agent_name
+      ~action:(Audit_log.Custom "skill_delete")
+      ~details:
+        (`Assoc
+          ([ "reference", Skill_reference.to_yojson reference
+           ; "status", `String status
+           ]
+           @ match recovery with
+             | None -> []
+             | Some (recovery_id, disposition) ->
+               [ "recovery_id", `String recovery_id
+               ; "recovery_disposition", `String disposition
+               ]))
+      ~outcome
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Dashboard.warn "Skill delete audit failed: %s" (Printexc.to_string exn)
+;;
+
+let skill_error_recovery error =
+  Server_skill_editor.error_recovery error
+  |> Option.map (fun (recovery_id, disposition) ->
+    ( recovery_id
+    , Server_skill_editor.recovery_disposition_to_string disposition ))
+;;
+
 let respond_runtime_config_commit
       state
       agent_name
@@ -913,11 +955,10 @@ end
    rather than a field on the workspace one: the two answer different
    questions, and a body that omitted [keeper_name] would otherwise move
    every keeper at once. *)
-(* Which of the lane's admitted judges this Keeper is put to first. Naming a
-   slot the lane does not offer is refused here rather than at the next
-   judgment, so an operator finds out while they are still looking at the
-   screen they set it on. *)
-let handle_gate_keeper_judge_body state operator_name request reqd body_str =
+(* Which admitted slot this Keeper uses first in one exact-output lane. Naming
+   a slot the lane does not offer is refused here rather than on the next run,
+   so the operator learns while still looking at the setting. *)
+let handle_keeper_exact_lane_body state operator_name request reqd body_str =
   let refuse message =
     respond_json_value_with_cors ~status:`Bad_request request reqd
       (operator_error_json message)
@@ -929,8 +970,10 @@ let handle_gate_keeper_judge_body state operator_name request reqd body_str =
       | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
         []
     in
-    match List.assoc_opt "keeper_name" fields with
-    | Some (`String keeper_name) when String.trim keeper_name <> "" -> (
+    match List.assoc_opt "keeper_name" fields, List.assoc_opt "lane_id" fields with
+    | ( Some (`String keeper_name)
+      , Some (`String lane_id) )
+      when String.trim keeper_name <> "" && String.trim lane_id <> "" -> (
       match
         match List.assoc_opt "slot_id" fields with
         | None | Some `Null -> Ok None
@@ -941,9 +984,19 @@ let handle_gate_keeper_judge_body state operator_name request reqd body_str =
       | Error message -> refuse message
       | Ok slot_id -> (
         let config = Mcp_server.workspace_config state in
+        let set () =
+          Keeper_exact_lane_preference.set
+            config ~actor:operator_name ~keeper_name ~lane_id slot_id
+        in
         match
-          Keeper_gate_judge_slot.set config ~actor:operator_name ~keeper_name
-            slot_id
+          match slot_id with
+          | None -> set ()
+          | Some slot_id ->
+            Result.bind
+              (Keeper_exact_lane_preference.validate_admitted_slot
+                 ~lane_id
+                 ~slot_id)
+              set
         with
         | Error message -> refuse message
         | Ok current ->
@@ -951,8 +1004,9 @@ let handle_gate_keeper_judge_body state operator_name request reqd body_str =
             (Printf.sprintf "gate:%s;" config.base_path);
           Sse.broadcast
             (`Assoc
-               [ "type", `String "gate_keeper_judge_changed"
+               [ "type", `String "keeper_exact_lane_preference_changed"
                ; "keeper_name", `String keeper_name
+               ; "lane_id", `String lane_id
                ; ( "slot_id"
                  , match slot_id with
                    | Some slot_id -> `String slot_id
@@ -962,12 +1016,14 @@ let handle_gate_keeper_judge_body state operator_name request reqd body_str =
             (`Assoc
                [ "ok", `Bool true
                ; "keeper_name", `String keeper_name
+               ; "lane_id", `String lane_id
                ; ( "slot_id"
                  , match current with
-                   | Some current -> `String current.Keeper_gate_judge_slot.slot_id
+                   | Some current ->
+                     `String current.Keeper_exact_lane_preference.slot_id
                    | None -> `Null )
                ])))
-    | Some _ | None -> refuse "keeper_name is required"
+    | _, _ -> refuse "keeper_name and lane_id are required"
   with Yojson.Json_error message -> refuse message
 ;;
 
@@ -1366,7 +1422,7 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   (* One bounded, read-only join of lane admission and retained observations.
-     Unlike the paged run endpoint below this always names all five standalone
+     Unlike the paged run endpoint below this always names every standalone
      lanes, including configured lanes with no currently retained run. *)
   |> Http.Router.get "/api/v1/dashboard/standalone-lanes" (fun request reqd ->
        with_token_permission_auth ~permission:exact_lane_run_permission
@@ -1610,7 +1666,7 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = _ } ->
+             | Ok { reference; source_text = _; confirmed = _ } ->
                Http.Response.json_value
                  ~compress:true
                  ~request:req
@@ -1668,7 +1724,7 @@ let add_routes ~sw ~clock router =
                   audit_skill_write
                     state
                     agent_name
-                    ~reference:preview.reference
+                    ~reference:preview.profile.reference
                     ~source_text
                     ~status
                     ~outcome:audit_outcome;
@@ -1678,6 +1734,75 @@ let add_routes ~sw ~clock router =
                     (Server_skill_editor.create_outcome_to_yojson outcome)
                     reqd)))
          request reqd)
+  |> Http.Router.add
+       ~path:"/api/v1/skills/editor"
+       ~methods:[ `DELETE ]
+       ~handler:(fun request reqd ->
+         with_token_permission_auth ~permission:Masc_domain.CanAdmin
+           (fun state agent_name req reqd ->
+             Http.Request.read_body_async reqd (fun body_str ->
+               match parse_skill_editor_body body_str with
+               | Error message ->
+                 respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+               | Ok { reference; source_text = _; confirmed } ->
+                 let base_path = (Mcp_server.workspace_config state).base_path in
+                 let refresh () =
+                   match Runtime.load_config_observation () with
+                   | Error message -> Error message
+                   | Ok observation ->
+                     Server_skill_snapshot_runtime.refresh_from_observation
+                       ~base_path
+                       observation
+                     |> Result.map_error Server_skill_snapshot_runtime.error_to_string
+                 in
+                 let result =
+                   Server_skill_editor.delete
+                     ~base_path
+                     ~reference
+                     ~confirmed:(Option.value confirmed ~default:false)
+                     ~refresh
+                 in
+                 Eio.Cancel.protect (fun () ->
+                  match result with
+                  | Error error ->
+                    audit_skill_delete state agent_name ~reference
+                      ~status:(Server_skill_editor.error_code error)
+                      ~recovery:(skill_error_recovery error)
+                      ~outcome:
+                        (Audit_log.Failure (Server_skill_editor.error_to_string error));
+                    respond_skill_editor_error ~request:req reqd error
+                  | Ok outcome ->
+                    let status, audit_outcome, recovery_id, disposition =
+                      match outcome with
+                      | Server_skill_editor.Deleted_and_published
+                          { recovery_id; disposition; _ } ->
+                        ( "deleted_and_published"
+                        , Audit_log.Success
+                        , recovery_id
+                        , disposition )
+                      | Deleted_but_unpublished
+                          { reason; recovery_id; disposition; _ } ->
+                        ( "deleted_but_unpublished"
+                        , Audit_log.Failure
+                            (Server_skill_editor.delete_unpublished_reason_to_string
+                               reason)
+                        , recovery_id
+                        , disposition )
+                    in
+                    audit_skill_delete state agent_name ~reference ~status
+                      ~recovery:
+                        (Some
+                           ( recovery_id
+                           , Server_skill_editor.recovery_disposition_to_string
+                               disposition ))
+                      ~outcome:audit_outcome;
+                    Http.Response.json_value
+                      ~compress:true
+                      ~request:req
+                      (Server_skill_editor.delete_outcome_to_yojson outcome)
+                      reqd))
+             )
+           request reqd)
   |> Http.Router.post "/api/v1/skills/editor/read" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
@@ -1685,7 +1810,7 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = _ } ->
+             | Ok { reference; source_text = _; confirmed = _ } ->
                (match
                   Server_skill_editor.load
                     ~base_path:(Mcp_server.workspace_config state).base_path
@@ -1706,13 +1831,13 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = None } ->
+             | Ok { reference; source_text = None; confirmed = _ } ->
                respond_dashboard_error
                  ~status:`Bad_request
                  ~request:req
                  reqd
                  "source_text required"
-             | Ok { reference; source_text = Some source_text } ->
+             | Ok { reference; source_text = Some source_text; confirmed = _ } ->
                (match
                   Server_skill_editor.preview
                     ~base_path:(Mcp_server.workspace_config state).base_path
@@ -1738,13 +1863,13 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = None } ->
+             | Ok { reference; source_text = None; confirmed = _ } ->
                respond_dashboard_error
                  ~status:`Bad_request
                  ~request:req
                  reqd
                  "source_text required"
-             | Ok { reference; source_text = Some source_text } ->
+             | Ok { reference; source_text = Some source_text; confirmed = _ } ->
                let base_path = (Mcp_server.workspace_config state).base_path in
                let refresh () =
                  match Runtime.load_config_observation () with
@@ -2223,14 +2348,15 @@ let add_routes ~sw ~clock router =
              ( `List []
              , `Assoc [ "state", `String "unavailable"; "error", `String detail ] )
          in
-         let judges, judges_state =
-           match Keeper_gate_judge_slot.all ~base_path with
+         let exact_lanes, exact_lanes_state =
+           match Keeper_exact_lane_preference.all ~base_path with
            | Ok rows ->
              ( `List
                  (List.map
-                    (fun (row : Keeper_gate_judge_slot.t) ->
+                    (fun (row : Keeper_exact_lane_preference.t) ->
                       `Assoc
                         [ "keeper_name", `String row.keeper_name
+                        ; "lane_id", `String row.lane_id
                         ; "slot_id", `String row.slot_id
                         ])
                     rows)
@@ -2243,8 +2369,8 @@ let add_routes ~sw ~clock router =
            (`Assoc
               [ "modes", modes
               ; "modes_state", modes_state
-              ; "judges", judges
-              ; "judges_state", judges_state
+              ; "exact_lanes", exact_lanes
+              ; "exact_lanes_state", exact_lanes_state
               ])
            reqd)
          request reqd)
@@ -2254,11 +2380,11 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd
              (handle_gate_keeper_mode_body state operator_name request reqd))
          request reqd)
-  |> Http.Router.post "/api/v1/dashboard/gate/keeper-judge" (fun request reqd ->
+  |> Http.Router.post "/api/v1/dashboard/runtime/keeper-exact-lane" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
-             (handle_gate_keeper_judge_body state operator_name request reqd))
+             (handle_keeper_exact_lane_body state operator_name request reqd))
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/external-mode" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

@@ -5,7 +5,7 @@
 // parser-derived surface of each effective Skill.
 
 import { Either, ParseResult, Schema } from 'effect'
-import { get, post, type GetOptions } from './core'
+import { ApiRequestError, get, post, postControlPlane, type GetOptions } from './core'
 
 export interface SkillIdentity {
   source_id: string
@@ -111,6 +111,8 @@ export interface SkillProfile {
   flow: SkillFlow | null
 }
 
+export type SkillSurfaceProfile = Omit<SkillProfile, 'reference' | 'kind'>
+
 export interface SkillEvidenceCoverage {
   composition_scan_limit: number
   composition_rows_scanned: number
@@ -138,6 +140,33 @@ export interface SkillEvidenceResponse {
 }
 
 export interface WritableSkillSource { source_id: string }
+
+export interface SkillEditorLoaded {
+  status: 'ready'
+  reference: SkillReference
+  snapshot_revision: string
+  source_text: string
+  access: 'read_only' | 'read_write'
+}
+
+export interface SkillEditorPreview {
+  profile: SkillProfile
+  diagnostics: readonly string[]
+}
+
+export type SkillEditorSaveReceipt =
+  | {
+      status: 'unchanged' | 'saved_and_published'
+      preview: SkillEditorPreview
+      snapshot_revision: string
+    }
+  | {
+      status: 'saved_but_unpublished'
+      preview: SkillEditorPreview
+      reason: string
+    }
+
+export type SkillEditorErrorKind = 'revision_conflict' | 'other'
 
 export interface AsyncRequestRow {
   request_id: string
@@ -189,18 +218,22 @@ export type AsyncRequestObservation =
 interface SkillSurfaceBase {
   reference: SkillReference
   diagnostics?: readonly string[]
-  profile?: SkillProfile | null
   usage?: readonly SkillUsage[]
 }
 
 export type SkillSurface =
-  | (SkillSurfaceBase & { kind: 'instruction' })
+  | (SkillSurfaceBase & {
+      kind: 'instruction'
+      profile: SkillSurfaceProfile
+    })
   | (SkillSurfaceBase & {
       kind: 'composition'
-      tool_name: string
-      execution: string
+      profile: SkillSurfaceProfile
     })
-  | (SkillSurfaceBase & { kind: 'unavailable'; error: string })
+  | (SkillSurfaceBase & {
+      kind: 'unavailable'
+      error: string
+    })
 
 export type SkillsResponse =
   | {
@@ -368,9 +401,7 @@ const AsyncRequestObservationSchema = Schema.Union(
   }),
 )
 
-const SkillProfileSchema = Schema.Struct({
-  reference: SkillReferenceSchema,
-  kind: Schema.NonEmptyString,
+const SkillProfileDetailsFields = {
   activation_tool: Schema.NonEmptyString,
   execution: Schema.NonEmptyString,
   capabilities: Schema.Struct({
@@ -399,9 +430,48 @@ const SkillProfileSchema = Schema.Struct({
     end_line: PositiveSafeIntegerSchema,
   })),
   flow: Schema.NullOr(SkillFlowSchema),
+} as const
+
+const SkillProfileSchema = Schema.Struct({
+  reference: SkillReferenceSchema,
+  kind: Schema.NonEmptyString,
+  ...SkillProfileDetailsFields,
 })
 
-const OptionalProfileSchema = Schema.optional(Schema.NullOr(SkillProfileSchema))
+const SkillSurfaceProfileSchema = Schema.Struct(SkillProfileDetailsFields)
+
+const SkillEditorPreviewSchema = Schema.Struct({
+  profile: SkillProfileSchema,
+  diagnostics: Schema.Array(Schema.String),
+})
+
+const SkillEditorLoadedSchema = Schema.Struct({
+  status: Schema.Literal('ready'),
+  reference: SkillReferenceSchema,
+  snapshot_revision: Schema.NonEmptyString,
+  source_text: Schema.String,
+  access: Schema.Literal('read_only', 'read_write'),
+})
+
+const SkillEditorPreviewResponseSchema = Schema.Struct({
+  ok: Schema.Literal(true),
+  status: Schema.Literal('valid'),
+  preview: SkillEditorPreviewSchema,
+})
+
+const SkillEditorSaveReceiptSchema = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal('unchanged', 'saved_and_published'),
+    preview: SkillEditorPreviewSchema,
+    snapshot_revision: Schema.NonEmptyString,
+  }),
+  Schema.Struct({
+    status: Schema.Literal('saved_but_unpublished'),
+    preview: SkillEditorPreviewSchema,
+    reason: Schema.NonEmptyString,
+  }),
+)
+
 const OptionalUsageSchema = Schema.optional(Schema.Array(SkillUsageSchema))
 
 const SkillSurfaceSchema = Schema.Union(
@@ -409,16 +479,14 @@ const SkillSurfaceSchema = Schema.Union(
     reference: SkillReferenceSchema,
     kind: Schema.Literal('instruction'),
     diagnostics: OptionalDiagnosticsSchema,
-    profile: OptionalProfileSchema,
+    profile: SkillSurfaceProfileSchema,
     usage: OptionalUsageSchema,
   }),
   Schema.Struct({
     reference: SkillReferenceSchema,
     kind: Schema.Literal('composition'),
-    tool_name: Schema.NonEmptyString,
-    execution: Schema.NonEmptyString,
     diagnostics: OptionalDiagnosticsSchema,
-    profile: OptionalProfileSchema,
+    profile: SkillSurfaceProfileSchema,
     usage: OptionalUsageSchema,
   }),
   Schema.Struct({
@@ -426,7 +494,6 @@ const SkillSurfaceSchema = Schema.Union(
     kind: Schema.Literal('unavailable'),
     error: Schema.NonEmptyString,
     diagnostics: OptionalDiagnosticsSchema,
-    profile: OptionalProfileSchema,
     usage: OptionalUsageSchema,
   }),
 )
@@ -629,6 +696,68 @@ export async function fetchWritableSkillSources(): Promise<readonly WritableSkil
     '/api/v1/skills/editor/sources',
   )
   return response.sources
+}
+
+function skillEditorBody(reference: SkillReference, sourceText?: string): Record<string, unknown> {
+  return sourceText === undefined
+    ? { reference }
+    : { reference, source_text: sourceText }
+}
+
+export function decodeSkillEditorLoaded(raw: unknown): SkillEditorLoaded {
+  return decodeWithSchema(SkillEditorLoadedSchema, raw, 'invalid_response')
+}
+
+export function decodeSkillEditorPreview(raw: unknown): SkillEditorPreview {
+  return decodeWithSchema(
+    SkillEditorPreviewResponseSchema,
+    raw,
+    'invalid_response',
+  ).preview
+}
+
+export function decodeSkillEditorSaveReceipt(raw: unknown): SkillEditorSaveReceipt {
+  return decodeWithSchema(SkillEditorSaveReceiptSchema, raw, 'invalid_response')
+}
+
+export function classifySkillEditorError(error: unknown): SkillEditorErrorKind {
+  if (!(error instanceof ApiRequestError) || error.status !== 409) return 'other'
+  const responseCode = isRecord(error.responseData) && typeof error.responseData.code === 'string'
+    ? error.responseData.code
+    : null
+  return error.errorCode === 'revision_conflict' || responseCode === 'revision_conflict'
+    ? 'revision_conflict'
+    : 'other'
+}
+
+export async function readSkillSource(reference: SkillReference): Promise<SkillEditorLoaded> {
+  return decodeSkillEditorLoaded(
+    await post<unknown>('/api/v1/skills/editor/read', skillEditorBody(reference)),
+  )
+}
+
+export async function previewSkillSource(
+  reference: SkillReference,
+  sourceText: string,
+): Promise<SkillEditorPreview> {
+  return decodeSkillEditorPreview(
+    await post<unknown>(
+      '/api/v1/skills/editor/preview',
+      skillEditorBody(reference, sourceText),
+    ),
+  )
+}
+
+export async function saveSkillSource(
+  reference: SkillReference,
+  sourceText: string,
+): Promise<SkillEditorSaveReceipt> {
+  return decodeSkillEditorSaveReceipt(
+    await postControlPlane<unknown>(
+      '/api/v1/skills/editor/save',
+      skillEditorBody(reference, sourceText),
+    ),
+  )
 }
 
 /** Mirror of Server_skill_editor.create_outcome_to_yojson: the server

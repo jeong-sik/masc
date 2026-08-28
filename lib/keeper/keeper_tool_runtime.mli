@@ -9,6 +9,10 @@
    descriptor handlers (masc_keeper_msg, masc_keeper_up, etc.) check
    for [Some] and return a typed "Eio context not provided" failure
    when unset. *)
+type capability_authority =
+  | Frozen_surface of Keeper_capability_surface.t
+  | Compatibility_meta
+
 type context =
   { config : Workspace.config
   ; meta : Keeper_meta_contract.keeper_meta
@@ -29,6 +33,9 @@ type context =
   ; gate_grant : Keeper_gate.cycle_grant option
     (** Exact human decision delivered to this Keeper lane. Permission-capable
         handlers must match it against the normalized request before use. *)
+  ; capability_authority : capability_authority
+    (** Production Keeper turns carry [Frozen_surface]. [Compatibility_meta]
+        is explicit and reserved for direct callers without a turn. *)
   }
 
 val descriptor_for_internal : string -> Keeper_tool_descriptor.t option

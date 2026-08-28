@@ -800,6 +800,30 @@ let test_repo_seed_board_attention_lane_admits () =
        require_published_seed "pricing-free deployment overlay")
 ;;
 
+(* An assignment whose target left the frozen catalog does not fail a lane
+   or a boot — the keeper silently falls back to the default runtime. On
+   2026-08-28 three keepers ran that way for days with no log line naming
+   them. The classifier must name exactly those, and only those. *)
+let test_catalog_absent_assignments_names_only_retired_targets () =
+  with_temp_dir "catalog-absent-assignments" @@ fun root ->
+  let overlay_path = Filename.concat root "agent-core-models-overlay.toml" in
+  write_file overlay_path overlay_catalog;
+  let snapshot =
+    load_control_snapshot
+      (Exact_output.Embedded_with_overlay
+         { source = overlay_path; contents = overlay_catalog })
+  in
+  require_admitted snapshot overlay_target;
+  Alcotest.(check (list (pair string string)))
+    "only the catalog-absent assignment is named"
+    [ ("keeper-ghost", "ghost_provider.retired-model") ]
+    (Registry.catalog_absent_assignments snapshot
+       ~assignments:
+         [ ("keeper-live", overlay_target)
+         ; ("keeper-ghost", "ghost_provider.retired-model")
+         ])
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -809,7 +833,12 @@ let () =
   Alcotest.run
     "Exact_output_catalog_precedence"
     [ ( "bootstrap",
-        [ Alcotest.test_case
+        [
+          Alcotest.test_case
+            "catalog_absent_assignments names only retired targets"
+            `Quick
+            test_catalog_absent_assignments_names_only_retired_targets
+        ; Alcotest.test_case
             "offline saves converge cache without publishing registry"
             `Quick
             test_offline_runtime_save_converges_by_write_stage

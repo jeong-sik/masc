@@ -728,6 +728,7 @@ let test_composition_run_id_is_uuid_v7_identity () =
 ;;
 
 module Request = Masc.Keeper_tool_plan_request
+module Catalog = Masc.Keeper_tool_composition_catalog
 
 let parse_request json =
   Request.plan_of_json ~descriptors:(Descriptor.all_descriptors ()) json
@@ -760,6 +761,119 @@ let test_request_parses_reference_chain () =
          (Plan.dependencies clock |> List.map Plan.Node_id.to_string)
      | _ -> fail "expected exactly two nodes")
   | Error error -> failf "reference chain rejected: %s" (Request.error_message error)
+;;
+
+let plan_signature plan =
+  Plan.nodes plan
+  |> List.map (fun (node : Plan.node) ->
+    String.concat
+      "|"
+      [ Plan.Node_id.to_string node.id
+      ; node.tool_name
+      ; (node.after |> List.map Plan.Node_id.to_string |> String.concat ",")
+      ; ( Plan.Json_template.dependencies node.input
+          |> List.map Plan.Node_id.to_string
+          |> String.concat "," )
+      ])
+;;
+
+let equivalent_toml_plan =
+  {|[[compositions]]
+name = "request-parity"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+
+[[compositions.nodes]]
+id = "memory"
+tool = "keeper_memory_search"
+after = ["clock"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "clock"
+pointer = "/now_iso"
+|}
+;;
+
+let test_request_and_toml_share_plan_grammar () =
+  let request_plan =
+    match
+      parse_request
+        (request_of_string
+           {|{"nodes":[
+               {"id":"clock","tool":"keeper_time_now"},
+               {"id":"memory","tool":"keeper_memory_search","after":["clock"],
+                "input":{"kind":"object","fields":[
+                  {"name":"query","value":{"kind":"output","node":"clock",
+                                                "pointer":"/now_iso"}}]}}]}|})
+    with
+    | Ok plan -> plan
+    | Error error -> failf "JSON request rejected: %s" (Request.error_message error)
+  in
+  let catalog_plan =
+    match Catalog.parse equivalent_toml_plan with
+    | Error error -> failf "equivalent TOML rejected: %s" (Catalog.error_to_string error)
+    | Ok catalog ->
+      (match Catalog.find catalog "request-parity" with
+       | Some entry -> entry.plan
+       | None -> fail "equivalent TOML omitted its composition")
+  in
+  check
+    (list string)
+    "JSON request and TOML build the same descriptor-backed plan"
+    (plan_signature catalog_plan)
+    (plan_signature request_plan)
+;;
+
+let test_request_and_toml_reject_the_same_invalid_pointer () =
+  let request_rejected =
+    match
+      parse_request
+        (request_of_string
+           {|{"nodes":[
+               {"id":"clock","tool":"keeper_time_now"},
+               {"id":"memory","tool":"keeper_memory_search",
+                "input":{"kind":"output","node":"clock","pointer":"now_iso"}}]}|})
+    with
+    | Error (Request.Node_template_error { error = Request.Template_invalid_pointer _; _ }) ->
+      true
+    | Error _ | Ok _ -> false
+  in
+  let toml_rejected =
+    match
+      Catalog.parse
+        {|[[compositions]]
+name = "invalid-pointer"
+execution = "inline"
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+[[compositions.nodes]]
+id = "memory"
+tool = "keeper_memory_search"
+[compositions.nodes.input]
+kind = "output"
+node = "clock"
+pointer = "now_iso"
+|}
+    with
+    | Error (Catalog.Invalid_json_pointer _) -> true
+    | Error _ | Ok _ -> false
+  in
+  check bool "JSON request rejects an invalid pointer" true request_rejected;
+  check bool "TOML rejects the same invalid pointer" true toml_rejected
 ;;
 
 let test_request_defaults_missing_input_to_empty_object () =
@@ -1108,6 +1222,14 @@ let () =
     "keeper_tool_plan"
     [ ( "request"
       , [ test_case "reference chain" `Quick test_request_parses_reference_chain
+        ; test_case
+            "JSON and TOML plan parity"
+            `Quick
+            test_request_and_toml_share_plan_grammar
+        ; test_case
+            "JSON and TOML invalid pointer parity"
+            `Quick
+            test_request_and_toml_reject_the_same_invalid_pointer
         ; test_case
             "missing input defaults"
             `Quick

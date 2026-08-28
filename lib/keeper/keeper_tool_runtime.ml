@@ -10,6 +10,10 @@ open Keeper_tool_descriptor
    plumbing.  Default = [None]; callers without Eio context (AGENT_CORE handler,
    tests) leave them unset and the Eio-bound descriptor handlers return
    a typed "Eio context not provided" failure instead of crashing. *)
+type capability_authority =
+  | Frozen_surface of Keeper_capability_surface.t
+  | Compatibility_meta
+
 type context =
   { config : Workspace.config
   ; meta : Keeper_meta_contract.keeper_meta
@@ -33,6 +37,7 @@ type context =
   ; gate_grant : Keeper_gate.cycle_grant option
     (* Exact human decision delivered to this Keeper lane. External-effect
        handlers may consume it only after matching their normalized request. *)
+  ; capability_authority : capability_authority
   }
 
 let descriptor_for_internal internal_name =
@@ -66,6 +71,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_search_files
   | Tool_time_now
   | Tool_tools_list
+  | Tool_capability_search
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
@@ -127,6 +133,7 @@ let handle_shell_ir ctx descriptor args =
   | Tool_write_file
   | Tool_time_now
   | Tool_tools_list
+  | Tool_capability_search
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
@@ -169,7 +176,30 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_execution.success_data
          (Keeper_tool_in_process_runtime.handle_time_now ~args))
   | Tool_tools_list ->
-    Some (Keeper_tool_in_process_runtime.handle_tools_list ~meta:ctx.meta ~args)
+    Some
+      (match ctx.capability_authority with
+       | Frozen_surface capability_surface ->
+         Keeper_tool_in_process_runtime.handle_tools_list
+           ~capability_surface
+           ~args
+           ()
+       | Compatibility_meta ->
+         Keeper_tool_in_process_runtime.handle_tools_list_from_meta
+           ~meta:ctx.meta
+           ~args
+           ())
+  | Tool_capability_search ->
+    Some
+      (match ctx.capability_authority with
+       | Frozen_surface capability_surface ->
+         Keeper_tool_in_process_runtime.handle_capability_search
+           ~capability_surface
+           ~args
+           ()
+       | Compatibility_meta ->
+         Keeper_tool_in_process_runtime.handle_capability_search_from_meta
+           ~args
+           ())
   | Tool_context_status ->
     Some
       (Keeper_tool_execution.success

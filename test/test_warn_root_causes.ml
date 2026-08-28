@@ -95,7 +95,7 @@ let test_web_tools_are_bundle_visible () =
           ~keeper_name:meta.name
       in
       let bundle =
-        Keeper_tools_agent_core_bundle.make_tool_bundle
+        Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -142,7 +142,7 @@ let test_fusion_default_descriptor_is_bundle_visible () =
           ~keeper_name:meta.name
       in
       let bundle =
-        Keeper_tools_agent_core_bundle.make_tool_bundle
+        Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -179,7 +179,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
           ~keeper_name:meta.name
       in
       let bundle =
-        Keeper_tools_agent_core_bundle.make_tool_bundle
+        Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -258,6 +258,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
                     true
                     (Agent_core.Tool.completion tool
                      = Agent_core.Tool_contract.Continue_after_success)
+                | Keeper_tool_descriptor.Direct_terminal
                 | Keeper_tool_descriptor.Terminal ->
                   check bool
                     (name ^ " terminal tools are serial")
@@ -306,7 +307,7 @@ let test_explicit_concurrent_tools_enter_one_agent_core_batch () =
          Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
        in
        let bundle =
-         Keeper_tools_agent_core_bundle.make_tool_bundle
+         Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -456,7 +457,7 @@ let test_missing_current_task_reconciled_before_transition_hint () =
           ~keeper_name:meta.name
       in
       let bundle =
-        Keeper_tools_agent_core_bundle.make_tool_bundle
+        Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -539,7 +540,7 @@ let test_tool_bundle_does_not_emit_full_universe_assignment () =
           ~keeper_name:meta.name
       in
       let bundle =
-        Keeper_tools_agent_core_bundle.make_tool_bundle
+        Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -685,7 +686,7 @@ let with_bundle ~name ?tool_groups f =
           ~keeper_name:meta.name
       in
       let bundle =
-        Keeper_tools_agent_core_bundle.make_tool_bundle
+        Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect ~finally:bundle.cleanup (fun () -> f bundle))

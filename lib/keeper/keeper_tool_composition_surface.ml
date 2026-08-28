@@ -20,93 +20,6 @@ let with_tool_kind_field kind = function
   | json -> json
 ;;
 
-let plan_execute_input_schema =
-  let node_schema =
-    `Assoc
-      [ "type", `String "object"
-      ; ( "properties"
-        , `Assoc
-            [ "id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-            ; "tool", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-            ; ( "after"
-              , `Assoc
-                  [ "type", `String "array"
-                  ; "items", `Assoc [ "type", `String "string" ]
-                  ] )
-              (* The four template shapes were spelled out in the tool's
-                 description because the schema said only "object". A reader
-                 had to learn them from prose while the validator knew them
-                 exactly. Stating them here puts the shape where a model
-                 reads structure rather than prose. It does not make them
-                 enforced: [validate_args] descends no further than the
-                 top-level schema, so [Keeper_tool_plan] is still what refuses
-                 a malformed template. Recursive shapes are named
-                 through [$ref] so [object] and [array] can hold any input. *)
-            ; ( "input"
-              , `Assoc
-                  [ "type", `String "object"
-                  ; ( "oneOf"
-                    , `List
-                        [ `Assoc
-                            [ "required", `List [ `String "kind"; `String "value" ]
-                            ; ( "properties"
-                              , `Assoc
-                                  [ ( "kind"
-                                    , `Assoc
-                                        [ "const", `String "literal" ] )
-                                  ] )
-                            ]
-                        ; `Assoc
-                            [ ( "required"
-                              , `List
-                                  [ `String "kind"
-                                  ; `String "node"
-                                  ; `String "pointer"
-                                  ] )
-                            ; ( "properties"
-                              , `Assoc
-                                  [ "kind", `Assoc [ "const", `String "output" ]
-                                  ; "node", `Assoc [ "type", `String "string" ]
-                                  ; ( "pointer"
-                                    , `Assoc [ "type", `String "string" ] )
-                                  ] )
-                            ]
-                        ; `Assoc
-                            [ ( "required"
-                              , `List [ `String "kind"; `String "fields" ] )
-                            ; ( "properties"
-                              , `Assoc
-                                  [ "kind", `Assoc [ "const", `String "object" ]
-                                  ; ( "fields"
-                                    , `Assoc [ "type", `String "array" ] )
-                                  ] )
-                            ]
-                        ; `Assoc
-                            [ ( "required"
-                              , `List [ `String "kind"; `String "items" ] )
-                            ; ( "properties"
-                              , `Assoc
-                                  [ "kind", `Assoc [ "const", `String "array" ]
-                                  ; ( "items"
-                                    , `Assoc [ "type", `String "array" ] )
-                                  ] )
-                            ]
-                        ] )
-                  ] )
-            ] )
-      ; "required", `List [ `String "id"; `String "tool" ]
-      ; "additionalProperties", `Bool false
-      ]
-  in
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc [ "nodes", `Assoc [ "type", `String "array"; "items", node_schema ] ] )
-    ; "required", `List [ `String "nodes" ]
-    ; "additionalProperties", `Bool false
-    ]
-;;
-
 (* What it buys, then how to say it. Measured over 2026-08-21..23: this tool
    sat in all 87 tool surfaces of 368 turns and was chosen zero times, while
    [keeper_compose_mission-snapshot] -- 254 bytes that open "Read clock,
@@ -202,6 +115,22 @@ let instruction_skill_description (instruction_skills : instruction_skill list) 
   skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
 ;;
 
+(* Every refusal that turns on the reference answers with the references the
+   keeper actually carries. A caller without the revision at hand — the log
+   shows empty strings and copied placeholders — has to be handed the exact
+   value here, because nothing else on its surface can say it (task-828). *)
+let carried_references_text (instruction_skills : instruction_skill list) =
+  match instruction_skills with
+  | [] -> "(none)"
+  | skills ->
+    String.concat
+      ", "
+      (List.map
+         (fun (skill : instruction_skill) ->
+            Skill_reference.to_yojson skill.reference |> Yojson.Safe.to_string)
+         skills)
+;;
+
 type 'evidence schema_tool_origin =
   | Declared_composition of 'evidence
   | Plan_execute
@@ -227,7 +156,7 @@ let schema_tool_rows ?(skill_compositions = []) () =
     , schema_tool
         ~name:plan_execute_tool_name
         ~description:plan_execute_description
-        ~input_schema:plan_execute_input_schema )
+        ~input_schema:Keeper_tool_plan_request.input_schema )
   in
   if
     List.exists
@@ -768,6 +697,14 @@ let async_parent_invocation ~request_id source =
     ~completion:Agent_core.Tool_contract.Continue_after_success
 ;;
 
+let execute_keeper_plan ~capability_authority =
+  match capability_authority with
+  | Keeper_tool_runtime.Frozen_surface capability_surface ->
+    Executor.execute_keeper ~capability_surface
+  | Keeper_tool_runtime.Compatibility_meta ->
+    Executor.Compatibility.execute_keeper
+;;
+
 let async_worker_result
       ~(entry : Catalog.entry)
       ~plan
@@ -778,6 +715,7 @@ let async_worker_result
       ~request_sw
       ~(config : Workspace.config)
       ~meta
+      ~capability_authority
       ~publication_recovery
       ~ctx_snapshot
       ~turn_context
@@ -791,7 +729,8 @@ let async_worker_result
     Keeper_sandbox_factory.cleanup sandbox_factory);
   let start_time = Time_compat.now () in
   let run_id = Keeper_tool_plan.Run_id.fresh () in
-  Executor.execute_keeper
+  execute_keeper_plan
+    ~capability_authority
     ~plan
     ~run_id
     ~composition_run_id
@@ -839,6 +778,7 @@ let async_submission_result
       ~parent_invocation
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~capability_authority
       ~publication_recovery
       ~ctx_snapshot
       ~turn_context
@@ -897,6 +837,7 @@ let async_submission_result
              ~request_sw
              ~config
              ~meta
+             ~capability_authority
              ~publication_recovery
              ~ctx_snapshot
              ~turn_context
@@ -1260,7 +1201,10 @@ let make_instruction_skill_tool
              ~tool_name:name
              ~class_:Tool_result.Workflow_rejection
              ~start_time
-             "keeper_skill requires one canonical exact Skill reference"
+             (Printf.sprintf
+                "keeper_skill requires one canonical exact Skill reference; \
+                 this keeper carries: %s"
+                (carried_references_text instruction_skills))
          | Error Duplicate_resource_path ->
            Tool_result.make_err
              ~tool_name:name
@@ -1416,15 +1360,7 @@ let make_instruction_skill_tool
                 (Printf.sprintf
                    "no instruction Skill matches exact reference %s; this keeper carries: %s"
                    (Skill_reference.to_yojson asked |> Yojson.Safe.to_string)
-                   (match instruction_skills with
-                    | [] -> "(none)"
-                    | skills ->
-                      String.concat ", "
-                        (List.map
-                           (fun (skill : instruction_skill) ->
-                              Skill_reference.to_yojson skill.reference
-                              |> Yojson.Safe.to_string)
-                           skills)))))))
+                   (carried_references_text instruction_skills))))))
 ;;
 
 module For_testing = struct
@@ -1434,7 +1370,7 @@ module For_testing = struct
   let cancel_result = cancel_result
 end
 
-let make_tools
+let make_tools_with_authority
       ?(instruction_skills : instruction_skill list = [])
       ?(skill_compositions : composition_skill list = [])
       ?composition_plan_index
@@ -1442,6 +1378,7 @@ let make_tools
       ?record_composition_activation
       ~(config : Workspace.config)
       ~meta
+      ~capability_authority
       ~publication_recovery
       ~ctx_snapshot
       ?turn_sandbox_factory
@@ -1588,6 +1525,7 @@ let make_tools
                            ~parent_invocation
                            ~config
                            ~meta
+                           ~capability_authority
                            ~publication_recovery
                            ~ctx_snapshot
                            ~turn_context
@@ -1602,6 +1540,7 @@ let make_tools
                         ~parent_invocation
                         ~config
                         ~meta
+                        ~capability_authority
                         ~publication_recovery
                         ~ctx_snapshot
                         ~turn_context
@@ -1663,7 +1602,8 @@ let make_tools
              let run_id = Keeper_tool_plan.Run_id.fresh () in
              let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
              let execution =
-               Executor.execute_keeper
+               execute_keeper_plan
+                 ~capability_authority
                  ~plan
                  ~run_id
                  ~composition_run_id
@@ -1790,12 +1730,12 @@ let make_tools
       ?on_externalization_error
       ~name:tool_name
       ~description:plan_execute_description
-      ~input_schema:plan_execute_input_schema
+      ~input_schema:Keeper_tool_plan_request.input_schema
       (fun execution_env input ->
         let start_time = Time_compat.now () in
         match
           Tool_input_validation.validate_args
-            ~schema:plan_execute_input_schema
+            ~schema:Keeper_tool_plan_request.input_schema
             ~name:tool_name
             ~args:input
             ()
@@ -1851,7 +1791,8 @@ let make_tools
                      Keeper_tool_plan.Composition_run_id.fresh ()
                    in
                    let execution =
-                     Executor.execute_keeper
+                     execute_keeper_plan
+                       ~capability_authority
                        ~plan
                        ~run_id
                        ~composition_run_id
@@ -1992,3 +1933,18 @@ let make_tools
     in
     composition_tools @ [ status_tool; cancel_tool ]
 ;;
+
+let make_tools ~capability_surface =
+  make_tools_with_authority
+    ~capability_authority:
+      (Keeper_tool_runtime.Frozen_surface capability_surface)
+    ~descriptors:(Keeper_capability_surface.descriptors capability_surface)
+;;
+
+module Compatibility = struct
+  let make_tools ~descriptors =
+    make_tools_with_authority
+      ~capability_authority:Keeper_tool_runtime.Compatibility_meta
+      ~descriptors
+  ;;
+end

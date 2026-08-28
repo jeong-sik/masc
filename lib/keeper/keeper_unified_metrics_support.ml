@@ -372,7 +372,13 @@ let observed_triggers_of_observation
         (Keeper_world_observation_message_scope.has_kind
            Keeper_world_observation_message_scope.Scope observation.pending_messages)
         "scope_message";
-      singleton_when actionable_backlog "new_unclaimed_task";
+      (* One label per fact. A reader weighs urgency by the signals a turn
+         reports, so two names on [actionable_backlog] would offer two where
+         the world offered one. The label states a level -- a claimable task
+         exists -- and not an arrival: nothing here remembers what this keeper
+         already read, so it holds for as long as the backlog does. A keeper
+         that should stop waking on a backlog it has already seen is answered
+         by what counts as claimable for it, not by how this fact is named. *)
       singleton_when actionable_backlog "claimable_task";
       singleton_when (observation.failed_task_count > 0) "failed_task";
       singleton_when

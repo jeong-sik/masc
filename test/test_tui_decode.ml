@@ -1424,16 +1424,12 @@ let system_log_snapshot_json entries =
 (* Verification requests. The shape is [Dashboard_verification.request_to_json]
    -- fields are asserted against what that writer emits, not against a shape
    invented here. *)
-let verification_request_json ?(next_action = `Null)
-    ?(evidence = [ "artifact:reports/proof.json" ])
+let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
     ?(evidence_error = `Null) () =
   `Assoc
     [ ("request_id", `String "vr-1")
     ; ("task_id", `String "task-470")
     ; ("task_title", `String "wire the approval gate")
-    ; ("request_kind", `String "task_completion")
-    ; ("request_summary", `String "tests green, gate installed")
-    ; ("next_action", next_action)
     ; ("created_at", `String "2026-08-23T09:00:00Z")
     ; ("submitted_by", `String "keeper.one")
     ; ("completion_contract", `List [ `String "tests pass" ])
@@ -1510,9 +1506,9 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
     else `Null
   in
   let profile_json =
-    if flow then
-      `Assoc
-        [ ( "flow",
+    `Assoc
+      [ ( "flow",
+          if flow then
             `Assoc
               [ ( "nodes",
                   `List
@@ -1532,11 +1528,11 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
                         ; ("execution_mode", `String "serial")
                         ; ("node_ids", `List [ `String "fetch" ])
                         ] ] )
-              ] )
-        ; ("plan", `Assoc [])
-        ; ("context", `Assoc [])
-        ]
-    else `Null
+              ]
+          else `Null )
+      ; ("plan", `Assoc [])
+      ; ("context", `Assoc [])
+      ]
   in
   `Assoc
     [ ("schema", `String "masc.skill-snapshot/v1")
@@ -1594,15 +1590,14 @@ let test_decode_skills_catalog_reads_usage_and_flow () =
        | surfaces ->
            Alcotest.failf "expected one surface, got %d" (List.length surfaces))
 
-(* The ledger side warms independently of the catalog: a surface may answer
-   with null usage and no profile before any keeper has run it. That must
-   read as "tracked but unused", not fail the whole catalog. *)
-let test_decode_skills_catalog_tolerates_warming_nulls () =
+(* The ledger side warms independently of the catalog. Usage may be empty, but
+   the exact surface profile remains the capability authority. *)
+let test_decode_skills_catalog_tolerates_empty_usage_and_flow () =
   match
     Tui_decode.decode_skills_catalog
       (skills_catalog_json ~usage:false ~flow:false ())
   with
-  | Error err -> Alcotest.failf "decode failed on warming nulls: %s" err
+  | Error err -> Alcotest.failf "decode failed on empty usage/flow: %s" err
   | Ok catalog ->
       (match catalog.Tui_decode.sc_surfaces with
        | [ surface ] ->
@@ -2501,6 +2496,8 @@ let test_decode_standalone_lane_keeps_the_run_start () =
           ; standalone_lane_json "librarian_exact" "Librarian"
           ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
               "compaction_exact" "Compaction"
+          ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
+              "assembler_exact" "Assembler"
           ; standalone_lane_json "verifier_exact" "Verifier"
           ]
       ]
@@ -2544,6 +2541,8 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
         "librarian_exact" "Librarian"
     ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
         "compaction_exact" "Compaction"
+    ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
+        "assembler_exact" "Assembler"
     ; standalone_lane_json "verifier_exact" "Verifier"
     ]
   in
@@ -2562,15 +2561,33 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
   match Tui_decode.decode_standalone_lanes_snapshot json with
   | Error detail -> Alcotest.failf "decode failed: %s" detail
   | Ok snapshot ->
-      Alcotest.(check int) "all five lanes" 5 (List.length snapshot.sls_lanes);
+      Alcotest.(check int) "all six lanes" 6 (List.length snapshot.sls_lanes);
       let first = List.hd snapshot.sls_lanes in
       Alcotest.(check string) "running status" "running"
         (Tui_decode.standalone_lane_status_to_string first.sl_status);
       let compaction = List.nth snapshot.sls_lanes 3 in
       Alcotest.(check string)
-        "no retained observation"
-        "no retained observation"
+        "none retained"
+        "none retained"
         (Tui_decode.standalone_lane_status_to_string compaction.sl_status)
+
+(* The screen draws these words in a column sized for the longest one. It was
+   sized fourteen and this said twenty-three, so the Compaction row's whole
+   right-hand side sat nine columns clear of every other row. *)
+let test_every_lane_status_word_fits_its_column () =
+  List.iter
+    (fun status ->
+      let word = Tui_decode.standalone_lane_status_to_string status in
+      Alcotest.(check bool)
+        (Printf.sprintf "%s fits" word)
+        true
+        (String.length word <= 14))
+    [ Tui_decode.Standalone_running
+    ; Tui_decode.Standalone_idle
+    ; Tui_decode.Standalone_degraded
+    ; Tui_decode.Standalone_unavailable
+    ; Tui_decode.Standalone_no_retained_observation
+    ]
 
 let test_decode_standalone_lanes_rejects_duplicate_ids () =
   let duplicate = standalone_lane_json "board_attention_exact" "Board" in
@@ -2844,8 +2861,12 @@ let test_decode_verification_snapshot_reads_the_live_shape () =
            Alcotest.(check (list string)) "what it must produce"
              [ "artifact:reports/proof.json" ]
              request.Tui_decode.vr_required_artifacts;
-           Alcotest.(check (option string)) "no next action offered" None
-             request.Tui_decode.vr_next_action
+           (* What the queue draws in the column that used to be empty. The
+              producer wrote "" into request_summary and next_action as
+              literals, so the queue read the one field beside them that is
+              actually filled. *)
+           Alcotest.(check string) "the title the queue reads"
+             "wire the approval gate" request.Tui_decode.vr_task_title
        | requests ->
            Alcotest.failf "expected one request, got %d" (List.length requests))
 
@@ -2877,20 +2898,6 @@ let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   Alcotest.(check (option string)) "the reason survives"
     (Some "artifact path escapes the producer root")
     unreadable.Tui_decode.vr_evidence_error
-
-let test_decode_verification_carries_a_next_action () =
-  match
-    Tui_decode.decode_verification_snapshot
-      (verification_snapshot_json
-         [ verification_request_json
-             ~next_action:(`String "attach the missing artifact") ()
-         ])
-  with
-  | Ok { Tui_decode.vs_requests = [ r ]; _ } ->
-      Alcotest.(check (option string)) "what would move it forward"
-        (Some "attach the missing artifact") r.Tui_decode.vr_next_action
-  | Ok _ -> Alcotest.fail "expected one request"
-  | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_system_log_snapshot_reads_the_live_shape () =
   match
@@ -4568,8 +4575,174 @@ let test_decode_runtime_params_rejects_a_row_without_a_key () =
   | Ok _ -> Alcotest.fail "accepted a parameter that names nothing"
 
 
+(* Goal detail timeline: [`Null] from the server means the approval-queue
+   store could not be read, so it must decode to the explicit unavailable
+   constructor — an empty list would draw a goal with no history where the
+   truth is "the history could not be read". *)
+let test_goal_timeline_decodes_ready_events () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"approval_queue_state":{"state":"ready"},
+         "timeline":[
+           {"ts":"2026-07-28T03:57:38Z","kind":"goal_phase","lane":"goal",
+            "title":"Goal Phase","summary":"phase=completed by rondo",
+            "severity":"ok"},
+           {"ts":"2026-07-28T04:00:00Z","kind":"keeper_receipt","lane":"keeper",
+            "title":"Receipt","summary":"turn failed","severity":"bad"}]}|}
+  in
+  match Masc.Tui_decode.decode_goal_detail_timeline json with
+  | Error err -> Alcotest.fail err
+  | Ok (Masc.Tui_decode.Goal_timeline_unavailable _) ->
+      Alcotest.fail "a present timeline decoded as unavailable"
+  | Ok (Masc.Tui_decode.Goal_timeline_ready events) ->
+      Alcotest.(check int) "two events" 2 (List.length events);
+      let first = List.hd events in
+      Alcotest.(check string) "ts" "2026-07-28T03:57:38Z"
+        first.Masc.Tui_decode.gt_ts;
+      Alcotest.(check string) "kind" "goal_phase" first.gt_kind;
+      Alcotest.(check string) "summary" "phase=completed by rondo"
+        first.gt_summary;
+      Alcotest.(check string) "severity" "ok" first.gt_severity
+
+let test_goal_timeline_null_is_unavailable_with_detail () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"approval_queue_state":
+          {"state":"unavailable","operator_detail":"queue store unreadable"},
+         "timeline":null}|}
+  in
+  match Masc.Tui_decode.decode_goal_detail_timeline json with
+  | Ok (Masc.Tui_decode.Goal_timeline_unavailable detail) ->
+      Alcotest.(check string) "detail" "queue store unreadable" detail
+  | Ok (Masc.Tui_decode.Goal_timeline_ready _) ->
+      Alcotest.fail "a null timeline decoded as ready"
+  | Error err -> Alcotest.fail err
+
+let test_goal_timeline_rejects_a_thin_event () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"timeline":[{"ts":"2026-07-28T03:57:38Z","kind":"goal_phase"}]}|}
+  in
+  match Masc.Tui_decode.decode_goal_detail_timeline json with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an event missing summary/severity decoded"
+
+(* Task history rows are raw event-stream lines: the shape below is a live
+   row verbatim (2026-08-28, task-770), and an unknown event type must keep
+   its type string rather than being dropped. *)
+let test_task_history_decodes_live_rows () =
+  let json =
+    Yojson.Safe.from_string
+      {|[{"type":"task_transition","agent":"sangsu","task":"task-770",
+          "from_status":"in_progress","to_status":"todo",
+          "ts":"2026-08-28T09:25:14Z","action":"release",
+          "handoff_context":{"summary":"build replay is readable"}},
+         {"type":"task_note","task":"task-770","ts":"2026-08-28T09:00:00Z"}]|}
+  in
+  match Masc.Tui_decode.decode_task_history json with
+  | Error err -> Alcotest.fail err
+  | Ok rows ->
+      Alcotest.(check int) "two rows" 2 (List.length rows);
+      let first = List.hd rows in
+      Alcotest.(check string) "label prefers action" "release"
+        first.Masc.Tui_decode.th_label;
+      Alcotest.(check (option string)) "from" (Some "in_progress")
+        first.th_from_status;
+      Alcotest.(check (option string)) "to" (Some "todo") first.th_to_status;
+      Alcotest.(check (option string)) "actor" (Some "sangsu") first.th_actor;
+      Alcotest.(check (option string)) "note" (Some "build replay is readable")
+        first.th_note;
+      let second = List.nth rows 1 in
+      Alcotest.(check string) "label falls back to type" "task_note"
+        second.th_label;
+      Alcotest.(check (option string)) "no actor" None second.th_actor
+
+let test_task_history_rejects_a_non_list () =
+  match
+    Masc.Tui_decode.decode_task_history
+      (Yojson.Safe.from_string {|{"events":[]}|})
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a non-list task history decoded"
+
+(* Evidence bundle: the item vocabulary is the producer's closed set, so an
+   unknown kind must fail the decode; the unavailable access state carries
+   the server's stated reason, never an empty list. *)
+let test_verification_evidence_decodes_items () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"ok":true,"result":{"task_id":"task-9","verification_id":"vr-1",
+         "producer":"sangsu",
+         "evidence":{"access":"available","request":{},
+           "items":[
+             {"kind":"note","content":"tests green"},
+             {"kind":"artifact","reference":"artifact:proof.json",
+              "content":"{}","bytes":2,"truncated":false},
+             {"kind":"artifact_unreadable","reference":"artifact:gone.txt",
+              "reason":{"code":"missing"}}]}}}|}
+  in
+  match Masc.Tui_decode.decode_verification_evidence json with
+  | Error err -> Alcotest.fail err
+  | Ok (Masc.Tui_decode.Evidence_access_unavailable _) ->
+      Alcotest.fail "available evidence decoded as unavailable"
+  | Ok (Masc.Tui_decode.Evidence_items items) ->
+      Alcotest.(check int) "three items" 3 (List.length items);
+      (match items with
+       | [ Masc.Tui_decode.Ev_note note
+         ; Masc.Tui_decode.Ev_artifact { ev_reference; ev_bytes; ev_truncated; _ }
+         ; Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reference; ev_u_reason }
+         ] ->
+           Alcotest.(check string) "note" "tests green" note;
+           Alcotest.(check string) "reference" "artifact:proof.json" ev_reference;
+           Alcotest.(check int) "bytes" 2 ev_bytes;
+           Alcotest.(check bool) "not truncated" false ev_truncated;
+           Alcotest.(check (option string)) "unreadable ref"
+             (Some "artifact:gone.txt") ev_u_reference;
+           Alcotest.(check bool) "reason preserved" true
+             (String.length ev_u_reason > 0)
+       | _ -> Alcotest.fail "items decoded out of shape")
+
+let test_verification_evidence_unavailable_and_unknown_kind () =
+  (match
+     Masc.Tui_decode.decode_verification_evidence
+       (Yojson.Safe.from_string
+          {|{"result":{"evidence":{"access":"unavailable",
+             "request_id":"vr-1","reason":"snapshot invalid"}}}|})
+   with
+   | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
+       Alcotest.(check string) "reason" "snapshot invalid" reason
+   | Ok _ | Error _ -> Alcotest.fail "unavailable access did not decode");
+  match
+    Masc.Tui_decode.decode_verification_evidence
+      (Yojson.Safe.from_string
+         {|{"result":{"evidence":{"access":"available",
+            "items":[{"kind":"hologram"}]}}}|})
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an unknown evidence kind decoded"
+
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_verification_evidence",
+      [ Alcotest.test_case "decodes the three item kinds" `Quick
+          test_verification_evidence_decodes_items
+      ; Alcotest.test_case "unavailable carries reason; unknown kind fails" `Quick
+          test_verification_evidence_unavailable_and_unknown_kind
+      ] );
+    ( "decode_goal_timeline",
+      [ Alcotest.test_case "carries ready events" `Quick
+          test_goal_timeline_decodes_ready_events
+      ; Alcotest.test_case "null decodes as unavailable with detail" `Quick
+          test_goal_timeline_null_is_unavailable_with_detail
+      ; Alcotest.test_case "rejects a thin event" `Quick
+          test_goal_timeline_rejects_a_thin_event
+      ] );
+    ( "decode_task_history",
+      [ Alcotest.test_case "decodes live rows" `Quick
+          test_task_history_decodes_live_rows
+      ; Alcotest.test_case "rejects a non-list" `Quick
+          test_task_history_rejects_a_non_list
+      ] );
     ( "decode_runtime_surface",
       [ Alcotest.test_case "joins projection and observation in lane order" `Quick
           test_decode_and_join_runtime_surface
@@ -4677,6 +4850,8 @@ let () =
           test_decode_standalone_lane_keeps_the_run_start;
         Alcotest.test_case "rejects duplicate lane ids" `Quick
           test_decode_standalone_lanes_rejects_duplicate_ids;
+        Alcotest.test_case "every lane status word fits its column" `Quick
+          test_every_lane_status_word_fits_its_column;
       ] );
     ( "decode_lane_runs",
       [
@@ -4713,8 +4888,6 @@ let () =
           test_decode_verification_snapshot_reads_the_live_shape;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
-        Alcotest.test_case "carries a next action" `Quick
-          test_decode_verification_carries_a_next_action;
       ] );
     ( "decode_system_logs",
       [
@@ -4977,8 +5150,8 @@ let () =
       [
         Alcotest.test_case "reads usage rows and the execution flow" `Quick
           test_decode_skills_catalog_reads_usage_and_flow;
-        Alcotest.test_case "tolerates warming null usage and profile" `Quick
-          test_decode_skills_catalog_tolerates_warming_nulls;
+        Alcotest.test_case "keeps the profile while usage and flow are empty" `Quick
+          test_decode_skills_catalog_tolerates_empty_usage_and_flow;
         Alcotest.test_case "rejects a non-string kind" `Quick
           test_decode_skills_catalog_rejects_a_wrong_kind_type;
       ] );

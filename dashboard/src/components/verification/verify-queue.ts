@@ -71,7 +71,6 @@ interface VqQueueItem {
   gateRows: VqGateRow[]
   submitActor: string | null
   submitAt: string | null
-  submitNote: string | null
   projectionError: string | null
 }
 
@@ -103,9 +102,6 @@ function buildQueueItem(
     rows.unshift({ evidence: `증거 투영 오류 — ${projectionError}`, outcome: 'failed' })
   }
   const submitActor = request?.submitted_by?.trim() || task.assignee || null
-  const submitNote = request && request.request_summary.trim() !== ''
-    ? request.request_summary
-    : null
   return {
     task,
     goalId: task.goal_id ?? null,
@@ -113,7 +109,6 @@ function buildQueueItem(
     gateRows: rows,
     submitActor,
     submitAt: request?.created_at ?? null,
-    submitNote,
     projectionError,
   }
 }
@@ -304,7 +299,6 @@ function VqReview(props: {
     ${task.predecessor_task_id
       ? html`<div class="vq-note rerun">↻ 재실행 제출 · predecessor <b>${task.predecessor_task_id}</b> — 반려 후 재검증</div>`
       : null}
-    ${item.submitNote ? html`<div class="vq-note"><b>제출 메모</b> · ${item.submitNote}</div>` : null}
     <${VqGate} item=${item} checks=${props.checks} onToggleGate=${props.onToggleGate} />
     ${handoff && handoff.summary
       ? html`<div class="vq-note"><b>핸드오프</b> · ${handoff.summary}${handoff.next_step ? ` → ${handoff.next_step}` : ''}</div>`

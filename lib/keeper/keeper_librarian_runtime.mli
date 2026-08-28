@@ -20,8 +20,12 @@ val prompt_max_messages : unit -> int
     registry records this value as the actual input, so observability and
     provider dispatch share the same history window. *)
 val prompt_input_for_librarian
-  :  Keeper_librarian.input
+  :  ?max_messages:int
   -> Keeper_librarian.input
+  -> Keeper_librarian.input
+(** [?max_messages] overrides the configured window; the byte-budget fit
+    search shrinks through it when the full prompt exceeds an admitted
+    slot's request-body limit. *)
 
 val messages_for_librarian
   :  Keeper_librarian.input
@@ -29,13 +33,28 @@ val messages_for_librarian
 
 type extraction_error
 
+val extraction_error_to_string : extraction_error -> string
+
+val fitted_messages
+  :  selected_slots:Runtime_exact_output_registry.selected_slot list
+  -> full_messages:Agent_core.Types.message list
+  -> render_at:(int -> (Agent_core.Types.message list, extraction_error) result)
+  -> (Agent_core.Types.message list * int option, extraction_error) result
+(** Pre-flight size discipline (lane audit W1/W2), mirrored from the
+    compaction lane: the full prompt is kept when it fits every admitted
+    slot's request-body limit; otherwise the message window binary-searches
+    down through [render_at] and the fitted count rides along as [Some k].
+    Zero-message overflow is [Exact_input_over_budget]. *)
+
+
 (** Which failure kind this error records in the memory journal. The vocabulary
     is owned by {!Keeper_memory_os_current} because the journal is the only
     place it reaches disk; this function is the one place the classification
     happens, so adding an [extraction_error] case fails to compile until it
     names its journal kind. *)
 val run_best_effort
-  :  keepers_dir:string
+  :  base_path:string
+  -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int option
   -> Keeper_librarian.input

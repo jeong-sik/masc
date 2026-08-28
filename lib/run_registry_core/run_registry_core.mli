@@ -38,6 +38,11 @@ module type Payload = sig
   val completion_of_yojson : Yojson.Safe.t -> (completion, string) result
   val running_noun : string
   val restart_reason : string
+  val replayed_running_completion
+    : (started_at:float -> registration -> completion) option
+  (** [Some] converts a replayed [Running] entry into explicit terminal
+      evidence. [None] drops it when the subsystem's authoritative state lives
+      elsewhere. *)
   val completed_retention : [ `All | `Latest of int ]
 end
 
@@ -107,8 +112,9 @@ module Make (Payload : Payload) : sig
 
       The rewrite is [replay]'s own compaction, so it keeps exactly what
       [replay] keeps and nothing else. Beyond the rows no decoder reads, that
-      drops every entry still [Running] on disk (a fiber does not survive a
-      restart) and every completed entry past [completed_retention], and it
+      settles every entry still [Running] according to
+      [Payload.replayed_running_completion] (a fiber does not survive a
+      restart), drops every completed entry past [completed_retention], and
       collapses the append history to one register — and one complete — per
       surviving entry. On a store that has been compacting normally this is
       what the next boot would write anyway; on a poisoned store it is not,

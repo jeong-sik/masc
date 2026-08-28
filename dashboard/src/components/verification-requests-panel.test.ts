@@ -95,9 +95,6 @@ function makeRequest(overrides: Partial<VerificationRequest> = {}): Verification
     request_id: 'req-001',
     task_id: 'task-001',
     task_title: '',
-    request_kind: 'normal',
-    request_summary: '',
-    next_action: null,
     created_at: new Date().toISOString(),
     submitted_by: 'agent-a',
     completion_contract: [],
@@ -193,12 +190,16 @@ describe('VerificationRequestsPanel', () => {
     })
   })
 
-  it('renders immutable submissions as read-only summary and next action', async () => {
+  // The panel used to draw a Verification Summary and a Next Action here. Both
+  // came from fields the producer set to the empty string as literals, so the
+  // two blocks were guarded off on every request the server has ever sent and
+  // this test was the only thing that ever filled them -- by writing the
+  // values into its own fixture.
+  it('is read-only, and shows the task title it does carry', async () => {
     setData([
       makeRequest({
         request_id: 'req-conflict',
-        request_summary: 'Conflict verification required: board / planning / mutation path disagree.',
-        next_action: 'Reconcile board / planning / mutation surfaces before ordinary approval.',
+        task_title: 'wire the approval gate',
       }),
     ])
     render(html`<${VerificationRequestsPanel} />`)
@@ -209,18 +210,9 @@ describe('VerificationRequestsPanel', () => {
 
     fireEvent.click(screen.getByText('자세히'))
     await waitFor(() => {
-      expect(screen.getByText('Verification Summary')).toBeTruthy()
-      expect(
-        screen.getByText(
-          'Conflict verification required: board / planning / mutation path disagree.',
-        ),
-      ).toBeTruthy()
-      expect(screen.getByText('Next Action')).toBeTruthy()
-      expect(
-        screen.getByText(
-          'Reconcile board / planning / mutation surfaces before ordinary approval.',
-        ),
-      ).toBeTruthy()
+      expect(screen.getByText('wire the approval gate')).toBeTruthy()
+      expect(screen.queryByText('Verification Summary')).toBeNull()
+      expect(screen.queryByText('Next Action')).toBeNull()
     })
   })
 

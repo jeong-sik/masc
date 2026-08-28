@@ -242,6 +242,12 @@ let tool_response =
   {|{"id":"resp-tool","model":"flow","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":"forbidden","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
 ;;
 
+(* The measured thinking-eats-content shape: the answer sits complete in the
+   reasoning field while content is the empty string. *)
+let missing_output_response =
+  {|{"id":"resp-missing","model":"flow","choices":[{"index":0,"message":{"role":"assistant","content":"","reasoning_content":"{\"name\":\"answer-routed-into-reasoning\"}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+;;
+
 let with_server
       ?response_delay_s
       ?(status = `OK)
@@ -810,6 +816,68 @@ let test_fenced_text_json_advances_to_frozen_successor () =
       true
       ((EO.flow_success_output success).output = `Assoc [ "name", `String "accepted" ])
   | Error _ -> fail "strict fallback did not advance to its frozen successor"
+;;
+
+(* The answer routed into reasoning with empty content used to terminate the
+   lane. It is a property of the binding's output dialect, so the declared
+   successor gets the request — the same shape as the fenced-JSON case. *)
+let test_missing_output_advances_to_frozen_successor () =
+  let first_response = `OK, missing_output_response in
+  let (result, observed_advance, advances), posts =
+    with_server ~first_response ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"missing-text" ~base_url ~native:false ~json:false ()
+      ; catalog_entry ~id:"present-text" ~base_url ~native:false ~json:false ()
+      ]
+      @@ fun snapshot ->
+      let observed_advance = ref None in
+      let advances = ref 0 in
+      let result =
+        execute_with_accepting_test_validator
+          ~net
+          ~on_measurement_terminal:(fun _ -> Ok ())
+          ~before_measurement_dispatch:(fun _ -> Ok ())
+          ~before_dispatch:(fun _ -> Ok ())
+          ~before_advance:(fun ~failed ~next ->
+            let candidate, failure = flow_execution_failure failed in
+            observed_advance
+            := Some
+                 ( candidate_id candidate
+                 , next.identity.candidate_id
+                 , failure.EO.cause
+                 , EO.receipt_phase failure.receipt
+                 , EO.receipt_dispatch_count failure.receipt );
+            incr advances;
+            Ok ())
+          (start_flow (frozen_flow snapshot [ "missing-text"; "present-text" ]))
+      in
+      result, !observed_advance, !advances
+  in
+  check int "missing then valid fallback performs two POSTs" 2 posts;
+  check int "missing output fallback advances once" 1 advances;
+  (match observed_advance with
+   | Some (failed, next, cause, phase, dispatch_count) ->
+     check string "missing output fallback candidate" "missing-text" failed;
+     check string "missing output frozen successor" "present-text" next;
+     check bool "empty content with reasoning is missing output" true (cause = EO.Missing_output);
+     (* The failure is raised when the response is normalized, before the
+        receipt turns terminal — unlike fenced JSON, which fails at parse. *)
+     check
+       bool
+       "missing output fails at response-received phase"
+       true
+       (phase = EO.Response_received);
+     check int "missing output fallback preserves one POST" 1 dispatch_count
+   | None -> fail "missing output did not request its frozen successor");
+  match result with
+  | Ok success ->
+    check
+      string
+      "content-bearing successor serves the request"
+      "present-text"
+      (candidate_id (EO.flow_success_candidate success))
+  | Error _ -> fail "missing output did not advance to its frozen successor"
 ;;
 
 let test_provider_schema_still_requires_native_capability () =
@@ -4114,6 +4182,10 @@ let () =
             "fenced JSON advances to frozen successor"
             `Quick
             test_fenced_text_json_advances_to_frozen_successor
+        ; test_case
+            "missing output advances to frozen successor"
+            `Quick
+            test_missing_output_advances_to_frozen_successor
         ; test_case
             "provider schema still requires native capability"
             `Quick

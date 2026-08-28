@@ -11,6 +11,11 @@ type completed_plan
 
 type prepared_lane
 
+val prepared_ordered_slot_ids : prepared_lane -> string list
+(** The frozen candidate order of a prepared flow, after lane resolution and
+    the per-keeper exact-lane preference. Observation only; the flow itself
+    is immutable. *)
+
 type attempt_observation =
   { slot_id : string
   ; call_id : string

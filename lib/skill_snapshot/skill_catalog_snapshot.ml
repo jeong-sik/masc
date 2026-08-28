@@ -80,6 +80,7 @@ type rejection =
   ; source_id : Skill_source_config.source_id
   ; package_id : package_id option
   ; directory : string
+  ; content_revision : content_revision option
   ; reason : rejection_reason
   }
 
@@ -273,6 +274,10 @@ let rejection_to_private_yojson (rejection : rejection) =
         | Some package_id -> `String (package_id_to_string package_id)
         | None -> `Null )
     ; "directory", `String rejection.directory
+    ; ( "content_revision"
+      , match rejection.content_revision with
+        | Some revision -> `String (content_revision_to_string revision)
+        | None -> `Null )
     ; "reason", rejection_reason_to_private_yojson rejection.reason
     ]
 ;;
@@ -340,6 +345,7 @@ let build_entries sources =
                      ; source_id
                      ; package_id = None
                      ; directory
+                     ; content_revision = None
                      ; reason = Invalid_package_id package_error
                      }
                      :: rejections )
@@ -349,6 +355,7 @@ let build_entries sources =
                      ; source_id
                      ; package_id = Some package_id
                      ; directory
+                     ; content_revision = None
                      ; reason = Document_unreadable { path; detail }
                      }
                      :: rejections ))
@@ -360,6 +367,7 @@ let build_entries sources =
                      ; source_id
                      ; package_id = None
                      ; directory
+                     ; content_revision = Some (content_revision source_text)
                      ; reason = Invalid_package_id package_error
                      }
                      :: rejections )
@@ -375,6 +383,7 @@ let build_entries sources =
                         ; source_id
                         ; package_id = Some package_id
                         ; directory
+                        ; content_revision = Some (content_revision source_text)
                         ; reason = Document_rejected diagnostics
                         }
                         :: rejections )
@@ -388,6 +397,7 @@ let build_entries sources =
                            ; source_id
                            ; package_id = Some package_id
                            ; directory
+                           ; content_revision = Some (content_revision source_text)
                            ; reason = Exact_identity_duplicate { first_directory }
                            }
                            :: rejections )
@@ -652,6 +662,10 @@ let rejection_to_public_yojson (rejection : rejection) =
     ; ( "package_id"
       , match rejection.package_id with
         | Some package_id -> `String (package_id_to_string package_id)
+        | None -> `Null )
+    ; ( "content_revision"
+      , match rejection.content_revision with
+        | Some revision -> `String (content_revision_to_string revision)
         | None -> `Null )
     ; "reason", reason
     ]

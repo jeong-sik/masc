@@ -39,15 +39,16 @@ function snapshot() {
       row('hitl_auto_judge'),
       row('librarian_exact'),
       row('compaction_exact', 'no_retained_observation'),
+      row('assembler_exact', 'no_retained_observation'),
       row('verifier_exact'),
     ],
   }
 }
 
 describe('standalone lane snapshot decoder', () => {
-  it('keeps all five lane states and observed slot counts', () => {
+  it('keeps all six lane states and observed slot counts', () => {
     const parsed = parseStandaloneLanesSnapshot(snapshot())
-    expect(parsed.lanes).toHaveLength(5)
+    expect(parsed.lanes).toHaveLength(6)
     expect(parsed.lanes[0]?.status).toBe('running')
     expect(parsed.lanes[0]?.selectedSlots).toEqual([{ slotId: 'primary', count: 1 }])
     expect(parsed.lanes[3]?.status).toBe('no_retained_observation')

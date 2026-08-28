@@ -227,6 +227,67 @@ let count_field_accesses_outside_calls_in_value_binding
       | _ -> false)
 ;;
 
+(* String literals a binding draws, by value. A screen mark is a literal, and
+   a table that draws one mark for several states says less than the style
+   beside it does -- which is a thing to assert, and not one the type checker
+   can. Keeping the AST here means a caller needs no Ppxlib of its own. *)
+let count_string_literals_in_value_binding ~module_path ~binding_name ~literals =
+  count_expressions_outside_calls_in_value_binding ~module_path ~binding_name
+    ~callees:[]
+    ~matches:(fun expression ->
+      match expression.pexp_desc with
+      | Pexp_constant { pconst_desc = Pconst_string (text, _, _); _ } ->
+        List.mem text literals
+      | _ -> false)
+;;
+
+(* Constructors a binding names, in patterns as well as expressions. A match
+   arm is where a rule about which cases behave alike actually lives, and an
+   arm is a pattern -- an expression walk alone sees nothing. *)
+let count_constructors_in_value_binding ~module_path ~binding_name ~constructors
+  =
+  let structure = parse_implementation_or_fail module_path in
+  let count_in_expr expr =
+    let count = ref 0 in
+    let iter =
+      { Ast_iterator.default_iterator with
+        expr =
+          (fun self e ->
+            (match e.pexp_desc with
+             | Pexp_construct ({ txt; _ }, _)
+               when List.mem (longident_to_string txt) constructors ->
+               incr count
+             | _ -> ());
+            Ast_iterator.default_iterator.expr self e)
+      ; pat =
+          (fun self p ->
+            (match p.ppat_desc with
+             | Ppat_construct ({ txt; _ }, _)
+               when List.mem (longident_to_string txt) constructors ->
+               incr count
+             | _ -> ());
+            Ast_iterator.default_iterator.pat self p)
+      }
+    in
+    iter.expr iter expr;
+    !count
+  in
+  let total = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      value_binding =
+        (fun self vb ->
+          (match vb.pvb_pat.ppat_desc with
+           | Ppat_var { txt; _ } when txt = binding_name ->
+             total := !total + count_in_expr vb.pvb_expr
+           | _ -> ());
+          Ast_iterator.default_iterator.value_binding self vb)
+    }
+  in
+  iter.structure iter structure;
+  !total
+;;
+
 let count_identifiers_outside_calls_in_value_binding
       ~module_path
       ~binding_name

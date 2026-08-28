@@ -69,6 +69,11 @@ val docker_command : unit -> string
     script fake [docker] binary; this helper wraps that path via
     [/bin/sh] so direct script execution does not depend on host shebang
     handling. *)
+val pid_alive : int -> bool
+(** Whether a process id still names a live process. Exposed because guest
+    sweeping decides abandonment on exactly this and must not carry its own
+    copy of the rule. EPERM counts as alive: another user owns it. *)
+
 val docker_command_argv : unit -> string list
 
 (** Docker [run] flag fragment that prevents implicit registry pulls. Keeper

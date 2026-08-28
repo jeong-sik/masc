@@ -36,3 +36,17 @@ val body :
     An idle ledger with no note still says so: an empty block would read as a
     goal nobody has looked at, which is the same picture a goal whose verdict
     failed to decode would draw. *)
+
+val short_ts : string -> string
+(** "2026-07-28T03:57:38Z" -> "07-28 03:57"; anything shorter is shown as-is
+    rather than guessed at. Shared with the task-history rows. *)
+
+val timeline :
+  width:int ->
+  goal_id:string ->
+  (string * (Tui_decode.goal_timeline, string) result) option ->
+  line list
+(** The goal's merged event timeline, appended after [body] so it rides the
+    same scroll. Loaded lazily on detail entry; every non-ready state (still
+    loading, store unavailable, load failed, stale answer for another goal)
+    says what it is instead of rendering as an empty history. *)

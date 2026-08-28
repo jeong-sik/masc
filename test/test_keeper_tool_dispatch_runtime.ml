@@ -1,6 +1,9 @@
 open Alcotest
 
-module KET = Masc.Keeper_tool_dispatch_runtime
+module KET = struct
+  include Masc.Keeper_tool_dispatch_runtime
+  include Masc.Keeper_tool_dispatch_runtime.Compatibility
+end
 module KTE = Masc.Keeper_tool_execution
 module KES = Masc.Keeper_tool_shared_runtime
 module KTD = Masc.Keeper_tool_descriptor
@@ -404,8 +407,8 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (member "workspace" "keeper_task_claim");
   check bool "MASC task tool grouped as workspace" (is_model_visible "masc_transition")
     (member "workspace" "masc_transition");
-  check bool "MASC plan tool grouped as workspace" (is_model_visible "masc_plan_get")
-    (member "workspace" "masc_plan_get");
+  check bool "MASC plan tool grouped as workspace" (is_model_visible "masc_plan_get_task")
+    (member "workspace" "masc_plan_get_task");
   check bool "surface read grouped as surface" true
     (member "surface" "keeper_surface_read");
   check bool "surface read not hidden under meta" false
@@ -608,99 +611,39 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     Yojson.Safe.Util.(member "required" empty_shape |> to_list |> List.length);
   check bool "empty schema has no shape errors" true
     (Yojson.Safe.Util.member "schema_errors" empty_shape = `Null);
-  let search =
-    match KES.keeper_tools_search_json ~meta ~query:"current time" with
-    | Ok value -> value
-    | Error error ->
-      fail
-        (Yojson.Safe.to_string
-           (Masc.Keeper_capability_search.error_to_yojson error))
-  in
-  let matches = Yojson.Safe.Util.(member "matches" search |> to_list) in
-  check bool "FTS returns a ranked result" true (matches <> []);
-  check string
-    "FTS finds the authorized time capability"
-    "keeper_time_now"
-    Yojson.Safe.Util.(List.hd matches |> member "matched_name" |> to_string);
-  check int
-    "rank is explicit and one-based"
-    1
-    Yojson.Safe.Util.(List.hd matches |> member "rank" |> to_int);
-  let unrestricted_files =
-    match KES.keeper_tools_search_json ~meta ~query:"file" with
-    | Ok value -> Yojson.Safe.Util.(member "matches" value |> to_list)
-    | Error error ->
-      fail
-        (Yojson.Safe.to_string
-           (Masc.Keeper_capability_search.error_to_yojson error))
-  in
-  check bool
-    "unrestricted FTS can find the filesystem capability"
-    true
-    (List.exists
-       (fun row ->
-          String.equal
-            "Read"
-            Yojson.Safe.Util.(member "matched_name" row |> to_string))
-       unrestricted_files);
-  let board_only = { meta with tool_groups = Some [ "board" ] } in
-  let filtered =
-    match KES.keeper_tools_search_json ~meta:board_only ~query:"file" with
-    | Ok value -> Yojson.Safe.Util.(member "matches" value |> to_list)
-    | Error error ->
-      fail
-        (Yojson.Safe.to_string
-           (Masc.Keeper_capability_search.error_to_yojson error))
-  in
-  check bool
-    "FTS never returns the off-surface filesystem capability"
-    false
-    (List.exists
-       (fun row ->
-          String.equal
-            "Read"
-            Yojson.Safe.Util.(member "matched_name" row |> to_string))
-       filtered);
-  let no_substring =
-    match KES.keeper_tools_search_json ~meta ~query:"fil" with
-    | Ok value -> value
-    | Error error ->
-      fail
-        (Yojson.Safe.to_string
-           (Masc.Keeper_capability_search.error_to_yojson error))
-  in
-  check int
-    "FTS does not silently add substring matching"
-    0
-    Yojson.Safe.Util.(member "match_count" no_substring |> to_int);
-  (match KES.keeper_tools_search_json ~meta ~query:"\"unterminated" with
-   | Error (Masc.Keeper_capability_search.Invalid_query _) -> ()
-   | Error error ->
-     failf
-       "malformed FTS query has wrong error: %s"
-       (Yojson.Safe.to_string
-          (Masc.Keeper_capability_search.error_to_yojson error))
-   | Ok _ -> fail "malformed FTS query was accepted");
-  let empty =
-    Masc.Keeper_tool_in_process_runtime.handle_tools_list
+  let old_search =
+    Masc.Keeper_tool_in_process_runtime.handle_tools_list_from_meta
       ~meta
-      ~args:(`Assoc [ "query", `String "  " ])
+      ~args:(`Assoc [ "query", `String "time" ])
+      ()
   in
-  (match empty.KTE.disposition with
+  (match old_search.KTE.disposition with
    | Tool_result.Failed Tool_result.Policy_rejection -> ()
    | Tool_result.Failed class_ ->
      failf
-       "empty query has wrong failure class: %s"
+       "retired list query has wrong failure class: %s"
        (Tool_result.tool_failure_class_to_string class_)
    | Tool_result.Completed () | Tool_result.Deferred () ->
-     fail "empty query did not produce a typed rejection");
+     fail "keeper_tools_list still accepted query");
   check string
-    "empty query has a typed error kind"
-    "empty_query"
-    (match empty.data with
+    "list query rejection is typed"
+    "unexpected_arguments"
+    (match old_search.data with
      | Some data ->
        Yojson.Safe.Util.(data |> member "error" |> member "kind" |> to_string)
-     | None -> fail "empty query omitted typed rejection data");
+     | None -> fail "list query omitted typed rejection data");
+  let compatibility_search =
+    Masc.Keeper_tool_in_process_runtime.handle_capability_search_from_meta
+      ~args:(`Assoc [ "query", `String "time" ])
+      ()
+  in
+  check string
+    "compatibility search requires frozen authority"
+    "frozen_surface_required"
+    (match compatibility_search.data with
+     | Some data ->
+       Yojson.Safe.Util.(data |> member "error" |> member "kind" |> to_string)
+     | None -> fail "compatibility search omitted typed rejection data");
   ()
 
 let test_execute_with_outcome_missing_file_is_failure () =
@@ -1429,7 +1372,7 @@ let test_manual_gate_deferral_stays_deferred_through_agent_core_bridge () =
          | _ :: _ :: _ -> fail "duplicate tool_write_file descriptors"
        in
        let handler =
-         Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler
+         Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
            ~name:"Write"
            ~input_schema
            ~config
@@ -3719,7 +3662,7 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
           ]
       in
       let run () =
-        KET.execute_keeper_tool_call
+        KET.Compatibility.execute_keeper_tool_call
           ~config ~meta ~publication_recovery ~ctx_work
           ~name:"tool_execute" ~input ()
       in
@@ -3752,7 +3695,7 @@ let test_tool_execute_script_form_is_admitted_and_runs () =
         `Assoc [ "script", `String "printf begin- && printf end" ]
       in
       let raw =
-        KET.execute_keeper_tool_call
+        KET.Compatibility.execute_keeper_tool_call
           ~config ~meta ~publication_recovery ~ctx_work
           ~name:"tool_execute" ~input ()
       in
@@ -3766,7 +3709,7 @@ let test_tool_execute_empty_input_names_all_three_forms () =
   with_exec_fixture "tool_execute_empty_input_names_forms"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let raw =
-        KET.execute_keeper_tool_call
+        KET.Compatibility.execute_keeper_tool_call
           ~config ~meta ~publication_recovery ~ctx_work
           ~name:"tool_execute" ~input:(`Assoc []) ()
       in
@@ -3846,7 +3789,7 @@ let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
                    ~data:delegated_data
                    ()));
           let handler =
-            Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler
+            Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
               ~name:"masc_keeper_delegate"
               ~input_schema:(keeper_delegate_input_schema ())
               ~config
@@ -4767,6 +4710,320 @@ let composition_invocation ~completion =
     ~completion
 ;;
 
+let frozen_capability_surface ~tool_groups =
+  let snapshot =
+    Skill_catalog_snapshot.config_unreadable
+      ~detail:"dispatch boundary test has no Skill sources"
+  in
+  Masc.Keeper_capability_surface.create
+    ~tool_groups:(Some tool_groups)
+    ~skill_names:None
+    ~global_skill_catalog:Masc.Keeper_skill_catalog.empty
+    ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot)
+    ~task_skills:[]
+;;
+
+let test_frozen_surface_lists_and_searches_operator_only_tool () =
+  let capability_surface = frozen_capability_surface ~tool_groups:[] in
+  let list_result =
+    Masc.Keeper_tool_in_process_runtime.handle_tools_list
+      ~capability_surface
+      ~args:(`Assoc [])
+      ()
+  in
+  check bool "complete inventory list completes" true
+    (list_result.disposition = Tool_result.Completed ());
+  let descriptor =
+    Yojson.Safe.Util.(
+      parse_json list_result.raw_output
+      |> member "descriptor_surface"
+      |> to_list)
+    |> List.find_opt (fun row ->
+      String.equal
+        "masc_keeper_up"
+        Yojson.Safe.Util.(row |> member "internal_name" |> to_string))
+    |> function
+    | Some row -> row
+    | None -> fail "operator-only Tool is absent from keeper_tools_list"
+  in
+  check string "operator-only list availability"
+    "not_model_invocable"
+    Yojson.Safe.Util.(descriptor |> member "availability" |> to_string);
+  check int "operator-only list has no active names" 0
+    Yojson.Safe.Util.(descriptor |> member "active_names" |> to_list |> List.length);
+  let search_result =
+    Masc.Keeper_tool_in_process_runtime.handle_capability_search
+      ~capability_surface
+      ~args:(`Assoc [ "query", `String "masc_keeper_up" ])
+      ()
+  in
+  check bool "operator-only inventory search completes" true
+    (search_result.disposition = Tool_result.Completed ());
+  let matches =
+    match search_result.data with
+    | Some data -> Yojson.Safe.Util.(data |> member "matches" |> to_list)
+    | None -> fail "operator-only inventory search omitted typed data"
+  in
+  let found =
+    List.exists
+      (fun row ->
+         let capability =
+           Yojson.Safe.Util.(row |> member "candidate" |> member "capability")
+         in
+         String.equal
+           "masc_keeper_up"
+           Yojson.Safe.Util.(capability |> member "internal_name" |> to_string)
+         && String.equal
+              "not_model_invocable"
+              Yojson.Safe.Util.(capability |> member "availability" |> to_string))
+      matches
+  in
+  check bool "operator-only Tool search retains typed availability" true found
+;;
+
+let execution_data_exn label (result : KET.executed_tool_result) =
+  match result.data with
+  | Some data -> data
+  | None -> fail (label ^ " omitted typed execution data")
+;;
+
+let check_frozen_surface_rejection label (result : KET.executed_tool_result) =
+  check string (label ^ " outcome") "failure" (outcome_label result.disposition);
+  check bool
+    (label ^ " is a policy rejection")
+    true
+    (result.disposition = Tool_result.Failed Tool_result.Policy_rejection);
+  check bool
+    (label ^ " is proven pre-effect")
+    true
+    (result.failure_effect_disposition = Tool_result.Proven_pre_effect);
+  let data = execution_data_exn label result in
+  check string
+    (label ^ " typed error")
+    "tool_outside_frozen_capability_surface"
+    Yojson.Safe.Util.(data |> member "error" |> to_string)
+;;
+
+let test_frozen_surface_direct_dispatch_rejects_excluded_global_tool () =
+  with_exec_fixture "frozen-surface-direct-excluded"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let result =
+    KET.execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~name:"Read"
+      ~input:(`Assoc [ "file_path", `String "outside.txt" ])
+      ()
+  in
+  check_frozen_surface_rejection "excluded name dispatch" result;
+  register_registered_dispatch_probe ();
+  let registered_result =
+    KET.execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~name:registered_dispatch_probe_tool
+      ~input:(`Assoc [])
+      ()
+  in
+  check_frozen_surface_rejection
+    "registered-only fallback"
+    registered_result
+;;
+
+let test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor () =
+  with_exec_fixture "frozen-surface-direct-included"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let descriptor = composition_descriptor "keeper_time_now" in
+  let result =
+    KET.execute_keeper_tool_descriptor_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~descriptor
+      ~input:(`Assoc [])
+      ()
+  in
+  check string "included descriptor completes" "success"
+    (outcome_label result.disposition);
+  let name_result =
+    KET.execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~name:"keeper_time_now"
+      ~input:(`Assoc [])
+      ()
+  in
+  check string "included exposed name completes" "success"
+    (outcome_label name_result.disposition)
+;;
+
+let test_frozen_surface_rejects_same_id_counterfeit_descriptor () =
+  with_exec_fixture "frozen-surface-counterfeit-descriptor"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let canonical = composition_descriptor "keeper_time_now" in
+  let counterfeit =
+    { canonical with description = canonical.description ^ " (counterfeit)" }
+  in
+  check string "counterfeit retains the registered id" canonical.id counterfeit.id;
+  check bool "counterfeit is not canonical" false (counterfeit == canonical);
+  let result =
+    KET.execute_keeper_tool_descriptor_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~descriptor:counterfeit
+      ~input:(`Assoc [])
+      ()
+  in
+  check_frozen_surface_rejection "counterfeit descriptor" result
+;;
+
+let test_frozen_surface_production_bundle_executes_public_read () =
+  with_exec_fixture "frozen-surface-production-read"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let playground = KES.keeper_default_write_root ~config ~meta in
+  let relative_path = "frozen-bundle-read.txt" in
+  let expected_content = "canonical frozen bundle content\n" in
+  mkdir_p playground;
+  write_file (Filename.concat playground relative_path) expected_content;
+  let capability_surface = frozen_capability_surface ~tool_groups:[] in
+  let bundle =
+    Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot:ctx_work
+      ~capability_surface
+      ()
+  in
+  Fun.protect
+    ~finally:bundle.cleanup
+    (fun () ->
+       let read_tool =
+         match find_tool_by_name bundle.tools "Read" with
+         | Some tool -> tool
+         | None -> fail "production capability bundle omitted public Read"
+       in
+       match
+         Agent_core.Tool.execute
+           read_tool
+           (`Assoc [ "file_path", `String relative_path; "limit", `Int 4096 ])
+       with
+       | Error error ->
+         failf
+           "production capability bundle Read failed: %s"
+           error.Agent_core.Types.message
+       | Ok output ->
+         let payload = parse_json output.content in
+         check string
+           "production capability bundle returns fixture content"
+           expected_content
+           Yojson.Safe.Util.(payload |> member "content" |> to_string))
+;;
+
+let test_frozen_surface_name_dispatch_rejects_non_exposed_alias () =
+  with_exec_fixture "frozen-surface-name-alias"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let capability_surface = frozen_capability_surface ~tool_groups:[] in
+  check bool
+    "Read descriptor is active in the fixture"
+    true
+    (Masc.Keeper_capability_surface.descriptors capability_surface
+     |> List.exists (fun descriptor ->
+       Masc.Keeper_tool_descriptor.keeper_model_names descriptor
+       |> List.exists (String.equal "Read")));
+  let result =
+    KET.execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~name:"tool_read_file"
+      ~input:(`Assoc [ "path", `String "outside.txt" ])
+      ()
+  in
+  check_frozen_surface_rejection "non-exposed internal alias" result
+;;
+
+let test_frozen_surface_nested_plan_rejects_excluded_descriptor () =
+  with_exec_fixture "frozen-surface-nested-plan-excluded"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let descriptor = composition_descriptor "Read" in
+  let node =
+    Masc.Keeper_tool_plan.node
+      ~id:(composition_node_id "read")
+      ~tool_name:"Read"
+      ~input:
+        (Masc.Keeper_tool_plan.Json_template.literal
+           (`Assoc [ "file_path", `String "outside.txt" ]))
+      ()
+  in
+  let plan =
+    match Masc.Keeper_tool_plan.create ~descriptors:[ descriptor ] [ node ] with
+    | Ok plan -> plan
+    | Error error -> fail (Masc.Keeper_tool_plan.error_to_string error)
+  in
+  match
+    Masc.Keeper_tool_plan_executor.execute_keeper
+      ~capability_surface
+      ~plan
+      ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
+      ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
+      ~parent_invocation:
+        (composition_invocation
+           ~completion:Agent_core.Tool_contract.Continue_after_success)
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot:ctx_work
+      ()
+  with
+  | Error
+      { cause = Masc.Keeper_tool_plan_executor.Tool_did_not_complete node_result
+      ; _
+      } ->
+    check bool
+      "nested exclusion stays a policy rejection"
+      true
+      (match node_result.result with
+       | Tool_result.Failed { class_ = Tool_result.Policy_rejection; _ } -> true
+       | Tool_result.Completed _
+       | Tool_result.Deferred _
+       | Tool_result.Failed _ -> false);
+    check
+      (option bool)
+      "nested exclusion stays proven pre-effect"
+      (Some true)
+      (Option.map
+         (fun disposition -> disposition = Tool_result.Proven_pre_effect)
+         node_result.failure_effect_disposition);
+    check string
+      "nested exclusion preserves typed error"
+      "tool_outside_frozen_capability_surface"
+      Yojson.Safe.Util.
+        (Tool_result.data node_result.result |> member "error" |> to_string)
+  | Error _ -> fail "nested plan failed before the frozen dispatch boundary"
+  | Ok _ -> fail "nested plan recovered a descriptor outside its frozen surface"
+;;
+
 let test_tools_search_error_reaches_agent_core_as_typed_payload () =
   with_exec_fixture
     "tools-search-agent-core-error"
@@ -4780,9 +5037,9 @@ let test_tools_search_error_reaches_agent_core_as_typed_payload () =
            ()
        in
        let tool =
-         match find_tool_by_name tools "keeper_tools_list" with
+         match find_tool_by_name tools "keeper_capability_search" with
          | Some tool -> tool
-         | None -> fail "keeper_tools_list is absent from Agent Core bundle"
+         | None -> fail "keeper_capability_search is absent from Agent Core bundle"
        in
        let reject input =
          match
@@ -4808,7 +5065,7 @@ let test_tools_search_error_reaches_agent_core_as_typed_payload () =
        let empty = reject (`Assoc [ "query", `String "  " ]) in
        check string
          "Agent Core receives the typed search error kind"
-         "empty_query"
+         "frozen_surface_required"
          Yojson.Safe.Util.(empty |> member "error" |> member "kind" |> to_string);
        let wrong_type = reject (`Assoc [ "query", `Int 3 ]) in
        check string
@@ -5774,7 +6031,7 @@ let test_stale_spawn_handles_remain_correction_capable () =
        in
        Spawn_turn_registry.with_turn_registry (Some registry) @@ fun () ->
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -6777,7 +7034,7 @@ let test_composition_runtime_uses_canonical_descriptor () =
          | Error _ -> fail "canonicalized composition plan was rejected"
        in
        match
-         Masc.Keeper_tool_plan_executor.execute_keeper
+         Masc.Keeper_tool_plan_executor.Compatibility.execute_keeper
            ~plan
            ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
            ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
@@ -6820,7 +7077,7 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
          | Error _ -> fail "terminal composition plan was rejected"
        in
        match
-         Masc.Keeper_tool_plan_executor.execute_keeper
+         Masc.Keeper_tool_plan_executor.Compatibility.execute_keeper
            ~plan
            ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
            ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
@@ -7166,6 +7423,18 @@ let () =
         test_invalid_surface_post_input_stays_correction_capable;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
+      test_case "frozen surface rejects an excluded global tool" `Quick
+        test_frozen_surface_direct_dispatch_rejects_excluded_global_tool;
+      test_case "frozen surface accepts its exact descriptor" `Quick
+        test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor;
+      test_case "frozen surface rejects a same-id counterfeit descriptor" `Quick
+        test_frozen_surface_rejects_same_id_counterfeit_descriptor;
+      test_case "production frozen bundle executes public Read" `Quick
+        test_frozen_surface_production_bundle_executes_public_read;
+      test_case "frozen surface rejects a non-exposed descriptor alias" `Quick
+        test_frozen_surface_name_dispatch_rejects_non_exposed_alias;
+      test_case "nested plan preserves frozen surface authority" `Quick
+        test_frozen_surface_nested_plan_rejects_excluded_descriptor;
       test_case "composition dispatch uses canonical descriptor authority" `Quick
         test_composition_runtime_uses_canonical_descriptor;
       test_case "catalog composition is a first-class executable tool" `Quick
@@ -7212,6 +7481,8 @@ let () =
     ("keeper_tools_list_json", [
       test_case "uses typed groups" `Quick
         test_keeper_tools_list_json_uses_typed_groups;
+      test_case "lists and searches operator-only Tools" `Quick
+        test_frozen_surface_lists_and_searches_operator_only_tool;
       test_case "Agent Core receives typed search failures" `Quick
         test_tools_search_error_reaches_agent_core_as_typed_payload;
       test_case "descriptor route miss is typed runtime failure" `Quick

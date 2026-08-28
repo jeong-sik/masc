@@ -2,9 +2,16 @@
 
     One lightweight VM per container through Virtualization.framework, so a
     guest runs its own Linux kernel instead of sharing the host's. Measured
-    2026-08-28 on macOS 26.6.1 / M3 Max with container CLI 1.3.0: 4.0-4.4s to
-    start against Docker's 0.6-0.9s, about 400 MB of host memory per running
-    container, and the guest reporting [Linux <uuid> 6.18.35].
+    2026-08-28 on macOS 26.6.1 / M3 Max with container CLI 1.3.0: about
+    460 MB of host memory per running guest, and the guest reporting
+    [Linux <uuid> 6.18.35].
+
+    Cost is per keeper, not per call. Booting a guest takes 1.3-2.4s, but
+    #31340 made the guest keeper-lifetime, so a turn pays [container exec]
+    at 0.06-0.10s -- under Docker's 0.6-0.9s per-call container start. An
+    earlier version of this comment quoted 4.0-4.4s per call: that was
+    measured before guests were adopted across turns, and stayed here after
+    the number stopped being true.
 
     This module builds the command and nothing else. Dispatch still refuses
     [Micro_vm] until a later change routes it here, so the argv is covered by
@@ -106,8 +113,16 @@ let image_present ~image ~timeout_sec =
   match
     Process_eio.run_argv_with_status ~timeout_sec argv
   with
+  (* Exit status separates the answers, so none of them is guessed.
+     Measured against container 1.3.0 on 2026-08-28: 0 for a present image,
+     1 for an absent one, 127 when the CLI is not on PATH.
+
+     The first version collapsed everything that was not 0 into "image
+     missing". A dead daemon, a timeout and an uninstalled CLI all told the
+     operator to build an image they already had -- the unknown-to-convenient
+     -default shape this module was written to avoid. *)
   | Unix.WEXITED 0, _ -> Ok ()
-  | _ ->
+  | Unix.WEXITED 1, _ ->
     Error
       (Printf.sprintf
          "microvm_image_missing: %s is not in the container image store. \
@@ -116,6 +131,26 @@ let image_present ~image ~timeout_sec =
           registry instead of failing. Next: build or load the image with \
           `container image` before starting a microvm keeper."
          image)
+  | Unix.WEXITED 127, _ ->
+    Error
+      "microvm_cli_unavailable: the `container` CLI is not on PATH. Next: \
+       install Apple container, or move the keeper to sandbox_profile = \
+       \"docker\"."
+  | status, out ->
+    (* Says what it saw rather than naming a cause it does not know. The
+       image may well be present; the probe could not find out. *)
+    Error
+      (Printf.sprintf
+         "microvm_image_probe_failed: `container image inspect %s` did not \
+          answer whether the image exists (%s). Next: check that the \
+          container system is running with `container system status`."
+         image
+         (Keeper_sandbox_runtime.docker_failure_output_for_log out
+          |> fun detail ->
+          match status with
+          | Unix.WEXITED code -> Printf.sprintf "exit %d: %s" code detail
+          | Unix.WSIGNALED n -> Printf.sprintf "signal %d: %s" n detail
+          | Unix.WSTOPPED n -> Printf.sprintf "stopped %d: %s" n detail))
 ;;
 
 (* ── Turn-container argv ─────────────────────────────────────────────
@@ -210,3 +245,89 @@ let running_of_inspect_json raw =
 ;;
 
 let inspect_argv ~container_name = command_argv () @ [ "inspect"; container_name ]
+
+(** Guests whose owning server is gone.
+
+    A guest is keeper-lifetime, so age says nothing: one running for days
+    belongs to a keeper that has been busy for days. What marks a guest as
+    abandoned is its [masc.mcp.owner_pid] label naming a process that no
+    longer exists -- the server that booted it died without reaching
+    shutdown finalization, which is the one path that removes a guest
+    (#31413). Each is about 460 MB, so they are worth collecting.
+
+    Owner liveness is a fact rather than a heuristic, which is why this does
+    not fall back to a time cutoff when the label is missing or unreadable:
+    a guest it cannot account for is left alone and reported, not removed.
+    Removing somebody's running guest to tidy up is worse than leaking. *)
+type sweep_candidate =
+  { container_id : string
+  ; keeper_name : string option
+  ; owner_pid : int option
+  }
+
+let label_of entry key =
+  let open Yojson.Safe.Util in
+  match entry |> member "configuration" |> member "labels" |> member key with
+  | `String value -> Some value
+  | _ -> None
+;;
+
+let sweep_candidates_of_json ~is_pid_alive json =
+  let open Yojson.Safe.Util in
+  match json with
+  | `List entries ->
+    List.filter_map
+      (fun entry ->
+         let kind = label_of entry Keeper_sandbox_runtime_setup.sandbox_kind_label_key in
+         let id =
+           match entry |> member "configuration" |> member "id" with
+           | `String id -> Some id
+           | _ -> None
+         in
+         match kind, id with
+         | Some kind, Some container_id when String.equal kind keeper_vm_container_kind ->
+           let owner_pid =
+             Option.bind (label_of entry Keeper_sandbox_runtime_setup.sandbox_owner_pid_label_key) int_of_string_opt
+           in
+           (match owner_pid with
+            (* No label, or one that does not parse: this build cannot say
+               whose guest it is, so it stays. *)
+            | None -> None
+            | Some pid -> if is_pid_alive pid then None else Some { container_id; keeper_name = label_of entry Keeper_sandbox_runtime_setup.sandbox_keeper_label_key; owner_pid })
+         | _ -> None)
+      entries
+  | _ -> []
+;;
+
+type sweep_outcome =
+  { removed : string list
+  ; failed : (string * string) list
+  }
+
+(** Remove every guest whose owning server is gone.
+
+    Returns what it did rather than raising: a guest that refuses to stop is
+    worth reporting, and is not a reason to fail whatever asked for the
+    sweep. A listing that cannot be read removes nothing. *)
+let sweep_abandoned_guests ~timeout_sec ~is_pid_alive ~run_argv =
+  let listing = command_argv () @ [ "list"; "-a"; "--format"; "json" ] in
+  match run_argv ~timeout_sec listing with
+  | Unix.WEXITED 0, out ->
+    let candidates =
+      match Yojson.Safe.from_string out with
+      | json -> sweep_candidates_of_json ~is_pid_alive json
+      | exception Yojson.Json_error _ -> []
+    in
+    List.fold_left
+      (fun acc candidate ->
+         match
+           run_argv ~timeout_sec (delete_force_argv ~container_name:candidate.container_id)
+         with
+         | Unix.WEXITED 0, _ ->
+           { acc with removed = candidate.container_id :: acc.removed }
+         | _, detail ->
+           { acc with failed = (candidate.container_id, detail) :: acc.failed })
+      { removed = []; failed = [] }
+      candidates
+  | _, _ -> { removed = []; failed = [] }
+;;

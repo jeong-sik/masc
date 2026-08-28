@@ -54,122 +54,6 @@ open Tool_args
 
 (** {1 Individual Handlers} *)
 
-let handle_plan_init ~tool_name ~start_time ctx args : Tool_result.result =
-  let task_id = get_string args "task_id" "" in
-  let result = Planning_eio.init ctx.config ~task_id in
-  match result with
-  | Ok _ctx ->
-      let response = `Assoc [
-        Plan_action_outcome.(status_field Initialized);
-        ("task_id", `String task_id);
-        ("message", `String (Printf.sprintf "Planning context created for %s" task_id));
-      ] in
-      Tool_result.make_ok ~tool_name ~start_time ~data:response ()
-  | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
-        (Printf.sprintf "Failed to init planning: %s" e)
-
-let handle_plan_update ~tool_name ~start_time ctx args : Tool_result.result =
-  let task_id = get_string args "task_id" "" in
-  let content = get_string args "content" "" in
-  let result = Planning_eio.update_plan ctx.config ~task_id ~content in
-  match result with
-  | Ok plan_ctx ->
-      let response = `Assoc [
-        Plan_action_outcome.(status_field Updated);
-        ("task_id", `String task_id);
-        ("updated_at", `String plan_ctx.Planning_eio.updated_at);
-      ] in
-      Tool_result.make_ok ~tool_name ~start_time ~data:response ()
-  | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
-        (Printf.sprintf "Failed to update plan: %s" e)
-
-let handle_note_add ~tool_name ~start_time ctx args : Tool_result.result =
-  let task_id = get_string args "task_id" "" in
-  let note = get_string args "note" "" in
-  let result = Planning_eio.add_note ctx.config ~task_id ~note in
-  match result with
-  | Ok plan_ctx ->
-      let response = `Assoc [
-        Plan_action_outcome.(status_field Added);
-        ("task_id", `String task_id);
-      ] in
-      Tool_result.make_ok ~tool_name ~start_time ~data:response ()
-  | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
-        (Printf.sprintf "Failed to add note: %s" e)
-
-let handle_deliver ~tool_name ~start_time ctx args : Tool_result.result =
-  let task_id_input = get_string args "task_id" "" in
-  match Planning_eio.resolve_task_id ctx.config ~task_id:task_id_input with
-  | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Workflow_rejection
-        ~start_time
-        e
-  | Ok task_id ->
-  let content = get_string args "content" "" in
-  if String.equal (String.trim content) "" then
-    Tool_result.make_err
-      ~tool_name
-      ~class_:Tool_result.Workflow_rejection
-      ~start_time
-      "content is required for masc_deliver"
-  else
-  let result = Planning_eio.set_deliverable ctx.config ~task_id ~content in
-  match result with
-  | Ok plan_ctx ->
-      let response = `Assoc [
-        Plan_action_outcome.(status_field Delivered);
-        ("task_id", `String task_id);
-        ("updated_at", `String plan_ctx.Planning_eio.updated_at);
-      ] in
-      Tool_result.make_ok ~tool_name ~start_time ~data:response ()
-  | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
-        (Printf.sprintf "Failed to set deliverable: %s" e)
-
-let handle_plan_get ~tool_name ~start_time ctx args : Tool_result.result =
-  let task_id_input = get_string args "task_id" "" in
-  match Planning_eio.resolve_task_id ctx.config ~task_id:task_id_input with
-  | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Workflow_rejection
-        ~start_time
-        e
-  | Ok task_id ->
-      let result = Planning_eio.load_or_init ctx.config ~task_id in
-      match result with
-      | Ok plan_ctx ->
-          let markdown = Planning_eio.get_context_markdown plan_ctx in
-          let response = `Assoc [
-            ("task_id", `String task_id);
-            ("context", Planning_eio.planning_context_to_yojson plan_ctx);
-            ("markdown", `String markdown);
-          ] in
-          Tool_result.make_ok ~tool_name ~start_time ~data:response ()
-      | Error e ->
-          Tool_result.make_err
-            ~tool_name
-            ~class_:Tool_result.Runtime_failure
-            ~start_time
-            (Printf.sprintf "Failed to load planning context: %s" e)
-
 let handle_plan_set_task ~tool_name ~start_time ctx args : Tool_result.result =
   let task_id = get_string args "task_id" "" in
   if String.equal task_id "" then
@@ -217,11 +101,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   let lift r = Some r in
   match name with
-  | "masc_plan_init" -> lift (handle_plan_init ~tool_name:name ~start_time:start ctx args)
-  | "masc_plan_update" -> lift (handle_plan_update ~tool_name:name ~start_time:start ctx args)
-  | "masc_note_add" -> lift (handle_note_add ~tool_name:name ~start_time:start ctx args)
-  | "masc_deliver" -> lift (handle_deliver ~tool_name:name ~start_time:start ctx args)
-  | "masc_plan_get" -> lift (handle_plan_get ~tool_name:name ~start_time:start ctx args)
   | "masc_plan_set_task" -> lift (handle_plan_set_task ~tool_name:name ~start_time:start ctx args)
   | "masc_plan_get_task" -> lift (handle_plan_get_task ~tool_name:name ~start_time:start ctx args)
   | "masc_plan_clear_task" -> lift (handle_plan_clear_task ~tool_name:name ~start_time:start ctx args)
@@ -238,14 +117,9 @@ let tool_spec_read_only = [ "masc_plan_get_task" ]
 
 let () =
   let is_plan = function
-    | "masc_plan_init"
-    | "masc_plan_update"
-    | "masc_plan_get"
     | "masc_plan_set_task"
     | "masc_plan_get_task"
-    | "masc_plan_clear_task"
-    | "masc_note_add"
-    | "masc_deliver" -> true
+    | "masc_plan_clear_task" -> true
     | _ -> false
   in
   List.iter

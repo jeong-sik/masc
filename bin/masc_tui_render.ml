@@ -1280,6 +1280,45 @@ let render_overview (state : state) =
    arithmetic instead of trusting it. *)
 let boxed_surface_chrome_rows = 10
 
+(* One task's event history, appended after the detail body so it rides the
+   same scroll. Loaded lazily on detail entry; the id check drops an answer
+   for a task the operator already left. Rows are raw event-stream lines, so
+   only the fields present are drawn. *)
+let task_history_lines (state : state) task_id =
+  let header = "  HISTORY" in
+  let rows =
+    match state.task_history with
+    | Some (id, result) when String.equal id task_id -> (
+        match result with
+        | Ok [] -> [ "    (no events recorded)" ]
+        | Ok events ->
+            List.concat_map
+              (fun (event : Tui_decode.task_history_event) ->
+                let transition =
+                  match event.Tui_decode.th_from_status, event.th_to_status with
+                  | Some from_status, Some to_status ->
+                      Printf.sprintf "  %s -> %s" from_status to_status
+                  | Some from_status, None -> "  from " ^ from_status
+                  | None, Some to_status -> "  -> " ^ to_status
+                  | None, None -> ""
+                in
+                let actor =
+                  match event.th_actor with
+                  | Some actor -> "  by " ^ actor
+                  | None -> ""
+                in
+                Printf.sprintf "    %s  %s%s%s"
+                  (Planning_detail.short_ts event.th_ts)
+                  event.th_label transition actor
+                :: (match event.th_note with
+                    | Some note -> [ "      " ^ note ]
+                    | None -> []))
+              events
+        | Error err -> [ "    load failed: " ^ err ])
+    | _ -> [ "    loading..." ]
+  in
+  ("" :: header :: rows)
+
 let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -1415,6 +1454,7 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
            @ list_lines "done-when" contract.Masc_domain.completion_contract
            @ list_lines "evidence" contract.Masc_domain.required_evidence)
     @ list_lines "file" task.files
+    @ task_history_lines state task.id
   in
   let total_lines = List.length body_lines in
   (* Chrome above and below the scrolling body: top border, header, divider,
@@ -1474,7 +1514,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
-       ~hints:"j/k:scroll  left/esc:back  r:refresh");
+       ~hints:"j/k:scroll  x:cancel  left/esc:back  r:refresh");
 
   finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
@@ -2956,6 +2996,8 @@ let planning_detail_pane (state : state)
      surface's scroll moves through. *)
   let body =
     Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note
+    @ Planning_detail.timeline ~width:(cols - 6) ~goal_id:goal.pg_id
+        state.goal_timeline
   in
   (* What is being done about this goal. The goal record does not carry its
      tasks -- the goal-task registry is the source of truth and the loader
@@ -3083,6 +3125,27 @@ let render_planning_detail (state : state)
 (* The store's status vocabulary, as colours. An unknown word keeps its own
    text and no colour: the row is still a fact about the store, just one this
    build does not rank. *)
+(* Who the wake reaches. The payload target names a keeper on the rows this
+   list can draw; rows without one fall back to the summary, then the source,
+   so every row names something.
+
+   The kind prefix comes off first. It is "keeper:" on every row here, so it
+   separates nothing and takes seven cells out of the name -- which left two
+   schedules for two different keepers both reading "keeper:~". The agenda
+   strip has stripped it since it was written; this list is the surface that
+   did not.
+
+   Lifted out of the row loop because the column measures itself from the
+   rows now: the width and the cell have to be reading the same string. *)
+let schedule_row_subject (row : Masc_tui_types.schedule_row) =
+  match row.sch_payload_target with
+  | Some target -> Masc_tui_agenda.short_who target
+  | None -> (
+    match row.sch_payload_summary with
+    | Some summary -> summary
+    | None -> row.sch_source)
+;;
+
 let schedule_status_color status =
   semantic_status_color status
 
@@ -3183,6 +3246,15 @@ let render_schedule_list (state : state) =
               it the list says when a wake is due but not whether the dispatch,
               queue, and reaction projections agree. Two rows keep all three
               projections readable at the 100-column regression viewport. *)
+           let subject_width =
+             List.fold_left
+               (fun widest row ->
+                 max widest
+                   (Message_layout.display_width
+                      (Terminal_text.single_line (schedule_row_subject row))))
+               16 snapshot.scs_rows
+             |> min 40
+           in
            let content_height = rows - 14 in
            let scroll_offset =
              if state.schedule_cursor >= content_height then
@@ -3209,14 +3281,7 @@ let render_schedule_list (state : state) =
                   two different keepers both reading "keeper:~". The agenda
                   strip has stripped it since it was written; this list is
                   the surface that did not. *)
-               let subject =
-                 match row.sch_payload_target with
-                 | Some target -> Masc_tui_agenda.short_who target
-                 | None ->
-                     (match row.sch_payload_summary with
-                      | Some summary -> summary
-                      | None -> row.sch_source)
-               in
+               let subject = schedule_row_subject row in
                let status_color = schedule_status_color row.sch_status in
                let last_wake =
                  Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status
@@ -3227,8 +3292,15 @@ let render_schedule_list (state : state) =
                    (fit_width row.sch_status 10)
                    Ansi.reset
                    due
+                   (* Measured from the rows rather than given the rest of the
+                      line. The subject is a keeper name on every row that has
+                      a payload target, so [cols - 76] spent ninety cells on
+                      [edgar.a.poe] and the recurrence past it -- which is
+                      where the timezone lives -- read [daily 08:00:00 A~].
+                      The fallback summary can be long, so it is capped rather
+                      than trusted. *)
                    (fit_width (Terminal_text.single_line subject)
-                      (max 8 (cols - 76)))
+                      subject_width)
                    (schedule_status_color last_wake)
                    (fit_width (Terminal_text.single_line last_wake) 10)
                    Ansi.reset
@@ -3663,12 +3735,31 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
      Idle and unavailable rows keep the health word -- unavailable is the
      owner lookup failing, which the health column describes better than a
      blank would. *)
+  (* A turn record that outlives the process it belongs to. The summary above
+     this table read "2 offline / not running: polisher, taskmaster" while
+     taskmaster's own row drew a turning mark and a climbing clock: its turn
+     had started and never been closed, and the process behind it had gone.
+     The row that most needed reading looked like the healthiest kind.
+
+     The elapsed stays -- a turn open two minutes is the fact -- but the mark
+     stops. Motion here means work is progressing, and for a keeper the health
+     reading calls offline or zombie, nothing is. *)
+  let turn_is_being_worked =
+    match Option.map Tui_decode.keeper_health_reading health with
+    | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> false
+    | Some
+        ( Tui_decode.Health_running | Tui_decode.Health_idle
+        | Tui_decode.Health_stale | Tui_decode.Health_degraded )
+    | None ->
+      true
+  in
   let glyph, status_word, status_color =
     match (turn : Tui_decode.keeper_turn_state option) with
     | Some (Tui_decode.Keeper_turn_running { started_at_unix; _ }) ->
-      ( Masc_tui_answering.running_glyph ~frame
+      ( Masc_tui_answering.running_glyph
+          ~frame:(if turn_is_being_worked then frame else -1)
       , Masc_tui_answering.elapsed_text ~now started_at_unix
-      , Ansi.cyan )
+      , if turn_is_being_worked then Ansi.cyan else (Theme.bad ()) )
     | Some Tui_decode.Keeper_turn_idle
     | Some (Tui_decode.Keeper_turn_unavailable _)
     | None ->
@@ -4199,16 +4290,33 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
     | Tui_decode.Standalone_running, Some started_at ->
       ( Masc_tui_answering.running_glyph ~frame
       , status ^ " " ^ Masc_tui_answering.elapsed_text ~now started_at )
-    | ( ( Tui_decode.Standalone_running | Tui_decode.Standalone_idle
-        | Tui_decode.Standalone_degraded | Tui_decode.Standalone_unavailable
-        | Tui_decode.Standalone_no_retained_observation )
-      , _ ) ->
+    (* One mark per colour class, so a reader who cannot tell the colours
+       apart gets the split the colours make. Four states shared a single
+       [\xe2\x97\x8f] while the style beside them was green, red or grey: on
+       a column of identical marks, the lane failing 133 of 1095 runs looked
+       exactly like the four that were fine.
+
+       This says what the style says and no more -- the mapping is the same
+       three-way split, not a second opinion about severity. *)
+    | (Tui_decode.Standalone_idle | Tui_decode.Standalone_running), _ ->
       ("\xe2\x97\x8f", status)
+    | ( (Tui_decode.Standalone_degraded | Tui_decode.Standalone_unavailable)
+      , _ ) ->
+      ("\xe2\x9c\x97", status)
+    | Tui_decode.Standalone_no_retained_observation, _ -> ("\xc2\xb7", status)
   in
+  (* Why the lane cannot admit, where the cell used to restate that it cannot.
+     "no admitted slot" says the same thing the status word beside it already
+     says; the projection carries the reason -- an unconfigured lane and a lane
+     whose registry could not be read are different problems and the operator
+     acts on them differently -- and nothing drew it. *)
   let slots =
-    match lane.sl_admitted_slots with
-    | [] -> "no admitted slot"
-    | slots -> String.concat "," slots
+    match lane.sl_admitted_slots, lane.sl_admission_error with
+    | [], Some reason -> reason
+    | [], None -> "no admitted slot"
+    | admitted, None -> String.concat "," admitted
+    | admitted, Some reason ->
+      String.concat "," admitted ^ " \xc2\xb7 " ^ reason
   in
   let observed_slots =
     match lane.sl_selected_slots with
@@ -5803,8 +5911,7 @@ let render_keeper_message (state : state) =
         ->
           let request_id = Keeper_chat_transcript.request_id live in
           let request_label = Keeper_chat.compact_request_id request_id in
-          let entry ?(markdown_source = Message_layout.Markdown_streaming) style
-              role_label body =
+          let entry ~markdown_source style role_label body =
             (* One alignment, on the label the row actually carries. Aligning
                the continuation mark and then aligning the result again pays
                the badge's width twice, so the second call trims what the
@@ -5842,7 +5949,15 @@ let render_keeper_message (state : state) =
 
              The index counts trail positions, not surviving rows, which is
              what the cache key needs: hiding reasoning must not renumber the
-             text entries and invalidate every cached render below it. *)
+             text entries and invalidate every cached render below it.
+
+             Every live stretch rides the growing-markdown cache, reasoning and
+             tool blocks included: a frame whose text did not move reuses the
+             rows outright, and only the new suffix is parsed when it did.
+             Tool rows rewrite earlier lines when a call settles, which is not
+             an append; the cache detects that (the new text no longer starts
+             with the old) and falls back to one full render, the same work
+             the uncached streaming path did on every frame. *)
           List.filter_map Fun.id
           @@ List.mapi
                (fun entry_index (item : Keeper_chat_transcript.trail_item) ->
@@ -5852,7 +5967,14 @@ let render_keeper_message (state : state) =
                   None
               | Keeper_chat_transcript.Trail_thinking lines ->
                   Some
-                    (entry Message_layout.Thinking "THINKING"
+                    (entry
+                       ~markdown_source:
+                         (Message_layout.Markdown_growing
+                            { keeper_name;
+                              request_id;
+                              entry_index;
+                            })
+                       Message_layout.Thinking "THINKING"
                        (if state.msg_reasoning_visibility = Reasoning_folded
                         then folded_thinking_summary (String.concat "\n" lines)
                         else String.concat "\n" lines))
@@ -5862,7 +5984,14 @@ let render_keeper_message (state : state) =
                       (tool_projection_mode state) block
                   in
                   Some
-                    (entry (tool_block_style projection) "TOOLS"
+                    (entry
+                       ~markdown_source:
+                         (Message_layout.Markdown_growing
+                            { keeper_name;
+                              request_id;
+                              entry_index;
+                            })
+                       (tool_block_style projection) "TOOLS"
                        (String.concat "\n" (projected_tool_rows projection)))
               | Keeper_chat_transcript.Trail_text text ->
                   Some
@@ -6363,9 +6492,21 @@ let render_verification_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (* Measured from the rows. Sixteen was the fixed width and the longest
+     submitter on the wire is thirty-seven, so every [keeper-*-agent] row
+     pushed the two columns after it out of line with the rest. *)
+  let submitter_width =
+    List.fold_left
+      (fun widest (r : Masc.Tui_decode.verification_request) ->
+        max widest
+          (Message_layout.display_width
+             (Terminal_text.single_line r.Masc.Tui_decode.vr_submitted_by)))
+      16 requests
+    |> min 26
+  in
   let col_hdr =
-    Printf.sprintf "  %-14s %-16s %-9s %s" "Task" "Submitted by" "Evidence"
-      "What it asks for"
+    Printf.sprintf "  %-14s %-*s %-9s %s" "Task" submitter_width
+      "Submitted by" "Evidence" "What it asks for"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -6412,15 +6553,23 @@ let render_verification_list (state : state) =
                   (List.length r.vr_submitted_evidence)
                   (List.length r.vr_required_artifacts)
           in
-          let asks =
-            match r.vr_next_action with
-            | Some action -> action
-            | None -> r.vr_summary
-          in
+          (* The task's own title. This column read [next_action] and fell
+             back to [request_summary], and both are literals in the producer:
+             [submit_request_spec] sets [request_summary = ""] and
+             [next_action = ""] and writes them into the request. All 200
+             rows on the wire carry both empty, so the column had a header and
+             no content on every row that has ever been drawn.
+
+             The title is in the same object, filled on all 200, decoded into
+             [vr_task_title] already, and shown in the detail pane below --
+             just not in the list. What a verification request asks for is
+             that this task be verified, so the title is what it asks for. *)
+          let asks = r.vr_task_title in
           let line =
-            Printf.sprintf "  %-14s %-16s %-9s %s"
+            Printf.sprintf "  %-14s %s %-9s %s"
               (Terminal_text.single_line r.vr_task_id)
-              (Terminal_text.single_line r.vr_submitted_by)
+              (fit_width (Terminal_text.single_line r.vr_submitted_by)
+                 submitter_width)
               evidence
               (Terminal_text.single_line asks)
           in
@@ -6490,28 +6639,20 @@ let verification_detail_lines ~width
                     Ansi.reset, (if index = 0 then "    - " else "      ") ^ line))
           items
   in
-  let summary =
-    if String.equal (String.trim request.vr_summary) "" then
-      "No request summary was recorded. Read the required artifacts and submitted evidence below."
-    else request.vr_summary
-  in
-  let next_action =
-    match request.vr_next_action with
-    | Some action when not (String.equal (String.trim action) "") -> action
-    | Some _ | None -> "No next action was recorded."
-  in
   [ Ansi.bold, "  VERIFICATION REQUEST"
   ; field "Request" request.vr_request_id
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
-  ; field "Kind" request.vr_kind
   ; field "Submitted by" request.vr_submitted_by
   ; field "Created" request.vr_created_at
   ; Ansi.dim, ""
   ]
-  @ wrapped_block "What is being judged" summary
-  @ [ Ansi.dim, "" ]
-  @ wrapped_block "What moves it forward" next_action
+  (* [Kind], [What is being judged] and [What moves it forward] stood here.
+     Their three fields were literals in the producer -- "normal", "" and "" --
+     so the three rows read the same on every request this pane has ever
+     drawn, two of them as "No X was recorded". The pane already tells a
+     reader how to read the request from its artifacts and evidence, which is
+     what those rows were pointing away from. *)
   @ [ Ansi.dim, ""
     ; Ansi.bold, "  HOW TO READ THIS"
     ; ( Ansi.dim
@@ -6535,6 +6676,51 @@ let verification_detail_lines ~width
       [ Ansi.dim, "" ]
       @ wrapped_block "Evidence projection error" detail
 
+(* What the verifier can actually inspect: the operator evidence bundle,
+   lazily fetched on detail entry. The snapshot above lists references; this
+   carries artifact content prefixes (server-capped, truncation marked) and
+   the typed reason when an artifact could not be read — the judge's actual
+   input, drawn beside the verdict keys so approval is not blind. *)
+let verification_evidence_lines (state : state) ~width task_id =
+  let wrap ~prefix text =
+    Message_layout.wrap_body ~max_cells:(max 1 (width - 6))
+      ~sanitize:Keeper_chat.terminal_safe_text text
+    |> List.mapi (fun index line ->
+           Ansi.reset, (if index = 0 then prefix else "      ") ^ line)
+  in
+  let rows =
+    match state.verification_evidence with
+    | Some (id, result) when String.equal id task_id -> (
+        match result with
+        | Ok (Masc.Tui_decode.Evidence_items []) ->
+            [ Ansi.dim, "    (no inspectable evidence)" ]
+        | Ok (Masc.Tui_decode.Evidence_items items) ->
+            List.concat_map
+              (fun (item : Masc.Tui_decode.verification_evidence_item) ->
+                match item with
+                | Masc.Tui_decode.Ev_note note -> wrap ~prefix:"    - note: " note
+                | Masc.Tui_decode.Ev_artifact
+                    { ev_reference; ev_content; ev_bytes; ev_truncated } ->
+                    (( Ansi.reset
+                     , Printf.sprintf "    - artifact %s (%dB%s)"
+                         (Terminal_text.single_line ev_reference) ev_bytes
+                         (if ev_truncated then ", truncated" else "") )
+                     :: wrap ~prefix:"      " ev_content)
+                | Masc.Tui_decode.Ev_artifact_unreadable
+                    { ev_u_reference; ev_u_reason } ->
+                    wrap
+                      ~prefix:"    - artifact unreadable: "
+                      (Printf.sprintf "%s %s"
+                         (Option.value ev_u_reference ~default:"(no reference)")
+                         ev_u_reason))
+              items
+        | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
+            wrap ~prefix:"    evidence unavailable: " reason
+        | Error err -> wrap ~prefix:"    evidence load failed: " err)
+    | _ -> [ Ansi.dim, "    loading..." ]
+  in
+  (Ansi.dim, "") :: (Ansi.bold, "  EVIDENCE CONTENT") :: rows
+
 let verification_detail_pane (state : state) ~rows ~cols request buf =
   box_top buf cols;
   box_line buf cols
@@ -6542,7 +6728,11 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
        (screen_title " MASC Verification \xe2\x96\xb8 details")
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
-  let lines = verification_detail_lines ~width:(max 1 (framed_inner_width cols)) request in
+  let width = max 1 (framed_inner_width cols) in
+  let lines =
+    verification_detail_lines ~width request
+    @ verification_evidence_lines state ~width request.Masc.Tui_decode.vr_task_id
+  in
   let content_height = max 1 (rows - 6) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in

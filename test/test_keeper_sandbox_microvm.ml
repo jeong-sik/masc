@@ -463,6 +463,65 @@ let test_docker_lane_keeps_the_full_env () =
         then Alcotest.failf "docker lane dropped %S the microvm lane carries" arg)
       (microvm_env ~base_path))
 
+
+(* Sweep selection. A guest is keeper-lifetime, so the only safe reason to
+   remove one is that the server which booted it is gone -- age would kill a
+   keeper that has simply been busy for days. These pin that the rule is
+   owner liveness and nothing else, and that an entry the build cannot
+   account for is left alone. *)
+
+let entry ?(kind = "keeper-vm") ?owner_pid ?(keeper = "probe") id =
+  let labels =
+    [ "masc.mcp.kind", `String kind; "masc.mcp.keeper", `String keeper ]
+    @ (match owner_pid with Some p -> [ "masc.mcp.owner_pid", `String p ] | None -> [])
+  in
+  `Assoc [ "configuration", `Assoc [ "id", `String id; "labels", `Assoc labels ] ]
+
+let ids candidates =
+  List.map (fun (c : M.sweep_candidate) -> c.M.container_id) candidates
+
+let dead_pid = 999999
+let live_pid = 1
+let is_pid_alive pid = pid = live_pid
+
+let test_only_guests_whose_owner_is_gone () =
+  let listing =
+    `List
+      [ entry ~owner_pid:(string_of_int live_pid) "alive-owner"
+      ; entry ~owner_pid:(string_of_int dead_pid) "dead-owner"
+      ]
+  in
+  Alcotest.(check (list string))
+    "only the guest whose server is gone"
+    [ "dead-owner" ]
+    (ids (M.sweep_candidates_of_json ~is_pid_alive listing))
+
+(* A turn container carries a different kind and is swept by the docker
+   path; taking it here would remove a container mid-turn. *)
+let test_leaves_containers_that_are_not_guests () =
+  let listing =
+    `List [ entry ~kind:"oneshot" ~owner_pid:(string_of_int dead_pid) "turn-container" ]
+  in
+  Alcotest.(check (list string))
+    "a non-guest is not a sweep target"
+    []
+    (ids (M.sweep_candidates_of_json ~is_pid_alive listing))
+
+(* Without a usable owner label the build cannot say whose guest it is.
+   Guessing -- by age, or by assuming abandonment -- would remove somebody's
+   running guest, which is worse than leaking one. *)
+let test_leaves_guests_it_cannot_account_for () =
+  let listing =
+    `List
+      [ entry "no-owner-label"
+      ; entry ~owner_pid:"not-a-number" "unparseable-owner"
+      ]
+  in
+  Alcotest.(check (list string))
+    "an unaccountable guest stays"
+    []
+    (ids (M.sweep_candidates_of_json ~is_pid_alive listing))
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -477,6 +536,12 @@ let () =
             test_closed_network_is_spelled_on_the_command
         ; Alcotest.test_case "image and shell come last" `Quick
             test_image_and_shell_come_last
+        ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick
+            test_only_guests_whose_owner_is_gone
+        ; Alcotest.test_case "leaves containers that are not guests" `Quick
+            test_leaves_containers_that_are_not_guests
+        ; Alcotest.test_case "leaves guests it cannot account for" `Quick
+            test_leaves_guests_it_cannot_account_for
         ] )
     ; ( "refusal"
       , [ Alcotest.test_case "docker shell entrypoint refuses" `Quick

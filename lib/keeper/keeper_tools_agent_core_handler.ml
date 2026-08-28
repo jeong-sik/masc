@@ -8,7 +8,8 @@
 
 open Keeper_tools_agent_core_handler_telemetry
 
-let make_keeper_tool_handler
+let make_keeper_tool_handler_with_authority
+      ~capability_authority
       ~(name : string)
       ?descriptor
       ?model_name
@@ -211,7 +212,15 @@ let make_keeper_tool_handler
               | Error _ -> None
             in
             let execution =
-              Keeper_tools_agent_core_handler_exec.execute_with_observers
+              let execute =
+                match capability_authority with
+                | Keeper_tool_runtime.Frozen_surface capability_surface ->
+                  Keeper_tools_agent_core_handler_exec.execute_with_observers
+                    ~capability_surface
+                | Keeper_tool_runtime.Compatibility_meta ->
+                  Keeper_tools_agent_core_handler_exec.execute_with_observers_from_meta
+              in
+              execute
                 ~name
                 ?descriptor
                 ~config
@@ -246,4 +255,15 @@ let make_keeper_tool_handler
                  execution
           in
           run_with_current_eio_context ?clock:current_clock ()
+;;
+
+let make_keeper_tool_handler ~capability_surface =
+  make_keeper_tool_handler_with_authority
+    ~capability_authority:
+      (Keeper_tool_runtime.Frozen_surface capability_surface)
+;;
+
+let make_keeper_tool_handler_from_meta =
+  make_keeper_tool_handler_with_authority
+    ~capability_authority:Keeper_tool_runtime.Compatibility_meta
 ;;

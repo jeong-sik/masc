@@ -737,6 +737,8 @@ let setup_error_detail = function
     "prompt contract unavailable: " ^ detail
   | Exact_flow.Registry_unavailable -> "runtime registry unavailable"
   | Exact_flow.Lane_unavailable -> "board exact lane unavailable"
+  | Exact_flow.Lane_preference_unavailable detail ->
+    "board exact lane preference unavailable: " ^ detail
   | Exact_flow.Lane_resolved_without_slots ->
     "board exact lane has no admitted slots"
   | Exact_flow.Candidate_invalid { position; slot_id = _ } ->

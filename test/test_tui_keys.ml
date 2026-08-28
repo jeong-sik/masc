@@ -69,24 +69,24 @@ let test_lanes_scroll_reserves_standalone_matrix_rows () =
     3
     (standalone_lanes_chrome ~row_count:None ~error:None ~truncated:false);
   check Alcotest.int
-    "five lane rows plus title and divider"
-    7
+    "six lane rows plus title and divider"
+    8
     (standalone_lanes_chrome
-       ~row_count:(Some 5)
+       ~row_count:(Some 6)
        ~error:None
        ~truncated:false);
   check Alcotest.int
     "retained rows plus explicit stale warning"
-    8
+    9
     (standalone_lanes_chrome
-       ~row_count:(Some 5)
+       ~row_count:(Some 6)
        ~error:(Some "offline")
        ~truncated:false);
   check Alcotest.int
     "bounded-window warning spends one row"
-    8
+    9
     (standalone_lanes_chrome
-       ~row_count:(Some 5)
+       ~row_count:(Some 6)
        ~error:None
        ~truncated:true)
 ;;
@@ -293,13 +293,14 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_selected_slots = []
   }
 
-(* The five lanes the projection fixes, in its order
+(* The six lanes the projection fixes, in its order
    (server_standalone_lane_projection.ml). *)
-let five_standalone_lanes =
+let six_standalone_lanes =
   [ standalone_lane ~lane_id:"board_attention_exact" ~label:"Board Attention"
   ; standalone_lane ~lane_id:"hitl_auto_judge" ~label:"HITL Auto Judge"
   ; standalone_lane ~lane_id:"librarian_exact" ~label:"Librarian"
   ; standalone_lane ~lane_id:"compaction_exact" ~label:"Compaction"
+  ; standalone_lane ~lane_id:"assembler_exact" ~label:"Assembler"
   ; standalone_lane ~lane_id:"verifier_exact" ~label:"Verifier"
   ]
 
@@ -329,7 +330,7 @@ let keeper_snapshot lanes : Tui_decode.keeper_lanes_snapshot =
 let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Lanes;
-  state.standalone_lanes <- Some (standalone_snapshot five_standalone_lanes);
+  state.standalone_lanes <- Some (standalone_snapshot six_standalone_lanes);
   state.lanes <- Some (keeper_snapshot (List.map keeper_lane keepers));
   state
 
@@ -368,7 +369,7 @@ let test_lanes_search_texts_lead_with_the_standalone_labels () =
     "standalone labels first, then Keeper names"
     (Some
        [ "Board Attention"; "HITL Auto Judge"; "Librarian"; "Compaction"
-       ; "Verifier"; "alpha"; "beta" ])
+       ; "Assembler"; "Verifier"; "alpha"; "beta" ])
     (surface_row_texts state Lanes)
 
 let test_lanes_sub_modes_stay_unsearchable () =
@@ -390,28 +391,28 @@ let check_hit state ~terminal_rows ~row expected =
     (hit_to_string (lanes_overview_hit state ~terminal_rows ~row))
 
 (* The overview frame, row by row: 1 strip, 2 box top, 3 header, 4 divider,
-   5 matrix heading, 6-10 the five standalone rows, 11 divider, 12 Keeper
-   column header, 13 divider, 14 on the Keeper rows. *)
+   5 matrix heading, 6-11 the six standalone rows, 12 divider, 13 Keeper
+   column header, 14 divider, 15 on the Keeper rows. *)
 let test_overview_hit_reads_the_frame_rows () =
   let state = lanes_state () in
   check_hit state ~terminal_rows:40 ~row:5 "none";
   check_hit state ~terminal_rows:40 ~row:6 "standalone 0";
-  check_hit state ~terminal_rows:40 ~row:10 "standalone 4";
-  check_hit state ~terminal_rows:40 ~row:11 "none";
-  check_hit state ~terminal_rows:40 ~row:13 "none";
-  check_hit state ~terminal_rows:40 ~row:14 "keeper 0";
-  check_hit state ~terminal_rows:40 ~row:15 "keeper 1";
-  check_hit state ~terminal_rows:40 ~row:16 "none"
+  check_hit state ~terminal_rows:40 ~row:11 "standalone 5";
+  check_hit state ~terminal_rows:40 ~row:12 "none";
+  check_hit state ~terminal_rows:40 ~row:14 "none";
+  check_hit state ~terminal_rows:40 ~row:15 "keeper 0";
+  check_hit state ~terminal_rows:40 ~row:16 "keeper 1";
+  check_hit state ~terminal_rows:40 ~row:17 "none"
 
 let test_overview_hit_pays_for_the_error_rows () =
   let state = lanes_state () in
   state.lanes_error <- Some "lane fixture failed";
   (* One load error spends a row and a divider before the first Keeper row. *)
-  check_hit state ~terminal_rows:40 ~row:15 "none";
-  check_hit state ~terminal_rows:40 ~row:16 "keeper 0";
+  check_hit state ~terminal_rows:40 ~row:16 "none";
+  check_hit state ~terminal_rows:40 ~row:17 "keeper 0";
   state.lanes_action_error <- Some "Cannot open detail: no lane is selected";
-  check_hit state ~terminal_rows:40 ~row:17 "none";
-  check_hit state ~terminal_rows:40 ~row:18 "keeper 0"
+  check_hit state ~terminal_rows:40 ~row:18 "none";
+  check_hit state ~terminal_rows:40 ~row:19 "keeper 0"
 
 let test_overview_hit_waits_for_the_matrix () =
   (* The matrix's single loading note is not a lane row. *)
@@ -426,8 +427,8 @@ let test_overview_hit_follows_the_window () =
      row names the second Keeper. *)
   let state = lanes_state ~keepers:[ "alpha"; "beta"; "gamma" ] () in
   state.lanes_scroll <- 1;
-  check_hit state ~terminal_rows:17 ~row:14 "keeper 1";
-  check_hit state ~terminal_rows:17 ~row:15 "none"
+  check_hit state ~terminal_rows:17 ~row:15 "keeper 1";
+  check_hit state ~terminal_rows:17 ~row:16 "none"
 
 let () =
   Alcotest.run "masc_tui_keys"

@@ -535,9 +535,6 @@ type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
-  vr_kind : string;  (** What is being asked for, e.g. a review or a proof. *)
-  vr_summary : string;
-  vr_next_action : string option;
       (** What would move it forward, when the server can say. *)
   vr_submitted_by : string;
   vr_created_at : string;
@@ -1619,3 +1616,58 @@ val decode_asks_snapshot : Yojson.Safe.t -> (asks_snapshot, string) result
 (** A row whose mode or free-text shape is unknown fails the decode rather
     than defaulting: a surface that guessed would offer the operator a control
     the server will refuse. *)
+
+type goal_timeline_event = {
+  gt_ts : string;
+  gt_kind : string;
+  gt_summary : string;
+  gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
+}
+
+(** Goal detail timeline. [`Null] from the server means the approval-queue
+    store could not be read (the same discriminated failure the gate snapshot
+    carries), so it decodes to the explicit unavailable constructor, never an
+    empty list. *)
+type goal_timeline =
+  | Goal_timeline_ready of goal_timeline_event list
+  | Goal_timeline_unavailable of string
+
+val decode_goal_detail_timeline : Yojson.Safe.t -> (goal_timeline, string) result
+
+type task_history_event = {
+  th_ts : string;
+  th_label : string;  (** [action] when present, else [type], else "event" *)
+  th_from_status : string option;
+  th_to_status : string option;
+  th_actor : string option;
+  th_note : string option;  (** handoff_context.summary when present *)
+}
+
+val decode_task_history : Yojson.Safe.t -> (task_history_event list, string) result
+(** Rows are raw event-stream lines rather than a uniform projection, so every
+    field except [ts] is tolerant; an unknown event type renders as its type
+    string instead of being dropped. *)
+
+(** Operator evidence bundle for one awaiting-verification task. The item
+    vocabulary is the producer's closed set, so an unknown kind fails the
+    decode rather than rendering as an empty row; [Evidence_access_unavailable]
+    is the store-level failure the server states explicitly. *)
+type verification_evidence_item =
+  | Ev_note of string
+  | Ev_artifact of {
+      ev_reference : string;
+      ev_content : string;
+      ev_bytes : int;
+      ev_truncated : bool;
+    }
+  | Ev_artifact_unreadable of {
+      ev_u_reference : string option;
+      ev_u_reason : string;
+    }
+
+type verification_evidence =
+  | Evidence_items of verification_evidence_item list
+  | Evidence_access_unavailable of string
+
+val decode_verification_evidence :
+  Yojson.Safe.t -> (verification_evidence, string) result

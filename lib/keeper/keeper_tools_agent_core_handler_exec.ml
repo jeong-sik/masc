@@ -15,7 +15,8 @@ let producer_payload ~raw = function
   | None -> `String raw
 ;;
 
-let execute_with_observers
+let execute_with_observers_with_authority
+      ~capability_authority
       ~(name : string)
       ?descriptor
       ~(config : Workspace.config)
@@ -51,9 +52,10 @@ let execute_with_observers
   try
     let result, duration_ms =
       Inference_utils.timed (fun () ->
-        match descriptor with
-        | None ->
-          Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
+        match descriptor, capability_authority with
+        | None, Keeper_tool_runtime.Frozen_surface capability_surface ->
+          Keeper_tool_dispatch_runtime.execute_keeper_tool_call_for_capability_surface_with_outcome
+            ~capability_surface
             ~config
             ~meta
             ~publication_recovery
@@ -70,8 +72,45 @@ let execute_with_observers
             ~name
             ~input
             ()
-        | Some descriptor ->
-          Keeper_tool_dispatch_runtime.execute_keeper_tool_descriptor_with_outcome
+        | Some descriptor, Keeper_tool_runtime.Frozen_surface capability_surface ->
+          Keeper_tool_dispatch_runtime.execute_keeper_tool_descriptor_for_capability_surface_with_outcome
+            ~capability_surface
+            ~config
+            ~meta
+            ~publication_recovery
+            ~ctx_work:ctx_snapshot
+            ?turn_sandbox_factory
+            ?sw
+            ?clock
+            ?proc_mgr
+            ?net
+            ?mcp_session_id
+            ?continuation_channel
+            ?gate_context
+            ?gate_grant
+            ~descriptor
+            ~input
+            ()
+        | None, Keeper_tool_runtime.Compatibility_meta ->
+          Keeper_tool_dispatch_runtime.Compatibility.execute_keeper_tool_call_with_outcome
+            ~config
+            ~meta
+            ~publication_recovery
+            ~ctx_work:ctx_snapshot
+            ?turn_sandbox_factory
+            ?sw
+            ?clock
+            ?proc_mgr
+            ?net
+            ?mcp_session_id
+            ?continuation_channel
+            ?gate_context
+            ?gate_grant
+            ~name
+            ~input
+            ()
+        | Some descriptor, Keeper_tool_runtime.Compatibility_meta ->
+          Keeper_tool_dispatch_runtime.Compatibility.execute_keeper_tool_descriptor_with_outcome
             ~config
             ~meta
             ~publication_recovery
@@ -385,4 +424,15 @@ let execute_with_observers
     ; deferred_kind = None
     ; terminal_effect_receipt = None
     }
+;;
+
+let execute_with_observers ~capability_surface =
+  execute_with_observers_with_authority
+    ~capability_authority:
+      (Keeper_tool_runtime.Frozen_surface capability_surface)
+;;
+
+let execute_with_observers_from_meta =
+  execute_with_observers_with_authority
+    ~capability_authority:Keeper_tool_runtime.Compatibility_meta
 ;;

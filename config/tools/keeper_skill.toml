@@ -27,14 +27,15 @@ type = "string"
 required = true
 min_length = 1
 
+# No length/pattern gate here: a caller that lacks the revision must reach
+# the handler, whose refusal carries the exact references this keeper does
+# carry. A schema-level gate answered those calls with a generic length
+# error that could not name the catalog (task-828).
 [[params]]
 name = "content_revision"
 type = "string"
 required = true
-min_length = 64
-max_length = 64
-pattern = "^[0-9a-f]{64}$"
-description = "Canonical domain-separated SHA-256 content revision derived from the exact frozen SKILL.md bytes."
+description = "Canonical domain-separated SHA-256 content revision derived from the exact frozen SKILL.md bytes: 64 lowercase hex characters, copied verbatim from the Task skill reference or this tool's Available list."
 
 [[params]]
 name = "file"

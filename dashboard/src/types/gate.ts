@@ -253,9 +253,10 @@ export interface KeeperGateModeOverride {
   updated_at: string
 }
 
-/** One Keeper pointed at a particular admitted judge, tried before the rest. */
-export interface KeeperGateJudgePreference {
+/** One Keeper pointed at a particular admitted slot for one exact-output lane. */
+export interface KeeperExactLanePreference {
   keeper_name: string
+  lane_id: string
   slot_id: string
   updated_by: string
   updated_at: string
@@ -313,8 +314,8 @@ export interface DashboardGateResponse {
   approval_rules_state: KeeperApprovalRulesState
   keeper_modes: KeeperGateModeOverride[]
   keeper_modes_state: KeeperGateSettingsState
-  keeper_judges: KeeperGateJudgePreference[]
-  keeper_judges_state: KeeperGateSettingsState
+  keeper_exact_lanes: KeeperExactLanePreference[]
+  keeper_exact_lanes_state: KeeperGateSettingsState
   hitl: {
     gate_mode: GateModeStatus
     /** The external-services lane: calls that leave for an attached outside

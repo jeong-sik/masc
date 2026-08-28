@@ -234,7 +234,6 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_board_curation_submit",
       broadcast_tool );
     ("masc_tool_help", read_state_tool);
-    ("masc_plan_get", broadcast_tool);
     ("masc_transition", complete_task_tool);
     ("masc_plan_set_task", broadcast_tool);
     ("masc_broadcast", with_semantic_flags ~mcp_context_required:true broadcast_tool);
@@ -317,8 +316,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_goal_list", read_state_tool);
     ("masc_goal_upsert", broadcast_tool);
     ("masc_goal_transition", broadcast_tool);
-    ("masc_plan_init", broadcast_tool);
-    ("masc_plan_update", broadcast_tool);
     ("masc_keeper_list", read_state_tool);
     ("masc_keeper_status", read_state_tool);
     ("masc_keeper_sandbox_start", broadcast_tool);
@@ -340,8 +337,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_reset", reset_tool);
     ("masc_plan_get_task", read_state_tool);
     ("masc_plan_clear_task", broadcast_tool);
-    ("masc_note_add", broadcast_tool);
-    ("masc_deliver", broadcast_tool);
     ("masc_config", read_state_tool);
     ("masc_check", read_state_tool);
     ("masc_web_search", read_state_tool);
@@ -447,6 +442,10 @@ let explicit_metadata : (string * metadata) list =
     ( "keeper_tools_list",
       hidden_runtime_tool
         "Keeper tool-list runtime tool; callable but hidden from the public MCP schema surface."
+        read_state_tool );
+    ( "keeper_capability_search",
+      hidden_runtime_tool
+        "Keeper capability-search runtime tool; callable but hidden from the public MCP schema surface."
         read_state_tool );
     (* Keeper shard schemas are registered directly by [Unified_tool_registry],
        not through [Tool_spec].  Their callable names still need an explicit

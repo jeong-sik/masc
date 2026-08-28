@@ -255,6 +255,68 @@ let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
 
+(** Fetch the operator evidence bundle for one awaiting-verification task
+    ([GET /api/v1/verification/evidence]). A task outside
+    awaiting_verification is a 400 whose body names why; that text becomes
+    the error the pane draws. *)
+let fetch_verification_evidence ~(host : string) ~(port : int)
+    ~(task_id : string) :
+    (Masc.Tui_decode.verification_evidence, string) result =
+  let path =
+    Printf.sprintf "/api/v1/verification/evidence?task_id=%s"
+      (percent_encode_path_segment task_id)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "evidence returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_decode.decode_verification_evidence json
+      | exception Yojson.Json_error detail ->
+          Error ("evidence was not JSON: " ^ detail))
+
+(** Fetch one goal's merged event timeline
+    ([GET /api/v1/dashboard/goals/detail]). Only the [timeline] (and the
+    queue-state detail behind a [`Null] timeline) is decoded; the rest of the
+    detail payload stays server-side until a surface needs it. *)
+let fetch_goal_timeline ~(host : string) ~(port : int) ~(goal_id : string) :
+    (Masc.Tui_decode.goal_timeline, string) result =
+  let path =
+    Printf.sprintf "/api/v1/dashboard/goals/detail?goal_id=%s"
+      (percent_encode_path_segment goal_id)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "goal detail returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_decode.decode_goal_detail_timeline json
+      | exception Yojson.Json_error detail ->
+          Error ("goal detail was not JSON: " ^ detail))
+
+(** Fetch one task's event history
+    ([GET /api/v1/dashboard/tasks/history]). *)
+let fetch_task_history ~(host : string) ~(port : int) ~(task_id : string) :
+    (Masc.Tui_decode.task_history_event list, string) result =
+  let path =
+    Printf.sprintf "/api/v1/dashboard/tasks/history?task_id=%s&limit=50"
+      (percent_encode_path_segment task_id)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "task history returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_decode.decode_task_history json
+      | exception Yojson.Json_error detail ->
+          Error ("task history was not JSON: " ^ detail))
+
 (** Fetch a keeper's durable tool-call log
     ([GET /api/v1/keepers/:name/tool-calls]). *)
 let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
@@ -1418,7 +1480,7 @@ let fetch_keeper_lanes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/keepers/composite"
 
-(** Fetch the read-only five-lane admission and observation matrix. *)
+(** Fetch the read-only standalone-lane admission and observation matrix. *)
 let fetch_standalone_lanes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/standalone-lanes"

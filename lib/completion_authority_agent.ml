@@ -236,6 +236,32 @@ type prepared_review =
   ; required_artifacts : string list
   }
 
+(* Artifact references the store looked for and did not find. The snapshot layer
+   already resolves every reference against the producer's root and answers
+   [Evidence_artifact_unreadable] for the ones that lead nowhere, so this only
+   collects that answer; it does not decide what counts as readable. Only
+   [Evidence_missing] is collected: a file that exists but cannot be read is a
+   different situation, and the reviewer is the right place to weigh it.
+
+   A reference that names no file is not weak evidence for the authority to
+   weigh, it is a submission with nothing behind it, and no reviewer can read
+   what was never written. Left to the reviewer it becomes a judgement call that
+   can land either way on the same evidence: task-808 was refused at 10:55 for
+   an artifact the store reported missing, and approved at 10:59 with the file
+   still absent. *)
+let unresolved_artifact_references items =
+  List.filter_map
+    (function
+      | Workspace_verification_store.Evidence_artifact_unreadable
+          { reference; reason = Workspace_verification_store.Evidence_missing } ->
+        Some reference
+      | Workspace_verification_store.Evidence_artifact _
+      | Workspace_verification_store.Evidence_note _
+      | Workspace_verification_store.Evidence_invalid_reference
+      | Workspace_verification_store.Evidence_artifact_unreadable _ -> None)
+    items
+;;
+
 let prepare_review
       ~(config : Workspace_utils_backend_setup.config)
       ~(task : Masc_domain.task)
@@ -283,7 +309,7 @@ let prepare_review
            (Workspace_verification_store.evidence_access_failure_to_string
               ~request_id
               reason))
-    | Workspace_verification_store.Evidence_available { request = header; _ } ->
+    | Workspace_verification_store.Evidence_available { request = header; items } ->
       if not (String.equal header.id verification_id)
       then
         Error
@@ -305,6 +331,12 @@ let prepare_review
              "submitted evidence header worker mismatch (expected=%s actual=%s)"
              assignee
              header.worker)
+      else if unresolved_artifact_references items <> []
+      then
+        Error
+          (Printf.sprintf
+             "submitted evidence names artifacts that do not exist: %s"
+             (String.concat ", " (unresolved_artifact_references items)))
       else
         let* evidence_refs = evidence_refs_of_output request.output in
         let* completion_contract, required_artifacts =
@@ -855,6 +887,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
 module For_testing = struct
   let authority_actor = authority_actor
   let evidence_refs_of_output = evidence_refs_of_output
+  let unresolved_artifact_references = unresolved_artifact_references
   let completion_verdict_of_review = completion_verdict_of_review
   let review_notes = review_notes
 

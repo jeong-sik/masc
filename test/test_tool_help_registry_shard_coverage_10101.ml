@@ -101,6 +101,7 @@ let test_9912_base_tools_still_covered () =
     [ "keeper_time_now"
     ; "keeper_context_status"
     ; "keeper_memory_search"
+    ; "keeper_capability_search"
     ; "keeper_tools_list"
     ]
   in

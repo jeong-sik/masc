@@ -30,8 +30,8 @@ export function gateObservationErrorSnapshot(operatorDetail: string): DashboardG
     approval_rules_state: { state: 'unavailable', error: operatorDetail },
     keeper_modes: [],
     keeper_modes_state: { state: 'unavailable', error: operatorDetail },
-    keeper_judges: [],
-    keeper_judges_state: { state: 'unavailable', error: operatorDetail },
+    keeper_exact_lanes: [],
+    keeper_exact_lanes_state: { state: 'unavailable', error: operatorDetail },
     hitl: null,
   }
 }

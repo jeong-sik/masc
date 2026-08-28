@@ -24,6 +24,14 @@ type template_error =
       }
   | Template_invalid_pointer of { pointer : string }
   | Template_duplicate_object_field of string
+  | Template_duplicate_field of
+      { kind : string
+      ; field : string
+      }
+  | Template_unknown_field of
+      { kind : string
+      ; field : string
+      }
 
 type error =
   | Request_not_an_object of { found : string }
@@ -48,7 +56,17 @@ type error =
       ; error : template_error
       }
   | Unknown_request_field of { field : string }
+  | Duplicate_request_field of { field : string }
+  | Node_duplicate_field of
+      { index : int
+      ; field : string
+      }
   | Plan_rejected of Keeper_tool_plan.error
+
+val input_schema : Yojson.Safe.t
+(** Canonical model-visible schema for the JSON grammar parsed by
+    {!plan_of_json}. The nested template shapes are advertised here; semantic
+    validation remains owned by {!Keeper_tool_plan.create}. *)
 
 val error_message : error -> string
 val error_to_json : error -> Yojson.Safe.t

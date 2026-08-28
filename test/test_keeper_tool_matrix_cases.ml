@@ -168,7 +168,7 @@ let make_fixture
   ignore (Masc.Keeper_registry.For_testing.register ~base_path meta.name meta);
   ignore (Masc.Keeper_registry.For_testing.register ~base_path "tool-matrix" meta);
   let tools =
-    KTO.make_tools
+    KTO.For_testing.make_tools
       ~config
       ~meta
       ~publication_recovery
@@ -306,6 +306,8 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_voice_sessions"
   | "keeper_voice_session_end" ->
       `Assoc []
+  | "keeper_capability_search" ->
+      `Assoc [ "query", `String "keeper_time_now" ]
   | "keeper_memory_search" ->
       `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
   | "keeper_memory_write" ->

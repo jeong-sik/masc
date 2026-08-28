@@ -8,7 +8,6 @@
   repo_manager_types
   repo_store
   repo_git
-  keeper_repo_mapping
   repo_sync)
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on. + unused-value ratchet (warning 32)

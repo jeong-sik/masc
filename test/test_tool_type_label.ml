@@ -81,6 +81,7 @@ let test_catalog_declaration_beats_the_name_chain () =
     (fun (name, expected) -> check string name expected (T.tool_type_of_name name))
     [ "keeper_tasks_list", "read"
     ; "keeper_tools_list", "read"
+    ; "keeper_capability_search", "read"
     ; "keeper_task_claim", "write"
     ; "keeper_task_done", "write"
     ]

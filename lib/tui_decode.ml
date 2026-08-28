@@ -1802,9 +1802,6 @@ type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
-  vr_kind : string;
-  vr_summary : string;
-  vr_next_action : string option;
   vr_submitted_by : string;
   vr_created_at : string;
   vr_required_artifacts : string list;
@@ -2090,9 +2087,9 @@ let decode_skill_activation_projection json =
 (* ── Workspace skills catalog (/api/v1/skills) ─────────────────────
    The dashboard renders the full surface set; the TUI Tools screen reads
    per-skill usage rows (cross-keeper tracking) and reuses the skill_flow
-   decoder the effective-surface profiles already share. Usage is absent
-   while the ledger side is warming, so [usage]/[profile] decode as
-   empty/None rather than failing the whole catalog. *)
+   decoder the effective-surface profiles already share. Usage may be absent
+   while the ledger side is warming. A valid instruction/composition surface
+   always carries its profile; only an unavailable surface has none. *)
 
 type skill_usage_row =
   { su_keeper : string
@@ -2130,16 +2127,20 @@ let decode_skills_catalog_surface json =
   let* usage_json = optional_list_field json "usage" in
   let* scs_usage = decode_list "usage" decode_skill_usage_row usage_json in
   let* scs_flow =
-    match member "profile" json with
-    | `Assoc _ as profile ->
+    match scs_kind, member "profile" json with
+    | ("instruction" | "composition"), (`Assoc _ as profile) ->
         let* flow_field = required_member profile "flow" in
         (match flow_field with
          | `Null -> Ok None
          | `Assoc _ as flow ->
              decode_skill_flow flow |> Result.map Option.some
          | bad -> field_type_error "profile.flow" "an object or null" bad)
-    | `Null -> Ok None
-    | bad -> field_type_error "profile" "an object or null" bad
+    | ("instruction" | "composition"), bad ->
+      field_type_error "profile" "an object" bad
+    | "unavailable", `Null -> Ok None
+    | "unavailable", bad -> field_type_error "profile" "absent" bad
+    | unknown, _ ->
+      Error (Printf.sprintf "skills surface kind has unknown value %S" unknown)
   in
   Ok { scs_name; scs_kind; scs_usage; scs_flow }
 
@@ -2882,8 +2883,6 @@ let decode_verification_request json =
   let* vr_request_id = required_string_field json "request_id" in
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
-  let* vr_kind = required_string_field json "request_kind" in
-  let* vr_summary = required_string_field json "request_summary" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
   let* vr_created_at = required_string_field json "created_at" in
   let* vr_required_artifacts =
@@ -2892,7 +2891,6 @@ let decode_verification_request json =
   let* vr_submitted_evidence =
     decode_string_name_list json "submitted_evidence"
   in
-  let* vr_next_action = optional_string_field json "next_action" in
   let* vr_evidence_error =
     optional_string_field json "evidence_projection_error"
   in
@@ -2900,9 +2898,6 @@ let decode_verification_request json =
     { vr_request_id
     ; vr_task_id
     ; vr_task_title
-    ; vr_kind
-    ; vr_summary
-    ; vr_next_action
     ; vr_submitted_by
     ; vr_created_at
     ; vr_required_artifacts
@@ -3205,7 +3200,12 @@ let standalone_lane_status_to_string = function
   | Standalone_running -> "running"
   | Standalone_idle -> "idle"
   | Standalone_degraded -> "degraded"
-  | Standalone_no_retained_observation -> "no retained observation"
+  (* Thirteen cells, not twenty-three. This is what the screen prints in a
+     column sized for the other four words, and the long spelling pushed its
+     whole row nine columns right of every other one. The row already says
+     the rest -- [runs 0], [observed none] -- so the state word only has to
+     name the state. *)
+  | Standalone_no_retained_observation -> "none retained"
   | Standalone_unavailable -> "unavailable"
 
 let decode_standalone_lane_slot_count json =
@@ -5254,3 +5254,174 @@ let decode_asks_snapshot json =
   let* row_items = ask_list json "asks" in
   let* asn_rows = ask_map_results decode_ask_row row_items in
   Ok { asn_keeper; asn_open_count; asn_rows }
+
+(* Goal detail timeline (GET /api/v1/dashboard/goals/detail). The server
+   merges task/approval/keeper/goal events into one list of uniform
+   six-field rows; the TUI carries the four it renders. [timeline] is
+   [`Null] exactly when the approval-queue store could not be read — the
+   same discriminated failure the gate snapshot carries — so that case is
+   an explicit constructor, never an empty list. *)
+type goal_timeline_event = {
+  gt_ts : string;
+  gt_kind : string;
+  gt_summary : string;
+  gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
+}
+
+type goal_timeline =
+  | Goal_timeline_ready of goal_timeline_event list
+  | Goal_timeline_unavailable of string
+
+let decode_goal_timeline_event json =
+  let required field =
+    match member field json with
+    | `String value -> Ok value
+    | _ -> Error (Printf.sprintf "timeline event %s must be a string" field)
+  in
+  let* gt_ts = required "ts" in
+  let* gt_kind = required "kind" in
+  let* gt_summary = required "summary" in
+  let* gt_severity = required "severity" in
+  Ok { gt_ts; gt_kind; gt_summary; gt_severity }
+
+let decode_goal_detail_timeline json =
+  match member "timeline" json with
+  | `Null ->
+      let detail =
+        match member "operator_detail" (member "approval_queue_state" json) with
+        | `String detail -> detail
+        | _ -> "approval queue store is unreadable"
+      in
+      Ok (Goal_timeline_unavailable detail)
+  | `List items ->
+      let rec loop acc = function
+        | [] -> Ok (Goal_timeline_ready (List.rev acc))
+        | item :: rest ->
+            let* event = decode_goal_timeline_event item in
+            loop (event :: acc) rest
+      in
+      loop [] items
+  | _ -> Error "goal detail timeline is neither a list nor null"
+
+(* One task's event history (GET /api/v1/dashboard/tasks/history). Rows are
+   raw event-stream lines, not a uniform projection, so every field except
+   [ts] is optional and an unknown event type still renders as its type
+   string instead of being dropped. *)
+type task_history_event = {
+  th_ts : string;
+  th_label : string;  (** [action] when present, else [type], else "event" *)
+  th_from_status : string option;
+  th_to_status : string option;
+  th_actor : string option;
+  th_note : string option;  (** handoff_context.summary when present *)
+}
+
+let decode_task_history json =
+  match json with
+  | `List rows ->
+      let event_of_row row =
+        let str field =
+          match member field row with
+          | `String value when String.trim value <> "" -> Some value
+          | _ -> None
+        in
+        let th_label =
+          match str "action" with
+          | Some action -> action
+          | None -> (match str "type" with Some t -> t | None -> "event")
+        in
+        {
+          th_ts = Option.value (str "ts") ~default:"";
+          th_label;
+          th_from_status = str "from_status";
+          th_to_status = str "to_status";
+          th_actor = (match str "agent" with Some a -> Some a | None -> str "actor");
+          th_note =
+            (match member "handoff_context" row with
+             | `Assoc _ as handoff ->
+                 (match member "summary" handoff with
+                  | `String s when String.trim s <> "" -> Some s
+                  | _ -> None)
+             | _ -> None);
+        }
+      in
+      Ok (List.map event_of_row rows)
+  | _ -> Error "task history is not a list"
+
+(* Operator evidence bundle (GET /api/v1/verification/evidence). The
+   verification snapshot already lists evidence references; this carries what
+   the verifier can actually inspect — artifact content prefixes (the server
+   caps and marks truncation) and the typed reason when an artifact could not
+   be read. The item vocabulary is the producer's closed set
+   (Workspace_verification_store.submitted_evidence_item_to_yojson), so an
+   unknown kind fails the decode rather than rendering as an empty row. *)
+type verification_evidence_item =
+  | Ev_note of string
+  | Ev_artifact of {
+      ev_reference : string;
+      ev_content : string;
+      ev_bytes : int;
+      ev_truncated : bool;
+    }
+  | Ev_artifact_unreadable of {
+      ev_u_reference : string option;
+      ev_u_reason : string;
+    }
+
+type verification_evidence =
+  | Evidence_items of verification_evidence_item list
+  | Evidence_access_unavailable of string
+
+let decode_verification_evidence json =
+  let result = member "result" json in
+  let evidence = member "evidence" result in
+  match member "access" evidence with
+  | `String "unavailable" ->
+      let reason =
+        match member "reason" evidence with
+        | `String reason -> reason
+        | _ -> "evidence store is unreadable"
+      in
+      Ok (Evidence_access_unavailable reason)
+  | `String "available" ->
+      let decode_item item =
+        let str field =
+          match member field item with `String s -> Some s | _ -> None
+        in
+        match member "kind" item with
+        | `String "note" ->
+            (match str "content" with
+             | Some content -> Ok (Ev_note content)
+             | None -> Error "evidence note is missing content")
+        | `String "artifact" ->
+            (match str "reference", str "content", member "bytes" item with
+             | Some ev_reference, Some ev_content, `Int ev_bytes ->
+                 let ev_truncated =
+                   match member "truncated" item with
+                   | `Bool b -> b
+                   | _ -> false
+                 in
+                 Ok (Ev_artifact { ev_reference; ev_content; ev_bytes; ev_truncated })
+             | _ -> Error "evidence artifact is missing reference/content/bytes")
+        | `String "artifact_unreadable" ->
+            let ev_u_reason =
+              match member "reason" item with
+              | `Null -> "unreadable"
+              | reason -> Yojson.Safe.to_string reason
+            in
+            Ok (Ev_artifact_unreadable { ev_u_reference = str "reference"; ev_u_reason })
+        | `String kind -> Error ("unknown evidence item kind: " ^ kind)
+        | _ -> Error "evidence item is missing kind"
+      in
+      (match member "items" evidence with
+       | `List items ->
+           let rec loop acc = function
+             | [] -> Ok (Evidence_items (List.rev acc))
+             | item :: rest ->
+                 let* decoded = decode_item item in
+                 loop (decoded :: acc) rest
+           in
+           loop [] items
+       | _ -> Error "available evidence carries no items list")
+  | `String other -> Error ("unknown evidence access state: " ^ other)
+  | _ -> Error "evidence access state is missing"

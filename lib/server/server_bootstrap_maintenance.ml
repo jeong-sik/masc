@@ -162,6 +162,11 @@ type durable_demand_owner_error =
   | Executor_unavailable of Executor_pool_ref.strict_submit_error
   | Demand_execution_failed of exn * Printexc.raw_backtrace
 
+(* One ERROR per orphaned keeper per process: the condition is a standing
+   operator decision, not a new event, so repeating it every recovery cycle
+   buries real errors. *)
+let owner_absent_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
+
 let load_durable_demand_meta ~base_path ~config ~keeper_name =
   match
     Executor_pool_ref.submit_strict (fun () ->
@@ -188,6 +193,23 @@ let load_durable_demand_meta ~base_path ~config ~keeper_name =
   | Error (Executor_pool_ref.Work_failed (exn, backtrace)) ->
     Error (Demand_execution_failed (exn, backtrace))
   | Error error -> Error (Executor_unavailable error)
+;;
+
+type durable_demand_recovery_action =
+  | Wake_executable_owner
+  | Supervise_recoverable_owner
+  | Report_unknown_owner of string
+  | Retain_non_executable_owner of string
+
+let durable_demand_recovery_action = function
+  | Keeper_activation_readiness.Executable -> Wake_executable_owner
+  | Keeper_activation_readiness.Recoverable -> Supervise_recoverable_owner
+  | Keeper_activation_readiness.Unknown detail -> Report_unknown_owner detail
+  | ( Keeper_activation_readiness.Retained_disabled _
+    | Keeper_activation_readiness.Paused_dead _
+    | Keeper_activation_readiness.Shutdown_fenced _ ) as retained ->
+    Retain_non_executable_owner
+      (Keeper_activation_readiness.owner_execution_truth_to_wire retained)
 ;;
 
 let recover_projected_durable_demand_owner
@@ -231,15 +253,23 @@ let recover_projected_durable_demand_owner
          keeper_name
          detail
      | Error Owner_absent ->
-       Log.Server.error
-         "keeper durable demand orphaned keeper=%s reason=owner_absent: durable \
-          work sits under %s but the Keeper store holds no metadata for that \
-          name, so the work cannot execute until the name is registered or the \
-          directory is removed"
-         keeper_name
-         (Filename.concat
-            (Common.keepers_runtime_dir_of_base ~base_path)
-            keeper_name)
+       (* This state waits on an operator decision (register the name or
+          remove the directory) that no maintenance cycle can make for it.
+          The recovery loop visits every keeper every cycle, so an
+          unacknowledged orphan logged at ERROR every visit -- 167/hour for
+          one stale kidsnote queue on 2026-08-28. Say it once per process;
+          the durable work stays where it is either way. *)
+       if not (Hashtbl.mem owner_absent_reported keeper_name) then (
+         Hashtbl.add owner_absent_reported keeper_name ();
+         Log.Server.error
+           "keeper durable demand orphaned keeper=%s reason=owner_absent: durable \
+            work sits under %s but the Keeper store holds no metadata for that \
+            name, so the work cannot execute until the name is registered or the \
+            directory is removed"
+           keeper_name
+           (Filename.concat
+              (Common.keepers_runtime_dir_of_base ~base_path)
+              keeper_name))
      | Error (Executor_unavailable error) ->
        Log.Server.error
          "keeper durable demand recovery retained keeper=%s reason=executor_unavailable detail=%s"
@@ -271,26 +301,33 @@ let recover_projected_durable_demand_owner
              ~runtime
              (Ok meta)
        in
-       (match truth with
-        | Keeper_activation_readiness.Executable -> ()
-        | Keeper_activation_readiness.Recoverable ->
+       (match durable_demand_recovery_action truth with
+        | Wake_executable_owner ->
+          (* The durable queue survived the process that originally sent its
+             wake hint. A live owner therefore still needs a new edge after
+             startup or maintenance discovery; otherwise it can sleep forever
+             beside runnable work. [wakeup_keeper] is only the hint -- the
+             queue remains the authoritative payload. *)
+          Keeper_keepalive.wakeup_keeper ~base_path keeper_name;
+          Log.Server.info
+            "keeper durable demand recovery woke executable owner keeper=%s"
+            keeper_name
+        | Supervise_recoverable_owner ->
           let owner_ctx = { ctx with agent_name = meta.name } in
           Keeper_supervisor.supervise_keepalive
             ~proactive_warmup_sec:0
             owner_ctx
             meta
-        | Keeper_activation_readiness.Unknown detail ->
+        | Report_unknown_owner detail ->
           Log.Server.error
             "keeper durable demand recovery retained keeper=%s reason=unknown detail=%s"
             keeper_name
             detail
-        | ( Keeper_activation_readiness.Retained_disabled _
-          | Keeper_activation_readiness.Paused_dead _
-          | Keeper_activation_readiness.Shutdown_fenced _ ) as retained ->
+        | Retain_non_executable_owner reason ->
           Log.Server.info
             "keeper durable demand recovery retained keeper=%s reason=%s"
             keeper_name
-            (Keeper_activation_readiness.owner_execution_truth_to_wire retained)))
+            reason))
 ;;
 
 let consume_owner_projection_batch
@@ -342,6 +379,13 @@ let recover_keeper_durable_demand_owners
 ;;
 
 module Recovery_for_testing = struct
+  type nonrec durable_demand_recovery_action = durable_demand_recovery_action =
+    | Wake_executable_owner
+    | Supervise_recoverable_owner
+    | Report_unknown_owner of string
+    | Retain_non_executable_owner of string
+
+  let durable_demand_recovery_action = durable_demand_recovery_action
   let load_durable_demand_meta = load_durable_demand_meta
   let consume_owner_projection_batch = consume_owner_projection_batch
 end

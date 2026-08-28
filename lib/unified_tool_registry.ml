@@ -90,6 +90,7 @@ let tag_of_runtime_handler
   | Tool_write_file
   | Tool_time_now
   | Tool_tools_list
+  | Tool_capability_search
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search

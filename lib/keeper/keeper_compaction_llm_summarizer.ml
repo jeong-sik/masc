@@ -766,7 +766,7 @@ let make_flow_candidates ~keeper_name selected_slots =
 ;;
 
 let prepare_lane
-      ~base_path:_
+      ~base_path
       ~keeper_name
       ~registry
       ~lane_id
@@ -792,7 +792,29 @@ let prepare_lane
         "compaction exact lane has no admitted opaque slots lane_id=%s"
         empty_lane_id;
       Error Exact_target_selection_failed
-  | Ok { selected_slots } ->
+  | Ok resolved ->
+    (* The other three registry lanes honor the operator's per-keeper slot
+       pin here (librarian/hitl/board_attention all call
+       [Keeper_exact_lane_preference.apply]); compaction was the one lane
+       that resolved the lane and stopped, so a pin applied on three lanes
+       and silently not on the fourth. *)
+    let* { Runtime_exact_output_registry.selected_slots } =
+      match
+        Keeper_exact_lane_preference.apply
+          ~base_path
+          ~keeper_name
+          ~lane_id
+          resolved
+      with
+      | Ok resolved -> Ok resolved
+      | Error detail ->
+        Log.Keeper.warn
+          ~keeper_name
+          "compaction exact lane preference unavailable lane_id=%s: %s"
+          lane_id
+          detail;
+        Error Exact_target_selection_failed
+    in
     let* () =
       if planning_window_has_valid_boundary window
       then Ok ()
@@ -839,6 +861,10 @@ let prepare_lane
                ; selected_slots
                ; flow_attempt
                })))
+;;
+
+let prepared_ordered_slot_ids (prepared : prepared_lane) =
+  prepared.ordered_slot_ids
 ;;
 
 type exact_flow_callback_failure =

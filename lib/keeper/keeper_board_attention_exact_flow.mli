@@ -11,6 +11,7 @@ type setup_error =
   | Prompt_contract_unavailable of string
   | Registry_unavailable
   | Lane_unavailable
+  | Lane_preference_unavailable of string
   | Lane_resolved_without_slots
   | Candidate_invalid of
       { position : int

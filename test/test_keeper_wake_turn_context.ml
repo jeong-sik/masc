@@ -303,6 +303,59 @@ let test_refused_call_keeps_its_arguments () =
     (Option.is_some (Astring.String.find_sub ~sub:"REJECTED: not verified" section))
 ;;
 
+(* The digest is the salience fix: sangsu re-read the same nonexistent paths
+   every autonomous turn on 2026-08-28 while the refusals were already inside
+   this window, buried in the row matrix. Five turns of the same rejected
+   read must surface as one counted row, ahead of the rows. *)
+let test_failure_digest_dedupes_and_counts () =
+  let path = "{\"path\":\"/repos/masc/lib/keeper/keeper_sandbox_control.ml\"}" in
+  let observation =
+    { base_observation with
+      WO.own_recent_actions =
+        List.init 5 (fun i ->
+            action_turn
+              (370 + i)
+              [
+                call
+                  ~tool:"tool_read_file"
+                  ~input:path
+                  ~outcome:
+                    (Masc.Keeper_own_recent_actions.Failed_call
+                       (Some "docker_cat_failed: No such file or directory"));
+              ])
+    }
+  in
+  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let section = own_recent_actions_section body in
+  check bool "digest heading present" true
+    (Option.is_some (Astring.String.find_sub ~sub:"Rejected already" section));
+  check bool "the same rejected read is counted once" true
+    (Option.is_some (Astring.String.find_sub ~sub:" ×5 " section));
+  check bool "and keeps its newest refusal reason" true
+    (Option.is_some
+       (Astring.String.find_sub
+          ~sub:"docker_cat_failed: No such file or directory" section))
+;;
+
+let test_no_digest_without_failures () =
+  let observation =
+    { base_observation with
+      WO.own_recent_actions =
+        [ action_turn
+            380
+            [ call
+                ~tool:"masc_board_list"
+                ~input:"{}"
+                ~outcome:Masc.Keeper_own_recent_actions.Ok_call ]
+        ]
+    }
+  in
+  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let section = own_recent_actions_section body in
+  check bool "no digest heading without refusals" true
+    (Option.is_none (Astring.String.find_sub ~sub:"Rejected already" section))
+;;
+
 (* --- 1. Current Task layer --- *)
 
 let test_current_task_section_renders () =
@@ -431,6 +484,11 @@ let task_id_exn value =
   | Error message -> fail message
 
 let test_current_task_unavailable_is_explicit () =
+  (* The needles assert the configured prose (config/prompts/
+     keeper.observation.current_task_unobservable.md), so the repo prompt
+     config must be loaded the way the passing siblings load it; without it
+     the renderer falls back to different built-in wording. *)
+  with_repo_prompt_config @@ fun () ->
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
@@ -449,6 +507,7 @@ let test_current_task_unavailable_is_explicit () =
     (contains ~needle:"primary and recovery backlog decode failed" world_state)
 
 let test_current_task_missing_is_explicit () =
+  with_repo_prompt_config @@ fun () ->
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
@@ -463,6 +522,7 @@ let test_current_task_missing_is_explicit () =
     (contains ~needle:"Do not infer or invent task details" world_state)
 
 let test_recovered_current_task_is_non_authoritative () =
+  with_repo_prompt_config @@ fun () ->
   let recovered_task : Masc_domain.task =
     make_task ~task_status:(Masc_domain.Todo : Masc_domain.task_status) ()
   in
@@ -876,6 +936,10 @@ let () =
             test_successful_call_arguments_are_not_replayed;
           test_case "a refused call keeps what was sent" `Quick
             test_refused_call_keeps_its_arguments;
+          test_case "repeated refusals collapse into one digest row" `Quick
+            test_failure_digest_dedupes_and_counts;
+          test_case "no digest block without refusals" `Quick
+            test_no_digest_without_failures;
         ] );
       ( "goal titles",
         [

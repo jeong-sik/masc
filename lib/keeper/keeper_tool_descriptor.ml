@@ -52,11 +52,13 @@ type ordinary_execution_mode =
 
 type execution =
   | Ordinary of ordinary_execution_mode
+  | Direct_terminal
   | Terminal
 
 let execution_to_string = function
   | Ordinary Serial -> "serial"
   | Ordinary Concurrent -> "concurrent"
+  | Direct_terminal -> "direct_terminal"
   | Terminal -> "terminal"
 ;;
 
@@ -119,6 +121,7 @@ type runtime_handler =
   | Tool_write_file
   | Tool_time_now
   | Tool_tools_list
+  | Tool_capability_search
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
@@ -261,6 +264,7 @@ let runtime_handler_to_string = function
   | Tool_write_file -> "tool_write_file"
   | Tool_time_now -> "tool_time_now"
   | Tool_tools_list -> "tool_tools_list"
+  | Tool_capability_search -> "tool_capability_search"
   | Tool_context_status -> "tool_context_status"
   | Tool_artifact_read -> "tool_artifact_read"
   | Tool_memory_search -> "tool_memory_search"
@@ -332,6 +336,7 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_masc_library_dispatch -> Memory_group
   | Tool_time_now
   | Tool_tools_list
+  | Tool_capability_search
   | Tool_context_status
   | Tool_ide_annotate -> Meta_group
 ;;
@@ -495,6 +500,7 @@ let descriptor
   let execution =
     match runtime_handler with
     | Tool_surface_post -> Terminal
+    | Tool_memory_write -> Direct_terminal
     | ( Tool_execute
       | Tool_keeper_code_query_dispatch
       | Tool_search_files
@@ -503,10 +509,10 @@ let descriptor
       | Tool_write_file
       | Tool_time_now
       | Tool_tools_list
+      | Tool_capability_search
       | Tool_context_status
       | Tool_artifact_read
       | Tool_memory_search
-      | Tool_memory_write
       | Tool_library_search
       | Tool_library_read
       | Tool_surface_read
@@ -550,7 +556,7 @@ let descriptor
           "descriptor %S declares Concurrent execution without a static \
            read-only policy hint"
           internal_name)
-   | Ordinary Serial, _ | Terminal, _ -> ());
+   | Ordinary Serial, _ | Direct_terminal, _ | Terminal, _ -> ());
   let receipt_labels =
     [ "descriptor_id", id
     ; "capability_id", capability_id
@@ -971,6 +977,12 @@ let keeper_tools_list_schema =
   match find_base_schema_opt "keeper_tools_list" with
   | Some schema -> schema
   | None -> invalid_arg "missing base tool schema for keeper_tools_list"
+;;
+
+let keeper_capability_search_schema =
+  match find_base_schema_opt "keeper_capability_search" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_capability_search"
 ;;
 
 (* Declared twice until now: here and in the library shard, whose file is
@@ -1923,6 +1935,19 @@ let internal_descriptors : t list =
        ~handler:Tool_tools_list
        ()
      |> with_eval_tags [ "capability_introspection" ])
+  ; (in_process_descriptor_with_schema_source
+       ~capability_identity:Internal_name_identity
+       ~keeper_model_projection:Internal_name
+       ~input_schema_source:Canonical_registry
+       ~id:"keeper.capability_search"
+       ~name:"keeper_capability_search"
+       ~description:keeper_capability_search_schema.description
+       ~input_schema:keeper_capability_search_schema.input_schema
+       ~ordinary_execution_mode:Concurrent
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_capability_search
+       ()
+     |> with_eval_tags [ "capability_introspection" ])
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
@@ -2187,16 +2212,10 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_task_descriptor "set_goal" "masc_task_set_goal"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_plan_* + note + deliver (8 entries) ── *)
-  ; masc_plan_descriptor ~keeper_model_projection:Operator_only
-       "init" "masc_plan_init"
-       ~readonly:false
-  ; masc_plan_descriptor ~keeper_model_projection:Operator_only
-       "update" "masc_plan_update"
-       ~readonly:false
-  ; masc_plan_descriptor ~keeper_model_projection:Operator_only
-      "get" "masc_plan_get"
-      ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_plan_* current-task trio (3 entries).
+     The five plan-document tools (init/update/get + note_add/deliver)
+     were retired with their planning/<task_id> store; only the
+     current-task session pointer remains. ── *)
   ; masc_plan_descriptor ~keeper_model_projection:Operator_only
        "set_task" "masc_plan_set_task"
        ~readonly:false
@@ -2204,10 +2223,6 @@ let internal_descriptors : t list =
        "get_task" "masc_plan_get_task"
        ~readonly:true
   ; masc_plan_descriptor "clear_task" "masc_plan_clear_task"
-       ~readonly:false
-  ; masc_plan_descriptor "note_add" "masc_note_add"
-       ~readonly:false
-  ; masc_plan_descriptor "deliver" "masc_deliver"
        ~readonly:false
   (* ── RFC-0182 §3.1 — masc_run_* cluster (4 entries) ──────────── *)
   ; masc_run_descriptor "masc_run_init"

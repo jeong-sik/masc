@@ -254,6 +254,7 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
 ;;
 
 let warn_rejected_exact_output_slots registry =
+  let rejected = Runtime_exact_output_registry.rejected_slots registry in
   List.iter
     (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
        Log.Server.warn
@@ -262,7 +263,39 @@ let warn_rejected_exact_output_slots registry =
          slot.position
          slot.slot_id
          slot.target_ref)
-    (Runtime_exact_output_registry.rejected_slots registry)
+    rejected;
+  (* One consolidated line at ERROR, because per-slot WARNs at "remaining
+     slots stay active" read as tolerable degradation and get discounted:
+     four lanes carried retired targets for days on 2026-08-28 while the
+     warnings repeated unread. The count and lane list make the standing
+     config debt visible once per publish. *)
+  (match rejected with
+   | [] -> ()
+   | rejected ->
+     let lanes =
+       rejected
+       |> List.map (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+              slot.lane_id)
+       |> List.sort_uniq String.compare
+     in
+     Log.Server.error
+       "exact_output: %d retired target ref(s) ignored across %d lane(s) (%s) — the catalog moved on and runtime.toml has not; delete or replace them"
+       (List.length rejected)
+       (List.length lanes)
+       (String.concat ", " lanes))
+;;
+
+(* Retracted (2026-08-28, hours after #31445): the classifier reuses
+   Exact_output.admit_target_ref, whose authority is exact-output LANE
+   admission. Keeper turn assignments resolve through a different path —
+   the [runtime] provider/model bindings — and keepers flagged by the
+   catalog predicate (codex_subscription.gpt-5.6-luna, ollama_cloud
+   targets, …) were measured running on exactly their assigned runtimes
+   the same day. The boot ERROR named ten false positives before it was
+   pulled. A correct assignment-liveness check must read the binding
+   resolver, not the frozen catalog. *)
+
+let warn_catalog_absent_keeper_assignments _resolver_snapshot = ()
 ;;
 
 let warn_rejected_exact_output_bindings resolver_snapshot =
@@ -345,6 +378,7 @@ let configure_exact_output_registry ?config_root () =
             ("exact-output resolver-and-lane registry: " ^ detail))
      | Ok registry ->
        warn_rejected_exact_output_slots registry;
+       warn_catalog_absent_keeper_assignments resolver_snapshot;
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry published%s"
          catalog_description;
@@ -622,8 +656,18 @@ let lazy_startup_plan () =
     [
       {
         group_name = "cleanup";
-        execution = Serial;
-        task_names = [ "jsonl_prune" ];
+        (* Parallel, because removing a guest is a VM shutdown at roughly a
+           minute each and jsonl_prune finishes in milliseconds. Run serially
+           the sweep held the whole group, and keeper boot waits for the
+           group: measured on 2026-08-28, autoboot logged
+           "waiting for lazy startup tasks" for 30s behind a single guest.
+
+           Boot is still the right moment. The sweep only removes guests
+           whose owning server is gone, and this process owns none yet, so
+           every candidate belongs to an earlier server -- one still running
+           keeps its own pid alive and its guests are not candidates. *)
+        execution = Parallel;
+        task_names = [ "jsonl_prune"; "microvm_guest_sweep" ];
       };
     ]
   in
@@ -1221,6 +1265,7 @@ let start_owner_lazy_tasks ~sw state =
   let task_fn = function
     | "restore_sessions" -> fun () -> restore_persisted_sessions state
     | "jsonl_prune" -> fun () -> startup_prune_jsonl state
+    | "microvm_guest_sweep" -> fun () -> startup_sweep_microvm_guests state
     | task_name ->
       raise
         (Invalid_argument

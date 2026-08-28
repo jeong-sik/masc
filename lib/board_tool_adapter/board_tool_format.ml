@@ -96,7 +96,19 @@ let visibility_of_string = Board.visibility_of_string
 
 (** {1 Formatters} *)
 
-let format_post (p : Board.post) =
+(* The reading agent's own vote, rendered into the listing. The vote tool
+   answers a same-direction revote with "Already voted", but that answer lives
+   in the turn that made it; the next turn re-reads the board, and the board
+   showed no trace of the reader's vote — so the reader decided to vote again.
+   Live tool-call logs carry the cost: one keeper received "Already voted"
+   131 times in a day across 66 turns (task-839). *)
+let viewer_vote_marker = function
+  | None -> ""
+  | Some Board.Up -> ", 내 투표: 👍"
+  | Some Board.Down -> ", 내 투표: 👎"
+;;
+
+let format_post ?viewer_vote (p : Board.post) =
   let vis_str = Board.visibility_to_string p.visibility in
   let time_str = format_timestamp_absolute p.created_at in
   let ttl_str = format_expiry p.expires_at in
@@ -112,7 +124,7 @@ let format_post (p : Board.post) =
     | None -> ""
   in
   Printf.sprintf
-    "**%s** · %s [%s]%s (by %s, %s, expires: %s)\n%s\n[↑%d ↓%d = %+d] [%d replies]%s"
+    "**%s** · %s [%s]%s (by %s, %s, expires: %s)\n%s\n[↑%d ↓%d = %+d%s] [%d replies]%s"
     (Board.Post_id.to_string p.id)
     p.title
     vis_str
@@ -124,6 +136,7 @@ let format_post (p : Board.post) =
     p.votes_up
     p.votes_down
     score
+    (viewer_vote_marker viewer_vote)
     p.reply_count
     thread_str
 ;;
@@ -149,14 +162,15 @@ let format_post_compact (p : Board.post) =
     p.reply_count
 ;;
 
-let format_comment ?(indent = 0) (c : Board.comment) =
+let format_comment ?(indent = 0) ?viewer_vote (c : Board.comment) =
   let prefix = String.make indent ' ' in
   let tree_prefix = if indent > 0 then "└─ " else "" in
   let time_str = format_timestamp_absolute c.created_at in
   let vote_str =
-    if c.votes_up > 0 || c.votes_down > 0
-    then Printf.sprintf ", 👍%d 👎%d" c.votes_up c.votes_down
-    else ""
+    (if c.votes_up > 0 || c.votes_down > 0
+     then Printf.sprintf ", 👍%d 👎%d" c.votes_up c.votes_down
+     else "")
+    ^ viewer_vote_marker viewer_vote
   in
   (* The id is what [masc_board_comment_vote] and a threaded
      [masc_board_comment] take, and this listing is where the rejection tells a
@@ -179,7 +193,11 @@ let format_comment ?(indent = 0) (c : Board.comment) =
 (** Format comments as a tree, grouping replies under parents.
     [max_depth] limits nesting (default 5); beyond that, comments
     render flat. *)
-let format_comment_tree ?(max_depth = 5) (comments : Board.comment list) =
+let format_comment_tree
+      ?(max_depth = 5)
+      ?(viewer_vote_of = fun (_ : Board.Comment_id.t) -> None)
+      (comments : Board.comment list)
+  =
   let visible_comment_ids = Hashtbl.create (List.length comments) in
   let children_map = Hashtbl.create (List.length comments) in
   let comment_id = Board.Comment_id.to_string in
@@ -210,7 +228,7 @@ let format_comment_tree ?(max_depth = 5) (comments : Board.comment list) =
     |> List.rev
   in
   let rec render depth indent (c : Board.comment) =
-    let self = format_comment ~indent c in
+    let self = format_comment ~indent ?viewer_vote:(viewer_vote_of c.id) c in
     if depth >= max_depth
     then [ self ] (* Stop recursing; children rendered flat at next level. *)
     else (

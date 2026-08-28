@@ -1733,6 +1733,16 @@ let execution_failure_may_advance (error : execution_error) =
     receipt_dispatch_count error.receipt = 1
   | Invalid_json_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
+  (* The response arrived and terminated, but this binding routed the whole
+     answer into a non-content field and left content empty. Where the answer
+     lands is a property of the binding's output dialect, the same way a quota
+     is a property of the binding: the successor carries its own dialect, so
+     the lane tries it instead of terminating. Measured on json_object-only
+     providers where thinking cannot be disabled on every dialect: 54 turns
+     on ollama.com and 36 on glm with the schema-complete answer sitting in
+     the reasoning field (2026-08-16/08-27). *)
+  | Missing_output, (Response_received | Terminal) ->
+    receipt_dispatch_count error.receipt = 1
   (* The remaining refusals do not advance, as before this classification
      existed. Promoting any one of them needs its own argument about whether the
      successor can serve the same input, which this change does not make. *)

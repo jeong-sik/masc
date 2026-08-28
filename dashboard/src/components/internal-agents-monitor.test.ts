@@ -124,6 +124,7 @@ describe('InternalAgentsMonitor', () => {
         lane({ laneId: 'hitl_auto_judge', label: 'HITL Auto Judge' }),
         lane({ laneId: 'librarian_exact', label: 'Librarian' }),
         lane({ laneId: 'compaction_exact', label: 'Compaction', required: false, status: 'no_retained_observation', retainedRunCount: 0, lastStartedAt: null, lastTerminalAt: null, lastOutcome: null, p50ElapsedSeconds: null, selectedSlots: [] }),
+        lane({ laneId: 'assembler_exact', label: 'Assembler', required: false, status: 'no_retained_observation', retainedRunCount: 0, lastStartedAt: null, lastTerminalAt: null, lastOutcome: null, p50ElapsedSeconds: null, selectedSlots: [] }),
         lane({ laneId: 'verifier_exact', label: 'Verifier', required: false }),
       ],
     })
@@ -133,7 +134,7 @@ describe('InternalAgentsMonitor', () => {
     expect(await screen.findByText('READ-ONLY OBSERVATION')).toBeTruthy()
     const matrix = await screen.findByTestId('standalone-lane-matrix')
     expect(within(matrix).getAllByText('Running')).toHaveLength(2)
-    expect(within(matrix).getByText('No retained observation')).toBeTruthy()
+    expect(within(matrix).getAllByText('No retained observation')).toHaveLength(2)
     expect(container.textContent).toContain('qwen3-5-cloud ×4')
     expect(container.textContent).toContain('관측 기록 없음')
   })

@@ -1,17 +1,19 @@
-type document =
-  { id : string
+type 'a document =
+  { payload : 'a
   ; name : string
   ; description : string
   ; category : string
+  ; invocation_name : string option
   }
 
-type hit =
-  { document : document
-  ; rank : float
+type 'a hit =
+  { document : 'a document
+  ; bm25 : float
   }
 
 type error =
   | Empty_query
+  | Frozen_surface_required
   | Index_unavailable of string
   | Invalid_query of string
 
@@ -19,6 +21,8 @@ let ( let* ) = Result.bind
 
 let error_to_yojson = function
   | Empty_query -> `Assoc [ "kind", `String "empty_query" ]
+  | Frozen_surface_required ->
+    `Assoc [ "kind", `String "frozen_surface_required" ]
   | Index_unavailable detail ->
     `Assoc
       [ "kind", `String "index_unavailable"; "detail", `String detail ]
@@ -46,6 +50,15 @@ let bind_text db statement index value =
   if Sqlite3.Rc.is_success rc
   then Ok ()
   else Error (Index_unavailable (sqlite_error db "bind capability field"))
+;;
+
+let bind_int db statement index value =
+  let rc =
+    Sqlite3.bind statement index (Sqlite3.Data.INT (Int64.of_int value))
+  in
+  if Sqlite3.Rc.is_success rc
+  then Ok ()
+  else Error (Index_unavailable (sqlite_error db "bind capability ordinal"))
 ;;
 
 let with_statement db sql f =
@@ -103,11 +116,14 @@ let with_database db f =
   | `Exception exn, _ -> raise exn
 ;;
 
-let insert_document db statement (document : document) =
-  let* () = bind_text db statement 1 document.id in
+let insert_document db statement ordinal document =
+  let* () = bind_int db statement 1 ordinal in
   let* () = bind_text db statement 2 document.name in
   let* () = bind_text db statement 3 document.description in
   let* () = bind_text db statement 4 document.category in
+  let* () =
+    bind_text db statement 5 (Option.value ~default:"" document.invocation_name)
+  in
   let rc = Sqlite3.step statement in
   if rc = Sqlite3.Rc.DONE
   then
@@ -121,24 +137,25 @@ let insert_document db statement (document : document) =
 let populate db documents =
   with_statement
     db
-    "INSERT INTO capability_search(id, name, description, category) VALUES (?, ?, ?, ?)"
+    "INSERT INTO capability_search(ordinal, name, description, category, invocation_name) VALUES (?, ?, ?, ?, ?)"
     (fun statement ->
-       let rec loop = function
+       let rec loop ordinal = function
          | [] -> Ok ()
          | document :: rest ->
-           (match insert_document db statement document with
-            | Ok () -> loop rest
+           (match insert_document db statement ordinal document with
+            | Ok () -> loop (ordinal + 1) rest
             | Error _ as error -> error)
        in
-       loop documents)
+       loop 0 documents)
 ;;
 
-let query db text =
+let query db documents text =
+  let documents = Array.of_list documents in
   with_statement
     db
-    "SELECT id, name, description, category, bm25(capability_search) \
+    "SELECT ordinal, bm25(capability_search) \
      FROM capability_search WHERE capability_search MATCH ? \
-     ORDER BY bm25(capability_search), name"
+     ORDER BY bm25(capability_search), ordinal"
     (fun statement ->
        match bind_text db statement 1 text with
        | Error _ as error -> error
@@ -148,14 +165,16 @@ let query db text =
            | exception Sqlite3.Error detail ->
              Error (Index_unavailable ("search capabilities: " ^ detail))
            | Sqlite3.Rc.ROW ->
-             let document =
-               { id = Sqlite3.column_text statement 0
-               ; name = Sqlite3.column_text statement 1
-               ; description = Sqlite3.column_text statement 2
-               ; category = Sqlite3.column_text statement 3
-               }
-             in
-             rows ({ document; rank = Sqlite3.column_double statement 4 } :: hits)
+             let ordinal = Sqlite3.column_int statement 0 in
+             if ordinal < 0 || ordinal >= Array.length documents
+             then
+               Error
+                 (Index_unavailable
+                    "capability index returned an ordinal outside its frozen input")
+             else
+               let document = documents.(ordinal) in
+               rows
+                 ({ document; bm25 = Sqlite3.column_double statement 1 } :: hits)
            | Sqlite3.Rc.DONE -> Ok (List.rev hits)
            | Sqlite3.Rc.ERROR ->
              Error (Invalid_query (sqlite_error db "search capabilities"))
@@ -183,13 +202,13 @@ let search ~query:text documents =
                  db
                  "create capability index"
                  "CREATE VIRTUAL TABLE capability_search USING \
-                  fts5(id UNINDEXED, name, description, category, tokenize='unicode61')"
+                  fts5(ordinal UNINDEXED, name, description, category, invocation_name, tokenize='unicode61')"
              with
              | Error _ as error -> error
              | Ok () ->
                (match populate db documents with
                 | Error _ as error -> error
-                | Ok () -> query db text))
+                | Ok () -> query db documents text))
     with
     | Sqlite3.Error detail -> Error (Index_unavailable detail)
 ;;

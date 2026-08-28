@@ -1385,7 +1385,6 @@ let add_routes ~sw ~clock router =
              let catalog, diagnostics =
                Keeper_skill_catalog.all_entries_of_snapshot snapshot
              in
-             let profiles = Keeper_skill_observability.of_catalog catalog in
              let usage_ledgers, usage_unavailable =
                match Keeper_meta_store.keeper_names_result config with
                | Error _ -> [], [ "keeper catalog: unavailable" ]
@@ -1463,10 +1462,18 @@ let add_routes ~sw ~clock router =
                         ; "last_used_at", `String last_used_at
                         ]))
              in
-             let profile_for_reference reference =
-               profiles
-               |> List.find_opt (fun (profile : Keeper_skill_observability.profile) ->
-                 Skill_reference.equal reference profile.reference)
+             let surface_profile_json reference skill =
+               match
+                 Keeper_skill_observability.of_skill_with_reference reference skill
+                 |> Keeper_skill_observability.to_yojson
+               with
+               | `Assoc fields ->
+                 `Assoc
+                   (List.filter
+                      (fun (name, _) ->
+                         not (String.equal name "reference" || String.equal name "kind"))
+                      fields)
+               | _ -> assert false
              in
              let diagnostic_messages identity =
                diagnostics
@@ -1491,9 +1498,7 @@ let add_routes ~sw ~clock router =
                  let base =
                    [ ("reference", Skill_reference.to_yojson reference) ]
                    @ [ ( "profile"
-                       , match profile_for_reference reference with
-                         | Some profile -> Keeper_skill_observability.to_yojson profile
-                         | None -> `Null )
+                       , surface_profile_json reference skill )
                      ; "usage", `List (usage_for_reference reference)
                      ]
                    @ diagnostic_fields reference.identity
@@ -1502,18 +1507,8 @@ let add_routes ~sw ~clock router =
                    (match skill.surface with
                     | Keeper_skill_catalog.Instruction ->
                       `Assoc (base @ [ ("kind", `String "instruction") ])
-                    | Keeper_skill_catalog.Composition composition ->
-                      `Assoc
-                        (base
-                        @ [ ("kind", `String "composition")
-                          ; ( "tool_name"
-                            , `String
-                                (Keeper_tool_composition_catalog.tool_name composition) )
-                          ; ( "execution"
-                            , `String
-                                (Keeper_tool_composition_catalog.execution_mode_to_string
-                                   composition.execution) )
-                          ]))
+                    | Keeper_skill_catalog.Composition _ ->
+                      `Assoc (base @ [ ("kind", `String "composition") ]))
              in
              let projected_references =
                Keeper_skill_catalog.skills catalog

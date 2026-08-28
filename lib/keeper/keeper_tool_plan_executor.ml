@@ -17,6 +17,7 @@ let execution_mode_of_descriptor descriptor =
   | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
     Agent_core.Tool_contract.Concurrent
   | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial
+  | Keeper_tool_descriptor.Direct_terminal
   | Keeper_tool_descriptor.Terminal -> Agent_core.Tool_contract.Serial
 ;;
 
@@ -43,6 +44,7 @@ let unscheduled_layer plan nodes =
        | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
          build batches ((node, descriptor) :: concurrent) rest
        | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial
+       | Keeper_tool_descriptor.Direct_terminal
        | Keeper_tool_descriptor.Terminal ->
          let batches = flush_concurrent batches concurrent in
          build (Unscheduled_serial (node, descriptor) :: batches) [] rest)
@@ -99,6 +101,7 @@ let outer_completion plan =
                    (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent)
              ; _
              }
+         | Some { execution = Keeper_tool_descriptor.Direct_terminal; _ }
          | None -> false)
       (Keeper_tool_plan.nodes plan)
   then
@@ -439,13 +442,14 @@ let equal_completion left right =
     Agent_core.Tool_contract.Continue_after_success -> false
 ;;
 
-let execute_keeper
+let execute_keeper_with_authority
       ~plan
       ~run_id
       ?composition_run_id
       ~parent_invocation
       ~config
       ~meta
+      ~capability_authority
       ~publication_recovery
       ~ctx_snapshot
       ?turn_sandbox_factory
@@ -487,11 +491,20 @@ let execute_keeper
       match descriptor.Keeper_tool_descriptor.execution with
       | Keeper_tool_descriptor.Terminal -> on_completed, on_failed
       | Keeper_tool_descriptor.Ordinary
-          (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent) -> None, None
+          (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent)
+       | Keeper_tool_descriptor.Direct_terminal -> None, None
     in
     let execution_evidence = ref None in
+    let make_handler =
+      match capability_authority with
+      | Keeper_tool_runtime.Frozen_surface capability_surface ->
+        Keeper_tools_agent_core_handler.make_keeper_tool_handler
+          ~capability_surface
+      | Keeper_tool_runtime.Compatibility_meta ->
+        Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
+    in
     let handler =
-      Keeper_tools_agent_core_handler.make_keeper_tool_handler
+      make_handler
         ~name:descriptor.internal_name
         ~descriptor
         ~model_name:node.tool_name
@@ -556,3 +569,16 @@ let execute_keeper
     ?observe_node_result
     ()
 ;;
+
+let execute_keeper ~capability_surface =
+  execute_keeper_with_authority
+    ~capability_authority:
+      (Keeper_tool_runtime.Frozen_surface capability_surface)
+;;
+
+module Compatibility = struct
+  let execute_keeper =
+    execute_keeper_with_authority
+      ~capability_authority:Keeper_tool_runtime.Compatibility_meta
+  ;;
+end

@@ -848,6 +848,16 @@ let test_monotonic_sequence_survives_restart () =
          (read_pending_snapshot ~base_path |> member "next_sequence" |> to_int))
 ;;
 
+let hitl_concurrency_key = "keeper.hitl.max_concurrent_per_keeper"
+
+let with_hitl_concurrency n f =
+  let restore () = ignore (Masc.Runtime_params.clear_by_key hitl_concurrency_key) in
+  (match Masc.Runtime_params.set_by_key hitl_concurrency_key (`Int n) with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "could not set HITL concurrency: %s" detail);
+  Fun.protect ~finally:restore f
+;;
+
 let test_same_owner_drain_uses_sequence_not_wall_clock () =
   let base_path = temp_dir () in
   let other_base_path = temp_dir () in
@@ -884,16 +894,19 @@ let test_same_owner_drain_uses_sequence_not_wall_clock () =
          "workspace projections compose deterministic FIFO"
          expected_global
          actual_global;
-       match
+       with_hitl_concurrency 2 @@ fun () ->
+       let ready =
          Gate.For_testing.ready_auto_judges_for_owner
            ~base_path
            ~keeper_name:"fifo-owner"
            [ second; first ]
-       with
-       | [ oldest ] ->
-         Alcotest.(check string) "only oldest sequence is ready" first.id oldest.id
-       | entries ->
-         Alcotest.failf "one oldest same-owner entry expected, got %d" (List.length entries))
+       in
+       Alcotest.(check (list string))
+         "same-owner worker slots preserve durable sequence"
+         [ first.id; second.id ]
+         (List.map
+            (fun (entry : Rule_types.pending_approval) -> entry.id)
+            ready))
 ;;
 
 (* Owner selection used to read only the FIFO head, so a head that never
@@ -937,11 +950,13 @@ let check_owner_selection label ~base_path ~expected entries =
       ~keeper_name:head_of_line_owner
       entries
   with
-  | [ selected ] ->
-    Alcotest.(check string) label expected selected.Rule_types.id
-  | [] -> Alcotest.failf "%s: owner selection returned nothing" label
   | selected ->
-    Alcotest.failf "%s: expected one entry, got %d" label (List.length selected)
+    Alcotest.(check (list string))
+      label
+      expected
+      (List.map
+         (fun (entry : Rule_types.pending_approval) -> entry.id)
+         selected)
 ;;
 
 let test_terminal_head_does_not_stall_owner_queue () =
@@ -965,10 +980,11 @@ let test_terminal_head_does_not_stall_owner_queue () =
          "head carries the earlier durable sequence"
          true
          (head.sequence < follower.sequence);
+       with_hitl_concurrency 4 @@ fun () ->
        check_owner_selection
-         "a startable head keeps its place at the front"
+         "startable work fills owner slots in durable order"
          ~base_path
-         ~expected:head.id
+         ~expected:[ head.id; follower.id ]
          [ follower; head ];
        let judged_head =
          { head with
@@ -980,7 +996,7 @@ let test_terminal_head_does_not_stall_owner_queue () =
        check_owner_selection
          "a Require_human head releases the owner slot to the next approval"
          ~base_path
-         ~expected:follower.id
+         ~expected:[ follower.id ]
          [ judged_head; follower ];
        let blocked_head =
          { head with
@@ -996,7 +1012,7 @@ let test_terminal_head_does_not_stall_owner_queue () =
        check_owner_selection
          "a pre-worker-blocked head releases the owner slot to the next approval"
          ~base_path
-         ~expected:follower.id
+         ~expected:[ follower.id ]
          [ blocked_head; follower ])
 ;;
 
@@ -1008,13 +1024,13 @@ let test_workspace_drain_isolates_owner_failures () =
     | "owner-a" -> Error "owner-a queue unavailable"
     | "owner-b" ->
       Ok
-        ({ started_id = Some "approval-b"
+        ({ started_ids = [ "approval-b" ]
          ; failures = []
          }
           : Gate.For_testing.owner_drain_outcome)
     | "owner-c" ->
       Ok
-        ({ started_id = None
+        ({ started_ids = []
          ; failures = [ "approval-c", "owner-c worker unavailable" ]
          }
           : Gate.For_testing.owner_drain_outcome)
@@ -1059,11 +1075,9 @@ let test_workspace_drain_isolates_owner_failures () =
      Alcotest.failf "expected two owner-local failures, got %d" (List.length failures))
 ;;
 
-let test_different_owners_claim_in_parallel () =
-  (* Real concurrent proof: fibers race the per-owner claim, so the
-     one-winner-per-owner invariant is exercised under actual Atomic
-     contention instead of sequential calls.  Unique owner names keep the
-     process-global active map isolated without a production reset. *)
+let test_each_owner_claims_bounded_parallel_workers () =
+  (* Real concurrent proof: fibers race the per-owner claim, exercising both
+     same-owner fan-out and the independent owner boundary under Atomic CAS. *)
   let base_path = temp_dir () in
   let suffix = string_of_int (int_of_float (Unix.gettimeofday () *. 1_000_000.0)) in
   Fun.protect
@@ -1084,25 +1098,47 @@ let test_different_owners_claim_in_parallel () =
        let entry_b1 =
          pending_entry_exn (submit ~base_path ~keeper_name:owner_b ~input:(`Int 1))
        in
+       let entry_a3 =
+         pending_entry_exn (submit ~base_path ~keeper_name:owner_a ~input:(`Int 3))
+       in
        let winners_a = Atomic.make 0 in
        let winners_b = Atomic.make 0 in
-       let hammer entry winners =
-         for _ = 1 to 40 do
-           if Gate.For_testing.claim_auto_judge entry
-           then ignore (Atomic.fetch_and_add winners 1)
-         done
+       let claim entry winners =
+         if Gate.For_testing.claim_auto_judge entry
+         then ignore (Atomic.fetch_and_add winners 1)
        in
+       with_hitl_concurrency 2 @@ fun () ->
        Eio_main.run (fun _env ->
          Eio.Switch.run (fun sw ->
-           Eio.Fiber.fork ~sw (fun () -> hammer entry_a1 winners_a);
-           Eio.Fiber.fork ~sw (fun () -> hammer entry_a1 winners_a);
-           Eio.Fiber.fork ~sw (fun () -> hammer entry_b1 winners_b);
-           Eio.Fiber.fork ~sw (fun () -> hammer entry_b1 winners_b)));
-       Alcotest.(check int) "one winner for owner A under contention" 1 (Atomic.get winners_a);
-       Alcotest.(check int) "one winner for owner B in parallel" 1 (Atomic.get winners_b);
-       Gate.For_testing.release_auto_judge entry_a1;
-       Alcotest.(check bool) "same owner re-claims after release" true
-         (Gate.For_testing.claim_auto_judge entry_a2))
+           Eio.Fiber.fork ~sw (fun () -> claim entry_a1 winners_a);
+           Eio.Fiber.fork ~sw (fun () -> claim entry_a2 winners_a);
+           Eio.Fiber.fork ~sw (fun () -> claim entry_a3 winners_a);
+           Eio.Fiber.fork ~sw (fun () -> claim entry_b1 winners_b)));
+       Alcotest.(check int) "owner A fills two slots" 2 (Atomic.get winners_a);
+       Alcotest.(check int) "owner B claims independently" 1 (Atomic.get winners_b);
+       let active_a =
+         Gate.For_testing.active_auto_judges_for_owner
+           ~base_path
+           ~keeper_name:owner_a
+       in
+       Alcotest.(check int) "owner A active count is bounded" 2 (List.length active_a);
+       let entries_a = [ entry_a1; entry_a2; entry_a3 ] in
+       let active_entry =
+         List.find
+           (fun (entry : Rule_types.pending_approval) -> List.mem entry.id active_a)
+           entries_a
+       in
+       let waiting_entry =
+         List.find
+           (fun (entry : Rule_types.pending_approval) ->
+              not (List.mem entry.id active_a))
+           entries_a
+       in
+       Gate.For_testing.release_auto_judge active_entry;
+       Alcotest.(check bool) "waiting same-owner work claims the released slot" true
+         (Gate.For_testing.claim_auto_judge waiting_entry);
+       List.iter Gate.For_testing.release_auto_judge entries_a;
+       Gate.For_testing.release_auto_judge entry_b1)
 ;;
 
 let test_delivery_wire_shape_drops_request_context () =
@@ -1593,7 +1629,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Keeper_always_allow -> ()
         | Gate.One_shot_resolution _
         | Gate.Exact_always_rule _
-        | Gate.Workspace_always_allow ->
+        | Gate.Workspace_always_allow
+        | Gate.Readonly_sandbox ->
           Alcotest.fail "different exact input consumed the grant");
        (match
           Gate.decide
@@ -1609,7 +1646,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
           Alcotest.(check string) "exact approval id" approval_id actual_id
         | Gate.Exact_always_rule _
         | Gate.Keeper_always_allow
-        | Gate.Workspace_always_allow ->
+        | Gate.Workspace_always_allow
+        | Gate.Readonly_sandbox ->
           Alcotest.fail "exact effect did not consume its one-shot grant");
        (match
           Gate.decide
@@ -1621,7 +1659,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Keeper_always_allow -> ()
         | Gate.One_shot_resolution _
         | Gate.Exact_always_rule _
-        | Gate.Workspace_always_allow ->
+        | Gate.Workspace_always_allow
+        | Gate.Readonly_sandbox ->
           Alcotest.fail "one-shot grant was consumed more than once");
        AQ.For_testing.reset_runtime_state ();
        let _ = install_exn ~base_path in
@@ -2745,6 +2784,55 @@ let test_override_only_auto_judge_owner_is_recovered () =
          true
          (Option.is_some
             (AQ.For_testing.get_pending_entry_unchecked ~id:bystander_id)))
+;;
+
+(* The operator recovery entry point shares the sweep's per-owner admission
+   (#31321 residue): on an always_allow workspace with one keeper pinned to
+   auto_judge, the old workspace-mode guard refused with "requires auto_judge
+   mode" — the exact stalled-owner configuration the escape hatch exists
+   for. It must now run and report, not refuse. *)
+let test_operator_recovery_admits_override_only_workspace () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-recovery-override" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let config = Masc.Workspace.default_config base_path in
+       (match
+          Masc.Keeper_gate_mode.set config ~actor:"test"
+            Masc.Keeper_gate_mode.Always_allow
+        with
+        | Ok _ -> ()
+        | Error e -> Alcotest.fail e);
+       (match
+          Masc.Keeper_gate_mode.set_for_keeper config ~actor:"test"
+            ~keeper_name
+            (Some Masc.Keeper_gate_mode.Auto_judge)
+        with
+        | Ok _ -> ()
+        | Error e -> Alcotest.fail e);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "request", `String "recovery-override" ])
+       in
+       ignore id;
+       (* This fixture publishes no exact-output registry, so the call may
+          stop at the later topology-readiness gate; the regression under
+          test is only the FIRST gate — the workspace-mode refusal that
+          used to fire before any per-owner resolution. *)
+       match Gate.request_operator_auto_judge_recovery ~base_path with
+       | Ok _ -> ()
+       | Error e ->
+           Alcotest.(check bool)
+             ("refusal is not the workspace-mode guard: " ^ e)
+             false
+             (String_util.contains_substring e "requires auto_judge mode"))
 ;;
 
 let test_current_snapshot_rejects_unbound_available_summary () =
@@ -4367,9 +4455,9 @@ let () =
             `Quick
             test_workspace_drain_isolates_owner_failures
         ; Alcotest.test_case
-            "different owners activate in parallel"
+            "each owner activates bounded parallel workers"
             `Quick
-            test_different_owners_claim_in_parallel
+            test_each_owner_claims_bounded_parallel_workers
         ; Alcotest.test_case
             "dedup keeps distinct origins"
             `Quick
@@ -4438,6 +4526,10 @@ let () =
             "override-only auto_judge owner is recovered"
             `Quick
             test_override_only_auto_judge_owner_is_recovered
+        ; Alcotest.test_case
+            "operator recovery admits an override-only workspace"
+            `Quick
+            test_operator_recovery_admits_override_only_workspace
         ; Alcotest.test_case
             "current snapshot rejects unbound available summary"
             `Quick

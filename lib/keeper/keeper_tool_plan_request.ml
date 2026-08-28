@@ -15,6 +15,14 @@ type template_error =
       }
   | Template_invalid_pointer of { pointer : string }
   | Template_duplicate_object_field of string
+  | Template_duplicate_field of
+      { kind : string
+      ; field : string
+      }
+  | Template_unknown_field of
+      { kind : string
+      ; field : string
+      }
 
 type error =
   | Request_not_an_object of { found : string }
@@ -39,9 +47,88 @@ type error =
       ; error : template_error
       }
   | Unknown_request_field of { field : string }
+  | Duplicate_request_field of { field : string }
+  | Node_duplicate_field of
+      { index : int
+      ; field : string
+      }
   | Plan_rejected of Keeper_tool_plan.error
 
 let kind_name = Json_util.kind_name
+
+let input_schema =
+  let template_ref = `Assoc [ "$ref", `String "#/$defs/template" ] in
+  let closed_object properties required =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties", `Assoc properties
+      ; "required", `List (List.map (fun name -> `String name) required)
+      ; "additionalProperties", `Bool false
+      ]
+  in
+  let field_entry_schema =
+    closed_object
+      [ "name", `Assoc [ "type", `String "string" ]; "value", template_ref ]
+      [ "name"; "value" ]
+  in
+  let template_schema =
+    `Assoc
+      [ ( "oneOf"
+        , `List
+            [ closed_object
+                [ "kind", `Assoc [ "const", `String "literal" ]
+                ; "value", `Assoc []
+                ]
+                [ "kind"; "value" ]
+            ; closed_object
+                [ "kind", `Assoc [ "const", `String "output" ]
+                ; "node", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+                ; ( "pointer"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "pattern", `String "^(?:|/(?:[^~]|~[01])*(?:/(?:[^~]|~[01])*)*)$"
+                      ] )
+                ]
+                [ "kind"; "node"; "pointer" ]
+            ; closed_object
+                [ "kind", `Assoc [ "const", `String "object" ]
+                ; ( "fields"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; "items", field_entry_schema
+                      ] )
+                ]
+                [ "kind"; "fields" ]
+            ; closed_object
+                [ "kind", `Assoc [ "const", `String "array" ]
+                ; "items", `Assoc [ "type", `String "array"; "items", template_ref ]
+                ]
+                [ "kind"; "items" ]
+            ] )
+      ]
+  in
+  let node_schema =
+    closed_object
+      [ "id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+      ; "tool", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+      ; ( "after"
+        , `Assoc
+            [ "type", `String "array"
+            ; "items", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+            ] )
+      ; "input", template_ref
+      ]
+      [ "id"; "tool" ]
+  in
+  `Assoc
+    [ "$id", `String "urn:masc:schema:keeper-tool-plan-request:v1"
+    ; "type", `String "object"
+    ; "properties", `Assoc [ "nodes", `Assoc [ "type", `String "array"; "minItems", `Int 1; "items", node_schema ] ]
+    ; "required", `List [ `String "nodes" ]
+    ; "additionalProperties", `Bool false
+    ; "$defs", `Assoc [ "template", template_schema ]
+    ]
+;;
 
 let template_error_message = function
   | Template_not_an_object { found } ->
@@ -59,6 +146,10 @@ let template_error_message = function
     Printf.sprintf "invalid JSON pointer %S (must start with '/')" pointer
   | Template_duplicate_object_field field ->
     Printf.sprintf "template object declares field %S twice" field
+  | Template_duplicate_field { kind; field } ->
+    Printf.sprintf "template kind %S declares JSON field %S twice" kind field
+  | Template_unknown_field { kind; field } ->
+    Printf.sprintf "template kind %S has unknown field %S" kind field
 ;;
 
 let error_message = function
@@ -78,6 +169,10 @@ let error_message = function
     Printf.sprintf "node %d input: %s" index (template_error_message error)
   | Unknown_request_field { field } ->
     Printf.sprintf "unknown plan request field %S (only \"nodes\" is accepted)" field
+  | Duplicate_request_field { field } ->
+    Printf.sprintf "plan request declares field %S twice" field
+  | Node_duplicate_field { index; field } ->
+    Printf.sprintf "node %d declares field %S twice" index field
   | Plan_rejected error -> Plan.error_to_string error
 ;;
 
@@ -98,6 +193,10 @@ let template_error_to_json error =
     tag "template_invalid_pointer" [ "pointer", `String pointer ]
   | Template_duplicate_object_field field ->
     tag "template_duplicate_object_field" [ "field", `String field ]
+  | Template_duplicate_field { kind; field } ->
+    tag "template_duplicate_field" [ "template", `String kind; "field", `String field ]
+  | Template_unknown_field { kind; field } ->
+    tag "template_unknown_field" [ "template", `String kind; "field", `String field ]
 ;;
 
 let error_to_json error =
@@ -122,6 +221,10 @@ let error_to_json error =
       [ "index", `Int index; "error", template_error_to_json error ]
   | Unknown_request_field { field } ->
     tag "unknown_request_field" [ "field", `String field ]
+  | Duplicate_request_field { field } ->
+    tag "duplicate_request_field" [ "field", `String field ]
+  | Node_duplicate_field { index; field } ->
+    tag "node_duplicate_field" [ "index", `Int index; "field", `String field ]
   | Plan_rejected plan_error ->
     tag
       "plan_rejected"
@@ -144,6 +247,24 @@ let composable_tool_names ~descriptors =
 
 let ( let* ) = Result.bind
 
+let first_duplicate fields =
+  let rec loop seen = function
+    | [] -> None
+    | (field, _) :: rest ->
+      if List.mem field seen then Some field else loop (field :: seen) rest
+  in
+  loop [] fields
+;;
+
+let validate_template_fields ~kind ~allowed fields =
+  match first_duplicate fields with
+  | Some field -> Error (Template_duplicate_field { kind; field })
+  | None ->
+    (match List.find_opt (fun (field, _) -> not (List.mem field allowed)) fields with
+     | Some (field, _) -> Error (Template_unknown_field { kind; field })
+     | None -> Ok ())
+;;
+
 let node_id_of_string ~index ~field value =
   match Plan.Node_id.make value with
   | Ok id -> Ok id
@@ -159,10 +280,14 @@ let rec template_of_json json =
     (match List.assoc_opt "kind" fields with
      | None -> Error Template_missing_kind
      | Some (`String "literal") ->
+       let* () = validate_template_fields ~kind:"literal" ~allowed:[ "kind"; "value" ] fields in
        (match List.assoc_opt "value" fields with
         | None -> Error (Template_missing_field { kind = "literal"; field = "value" })
         | Some value -> Ok (Plan.Json_template.literal value))
      | Some (`String "output") ->
+       let* () =
+         validate_template_fields ~kind:"output" ~allowed:[ "kind"; "node"; "pointer" ] fields
+       in
        let* node =
          match List.assoc_opt "node" fields with
          | Some (`String node) -> Ok node
@@ -194,6 +319,7 @@ let rec template_of_json json =
         | Ok pointer -> Ok (Plan.Json_template.output ~node_id ~pointer)
         | Error _ -> Error (Template_invalid_pointer { pointer = pointer_text }))
      | Some (`String "object") ->
+       let* () = validate_template_fields ~kind:"object" ~allowed:[ "kind"; "fields" ] fields in
        (match List.assoc_opt "fields" fields with
         | None -> Error (Template_missing_field { kind = "object"; field = "fields" })
         | Some (`List entries) ->
@@ -203,6 +329,12 @@ let rec template_of_json json =
                  let* acc = acc in
                  match entry with
                  | `Assoc entry_fields ->
+                   let* () =
+                     validate_template_fields
+                       ~kind:"object.fields"
+                       ~allowed:[ "name"; "value" ]
+                       entry_fields
+                   in
                    let* name =
                      match List.assoc_opt "name" entry_fields with
                      | Some (`String name) -> Ok name
@@ -246,6 +378,7 @@ let rec template_of_json json =
             (Template_invalid_field
                { kind = "object"; field = "fields"; found = kind_name other }))
      | Some (`String "array") ->
+       let* () = validate_template_fields ~kind:"array" ~allowed:[ "kind"; "items" ] fields in
        (match List.assoc_opt "items" fields with
         | None -> Error (Template_missing_field { kind = "array"; field = "items" })
         | Some (`List items) ->
@@ -274,6 +407,11 @@ let rec template_of_json json =
 let node_of_json ~index json =
   match json with
   | `Assoc fields ->
+    let* () =
+      match first_duplicate fields with
+      | Some field -> Error (Node_duplicate_field { index; field })
+      | None -> Ok ()
+    in
     let* () =
       List.fold_left
         (fun acc (field, _) ->
@@ -338,6 +476,11 @@ let node_of_json ~index json =
 let plan_of_json ~descriptors json =
   match json with
   | `Assoc fields ->
+    let* () =
+      match first_duplicate fields with
+      | Some field -> Error (Duplicate_request_field { field })
+      | None -> Ok ()
+    in
     let* () =
       List.fold_left
         (fun acc (field, _) ->

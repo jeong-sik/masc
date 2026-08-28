@@ -401,6 +401,24 @@ let test_the_line_is_the_spans_joined () =
         joined)
     [ ""; "hello"; "/"; "/t"; "/th"; "/thinking"; "/task a b"; "/zork" ]
 
+(* The cancel contract: exit-class on masc_transition, so the one typed
+   reason must arrive as both [reason] and the required non-empty
+   [handoff_context.summary]. A builder that dropped the summary would pass
+   the transport and be refused by the server's schema on every cancel. *)
+let test_cancel_arguments_carry_reason_as_summary () =
+  let arguments =
+    Masc_tui_mcp.task_cancel_arguments ~task_id:"task-9" ~reason:"wrong scope"
+  in
+  let assoc key = List.assoc_opt key arguments in
+  Alcotest.(check bool) "task id" true (assoc "task_id" = Some (`String "task-9"));
+  Alcotest.(check bool) "action is cancel" true
+    (assoc "action" = Some (`String "cancel"));
+  Alcotest.(check bool) "reason rides" true
+    (assoc "reason" = Some (`String "wrong scope"));
+  Alcotest.(check bool) "summary equals the reason" true
+    (assoc "handoff_context"
+    = Some (`Assoc [ ("summary", `String "wrong scope") ]))
+
 let () =
   run "tui command"
     [ ( "composer"
@@ -446,7 +464,9 @@ let () =
             test_the_line_is_the_spans_joined
         ] )
     ; ( "tools/call"
-      , [ test_case "a tool answer is read off the SSE body" `Quick
+      , [ test_case "cancel arguments carry the reason as summary" `Quick
+            test_cancel_arguments_carry_reason_as_summary
+        ; test_case "a tool answer is read off the SSE body" `Quick
             test_a_tool_answer_is_read_off_the_sse_body
         ; test_case "a tool that failed is an outcome, not a transport error" `Quick
             test_a_tool_that_failed_is_an_outcome_not_a_transport_error

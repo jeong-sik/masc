@@ -653,6 +653,125 @@ let test_unproven_slack_failures_stay_unknown () =
     (Masc.Keeper_chat_slack.effect_disposition
        (Masc.Keeper_chat_slack.Other "ok=true but missing 'ts'"))
 
+(* A failed streaming edit consumed Slack's rate budget just like a
+   successful one. Leaving last_edit_time stale let the very next token retry
+   immediately, so a 429 window attracted one edit attempt per token. The
+   failure must re-arm the throttle. *)
+let test_failed_stream_edit_rearms_the_throttle () =
+  let times = ref [ 10.0; 13.2; 13.3; 13.4; 16.5; 16.6; 16.7 ] in
+  let now () =
+    match !times with
+    | t :: rest ->
+        times := rest;
+        t
+    | [] -> 16.7
+  in
+  let edits = ref [] in
+  let outcomes =
+    run_adapter ~now ~sleep:(fun _ -> ())
+      ~post_stream:(fun ~content:_ -> Ok "slack-message-1")
+      ~edit_stream:(fun ~message_id:_ ~content ->
+        edits := content :: !edits;
+        Error (Masc.Keeper_chat_slack.Network "rate limited"))
+      ~edit_blocks:(fun ~message_id:_ ~content:_ ~blocks:_ ->
+        Error (Masc.Keeper_chat_slack.Network "rate limited"))
+      ~delete_stream:(fun ~message_id:_ ->
+        fail "a rate-limited reply must not be deleted")
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-throttle"; thread_id = "thread-throttle" }
+      ; Masc.Keeper_chat_events.Text_delta "a "
+      ; Masc.Keeper_chat_events.Text_delta "b "
+      ; Masc.Keeper_chat_events.Text_delta "c "
+      ; Masc.Keeper_chat_events.Text_delta "d "
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-throttle" }
+      ]
+      ~send_plain:(fun ~content:_ ->
+        fail "a streaming failure needs no side message")
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        fail "the accepted streaming message is edited, not replaced")
+  in
+  check bool "terminal callback reports the failure" true
+    (outcomes = [ Error (Masc.Keeper_chat_slack.Network "rate limited") ]);
+  check (list string)
+    "a failed edit re-arms the throttle: one retry per interval"
+    [ "a b "; "a b c d " ]
+    (List.rev !edits)
+
+(* A mid-turn checkpoint status is a block alongside the reply, not a
+   replacement for it: wiping acc_text made the already-posted channel
+   message visibly shrink at the next edit. *)
+let test_checkpoint_status_keeps_the_accumulated_stream_text () =
+  let final_edits = ref [] in
+  let outcomes =
+    run_adapter
+      ~post_stream:(fun ~content:_ -> Ok "slack-message-ckpt")
+      ~edit_stream:(fun ~message_id:_ ~content:_ -> Ok ())
+      ~edit_blocks:(fun ~message_id:_ ~content ~blocks ->
+        final_edits := (content, blocks) :: !final_edits;
+        Ok ())
+      ~delete_stream:(fun ~message_id:_ ->
+        fail "a checkpointed reply must not be deleted")
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-ckpt"; thread_id = "thread-ckpt" }
+      ; Masc.Keeper_chat_events.Text_delta "hello "
+      ; Masc.Keeper_chat_events.Status_block
+          { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
+      ; Masc.Keeper_chat_events.Text_delta "world "
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-ckpt" }
+      ]
+      ~send_plain:(fun ~content:_ ->
+        fail "a checkpoint status needs no side message")
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        fail "the accepted streaming message is edited, not replaced")
+  in
+  check bool "terminal callback succeeds" true (outcomes = [ Ok () ]);
+  match List.rev !final_edits with
+  | [ (content, blocks) ] ->
+      check bool "pre-checkpoint text survives" true (contains content "hello");
+      check bool "post-checkpoint text is delivered" true
+        (contains content "world");
+      check bool "the checkpoint status block is still delivered" true
+        (List.exists
+           (fun block -> contains (json_string block) "체크포인트")
+           blocks)
+  | _ -> fail "a checkpointed reply must receive one terminal rich edit"
+
+(* A failed placeholder POST may still have landed server-side; Slack has no
+   idempotency key for chat.postMessage. One bounded retry, then the turn
+   degrades to a single final message instead of risking a duplicate. *)
+let test_unknown_outcome_post_retries_once_then_degrades () =
+  let posts = ref [] in
+  let finals = ref [] in
+  let outcomes =
+    run_adapter
+      ~post_stream:(fun ~content ->
+        posts := content :: !posts;
+        Error (Masc.Keeper_chat_slack.Network "connection reset after send"))
+      ~edit_stream:(fun ~message_id:_ ~content:_ ->
+        fail "without a message id there is nothing to edit")
+      ~edit_blocks:(fun ~message_id:_ ~content:_ ~blocks:_ ->
+        fail "without a message id there is nothing to finalize")
+      ~delete_stream:(fun ~message_id:_ ->
+        fail "without a message id there is nothing to delete")
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-post"; thread_id = "thread-post" }
+      ; Masc.Keeper_chat_events.Text_delta "a "
+      ; Masc.Keeper_chat_events.Text_delta "b "
+      ; Masc.Keeper_chat_events.Text_delta "c "
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-post" }
+      ]
+      ~send_plain:(fun ~content:_ ->
+        fail "the final reply uses block delivery")
+      ~send_blocks:(fun ~content ~blocks:_ ->
+        finals := content :: !finals;
+        Ok ())
+  in
+  check bool "terminal callback succeeds" true (outcomes = [ Ok () ]);
+  check (list string) "the placeholder POST is retried at most once"
+    [ "a "; "a b " ] (List.rev !posts);
+  check (list string) "the reply still arrives as one final message"
+    [ "a b c " ] (List.rev !finals)
+
 let () =
   run "keeper_chat_slack"
     [
@@ -728,6 +847,12 @@ let () =
             test_terminal_edit_waits_for_slack_interval
         ; test_case "typed external-effect status settles successfully" `Quick
             test_adapter_external_effect_status_is_terminal_success
+        ; test_case "failed stream edit re-arms the throttle" `Quick
+            test_failed_stream_edit_rearms_the_throttle
+        ; test_case "checkpoint status keeps accumulated text" `Quick
+            test_checkpoint_status_keeps_the_accumulated_stream_text
+        ; test_case "unknown-outcome POST retries once then degrades" `Quick
+            test_unknown_outcome_post_retries_once_then_degrades
         ; test_case "native activity failure is isolated" `Quick
             test_native_activity_failure_does_not_affect_delivery
         ] )

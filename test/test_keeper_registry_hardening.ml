@@ -6,7 +6,10 @@
 open Alcotest
 
 module KR = Masc.Keeper_registry
-module KET = Masc.Keeper_tool_dispatch_runtime
+module KET = struct
+  include Masc.Keeper_tool_dispatch_runtime
+  include Masc.Keeper_tool_dispatch_runtime.Compatibility
+end
 module KLH = Masc.Keeper_lifecycle_hooks
 module Keeper_lifecycle_admission = Masc.Keeper_lifecycle_admission
 module Reservation = Masc.Keeper_lifecycle_reservation

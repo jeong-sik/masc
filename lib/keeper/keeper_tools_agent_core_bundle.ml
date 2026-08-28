@@ -39,7 +39,7 @@ let initial_terminal_effect_state = function
   | Some _ | None -> Keeper_tools_agent_core.Terminal_effect_open
 ;;
 
-let make_tool_bundle_for_descriptors
+let make_tool_bundle_for_descriptors_with_policy
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
@@ -55,6 +55,7 @@ let make_tool_bundle_for_descriptors
       ?skill_activation_context
       ?(allow_unrecorded_skill_surface = false)
       ?turn_ctx_cell
+      ?capability_surface
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
   : tool_bundle
@@ -175,9 +176,8 @@ let make_tool_bundle_for_descriptors
       gate_context
   in
   (* Every descriptor authorized by this caller is materialized through the
-     canonical Keeper handler. [make_tool_bundle] supplies the full
-     model-visible set; bounded internal roles supply their own closed typed
-     subset. *)
+     canonical Keeper handler. A Keeper turn supplies its frozen Tool Group
+     surface; bounded internal roles supply their own closed typed subset. *)
   (* The bundle lives for exactly one Agent run. Its typed tool-boundary
      state is request-scoped and observed by the AGENT_CORE tool-boundary probe only
      after the whole tool batch and checkpoint sink have completed. A generic
@@ -281,6 +281,7 @@ let make_tool_bundle_for_descriptors
              Some
                (Agent_core.Tool.ordinary_descriptor
                   Agent_core.Tool_contract.Concurrent)
+           | Keeper_tool_descriptor.Direct_terminal
            | Keeper_tool_descriptor.Terminal ->
              Some
                (Agent_core.Tool.terminal_descriptor
@@ -288,6 +289,7 @@ let make_tool_bundle_for_descriptors
          in
          let on_completed, on_failed, on_externalization_error =
            match descriptor.execution with
+           | Keeper_tool_descriptor.Direct_terminal
            | Keeper_tool_descriptor.Terminal ->
              ( Some
                  (function
@@ -297,7 +299,7 @@ let make_tool_bundle_for_descriptors
                        { failure_class = Tool_result.Runtime_failure
                        ; effect_disposition = Tool_result.Effect_outcome_unknown
                        ; diagnostic =
-                           "terminal surface post completed without a typed target receipt"
+                           "terminal tool completed without a typed effect receipt"
                        })
              , Some mark_terminal_effect_failed
              , Some mark_completed_terminal_externalization_failed )
@@ -321,6 +323,7 @@ let make_tool_bundle_for_descriptors
                  | Keeper_tool_descriptor.Tool_write_file
                  | Keeper_tool_descriptor.Tool_time_now
                  | Keeper_tool_descriptor.Tool_tools_list
+                 | Keeper_tool_descriptor.Tool_capability_search
                  | Keeper_tool_descriptor.Tool_context_status
                  | Keeper_tool_descriptor.Tool_artifact_read
                  | Keeper_tool_descriptor.Tool_memory_search
@@ -358,29 +361,53 @@ let make_tool_bundle_for_descriptors
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
              let h =
-               Keeper_tools_agent_core_handler.make_keeper_tool_handler
-                 ~name:internal
-                 ~input_schema:descriptor.input_schema
-                 ~config
-                 ~meta
-                 ~publication_recovery
-                 ~ctx_snapshot
+               match capability_surface with
+               | Some capability_surface ->
+                 Keeper_tools_agent_core_handler.make_keeper_tool_handler
+                   ~capability_surface
+                   ~name:internal
+                   ~descriptor
+                   ~model_name
+                   ~input_schema:descriptor.input_schema
+                   ~config
+                   ~meta
+                   ~publication_recovery
+                   ~ctx_snapshot
                    ?turn_sandbox_factory
-                 ?clock
-                 ?continuation_channel
-                 ?gate_context:gate_context_provider
-                 ?gate_grant
-                 ?record_gate_result
-                 ?on_completed
-                 ~on_deferred:mark_deferred_tool_result
-                 ~on_external_effect_deferred:mark_external_effect_deferred
-                 ?on_failed
-                 ~prepare_input:(fun input ->
-                   Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
-                     ~tool_name:model_name
-                     descriptor
-                     ~input)
-                 ()
+                   ?clock
+                   ?continuation_channel
+                   ?gate_context:gate_context_provider
+                   ?gate_grant
+                   ?record_gate_result
+                   ?on_completed
+                   ~on_deferred:mark_deferred_tool_result
+                   ~on_external_effect_deferred:mark_external_effect_deferred
+                   ?on_failed
+                   ()
+               | None ->
+                 Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
+                   ~name:internal
+                   ~input_schema:descriptor.input_schema
+                   ~config
+                   ~meta
+                   ~publication_recovery
+                   ~ctx_snapshot
+                   ?turn_sandbox_factory
+                   ?clock
+                   ?continuation_channel
+                   ?gate_context:gate_context_provider
+                   ?gate_grant
+                   ?record_gate_result
+                   ?on_completed
+                   ~on_deferred:mark_deferred_tool_result
+                   ~on_external_effect_deferred:mark_external_effect_deferred
+                   ?on_failed
+                   ~prepare_input:(fun input ->
+                     Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
+                       ~tool_name:model_name
+                       descriptor
+                       ~input)
+                   ()
              in
              Tool_bridge.agent_core_tool_of_masc_with_execution_env
                ?descriptor:agent_core_descriptor
@@ -460,7 +487,14 @@ let make_tool_bundle_for_descriptors
              reference)
         skill_activation_context
     in
-    Keeper_tool_composition_surface.make_tools
+    let make_composition_tools =
+      match capability_surface with
+      | Some capability_surface ->
+        Keeper_tool_composition_surface.make_tools ~capability_surface
+      | None ->
+        Keeper_tool_composition_surface.Compatibility.make_tools ~descriptors
+    in
+    make_composition_tools
         ~instruction_skills
         ~skill_compositions:composition_skills
         ?composition_plan_index
@@ -490,7 +524,6 @@ let make_tool_bundle_for_descriptors
         ~on_external_effect_deferred:mark_external_effect_deferred
         ~on_failed:mark_terminal_effect_failed
         ~on_externalization_error:mark_completed_terminal_externalization_failed
-        ~descriptors
         ()
   in
   (* Identity tools are external effects by definition; they join the turn
@@ -519,6 +552,42 @@ let make_tool_bundle_for_descriptors
   }
 ;;
 
+let make_tool_bundle_for_capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot
+      ?clock
+      ?continuation_channel
+      ?gate_context
+      ?hitl_resolution
+      ?identity_tools
+      ?composition_plan_index
+      ?skill_activation_context
+      ?turn_ctx_cell
+      ~capability_surface
+      ()
+  =
+  make_tool_bundle_for_descriptors_with_policy
+    ~config
+    ~meta
+    ~publication_recovery
+    ~ctx_snapshot
+    ?clock
+    ?continuation_channel
+    ?gate_context
+    ?hitl_resolution
+    ~skill_catalog:(Keeper_capability_surface.skill_catalog capability_surface)
+    ?identity_tools
+    ?composition_plan_index
+    ?skill_activation_context
+    ~allow_unrecorded_skill_surface:false
+    ?turn_ctx_cell
+    ~descriptors:(Keeper_capability_surface.descriptors capability_surface)
+    ~capability_surface
+    ()
+;;
+
 let make_tool_bundle_with_policy
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -544,7 +613,7 @@ let make_tool_bundle_with_policy
   let descriptors =
     Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
   in
-  make_tool_bundle_for_descriptors
+  make_tool_bundle_for_descriptors_with_policy
     ~config
     ~meta
     ~publication_recovery
@@ -561,66 +630,6 @@ let make_tool_bundle_with_policy
     ?turn_ctx_cell
     ~descriptors
     ()
-;;
-
-let make_tool_bundle
-      ~config
-      ~meta
-      ~publication_recovery
-      ~ctx_snapshot
-      ?clock
-      ?continuation_channel
-      ?gate_context
-      ?hitl_resolution
-      ?skill_catalog
-      ?identity_tools
-      ?composition_plan_index
-      ?skill_activation_context
-      ?turn_ctx_cell
-      ()
-  =
-  make_tool_bundle_with_policy
-    ~config
-    ~meta
-    ~publication_recovery
-    ~ctx_snapshot
-    ?clock
-    ?continuation_channel
-    ?gate_context
-    ?hitl_resolution
-    ?skill_catalog
-    ?identity_tools
-    ?composition_plan_index
-    ?skill_activation_context
-    ~allow_unrecorded_skill_surface:false
-    ?turn_ctx_cell
-    ()
-;;
-
-let make_tools
-      ~(config : Workspace.config)
-      ~(meta : Keeper_meta_contract.keeper_meta)
-      ~(publication_recovery :
-          Keeper_publication_recovery_availability.turn_context)
-      ~(ctx_snapshot : Keeper_types.working_context)
-      ?clock
-      ?skill_catalog
-      ?skill_activation_context
-      ?turn_ctx_cell
-      ()
-  : Agent_core.Tool.t list
-  =
-  (make_tool_bundle
-     ~config
-     ~meta
-     ~publication_recovery
-     ~ctx_snapshot
-     ?clock
-     ?skill_catalog
-     ?skill_activation_context
-     ?turn_ctx_cell
-     ())
-    .tools
 ;;
 
 module For_testing = struct
@@ -683,7 +692,7 @@ module For_testing = struct
         ?skill_catalog
         ()
     =
-    (make_tool_bundle_for_descriptors
+    (make_tool_bundle_for_descriptors_with_policy
        ~config
        ~meta
        ~publication_recovery

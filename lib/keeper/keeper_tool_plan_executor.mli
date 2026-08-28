@@ -104,7 +104,8 @@ val execute
     descriptor input translation, Gate, Shell IR routing, tool-call telemetry,
     and per-action I/O previews on the same boundary as a direct Keeper call. *)
 val execute_keeper
-  :  plan:Keeper_tool_plan.t
+  :  capability_surface:Keeper_capability_surface.t
+  -> plan:Keeper_tool_plan.t
   -> run_id:Keeper_tool_plan.Run_id.t
   -> ?composition_run_id:Keeper_tool_plan.Composition_run_id.t
   -> parent_invocation:Agent_core.Tool_contract.Invocation.t
@@ -126,3 +127,31 @@ val execute_keeper
   -> ?observe_node_result:(node_result -> (unit, string) result)
   -> unit
   -> (node_result list, failure) result
+
+module Compatibility : sig
+  val execute_keeper
+    :  plan:Keeper_tool_plan.t
+    -> run_id:Keeper_tool_plan.Run_id.t
+    -> ?composition_run_id:Keeper_tool_plan.Composition_run_id.t
+    -> parent_invocation:Agent_core.Tool_contract.Invocation.t
+    -> config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> publication_recovery:
+         Keeper_publication_recovery_availability.turn_context
+    -> ctx_snapshot:Keeper_types.working_context
+    -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+    -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+    -> ?continuation_channel:Keeper_continuation_channel.t
+    -> ?gate_context:(unit -> Keeper_gate.causal_context)
+    -> ?gate_grant:Keeper_gate.cycle_grant
+    -> ?record_gate_result:
+         (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
+    -> ?on_completed:(Keeper_tool_execution.terminal_effect_receipt option -> unit)
+    -> ?on_deferred:(unit -> unit)
+    -> ?on_external_effect_deferred:(unit -> unit)
+    -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
+    -> ?observe_node_result:(node_result -> (unit, string) result)
+    -> unit
+    -> (node_result list, failure) result
+end
+(** Explicit compatibility adapter for tests without an enclosing Keeper turn. *)

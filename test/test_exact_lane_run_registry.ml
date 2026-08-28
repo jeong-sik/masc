@@ -98,7 +98,7 @@ let test_completion_without_slot_receipt_writes_explicit_null () =
   remove_if_exists path
 ;;
 
-let test_missing_selected_slot_is_not_replayed () =
+let test_missing_selected_slot_completion_is_not_replayed_as_success () =
   let path = Filename.temp_file "exact-lane-legacy-slot-" ".jsonl" in
   remove_if_exists path;
   let registry = R.create ~path () in
@@ -138,7 +138,10 @@ let test_missing_selected_slot_is_not_replayed () =
        "\n"
        [ List.nth lines 0; Yojson.Safe.to_string completion_event; "" ]);
   let replayed = R.replay path in
-  check (option string) "pre-v4 completion is rejected, not projected as None" None
+  check
+    (option string)
+    "pre-v4 completion is rejected and its registration is restart-failed"
+    (Some "failed")
     (R.get replayed ~run_id:"legacy-run" |> Option.map (fun run -> R.status_label run.R.status));
   remove_if_exists path
 ;;
@@ -308,6 +311,54 @@ let test_running_shape_has_no_invented_completion () =
   | _ -> fail "run serializer must emit an object"
 ;;
 
+let test_replay_settles_running_as_server_restart_failure () =
+  let path = Filename.temp_file "exact-lane-restart-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"interrupted-run"
+    ~lane:R.Librarian
+    ~actor:"keeper-a"
+    ~started_at:(Time_compat.now () -. 2.0)
+    ~input:(R.Exact_input (`Assoc [ "message_count", `Int 4 ]));
+  let replayed = R.replay path in
+  (match R.get replayed ~run_id:"interrupted-run" with
+   | Some
+       { status =
+           R.Completed
+             { outcome = R.Failed { code; detail }
+             ; elapsed_s
+             ; output
+             ; selected_slot
+             }
+       ; _
+       } ->
+     check string "typed restart code" "server_restarted" code;
+     check string
+       "operator detail"
+       "exact-output fibers do not survive server restart"
+       detail;
+     check bool "elapsed time is retained" true (elapsed_s >= 2.0);
+     check (option string) "no slot receipt is invented" None selected_slot;
+     check
+       string
+       "durable output names the interruption"
+       "server_restarted"
+       (Yojson.Safe.Util.member "reason" output |> Yojson.Safe.Util.to_string)
+   | Some run ->
+     failf "replayed run stayed non-terminal: %s" (R.status_label run.status)
+   | None -> fail "replayed running exact lane disappeared");
+  let replayed_again = R.replay path in
+  check
+    (option string)
+    "the synthesized terminal event survives another replay"
+    (Some "failed")
+    (R.get replayed_again ~run_id:"interrupted-run"
+     |> Option.map (fun run -> R.status_label run.R.status));
+  remove_if_exists path
+;;
+
 let test_current_storage_generation () =
   check string "current store file" "exact-lane-runs-v5.jsonl" R.storage_filename
 ;;
@@ -327,11 +378,10 @@ let v4_registration_row =
   {|{"event":"register","id":"exact-board-attention-pin","started_at":30.0,"registration":{"lane":"board_attention_exact","subject_id":"s","actor":"keeper-a","input":{"kind":"exact","payload":{"candidate_id":"c"}}}}|}
 
 let test_store_version_pins_the_registration_shape () =
-  (* Reads the decoder's verdict on the row, not what survives replay. A
-     registration that decodes is still dropped from the replayed registry —
-     running exact-output fibers do not outlive a restart — so "does the run
-     come back" cannot tell an accepted row from a refused one. [cut_replay_log]
-     reports what the same decoder read, and counts what it refused. *)
+  (* Reads the decoder's verdict on the row, not only whether an ID survives
+     replay. A registration that decodes is restart-failed into a terminal row,
+     while a refused row is absent. [cut_replay_log] reports what the same
+     decoder read and counts what it refused. *)
   let malformed_lines row =
     let path = Filename.temp_file "exact-lane-shape-" ".jsonl" in
     Fs_compat.save_file path (row ^ "\n");
@@ -401,15 +451,12 @@ let test_exact_history_is_not_pruned_across_lanes () =
   let path = Filename.temp_file "exact-lane-runs-all-" ".jsonl" in
   remove_if_exists path;
   let registry = R.create ~path () in
+  let lanes = Array.of_list R.all_lanes in
   List.init 80 Fun.id
   |> List.iter (fun index ->
     let run_id = Printf.sprintf "run-%02d" index in
     let lane =
-      match index mod 4 with
-      | 0 -> R.Librarian
-      | 1 -> R.Hitl_auto_judge
-      | 2 -> R.Board_attention
-      | _ -> R.Compaction
+      lanes.(index mod Array.length lanes)
     in
     R.register_running
       registry
@@ -426,9 +473,32 @@ let test_exact_history_is_not_pruned_across_lanes () =
       ~output:(`Assoc [ "index", `Int index ]));
   let replayed = R.replay path in
   check int "all exact runs survive replay" 80 (List.length (R.list_runs replayed));
+  check
+    (list string)
+    "every registered lane survives replay"
+    (R.all_lanes |> List.map R.lane_key |> List.sort String.compare)
+    (R.list_runs replayed
+     |> List.map (fun (run : R.run) -> R.lane_key run.lane)
+     |> List.sort_uniq String.compare);
   let permissions = (Unix.stat path).Unix.st_perm land 0o777 in
   check int "durable registry is private" 0o600 permissions;
   remove_if_exists path
+;;
+
+let test_all_lanes_matches_the_independent_constructor_oracle () =
+  let expected =
+    [ R.Librarian
+    ; R.Hitl_auto_judge
+    ; R.Board_attention
+    ; R.Compaction
+    ; R.Assembler
+    ]
+  in
+  check
+    (list string)
+    "all_lanes is the complete ordered constructor enumeration"
+    (List.map R.lane_key expected)
+    (List.map R.lane_key R.all_lanes)
 ;;
 
 let test_failed_durable_registration_is_not_published_in_memory () =
@@ -638,6 +708,7 @@ let test_summary_carries_no_payload () =
   let detail = R.run_to_yojson run in
   check bool "summary omits input" true (Option.is_none (field "input" summary));
   check bool "summary omits output" true (Option.is_none (field "output" summary));
+  check bool "summary does not invent a subject" true (field "subject_id" summary = Some `Null);
   check bool "detail keeps input" true (Option.is_some (field "input" detail));
   check bool "detail keeps output" true (Option.is_some (field "output" detail));
   check bool "summary still identifies the run" true (Option.is_some (field "run_id" summary))
@@ -650,8 +721,8 @@ let () =
       , [ test_case "durable exact evidence" `Quick test_round_trip_preserves_exact_evidence
         ; test_case "missing receipt is explicit null" `Quick
             test_completion_without_slot_receipt_writes_explicit_null
-        ; test_case "pre-v4 completion is rejected" `Quick
-            test_missing_selected_slot_is_not_replayed
+        ; test_case "pre-v4 completion is not replayed as success" `Quick
+            test_missing_selected_slot_completion_is_not_replayed_as_success
         ; test_case "blank selected slot is rejected before write" `Quick
             test_blank_selected_slot_is_rejected_before_write
         ; test_case "hard-cut artifact does not poison compaction forever" `Quick
@@ -659,11 +730,15 @@ let () =
         ; test_case "cut refuses a store with an unterminated tail" `Quick
             test_cut_refuses_a_store_with_an_unterminated_tail
         ; test_case "running shape" `Quick test_running_shape_has_no_invented_completion
+        ; test_case "restart settles running lane" `Quick
+            test_replay_settles_running_as_server_restart_failure
         ; test_case "current storage generation" `Quick test_current_storage_generation
         ; test_case "store version pins the registration shape" `Quick
             test_store_version_pins_the_registration_shape
         ; test_case "exact history is not cross-lane pruned" `Quick
             test_exact_history_is_not_pruned_across_lanes
+        ; test_case "all lanes matches independent constructor oracle" `Quick
+            test_all_lanes_matches_the_independent_constructor_oracle
         ; test_case "retention is derived from the monitor page size" `Quick
             test_retention_is_derived_from_the_monitor_page_size
         ; test_case "completed runs are bounded" `Quick

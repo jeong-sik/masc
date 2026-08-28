@@ -379,27 +379,32 @@ let descriptor_discovery_json active_name_set descriptor =
        ])
 ;;
 
-let active_descriptor_names ~(meta : keeper_meta) =
+let active_descriptor_names_for_descriptors descriptors =
   let active_name_set =
-    Keeper_tool_policy.keeper_model_tool_schemas_for meta.tool_groups ()
-    |> List.fold_left
-         (fun names (schema : Masc_domain.tool_schema) ->
-            StringSet.add schema.name names)
-         StringSet.empty
+    descriptors
+    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+    |> List.fold_left (fun names name -> StringSet.add name names) StringSet.empty
   in
-  let descriptors =
-    Keeper_tool_descriptor.model_visible_descriptors ()
+  let descriptor_names =
+    descriptors
     |> List.concat_map (fun descriptor ->
       Keeper_tool_descriptor.keeper_model_names descriptor
-      |> List.filter_map (fun name ->
-        if StringSet.mem name active_name_set then Some (name, descriptor) else None))
+      |> List.map (fun name -> name, descriptor))
   in
-  active_name_set, descriptors
+  active_name_set, descriptor_names
 ;;
 
-let keeper_tools_list_json ~(meta : keeper_meta) =
-  let active_name_set, active_descriptor_names = active_descriptor_names ~meta in
-  let map =
+let active_descriptor_names ~(meta : keeper_meta) =
+  let descriptors =
+    Keeper_tool_descriptor.tool_groups_to_surface meta.tool_groups
+    |> fun surface ->
+    Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
+  in
+  active_descriptor_names_for_descriptors descriptors
+;;
+
+let grouped_active_names active_descriptor_names =
+  let grouped =
     List.fold_left
       (fun acc (name, descriptor) ->
          let cat =
@@ -411,12 +416,16 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
       StringMap.empty
       active_descriptor_names
   in
-  let assoc =
-    StringMap.fold
-      (fun cat list acc -> (cat, `List (List.map (fun s -> `String s) list)) :: acc)
-      map
-      []
-  in
+  StringMap.fold
+    (fun cat list acc ->
+       (cat, `List (List.map (fun name -> `String name) list)) :: acc)
+    grouped
+    []
+;;
+
+let keeper_tools_list_json ~(meta : keeper_meta) =
+  let active_name_set, active_descriptor_names = active_descriptor_names ~meta in
+  let assoc = grouped_active_names active_descriptor_names in
   let descriptor_surface =
     active_descriptor_names
     |> List.map snd
@@ -427,61 +436,93 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     |> List.map (descriptor_discovery_json active_name_set)
   in
   Yojson.Safe.to_string
-    (`Assoc (assoc @ [ "descriptor_surface", `List descriptor_surface ]))
+    (`Assoc
+       (assoc
+        @ [ "descriptor_surface", `List descriptor_surface
+          ; "search_scope", `String "active_tools_only"
+          ]))
 ;;
 
-let keeper_tools_search_json ~(meta : keeper_meta) ~query =
-  let active_name_set, active_descriptors = active_descriptor_names ~meta in
+let keeper_tools_list_json_for_surface ~capability_surface =
+  let descriptors = Keeper_capability_surface.descriptors capability_surface in
+  let active_name_set, active_descriptor_names =
+    active_descriptor_names_for_descriptors descriptors
+  in
+  let assoc = grouped_active_names active_descriptor_names in
+  let descriptor_surface =
+    Keeper_capability_surface.tool_capabilities capability_surface
+    |> List.map (fun (capability : Keeper_capability_surface.tool_capability) ->
+      `Assoc
+        (Keeper_tool_descriptor.discovery_fields capability.descriptor
+         @ [ ( "active_names"
+             , Json_util.json_string_list
+                 (descriptor_active_names active_name_set capability.descriptor) )
+           ; ( "availability"
+             , `String
+                 (Keeper_capability_surface.capability_availability_to_string
+                    capability.availability) )
+           ]))
+  in
+  let skills =
+    Keeper_capability_surface.skill_capabilities capability_surface
+    |> List.map Keeper_capability_surface.skill_capability_to_yojson
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+       (assoc
+        @ [ "schema", `String "masc.keeper.capability_surface.v1"
+          ; ( "skill_snapshot_revision"
+            , `String
+                (Keeper_capability_surface.skill_snapshot_revision capability_surface
+                 |> Skill_catalog_snapshot.snapshot_revision_to_string) )
+          ; ( "surface_digest"
+            , `String (Keeper_capability_surface.digest capability_surface) )
+          ; "descriptor_surface", `List descriptor_surface
+          ; "skills", `List skills
+          ]))
+;;
+
+let keeper_capability_search_json_for_surface ~capability_surface ~query =
   let documents =
-    List.map
-      (fun (name, descriptor) ->
-         let category =
-           Keeper_tool_descriptor.keeper_tool_group_to_string
-             descriptor.Keeper_tool_descriptor.keeper_tool_group
-         in
+    Keeper_capability_surface.candidates capability_surface
+    |> List.map (fun candidate ->
          Keeper_capability_search.
-           { id = descriptor.id; name; description = descriptor.description; category })
-      active_descriptors
+           { payload = candidate
+           ; name = Keeper_capability_surface.candidate_name candidate
+           ; description =
+               Keeper_capability_surface.candidate_description candidate
+           ; category = Keeper_capability_surface.candidate_category candidate
+           ; invocation_name =
+               Keeper_capability_surface.candidate_invocation_name candidate
+           })
   in
   match Keeper_capability_search.search ~query documents with
   | Error _ as error -> error
   | Ok hits ->
-       let rec render index rows = function
-         | [] ->
-           Ok
-             (`Assoc
-                [ "query", `String query
-                ; "match_count", `Int (List.length rows)
-                ; "matches", `List (List.rev rows)
-                ])
-         | (hit : Keeper_capability_search.hit) :: rest ->
-           (match
-              List.find_map
-                (fun (name, descriptor) ->
-                   if String.equal name hit.document.name
-                      && String.equal descriptor.Keeper_tool_descriptor.id hit.document.id
-                   then Some descriptor
-                   else None)
-                active_descriptors
-            with
-            | None ->
-              Error
-                (Keeper_capability_search.Index_unavailable
-                   "capability index returned an identity outside its authorized input")
-            | Some descriptor ->
-              let row =
-                `Assoc
-                  ([ "rank", `Int index
-                   ; "score", `Float hit.rank
-                   ; "matched_name", `String hit.document.name
-                   ; "category", `String hit.document.category
-                   ]
-                   @ Keeper_tool_descriptor.discovery_fields descriptor
-                   @ [ ( "active_names"
-                       , Json_util.json_string_list
-                           (descriptor_active_names active_name_set descriptor) ) ])
-              in
-              render (index + 1) (row :: rows) rest)
-       in
-       render 1 [] hits
+    let matches =
+      hits
+      |> List.map (fun hit ->
+        `Assoc
+          [ "bm25", `Float hit.Keeper_capability_search.bm25
+          ; "matched_name", `String hit.document.name
+          ; "category", `String hit.document.category
+          ; ( "invocation_name"
+            , Option.fold
+                ~none:`Null
+                ~some:(fun name -> `String name)
+                hit.document.invocation_name )
+          ; ( "candidate"
+            , Keeper_capability_surface.candidate_to_yojson
+                hit.document.payload )
+          ])
+    in
+    Ok
+      (`Assoc
+         [ "schema", `String "masc.keeper.capability_search.v1"
+         ; "query", `String query
+         ; "search_scope", `String "frozen_capability_surface"
+         ; "surface_digest", `String (Keeper_capability_surface.digest capability_surface)
+         ; "match_count", `Int (List.length matches)
+         ; "matches", `List matches
+         ])
 ;;

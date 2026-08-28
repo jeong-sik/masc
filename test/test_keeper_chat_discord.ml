@@ -5,7 +5,8 @@ module D = Masc.Keeper_chat_discord.For_testing
 let contains haystack needle =
   String_util.contains_substring haystack needle
 
-let run_adapter ?show_activity events ~post_message ~edit_message ~send_message =
+let run_adapter ?show_activity ?now events ~post_message ~edit_message
+    ~send_message =
   Eio_main.run
   @@ fun _env ->
   let stream = Masc.Keeper_chat_events.create () in
@@ -13,7 +14,7 @@ let run_adapter ?show_activity events ~post_message ~edit_message ~send_message 
   let outcomes = ref [] in
   D.adapter_loop ~token:"test-token" ~channel_id:"test-channel"
     ~events:stream ~post_message ~edit_message ~send_message
-    ?show_activity
+    ?show_activity ?now
     ~on_send_result:(fun result -> outcomes := result :: !outcomes) ();
   List.rev !outcomes
 
@@ -417,6 +418,104 @@ let test_tool_activity_uses_native_surface_without_messages () =
     (List.exists (fun sent -> contains sent "private tool result") !final_sends);
   check_single_ok "activity failure does not affect delivery" outcomes
 
+(* A failed streaming edit consumed Discord's rate budget just like a
+   successful one. Leaving last_edit_time stale let the very next token retry
+   immediately, so a 429 window attracted one edit attempt per token. The
+   failure must re-arm the throttle. *)
+let test_failed_stream_edit_rearms_the_throttle () =
+  let times = ref [ 10.0; 11.2; 11.3; 11.4; 12.5; 12.6 ] in
+  let now () =
+    match !times with
+    | t :: rest ->
+        times := rest;
+        t
+    | [] -> 12.6
+  in
+  let edits = ref [] in
+  let outcomes =
+    run_adapter ~now
+      ~post_message:(fun ~content:_ -> Ok "discord-message-1")
+      ~edit_message:(fun ~message_id:_ ~content ->
+        edits := content :: !edits;
+        Error (Discord_rest_client.Network "rate limited"))
+      ~send_message:(fun ~content:_ ->
+        fail "the accepted streaming message is edited, not replaced")
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-throttle"; thread_id = "thread-throttle" }
+      ; Masc.Keeper_chat_events.Text_delta "a "
+      ; Masc.Keeper_chat_events.Text_delta "b "
+      ; Masc.Keeper_chat_events.Text_delta "c "
+      ; Masc.Keeper_chat_events.Text_delta "d "
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-throttle" }
+      ]
+  in
+  check_single_network_error "terminal callback reports the failure"
+    "rate limited" outcomes;
+  check (list string)
+    "a failed edit re-arms the throttle: one retry per interval"
+    [ "a b "; "a b c d "; "a b c d " ]
+    (List.rev !edits)
+
+(* A mid-turn checkpoint status is a block alongside the reply, not a
+   replacement for it: replacing acc_text made the already-posted channel
+   message visibly shrink at the next edit. *)
+let test_checkpoint_status_keeps_the_accumulated_stream_text () =
+  let edits = ref [] in
+  let outcomes =
+    run_adapter
+      ~post_message:(fun ~content:_ -> Ok "discord-message-ckpt")
+      ~edit_message:(fun ~message_id:_ ~content ->
+        edits := content :: !edits;
+        Ok ())
+      ~send_message:(fun ~content:_ ->
+        fail "the accepted streaming message is edited, not replaced")
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-ckpt"; thread_id = "thread-ckpt" }
+      ; Masc.Keeper_chat_events.Text_delta "hello "
+      ; Masc.Keeper_chat_events.Status_block
+          { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
+      ; Masc.Keeper_chat_events.Text_delta "world "
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-ckpt" }
+      ]
+  in
+  check_single_ok "checkpointed reply settles" outcomes;
+  match List.rev !edits with
+  | [ content ] ->
+      check bool "pre-checkpoint text survives" true (contains content "hello");
+      check bool "post-checkpoint text is delivered" true
+        (contains content "world")
+  | _ -> fail "a checkpointed reply must receive one terminal edit"
+
+(* A failed placeholder POST may still have landed server-side; Discord has no
+   idempotency key for message creation. One bounded retry, then the turn
+   degrades to a single final message instead of risking a duplicate. *)
+let test_unknown_outcome_post_retries_once_then_degrades () =
+  let posts = ref [] in
+  let finals = ref [] in
+  let outcomes =
+    run_adapter
+      ~post_message:(fun ~content ->
+        posts := content :: !posts;
+        Error (Discord_rest_client.Network "connection reset after send"))
+      ~edit_message:(fun ~message_id:_ ~content:_ ->
+        fail "without a message id there is nothing to edit")
+      ~send_message:(fun ~content ->
+        finals := content :: !finals;
+        Ok ())
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-post"; thread_id = "thread-post" }
+      ; Masc.Keeper_chat_events.Text_delta "a "
+      ; Masc.Keeper_chat_events.Text_delta "b "
+      ; Masc.Keeper_chat_events.Text_delta "c "
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-post" }
+      ]
+  in
+  check_single_ok "the degraded turn still settles" outcomes;
+  check (list string) "the placeholder POST is retried at most once"
+    [ "a "; "a b " ] (List.rev !posts);
+  check (list string) "the reply still arrives as one final message"
+    [ "a b c " ] (List.rev !finals)
+
 let () =
   run "keeper_chat_discord"
     [ ( "streaming-redaction"
@@ -450,6 +549,12 @@ let () =
             test_external_effect_status_replaces_assistant_preface
         ; test_case "tool activity uses native surface" `Quick
             test_tool_activity_uses_native_surface_without_messages
+        ; test_case "failed stream edit re-arms the throttle" `Quick
+            test_failed_stream_edit_rearms_the_throttle
+        ; test_case "checkpoint status keeps accumulated text" `Quick
+            test_checkpoint_status_keeps_the_accumulated_stream_text
+        ; test_case "unknown-outcome POST retries once then degrades" `Quick
+            test_unknown_outcome_post_retries_once_then_degrades
         ] )
     ; ( "rich-blocks"
       , [ test_case "audio URL uses base URL" `Quick

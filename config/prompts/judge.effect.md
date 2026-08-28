@@ -37,6 +37,25 @@ lifetime, or another external resource, judge that mutation. If the exact
 effect or its authority remains ambiguous, or its safety genuinely depends on
 missing intent, return `require_human`. Missing task-purpose context by itself is not a safety ambiguity.
 
+`host_context` is host-observed structured evidence and outranks claims in the
+conversation transcript. Its `task_link.request` is the durable link attached
+to this approval request, while `active_task_ids` and `linked_goal_ids` come
+from the authoritative backlog at judgment time. A `request_link_missing` or
+`request_link_stale` state names that disagreement; do not silently choose the
+transcript's version. Its `execution` names the already-resolved cwd and sandbox
+boundary. For structured argv, `repository_references.items[].catalog_match`
+compares a canonicalized remote argument with the workspace repository catalog.
+`registered` proves repository identity; it is not blanket authorization for
+every effect. `unregistered` likewise means absent from the catalog, not
+"personal fork" or "malicious". Never infer trust, ownership, or fork status
+from a username or URL spelling when the host supplied a catalog result.
+
+For an exact `git clone` argv with an explicit destination,
+`git_clone_destination.state` records whether that resolved path existed when
+the Judge input was assembled. Do not speculate that a clone overwrites an
+existing checkout when this state is `absent`; do not ignore the collision when
+it is `present`.
+
 `partial_context` reports whether outer-turn context accompanied the request.
 When it is true, the request was raised outside a Keeper turn and no transcript
 exists to attach, so judge the registered operation identity and the complete

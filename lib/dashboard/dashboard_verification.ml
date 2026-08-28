@@ -67,30 +67,6 @@ let task_title_of_output (output : Yojson.Safe.t) : string =
        | _ -> "")
   | _ -> ""
 
-let request_kind_of_output (output : Yojson.Safe.t) : string =
-  match output with
-  | `Assoc fields ->
-      (match List.assoc_opt "request_kind" fields with
-       | Some (`String "conflict_triage") -> "conflict_triage"
-       | _ -> "normal")
-  | _ -> "normal"
-
-let request_summary_of_output (output : Yojson.Safe.t) : string =
-  match output with
-  | `Assoc fields ->
-      (match List.assoc_opt "request_summary" fields with
-       | Some (`String s) -> s
-       | _ -> "")
-  | _ -> ""
-
-let next_action_of_output (output : Yojson.Safe.t) : string option =
-  match output with
-  | `Assoc fields ->
-      (match List.assoc_opt "next_action" fields with
-       | Some (`String s) when String.trim s <> "" -> Some s
-       | _ -> None)
-  | _ -> None
-
 (** Per-request JSON row. *)
 let request_to_json (req : V.verification_request) : Yojson.Safe.t =
   let contract = completion_contract_of_criteria req.criteria in
@@ -129,16 +105,10 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     | errors -> Some (String.concat "; " errors)
   in
   let task_title = task_title_of_output req.output in
-  let request_kind = request_kind_of_output req.output in
-  let request_summary = request_summary_of_output req.output in
-  let next_action = next_action_of_output req.output in
   `Assoc [
     ("request_id", `String req.id);
     ("task_id", `String req.task_id);
     ("task_title", `String task_title);
-    ("request_kind", `String request_kind);
-    ("request_summary", `String request_summary);
-    ( "next_action", Json_util.string_opt_to_json next_action );
     ("created_at", `String (Masc_domain.iso8601_of_unix_seconds req.created_at));
     ("submitted_by", `String req.worker);
     ("completion_contract",

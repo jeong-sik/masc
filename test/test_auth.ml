@@ -109,6 +109,7 @@ let keeper_strict_auth_regression_tools =
     "tool_read_file";
     "masc_board_search";
     "keeper_tools_list";
+    "keeper_capability_search";
   ]
 
 (* ============================================ *)

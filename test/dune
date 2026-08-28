@@ -17,17 +17,31 @@
   masc_test_deps))
 
 (test
+ (name test_keeper_skill_inventory)
+ (modules test_keeper_skill_inventory)
+ (libraries
+  alcotest
+  masc
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot
+  masc_test_deps))
+
+(test
  (name test_server_skill_editor)
  (modules test_server_skill_editor)
  (libraries
   alcotest
+  masc
   masc_server
   masc.skill_config
   masc.skill_reference
   masc.skill_snapshot
   masc.skill_snapshot_service
+  eio
   eio_main
   fs_compat
+  yojson
   unix))
 
 (env
@@ -296,7 +310,6 @@
   test_keeper_capability_probe
   test_tool_resolution_runtime_projection
   test_keeper_id
-  test_keeper_repo_mapping
   test_repo_sync
   test_repo_git
   test_repo_e2e
@@ -304,6 +317,7 @@
   test_exec_dispatch
   test_keeper_tool_execute_typed_input
   test_keeper_sandbox_containment
+  test_keeper_microvm_teardown_on_shutdown
   test_keeper_sandbox_microvm
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
@@ -636,7 +650,6 @@
   test_keeper_capability_probe
   test_tool_resolution_runtime_projection
   test_keeper_id
-  test_keeper_repo_mapping
   test_repo_sync
   test_repo_git
   test_repo_e2e
@@ -644,6 +657,7 @@
   test_exec_dispatch
   test_keeper_tool_execute_typed_input
   test_keeper_sandbox_containment
+  test_keeper_microvm_teardown_on_shutdown
   test_keeper_sandbox_microvm
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
@@ -1420,6 +1434,7 @@
   test_eval_harness
   test_tool_board_coverage
   test_board_comment_id_is_visible
+  test_board_read_shows_viewer_vote
   test_yojson_type_error_board
   test_tool_registry
   test_tool_registry_consistency
@@ -1559,6 +1574,7 @@
   test_eval_harness
   test_tool_board_coverage
   test_board_comment_id_is_visible
+  test_board_read_shows_viewer_vote
   test_yojson_type_error_board
   test_tool_registry
   test_tool_registry_consistency
@@ -1733,6 +1749,11 @@
 (test
  (name test_keeper_board_attention_exact_flow)
  (modules test_keeper_board_attention_exact_flow)
+ (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
+
+(test
+ (name test_keeper_librarian_exact_lane_preference)
+ (modules test_keeper_librarian_exact_lane_preference)
  (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
 
 ; The exact-execution lease guard and exact-disposition recovery suites lived
@@ -2276,6 +2297,8 @@
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
 (include stanzas/test_keeper_tool_plan_executor.inc)
+(include stanzas/test_keeper_plan_proposal_store.inc)
+(include stanzas/test_keeper_assembler_request.inc)
 (include stanzas/test_keeper_tool_progress_identity.inc)
 
 (include stanzas/test_keeper_fs.inc)
@@ -3440,6 +3463,7 @@
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_replay.inc)
+(include stanzas/test_keeper_gate_readonly.inc)
 (include stanzas/test_keeper_hitl_resolution_prompt.inc)
 (include stanzas/test_fs_compat_capability_write.inc)
 
@@ -3527,7 +3551,7 @@
 
 (include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_config_highlight_wiring.inc)
-(include stanzas/test_tui_approval_row_wiring.inc)
+(include stanzas/test_tui_row_wiring.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)

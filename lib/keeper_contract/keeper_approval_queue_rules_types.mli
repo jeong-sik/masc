@@ -141,6 +141,7 @@ type authorization_source =
   | Exact_always_rule
   | Keeper_always_allow
   | Workspace_always_allow
+  | Readonly_sandbox
 
 (** An immutable exact Always Allowed rule. Its identity is the workspace-local
     Keeper, opaque operation identity, and complete normalized effect input;

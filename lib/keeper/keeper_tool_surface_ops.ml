@@ -377,10 +377,35 @@ let keeper_name_lookup_candidates raw_name =
    question. Effective meta (TOML overlay) is read here because the only
    downstream consumer of the carried meta is the runtime-id preflight,
    which must see overlay-owned fields. *)
+(* A name this surface refused can be two different things, and a reader acts
+   differently on each: a keeper that is gone is worth looking for, while an
+   agent was never a keeper and no amount of looking will help. Both answered
+   "keeper not found", which sends the reader after the first one. The roster
+   read happens only on the refusal path, and a failed read falls back to the
+   plain wording rather than claiming anything about the name. *)
+let name_is_known_agent ~(config : Workspace.config) name =
+  try
+    List.exists
+      (fun (agent : Masc_domain.agent) -> String.equal agent.name name)
+      (Workspace.get_active_agents config)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> false
+;;
+
+let keeper_absent_detail ~(config : Workspace.config) name =
+  if name_is_known_agent ~config name
+  then
+    Printf.sprintf
+      "%s is an agent, not a keeper; this surface takes keeper names"
+      name
+  else Printf.sprintf "keeper not found: %s" name
+;;
+
 let resolve_keeper_config ~(config : Workspace.config) name =
   let name = String.trim name in
   let rec loop = function
-    | [] -> Error (Printf.sprintf "keeper not found: %s" name)
+    | [] -> Error (keeper_absent_detail ~config name)
     | candidate :: rest ->
         let* resolved = read_effective_meta_resolved config candidate in
         (match resolved with

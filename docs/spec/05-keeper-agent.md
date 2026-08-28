@@ -407,6 +407,41 @@ durable 항목은 턴이 실어온 것을 그대로 보존하고 프롬프트만
 대부분은 이미 지나간 사고다. 두 설정을 같은 durable 큐에 대고 비교할 수 있으므로,
 어느 값이 맞는지는 측정으로 정한다.
 
+#### 8.x Auto Judge 는 Keeper 별로 bounded parallel 이다
+
+durable approval queue의 owner는 `(base_path, keeper_name)`이다. Auto Judge는
+owner 하나당 기본 4개의 worker를 durable sequence 순서로 동시에 시작한다. 한
+Keeper의 `ls`나 `gh auth status` 판정이 끝날 때까지 같은 Keeper의 서로 독립적인
+다음 판정을 직렬로 기다리게 하지 않는다. 다른 Keeper는 별도 owner이므로 서로의
+slot을 점유하지 않는다.
+
+한도는 runtime parameter `keeper.hitl.max_concurrent_per_keeper`
+(`MASC_KEEPER_HITL_MAX_CONCURRENT_PER_KEEPER`, 범위 1..16)로 조절한다. 이 값은
+owner별 fan-out 한도이고, runtime/provider의 전역 concurrency 제한은 그대로 최종
+backpressure다. 이미 provider 응답이 끝났지만 durable completion이 확정되지 않은
+exact-output 행은 예외다. 이 persistence finalization barrier는 먼저 fsync-confirm한
+뒤 같은 owner의 뒤 작업을 시작한다.
+
+#### 8.x Keeper별 exact-output lane 우선순위
+
+Keeper가 명확한 exact-output 작업은 workspace 공통 lane을 그대로 복제하지 않고,
+공통 admitted slot 집합 안에서 Keeper별 첫 slot을 정할 수 있다. canonical key는
+`(keeper_name, lane_id)`이며 현재 소비자는 `hitl_auto_judge`,
+`board_attention_exact`, `librarian_exact`이다. 나머지 slot은 선언 순서대로 남아
+failover를 유지한다.
+
+설정은 `POST /api/v1/dashboard/runtime/keeper-exact-lane`에
+`keeper_name`, `lane_id`, `slot_id`를 보낸다. `slot_id: null`은 해당 owner의
+명시적 우선순위를 지운다. 저장소는
+`.masc/gate/keeper-exact-lane-preferences.json` 하나이며 Dashboard Gate 응답의
+`keeper_exact_lanes`가 같은 canonical row를 투영한다. 이 설정은 lane에 없는
+slot을 새로 admit하지 못하며 runtime exact-output registry가 유일한 admission
+authority다.
+
+`verifier_exact`은 작업이 Keeper 소유라는 보장이 없으므로 이 축을 적용하지 않는다.
+Fusion은 exact-output registry가 아니라 preset이 model topology를 직접 소유하므로
+별도 계약이다.
+
 ---
 
 ## 9. Configuration

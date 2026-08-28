@@ -6,12 +6,13 @@ type lane =
   | Hitl_auto_judge
   | Board_attention
   | Compaction
+  | Assembler
 
 val all_lanes : lane list
 (** Every registry lane, for consumers that enumerate the wire vocabulary
-    (the standalone-lane projection and the TUI decoder). A lane added to
-    the variant belongs here in the same change; the exhaustive match in
-    the implementation makes forgetting it a compile error. *)
+    (the standalone-lane projection and the TUI decoder). An independent
+    constructor oracle pins this enumeration; replay exercises every exported
+    lane, and language-boundary parity tests pin the wire keys. *)
 
 val lane_key : lane -> string
 (** The lane's wire identifier — the spelling the standalone-lane projection

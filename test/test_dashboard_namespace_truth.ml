@@ -65,7 +65,7 @@ let write_keeper_toml ~keepers_dir ~name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-sandbox_profile = "local"
+sandbox_profile = "docker"
 instructions = "Dashboard keeper fixture"
 |}
 

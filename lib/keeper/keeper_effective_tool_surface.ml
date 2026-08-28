@@ -20,8 +20,12 @@ type skill_load_reason =
   | Keeper_profile
   | Task of { task_id : string }
 
+type projection_basis =
+  | Computed_current
+
 type t =
-  { keeper_name : string
+  { projection_basis : projection_basis
+  ; keeper_name : string
   ; runtime_id : string
   ; official_client_kind : string
   ; tool_delivery : tool_delivery
@@ -137,10 +141,6 @@ let project
         config.resource_read_max_bytes
     | Config_rejected _ | Config_unreadable _ -> None
   in
-  let surface = Keeper_tool_descriptor.tool_groups_to_surface tool_groups in
-  let descriptors =
-    Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
-  in
   let task_selection =
     match task_selection with
     | Some selection -> Ok selection
@@ -150,13 +150,19 @@ let project
   match task_selection with
   | Error _ as error -> error
   | Ok task_selection ->
-    let turn_skill_projection =
-      Keeper_skill_catalog.project_turn
-        ~names:skill_names
-        ~global:global_skill_catalog
-        ~task:(Keeper_task_skill_turn.skills task_selection)
+    let capability_surface =
+      Keeper_capability_surface.create
+        ~tool_groups
+        ~skill_names
+        ~global_skill_catalog
+        ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
+        ~task_skills:(Keeper_task_skill_turn.skills task_selection)
     in
-    let skill_catalog = turn_skill_projection.catalog in
+    let descriptors = Keeper_capability_surface.descriptors capability_surface in
+    let turn_skill_projection =
+      Keeper_capability_surface.skill_projection capability_surface
+    in
+    let skill_catalog = Keeper_capability_surface.skill_catalog capability_surface in
     let readable_instruction_skills =
       Keeper_skill_catalog.skills skill_catalog
       |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
@@ -304,7 +310,8 @@ let project
         native_posture
     in
     Ok
-      { keeper_name
+      { projection_basis = Computed_current
+      ; keeper_name
       ; runtime_id
       ; official_client_kind
       ; tool_delivery
@@ -546,6 +553,10 @@ let tool_delivery_to_yojson = function
       ; "reason", `String "runtime_tools_unsupported"
       ]
 
+let projection_basis_to_string = function
+  | Computed_current -> "computed_current"
+;;
+
 let origin_to_yojson = function
   | Descriptor { group } ->
     `Assoc [ "kind", `String "descriptor"; "group", `String group ]
@@ -573,6 +584,8 @@ let to_yojson = function
   | Available surface ->
     `Assoc
       [ "status", `String "available"
+      ; ( "projection_basis"
+        , `String (projection_basis_to_string surface.projection_basis) )
       ; "keeper_name", `String surface.keeper_name
       ; "runtime_id", `String surface.runtime_id
       ; "official_client_kind", `String surface.official_client_kind

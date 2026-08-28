@@ -33,6 +33,19 @@ type durable_demand_owner_error =
   | Demand_execution_failed of exn * Printexc.raw_backtrace
 
 module Recovery_for_testing : sig
+  type durable_demand_recovery_action =
+    | Wake_executable_owner
+    | Supervise_recoverable_owner
+    | Report_unknown_owner of string
+    | Retain_non_executable_owner of string
+
+  val durable_demand_recovery_action :
+    Keeper_activation_readiness.owner_execution_truth ->
+    durable_demand_recovery_action
+  (** Pure decision used after durable demand and owner readiness have both
+      been observed. An already-running owner must receive a fresh wake hint:
+      the hint that accompanied the durable write did not survive restart. *)
+
   val load_durable_demand_meta :
     base_path:string ->
     config:Workspace.config ->

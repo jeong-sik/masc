@@ -48,8 +48,8 @@ function response(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
     approval_rules_state: { state: 'ready' },
     keeper_modes: [],
     keeper_modes_state: { state: 'ready' },
-    keeper_judges: [],
-    keeper_judges_state: { state: 'ready' },
+    keeper_exact_lanes: [],
+    keeper_exact_lanes_state: { state: 'ready' },
     hitl: {
       gate_mode: { mode: 'manual', configured: true, state: 'ready' },
       external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },
@@ -151,8 +151,8 @@ describe('Gate resource (stale-while-revalidate)', () => {
       },
       keeper_modes: [],
       keeper_modes_state: { state: 'unavailable', error: 'Gate 새로고침 실패' },
-      keeper_judges: [],
-      keeper_judges_state: { state: 'unavailable', error: 'Gate 새로고침 실패' },
+      keeper_exact_lanes: [],
+      keeper_exact_lanes_state: { state: 'unavailable', error: 'Gate 새로고침 실패' },
       hitl: null,
     })
     expect(signals.gateError.value).toContain('Gate 새로고침 실패')

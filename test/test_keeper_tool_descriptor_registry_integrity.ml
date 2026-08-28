@@ -330,6 +330,7 @@ let descriptions_owned_elsewhere =
   ; "keeper_person_note_set"
   ; "keeper_time_now"
   ; "keeper_tools_list"
+  ; "keeper_capability_search"
   ]
 ;;
 
@@ -408,9 +409,6 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "masc_tool_help"
     ; "masc_agent_card"
     ; "masc_agent_timeline"
-    ; "masc_plan_init"
-    ; "masc_plan_update"
-    ; "masc_plan_get"
     ; "masc_plan_set_task"
     ];
   List.iter
@@ -588,6 +586,7 @@ let test_seed_eval_tags_are_registered () =
       descriptor.Descriptor.eval_tags
   in
   check "keeper_tools_list" [ "capability_introspection" ];
+  check "keeper_capability_search" [ "capability_introspection" ];
   check "keeper_surface_read" [ "surface_context_read" ];
   check "masc_agent_card" [ "agent_profile_lookup" ];
   check "keeper_time_now" []
@@ -893,6 +892,14 @@ let test_memory_write_descriptor_schema_is_closed () =
     "keeper_memory_write schema forbids additional properties"
     true
     (schema_forbids_additional_properties descriptor.input_schema)
+;;
+
+let test_memory_write_descriptor_is_terminal () =
+  let descriptor = required_internal_descriptor "keeper_memory_write" in
+  match descriptor.execution with
+  | Descriptor.Direct_terminal -> ()
+  | Descriptor.Ordinary _ | Descriptor.Terminal ->
+    Alcotest.fail "keeper_memory_write lost its direct-only terminal boundary"
 ;;
 
 let test_memory_write_rejects_retired_lifetime_argument () =
@@ -1329,12 +1336,15 @@ let test_concurrent_execution_opt_ins_are_exact () =
     |> List.filter_map (fun (descriptor : Descriptor.t) ->
       match descriptor.execution with
       | Descriptor.Ordinary Descriptor.Concurrent -> Some descriptor.internal_name
-      | Descriptor.Ordinary Descriptor.Serial | Descriptor.Terminal -> None)
+      | Descriptor.Ordinary Descriptor.Serial
+      | Descriptor.Direct_terminal
+      | Descriptor.Terminal -> None)
     |> List.sort_uniq String.compare
   in
   Alcotest.(check (list string))
     "only explicitly audited handlers opt into concurrent batches"
     [ "keeper_artifact_read"
+    ; "keeper_capability_search"
     ; "keeper_library_read"
     ; "keeper_library_search"
     ; "keeper_tasks_audit"
@@ -1382,7 +1392,9 @@ let test_concurrent_opt_ins_are_statically_read_only () =
       Alcotest.fail
         (descriptor.internal_name
          ^ " opts into concurrent batches without a static read-only hint")
-    | Descriptor.Ordinary Descriptor.Serial, _ | Descriptor.Terminal, _ -> ())
+    | ( Descriptor.Ordinary Descriptor.Serial
+      | Descriptor.Direct_terminal
+      | Descriptor.Terminal ), _ -> ())
 
 let test_readonly_policy_is_descriptor_input_aware () =
   let public_input =
@@ -1931,6 +1943,10 @@ let () =
         ] )
     ; ( "agent-contract"
       , [ test_case
+            "keeper_memory_write ends a successful turn"
+            `Quick
+            test_memory_write_descriptor_is_terminal
+        ; test_case
             "keeper_memory_write descriptor schema is closed"
             `Quick
             test_memory_write_descriptor_schema_is_closed

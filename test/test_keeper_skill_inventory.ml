@@ -2,6 +2,7 @@ open Alcotest
 
 module Inventory = Masc.Keeper_skill_inventory
 module Snapshot = Skill_catalog_snapshot
+module Tool_descriptor = Masc.Keeper_tool_descriptor
 
 let config_text sources =
   "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = 65536\n"
@@ -459,6 +460,91 @@ let test_tool_reference_json_is_closed () =
         (Surface.Unknown_tool_reference reference)
       |> member "kind"
       |> to_string)
+;;
+
+let tool_capability_by_internal_name surface internal_name =
+  Masc.Keeper_capability_surface.tool_capabilities surface
+  |> List.find_opt (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+    String.equal capability.descriptor.internal_name internal_name)
+  |> function
+  | Some capability -> capability
+  | None -> failf "Tool capability %S is absent" internal_name
+;;
+
+let descriptor_ids descriptors =
+  List.map (fun (descriptor : Tool_descriptor.t) -> descriptor.id) descriptors
+;;
+
+let active_capability_descriptor_ids surface =
+  Masc.Keeper_capability_surface.tool_capabilities surface
+  |> List.filter_map (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+    match capability.availability with
+    | Masc.Keeper_capability_surface.Active -> Some capability.descriptor.id
+    | Outside_tool_surface
+    | Outside_skill_surface
+    | Not_model_invocable
+    | Invalid_definition
+    | Missing_task_skill
+    | Missing_configured_skill -> None)
+;;
+
+let test_operator_only_tool_is_in_inventory_and_search () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let surface = capability_surface (snapshot config [ [] ]) in
+  let operator_only = tool_capability_by_internal_name surface "masc_keeper_up" in
+  check bool "operator-only Tool is explicitly non-model-invocable" true
+    (operator_only.availability
+     = Masc.Keeper_capability_surface.Not_model_invocable);
+  check (list string) "operator-only Tool has no Keeper model name" []
+    (Tool_descriptor.keeper_model_names operator_only.descriptor);
+  let found =
+    search_candidates surface "masc_keeper_up"
+    |> List.exists (fun hit ->
+      match hit.Masc.Keeper_capability_search.document.payload with
+      | Masc.Keeper_capability_surface.Ordinary_tool capability ->
+        String.equal capability.descriptor.id operator_only.descriptor.id
+        && capability.availability
+           = Masc.Keeper_capability_surface.Not_model_invocable
+      | Skill _ -> false)
+  in
+  check bool "operator-only Tool remains searchable without becoming executable" true found
+;;
+
+let test_complete_inventory_preserves_agent_core_surface () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen = snapshot config [ [] ] in
+  let unrestricted = capability_surface frozen in
+  let unrestricted_descriptor_ids =
+    descriptor_ids (Masc.Keeper_capability_surface.descriptors unrestricted)
+  in
+  check (list string) "unrestricted descriptors stay canonical model projection"
+    (descriptor_ids (Tool_descriptor.model_visible_descriptors ()))
+    unrestricted_descriptor_ids;
+  check (list string) "unrestricted active descriptors stay Agent Core projection"
+    unrestricted_descriptor_ids
+    (active_capability_descriptor_ids unrestricted);
+  check int "inventory covers every canonical descriptor"
+    (List.length (Tool_descriptor.all_descriptors ()))
+    (List.length (Masc.Keeper_capability_surface.tool_capabilities unrestricted));
+  let restricted = capability_surface ~tool_groups:(Some [ "board" ]) frozen in
+  let restricted_descriptor_ids =
+    descriptor_ids (Masc.Keeper_capability_surface.descriptors restricted)
+  in
+  let expected_restricted =
+    Tool_descriptor.tool_groups_to_surface (Some [ "board" ])
+    |> fun surface ->
+    Tool_descriptor.model_visible_descriptors_for_surface ~surface
+    |> descriptor_ids
+  in
+  check (list string) "restricted descriptors stay canonical model projection"
+    expected_restricted
+    restricted_descriptor_ids;
+  check (list string) "restricted active descriptors stay Agent Core projection"
+    restricted_descriptor_ids
+    (active_capability_descriptor_ids restricted);
+  let outside = tool_capability_by_internal_name restricted "tool_read_file" in
+  check bool "restricted model-visible Tool remains explicitly outside" true
+    (outside.availability = Masc.Keeper_capability_surface.Outside_tool_surface)
 ;;
 
 let test_empty_selection_makes_valid_skill_operator_only () =
@@ -961,6 +1047,10 @@ let () =
             test_forged_tool_reference_rejects_unknown_and_mismatch
         ; test_case "Tool reference JSON is closed" `Quick
             test_tool_reference_json_is_closed
+        ; test_case "operator-only Tool inventory and search" `Quick
+            test_operator_only_tool_is_in_inventory_and_search
+        ; test_case "complete inventory preserves Agent Core surface" `Quick
+            test_complete_inventory_preserves_agent_core_surface
         ; test_case "empty Skill selection" `Quick
             test_empty_selection_makes_valid_skill_operator_only
         ; test_case "shadowed and invalid Skill availability" `Quick

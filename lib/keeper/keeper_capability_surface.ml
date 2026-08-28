@@ -146,13 +146,16 @@ let create
       ~task:task_skills
   in
   let tool_capabilities =
-    Keeper_tool_descriptor.model_visible_descriptors ()
+    Keeper_tool_descriptor.all_descriptors ()
     |> List.map (fun descriptor ->
       { descriptor
       ; availability =
-          (if descriptor_is_active descriptors descriptor
-           then Active
-           else Outside_tool_surface)
+          (match Keeper_tool_descriptor.keeper_model_names descriptor with
+           | [] -> Not_model_invocable
+           | _ :: _ ->
+             if descriptor_is_active descriptors descriptor
+             then Active
+             else Outside_tool_surface)
       })
   in
   let skill_capabilities =

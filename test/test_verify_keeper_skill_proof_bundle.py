@@ -437,6 +437,19 @@ def make_bundle(root: Path):
 
     tui_png = png(1200, 800)
     (tui_root / "tui-skill-use.png").write_bytes(tui_png)
+    receipt_block = "\n".join(
+        [
+            'exact={"content_revision":"one"}',
+            f"invoked turn=1 id={SKILL_ID} runtime=runtime-one",
+            "action turn=1 runtime=runtime-one tool=keeper_time_now call=call-action-1",
+        ]
+    )
+    visible_text = "\n".join(
+        [
+            "MASC Tools 14:10:47 [connected]",
+            receipt_block,
+        ]
+    )
     tui = {
         "schema": verifier.TUI_SCHEMA,
         "source": {
@@ -464,15 +477,13 @@ def make_bundle(root: Path):
         "selection": {"visited_keepers": ["keeper-one"]},
         "producer_artifacts": producer_artifacts,
         "terminal": {"cols": 180, "rows": 42},
-        "visible_text": "\n".join(
-            [
-                "Skill Use — keeper-one",
-                f"session=trace-one  ledger={durable['revision']}",
-                f"id={SKILL_ID}",
-                "invalid=0",
-                "call=call-action-1",
-            ]
-        ),
+        "observations": {
+            "skill_header": "Skill Use — keeper-one (1 receipts)",
+            "session_line": f"session=trace-one  ledger={durable['revision'][:12]}…",
+            "invalid_line": "invoked=1 actions=1 invalid=0",
+            "receipt_block": receipt_block,
+        },
+        "visible_text": visible_text,
         "screenshot": {"path": "tui-skill-use.png", **file_identity(tui_png)},
     }
     tui["visible_text_sha256"] = verifier.digest(tui["visible_text"].encode())
@@ -912,14 +923,16 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             ):
                 verify(bundle)
 
-    def test_visible_text_requires_every_exact_receipt_marker(self):
+    def test_visible_text_requires_the_exact_receipt_observation(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
-            visible = bundle["tui"]["visible_text"].replace("invalid=0", "invalid=1")
+            visible = bundle["tui"]["visible_text"].replace(
+                "call=call-action-1", "call=foreign-action"
+            )
             bundle["tui"]["visible_text"] = visible
             bundle["tui"]["visible_text_sha256"] = verifier.digest(visible.encode())
             with self.assertRaisesRegex(
-                verifier.VerificationError, "exact Skill receipt markers"
+                verifier.VerificationError, "screenshot viewport"
             ):
                 verify(bundle)
 

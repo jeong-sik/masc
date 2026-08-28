@@ -71,7 +71,11 @@ module Runtime : sig
   val docker_image : unit -> string
 
   val microvm_dns : unit -> string
-  (** Nameserver handed to a microvm guest on the default network. Empty
+  (** Nameserver handed to a microvm guest on the default network.
+
+      Defaults to the host's first [/etc/resolv.conf] nameserver so a guest
+      resolves the way the host does; [MASC_KEEPER_MICROVM_DNS] overrides it.
+      Empty -- an unreadable resolv.conf, or an explicit empty override --
       passes no [--dns]. *)
 
   val microvm_memory : unit -> string

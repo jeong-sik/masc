@@ -76,8 +76,32 @@ module Runtime = struct
      refuses DNS from inside the guest even though the same port answers
      from the host. Without a nameserver the guest routes fine and resolves
      nothing, which reads as a dead network. Empty means "pass no --dns",
-     which is the right answer once container fixes its default. *)
-  let microvm_dns () = get_string ~default:"1.1.1.1" "MASC_KEEPER_MICROVM_DNS"
+     which is the right answer once container fixes its default.
+
+     The default is read from the host's own /etc/resolv.conf rather than
+     named here. A literal was wrong on this machine: it said 1.1.1.1 while
+     the host resolves through 168.126.63.1, so every guest lookup left for
+     a resolver the operator had not chosen -- and a split-horizon or
+     VPN-only name would simply not resolve. *)
+  let host_nameserver () =
+    match In_channel.with_open_text "/etc/resolv.conf" In_channel.input_all with
+    | contents ->
+      contents
+      |> String.split_on_char '\n'
+      |> List.filter_map (fun line ->
+        match String.split_on_char ' ' (String.trim line) with
+        | [ "nameserver"; server ] when String.trim server <> "" ->
+          Some (String.trim server)
+        | _ -> None)
+      |> (function first :: _ -> Some first | [] -> None)
+    | exception _ -> None
+  ;;
+
+  let microvm_dns () =
+    match get_string ~default:"" "MASC_KEEPER_MICROVM_DNS" with
+    | "" -> (match host_nameserver () with Some server -> server | None -> "")
+    | configured -> configured
+  ;;
 
   let microvm_memory () = get_string ~default:"" "MASC_KEEPER_MICROVM_MEMORY"
 

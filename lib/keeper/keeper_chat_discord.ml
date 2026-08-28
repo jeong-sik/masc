@@ -271,10 +271,6 @@ let send_text_rich_embeds ?clock ~token ~channel_id text =
 
 (* ── Adapter loop ────────────────────────────────────────────────── *)
 
-(* NDT-OK: wall-clock used for Discord rate-limit backoff only,
-   not for deterministic policy or state transitions. *)
-let now () = Unix.gettimeofday ()
-
 let combine_delivery_results primary overflow =
   match primary with
   | Error _ -> primary
@@ -282,6 +278,9 @@ let combine_delivery_results primary overflow =
 
 let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     ~edit_message ~send_message ?show_activity ?clock ?base_url
+    (* NDT-OK: wall time only paces external Discord edits; tests inject
+       [now]. *)
+    ?(now = Unix.gettimeofday)
     ?(on_send_result = fun _ -> ()) () =
   let external_effect_completed = ref false in
   let tool_trail = ref (Keeper_chat_tool_trail.create ()) in
@@ -299,11 +298,14 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                (Format.asprintf "%a" Discord_rest_client.pp_error err)
          | Error _ -> ())
   in
-  let rec loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text =
+  let rec loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text
+      ~post_attempts_left =
     let continue ?(acc_text = acc_text) ?(msg_id = msg_id)
         ?(last_edit_time = last_edit_time)
-        ?(last_edited_text = last_edited_text) () =
+        ?(last_edited_text = last_edited_text)
+        ?(post_attempts_left = post_attempts_left) () =
       loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text
+        ~post_attempts_left
     in
     let event = Keeper_chat_events.subscribe events in
     (* This adapter keeps tool activity off the channel as messages; the trail
@@ -316,16 +318,28 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         let patch_content = streaming_patch_content acc_text in
         (match msg_id with
          | None when String.length patch_content = 0 -> continue ~acc_text ()
-         | None ->
+         | None when post_attempts_left > 0 ->
              (match post_message ~content:patch_content with
               | Ok created_id ->
                   continue ~acc_text ~msg_id:(Some created_id)
                     ~last_edit_time:(now ()) ~last_edited_text:patch_content ()
               | Error err ->
+                  (* A failed POST may still have landed server-side (network
+                     error after send, or a 2xx whose body we could not read an
+                     id from), and Discord offers no idempotency key for message
+                     creation. One bounded retry, then this turn degrades to
+                     log-only streaming rather than risk a duplicate channel
+                     message; Run_finished still delivers the reply as a fresh
+                     message. *)
                   Log.Keeper.warn
                     "keeper_chat_discord: streaming POST failed: %s"
                     (Format.asprintf "%a" Discord_rest_client.pp_error err);
-                  continue ~acc_text ())
+                  continue ~acc_text
+                    ~post_attempts_left:(post_attempts_left - 1) ())
+         | None ->
+             (* The POST retry budget is spent; skip live edits until the
+                final send. *)
+             continue ~acc_text ()
          | Some mid ->
              let elapsed = now () -. last_edit_time in
              if patch_content = last_edited_text then continue ~acc_text ()
@@ -340,7 +354,13 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                       "keeper_chat_discord: streaming PATCH failed (msg=%s): %s"
                       mid
                       (Format.asprintf "%a" Discord_rest_client.pp_error err);
-                    continue ~acc_text ()))
+                    (* A failed edit consumed the rate budget just like a
+                       successful one; leaving last_edit_time stale let every
+                       incoming token retry immediately, deepening a 429
+                       window. Retry-After is unavailable here (the HTTP
+                       client discards response headers), so re-arming the
+                       plain interval is the honest bound. *)
+                    continue ~acc_text ~last_edit_time:(now ()) ()))
     | Text_message_end ->
         let final_content = truncate acc_text in
         (match msg_id with
@@ -399,7 +419,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
            with the previous run's reply. *)
         tool_trail := Keeper_chat_tool_trail.create ();
         loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0
-          ~last_edited_text:""
+          ~last_edited_text:"" ~post_attempts_left:2
     | Agent_core_runtime_attempt_started ->
         continue ~acc_text:"" ()
     | Text_message_start _ -> continue ()
@@ -446,8 +466,19 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         send_image_block ?clock ~token ~channel_id ~url ~caption ();
         continue ()
     | Status_block { kind } ->
-        continue
-          ~acc_text:(Keeper_chat_blocks.status_kind_connector_text kind) ()
+        (match kind with
+         | Keeper_chat_blocks.External_effect_pending ->
+             (* The turn's partial text is deliberately replaced by the
+                pending-approval status; the external-effect flow then owns
+                the message. *)
+             continue
+               ~acc_text:(Keeper_chat_blocks.status_kind_connector_text kind)
+               ()
+         | Keeper_chat_blocks.Continuation_checkpoint ->
+             (* A mid-turn checkpoint must not shrink the posted message:
+                the accumulated text is what Text_message_end and
+                Run_finished deliver. *)
+             continue ())
     | Audio_block { token; mime = _; message_text; duration_sec } ->
         send_audio_block ?clock ~token ~channel_id ~base_url ~audio_token:token
           ~message_text ~duration_sec ();
@@ -455,7 +486,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
   in
   let run () =
     loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0
-      ~last_edited_text:""
+      ~last_edited_text:"" ~post_attempts_left:2
   in
   match clock, show_activity with
   | Some clock, Some _ ->

@@ -239,6 +239,9 @@ val task_id_set_of_list : Keeper_id.Task_id.t list -> (task_id_set, decode_error
 val task_id_set_to_list : task_id_set -> Keeper_id.Task_id.t list
 val summarize_by_scope : t -> scoped_summary list
 val scoped_summary_to_yojson : scoped_summary -> Yojson.Safe.t
+val activation_to_yojson : activation -> Yojson.Safe.t
+(** Exact durable activation evidence. Projections may add their own owner
+    label around this value, but must not reconstruct or weaken its fields. *)
 
 val make_activation :
   identity:Skill_reference.identity ->

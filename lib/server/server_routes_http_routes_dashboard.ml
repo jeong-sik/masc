@@ -516,58 +516,6 @@ let respond_skill_editor_error ~request reqd error =
     reqd
 ;;
 
-let skill_run_projection reference =
-  let scan_limit = 5_000 in
-  let rows = Keeper_tool_call_log.read_recent_rows ~n:scan_limit () in
-  let exact_parent =
-    rows
-    |> List.rev
-    |> List.find_opt (fun row ->
-      match Json_util.assoc_member_opt "record_kind" row,
-            Json_util.assoc_member_opt "skill_reference" row
-      with
-      | Some (`String "composition_run"), Some reference_json ->
-        (match Skill_reference.of_yojson reference_json with
-         | Ok observed -> Skill_reference.equal observed reference
-         | Error _ -> false)
-      | _ -> false)
-  in
-  match exact_parent with
-  | None ->
-    `Assoc
-      [ "status", `String "never_observed"
-      ; "reference", Skill_reference.to_yojson reference
-      ; "scan_limit", `Int scan_limit
-      ]
-  | Some parent ->
-    let run_id =
-      match Json_util.assoc_member_opt "composition_run_id" parent with
-      | Some (`String value) -> Some value
-      | _ -> None
-    in
-    let nodes =
-      match run_id with
-      | None -> []
-      | Some expected ->
-        List.filter
-          (fun row ->
-             match Json_util.assoc_member_opt "composition_run_id" row,
-                   Json_util.assoc_member_opt "record_kind" row
-             with
-             | Some (`String observed), Some (`String "tool_call") ->
-               String.equal expected observed
-             | _ -> false)
-          rows
-    in
-    `Assoc
-      [ "status", `String "observed"
-      ; "reference", Skill_reference.to_yojson reference
-      ; "scan_limit", `Int scan_limit
-      ; "run", parent
-      ; "nodes", `List nodes
-      ]
-;;
-
 type runtime_route_lane =
   | Runtime_default
   | Runtime_media_failover
@@ -1636,9 +1584,9 @@ let add_routes ~sw ~clock router =
                  ])
                reqd)
          request reqd)
-  |> Http.Router.post "/api/v1/skills/runs" (fun request reqd ->
+  |> Http.Router.post "/api/v1/skills/evidence" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name req reqd ->
+         (fun state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_skill_editor_body body_str with
              | Error message ->
@@ -1647,7 +1595,9 @@ let add_routes ~sw ~clock router =
                Http.Response.json_value
                  ~compress:true
                  ~request:req
-                 (skill_run_projection reference)
+                 (Server_skill_evidence.project
+                    ~config:(Mcp_server.workspace_config state)
+                    reference)
                  reqd))
          request reqd)
   |> Http.Router.post "/api/v1/skills/editor/create" (fun request reqd ->

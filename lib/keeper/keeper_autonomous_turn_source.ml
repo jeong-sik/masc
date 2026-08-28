@@ -109,13 +109,24 @@ let trace_step_of_trajectory = function
   | Agent_core.Trajectory.Observe _ | Agent_core.Trajectory.Respond _ -> None
 ;;
 
-(* Terminal-failure cache for exact run reads. The trace format is a hard
-   cut: files written with an earlier trace_version are never migrated or
-   rewritten, so a version-mismatched run can never become readable. Without
-   the cache, every dashboard poll re-reads the same rejected file and
-   replays the same warning (16,128 WARN/day on 2026-08-27, 1,089 runs x 46
-   polls). Healable failures (missing file, I/O) stay uncached. *)
+(* Terminal-failure cache for exact run reads. Two read failures are
+   permanent and cached per (path, run):
+
+   - Version mismatch: the trace format is a hard cut, so files written
+     with an earlier trace_version are never migrated or rewritten.
+   - Missing file: a run reference is derived from the trace sink after
+     the run finished, so the file existed before the record cited it.
+     Deletion afterwards is one-way -- the v4 hard-cut cleanup and
+     retention pruning both remove without restoring -- so a missing
+     referenced file never comes back either.
+
+   Without the cache, every dashboard poll re-reads the same rejected
+   file and replays the same warning (16,128 WARN/day on 2026-08-27 for
+   the version arm; 4,157/hour on 2026-08-28 for the missing arm after
+   the hard-cut cleanup deleted pre-cut sangsu traces whose turn records
+   remained). Healable failures (I/O errors) stay uncached. *)
 let version_rejected_runs : (string, unit) Hashtbl.t = Hashtbl.create 64
+let missing_trace_runs : (string, unit) Hashtbl.t = Hashtbl.create 64
 
 let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
   match record.turn_kind, record.raw_trace_run_ref with
@@ -123,6 +134,7 @@ let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
   | Turn_record.Autonomous, None -> None
   | Turn_record.Autonomous, Some run_ref ->
     let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
+    let cache_key = run_ref.path ^ "\000" ^ run_ref.worker_run_id in
     if not (String.equal record.keeper keeper_name)
     then (
       Log.Keeper.warn ~keeper_name
@@ -138,22 +150,23 @@ let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
           run_ref.path;
         None
       | Missing_or_non_regular ->
-        Log.Keeper.warn ~keeper_name
-          "autonomous turn source: exact raw-trace file is missing or non-regular: %s"
-          run_ref.path;
-        None
+        if Hashtbl.mem missing_trace_runs cache_key then None
+        else (
+          Hashtbl.replace missing_trace_runs cache_key ();
+          Log.Keeper.warn ~keeper_name
+            "autonomous turn source: exact raw-trace file is missing or non-regular: %s"
+            run_ref.path;
+          None)
       | Current_regular_file ->
         if
-          Hashtbl.mem version_rejected_runs
-            (run_ref.path ^ "\000" ^ run_ref.worker_run_id)
+          Hashtbl.mem version_rejected_runs cache_key
+          || Hashtbl.mem missing_trace_runs cache_key
         then None
         else
           (match Agent_core.Raw_trace_query.read_run (agent_core_run_ref run_ref) with
            | Error (Agent_core.Error.Serialization
                       (Agent_core.Error.VersionMismatch _) as err) ->
-             Hashtbl.replace version_rejected_runs
-               (run_ref.path ^ "\000" ^ run_ref.worker_run_id)
-               ();
+             Hashtbl.replace version_rejected_runs cache_key ();
              Log.Keeper.warn ~keeper_name
                "autonomous turn source: cannot read exact run %s: %s"
                run_ref.worker_run_id

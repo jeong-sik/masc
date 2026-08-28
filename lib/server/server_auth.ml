@@ -886,6 +886,9 @@ let respond_agent_rate_limited ~rl_key request reqd =
     rl_headers @
     cors_headers origin
   ) in
+  Transport_metrics.record_http_rate_limit_response
+    ~protocol:Transport_metrics.H1
+    ~scope:Transport_metrics.Agent;
   Httpun.Reqd.respond_with_string reqd
     (Httpun.Response.create ~headers `Too_many_requests) body
 

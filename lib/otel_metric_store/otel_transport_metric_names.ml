@@ -153,4 +153,5 @@ let metric_ws_message_bytes = "masc_ws_message_bytes"
 
 let metric_http_accepts = Otel_metric_store_core.declare_counter "masc_http_accepts_total"
 let metric_http_accept_errors = Otel_metric_store_core.declare_counter "masc_http_accept_errors_total"
+let metric_http_rate_limit_responses = "masc_http_rate_limit_responses_total"
 let metric_http_active_connections = "masc_http_active_connections"

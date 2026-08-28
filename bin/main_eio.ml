@@ -122,6 +122,9 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
         ("content-length", string_of_int (String.length body)) ::
         rl_headers
       ) in
+      Transport_metrics.record_http_rate_limit_response
+        ~protocol:Transport_metrics.H1
+        ~scope:Transport_metrics.Client_ip;
       safe_reqd_respond reqd
         (Httpun.Response.create ~headers `Too_many_requests) body;
       true
@@ -144,6 +147,9 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
                     :: ("content-length", string_of_int (String.length body))
                     :: rl_headers)
                 in
+                Transport_metrics.record_http_rate_limit_response
+                  ~protocol:Transport_metrics.H1
+                  ~scope:Transport_metrics.Agent;
                 safe_reqd_respond reqd
                   (Httpun.Response.create ~headers `Too_many_requests)
                   body;

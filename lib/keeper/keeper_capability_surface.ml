@@ -186,6 +186,19 @@ let ordinary_tool_reference capability =
   }
 ;;
 
+let ordinary_tool_reference_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ "descriptor_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+          ; "capability_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+          ] )
+    ; "required", `List [ `String "descriptor_id"; `String "capability_id" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
 let ordinary_tool_reference_to_yojson reference =
   `Assoc
     [ "descriptor_id", `String reference.descriptor_id

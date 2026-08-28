@@ -82,6 +82,10 @@ val skill_projection : t -> Keeper_skill_catalog.turn_projection
 val skill_catalog : t -> Keeper_skill_catalog.t
 val tool_capabilities : t -> tool_capability list
 val ordinary_tool_reference : tool_capability -> ordinary_tool_reference
+val ordinary_tool_reference_schema : Yojson.Safe.t
+(** JSON Schema for the exact wire object owned by the adjacent encoder and
+    strict decoder. Assembler and proposal request schemas embed this value
+    instead of restating the two identity fields. *)
 val ordinary_tool_reference_to_yojson : ordinary_tool_reference -> Yojson.Safe.t
 
 val ordinary_tool_reference_of_yojson

@@ -7566,9 +7566,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              visible when Lanes is on screen. Off-surface loads still leave a
              valid cursor for the next visit. [search_land] names the combined
              search list, which leads with the standalone rows, so the Keeper
-             cursor goes in past them. *)
-          if state.view = Lanes then
-            search_land state (lanes_standalone_count state + cursor)
+             cursor goes in past them. The landing only runs when the Keeper
+             table owns the cursor in the overview: with the band on a
+             standalone row or a run list open, landing here would drag the
+             selection into the Keeper table on every refresh tick. *)
+          if
+            state.view = Lanes
+            && state.lanes_mode = Lanes_overview
+            && state.lanes_section = Lanes_section_keeper
+          then search_land state (lanes_standalone_count state + cursor)
       | Error detail ->
           (* Keep the previous rows visible. The error says that they are
              stale; clearing them would turn a failed refresh into an empty
@@ -10524,7 +10530,22 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_cursor <-
                        max 0
                          (min (count - 1)
-                            (state.lane_runs_cursor + (direction * page)))
+                            (state.lane_runs_cursor + (direction * page)));
+                     (* The page jump names a row; the window has to follow
+                        or the cursor walks off the frame. j/k get the follow
+                        from [move_row_cursor], which only steps a single
+                        row. *)
+                     (match scrolled_surface state state.view with
+                      | None -> ()
+                      | Some scrolled ->
+                          let height =
+                            surface_body_height
+                              ~rows:(surface_rows state) scrolled
+                          in
+                          state.lane_runs_scroll <-
+                            Masc_tui_scroll.ensure_visible
+                              ~cursor:state.lane_runs_cursor ~height
+                              state.lane_runs_scroll)
                  (* The notice is a static pane; there is nothing to page. *)
                  | Lanes_lane_notice _ | Lanes_overview -> ())
             | Overview | Acting | Keepers _ | Approvals | Planning

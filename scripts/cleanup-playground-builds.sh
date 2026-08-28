@@ -31,7 +31,9 @@
 #   ./scripts/cleanup-playground-builds.sh --apply --include-node-modules
 set -uo pipefail
 
-PLAYGROUND="${MASC_BASE_PATH:-$HOME/me}/.masc/playground"
+# Sibling cleaners' convention: MASC_BASE_PATH, else cwd — never a
+# HOME-anchored machine guess (audit-path-ssot).
+PLAYGROUND="${MASC_BASE_PATH:-$(pwd)}/.masc/playground"
 APPLY=0
 WITH_NODE=0
 

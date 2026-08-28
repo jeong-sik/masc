@@ -79,6 +79,10 @@ module Runtime = struct
      which is the right answer once container fixes its default. *)
   let microvm_dns () = get_string ~default:"1.1.1.1" "MASC_KEEPER_MICROVM_DNS"
 
+  let microvm_memory () = get_string ~default:"" "MASC_KEEPER_MICROVM_MEMORY"
+
+  let microvm_cpus () = get_string ~default:"" "MASC_KEEPER_MICROVM_CPUS"
+
   let docker_playground_enabled () =
     Feature_flag_registry.get_bool "MASC_KEEPER_DOCKER_PLAYGROUND"
 

@@ -73,6 +73,19 @@ module Runtime : sig
   val microvm_dns : unit -> string
   (** Nameserver handed to a microvm guest on the default network. Empty
       passes no [--dns]. *)
+
+  val microvm_memory : unit -> string
+  (** Memory for a keeper-lifetime microvm guest
+      ([MASC_KEEPER_MICROVM_MEMORY], e.g. "8g"). Empty falls back to the
+      shared sandbox cap [Hardening.memory], so raising only the guests
+      does not touch the docker lane. The guest holds this allocation for
+      its whole keeper lifetime — size it for the heaviest build the
+      keeper runs, not the average turn. *)
+
+  val microvm_cpus : unit -> string
+  (** CPU count for a microvm guest ([MASC_KEEPER_MICROVM_CPUS], e.g.
+      "8"). Empty passes no [--cpus] and takes the container CLI's
+      default allocation. *)
   (** Env: [MASC_KEEPER_SANDBOX_DOCKER_IMAGE].  Default:
       ["masc-keeper-sandbox:local"]. *)
 

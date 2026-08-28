@@ -53,7 +53,7 @@ describe('runtimeBandMeta', () => {
     expect(meta.description).toContain('기동')
   })
 
-  // RFC-0295 §5.1 — transient band metadata. The 5th value activates the
+  // Transient band metadata. The 5th value activates the
   // busy rail; meta must agree with the prototype's FL_TONE_LABEL.busy gloss.
   it('returns transient meta', () => {
     const meta = runtimeBandMeta('transient')
@@ -74,7 +74,7 @@ describe('isTransientPhase', () => {
   // bridges both formats at one location.
   //
   // `Draining` / `draining` are NOT in this set: operator-initiated stop
-  // routes to the `paused` band (RFC-0295 §5.3) via a direct phase check
+  // routes to the `paused` band via a direct phase check
   // in `keeperBand()`, NOT via the transient branch. Including Draining in
   // `TRANSIENT_KEEPER_PHASES` would force the keeper row to paint the busy
   // rail, disagreeing with the workspace tone (`PHASE_TONE.draining = 'warn'`,
@@ -295,10 +295,10 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.hint).toBe('오래 응답이 없어 실제 상태 확인이 필요합니다.')
   })
 
-  // RFC-0295 §5.2 verification: the three autonomous transient FSM phases
+  // The three autonomous transient FSM phases
   // (Compacting / HandingOff / Restarting) route to the `transient` band.
   // `Draining` is NOT in this set — operator-initiated stop routes to the
-  // `paused` band via RFC-0295 §5.3 (see `Draining → paused band routing`
+  // `paused` band (see `Draining → paused band routing`
   // block below).
   //
   // Wire spelling notes: composite.phase uses snake_case for `handing_off`
@@ -306,7 +306,7 @@ describe('summarizeKeeperMonitoring', () => {
   // `keeper-store-normalize.ts:110` `BACKEND_PHASE_LOWERCASE_MAP`. `handoff`
   // is the PipelineStage spelling (types/core.ts:945) used for
   // `keeper.pipeline_stage`; it does not appear in the composite wire.
-  describe('transient band routing (RFC-0295 §5.2)', () => {
+  describe('transient band routing', () => {
     const transientPhases: ReadonlyArray<[string, string]> = [
       ['compacting', 'lowercase composite.phase'],
       ['handing_off', 'snake_case composite.phase (lowercase map SSOT)'],
@@ -386,7 +386,7 @@ describe('summarizeKeeperMonitoring', () => {
     })
   })
 
-  // RFC-0295 §5.3 verification: `Draining` (operator-initiated stop) must
+  // `Draining` (operator-initiated stop) must
   // route to the `paused` band, NOT the `transient` band (which would force
   // the busy rail) and NOT the `active` band (which would force the ok
   // rail). Both spellings — PascalCase keeper.phase and lowercase composite
@@ -397,7 +397,7 @@ describe('summarizeKeeperMonitoring', () => {
   // not a paused keeper that can be resumed. Folding Draining into the
   // paused variant would silently change the action-panel canPause/canResume
   // semantics and the roster state-note label.
-  describe('Draining → paused band routing (RFC-0295 §5.3)', () => {
+  describe('Draining → paused band routing', () => {
     it('PascalCase Draining keeper.phase ⇒ paused band, label=일시정지', () => {
       const summary = summarizeKeeperMonitoring({
         name: 'keeper-draining-pascal',

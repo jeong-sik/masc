@@ -118,7 +118,7 @@ function rosterBandActionHint(band: RuntimeBand, isKeeper: boolean): string | nu
 // keyed to runtime band so keeper state reads down a single column instead of
 // every row looking identical). Maps masc's RuntimeBand onto the v2 tone
 // vocabulary (ok/warn/bad/busy/idle); the CSS in v2-monitoring.css paints the
-// edge. RFC-0295: `transient` resolves to `busy`, activating the previously
+// edge. `transient` resolves to `busy`, activating the previously
 // dead `[data-tone="busy"]` selectors in fleet.css.
 const ROSTER_BAND_TONE: Record<RuntimeBand, 'ok' | 'warn' | 'bad' | 'busy' | 'idle'> = {
   active: 'ok',
@@ -369,7 +369,7 @@ export function rosterBlockerDisplay(
 
 // keeper-v2 Fleet skin (fleet.css .fl-*) helpers. The prototype keys every
 // chip / rail / aside-state on a 5-value tone vocabulary
-// (ok/warn/bad/busy/idle). RFC-0295 brings masc's RuntimeBand to the same 5
+// (ok/warn/bad/busy/idle). masc's RuntimeBand carries the same 5
 // values via ROSTER_BAND_TONE (transient → busy). Do not redeclare the
 // tone vocabulary here — see fleet-tone.ts.
 //
@@ -720,7 +720,7 @@ function countAgentsByStatus(
     attention: 0,
     paused: 0,
     offline: 0,
-    // RFC-0295: keep parity with the 5-band facet so transient keepers
+    // Keep parity with the 5-band facet so transient keepers
     // appear under their own filter rather than being silently absorbed by
     // `active`.
     transient: 0,
@@ -741,7 +741,7 @@ function countAgentsByStatus(
 export function countRuntimeKinds(
   agentList: Agent[],
   keeperList: Keeper[],
-  // RFC-0295: pass the fleet-wide composite snapshot map so the breakdown
+  // Pass the fleet-wide composite snapshot map so the breakdown
   // agrees with the per-row band computation (`liveRuntimeCounts`,
   // `bandByAgent`). Without this, countRuntimeKinds and the chip/footer math
   // would disagree on transient/attention whenever composite gates shift
@@ -751,11 +751,11 @@ export function countRuntimeKinds(
   agents: number
   keepers: number
   pausedKeepers: number
-  // RFC-0295: transient band rows (Compacting / HandingOff / Restarting)
+  // Transient band rows (Compacting / HandingOff / Restarting)
   // are now part of the breakdown. Exposed so consumers can reconcile
   // `keepers + pausedKeepers + transientKeepers + offlineKeepers` against
   // `keeperRows` without guessing where the missing rows went.
-  // RFC-0295 §5.3 (pixel-perfect Fleet tone rail, iter-6): Draining is
+  // Draining is
   // counted under `pausedKeepers` here, NOT under `transientKeepers`.
   // The Draining phase routes to the `paused` band in `keeperBand()`
   // (`monitoring-runtime.ts`), and the rail paint, filter chip, and
@@ -857,7 +857,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const liveRuntimeCounts = useMemo(() => {
     const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'keeper-only', keeperRuntimeLookup)
     // Count via the same `band` SSOT that the rail paint and health pills
-    // use. RFC-0295 §5.3 + iter-6 reconciliation: `Draining` phase
+    // use. Under the iter-6 reconciliation the `Draining` phase
     // contributes to `pausedCount` because `keeperBand()` routes it to
     // the `paused` band. The duplicated count block in `countRuntimeKinds`
     // carries the same logic; keep them structurally aligned.
@@ -932,7 +932,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   )
   const filtered = useMemo(() => scopedAgents.slice()
     .sort((a: Agent, b: Agent) => {
-      // RFC-0295: transient sits between active and paused on the sort
+      // Transient sits between active and paused on the sort
       // axis — the prototype groups "what is currently moving" above the
       // healthy steady-state rows so the operator's first scan reads as
       // "attention → transient → active → paused → offline" instead of

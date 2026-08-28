@@ -14,7 +14,7 @@ export interface LiveRuntimeView {
   agents: number
   keepers: number
   pausedKeepers: number
-  // Transient keeper count — RFC-0295. Always present (even when the
+  // Transient keeper count. Always present (even when the
   // underlying source can't enumerate it) so downstream consumers can
   // reconcile `keepers + pausedKeepers + transientKeepers + offlineKeepers`
   // against `keeperRows` without guessing.
@@ -313,7 +313,7 @@ export function resolveRuntimeCounts({
     ? runtimeHealthCounts.pausedKeepers
     : normalizeCount(pausedKeepersCount)
   // Runtime-health fleet_safety is authoritative for executable/paused keepers,
-  // but it does not enumerate RFC-0295 transient detail rows. Preserve the
+  // but it does not enumerate transient detail rows. Preserve the
   // row-derived transient count so the live view remains reconcilable without
   // synthesizing offline rows from stale execution snapshots.
   const liveTransientKeepers = normalizeCount(transientKeepersCount)

@@ -3491,6 +3491,7 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
       let sandbox =
         match row.kr_sandbox_profile with
         | "docker" -> Ansi.cyan ^ "D" ^ Ansi.reset
+        | "microvm" -> Ansi.magenta ^ "M" ^ Ansi.reset
         | "local" -> Ansi.dim ^ "L" ^ Ansi.reset
         | other when String.length other > 0 ->
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset

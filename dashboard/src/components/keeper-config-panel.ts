@@ -489,8 +489,19 @@ function retainKeeperConfigPanelSubscriptions(): () => void {
   }
 }
 
+// A value this panel has not been taught used to become 'local' -- the
+// loosest profile -- so a keeper declaring microvm would have been shown, and
+// saved back, as running on the host. Match every known profile by name and
+// keep 'local' for the genuinely absent case only.
 export function coerceSandboxProfile(raw: string | undefined): SandboxProfile {
-  return raw === 'docker' ? 'docker' : 'local'
+  switch (raw) {
+    case 'docker':
+      return 'docker'
+    case 'microvm':
+      return 'microvm'
+    default:
+      return 'local'
+  }
 }
 
 export function coerceNetworkMode(raw: string | undefined): SandboxNetworkMode {
@@ -1039,10 +1050,12 @@ function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number |
   const state = runtimeDraft.value
   if (!state) return
   const next = { ...state.draft, [field]: value } as RuntimeDraft
-  if (field === 'sandbox_profile' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
-    next.network_mode = 'inherit'
-  }
-  if (field === 'network_mode' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
+  // 'none' belongs to the guest profiles. Testing against 'docker' alone put
+  // a microvm keeper back on 'inherit', which container cannot honour at all:
+  // it has no host network, so the keeper would have been saved with a mode
+  // its own backend refuses.
+  const isGuest = next.sandbox_profile === 'docker' || next.sandbox_profile === 'microvm'
+  if ((field === 'sandbox_profile' || field === 'network_mode') && !isGuest && next.network_mode === 'none') {
     next.network_mode = 'inherit'
   }
   runtimeDraft.value = { ...state, draft: next }
@@ -2250,21 +2263,25 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${InlineSelectRow}
         label="sandbox_profile"
         value=${rd.sandbox_profile}
-        options=${['local', 'docker'] as const}
+        options=${['local', 'docker', 'microvm'] as const}
         onChange=${(value: string) => updateRuntimeDraft('sandbox_profile', value as SandboxProfile)}
         dirty=${dirtyFlags.sandbox_profile}
       />
-      ${c.sandbox_profile === 'docker' && rd.sandbox_profile === 'local' ? html`
+      ${(c.sandbox_profile === 'docker' || c.sandbox_profile === 'microvm') && rd.sandbox_profile === 'local' ? html`
         <${Callout}
           title="격리 해제 경고"
-          body="Docker → Local 전환은 컨테이너 격리를 해제하고 호스트 프로세스 네임스페이스에서 실행합니다."
+          body=${`${c.sandbox_profile} → local 전환은 격리를 해제하고 호스트에서 바로 실행합니다.`}
           tone="warn"
         />
       ` : null}
       <${InlineSelectRow}
         label="network_mode"
         value=${rd.network_mode}
-        options=${rd.sandbox_profile === 'docker' ? ['inherit', 'none'] as const : ['inherit'] as const}
+        options=${rd.sandbox_profile === 'docker'
+          ? ['inherit', 'none'] as const
+          : rd.sandbox_profile === 'microvm'
+            ? ['none'] as const
+            : ['inherit'] as const}
         onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         dirty=${dirtyFlags.network_mode}
       />
@@ -2281,8 +2298,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         ></textarea>
         <span class="kcf-path-eff mono">effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}</span>
       </div>
-      ${rd.sandbox_profile === 'docker' ? html`
+      ${rd.sandbox_profile === 'docker' || rd.sandbox_profile === 'microvm' ? html`
         <${SetupGuideCard} connectorId="sandbox_hardened" />
+      ` : null}
+      ${rd.sandbox_profile === 'microvm' ? html`
+        <${Callout}
+          title="microvm 은 network_mode = none 만 가능합니다"
+          body="container 에는 host 네트워크가 없고 기본 네트워크도 외부로 나가지 못합니다. 호스트 네트워크가 필요하면 docker 로 두세요. 그리고 microvm 은 이미지를 container 저장소에 따로 넣어야 합니다 — docker 에 빌드한 것으로는 실행되지 않고, 실행 전에 거절됩니다."
+          tone="warn"
+        />
       ` : null}
       <${Callout}
         title="기본 경로 앵커"

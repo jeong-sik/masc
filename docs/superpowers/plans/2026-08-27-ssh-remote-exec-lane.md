@@ -134,9 +134,9 @@ let () =
 ```
 (Exact parser entrypoint signature is whatever `keeper_types_profile_toml_parser.ml` exposes today — adapt the call, keep the assertions.)
 
-- [ ] **Step 2: Run to confirm RED** — `scripts/dune-local.sh build test/test_keeper_remote_ssh_profile.exe` must fail (unbound constructor `Remote_ssh`).
+- [x] **Step 2: Run to confirm RED** — `scripts/dune-local.sh build test/test_keeper_remote_ssh_profile.exe` must fail (unbound constructor `Remote_ssh`).
 
-- [ ] **Step 3: Add the variant + SSOT updates**
+- [x] **Step 3: Add the variant + SSOT updates**
 
 In `keeper_types_profile_sandbox.ml`:
 ```ocaml
@@ -146,17 +146,17 @@ after `Docker`; add `Remote_ssh` to `all_sandbox_profiles`; extend `default_netw
 
 In `specs/boundary/SandboxDispatch.tla`: add `"Remote_ssh"` to `ProfileSet`, add the `ViaSet` atom for the SSH lane (e.g. `"ViaSsh"`), extend the dispatch mapping (:92-95) so `Remote_ssh` maps to it, and extend the invariants (:109-118) to assert a `Remote_ssh` dispatch never resolves to `ViaHost` or `ViaLocalPlayground`. Run the existing TLA check harness (`scripts/check-tla.sh` if present, else the dune alias used in Phase 0 — confirm the command from the Phase 0 plan before writing this step's run command).
 
-- [ ] **Step 4: Compile-driven sweep** — `scripts/dune-local.sh build` and fix every exhaustiveness error. Arms whose functionality arrives in later tasks fail closed with a named error, e.g.:
+- [x] **Step 4: Compile-driven sweep** — `scripts/dune-local.sh build` and fix every exhaustiveness error. Arms whose functionality arrives in later tasks fail closed with a named error, e.g.:
 ```ocaml
 | Remote_ssh -> Error "remote_ssh_dispatch_unavailable: runner not wired yet (Phase 1 task 6)"
 ```
 Never silently fall through to a Docker or host path (RFC-0001). `keeper_sandbox_factory.mli:26-29,50-63` gains the `Remote` branch shape per the existing `Docker` precedent.
 
-- [ ] **Step 5: network_mode fail-closed** — in the sandbox-settings validation path (`keeper_types_profile_toml_parser.ml` or `keeper_sandbox_config.ml`, wherever `network_mode` is validated for Docker today), `Remote_ssh` + anything other than `Network_inherit` → `Error "remote_ssh_no_network_mode: ..."`.
+- [x] **Step 5: network_mode fail-closed** — in the sandbox-settings validation path (`keeper_types_profile_toml_parser.ml` or `keeper_sandbox_config.ml`, wherever `network_mode` is validated for Docker today), `Remote_ssh` + anything other than `Network_inherit` → `Error "remote_ssh_no_network_mode: ..."`.
 
-- [ ] **Step 6: GREEN + full-suite no-regression** — `scripts/dune-local.sh build test/test_keeper_remote_ssh_profile.exe && _build/default/test/test_keeper_remote_ssh_profile.exe`, then `scripts/ci-run-tests.sh "scripts/dune-local.sh test"` compared against `/tmp/masc-gate-suite-final.log` baseline.
+- [x] **Step 6: GREEN + full-suite no-regression** — `scripts/dune-local.sh build test/test_keeper_remote_ssh_profile.exe && _build/default/test/test_keeper_remote_ssh_profile.exe`, then `scripts/ci-run-tests.sh "scripts/dune-local.sh test"` compared against `/tmp/masc-gate-suite-final.log` baseline.
 
-- [ ] **Step 7: Commit** — `feat(keeper): add Remote_ssh sandbox profile (fail-closed arms, network_mode fail-closed)`
+- [x] **Step 7: Commit** — `feat(keeper): add Remote_ssh sandbox profile (fail-closed arms, network_mode fail-closed)`
 
 ### Task 2: Endpoint registry — `[exec.ssh.endpoints.<name>]` in runtime config
 
@@ -168,7 +168,7 @@ Never silently fall through to a Docker or host path (RFC-0001). `keeper_sandbox
 - Modify: `lib/runtime/runtime_toml.mli` / `runtime_schema.mli` (expose endpoint registry on the parsed config)
 - Modify: `config/runtime.toml` (commented example endpoint)
 
-- [ ] **Step 1: Write the failing test + dune stanza**
+- [x] **Step 1: Write the failing test + dune stanza**
 
 `test/test_exec_ssh_endpoints.ml`:
 ```ocaml
@@ -227,17 +227,17 @@ let () =
                ; test_case "name validation" `Quick test_endpoint_name_validation ] ]
 ```
 
-- [ ] **Step 2: RED** — build fails (`Runtime_schema.exec_ssh_endpoint_exn` unbound).
+- [x] **Step 2: RED** — build fails (`Runtime_schema.exec_ssh_endpoint_exn` unbound).
 
-- [ ] **Step 3: `Exec_ssh_endpoint` module** — record with exactly the spec table fields: `host`, `user`, `port` (default 22), `identity_file` (default `<base>/.masc/ssh/<name>.key`), `known_hosts_file` (default `<base>/.masc/ssh/known_hosts.d/<name>`), `remote_root` (required), `connect_timeout_sec` (default 10), `max_concurrent_sessions` (default 8), `env_allowlist` (default `[]`), `capabilities` (default `[]`; unknown capability values warn-and-ignore, per spec). The two `<name>`-dependent defaults are resolved at parse time, where the endpoint name and `<base>` are both in scope.
+- [x] **Step 3: `Exec_ssh_endpoint` module** — record with exactly the spec table fields: `host`, `user`, `port` (default 22), `identity_file` (default `<base>/.masc/ssh/<name>.key`), `known_hosts_file` (default `<base>/.masc/ssh/known_hosts.d/<name>`), `remote_root` (required), `connect_timeout_sec` (default 10), `max_concurrent_sessions` (default 8), `env_allowlist` (default `[]`), `capabilities` (default `[]`; unknown capability values warn-and-ignore, per spec). The two `<name>`-dependent defaults are resolved at parse time, where the endpoint name and `<base>` are both in scope.
 
-- [ ] **Step 4: Parser** — `parse_exec_endpoints` walks `[exec.ssh.endpoints.*]` tables; each name passes `validate_runtime_id_component ~allow_dot:false ~kind:"exec ssh endpoint"` (:284-301); unknown keys and missing required keys are parse errors naming the key; wire the result into the config record assembly at :1678-1701 with the same `extract_after_all_errors_guard` pattern as `providers_result`; add `"exec"` to `active_top_level_namespaces` so a stray `[exec]` table is not silently ignored. Keep the mli signatures in sync.
+- [x] **Step 4: Parser** — `parse_exec_endpoints` walks `[exec.ssh.endpoints.*]` tables; each name passes `validate_runtime_id_component ~allow_dot:false ~kind:"exec ssh endpoint"` (:284-301); unknown keys and missing required keys are parse errors naming the key; wire the result into the config record assembly at :1678-1701 with the same `extract_after_all_errors_guard` pattern as `providers_result`; add `"exec"` to `active_top_level_namespaces` so a stray `[exec]` table is not silently ignored. Keep the mli signatures in sync.
 
-- [ ] **Step 5: Seed** — `config/runtime.toml` gains a fully commented-out example endpoint block (no live endpoint ships in the repo).
+- [x] **Step 5: Seed** — `config/runtime.toml` gains a fully commented-out example endpoint block (no live endpoint ships in the repo).
 
-- [ ] **Step 6: GREEN + no-regression** (same commands as Task 1 Step 6).
+- [x] **Step 6: GREEN + no-regression** (same commands as Task 1 Step 6).
 
-- [ ] **Step 7: Commit** — `feat(runtime): [exec.ssh.endpoints] registry — typed, fail-closed parse`
+- [x] **Step 7: Commit** — `feat(runtime): [exec.ssh.endpoints] registry — typed, fail-closed parse`
 
 ### Task 3: `Sandbox_target.Ssh` variant + dispatch routing
 
@@ -248,13 +248,13 @@ let () =
 - Modify: `lib/exec/exec_dispatch.ml` (route `Ssh` exactly like `Docker`)
 - Modify: `lib/keeper/keeper_tool_execute_runtime.ml:55` (`target_label` arm: `"ssh:" ^ endpoint.host`)
 
-- [ ] **Step 1: Write the failing test + dune stanza**
+- [x] **Step 1: Write the failing test + dune stanza**
 
 `test/test_exec_dispatch_ssh.ml` mirrors the Docker mock-runner case in `test/test_exec_dispatch.ml`: build an `Ssh` target whose `runner` records `(argv, env, cwd, stdin_content)` and returns `(Unix.WEXITED 0, "out", "err")`, dispatch a simple command, assert the runner saw the command and the dispatch result carries the mocked stdout/stderr. Include the `pipeline_runner = None` pipeline case asserting Docker parity: with no pipeline runner injected, the pipeline decomposes to per-stage `dispatch_simple` through the plain runner (pinned by `test_exec_dispatch.ml:384-416` — no named error exists for this case), and a `pipeline_runner = Some` case asserting the streaming pipeline runner is preferred.
 
-- [ ] **Step 2: RED** — build fails (unbound `Sandbox_target.ssh`).
+- [x] **Step 2: RED** — build fails (unbound `Sandbox_target.ssh`).
 
-- [ ] **Step 3: Variant + builder**
+- [x] **Step 3: Variant + builder**
 
 In `sandbox_target.ml`:
 ```ocaml
@@ -280,11 +280,11 @@ let ssh ~endpoint ~runner ?pipeline_runner () : t =
 ```
 (`max_concurrent_sessions` and `capabilities` are consumed by the keeper-side runner/preflight, not by `lib/exec`, so they stay out of this record.) Update the mli doc comment — the "variant rather than a record" rationale now covers three constructors.
 
-- [ ] **Step 4: Routing** — in `exec_dispatch.ml`, the `Ssh { runner; _ }` arm calls `runner` identically to the `Docker` arm (same `on_stdout_chunk`/`on_stderr_chunk`/`stdin_content` plumbing). `keeper_tool_execute_runtime.ml:55` `target_label` gains `| Masc_exec.Sandbox_target.Ssh { endpoint; _ } -> "ssh:" ^ endpoint.host`.
+- [x] **Step 4: Routing** — in `exec_dispatch.ml`, the `Ssh { runner; _ }` arm calls `runner` identically to the `Docker` arm (same `on_stdout_chunk`/`on_stderr_chunk`/`stdin_content` plumbing). `keeper_tool_execute_runtime.ml:55` `target_label` gains `| Masc_exec.Sandbox_target.Ssh { endpoint; _ } -> "ssh:" ^ endpoint.host`.
 
-- [ ] **Step 5: GREEN + no-regression.**
+- [x] **Step 5: GREEN + no-regression.**
 
-- [ ] **Step 6: Commit** — `feat(exec): Sandbox_target.Ssh — injected-runner SSH lane, dispatch routing`
+- [x] **Step 6: Commit** — `feat(exec): Sandbox_target.Ssh — injected-runner SSH lane, dispatch routing`
 
 ---
 
@@ -297,7 +297,7 @@ Pure OCaml, no I/O — shared by the keeper-side runner (encode request, parse t
 - Modify: `test/dune` (append stanza with `libraries masc_test_deps exec_ssh_protocol`)
 - Create: `lib/exec_ssh_protocol/dune`, `lib/exec_ssh_protocol/exec_ssh_protocol.ml` / `.mli`
 
-- [ ] **Step 1: Write the failing test + dune stanza**
+- [x] **Step 1: Write the failing test + dune stanza**
 
 `test/test_exec_ssh_protocol.ml`:
 ```ocaml
@@ -391,7 +391,7 @@ let () =
 
 - [x] **Step 2: RED.**
 
-- [ ] **Step 3: Implement the codec**
+- [x] **Step 3: Implement the codec**
 
 `lib/exec_ssh_protocol/dune`:
 ```
@@ -404,9 +404,9 @@ let () =
 
 Frame format (exactly per spec §4.2): `[8-byte big-endian length][request JSON][stdin_len raw bytes]`, where length covers JSON + raw bytes. Binary-suspect fields are base64 inside the JSON. Trailer: `\x1e{"masc_exec_result":{"v":1,"exit":...,"signal":...,"timed_out":...,"shim_error":...}}\x1e` appended after the child's stderr. `parse_trailer` takes the *tail* of the stderr stream (the runner passes the trailing bytes), so it must locate the LAST `\x1e...\x1e` pair, not the first — a payload may legally emit `\x1e` only inside valid UTF-8 (it cannot), but defensive last-match is required regardless. Malformed/absent trailer → `Error` whose message contains `remote_ssh_transport_error` (never a fabricated exit 0). `probe_major_compatible ~want version` compares the numeric major prefix.
 
-- [ ] **Step 4: GREEN + no-regression.**
+- [x] **Step 4: GREEN + no-regression.**
 
-- [ ] **Step 5: Commit** — `feat(exec-ssh-protocol): framed request/trailer/probe codec — binary-safe, version-gated`
+- [x] **Step 5: Commit** — `feat(exec-ssh-protocol): framed request/trailer/probe codec — binary-safe, version-gated`
 
 ### Task 5: `masc-exec-shim` static Linux binary
 
@@ -417,7 +417,7 @@ Frame format (exactly per spec §4.2): `[8-byte big-endian length][request JSON]
 - Create: `bin/masc_exec_shim.ml`, plus its `bin/dune` entry
 - Create: `scripts/build-shim-static.sh`
 
-- [ ] **Step 1: Write the failing test + dune stanza**
+- [x] **Step 1: Write the failing test + dune stanza**
 
 `test/test_exec_shim.ml` covers the pure cores:
 ```ocaml
@@ -439,22 +439,22 @@ let test_denylist_beats_allowlist () =
   check (option string) "FOO kept" (Some "ok") (List.assoc_opt "FOO" env)
 ```
 
-- [ ] **Step 2: RED.**
+- [x] **Step 2: RED.**
 
-- [ ] **Step 3: Shim core (`lib/exec_shim`)**
+- [x] **Step 3: Shim core (`lib/exec_shim`)**
 
 - `synthesize_env ~allowlist ~request_env` — minimal base env (`PATH`=/usr/local/bin:/usr/bin:/bin, `HOME`/`USER`/`TMPDIR` from the shim's own environment), overlay only allowlisted request entries, minus the reserved-name denylist (`PATH`, `HOME`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_*` prefix, `BASH_ENV`, `ENV`) which is never accepted from the wire. Pure and fully unit-tested.
 - `kill_policy` — pure decision function: `on_eof | on_timeout | on_child_exit` → ordered action list `[SIGTERM pgid; wait grace; SIGKILL pgid]`, so the sequence is asserted without real signals.
 - `prctl_stub.c` — ~20 lines exposing `PR_SET_PDEATHSIG` (`ocaml_prctl_set_pdeathsig`); called pre-exec in the child. The dune `foreign_stubs` stanza links it.
 - `run` — decode the stdin frame (`Exec_ssh_protocol.decode_request`), `setsid()`, fork; child: pdeathsig=SIGKILL, dup pipes, `execvp`; parent: `select` on child stdout/stderr pipes + shim stdin (EOF/HUP detection) + `timeout_sec` timer; stream child output through verbatim; on EOF/timeout apply `kill_policy`; on child exit append the result trailer to the stderr stream per the codec; `--probe` prints `Exec_ssh_protocol.render_probe` and exits 0.
 
-- [ ] **Step 4: Thin entrypoint** — `bin/masc_exec_shim.ml` is `let () = Exec_shim.main ()`; add the executable to `bin/dune` following the neighboring entry pattern.
+- [x] **Step 4: Thin entrypoint** — `bin/masc_exec_shim.ml` is `let () = Exec_shim.main ()`; add the executable to `bin/dune` following the neighboring entry pattern.
 
-- [ ] **Step 5: Static build script** — `scripts/build-shim-static.sh` runs an `ocaml/opam:alpine` container, installs the pinned deps, builds with `-ccopt -static`, copies out `masc-exec-shim`, and asserts `file` reports a statically linked ELF (fails the script otherwise). macOS host builds stay dynamic — the static artifact is produced on demand for fixture/provisioning use. Document the invocation in the script header comment.
+- [x] **Step 5: Static build script** — `scripts/build-shim-static.sh` runs an `ocaml/opam:alpine` container, installs the pinned deps, builds with `-ccopt -static`, copies out `masc-exec-shim`, and asserts `file` reports a statically linked ELF (fails the script otherwise). macOS host builds stay dynamic — the static artifact is produced on demand for fixture/provisioning use. Document the invocation in the script header comment.
 
-- [ ] **Step 6: GREEN + no-regression** (unit tests run on macOS against the dynamic build; the static artifact is exercised in Task 10's fixture).
+- [x] **Step 6: GREEN + no-regression** (unit tests run on macOS against the dynamic build; the static artifact is exercised in Task 10's fixture).
 
-- [ ] **Step 7: Commit** — `feat(shim): masc-exec-shim — setsid+pdeathsig supervision, framed protocol, --probe`
+- [x] **Step 7: Commit** — `feat(shim): masc-exec-shim — setsid+pdeathsig supervision, framed protocol, --probe`
 
 ### Task 6: SSH runner (`keeper_sandbox_ssh.ml`) + dispatch wiring
 
@@ -466,7 +466,7 @@ let test_denylist_beats_allowlist () =
 - Modify: `lib/keeper/keeper_tool_execute_runtime.ml` — `Remote_ssh` arms at :337-384 (dispatch), :402-411, :420-428 (redirect-path translation note), :699 area
 - Modify: `lib/keeper/dune` (add `exec_ssh_protocol` to libraries if not already transitively present)
 
-- [ ] **Step 1: Write the failing test + dune stanza**
+- [x] **Step 1: Write the failing test + dune stanza**
 
 `test/test_keeper_sandbox_ssh.ml` uses the `~ssh_bin` seam: a stub shell script (created in `Unix.mkstemp`-style temp dir, chmod 0755) that records its argv to a file, cats a canned stdout, emits a canned stderr + valid trailer, and exits 0. Cases:
 ```ocaml
@@ -487,9 +487,9 @@ let test_denylist_beats_allowlist () =
 (* cancellation: killing the local stub while blocked on read terminates dispatch *)
 ```
 
-- [ ] **Step 2: RED.**
+- [x] **Step 2: RED.**
 
-- [ ] **Step 3: Runner implementation** in `keeper_sandbox_ssh.ml`:
+- [x] **Step 3: Runner implementation** in `keeper_sandbox_ssh.ml`:
 
 - `build_ssh_argv ~endpoint ~control_path_dir` produces exactly the flag set above (order fixed for testability); `ControlPath` dir is created 0700 at runner construction; `max_concurrent_sessions` bounds concurrent dispatches per endpoint with a semaphore (sshd `MaxSessions` default 10 — the ceiling is explicit).
 - `runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd` — spawn via `Process_eio.run_argv_with_stdin_and_status_split` (mli:133-146) or the streaming variant (:206-217) so chunk callbacks fire as the ssh channel delivers; encode the request via `Exec_ssh_protocol.encode_request`; write frame to ssh stdin, then `stdin_content` raw bytes are part of the frame (`stdin_len`). (amended post-Task-5 review) The runner holds the ssh channel (shim stdin) OPEN until the trailer arrives — shim stdin EOF means "cancel the payload", so closing it early would kill the command; only the CHILD's stdin gets EOF (the shim closes it once `stdin_len` bytes are consumed, or immediately when `stdin_len=0`).
@@ -498,11 +498,11 @@ let test_denylist_beats_allowlist () =
 - Cancellation = kill the local ssh client process (`Process_eio.tree_kill` :275-316 precedent); channel EOF lets the shim's watchdog reap the remote process group (asserted end-to-end in Task 10).
 - First-SSH-dispatch-per-endpoint info log line (observability parity with the Phase 0 hatch warning); a per-endpoint preflight TTL cache re-check (`--probe` over the ControlMaster) fails the dispatch with a named error when the endpoint degrades mid-session.
 
-- [ ] **Step 4: `ssh_target` + dispatch arms** — in `keeper_sandbox_shell_ir_target.ml`, `ssh_target ~endpoint ~runner ...` mirrors `docker_target` including the env-unsupported guard shape (SSH *does* support env — via the allowlist — so the guard differs: typed Shell IR env entries not in the endpoint allowlist fail with `remote_ssh_env_not_allowlisted`). In `keeper_tool_execute_runtime.ml`, the `Remote_ssh` profile arm (:337-384) constructs the SSH target via the runner and dispatches; redirect-path arms (:402-428) translate via `Keeper_remote_path` (Task 7 — if Task 7 lands after, these arms fail closed with a named error until then).
+- [x] **Step 4: `ssh_target` + dispatch arms** — in `keeper_sandbox_shell_ir_target.ml`, `ssh_target ~endpoint ~runner ...` mirrors `docker_target` including the env-unsupported guard shape (SSH *does* support env — via the allowlist — so the guard differs: typed Shell IR env entries not in the endpoint allowlist fail with `remote_ssh_env_not_allowlisted`). In `keeper_tool_execute_runtime.ml`, the `Remote_ssh` profile arm (:337-384) constructs the SSH target via the runner and dispatches; redirect-path arms (:402-428) translate via `Keeper_remote_path` (Task 7 — if Task 7 lands after, these arms fail closed with a named error until then).
 
-- [ ] **Step 5: GREEN + no-regression.**
+- [x] **Step 5: GREEN + no-regression.**
 
-- [ ] **Step 6: Commit** — `feat(keeper): SSH exec runner — pinned flags, framed stdin protocol, trailer-verified results, no-pty cancellation`
+- [x] **Step 6: Commit** — `feat(keeper): SSH exec runner — pinned flags, framed stdin protocol, trailer-verified results, no-pty cancellation`
 
 ---
 
@@ -516,7 +516,7 @@ let test_denylist_beats_allowlist () =
 - Modify: `lib/keeper/keeper_sandbox_read_backend.ml` (:15-16) / its mli — `Ssh` backend
 - Modify: `lib/keeper/keeper_tool_execute_runtime.ml` :402-428 (redirect-path arms now translate instead of failing closed)
 
-- [ ] **Step 1: Write the failing test + dune stanza**
+- [x] **Step 1: Write the failing test + dune stanza**
 
 `test/test_keeper_remote_path.ml`:
 ```ocaml
@@ -530,13 +530,13 @@ let test_denylist_beats_allowlist () =
 (* identical keeper names with different remote_root never cross-map *)
 ```
 
-- [ ] **Step 2: RED.**
+- [x] **Step 2: RED.**
 
-- [ ] **Step 3: `Keeper_remote_path`** — the ONE module owning both directions: `host_to_remote ~endpoint ~keeper host_path` and `remote_to_logical ~endpoint ~keeper remote_path`, plus `rewrite_output ~endpoint ~keeper text` applied to streamed stdout/stderr and error text (compiler errors and `rg` hits contain absolute remote paths; a keeper that sees them feeds them back into the next call). Jail violations host-side return the same named error the existing path gate uses today (`keeper_sandbox_config.ml:75`, `playground_paths.ml`).
+- [x] **Step 3: `Keeper_remote_path`** — the ONE module owning both directions: `host_to_remote ~endpoint ~keeper host_path` and `remote_to_logical ~endpoint ~keeper remote_path`, plus `rewrite_output ~endpoint ~keeper text` applied to streamed stdout/stderr and error text (compiler errors and `rg` hits contain absolute remote paths; a keeper that sees them feeds them back into the next call). Jail violations host-side return the same named error the existing path gate uses today (`keeper_sandbox_config.ml:75`, `playground_paths.ml`).
 
-- [ ] **Step 4: Read ops SSH backend** — `keeper_sandbox_read_backend.ml` gains the `Ssh` backend; `keeper_workspace_read_ops.ml:123`'s host-side `Sys.file_exists` is skipped for remote targets and routed through `Keeper_sandbox_read_runner` (:132-137 precedent: `container_path_of_host`, `run_command_with_status`) using `test -e` over the shim. `should_route_read` (:172) gains the `Remote_ssh` arm. Enumerate `host_root_abs_of_meta` call sites (~27: telemetry, filesystem-runtime normalization, dashboard workspace views) and classify each in a comment at the top of `keeper_remote_path.ml` as logical-path (unchanged), remote-proxied (routed through the runner), or explicitly-divergent (documented) — this enumeration comment is a deliverable of this task, reviewable in the PR.
+- [x] **Step 4: Read ops SSH backend** — `keeper_sandbox_read_backend.ml` gains the `Ssh` backend; `keeper_workspace_read_ops.ml:123`'s host-side `Sys.file_exists` is skipped for remote targets and routed through `Keeper_sandbox_read_runner` (:132-137 precedent: `container_path_of_host`, `run_command_with_status`) using `test -e` over the shim. `should_route_read` (:172) gains the `Remote_ssh` arm. Enumerate `host_root_abs_of_meta` call sites (~27: telemetry, filesystem-runtime normalization, dashboard workspace views) and classify each in a comment at the top of `keeper_remote_path.ml` as logical-path (unchanged), remote-proxied (routed through the runner), or explicitly-divergent (documented) — this enumeration comment is a deliverable of this task, reviewable in the PR.
 
-- [ ] **Step 5: Redirect-path arms** — `keeper_tool_execute_runtime.ml:402-428` `Remote_ssh` arms translate redirect paths via `Keeper_remote_path` (replacing any fail-closed stub from Task 6).
+- [x] **Step 5: Redirect-path arms** — `keeper_tool_execute_runtime.ml:402-428` `Remote_ssh` arms translate redirect paths via `Keeper_remote_path` (replacing any fail-closed stub from Task 6).
 
   **2026-08-28 implementation finding:** the current `Sandbox_target.runner`
   contract carries argv/env/cwd/stdin and captured output, but no remote file
@@ -548,9 +548,9 @@ let test_denylist_beats_allowlist () =
   Path translation, streamed-output rewriting, and SSH read ops are independently
   shippable and covered by this task's focused tests.
 
-- [ ] **Step 6: GREEN + no-regression.**
+- [x] **Step 6: GREEN + no-regression.**
 
-- [ ] **Step 7: Commit** — `feat(keeper): bidirectional remote path translation + SSH read-ops backend`
+- [x] **Step 7: Commit** — `feat(keeper): bidirectional remote path translation + SSH read-ops backend`
 
 ### Task 8: Secret policy — nothing crosses the wire by default
 
@@ -559,7 +559,7 @@ let test_denylist_beats_allowlist () =
 - Modify: `test/dune` (append stanza)
 - Modify: `lib/keeper/keeper_tool_execute_runtime.ml` (:268-330 projection branch)
 
-- [ ] **Step 1: Write the failing test + dune stanza**
+- [x] **Step 1: Write the failing test + dune stanza**
 
 `test/test_keeper_ssh_secret_policy.ml`:
 ```ocaml
@@ -571,13 +571,13 @@ let test_denylist_beats_allowlist () =
 (* allowlisted non-secret typed env entry crosses *)
 ```
 
-- [ ] **Step 2: RED.**
+- [x] **Step 2: RED.**
 
-- [ ] **Step 3: Branch the projection** — in the dispatch path, the `Remote_ssh` arm skips the local identity/env projection (`Keeper_secret_projection` call at :268-330) entirely, then runs `Keeper_github_identity.validate_local_tool_env` on typed env unchanged (or rejects typed env exactly like the Docker arm if that is what the Docker arm does today — match it). The only env that may cross is the endpoint allowlist, enforced by the runner (Task 6) and re-asserted here.
+- [x] **Step 3: Branch the projection** — in the dispatch path, the `Remote_ssh` arm skips the local identity/env projection (`Keeper_secret_projection` call at :268-330) entirely, then runs `Keeper_github_identity.validate_local_tool_env` on typed env unchanged (or rejects typed env exactly like the Docker arm if that is what the Docker arm does today — match it). The only env that may cross is the endpoint allowlist, enforced by the runner (Task 6) and re-asserted here.
 
-- [ ] **Step 4: GREEN + no-regression.**
+- [x] **Step 4: GREEN + no-regression.**
 
-- [ ] **Step 5: Commit** — `feat(keeper): SSH secret policy — no host secrets cross the wire, typed env still validated`
+- [x] **Step 5: Commit** — `feat(keeper): SSH secret policy — no host secrets cross the wire, typed env still validated`
 
 ### Task 9: Preflight extension + provisioning bootstrap
 
@@ -588,7 +588,7 @@ let test_denylist_beats_allowlist () =
 - Modify: `lib/keeper/keeper_turn_up_args.ml` (:377-391, :430-433) — `remote_endpoint` required for `remote_ssh`, must exist in the registry (else config-load error naming the endpoint), preflight invocation
 - Create: `bin/masc_exec_ssh_bootstrap.ml` + `bin/dune` entry
 
-- [ ] **Step 1: Write the failing test + dune stanza**
+- [x] **Step 1: Write the failing test + dune stanza**
 
 `test/test_keeper_ssh_preflight.ml` (stub `~ssh_bin` again):
 ```ocaml
@@ -601,7 +601,7 @@ let test_denylist_beats_allowlist () =
 (* keeper_up with remote_endpoint = "ghost" not in registry -> config-load error *)
 ```
 
-- [ ] **Step 2: RED.**
+- [x] **Step 2: RED.**
 
 - [x] **Step 3: Preflight extension** — `Env_config_sandbox.Preflight` gains `check_ssh_endpoint ~endpoint ~keeper` running, over the pinned ssh flags: (1) connect, (2) `masc-exec-shim --probe` + `probe_major_compatible`, (3) remote `git --version`, (4) `remote_root` exists + disk-free floor, (5) remote `gh auth status` with `GH_CONFIG_DIR=<remote_root>/<keeper>/.config/gh`, (6) local ControlPath dir creatable. TTL cache (per endpoint, default 60s, overridable via env for tests) consulted at dispatch; keeper_up always forces a fresh check. Every failure is a named error; there is NO fallback to another lane.
 
@@ -611,7 +611,7 @@ let test_denylist_beats_allowlist () =
 
 - [x] **Step 6: GREEN + no-regression.**
 
-- [ ] **Step 7: Commit** — `feat(keeper): SSH endpoint preflight + provisioning bootstrap`
+- [x] **Step 7: Commit** — `feat(keeper): SSH endpoint preflight + provisioning bootstrap`
 
 ### Task 10: Integration fixture + end-to-end tests
 

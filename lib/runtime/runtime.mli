@@ -554,6 +554,13 @@ val turn_timeout_s_of_runtime_id : string -> float option
     "keep whatever bound the caller already has". Consumed by
     {!Runtime_inference.resolve_turn_timeout_s}. *)
 
+val wall_clock_ceiling_s_of_runtime_id : string -> float option
+(** Per-model [wall-clock-ceiling-s] from runtime.toml, or [None] when unset
+    or the runtime id is unknown. Bounds one official-client turn's total
+    duration and never resets on protocol messages ({!Runtime_wall_clock});
+    [None] keeps the runtime default ceiling. Consumed by
+    {!Runtime_inference.resolve_wall_clock_ceiling_s}. *)
+
 val quota_scope_of_runtime : t -> Runtime_quota_window.scope
 (** Non-secret quota-scope identity derived from this resolved runtime
     snapshot.  Use this form across a provider call so a concurrent catalog

@@ -923,6 +923,67 @@ let test_model_without_turn_timeout_leaves_it_unset () =
          (model.Runtime_schema.turn_timeout_s = None)
      | _ -> fail "exactly one model must parse")
 
+(* [wall-clock-ceiling-s] bounds the WHOLE turn and never resets on protocol
+   messages, so unlike [turn-timeout-s] there is no "0 removes the bound"
+   posture: the ceiling is the fail-safe against a turn that keeps emitting
+   forever (masc#31364's 1h+ turn shape), and the config may tighten it but
+   not delete it. *)
+let test_model_wall_clock_ceiling_parses_as_a_positive_float () =
+  let config =
+    "[models.probe]\napi-name = \"probe\"\nwall-clock-ceiling-s = 7200.0\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model declaring a positive wall-clock-ceiling-s must parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "wall-clock-ceiling-s reaches the model spec"
+         true
+         (model.Runtime_schema.wall_clock_ceiling_s = Some 7200.0)
+     | _ -> fail "exactly one model must parse")
+
+let test_model_wall_clock_ceiling_rejects_zero_and_negative () =
+  let parse value =
+    Runtime_toml.parse_string
+      (Printf.sprintf
+         "[models.probe]\napi-name = \"probe\"\nwall-clock-ceiling-s = %s\n"
+         value)
+  in
+  let names_the_key = function
+    | Ok _ -> false
+    | Error errors ->
+      List.exists
+        (fun (e : Runtime_toml.parse_error) ->
+           let needle = "wall-clock-ceiling-s" in
+           let n = String.length needle in
+           let rec scan i =
+             i + n <= String.length e.path
+             && (String.sub e.path i n = needle || scan (i + 1))
+           in
+           scan 0)
+        errors
+  in
+  check bool "zero is rejected: the ceiling cannot be removed" true
+    (names_the_key (parse "0"));
+  check bool "negative is rejected and names the key" true
+    (names_the_key (parse "-1.0"))
+
+let test_model_without_wall_clock_ceiling_leaves_it_unset () =
+  let config = "[models.probe]\napi-name = \"probe\"\n" in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model without wall-clock-ceiling-s must still parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "an undeclared wall-clock-ceiling-s stays None (runtime default)"
+         true
+         (model.Runtime_schema.wall_clock_ceiling_s = None)
+     | _ -> fail "exactly one model must parse")
+
 let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
   let valid =
     "[runtime.exact_output_lanes.compaction_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
@@ -4508,6 +4569,15 @@ let () =
         ; test_case
             "a model without turn-timeout-s leaves it unset"
             `Quick test_model_without_turn_timeout_leaves_it_unset
+        ; test_case
+            "wall-clock-ceiling-s parses as a positive float"
+            `Quick test_model_wall_clock_ceiling_parses_as_a_positive_float
+        ; test_case
+            "wall-clock-ceiling-s rejects zero and negative"
+            `Quick test_model_wall_clock_ceiling_rejects_zero_and_negative
+        ; test_case
+            "a model without wall-clock-ceiling-s leaves it unset"
+            `Quick test_model_without_wall_clock_ceiling_leaves_it_unset
         ; test_case
             "load allows a lane that mixes checkpoint owners"
             `Quick test_load_allows_a_lane_that_mixes_checkpoint_owners

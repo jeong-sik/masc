@@ -335,16 +335,6 @@ let handle_tool_execute_typed
         in
         let dispatch_sandbox =
           match sandbox_profile with
-          (* Its own arm rather than sharing Docker's: that branch labels the
-             dispatch [via: docker], and a keeper that asked for a VM must not
-             be told docker ran its command. The refusal names what it asked
-             for. *)
-          | Micro_vm ->
-            Error
-              (Keeper_sandbox_shell_ir_target.target_error
-                 ~fields:[ "requested_sandbox", `String "microvm" ]
-                 "sandbox_profile=microvm has no runtime in this build; the \
-                  call is refused rather than dispatched to another backend")
           | Local ->
             if Env_config_sandbox.Gate.allow_local_playground ()
             then (
@@ -360,12 +350,17 @@ let handle_tool_execute_typed
                 (Keeper_sandbox_shell_ir_target.target_error
                    ("local_playground_disabled: "
                     ^ Env_config_sandbox.Gate.disabled_message))
-          | Docker ->
+          (* Both guest profiles take the same route. The labels below are
+             read off the profile rather than written as "docker": a keeper
+             that asked for a VM must not be told docker ran its command,
+             which is how a mislabelled field sent an operator chasing the
+             wrong subsystem (#31225). *)
+          | Docker | Micro_vm ->
             if typed_input_has_env input
             then
               Error
                 (Keeper_sandbox_shell_ir_target.target_error
-                   "typed Shell IR Docker dispatch does not support env yet")
+                   "typed Shell IR guest dispatch does not support env yet")
             else
               docker_sandbox_target
                 ~turn_sandbox_factory
@@ -379,10 +374,14 @@ let handle_tool_execute_typed
                    ->
                   { sandbox = dispatch.target
                   ; fields =
-                      [ "requested_sandbox", `String "docker"
-                      ; "via", `String "docker"
-                      ; "sandbox_profile", `String "docker"
-                      ]
+                      (let label =
+                         Keeper_types_profile_sandbox.sandbox_profile_to_string
+                           sandbox_profile
+                       in
+                       [ "requested_sandbox", `String label
+                       ; "via", `String label
+                       ; "sandbox_profile", `String label
+                       ])
                   ; base_host_env = None
                   ; github_secret_files =
                       (fun () ->

@@ -1330,7 +1330,9 @@ let check_invariant_sandbox_isolation
   | Some factory ->
     let cwd = Filename.dirname target in
     (match Keeper_sandbox_factory.resolve_opt (Some factory) ~cwd with
-     | No_factory | Local_profile -> Ok ()
+     (* No guest root to check against; the call itself is refused where it
+        would run. *)
+     | Backend_unimplemented _ | No_factory | Local_profile -> Ok ()
      | Runtime runtime ->
        let host_root = Keeper_turn_sandbox_runtime.host_root runtime in
        Keeper_invariant.sandbox_isolation

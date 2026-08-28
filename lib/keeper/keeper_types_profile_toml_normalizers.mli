@@ -24,6 +24,7 @@ type sandbox_profile =
   Keeper_types_profile_sandbox.sandbox_profile =
     Local
   | Docker
+  | Micro_vm
 module Sandbox_profile_tla =
   Keeper_types_profile_sandbox.Sandbox_profile_tla
 type network_mode =

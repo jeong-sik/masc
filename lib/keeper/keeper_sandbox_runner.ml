@@ -123,6 +123,11 @@ include Make (Docker_backend)
 let uses_backend ~config:_ ~meta ~cwd:_ =
   match effective_sandbox_profile ~meta with
   | Keeper_types_profile_sandbox.Docker, _ -> true
+  (* Routed away from the host like Docker. What actually runs the guest is
+     decided at dispatch, which refuses Micro_vm outright until its backend
+     exists -- routing it here and letting [Docker_backend] answer would run
+     docker commands for a keeper that asked for a VM. *)
+  | Keeper_types_profile_sandbox.Micro_vm, _ -> true
   | Keeper_types_profile_sandbox.Local, _ -> false
 
 let route_for ~config ~meta ~cwd =

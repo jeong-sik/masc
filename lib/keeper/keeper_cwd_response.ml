@@ -11,7 +11,9 @@ let of_sandbox ~(sandbox : Keeper_sandbox.t) ~host_cwd
     ~container_cwd_for_docker =
   match sandbox.backend with
   | Keeper_sandbox.Local -> local ~host_cwd
-  | Keeper_sandbox.Docker ->
+  (* Both guest backends answer with a container-side cwd; the shape of the
+     reply does not depend on what runs the guest. *)
+  | Keeper_sandbox.Docker | Keeper_sandbox.Micro_vm ->
     docker ~host_cwd ~container_cwd:container_cwd_for_docker
 
 let profile_independent_cwd ~container_root ~host_cwd =

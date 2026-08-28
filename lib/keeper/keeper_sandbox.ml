@@ -7,6 +7,7 @@
 type backend =
   | Local
   | Docker
+  | Micro_vm
 
 type t =
   { keeper_name : string
@@ -72,10 +73,12 @@ end
 let backend_of_profile = function
   | Keeper_types_profile_sandbox.Local -> Local
   | Keeper_types_profile_sandbox.Docker -> Docker
+  | Keeper_types_profile_sandbox.Micro_vm -> Micro_vm
 
 let backend_to_string = function
   | Local -> "local"
   | Docker -> "docker"
+  | Micro_vm -> "microvm"
 
 let backend_of_config_agent ~(config : Workspace.config) ~(agent_name : string) =
   match
@@ -85,6 +88,7 @@ let backend_of_config_agent ~(config : Workspace.config) ~(agent_name : string) 
   with
   | Keeper_sandbox_config.Local -> Local
   | Keeper_sandbox_config.Docker -> Docker
+  | Keeper_sandbox_config.Micro_vm -> Micro_vm
 
 let sandbox_id_of_name name =
   "keeper:" ^ Playground_paths.sanitize_keeper_name name
@@ -99,7 +103,8 @@ let host_root_rel_of_backend ~(backend : backend) name =
   Keeper_sandbox_config.host_root_rel_of_profile
     (match backend with
      | Local -> Keeper_sandbox_config.Local
-     | Docker -> Keeper_sandbox_config.Docker)
+     | Docker -> Keeper_sandbox_config.Docker
+     | Micro_vm -> Keeper_sandbox_config.Micro_vm)
     name
 
 let host_root_rel_of_profile sandbox_profile name =
@@ -133,7 +138,10 @@ let host_path_of_visible_path ~config ~agent_name raw_path =
   else
     match backend_of_config_agent ~config ~agent_name with
     | Local -> raw_path
-    | Docker ->
+    (* Micro_vm projects like Docker: both mount the keeper's host root at a
+       guest path, so a visible path maps back the same way. They differ in
+       what runs the guest, not in where the tree appears. *)
+    | Docker | Micro_vm ->
         let container_prefix = container_root agent_name in
         if String.equal raw_path container_prefix
         then host_root_abs_of_config_agent ~config ~agent_name
@@ -155,7 +163,7 @@ let keeper_visible_root_abs_of_meta ~(config : Workspace.config)
     (meta : Keeper_meta_contract.keeper_meta) =
   match backend_of_profile meta.sandbox_profile with
   | Local -> host_root_abs_of_meta ~config meta
-  | Docker -> container_root meta.name
+  | Docker | Micro_vm -> container_root meta.name
 
 let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) : t =
   let backend = backend_of_profile meta.sandbox_profile in
@@ -169,7 +177,7 @@ let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
   ; container_root =
       (match backend with
        | Local -> None
-       | Docker -> Some (container_root meta.name))
+       | Docker | Micro_vm -> Some (container_root meta.name))
   ; root_arg = "."
   }
 
@@ -202,7 +210,7 @@ let visible_path_of_host (t : t) (p : Path.host Path.t)
   let path = Path.unsafe_to_string p in
   match t.backend with
   | Local -> Ok path
-  | Docker ->
+  | Docker | Micro_vm ->
     (match t.container_root with
      | None -> Error (Path.Container_root_missing { path })
      | Some container_root ->

@@ -86,6 +86,14 @@ let stub_main () =
 
 let shell_quote s = "'" ^ String.concat "'\\''" (String.split_on_char '\'' s) ^ "'"
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:""))
+    f
+;;
+
 let temp_dir () =
   let path = Filename.temp_file "masc-ssh-runner-" "" in
   Sys.remove path;
@@ -178,11 +186,11 @@ let test_argv_frame_stream_and_exit () =
   let state, runner = make_runner ~base_path ~ssh_bin in
   let stdout_chunks = Buffer.create 32 and stderr_chunks = Buffer.create 32 in
   let status, stdout, stderr =
+    with_env "GH_TOKEN" "ambient-host-secret" @@ fun () ->
     run_request runner
       ~on_stdout_chunk:(Buffer.add_string stdout_chunks)
       ~on_stderr_chunk:(Buffer.add_string stderr_chunks)
-      ~cwd:(Some (Filename.concat base_path ".masc/playground/keeper-a"))
-      ()
+      ~cwd:(Some (Filename.concat base_path ".masc/playground/keeper-a")) ()
   in
   check status_testable "payload exit from trailer" (Unix.WEXITED 3) status;
   check string "stdout" "remote-out" stdout;
@@ -199,7 +207,21 @@ let test_argv_frame_stream_and_exit () =
      check (list string) "request argv" [ "/usr/bin/printf"; "hello" ] request.argv;
      check string "request cwd" "/srv/masc/playground/keeper-a" request.cwd;
      check string "raw stdin" "stdin\x00bytes" stdin;
-     check (list (pair string string)) "allowlisted env only" [ "LANG", "C" ] request.env)
+     check (list (pair string string))
+       "allowlisted typed env only; ambient GH_TOKEN absent"
+       [ "LANG", "C" ] request.env)
+;;
+
+let test_nonallowlisted_env_fails_before_spawn () =
+  with_eio @@ fun ~clock:_ ->
+  let base_path = temp_dir () in
+  let ssh_bin, frame_path = make_stub ~dir:base_path ~mode:"exit3" in
+  let _, runner = make_runner ~base_path ~ssh_bin in
+  let status, _, stderr = run_request runner ~env:[| "NOPE=value" |] () in
+  check status_testable "policy failure" (Unix.WEXITED 1) status;
+  check bool "named allowlist error" true
+    (contains "remote_ssh_env_not_allowlisted:" stderr);
+  check bool "ssh was not spawned" false (Sys.file_exists frame_path)
 ;;
 
 let test_signal_and_remote_timeout () =
@@ -354,6 +376,8 @@ let () =
         , [ test_case "pinned argv + framed streams" `Quick test_argv_frame_stream_and_exit
           ; test_case "signal + remote timeout" `Quick test_signal_and_remote_timeout
           ; test_case "transport failures" `Quick test_transport_failures
+          ; test_case "nonallowlisted env fails before spawn" `Quick
+              test_nonallowlisted_env_fails_before_spawn
           ; test_case "shim error" `Quick test_shim_error
           ; test_case "remote paths rewritten in streams" `Quick
               test_remote_paths_rewritten_in_streams

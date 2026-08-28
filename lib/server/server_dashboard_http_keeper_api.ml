@@ -285,32 +285,12 @@ let cached_keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit () =
 ;;
 
 let cached_keeper_config_json config name =
-  let cache_key = keeper_config_cache_key config name in
-  let cached =
-    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
-      let status, body =
-        Domain_pool_ref.submit_io_or_inline (fun () ->
-          Dashboard_http_keeper.keeper_config_json config name)
-      in
-      `Assoc
-        [ ( "status"
-          , `String
-              (match status with
-               | `OK -> "ok"
-               | `Not_found -> "not_found") )
-        ; "body", body
-        ])
-  in
-  match cached with
-  | `Assoc fields ->
-    let status =
-      match List.assoc_opt "status" fields with
-      | Some (`String "not_found") -> `Not_found
-      | _ -> `OK
-    in
-    let body = cached_assoc_body_or_self cached fields in
-    status, body
-  | other -> `OK, other
+  (* The response carries the manifest's content revision used by config CAS.
+     A TTL cache could hand an editor a superseded token after masc_keeper_up
+     or another in-process writer commits, so this authority-bearing endpoint
+     always reads the current bytes. *)
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    Dashboard_http_keeper.keeper_config_json config name)
 ;;
 
 (* Dashboard hydration fetches every keeper's chat history concurrently on

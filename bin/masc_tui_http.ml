@@ -971,6 +971,9 @@ let fetch_runtime_probe ~(host : string) ~(port : int) ~(force : bool) :
   get_json ~host ~port ~path
 
 type runtime_config_commit_receipt = Masc_tui_runtime_config_receipt.t
+type runtime_assignment_write_result =
+  | Runtime_assignment_committed of runtime_config_commit_receipt
+  | Runtime_assignment_unchanged
 
 let decode_runtime_config_commit_receipt = Masc_tui_runtime_config_receipt.decode
 let runtime_config_commit_receipt_summary = Masc_tui_runtime_config_receipt.summary
@@ -978,8 +981,9 @@ let runtime_config_commit_receipt_summary = Masc_tui_runtime_config_receipt.summ
 (** POST /api/v1/runtime/config/assignment — point a keeper at a runtime.
     [runtime_id = None] clears the explicit assignment back to the default. *)
 let post_runtime_assignment ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(runtime_id : string option) :
-    (runtime_config_commit_receipt, string) result =
+    ~(keeper_name : string) ~(runtime_id : string option)
+    ~(expected_assignment_revision : Yojson.Safe.t) :
+    (runtime_assignment_write_result, string) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc
@@ -987,13 +991,22 @@ let post_runtime_assignment ~(host : string) ~(port : int)
           ::
           (match runtime_id with
            | Some id -> [ ("runtime_id", `String id) ]
-           | None -> [])))
+           | None -> [])
+          @ [ "expected_assignment_revision", expected_assignment_revision ]))
   in
   match
     post_json ~host ~port ~path:"/api/v1/runtime/config/assignment" ~body
   with
   | Error detail -> Error detail
-  | Ok json -> decode_runtime_config_commit_receipt json
+  | Ok (`Assoc fields as json) ->
+    (match List.assoc_opt "applied" fields with
+     | Some (`Bool false) ->
+       Masc_tui_keeper_config.decode_unchanged_runtime_assignment_response json
+       |> Result.map (fun _revision -> Runtime_assignment_unchanged)
+     | Some _ | None ->
+       decode_runtime_config_commit_receipt json
+       |> Result.map (fun receipt -> Runtime_assignment_committed receipt))
+  | Ok _ -> Error "runtime assignment response must be an object"
 
 (** GET /api/v1/keepers/tool-approvals — the tool calls keepers are holding. *)
 let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
@@ -1277,13 +1290,78 @@ let post_verification_verdict ~(host : string) ~(port : int)
     body is absent from the patch, so the editor round-trip cannot blank a
     setting it never showed. Validation is the route's (it re-uses
     masc_keeper_up's arg parsing), not duplicated here. *)
+type keeper_config_post_error =
+  | Keeper_config_transport_error of string
+  | Keeper_config_revision_conflict of Yojson.Safe.t
+  | Keeper_config_reconciliation_required of Yojson.Safe.t
+  | Keeper_config_runtime_sync_failed of Yojson.Safe.t
+  | Keeper_config_http_error of
+      { status : int
+      ; body : string
+      }
+
+let keeper_config_post_error_to_string = function
+  | Keeper_config_transport_error detail -> detail
+  | Keeper_config_revision_conflict _ ->
+    "keeper config revision conflict; authoritative reload required"
+  | Keeper_config_reconciliation_required _ ->
+    "keeper config reconciliation required; authoritative reload required"
+  | Keeper_config_runtime_sync_failed _ ->
+    "keeper config applied but runtime sync failed; authoritative reload required"
+  | Keeper_config_http_error { status; body } ->
+    Printf.sprintf "keeper config returned %d: %s" status body
+
 let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
-    ~(patch_json : string) : (Yojson.Safe.t, string) result =
-  post_json ~host ~port
-    ~path:
-      (Printf.sprintf "/api/v1/keepers/%s/config"
-         (percent_encode_path_segment keeper_name))
-    ~body:patch_json
+    ~(patch_json : string) : (Yojson.Safe.t, keeper_config_post_error) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/config"
+      (percent_encode_path_segment keeper_name)
+  in
+  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body:patch_json with
+  | Error detail -> Error (Keeper_config_transport_error detail)
+  | Ok (status, body) when Masc.Tui_decode.is_success_http_status status ->
+    (match Yojson.Safe.from_string body with
+     | json -> Ok json
+     | exception Yojson.Json_error detail ->
+       Error (Keeper_config_http_error { status; body = detail }))
+  | Ok (status, body) ->
+    let parsed =
+      match Yojson.Safe.from_string body with
+      | json -> Some json
+      | exception Yojson.Json_error _ -> None
+    in
+    let code =
+      match parsed with
+      | Some json ->
+        (match Json_util.assoc_member_opt "error" json with
+         | Some error ->
+           (match Json_util.assoc_member_opt "code" error with
+            | Some (`String code) -> Some code
+            | Some _ | None -> None)
+         | None -> None)
+      | None -> None
+    in
+    let config_application_indeterminate =
+      match parsed with
+      | Some json ->
+        Json_util.assoc_member_opt "config_application" json
+        = Some (`Assoc [ "state", `String "indeterminate" ])
+      | None -> false
+    in
+    (match status, code, parsed with
+     | 409, Some "keeper_config_revision_conflict", Some json ->
+       Error (Keeper_config_revision_conflict json)
+     | ( 503
+       , Some
+           ( "keeper_manifest_reconciliation_required"
+           | "keeper_config_composite_reconciliation_required" )
+       , Some json )
+       when config_application_indeterminate ->
+       Error (Keeper_config_reconciliation_required json)
+     | 503, Some "keeper_runtime_sync_failed", Some json
+       when Json_util.assoc_member_opt "config_applied" json = Some (`Bool true) ->
+       Error (Keeper_config_runtime_sync_failed json)
+     | _ -> Error (Keeper_config_http_error { status; body }))
 
 (** POST /api/v1/keepers/:name/up — masc_keeper_up's own create-or-update
     contract. The keeper name in the path is the row the operator launched

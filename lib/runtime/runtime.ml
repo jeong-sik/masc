@@ -44,12 +44,121 @@ type config_commit_receipt =
   { observation : config_observation
   ; durability : config_durability
   ; order : config_commit_order
+  ; lock_warnings : config_lock_warning list
+  }
+
+and config_lock_warning =
+  | Config_lock_release_unconfirmed of string
+
+type keeper_assignment_state =
+  | Assignment_missing
+  | Assignment_present of string
+
+type keeper_assignment_revision =
+  | Runtime_config_missing
+  | Runtime_config_present of
+      { source_revision : config_source_revision
+      ; assignment : keeper_assignment_state
+      }
+
+type keeper_assignment_cas_error =
+  | Assignment_revision_conflict of keeper_assignment_revision
+  | Assignment_io_error of string
+
+type keeper_assignment_write =
+  | Assignment_unchanged of keeper_assignment_revision
+  | Assignment_committed of
+      { receipt : config_commit_receipt
+      ; revision : keeper_assignment_revision
+      }
+
+type keeper_assignment_transaction =
+  | Missing_runtime_config of { keeper_name : string }
+  | Present_runtime_config of
+      { path : string
+      ; source_text : string
+      ; keeper_name : string
+      ; revision : keeper_assignment_revision
+      }
+
+type 'a config_lock_receipt =
+  { value : 'a
+  ; warnings : config_lock_warning list
   }
 
 let config_source_revision_to_string (Config_source_revision revision) = revision
 let config_commit_order_to_string (Config_commit_order order) = Int64.to_string order
 let compare_config_commit_order (Config_commit_order left) (Config_commit_order right) =
   Int64.compare left right
+;;
+
+let config_lock_warning_to_yojson = function
+  | Config_lock_release_unconfirmed detail ->
+    `Assoc
+      [ "code", `String "runtime_config_lock_release_unconfirmed"
+      ; "detail", `String detail
+      ]
+;;
+
+let keeper_assignment_state_to_yojson = function
+  | Assignment_missing -> `Assoc [ "state", `String "missing" ]
+  | Assignment_present runtime_id ->
+    `Assoc [ "state", `String "assigned"; "runtime_id", `String runtime_id ]
+;;
+
+let keeper_assignment_revision_to_yojson revision =
+  match revision with
+  | Runtime_config_missing -> `Assoc [ "state", `String "runtime_config_missing" ]
+  | Runtime_config_present { source_revision; assignment } ->
+    `Assoc
+      [ "state", `String "runtime_config_present"
+      ; "source_revision", `String (config_source_revision_to_string source_revision)
+      ; "assignment", keeper_assignment_state_to_yojson assignment
+      ]
+;;
+
+let keeper_assignment_revision_of_yojson = function
+  | `Assoc [ ("state", `String "runtime_config_missing") ] ->
+    Ok Runtime_config_missing
+  | `Assoc fields ->
+    let source_revision =
+      match List.assoc_opt "source_revision" fields with
+      | Some (`String value)
+        when String.length value = 64
+             && String.equal value (String.lowercase_ascii value)
+             && Option.is_some (Digestif.SHA256.of_hex_opt value) ->
+        Ok (Config_source_revision value)
+      | Some _ -> Error "runtime assignment source_revision must be lowercase SHA-256 hex"
+      | None -> Error "runtime assignment source_revision is required"
+    in
+    let assignment =
+      match List.assoc_opt "assignment" fields with
+      | Some (`Assoc assignment_fields) ->
+        (match List.assoc_opt "state" assignment_fields with
+         | Some (`String "missing") when List.length assignment_fields = 1 ->
+           Ok Assignment_missing
+         | Some (`String "assigned") ->
+           (match assignment_fields with
+            | [ ("state", `String "assigned"); ("runtime_id", `String runtime_id) ]
+            | [ ("runtime_id", `String runtime_id); ("state", `String "assigned") ]
+              when String.trim runtime_id <> "" ->
+              Ok (Assignment_present runtime_id)
+            | _ -> Error "assigned runtime revision requires only runtime_id")
+         | Some (`String state) ->
+           Error (Printf.sprintf "unsupported runtime assignment state: %S" state)
+         | Some _ -> Error "runtime assignment state must be a string"
+         | None -> Error "runtime assignment state is required")
+      | Some _ -> Error "runtime assignment revision must be an object"
+      | None -> Error "runtime assignment revision is required"
+    in
+    let* source_revision = source_revision in
+    let* assignment = assignment in
+    if List.assoc_opt "state" fields <> Some (`String "runtime_config_present")
+    then Error "runtime assignment revision state must be runtime_config_present"
+    else if List.length fields <> 3
+    then Error "runtime assignment revision has unexpected fields"
+    else Ok (Runtime_config_present { source_revision; assignment })
+  | _ -> Error "runtime assignment revision must be an object"
 ;;
 
 let config_observation ~path source_text =
@@ -1351,7 +1460,7 @@ let init_default_degraded_report ~config_path =
   |> initialize_degraded_loaded ~config_path
 ;;
 
-let init_default_degraded_observation observation =
+let init_default_degraded_observation (observation : config_observation) =
   load_list_internal_text
     ~config_path:observation.path
     ~content:observation.source_text
@@ -1922,20 +2031,49 @@ let materialize_runtime_config_text ~config_path content =
   materialize_config ~config_path cfg
 ;;
 
-let runtime_config_write_mutex = Mutex.create ()
 let runtime_config_commit_order = ref Int64.zero
+let runtime_config_commit_order_mu = Stdlib.Mutex.create ()
 
 let committed_receipt ~observation ~durability =
-  runtime_config_commit_order := Int64.succ !runtime_config_commit_order;
+  let order =
+    (* Process-global publication order spans every runtime.toml authority.
+       The file lock is path-scoped, so distinct config paths can commit on
+       different domains and must synchronize this shared sequence here. *)
+    Stdlib.Mutex.protect runtime_config_commit_order_mu (fun () ->
+      runtime_config_commit_order := Int64.succ !runtime_config_commit_order;
+      !runtime_config_commit_order)
+  in
   { observation
   ; durability
-  ; order = Config_commit_order !runtime_config_commit_order
+  ; order = Config_commit_order order
+  ; lock_warnings = []
   }
 ;;
 
-let with_runtime_config_write_lock f =
-  Mutex.lock runtime_config_write_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock runtime_config_write_mutex) f
+let with_runtime_config_write_lock_using observe path f =
+  let lock_path = path ^ ".lock" in
+  match observe ~lock_path f with
+  | File_lock_eio.Lock_not_acquired error ->
+    Error (File_lock_eio.durable_lock_error_to_string error)
+  | File_lock_eio.Body_completed { value; release_error = None } ->
+    Ok { value; warnings = [] }
+  | File_lock_eio.Body_completed { value; release_error = Some error } ->
+    Ok
+      { value
+      ; warnings =
+          [ Config_lock_release_unconfirmed
+              (File_lock_eio.durable_lock_error_to_string error)
+          ]
+      }
+;;
+
+let with_runtime_config_write_lock path f =
+  with_runtime_config_write_lock_using
+    File_lock_eio.with_durable_lock_observed path f
+;;
+
+let attach_lock_warnings warnings receipt =
+  { receipt with lock_warnings = receipt.lock_warnings @ warnings }
 ;;
 
 let runtime_config_atomic_failure
@@ -2077,10 +2215,13 @@ let save_config_text_with_replace_file
     ~replace_file
     content
   =
-  with_runtime_config_write_lock
-  @@ fun () ->
   let* path = runtime_config_path_result ?runtime_config_path () in
-  commit_runtime_config_text ~replace_file ~path content
+  let* locked =
+    with_runtime_config_write_lock path (fun () ->
+      commit_runtime_config_text ~replace_file ~path content)
+  in
+  let* receipt = locked.value in
+  Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
 let save_config_text ?runtime_config_path content =
@@ -2121,44 +2262,249 @@ module For_testing = struct
 end
 ;;
 
-let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
-  with_runtime_config_write_lock
-  @@ fun () ->
+let assignment_state_of_config (config : Runtime_schema.config) keeper_name =
+  match List.assoc_opt keeper_name config.keeper_assignments with
+  | None -> Assignment_missing
+  | Some runtime_id -> Assignment_present runtime_id
+;;
+
+let assignment_transaction_of_source ~path ~source_text ~keeper_name =
+  let* config =
+    Runtime_toml.parse_string source_text
+    |> Result.map_error (fun errors ->
+      Printf.sprintf
+        "runtime config parse failed (%s): %s"
+        path
+        (runtime_parse_errors_to_string errors))
+  in
+  let observation = config_observation ~path source_text in
+  Ok
+    (Present_runtime_config
+       { path
+       ; source_text
+       ; keeper_name
+       ; revision =
+           Runtime_config_present
+             { source_revision = observation.source_revision
+             ; assignment = assignment_state_of_config config keeper_name
+             }
+       })
+;;
+
+let with_keeper_assignment_transaction_using ~with_lock ?runtime_config_path
+    ~keeper_name f =
   let keeper_name = String.trim keeper_name in
-  let runtime_id = String.trim runtime_id in
   if String.equal keeper_name ""
   then Error "keeper_name must not be empty"
-  else if String.equal runtime_id ""
-  then Error "runtime_id must not be empty"
   else if contains_newline keeper_name
   then Error "keeper_name must not contain newlines"
-  else if contains_newline runtime_id
-  then Error "runtime_id must not contain newlines"
   else
-    let* path = runtime_config_path_result ?runtime_config_path () in
-    let* content = load_file_result path in
-    let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
-    commit_runtime_config_text ~path next
+    match runtime_config_path_result ?runtime_config_path () with
+    | Error "runtime config path not found" ->
+      Ok { value = f (Missing_runtime_config { keeper_name }); warnings = [] }
+    | Error detail -> Error detail
+    | Ok path ->
+      let* locked =
+        with_lock path (fun () ->
+          if not (Fs_compat.file_exists path)
+          then Ok (f (Missing_runtime_config { keeper_name }))
+          else
+            let* source_text = load_file_result path in
+            let* transaction =
+              assignment_transaction_of_source ~path ~source_text ~keeper_name
+            in
+            Ok (f transaction))
+      in
+      let* value = locked.value in
+      Ok { value; warnings = locked.warnings }
+;;
+
+let with_keeper_assignment_transaction ?runtime_config_path ~keeper_name f =
+  with_keeper_assignment_transaction_using
+    ~with_lock:with_runtime_config_write_lock
+    ?runtime_config_path ~keeper_name f
+;;
+
+let keeper_assignment_revision = function
+  | Missing_runtime_config _ -> Runtime_config_missing
+  | Present_runtime_config transaction -> transaction.revision
+
+let keeper_assignment_transaction_path = function
+  | Missing_runtime_config _ -> None
+  | Present_runtime_config transaction -> Some transaction.path
+
+let normalized_assignment = function
+  | None -> Ok Assignment_missing
+  | Some runtime_id ->
+    let runtime_id = String.trim runtime_id in
+    if String.equal runtime_id ""
+    then Error "runtime_id must not be empty"
+    else if contains_newline runtime_id
+    then Error "runtime_id must not contain newlines"
+    else Ok (Assignment_present runtime_id)
+;;
+
+let commit_keeper_assignment_using ~commit_text transaction ~runtime_id =
+  let* requested = normalized_assignment runtime_id in
+  match transaction with
+  | Missing_runtime_config _ ->
+    (match requested with
+     | Assignment_missing -> Ok (Assignment_unchanged Runtime_config_missing)
+     | Assignment_present _ -> Error "runtime config path not found")
+  | Present_runtime_config transaction ->
+  let current_assignment =
+    match transaction.revision with
+    | Runtime_config_present { assignment; _ } -> assignment
+    | Runtime_config_missing -> Assignment_missing
+  in
+  if requested = current_assignment
+  then Ok (Assignment_unchanged transaction.revision)
+  else
+    let next =
+      match requested with
+      | Assignment_missing ->
+        remove_runtime_assignment_text transaction.source_text
+          ~keeper_name:transaction.keeper_name
+      | Assignment_present runtime_id ->
+        update_runtime_assignment_text transaction.source_text
+          ~keeper_name:transaction.keeper_name ~runtime_id
+    in
+    let* receipt = commit_text ~path:transaction.path next in
+    Ok
+      (Assignment_committed
+         { receipt
+         ; revision =
+             Runtime_config_present
+               { source_revision = receipt.observation.source_revision
+               ; assignment = requested
+               }
+         })
+;;
+
+let commit_keeper_assignment transaction ~runtime_id =
+  commit_keeper_assignment_using
+    ~commit_text:(fun ~path content -> commit_runtime_config_text ~path content)
+    transaction ~runtime_id
+;;
+
+let restore_keeper_assignment_transaction_using ~commit_text transaction =
+  match transaction with
+  | Missing_runtime_config _ -> Ok (Assignment_unchanged Runtime_config_missing)
+  | Present_runtime_config transaction ->
+  let* current = load_file_result transaction.path in
+  if String.equal current transaction.source_text
+  then Ok (Assignment_unchanged transaction.revision)
+  else
+    let* receipt =
+      commit_text ~path:transaction.path transaction.source_text
+    in
+    Ok
+      (Assignment_committed
+         { receipt
+         ; revision = transaction.revision
+         })
+;;
+
+let restore_keeper_assignment_transaction transaction =
+  restore_keeper_assignment_transaction_using
+    ~commit_text:(fun ~path content -> commit_runtime_config_text ~path content)
+    transaction
+;;
+
+let observe_keeper_assignment ?runtime_config_path ~keeper_name () =
+  with_keeper_assignment_transaction ?runtime_config_path ~keeper_name
+    keeper_assignment_revision
+;;
+
+let set_keeper_assignment_if_revision_using ~with_transaction ?runtime_config_path
+    ~keeper_name ~runtime_id ~expected () =
+  match
+    with_transaction ?runtime_config_path ~keeper_name (fun transaction ->
+      let observed = keeper_assignment_revision transaction in
+      if expected <> observed
+      then Error (Assignment_revision_conflict observed)
+      else
+        match commit_keeper_assignment transaction ~runtime_id with
+        | Error detail -> Error (Assignment_io_error detail)
+        | Ok write -> Ok write)
+  with
+  | Error detail -> Error (Assignment_io_error detail)
+  | Ok { value = Error error; _ } -> Error error
+  | Ok { value = Ok value; warnings } ->
+    let value =
+      match value with
+      | Assignment_unchanged _ -> value
+      | Assignment_committed committed ->
+        Assignment_committed
+          { committed with
+            receipt = attach_lock_warnings warnings committed.receipt
+          }
+    in
+    Ok { value; warnings }
+;;
+
+let set_keeper_assignment_if_revision ?runtime_config_path ~keeper_name ~runtime_id
+    ~expected () =
+  set_keeper_assignment_if_revision_using
+    ~with_transaction:with_keeper_assignment_transaction
+    ?runtime_config_path ~keeper_name ~runtime_id ~expected ()
+;;
+
+module Assignment_for_testing = struct
+  let commit_with_replace_file ~replace_file transaction ~runtime_id =
+    commit_keeper_assignment_using
+      ~commit_text:(commit_runtime_config_text ~replace_file)
+      transaction ~runtime_id
+  ;;
+
+  let restore_with_replace_file ~replace_file transaction =
+    restore_keeper_assignment_transaction_using
+      ~commit_text:(commit_runtime_config_text ~replace_file)
+      transaction
+  ;;
+
+  let set_with_release_failure ~release_failure ~runtime_config_path ~keeper_name
+      ~runtime_id ~expected () =
+    let with_lock path f =
+      let observe ~lock_path body =
+        File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure
+          ~release_failure ~lock_path body
+      in
+      with_runtime_config_write_lock_using observe path f
+    in
+    let with_transaction ?runtime_config_path ~keeper_name f =
+      with_keeper_assignment_transaction_using ~with_lock ?runtime_config_path
+        ~keeper_name f
+    in
+    set_keeper_assignment_if_revision_using ~with_transaction
+      ~runtime_config_path ~keeper_name ~runtime_id ~expected ()
+  ;;
+end
+
+let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
+  match
+    with_keeper_assignment_transaction ?runtime_config_path ~keeper_name
+      (fun transaction ->
+        commit_keeper_assignment transaction ~runtime_id:(Some runtime_id))
+  with
+  | Error _ as error -> error
+  | Ok locked ->
+    locked.value
+    |> Result.map (fun value -> { value; warnings = locked.warnings })
 ;;
 
 let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
-  with_runtime_config_write_lock
-  @@ fun () ->
-  let keeper_name = String.trim keeper_name in
-  if String.equal keeper_name ""
-  then Error "keeper_name must not be empty"
-  else if contains_newline keeper_name
-  then Error "keeper_name must not contain newlines"
-  else
-    let* path = runtime_config_path_result ?runtime_config_path () in
-    let* content = load_file_result path in
-    let next = remove_runtime_assignment_text content ~keeper_name in
-    commit_runtime_config_text ~path next
+  match
+    with_keeper_assignment_transaction ?runtime_config_path ~keeper_name
+      (fun transaction -> commit_keeper_assignment transaction ~runtime_id:None)
+  with
+  | Error _ as error -> error
+  | Ok locked ->
+    locked.value
+    |> Result.map (fun value -> { value; warnings = locked.warnings })
 ;;
 
 let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
-  with_runtime_config_write_lock
-  @@ fun () ->
   let key = String.trim key in
   let runtime_id = Option.map String.trim runtime_id in
   if String.equal key ""
@@ -2173,14 +2519,17 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
       Error "runtime_id must not contain newlines"
     | _ ->
       let* path = runtime_config_path_result ?runtime_config_path () in
-      let* content = load_file_result path in
-      let next = update_runtime_scalar_text content ~key ~runtime_id in
-      commit_runtime_config_text ~path next
+      let* locked =
+        with_runtime_config_write_lock path (fun () ->
+          let* content = load_file_result path in
+          let next = update_runtime_scalar_text content ~key ~runtime_id in
+          commit_runtime_config_text ~path next)
+      in
+      let* receipt = locked.value in
+      Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
 let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
-  with_runtime_config_write_lock
-  @@ fun () ->
   let key = String.trim key in
   let runtime_ids = List.map String.trim runtime_ids in
   if String.equal key ""
@@ -2193,9 +2542,14 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
   then Error "runtime_ids must not contain newlines"
   else (
     let* path = runtime_config_path_result ?runtime_config_path () in
-    let* content = load_file_result path in
-    let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
-    commit_runtime_config_text ~path next)
+    let* locked =
+      with_runtime_config_write_lock path (fun () ->
+        let* content = load_file_result path in
+        let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
+        commit_runtime_config_text ~path next)
+    in
+    let* receipt = locked.value in
+    Ok (attach_lock_warnings locked.warnings receipt))
 ;;
 
 let set_runtime_default ?runtime_config_path ~runtime_id () =

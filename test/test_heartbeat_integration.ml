@@ -36,10 +36,14 @@ module Approval_queue = Masc.Keeper_approval_queue
 module Approval_types = Keeper_approval_queue_rules_types
 module Turn_up_args = Masc.Keeper_turn_up_args
 module Turn_up_update = Masc.Keeper_turn_up_update
+module Turn_up_config_persistence = Masc.Keeper_turn_up_config_persistence
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_json = Masc.Keeper_meta_json
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_owner_registry = Masc.Keeper_owner_registry
+module Paused_work_receipt = Masc.Keeper_paused_work_disposition_receipt
+module Keeper_checkpoint_store = Masc.Keeper_checkpoint_store
+module Fusion_config_loader = Masc.Fusion_config_loader
 module Keeper_lifecycle_reservation = Masc.Keeper_lifecycle_reservation
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_fs = Masc.Keeper_fs
@@ -80,6 +84,12 @@ let create_owner_meta_exn config meta =
   | Ok (Some _) -> ()
   | Ok None -> fail "owner metadata creation removed its snapshot"
   | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+;;
+
+let config_revision_exn config keeper_name =
+  match Turn_up_config_persistence.current_config_revision ~config ~keeper_name with
+  | Ok revision -> revision
+  | Error error -> fail error
 ;;
 
 let ensure_owner_meta_exn config meta =
@@ -185,6 +195,23 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let snapshot_path path =
+  let rec collect root relative =
+    let current = if String.equal relative "" then root else Filename.concat root relative in
+    if not (Sys.file_exists current)
+    then []
+    else if Sys.is_directory current
+    then
+      Sys.readdir current
+      |> Array.to_list
+      |> List.sort String.compare
+      |> List.concat_map (fun name ->
+        collect root (if String.equal relative "" then name else Filename.concat relative name))
+    else [ relative, In_channel.with_open_bin current In_channel.input_all ]
+  in
+  collect path ""
+;;
 
 let publication_recovery_registry env sw config =
   Masc_test_deps.with_publication_recovery_registry
@@ -1721,15 +1748,17 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; network_mode_opt = None
         ; tool_groups_opt = None
         ; tool_groups_present = false
+        ; skill_names_opt = None
+        ; skill_names_present = false
         ; native_tool_posture_opt = None
         ; native_tool_posture_present = false
         ; instructions_arg = Some "new operator intent"
         ; profile_defaults
+        ; declarative_manifest_snapshot =
+            Keeper_types_profile.Declarative_manifest_missing
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None
-        ; skill_names_present = false
-        ; skill_names_opt = None
         }
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1743,7 +1772,13 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
             Masc_test_deps.non_runtime_publication_recovery_provider
         }
       in
-      let result = Turn_up_update.update_keeper ctx parsed live_meta in
+      let result =
+        Turn_up_update.update_keeper
+          ~expected_config_revision:(config_revision_exn config live_name)
+          ctx
+          parsed
+          live_meta
+      in
       check bool
         "keeper_up restarts despite the stale blocked admission"
         true
@@ -1775,6 +1810,130 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            live_name
           : Masc.Keeper_keepalive.joined_stop_result);
 
+      let stale_name = "stale-up-does-not-resume-operator-pause" in
+      let stale_meta =
+        Shutdown_finalize.For_testing.paused_meta (make_meta stale_name)
+      in
+      create_owner_meta_exn config stale_meta;
+      let stale_parsed =
+        { parsed with
+          name = stale_name
+        ; instructions_arg = Some "stale operator intent"
+        }
+      in
+      let initial_revision =
+        let missing_revision = config_revision_exn config stale_name in
+        match
+          Turn_up_config_persistence.persist
+            ~expected_revision:missing_revision
+            ~config
+            ~parsed:stale_parsed
+            ~meta:{ stale_meta with instructions = "initial manifest" }
+            ()
+        with
+        | Ok _ -> config_revision_exn config stale_name
+        | Error error ->
+          fail (Turn_up_config_persistence.error_to_string error)
+      in
+      let winner_parsed =
+        { stale_parsed with instructions_arg = Some "winning manifest" }
+      in
+      (match
+         Turn_up_config_persistence.persist
+           ~expected_revision:initial_revision
+           ~config
+           ~parsed:winner_parsed
+           ~meta:{ stale_meta with instructions = "winning manifest" }
+           ()
+       with
+       | Ok _ -> ()
+       | Error error ->
+         fail (Turn_up_config_persistence.error_to_string error));
+      let manifest_path =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+        |> fun dir -> Filename.concat dir (stale_name ^ ".toml")
+      in
+      let receipt_root =
+        let keeper_hash =
+          Digestif.SHA256.(digest_string stale_name |> to_hex)
+        in
+        Filename.concat
+          (Filename.concat
+             (Workspace.masc_root_dir config)
+             ("paused-work-dispositions-"
+              ^ Paused_work_receipt.store_version))
+          ("keeper-" ^ keeper_hash)
+      in
+      let trace_id =
+        Keeper_id.Trace_id.to_string stale_meta.runtime.trace_id
+      in
+      let checkpoint_path =
+        Keeper_checkpoint_store.agent_core_checkpoint_path
+          ~session_dir:
+            (Filename.concat
+               (Keeper_types_profile.session_base_dir config)
+               trace_id)
+          ~session_id:trace_id
+      in
+      let runtime_path =
+        Config_dir_resolver.runtime_toml_path_for_base_path
+          ~base_path:config.base_path
+      in
+      let meta_snapshot () =
+        match Keeper_meta_store.read_meta config stale_name with
+        | Ok (Some meta) ->
+          Keeper_meta_json.meta_to_json meta |> Yojson.Safe.to_string
+        | Ok None -> "missing"
+        | Error detail -> fail detail
+      in
+      let authority_snapshot () =
+        ( snapshot_path manifest_path
+        , snapshot_path receipt_root
+        , snapshot_path runtime_path
+        , snapshot_path checkpoint_path
+        , meta_snapshot () )
+      in
+      let before_stale_update = authority_snapshot () in
+      let stale_result =
+        Turn_up_update.update_keeper
+          ~expected_config_revision:initial_revision
+          ctx
+          stale_parsed
+          stale_meta
+      in
+      check bool "stale paused update is rejected by manifest CAS" true
+        (Option.is_some
+           (Turn_up_update.config_revision_conflict_of_result stale_result));
+      check bool
+        "stale paused update leaves manifest, receipt, runtime, checkpoint, and meta unchanged"
+        true
+        (authority_snapshot () = before_stale_update);
+      (match Keeper_meta_store.read_meta config stale_name with
+       | Ok (Some meta) ->
+         check bool "stale update leaves pause bit set" true meta.paused
+       | Ok None -> fail "stale update removed paused metadata"
+       | Error detail -> fail detail);
+      let before_profile_failure = authority_snapshot () in
+      let profile_failure_result =
+        Turn_up_update.For_testing.update_keeper_with_apply_profile
+          ~apply_profile:(fun ~base_path:_ ~keeper_name _command ->
+            Error
+              (Keeper_owner_registry.Command_lookup_failed
+                 (Keeper_owner_registry.Owner_not_found keeper_name)))
+          ~expected_config_revision:(config_revision_exn config stale_name)
+          ctx
+          stale_parsed
+          stale_meta
+      in
+      check bool "profile failure is reported as unapplied" true
+        (Option.is_some
+           (Turn_up_update.config_publication_rollback_of_result
+              profile_failure_result));
+      check bool
+        "profile failure before resume leaves pause receipt, meta, manifest, runtime, and checkpoint unchanged"
+        true
+        (authority_snapshot () = before_profile_failure);
+
       let stopped_name = "explicit-up-resumes-operator-stop" in
       let stopped_meta =
         Shutdown_finalize.For_testing.paused_meta (make_meta stopped_name)
@@ -1787,7 +1946,11 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         }
       in
       let stopped_result =
-        Turn_up_update.update_keeper ctx stopped_parsed stopped_meta
+        Turn_up_update.update_keeper
+          ~expected_config_revision:(config_revision_exn config stopped_name)
+          ctx
+          stopped_parsed
+          stopped_meta
       in
       check bool
         "explicit keeper_up resumes an operator-stopped keeper"
@@ -1852,15 +2015,17 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         ; network_mode_opt = None
         ; tool_groups_opt = None
         ; tool_groups_present = false
+        ; skill_names_opt = None
+        ; skill_names_present = false
         ; native_tool_posture_opt = None
         ; native_tool_posture_present = false
         ; instructions_arg = Some "rejected mid-turn intent"
         ; profile_defaults
+        ; declarative_manifest_snapshot =
+            Keeper_types_profile.Declarative_manifest_missing
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None
-        ; skill_names_present = false
-        ; skill_names_opt = None
         }
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1881,7 +2046,12 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
          Keeper_owner_registry.run_maintenance_if_idle
            ~base_path:config.base_path
            ~keeper_name:name
-           (fun () -> Turn_up_update.update_keeper ctx parsed meta)
+           (fun () ->
+             Turn_up_update.update_keeper
+               ~expected_config_revision:(config_revision_exn config name)
+               ctx
+               parsed
+               meta)
        with
        | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
        | Ok (`Busy _) -> fail "Owner unexpectedly busy before the test turn"
@@ -1916,7 +2086,13 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
            (owner_turn_in_flight_exn
               ~base_path:config.base_path
               ~keeper_name:name));
-      let retry = Turn_up_update.update_keeper ctx parsed after in
+      let retry =
+        Turn_up_update.update_keeper
+          ~expected_config_revision:(config_revision_exn config name)
+          ctx
+          parsed
+          after
+      in
       check bool "idle update restarts the lane" true
         (Keeper_types_profile.tool_result_success retry);
       ignore
@@ -2009,15 +2185,17 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         ; network_mode_opt = None
         ; tool_groups_opt = None
         ; tool_groups_present = false
+        ; skill_names_opt = None
+        ; skill_names_present = false
         ; native_tool_posture_opt = None
         ; native_tool_posture_present = false
         ; instructions_arg = Some "durable cancelled update"
         ; profile_defaults
+        ; declarative_manifest_snapshot =
+            Keeper_types_profile.Declarative_manifest_missing
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None
-        ; skill_names_present = false
-        ; skill_names_opt = None
         }
       in
       let update_switch, resolve_update_switch = Eio.Promise.create () in
@@ -2027,7 +2205,12 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
           try
             Eio.Switch.run @@ fun update_sw ->
             Eio.Promise.resolve resolve_update_switch update_sw;
-            ignore (Turn_up_update.update_keeper ctx parsed meta);
+            ignore
+              (Turn_up_update.update_keeper
+                 ~expected_config_revision:(config_revision_exn config name)
+                 ctx
+                 parsed
+                 meta);
             `Returned
           with
           | Cancel_keeper_up_after_metadata -> `Cancelled
@@ -4548,6 +4731,30 @@ let test_crashed_cycle_records_health_failure () =
   let summary = Health.get_summary ~agent_name:keeper_name in
   check int "crashed cycles are observed" 3 summary.failure_count
 
+let test_invalid_keeper_config_revision_name_creates_no_artifact () =
+  let base_path = temp_dir "invalid-config-revision-name" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      let keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path
+      in
+      let escaped =
+        Filename.concat (Filename.dirname keepers_dir) "escaped.toml.lock"
+      in
+      (match
+         Turn_up_config_persistence.current_config_revision
+           ~config
+           ~keeper_name:"../escaped"
+       with
+       | Ok _ -> fail "invalid Keeper name unexpectedly acquired a revision"
+       | Error _ -> ());
+      check bool "invalid name created no escaped lock artifact" false
+        (Sys.file_exists escaped);
+      check bool "invalid name created no keepers directory" false
+        (Sys.file_exists keepers_dir))
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -4658,6 +4865,8 @@ let () =
         test_pipeline_stage_sensitivity;
     ];
     "scheduling", [
+      test_case "invalid config revision name creates no artifact" `Quick
+        test_invalid_keeper_config_revision_name_creates_no_artifact;
       test_case "runtime observations cannot block requested turn" `Quick
         test_runtime_observation_cannot_block_requested_turn;
       test_case "explicit stop blocks requested turn" `Quick

@@ -755,6 +755,105 @@ let test_runtime_assignment_writer_clears_assignment () =
       (Runtime.runtime_id_for_keeper "routingtest"))
 ;;
 
+let test_runtime_assignment_cas_admits_exactly_one_concurrent_writer () =
+  with_runtime_file (fun path ->
+    let expected =
+      match Runtime.observe_keeper_assignment ~runtime_config_path:path
+              ~keeper_name:"routingtest" () with
+      | Ok receipt -> receipt.value
+      | Error detail -> Alcotest.failf "assignment observation failed: %s" detail
+    in
+    let write runtime_id =
+      Runtime.set_keeper_assignment_if_revision
+        ~runtime_config_path:path
+        ~keeper_name:"routingtest"
+        ~runtime_id:(Some runtime_id)
+        ~expected
+        ()
+    in
+    let left = Domain.spawn (fun () -> write "runpod_mtp.qwen") in
+    let right = Domain.spawn (fun () -> write "openai.gpt") in
+    let outcomes = [ Domain.join left; Domain.join right ] in
+    let committed =
+      List.filter
+        (function
+          | Ok receipt ->
+            (match receipt.Runtime.value with
+             | Runtime.Assignment_committed _ -> true
+             | Runtime.Assignment_unchanged _ -> false)
+          | _ -> false)
+        outcomes
+      |> List.length
+    in
+    let conflicted =
+      List.filter
+        (function
+          | Error (Runtime.Assignment_revision_conflict _) -> true
+          | _ -> false)
+        outcomes
+      |> List.length
+    in
+    Alcotest.(check int) "one writer committed" 1 committed;
+    Alcotest.(check int) "one writer observed a typed conflict" 1 conflicted)
+;;
+
+let test_missing_runtime_config_is_typed_without_fabricated_revision () =
+  with_temp_dir "runtime-assignment-missing" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  match
+    Runtime.observe_keeper_assignment ~runtime_config_path:path
+      ~keeper_name:"routingtest" ()
+  with
+  | Error detail -> Alcotest.failf "missing observation failed: %s" detail
+  | Ok receipt ->
+    (match receipt.Runtime.value with
+     | Runtime.Runtime_config_missing ->
+       Alcotest.(check bool) "runtime.toml remains absent" false (Sys.file_exists path)
+     | Runtime.Runtime_config_present _ ->
+       Alcotest.fail "missing runtime config received a fabricated source revision")
+;;
+
+let test_runtime_assignment_release_warning_reaches_commit_receipt () =
+  with_runtime_file (fun path ->
+    let expected =
+      match Runtime.observe_keeper_assignment ~runtime_config_path:path
+              ~keeper_name:"routingtest" () with
+      | Ok receipt -> receipt.value
+      | Error detail -> Alcotest.fail detail
+    in
+    let lock_path = path ^ ".lock" in
+    let release_failure =
+      { File_lock_eio.lock_path
+      ; phase = File_lock_eio.Release_process_lock
+      ; cause =
+          { File_lock_eio.error = Unix.EIO
+          ; operation = "injected_runtime_release_after_commit"
+          ; argument = lock_path
+          }
+      ; cleanup_failure = None
+      }
+    in
+    match
+      Runtime.Assignment_for_testing.set_with_release_failure
+        ~release_failure
+        ~runtime_config_path:path
+        ~keeper_name:"routingtest"
+        ~runtime_id:(Some "runpod_mtp.qwen")
+        ~expected
+        ()
+    with
+    | Error _ -> Alcotest.fail "release uncertainty discarded the committed value"
+    | Ok locked ->
+      Alcotest.(check int) "transaction carries one release warning" 1
+        (List.length locked.warnings);
+      (match locked.value with
+       | Runtime.Assignment_unchanged _ ->
+         Alcotest.fail "assignment update unexpectedly became a no-op"
+       | Runtime.Assignment_committed { receipt; _ } ->
+         Alcotest.(check int) "commit receipt preserves one release warning" 1
+           (List.length receipt.lock_warnings)))
+;;
+
 let test_runtime_route_writer_updates_default () =
   with_runtime_file (fun path ->
     (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
@@ -1950,6 +2049,18 @@ let () =
             "dashboard runtime assignment clear validates and refreshes cache"
             `Quick
             test_runtime_assignment_writer_clears_assignment
+        ; Alcotest.test_case
+            "concurrent assignment CAS admits exactly one writer"
+            `Quick
+            test_runtime_assignment_cas_admits_exactly_one_concurrent_writer
+        ; Alcotest.test_case
+            "missing runtime config has a typed revision state"
+            `Quick
+            test_missing_runtime_config_is_typed_without_fabricated_revision
+        ; Alcotest.test_case
+            "runtime assignment release warning reaches commit receipt"
+            `Quick
+            test_runtime_assignment_release_warning_reaches_commit_receipt
         ; Alcotest.test_case
             "dashboard runtime route writer updates default"
             `Quick

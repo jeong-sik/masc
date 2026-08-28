@@ -8,6 +8,7 @@ import { signal } from '@preact/signals'
 import {
   patchKeeperConfig,
 } from '../api/dashboard'
+import { ApiRequestError } from '../api/core'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
@@ -439,6 +440,7 @@ const runtimeDraft = signal<KeeperRuntimeDraftState | null>(null)
 const activeKeeperConfigOwner = signal<KeeperConfigPanelOwner | null>(null)
 const runtimeSaving = signal(false)
 const runtimeSaveRequest = signal<KeeperConfigSaveRequest | null>(null)
+const promptSaveRequest = signal<KeeperConfigSaveRequest | null>(null)
 const runtimeDirectiveSaving = signal<'pause' | 'resume' | 'wakeup' | null>(null)
 function resetKeeperConfigPanelDrafts(): void {
   editMode.value = false
@@ -450,6 +452,7 @@ function resetKeeperConfigPanelDrafts(): void {
   activeKeeperConfigOwner.value = null
   runtimeSaving.value = false
   runtimeSaveRequest.value = null
+  promptSaveRequest.value = null
   runtimeDirectiveSaving.value = null
   hookFilterQuery.value = ''
   globalArchExpanded.value = false
@@ -530,6 +533,25 @@ function keeperConfigManifestSource(c: KeeperConfig): string {
 }
 
 const KEEPER_CONFIG_API = '/api/v1/keepers/:name/config'
+
+export function keeperConfigFailureRequiresAuthoritativeReload(error: unknown): boolean {
+  return error instanceof ApiRequestError
+    && (
+      error.errorCode === 'keeper_manifest_reconciliation_required'
+      || error.errorCode === 'keeper_config_composite_reconciliation_required'
+      || error.authoritativeReloadRequired
+      || (error.configApplied === true && error.runtimeSync === false)
+    )
+}
+
+export function configDurabilityWarningMessage(
+  subject: string,
+  warnings: NonNullable<KeeperConfig['config_write']>['warnings'],
+): string | null {
+  if (warnings.length === 0) return null
+  const warningCodes = warnings.map(warning => warning.code).join(', ')
+  return `${subject} 적용됐지만 config durability 경고가 있습니다: ${warningCodes}`
+}
 const KEEPER_DIRECTIVE_API = '/api/v1/keepers/:name/directive'
 const DASHBOARD_GOALS_API = '/api/v1/dashboard/goals'
 const RUNTIME_PROVIDERS_API = '/api/v1/providers'
@@ -1696,7 +1718,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     runtimeSaveRequest.value = saveRequest
     runtimeSaving.value = true
     try {
-      const updated = await patchKeeperConfig(keeperName, payload)
+      const updated = await patchKeeperConfig(keeperName, payload, c.config_revision)
       const activeOwner = activeKeeperConfigOwner.value
       if (
         activeOwner?.keeperName !== saveRequest.owner.keeperName
@@ -1704,8 +1726,36 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ) return
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
-      showToast('Keeper 설정 저장 완료', 'success')
+      const durabilityWarning = configDurabilityWarningMessage(
+        'Keeper 설정은',
+        updated.config_write?.warnings ?? [],
+      )
+      if (durabilityWarning) {
+        showToast(durabilityWarning, 'warning')
+      } else {
+        showToast('Keeper 설정 저장 완료', 'success')
+      }
     } catch (err) {
+      const activeOwner = activeKeeperConfigOwner.value
+      if (
+        activeOwner?.keeperName !== saveRequest.owner.keeperName
+        || activeOwner.epoch !== saveRequest.owner.epoch
+      ) return
+      if (
+        err instanceof ApiRequestError
+        && err.errorCode === 'keeper_config_revision_conflict'
+      ) {
+        runtimeDraft.value = null
+        await loadKeeperConfig(keeperName, { force: true })
+        showToast('Keeper 설정이 다른 화면에서 변경되어 최신 값을 다시 불러왔습니다', 'warning')
+        return
+      }
+      if (keeperConfigFailureRequiresAuthoritativeReload(err)) {
+        runtimeDraft.value = null
+        await loadKeeperConfig(keeperName, { force: true })
+        showToast('Keeper 설정 저장 결과를 확정할 수 없어 권위 설정을 다시 불러왔습니다', 'warning')
+        return
+      }
       const msg = err instanceof Error ? err.message : '저장 실패'
       showToast(msg, 'error')
     } finally {
@@ -1768,10 +1818,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       cancelEdit()
       return
     }
+    const saveRequest: KeeperConfigSaveRequest = {
+      owner: panelOwner,
+      request: Symbol('keeper-prompt-config-save'),
+    }
+    promptSaveRequest.value = saveRequest
     saving.value = true
     saveError.value = null
     try {
-      const updated = await patchKeeperConfig(keeperName, payload)
+      const updated = await patchKeeperConfig(keeperName, payload, c.config_revision)
       const activeOwner = activeKeeperConfigOwner.value
       if (
         activeOwner?.keeperName !== panelOwner.keeperName
@@ -1782,11 +1837,44 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       editMode.value = false
       editDraft.value = null
       lastSavedAt.value = new Date().toISOString()
-      showToast('프롬프트 저장 완료', 'success')
+      const durabilityWarning = configDurabilityWarningMessage(
+        '프롬프트는',
+        updated.config_write?.warnings ?? [],
+      )
+      if (durabilityWarning) {
+        showToast(durabilityWarning, 'warning')
+      } else {
+        showToast('프롬프트 저장 완료', 'success')
+      }
     } catch (err) {
+      const activeOwner = activeKeeperConfigOwner.value
+      if (
+        activeOwner?.keeperName !== saveRequest.owner.keeperName
+        || activeOwner.epoch !== saveRequest.owner.epoch
+      ) return
+      if (
+        err instanceof ApiRequestError
+        && err.errorCode === 'keeper_config_revision_conflict'
+      ) {
+        editMode.value = false
+        editDraft.value = null
+        await loadKeeperConfig(keeperName, { force: true })
+        showToast('Keeper 설정이 다른 화면에서 변경되어 최신 값을 다시 불러왔습니다', 'warning')
+        return
+      }
+      if (keeperConfigFailureRequiresAuthoritativeReload(err)) {
+        editMode.value = false
+        editDraft.value = null
+        await loadKeeperConfig(keeperName, { force: true })
+        showToast('Keeper 설정 저장 결과를 확정할 수 없어 권위 설정을 다시 불러왔습니다', 'warning')
+        return
+      }
       saveError.value = err instanceof Error ? err.message : '저장 실패'
     } finally {
-      saving.value = false
+      if (promptSaveRequest.value?.request === saveRequest.request) {
+        promptSaveRequest.value = null
+        saving.value = false
+      }
     }
   }
 

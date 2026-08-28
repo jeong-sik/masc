@@ -38,11 +38,122 @@ type config_commit_receipt = private
   { observation : config_observation
   ; durability : config_durability
   ; order : config_commit_order
+  ; lock_warnings : config_lock_warning list
+  }
+
+and config_lock_warning =
+  | Config_lock_release_unconfirmed of string
+
+type keeper_assignment_state =
+  | Assignment_missing
+  | Assignment_present of string
+
+type keeper_assignment_revision =
+  | Runtime_config_missing
+  | Runtime_config_present of
+      { source_revision : config_source_revision
+      ; assignment : keeper_assignment_state
+      }
+
+type keeper_assignment_cas_error =
+  | Assignment_revision_conflict of keeper_assignment_revision
+  | Assignment_io_error of string
+
+type keeper_assignment_write =
+  | Assignment_unchanged of keeper_assignment_revision
+  | Assignment_committed of
+      { receipt : config_commit_receipt
+      ; revision : keeper_assignment_revision
+      }
+
+type keeper_assignment_transaction
+
+type 'a config_lock_receipt = private
+  { value : 'a
+  ; warnings : config_lock_warning list
   }
 
 val config_source_revision_to_string : config_source_revision -> string
 val config_commit_order_to_string : config_commit_order -> string
 val compare_config_commit_order : config_commit_order -> config_commit_order -> int
+val config_lock_warning_to_yojson : config_lock_warning -> Yojson.Safe.t
+val keeper_assignment_revision_to_yojson : keeper_assignment_revision -> Yojson.Safe.t
+val keeper_assignment_revision_of_yojson :
+  Yojson.Safe.t -> (keeper_assignment_revision, string) result
+
+val with_keeper_assignment_transaction :
+  ?runtime_config_path:string ->
+  keeper_name:string ->
+  (keeper_assignment_transaction -> 'a) ->
+  ('a config_lock_receipt, string) result
+(** Hold the process-wide and durable [runtime.toml] locks while observing and
+    acting on one Keeper assignment. Callers that also hold a Keeper manifest
+    lock must always acquire that manifest lock first. *)
+
+val keeper_assignment_revision :
+  keeper_assignment_transaction -> keeper_assignment_revision
+
+val keeper_assignment_transaction_path : keeper_assignment_transaction -> string option
+
+val commit_keeper_assignment :
+  keeper_assignment_transaction ->
+  runtime_id:string option ->
+  (keeper_assignment_write, string) result
+(** Commit the requested assignment from the exact source bytes captured by
+    the transaction. [None] clears it. An unchanged assignment returns
+    [Assignment_unchanged] without rewriting [runtime.toml]. *)
+
+val restore_keeper_assignment_transaction :
+  keeper_assignment_transaction -> (keeper_assignment_write, string) result
+(** Restore the exact [runtime.toml] source bytes captured when the
+    transaction began. The caller must still be inside the transaction
+    callback, so no other admitted runtime writer can interleave. *)
+
+val observe_keeper_assignment :
+  ?runtime_config_path:string ->
+  keeper_name:string ->
+  unit ->
+  (keeper_assignment_revision config_lock_receipt, string) result
+
+val set_keeper_assignment_if_revision :
+  ?runtime_config_path:string ->
+  keeper_name:string ->
+  runtime_id:string option ->
+  expected:keeper_assignment_revision ->
+  unit ->
+  (keeper_assignment_write config_lock_receipt,
+   keeper_assignment_cas_error) result
+(** Compare and replace under the same runtime-config transaction. [Error]
+    carries the exact observed revision. *)
+
+module Assignment_for_testing : sig
+  val commit_with_replace_file :
+    replace_file:
+      (string ->
+       string ->
+       (unit, Fs_compat.atomic_replace_failure) result) ->
+    keeper_assignment_transaction ->
+    runtime_id:string option ->
+    (keeper_assignment_write, string) result
+
+  val restore_with_replace_file :
+    replace_file:
+      (string ->
+       string ->
+       (unit, Fs_compat.atomic_replace_failure) result) ->
+    keeper_assignment_transaction ->
+    (keeper_assignment_write, string) result
+
+  val set_with_release_failure :
+    release_failure:File_lock_eio.durable_lock_error ->
+    runtime_config_path:string ->
+    keeper_name:string ->
+    runtime_id:string option ->
+    expected:keeper_assignment_revision ->
+    unit ->
+    (keeper_assignment_write config_lock_receipt,
+     keeper_assignment_cas_error) result
+end
 
 val id_of_binding : binding -> string
 
@@ -545,7 +656,7 @@ val set_runtime_id_for_keeper :
   keeper_name:string ->
   runtime_id:string ->
   unit ->
-  (config_commit_receipt, string) result
+  (keeper_assignment_write config_lock_receipt, string) result
 (** Persist [keeper_name] -> [runtime_id] in
     [\[runtime.assignments\]] (runtime.toml SSOT), validate the resulting
     runtime config, atomically write it, and refresh the in-process runtime
@@ -555,7 +666,7 @@ val clear_runtime_id_for_keeper :
   ?runtime_config_path:string ->
   keeper_name:string ->
   unit ->
-  (config_commit_receipt, string) result
+  (keeper_assignment_write config_lock_receipt, string) result
 (** Remove [keeper_name] from [\[runtime.assignments\]], validate the resulting
     runtime config, atomically write it, and refresh the in-process runtime
     assignment cache. *)

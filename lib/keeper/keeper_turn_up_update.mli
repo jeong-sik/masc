@@ -11,7 +11,39 @@
     message on the typed error payload. *)
 val update_keeper :
   ?preserve_prompt_defaults:bool ->
+  expected_config_revision:Keeper_turn_up_config_persistence.config_revision ->
   _ Keeper_types_profile.context ->
   Keeper_turn_up_args.parsed_args ->
   Keeper_meta_contract.keeper_meta ->
   Keeper_types_profile.tool_result
+
+val config_revision_conflict_of_result :
+  Keeper_types_profile.tool_result ->
+  Keeper_turn_up_config_persistence.conflict option
+
+val config_publication_rollback_of_result :
+  Keeper_types_profile.tool_result -> string option
+
+val config_reconciliation_required_of_result :
+  Keeper_types_profile.tool_result -> Yojson.Safe.t option
+
+module For_testing : sig
+  val composite_reconciliation_required_data :
+    Keeper_turn_up_config_persistence.composite_reconciliation ->
+    Yojson.Safe.t
+
+  val update_keeper_with_apply_profile :
+    apply_profile:
+      (base_path:string ->
+       keeper_name:string ->
+       Keeper_owner_reducer.meta_command ->
+       ( Keeper_meta_contract.keeper_meta option
+       , Keeper_owner_registry.command_error )
+       result) ->
+    ?preserve_prompt_defaults:bool ->
+    expected_config_revision:Keeper_turn_up_config_persistence.config_revision ->
+    _ Keeper_types_profile.context ->
+    Keeper_turn_up_args.parsed_args ->
+    Keeper_meta_contract.keeper_meta ->
+    Keeper_types_profile.tool_result
+end

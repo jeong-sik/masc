@@ -5,11 +5,11 @@ import { useSignal } from '@preact/signals'
 import {
   createSkill,
   fetchSkills,
-  fetchSkillRun,
+  fetchSkillEvidence,
   fetchWritableSkillSources,
+  type SkillEvidenceResponse,
   type SkillIdentity,
   type SkillProfile,
-  type SkillRunResponse,
   type SkillSnapshotConfig,
   type SkillSnapshotEntry,
   type SkillSurface,
@@ -116,7 +116,7 @@ export function usageLabel(surface: SkillSurface | null): string {
   const usage = surface?.usage ?? []
   if (usage.length === 0) return 'unused in current sessions'
   return usage
-    .map(row => `${row.keeper} ${row.invocations}×/${row.deliveries} delivered/${row.actions} actions`)
+    .map(row => `${row.keeper} ${row.invocations}×/${row.deliveries} delivered/${row.actions} actions · last ${row.last_used_at}`)
     .join(' · ')
 }
 
@@ -203,21 +203,42 @@ function runOutput(value: unknown): string {
   }
 }
 
-function SkillRunView({ result }: { result: SkillRunResponse | null }) {
+function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null }) {
   if (!result) return html`<div class="ss-muted">Load the latest exact-revision result.</div>`
   if (result.status === 'never_observed') {
-    return html`<div class="text-[var(--color-status-warn)]">No exact-revision run in the latest ${result.scan_limit} log rows.</div>`
+    return html`
+      <div class="text-[var(--color-status-warn)]">No exact-revision activation or composition run was observed.</div>
+      <div class="ss-muted text-3xs">${result.coverage.instruction_ledgers_loaded} ledgers · ${result.coverage.composition_rows_scanned}/${result.coverage.composition_scan_limit} log rows</div>
+    `
   }
-  const output = result.run.output
+  const activation = result.activation?.activation ?? null
+  const actions = Array.isArray(activation?.actions) ? activation.actions.length : 0
+  const delivered = activation?.delivery !== null && activation?.delivery !== undefined
+  const composition = result.composition
+  const output = composition?.run.output
   return html`
-    <div data-testid="skill-latest-run">
-      <div class="font-semibold">
-        ${runField(result.run, 'success') === 'true' ? '✓ completed' : '✗ failed'}
-        · ${runDuration(result.run)}
-        · ${runField(result.run, 'keeper')}
+    <div class="space-y-2" data-testid="skill-latest-evidence">
+      ${activation ? html`
+        <div>
+          <div class="font-semibold">${delivered ? '✓ delivered' : '◌ invoked'} · ${result.activation?.keeper} · ${actions} actions</div>
+          <div class="ss-muted mono">${runField(activation, 'activated_at')} · tool use ${runField(activation, 'skill_tool_use_id')}</div>
+        </div>
+      ` : null}
+      ${composition ? html`
+        <div>
+          <div class="font-semibold">
+            ${runField(composition.run, 'success') === 'true' ? '✓ completed' : '✗ failed'}
+            · ${runDuration(composition.run)}
+            · ${runField(composition.run, 'keeper')}
+          </div>
+          <div class="ss-muted mono">${runField(composition.run, 'composition_run_id')} · ${composition.nodes.length} node rows</div>
+          <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-raised)] p-2 text-3xs">${runOutput(output)}</pre>
+        </div>
+      ` : null}
+      <div class="ss-muted text-3xs">
+        coverage ${result.coverage.instruction_ledgers_loaded} ledgers · ${result.coverage.composition_rows_scanned}/${result.coverage.composition_scan_limit} log rows
+        ${result.coverage.unavailable.length > 0 ? html` · ⚠ ${result.coverage.unavailable.join(' · ')}` : null}
       </div>
-      <div class="ss-muted mono">${runField(result.run, 'composition_run_id')} · ${result.nodes.length} node rows</div>
-      <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-raised)] p-2 text-3xs">${runOutput(output)}</pre>
     </div>
   `
 }
@@ -233,8 +254,8 @@ export function SkillsPanel() {
   const loading = useSignal(true)
   const error = useSignal<string | null>(null)
   const expanded = useSignal<string | null>(null)
-  const runs = useSignal<Record<string, SkillRunResponse>>({})
-  const runLoading = useSignal<string | null>(null)
+  const evidence = useSignal<Record<string, SkillEvidenceResponse>>({})
+  const evidenceLoading = useSignal<string | null>(null)
   const createOpen = useSignal(false)
   const createKind = useSignal<'instruction' | 'composition'>('instruction')
   const createName = useSignal('')
@@ -371,15 +392,13 @@ export function SkillsPanel() {
                   <div class="grid gap-3 p-2 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
                     <div><strong>Execution flow</strong>${row.surface?.profile ? html`<${SkillFlowView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
                     <div>
-                      <div class="mb-2 flex items-center justify-between"><strong>Latest result</strong>${row.surface?.profile?.kind === 'instruction' ? null : html`<button class="ss-btn" type="button" disabled=${runLoading.value === rowKey} onClick=${async () => {
+                      <div class="mb-2 flex items-center justify-between"><strong>Latest evidence</strong><button class="ss-btn" type="button" disabled=${evidenceLoading.value === rowKey} onClick=${async () => {
                         if (!row.surface) return
-                        runLoading.value = rowKey
-                        try { runs.value = { ...runs.value, [rowKey]: await fetchSkillRun(row.surface.reference) } }
-                        finally { runLoading.value = null }
-                      }}>${runLoading.value === rowKey ? 'Loading…' : 'Load'}</button>`}</div>
-                      ${row.surface?.profile?.kind === 'instruction'
-                        ? html`<div class="ss-muted">Instruction results belong to the model-owned Keeper turn. Use current users and Keeper calls for evidence.</div>`
-                        : html`<${SkillRunView} result=${runs.value[rowKey] ?? null} />`}
+                        evidenceLoading.value = rowKey
+                        try { evidence.value = { ...evidence.value, [rowKey]: await fetchSkillEvidence(row.surface.reference) } }
+                        finally { evidenceLoading.value = null }
+                      }}>${evidenceLoading.value === rowKey ? 'Loading…' : 'Load'}</button></div>
+                      <${SkillEvidenceView} result=${evidence.value[rowKey] ?? null} />
                     </div>
                   </div>
                 </td></tr>

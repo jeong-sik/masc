@@ -1703,7 +1703,7 @@ let add_routes ~sw ~clock router =
                   audit_skill_write
                     state
                     agent_name
-                    ~reference:preview.reference
+                    ~reference:preview.profile.reference
                     ~source_text
                     ~status
                     ~outcome:audit_outcome;

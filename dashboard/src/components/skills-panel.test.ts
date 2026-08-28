@@ -5,6 +5,7 @@ import type {
   SkillReference,
   SkillSnapshotEntry,
   SkillSurface,
+  SkillSurfaceProfile,
 } from '../api/dashboard-skills'
 
 const editorApiMocks = vi.hoisted(() => ({
@@ -72,6 +73,50 @@ function reference(snapshotEntry: SkillSnapshotEntry): SkillReference {
   }
 }
 
+function surfaceProfile(
+  execution = 'model_orchestrated',
+  activationTool = 'keeper_skill',
+): SkillSurfaceProfile {
+  const composition = activationTool !== 'keeper_skill'
+  return {
+    activation_tool: activationTool,
+    execution,
+    capabilities: {
+      as_skill: true,
+      as_tool: composition,
+      batch: false,
+      parallel: false,
+      async: execution === 'async',
+      tool_scope: composition ? 'registered_tools_only' : 'model_orchestrated',
+    },
+    context: {
+      body_bytes: 100,
+      eager_body_bytes: 0,
+      discovery_bytes: 40,
+      tool_schema_bytes: null,
+    },
+    plan: {
+      node_count: 0,
+      batch_count: 0,
+      parallel_batch_count: 0,
+      max_parallelism: 0,
+      statically_read_only: null,
+    },
+    declaration: null,
+    flow: null,
+  }
+}
+
+function instructionSurface(
+  entry: SkillSnapshotEntry,
+): Extract<SkillSurface, { kind: 'instruction' }> {
+  return {
+    reference: reference(entry),
+    kind: 'instruction',
+    profile: surfaceProfile(),
+  }
+}
+
 const mission = entry('mission-snapshot')
 const intake = entry('work-intake')
 const broken = entry('broken')
@@ -79,10 +124,9 @@ const surfaces: SkillSurface[] = [
   {
     reference: reference(mission),
     kind: 'composition',
-    tool_name: 'keeper_compose_mission-snapshot',
-    execution: 'inline',
+    profile: surfaceProfile('inline', 'keeper_compose_mission-snapshot'),
   },
-  { reference: reference(intake), kind: 'instruction' },
+  instructionSurface(intake),
   {
     reference: reference(broken),
     kind: 'unavailable',
@@ -112,8 +156,7 @@ describe('mergeSkillRows', () => {
     const rows = mergeSkillRows(
       [compatible, entry('plain')],
       [{
-        reference: reference(compatible),
-        kind: 'instruction',
+        ...instructionSurface(compatible),
         diagnostics: ['shared diagnostic', 'composition fence malformed'],
       }],
     )
@@ -128,8 +171,7 @@ describe('mergeSkillRows', () => {
     const rows = mergeSkillRows(
       [intake, shadow],
       [{
-        reference: reference(shadow),
-        kind: 'instruction',
+        ...instructionSurface(shadow),
         diagnostics: ['shadow-only diagnostic'],
       }],
     )
@@ -237,8 +279,7 @@ describe('decodeSkillsResponse', () => {
     expect(decodeSkillsResponse(readyPayload(
       [intake],
       [{
-        reference: reference(intake),
-        kind: 'instruction',
+        ...instructionSurface(intake),
         diagnostics: ['server projection diagnostic'],
       }],
     ))).toMatchObject({
@@ -249,6 +290,24 @@ describe('decodeSkillsResponse', () => {
         diagnostics: ['server projection diagnostic'],
       }],
     })
+  })
+
+  it('rejects the retired duplicate fields inside a ready surface', () => {
+    const current = instructionSurface(intake)
+    expectContractCode(
+      () => decodeSkillsResponse(readyPayload(
+        [intake],
+        [{
+          ...current,
+          profile: {
+            ...current.profile,
+            reference: current.reference,
+            kind: current.kind,
+          },
+        } as unknown as SkillSurface],
+      )),
+      'ready_surfaces_invalid',
+    )
   })
 
   it('distinguishes a missing surfaces field from an empty non-empty projection', () => {
@@ -270,7 +329,7 @@ describe('decodeSkillsResponse', () => {
   })
 
   it('rejects duplicate exact surface references', () => {
-    const surface: SkillSurface = { reference: reference(intake), kind: 'instruction' }
+    const surface = instructionSurface(intake)
     expectContractCode(
       () => decodeSkillsResponse(readyPayload([intake], [surface, surface])),
       'ready_surfaces_duplicate_reference',
@@ -282,7 +341,7 @@ describe('decodeSkillsResponse', () => {
     expectContractCode(
       () => decodeSkillsResponse(readyPayload(
         [intake, shadow],
-        [{ reference: reference(intake), kind: 'instruction' }],
+        [instructionSurface(intake)],
       )),
       'ready_surface_missing_reference',
     )
@@ -293,7 +352,7 @@ describe('decodeSkillsResponse', () => {
     expectContractCode(
       () => decodeSkillsResponse(readyPayload(
         [intake],
-        [{ reference: reference(shadow), kind: 'instruction' }],
+        [instructionSurface(shadow)],
       )),
       'ready_surface_unexpected_reference',
     )
@@ -305,11 +364,7 @@ describe('labels', () => {
     const profiled: SkillSurface = {
       reference: reference(mission),
       kind: 'composition',
-      tool_name: 'keeper_compose_mission-snapshot',
-      execution: 'async',
       profile: {
-        reference: reference(mission),
-        kind: 'composition',
         activation_tool: 'keeper_compose_mission-snapshot',
         execution: 'async',
         capabilities: {
@@ -414,7 +469,6 @@ const editorProfile = {
 }
 
 const editorPreview = {
-  reference: reference(intake),
   profile: editorProfile,
   diagnostics: [],
 }
@@ -431,14 +485,12 @@ describe('SkillSourceEditor', () => {
       access: 'read_write',
     })
     editorApiMocks.previewSkillSource.mockResolvedValue({
-      reference: nextReference,
       profile: { ...editorProfile, reference: nextReference },
       diagnostics: [],
     })
     editorApiMocks.saveSkillSource.mockResolvedValue({
       status: 'saved_and_published',
       preview: {
-        reference: nextReference,
         profile: { ...editorProfile, reference: nextReference },
         diagnostics: [],
       },
@@ -540,7 +592,6 @@ describe('SkillSourceEditor', () => {
     fireEvent.input(textarea, { target: { value: 'newer unpreviewed source' } })
 
     resolvePreview({
-      reference: currentReference,
       profile: editorProfile,
       diagnostics: [],
     })

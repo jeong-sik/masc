@@ -17,11 +17,11 @@ import {
   type SkillEditorPreview,
   type AsyncRequestObservation,
   type SkillIdentity,
-  type SkillProfile,
   type SkillReference,
   type SkillSnapshotConfig,
   type SkillSnapshotEntry,
   type SkillSurface,
+  type SkillSurfaceProfile,
   type SkillsResponse,
 } from '../api/dashboard-skills'
 import { SurfaceCard } from './common/card'
@@ -97,7 +97,7 @@ export function kindLabel(surface: SkillSurface | null): string {
   if (!surface) return 'surface unavailable'
   switch (surface.kind) {
     case 'composition':
-      return `composition · ${surface.execution}`
+      return `composition · ${surface.profile.execution}`
     case 'instruction':
       return 'instruction'
     case 'unavailable':
@@ -106,9 +106,9 @@ export function kindLabel(surface: SkillSurface | null): string {
 }
 
 export function capabilityLabel(surface: SkillSurface | null): string {
-  const profile = surface?.profile
-  if (!profile) return kindLabel(surface)
-  if (profile.kind === 'instruction') return 'on-demand · model orchestrated'
+  if (!surface || surface.kind === 'unavailable') return kindLabel(surface)
+  const profile = surface.profile
+  if (surface.kind === 'instruction') return 'on-demand · model orchestrated'
   const flags = [profile.execution, `${profile.plan.node_count} nodes`]
   if (profile.capabilities.batch) flags.push(`${profile.plan.batch_count} batches`)
   if (profile.capabilities.parallel) flags.push(`parallel ×${profile.plan.max_parallelism}`)
@@ -116,7 +116,9 @@ export function capabilityLabel(surface: SkillSurface | null): string {
 }
 
 export function contextLabel(surface: SkillSurface | null, bodyBytes: number): string {
-  const context = surface?.profile?.context
+  const context = surface && surface.kind !== 'unavailable'
+    ? surface.profile.context
+    : null
   if (!context) return `${formatBytes(bodyBytes)} body`
   return `${formatBytes(context.discovery_bytes)} discovery · ${formatBytes(context.eager_body_bytes)} eager · ${formatBytes(context.body_bytes)} body`
 }
@@ -152,7 +154,7 @@ export function stateMessage(state: Exclude<SkillsResponse['state'], 'ready'>): 
   }
 }
 
-function SkillFlowView({ profile }: { profile: SkillProfile }) {
+function SkillFlowView({ profile }: { profile: SkillSurfaceProfile }) {
   const flow = profile.flow
   if (!flow) {
     return html`<div class="ss-muted">Instruction body → keeper_skill → model-orchestrated tools</div>`
@@ -303,7 +305,7 @@ const REVISION_CONFLICT_GUIDANCE = 'This Skill changed after you loaded it. Copy
 
 function editorPreviewSummary(preview: SkillEditorPreview): string {
   const profile = preview.profile
-  return `${profile.kind} · ${profile.execution} · ${profile.plan.node_count} nodes · revision ${preview.reference.content_revision.slice(0, 12)}`
+  return `${profile.kind} · ${profile.execution} · ${profile.plan.node_count} nodes · revision ${profile.reference.content_revision.slice(0, 12)}`
 }
 
 export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorProps) {
@@ -505,7 +507,7 @@ export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorP
                               await onPublished(
                                 receipt.status === 'unchanged'
                                   ? 'Skill source was unchanged.'
-                                  : `Skill saved and published at ${receipt.preview.reference.content_revision.slice(0, 12)}.`,
+                                  : `Skill saved and published at ${receipt.preview.profile.reference.content_revision.slice(0, 12)}.`,
                               )
                               if (requestIsCurrent(generation, requestedReference, requestedSource)) {
                                 open.value = false
@@ -714,7 +716,7 @@ export function SkillsPanel() {
                 </td>
                 <td>
                   ${capabilityLabel(row.surface)}
-                  <div class="ss-muted mono">${row.surface?.profile?.activation_tool ?? (row.surface?.kind === 'composition' ? row.surface.tool_name : 'keeper_skill')}</div>
+                  <div class="ss-muted mono">${row.surface && row.surface.kind !== 'unavailable' ? row.surface.profile.activation_tool : 'unavailable'}</div>
                 </td>
                 <td>${contextLabel(row.surface, row.body_bytes)}</td>
                 <td>${usageLabel(row.surface)}</td>
@@ -723,7 +725,7 @@ export function SkillsPanel() {
               ${isExpanded ? html`
                 <tr key=${`${rowKey}-detail`}><td colspan="5">
                   <div class="grid gap-3 p-2 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-                    <div><strong>Execution flow</strong>${row.surface?.profile ? html`<${SkillFlowView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
+                    <div><strong>Execution flow</strong>${row.surface && row.surface.kind !== 'unavailable' ? html`<${SkillFlowView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
                     <div>
                       <div class="mb-2 flex items-center justify-between"><strong>Latest evidence</strong><button class="ss-btn" type="button" disabled=${evidenceLoading.value === rowKey} onClick=${async () => {
                         if (!row.surface) return

@@ -111,6 +111,8 @@ export interface SkillProfile {
   flow: SkillFlow | null
 }
 
+export type SkillSurfaceProfile = Omit<SkillProfile, 'reference' | 'kind'>
+
 export interface SkillEvidenceCoverage {
   composition_scan_limit: number
   composition_rows_scanned: number
@@ -148,7 +150,6 @@ export interface SkillEditorLoaded {
 }
 
 export interface SkillEditorPreview {
-  reference: SkillReference
   profile: SkillProfile
   diagnostics: readonly string[]
 }
@@ -217,18 +218,22 @@ export type AsyncRequestObservation =
 interface SkillSurfaceBase {
   reference: SkillReference
   diagnostics?: readonly string[]
-  profile?: SkillProfile | null
   usage?: readonly SkillUsage[]
 }
 
 export type SkillSurface =
-  | (SkillSurfaceBase & { kind: 'instruction' })
+  | (SkillSurfaceBase & {
+      kind: 'instruction'
+      profile: SkillSurfaceProfile
+    })
   | (SkillSurfaceBase & {
       kind: 'composition'
-      tool_name: string
-      execution: string
+      profile: SkillSurfaceProfile
     })
-  | (SkillSurfaceBase & { kind: 'unavailable'; error: string })
+  | (SkillSurfaceBase & {
+      kind: 'unavailable'
+      error: string
+    })
 
 export type SkillsResponse =
   | {
@@ -396,9 +401,7 @@ const AsyncRequestObservationSchema = Schema.Union(
   }),
 )
 
-const SkillProfileSchema = Schema.Struct({
-  reference: SkillReferenceSchema,
-  kind: Schema.NonEmptyString,
+const SkillProfileDetailsFields = {
   activation_tool: Schema.NonEmptyString,
   execution: Schema.NonEmptyString,
   capabilities: Schema.Struct({
@@ -427,10 +430,17 @@ const SkillProfileSchema = Schema.Struct({
     end_line: PositiveSafeIntegerSchema,
   })),
   flow: Schema.NullOr(SkillFlowSchema),
+} as const
+
+const SkillProfileSchema = Schema.Struct({
+  reference: SkillReferenceSchema,
+  kind: Schema.NonEmptyString,
+  ...SkillProfileDetailsFields,
 })
 
+const SkillSurfaceProfileSchema = Schema.Struct(SkillProfileDetailsFields)
+
 const SkillEditorPreviewSchema = Schema.Struct({
-  reference: SkillReferenceSchema,
   profile: SkillProfileSchema,
   diagnostics: Schema.Array(Schema.String),
 })
@@ -462,7 +472,6 @@ const SkillEditorSaveReceiptSchema = Schema.Union(
   }),
 )
 
-const OptionalProfileSchema = Schema.optional(Schema.NullOr(SkillProfileSchema))
 const OptionalUsageSchema = Schema.optional(Schema.Array(SkillUsageSchema))
 
 const SkillSurfaceSchema = Schema.Union(
@@ -470,16 +479,14 @@ const SkillSurfaceSchema = Schema.Union(
     reference: SkillReferenceSchema,
     kind: Schema.Literal('instruction'),
     diagnostics: OptionalDiagnosticsSchema,
-    profile: OptionalProfileSchema,
+    profile: SkillSurfaceProfileSchema,
     usage: OptionalUsageSchema,
   }),
   Schema.Struct({
     reference: SkillReferenceSchema,
     kind: Schema.Literal('composition'),
-    tool_name: Schema.NonEmptyString,
-    execution: Schema.NonEmptyString,
     diagnostics: OptionalDiagnosticsSchema,
-    profile: OptionalProfileSchema,
+    profile: SkillSurfaceProfileSchema,
     usage: OptionalUsageSchema,
   }),
   Schema.Struct({
@@ -487,7 +494,6 @@ const SkillSurfaceSchema = Schema.Union(
     kind: Schema.Literal('unavailable'),
     error: Schema.NonEmptyString,
     diagnostics: OptionalDiagnosticsSchema,
-    profile: OptionalProfileSchema,
     usage: OptionalUsageSchema,
   }),
 )

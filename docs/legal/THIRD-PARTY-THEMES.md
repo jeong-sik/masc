@@ -51,6 +51,19 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 가리키는 것이지 그 프로젝트가 masc 를 만들었다고 말하는 것이 아니다. 다만 어느
 프로젝트든 이름 사용을 제한한다고 밝히면 그때 이름을 바꾸고 이 줄을 고친다.
 
+### `monokai` 한 줄 (2026-08-28 확인)
+
+이름만 보면 걸리는 것이 하나 있어 적어둔다. Monokai 에는 유료 제품인 **Monokai
+Pro** 가 따로 있는데, masc 가 싣는 것은 2006년 원본이고 Pro 의 필터 값이 아니다.
+Pro 의 라이선스 문구도 `Monokai Pro extensions` 로 범위가 그쪽에 한정된다.
+
+원본 값은 tinted-theming 말고도 Microsoft 가 VS Code 내장 테마로 MIT 배포한다
+(`microsoft/vscode` 의 `extensions/theme-monokai`, 출처는 MIT 인 Colorsublime-Themes).
+"라이선스가 없으니 제한도 없다" 가 아니라 실제 허가가 있는 경로다.
+
+상표는 확인된 범위에서 걸리는 것이 없다. 다만 미국 등록부만 봤고 **EU·Benelux·WIPO
+는 확인하지 못했다** — 원저자가 네덜란드 사람이라 이 공백은 그냥 공백이다.
+
 ## 목록
 
 `원본` 열은 tinted-theming 에서의 파일 이름이다. masc 쪽 이름과 다른 경우 `←` 로
@@ -86,7 +99,6 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 | `tokyo-night-storm` | `tokyo-night-storm` | Michaël Ball | MIT (tinted-theming) |
 | `catppuccin-frappe` | `catppuccin-frappe` | https://github.com/catppuccin/catppuccin | MIT (tinted-theming) |
 | `rose-pine-moon` | `rose-pine-moon` | Emilia Dunfelt <edun@dunfelt.se> | MIT (tinted-theming) |
-| `material-palenight` | `material-palenight` | Nate Peterson | MIT (tinted-theming) |
 | `tomorrow-night` | `tomorrow-night` | Chris Kempson (http://chriskempson.com) | MIT (tinted-theming) |
 | `selenized-light` | `selenized-light` | Jan Warchol (https://github.com/jan-warchol/selenized) / adapted to base16 by ali | MIT (tinted-theming) |
 | `selenized-white` | `selenized-white` | Jan Warchol (https://github.com/jan-warchol/selenized) / adapted to base16 by ali | MIT (tinted-theming) |
@@ -98,9 +110,30 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 | `atelier-heath-light` | `atelier-heath-light` | Bram de Haan (http://atelierbramdehaan.nl) | MIT (tinted-theming) |
 ## 여기 없는 것
 
-카탈로그에 없는 스킴이 있다. 라이선스 때문이 아니라 masc 가 제대로 못 그려서다.
-2026-08-28 에 50개를 재서 38개를 넣고 12개를 뺐으며, 뺀 이유와 측정값은
-`bin/masc_tui_theme_catalog.ml` 맨 위 주석에 적혀 있다.
+### 그릴 수 없어서 뺀 것
+
+대부분은 라이선스 문제가 아니라 masc 가 제대로 못 그려서 빠졌다. 2026-08-28 에
+50개를 재서 12개를 뺐고, 뺀 이유와 측정값은 `bin/masc_tui_theme_catalog.ml` 맨 위
+주석에 있다.
+
+### 조건이 걸려서 뺀 것 — `material-palenight`
+
+한 번 넣었다가 뺐다. 값 자체는 Nate Peterson 의 base16 이식본이고 tinted-theming
+MIT 로 온다. 문제는 그 위쪽이다.
+
+- 원본 [material-theme/vsc-material-theme](https://github.com/material-theme/vsc-material-theme)
+  는 **라이선스 파일이 없다** (2026-08-28 GitHub API 확인, `license: null`).
+- 원저자가 색과 이름의 재사용에 법적 조치를 예고했고, 그 때문에
+  [원래 라이선스를 유지하는 별도 포크](https://github.com/t3dotgg/vsc-material-but-i-wont-sue-you)
+  가 따로 존재한다.
+- 원래 Apache-2.0 이었다가 git 히스토리가 지워졌다는 정황이 있다. 지워진 허가에
+  기대는 자리에 서지 않는다.
+
+색 목록 자체가 저작물인지는 다투어질 여지가 있고, 하위 이식본에는 MIT 표시가
+붙어 있다. 그래도 뺀다. 남은 37개는 다툴 것 없는 허가가 있고, 하나를 지키자고
+그 자리에 설 이유가 없다.
+
+다시 넣으려면 원본 저장소에 허가가 다시 생겼는지부터 확인한다.
 
 ## 스킴을 추가할 때
 

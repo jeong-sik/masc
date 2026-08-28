@@ -69,6 +69,8 @@ val make_identity :
   identity
 
 val make : identity:identity -> content_revision:content_revision -> t
+val identity_source_id_to_string : identity -> string
+val identity_package_id_to_string : identity -> string
 val equal_identity : identity -> identity -> bool
 val equal : t -> t -> bool
 

@@ -119,17 +119,13 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         def open_request(request, timeout):
             self.assertEqual(timeout, 4.0)
-            self.assertEqual(
-                request.get_header("Authorization"), f"Bearer {token}"
-            )
+            self.assertEqual(request.get_header("Authorization"), f"Bearer {token}")
             return Response()
 
         with mock.patch.object(
             capture.proof_http, "open_no_redirect", side_effect=open_request
         ):
-            value = capture.read_json_url(
-                "https://masc.invalid/strict", 4.0, token
-            )
+            value = capture.read_json_url("https://masc.invalid/strict", 4.0, token)
 
         self.assertEqual(value, {"ok": True})
         environment = capture.safe_environment("/workspace", "127.0.0.1", token)
@@ -365,6 +361,46 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             capture.receipt_block_contains(
                 prefix_collision, "call-skill-1", "call=call-action-1"
             )
+        )
+
+    def test_exact_receipt_block_ignores_unrelated_clock_change(self):
+        before = "\n".join(
+            [
+                "MASC Tools 14:10:47 [connected]",
+                "session=session-1  ledger=ledger-1",
+                "invoked turn=1 id=call-skill-1 runtime=one",
+                "action turn=1 runtime=one tool=x call=call-action-1",
+            ]
+        )
+        after = before.replace("14:10:47", "14:10:48")
+
+        self.assertNotEqual(before, after)
+        self.assertEqual(
+            capture.exact_receipt_block(before, "call-skill-1"),
+            capture.exact_receipt_block(after, "call-skill-1"),
+        )
+        self.assertTrue(capture.tools_surface_is_connected(after))
+
+    def test_exact_receipt_block_detects_changed_runtime_tool_and_turn(self):
+        before = "\n".join(
+            [
+                "invoked turn=1 id=call-skill-1 runtime=one",
+                "action turn=1 runtime=one tool=x call=call-action-1",
+            ]
+        )
+        after = before.replace("turn=1 runtime=one tool=x", "turn=9 runtime=two tool=y")
+
+        self.assertNotEqual(
+            capture.exact_receipt_block(before, "call-skill-1"),
+            capture.exact_receipt_block(after, "call-skill-1"),
+        )
+
+    def test_tools_surface_connection_rejects_disconnected(self):
+        self.assertTrue(
+            capture.tools_surface_is_connected("MASC Tools 14:10:47 [connected]")
+        )
+        self.assertFalse(
+            capture.tools_surface_is_connected("MASC Tools 14:10:48 [disconnected]")
         )
 
     def test_live_server_identity_rejects_restart(self):

@@ -746,13 +746,13 @@ def select_exact_keeper(page: Any, keeper: str, timeout: float) -> list[str]:
     return visited
 
 
-def receipt_block_contains(value: str, skill_tool_use_id: str, action: str) -> bool:
+def exact_receipt_block(value: str, skill_tool_use_id: str) -> str | None:
     lines = value.splitlines()
     id_marker = f"id={skill_tool_use_id}"
     token_lines = [line.strip(" │").split() for line in lines]
     starts = [index for index, tokens in enumerate(token_lines) if id_marker in tokens]
     if len(starts) != 1:
-        return False
+        return None
     start = starts[0]
     end = next(
         (
@@ -762,7 +762,21 @@ def receipt_block_contains(value: str, skill_tool_use_id: str, action: str) -> b
         ),
         len(lines),
     )
-    return any(action in tokens for tokens in token_lines[start + 1 : end])
+    return "\n".join(lines[start:end])
+
+
+def receipt_block_contains(value: str, skill_tool_use_id: str, action: str) -> bool:
+    block = exact_receipt_block(value, skill_tool_use_id)
+    if block is None:
+        return False
+    return any(action in line.strip(" │").split() for line in block.splitlines()[1:])
+
+
+def tools_surface_is_connected(value: str) -> bool:
+    return any(
+        line.strip().startswith("MASC Tools ") and line.rstrip().endswith("[connected]")
+        for line in value.splitlines()
+    )
 
 
 def scroll_to_markers(page: Any, markers: list[str], timeout: float) -> str:
@@ -889,6 +903,10 @@ def main() -> int:
                 ]
                 visible = scroll_to_markers(page, markers, args.timeout)
                 require(
+                    tools_surface_is_connected(visible),
+                    "TUI Tools surface is not connected before screenshot",
+                )
+                require(
                     receipt_block_contains(
                         visible,
                         selected["skill_tool_use_id"],
@@ -896,12 +914,23 @@ def main() -> int:
                     ),
                     "TUI action identity is not inside the exact Skill receipt block",
                 )
+                receipt_before = exact_receipt_block(
+                    visible, selected["skill_tool_use_id"]
+                )
+                require(
+                    receipt_before is not None, "exact TUI Skill receipt is missing"
+                )
                 screen = page.locator(".xterm-screen")
                 screen.screenshot(path=str(screenshot))
                 after_screenshot = screen_text(page)
                 require(
-                    after_screenshot == visible,
-                    "TUI contents changed while taking the screenshot",
+                    tools_surface_is_connected(after_screenshot),
+                    "TUI Tools surface disconnected while taking the screenshot",
+                )
+                require(
+                    exact_receipt_block(after_screenshot, selected["skill_tool_use_id"])
+                    == receipt_before,
+                    "exact TUI Skill receipt changed while taking the screenshot",
                 )
                 terminal = page.evaluate(
                     "() => ({cols: window.term.cols, rows: window.term.rows})"

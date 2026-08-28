@@ -157,6 +157,36 @@ let test_closed_blocks_are_not_rendered_again () =
     [ "alpha\n"; "alpha\nbeta\n"; "beta\ngamma"; "gamma delta" ]
     (List.rev !calls)
 
+let test_unchanged_growing_snapshot_never_reaches_the_renderer () =
+  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let calls = ref [] in
+  let text = "alpha\nbeta" in
+  let first = render_growing cache calls "entry-a" text in
+  let second = render_growing cache calls "entry-a" text in
+  let third = render_growing cache calls "entry-a" text in
+  check (list string) "hits return the same rows" first second;
+  check (list string) "hits keep returning the same rows" first third;
+  check (list string) "only the first snapshot was parsed"
+    [ text ] (List.rev !calls)
+
+let test_appended_text_parses_only_the_new_suffix () =
+  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let calls = ref [] in
+  let source = Buffer.create 64 in
+  let append chunk =
+    Buffer.add_string source chunk;
+    let text = Buffer.contents source in
+    let actual = render_growing cache calls "entry-a" text in
+    check (list string) ("full rows after " ^ chunk)
+      (full_markdown ~width:40 text) actual
+  in
+  append "settled line\npartial";
+  append " grows";
+  append " further\nnext";
+  check (list string) "each render starts at the previous mutable block"
+    [ "settled line\npartial"; "partial grows"; "partial grows further\nnext" ]
+    (List.rev !calls)
+
 let test_growing_retention_is_bounded_and_recent () =
   let cache = Cache.create ~capacity:2 ~equal:String.equal in
   let calls = ref [] in
@@ -214,6 +244,10 @@ let () =
             test_every_chunk_matches_the_canonical_full_render
         ; test_case "closed blocks are not rendered again" `Quick
             test_closed_blocks_are_not_rendered_again
+        ; test_case "unchanged growing snapshot is not parsed again" `Quick
+            test_unchanged_growing_snapshot_never_reaches_the_renderer
+        ; test_case "appended text parses only the new suffix" `Quick
+            test_appended_text_parses_only_the_new_suffix
         ; test_case "growing retention is bounded and recent" `Quick
             test_growing_retention_is_bounded_and_recent
         ; test_case "growing invalidation resets from the full source" `Quick

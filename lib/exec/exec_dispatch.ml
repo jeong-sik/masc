@@ -127,13 +127,15 @@ let attach_file ~cwd attach ~fd ~target ~mode =
 
 (* A file redirect is carried out by this process, so the path has to name a
    file on this filesystem. Running on the host, the command's namespace is
-   this one. Running in a container it is not, and only a layer that knows the
-   mounts can translate; until it has, the target says so. *)
+   this one. Running in a container or on a remote host it is not, and only a
+   layer that knows the mounts can translate; until it has, the target says
+   so. *)
 let target_is_openable_here ~(sandbox : Sandbox_target.t) target =
   match sandbox, target with
   | _, Redirect_scope.On_this_host _ -> true
   | Sandbox_target.Host, Redirect_scope.In_command_namespace _ -> true
-  | Sandbox_target.Docker _, Redirect_scope.In_command_namespace _ -> false
+  | (Sandbox_target.Docker _ | Sandbox_target.Ssh _), Redirect_scope.In_command_namespace _ ->
+    false
 
 (* A sandbox runner hands back what the container wrote as a string: this
    process never holds the container's pipe, so it cannot give the child a
@@ -310,10 +312,11 @@ let resolve_host_env ?base_host_env = function
 
 (* Dispatch a simple command via the IR-carried Sandbox_target.
 
-   The [Host] case forks/execs through [Process_eio]; the [Docker] case
-   is wired up by [lib/keeper] using a closure over
-   [Keeper_turn_sandbox_runtime].  Which one runs is decided by the
-   keeper's [sandbox_profile] carried on the IR, not by this function. *)
+   The [Host] case forks/execs through [Process_eio]; the [Docker] and [Ssh]
+   cases are wired up by [lib/keeper] using a closure over its own runtime
+   ([Keeper_turn_sandbox_runtime] for Docker, the SSH lane runner for [Ssh]).
+   Which one runs is decided by the keeper's [sandbox_profile] carried on the
+   IR, not by this function. *)
 let process_spec_of_simple (s : Shell_ir.simple) =
   let bin = Exec_program.to_string s.bin in
   let argv = bin :: List.map resolve_arg s.args in
@@ -345,7 +348,7 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
         unsupported_redirect_result (unresolved_target_message target)
       | Some (Redirect_scope.Fd_to_fd _ | Redirect_scope.Literal _) | None ->
         (match s.sandbox with
-         | Docker { runner; _ } ->
+         | Docker { runner; _ } | Ssh { runner; _ } ->
            (* stdin from a file is read here and handed to the runner as
               bytes, for the same reason: the runner takes a string. *)
            let stdin_for_runner =
@@ -465,7 +468,7 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
              }
          | status, stdout, stderr ->
              apply_redirect_plan redirect_plan { status; stdout; stderr })
-      | Docker { runner; _ } ->
+      | Docker { runner; _ } | Ssh { runner; _ } ->
         let on_stdout_chunk, on_stderr_chunk =
           match child_on_output_chunk with
           | None -> None, None
@@ -520,14 +523,17 @@ let host_pipeline_specs ?base_host_env stages =
                  captured text after the run, which a per-stage pipeline has no
                  place to do. Those stay on the existing path. *)
               | Ok _ -> None)
-         | Docker _ -> None)
+         | Docker _ | Ssh _ -> None)
     (* A stage that is itself a pipeline or a sequence needs a subshell,
        which this dispatcher does not spawn. *)
     | (Shell_ir.Pipeline _ | Shell_ir.Sequence _) :: _ -> None
   in
   loop [] stages
 
-let docker_pipeline_specs stages =
+(* The streaming pipeline runner is per sandbox target: every stage must
+   carry the same target value and that target must inject a
+   [pipeline_runner].  Docker and Ssh stages collect identically. *)
+let sandbox_pipeline_specs stages =
   let rec loop pipeline_runner sandbox_target acc = function
     | [] -> Option.map (fun runner -> runner, List.rev acc) pipeline_runner
     | Shell_ir.Simple simple :: rest ->
@@ -537,7 +543,7 @@ let docker_pipeline_specs stages =
           | Some first_target -> simple.sandbox == first_target
         in
         (match simple.sandbox with
-         | Docker { pipeline_runner = Some runner; _ }
+         | Docker { pipeline_runner = Some runner; _ } | Ssh { pipeline_runner = Some runner; _ }
            when simple.redirects = [] && same_sandbox_target ->
              let argv, env, cwd = process_spec_of_simple simple in
              let stage : Sandbox_target.pipeline_stage = { argv; env; cwd } in
@@ -596,7 +602,7 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
               | Ok (status, stdout, stderr) -> { status; stdout; stderr }
               | Error message -> unsupported_redirect_result message)
          | None -> (
-             match docker_pipeline_specs stages with
+             match sandbox_pipeline_specs stages with
              | Some (runner, specs) ->
                  let on_stdout_chunk, on_stderr_chunk =
                    match on_output_chunk with

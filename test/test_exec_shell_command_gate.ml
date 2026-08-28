@@ -400,7 +400,7 @@ let test_sandbox_target_propagates_to_every_stage () =
       (fun (s : Masc_exec.Shell_ir.simple) ->
         match s.sandbox with
         | Masc_exec.Sandbox_target.Host -> ()
-        | Masc_exec.Sandbox_target.Docker _ ->
+        | Masc_exec.Sandbox_target.Docker _ | Masc_exec.Sandbox_target.Ssh _ ->
           Alcotest.fail "expected Host sandbox on every stage")
       context.Gate.stages
   | other ->

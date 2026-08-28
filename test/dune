@@ -887,6 +887,11 @@
  (libraries alcotest astring masc_test_deps eio_main))
 
 (test
+ (name test_exec_dispatch_ssh)
+ (modules test_exec_dispatch_ssh)
+ (libraries masc_test_deps eio_main))
+
+(test
  (name test_process_file_redirects)
  (modules test_process_file_redirects)
  (libraries alcotest astring masc_test_deps eio_main))

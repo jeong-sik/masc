@@ -451,6 +451,54 @@ let test_answering_outlives_the_build_fact () =
   check_bool "the build fact went first" false (contains ~needle:"9.9.9" narrow);
   check_bool "answering stayed" true (contains ~needle:"answering" narrow)
 
+(* A substring test without a new library dependency for one check. *)
+let contains ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec loop i = i + n <= h && (String.sub haystack i n = needle || loop (i + 1)) in
+  n = 0 || loop 0
+;;
+
+(* When even the hints do not fit, the footer says where the rest of them
+   are. [~] alone reports a cut and stops; a reader cannot tell whether one
+   key is hidden or six, and the keys past the cut have no other way of being
+   found on that surface.
+
+   [?] opens the sheet, and it puts the reader's own surface first, so what
+   was cut is the first thing on the next screen. *)
+let test_cut_hints_name_the_key_that_shows_them () =
+  let hints =
+    "j/k:move  right/Enter:read  s:sort  Y:copy link  v/V:vote  w:write  \
+     r:refresh  Tab:next  q:quit"
+  in
+  let line =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:40 ~port:8935 ~hints ()
+  in
+  let body = String.trim line in
+  Alcotest.(check bool)
+    "the cut is still marked" true
+    (contains ~needle:"\xe2\x80\xa6" body);
+  Alcotest.(check bool)
+    "and it names the key that shows the rest" true
+    (String.length body > 0 && body.[String.length body - 1] = '?');
+  check_at_most_cells "the pointer stays inside the width" 40 body
+;;
+
+(* A footer wide enough for its hints gains nothing and must not pay for it:
+   the pointer exists to answer a question a full line does not raise. *)
+let test_hints_that_fit_are_left_alone () =
+  let hints = "j/k:move  q:quit" in
+  let line =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:120 ~port:8935 ~hints ()
+  in
+  Alcotest.(check bool)
+    "no cut mark" false
+    (contains ~needle:"\xe2\x80\xa6" line);
+  Alcotest.(check bool)
+    "and no pointer" false
+    (String.contains line '?')
+;;
+
+
 let tests =
   [ ( "tui-footer-status-items"
     , [ Alcotest.test_case "port closes every footer" `Quick
@@ -495,6 +543,10 @@ let tests =
           test_build_mismatch_is_silent_without_testimony
       ; Alcotest.test_case "answering outlives the build fact" `Quick
           test_answering_outlives_the_build_fact
+      ; Alcotest.test_case "cut hints name the key that shows them" `Quick
+          test_cut_hints_name_the_key_that_shows_them
+      ; Alcotest.test_case "hints that fit are left alone" `Quick
+          test_hints_that_fit_are_left_alone
       ] )
   ]
 

@@ -117,16 +117,46 @@ export type SkillSurfaceProfile = Omit<SkillProfile, 'reference' | 'kind'>
 export interface SkillEvidenceCoverage {
   composition_scope: 'exact_reference_latest_completed' | 'unavailable'
   composition_records_read: number
+  composition_unavailable: readonly string[]
   coverage_complete: false
-  activation_scope: 'current_keeper_sessions'
+  activation_scope:
+    | 'complete_retained_trace_snapshot'
+    | 'incomplete_retained_trace_snapshot'
+    | 'trace_store_unavailable'
+  activation_sessions_inspected: number
   activation_ledgers_loaded: number
-  unavailable: readonly string[]
+  activation_gaps: readonly Record<string, unknown>[]
+  activation_owner_gap_count: number
+}
+
+export interface SkillActivationOwnerClaim {
+  keeper: string
+  source: 'current_meta' | 'trace_history' | 'runtime_manifest'
+}
+
+export interface SkillActivationOwner {
+  status:
+    | 'known'
+    | 'not_claimed_in_retained_catalog'
+    | 'conflicting'
+    | 'incomplete'
+    | 'catalog_unavailable'
+  claims: readonly SkillActivationOwnerClaim[]
+  gaps: readonly Record<string, unknown>[]
 }
 
 export interface SkillActivationEvidence {
-  keeper: string
+  trace_id: string
+  owner: SkillActivationOwner
   activation: Record<string, unknown>
 }
+
+export type SkillActivationSelection =
+  | { selection: 'most_recent_observed'; evidence: SkillActivationEvidence }
+  | {
+      selection: 'most_recent_observed_timestamp_tie'
+      evidence: readonly SkillActivationEvidence[]
+    }
 
 export interface SkillCompositionEvidence {
   schema: 'masc.skill-composition-evidence/v1'
@@ -145,10 +175,10 @@ export interface SkillCompositionEvidence {
 }
 
 export interface SkillEvidenceResponse {
-  schema: 'masc.skill-evidence/v4'
-  status: 'observed' | 'not_observed_in_current_coverage'
+  schema: 'masc.skill-evidence/v5'
+  status: 'observed' | 'not_observed_in_retained_coverage'
   reference: SkillReference
-  activation: SkillActivationEvidence | null
+  activation: SkillActivationSelection | null
   composition: SkillCompositionEvidence | null
   coverage: SkillEvidenceCoverage
 }
@@ -399,13 +429,53 @@ const CompositionNodeSchema = Schema.Struct({
 })
 
 const SkillEvidenceResponseSchema = Schema.Struct({
-  schema: Schema.Literal('masc.skill-evidence/v4'),
-  status: Schema.Literal('observed', 'not_observed_in_current_coverage'),
+  schema: Schema.Literal('masc.skill-evidence/v5'),
+  status: Schema.Literal('observed', 'not_observed_in_retained_coverage'),
   reference: SkillReferenceSchema,
-  activation: Schema.NullOr(Schema.Struct({
-    keeper: Schema.NonEmptyString,
-    activation: UnknownRecordSchema,
-  })),
+  activation: Schema.NullOr(Schema.Union(
+    Schema.Struct({
+      selection: Schema.Literal('most_recent_observed'),
+      evidence: Schema.Struct({
+        trace_id: Schema.NonEmptyString,
+        owner: Schema.Struct({
+          status: Schema.Literal(
+            'known',
+            'not_claimed_in_retained_catalog',
+            'conflicting',
+            'incomplete',
+            'catalog_unavailable',
+          ),
+          claims: Schema.Array(Schema.Struct({
+            keeper: Schema.NonEmptyString,
+            source: Schema.Literal('current_meta', 'trace_history', 'runtime_manifest'),
+          })),
+          gaps: Schema.Array(UnknownRecordSchema),
+        }),
+        activation: UnknownRecordSchema,
+      }),
+    }),
+    Schema.Struct({
+      selection: Schema.Literal('most_recent_observed_timestamp_tie'),
+      evidence: Schema.Array(Schema.Struct({
+        trace_id: Schema.NonEmptyString,
+        owner: Schema.Struct({
+          status: Schema.Literal(
+            'known',
+            'not_claimed_in_retained_catalog',
+            'conflicting',
+            'incomplete',
+            'catalog_unavailable',
+          ),
+          claims: Schema.Array(Schema.Struct({
+            keeper: Schema.NonEmptyString,
+            source: Schema.Literal('current_meta', 'trace_history', 'runtime_manifest'),
+          })),
+          gaps: Schema.Array(UnknownRecordSchema),
+        }),
+        activation: UnknownRecordSchema,
+      })),
+    }),
+  )),
   composition: Schema.NullOr(Schema.Struct({
     schema: Schema.Literal('masc.skill-composition-evidence/v1'),
     reference: SkillReferenceSchema,
@@ -427,10 +497,17 @@ const SkillEvidenceResponseSchema = Schema.Struct({
       'unavailable',
     ),
     composition_records_read: NonNegativeSafeIntegerSchema,
+    composition_unavailable: Schema.Array(Schema.String),
     coverage_complete: Schema.Literal(false),
-    activation_scope: Schema.Literal('current_keeper_sessions'),
+    activation_scope: Schema.Literal(
+      'complete_retained_trace_snapshot',
+      'incomplete_retained_trace_snapshot',
+      'trace_store_unavailable',
+    ),
+    activation_sessions_inspected: NonNegativeSafeIntegerSchema,
     activation_ledgers_loaded: NonNegativeSafeIntegerSchema,
-    unavailable: Schema.Array(Schema.String),
+    activation_gaps: Schema.Array(UnknownRecordSchema),
+    activation_owner_gap_count: NonNegativeSafeIntegerSchema,
   }),
 })
 
@@ -743,6 +820,42 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
   if ((decoded.status === 'observed') !== observed) {
     contractError('invalid_response', 'skill evidence status disagrees with its observations')
   }
+  const activationEvidence = decoded.activation === null
+    ? []
+    : decoded.activation.selection === 'most_recent_observed'
+      ? [decoded.activation.evidence]
+      : decoded.activation.evidence
+  if (decoded.activation?.selection === 'most_recent_observed_timestamp_tie'
+    && activationEvidence.length < 2) {
+    contractError('invalid_response', 'activation timestamp tie requires at least two traces')
+  }
+  let ownerGapCount = 0
+  for (const evidence of activationEvidence) {
+    const { status, claims, gaps } = evidence.owner
+    const ownerAgrees = status === 'known'
+      ? claims.length === 1 && gaps.length === 0
+      : status === 'not_claimed_in_retained_catalog'
+        ? claims.length === 0 && gaps.length === 0
+        : status === 'conflicting'
+          ? claims.length >= 2 && gaps.length === 0
+          : status === 'incomplete'
+            ? gaps.length > 0
+            : claims.length === 0 && gaps.length > 0
+    if (!ownerAgrees) {
+      contractError('invalid_response', 'activation owner status disagrees with claims or gaps')
+    }
+    const identity = isRecord(evidence.activation.identity)
+      ? evidence.activation.identity
+      : null
+    if (identity === null
+      || identity.source_id !== decoded.reference.identity.source_id
+      || identity.package_id !== decoded.reference.identity.package_id
+      || identity.name !== decoded.reference.identity.name
+      || evidence.activation.content_revision !== decoded.reference.content_revision) {
+      contractError('invalid_response', 'activation reference disagrees with evidence envelope')
+    }
+    ownerGapCount += gaps.length
+  }
   if (decoded.composition !== null) {
     if (referenceKey(decoded.composition.reference) !== referenceKey(decoded.reference)) {
       contractError('invalid_response', 'composition reference disagrees with evidence envelope')
@@ -775,9 +888,21 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
   const { composition_scope: scope, composition_records_read: read } = decoded.coverage
   const coverageAgrees = scope === 'exact_reference_latest_completed'
     ? (decoded.composition === null ? read === 0 : read === 1)
-    : decoded.composition === null && read === 0 && decoded.coverage.unavailable.length > 0
+    : decoded.composition === null
+      && read === 0
+      && decoded.coverage.composition_unavailable.length > 0
   if (!coverageAgrees) {
     contractError('invalid_response', 'composition coverage disagrees with its record')
+  }
+  const coverage = decoded.coverage
+  const activationCoverageAgrees = coverage.activation_ledgers_loaded
+      <= coverage.activation_sessions_inspected
+    && coverage.activation_owner_gap_count === ownerGapCount
+    && (coverage.activation_scope === 'complete_retained_trace_snapshot'
+      ? coverage.activation_gaps.length === 0
+      : coverage.activation_gaps.length > 0)
+  if (!activationCoverageAgrees) {
+    contractError('invalid_response', 'activation coverage disagrees with retained snapshot')
   }
   return decoded
 }

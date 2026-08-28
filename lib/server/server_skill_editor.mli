@@ -27,8 +27,7 @@ type loaded = private
   }
 
 type preview = private
-  { reference : Skill_reference.t
-  ; profile : Keeper_skill_observability.profile
+  { profile : Keeper_skill_observability.profile
   ; diagnostics : string list
   }
 

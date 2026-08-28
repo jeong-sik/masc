@@ -2087,9 +2087,9 @@ let decode_skill_activation_projection json =
 (* ── Workspace skills catalog (/api/v1/skills) ─────────────────────
    The dashboard renders the full surface set; the TUI Tools screen reads
    per-skill usage rows (cross-keeper tracking) and reuses the skill_flow
-   decoder the effective-surface profiles already share. Usage is absent
-   while the ledger side is warming, so [usage]/[profile] decode as
-   empty/None rather than failing the whole catalog. *)
+   decoder the effective-surface profiles already share. Usage may be absent
+   while the ledger side is warming. A valid instruction/composition surface
+   always carries its profile; only an unavailable surface has none. *)
 
 type skill_usage_row =
   { su_keeper : string
@@ -2127,16 +2127,20 @@ let decode_skills_catalog_surface json =
   let* usage_json = optional_list_field json "usage" in
   let* scs_usage = decode_list "usage" decode_skill_usage_row usage_json in
   let* scs_flow =
-    match member "profile" json with
-    | `Assoc _ as profile ->
+    match scs_kind, member "profile" json with
+    | ("instruction" | "composition"), (`Assoc _ as profile) ->
         let* flow_field = required_member profile "flow" in
         (match flow_field with
          | `Null -> Ok None
          | `Assoc _ as flow ->
              decode_skill_flow flow |> Result.map Option.some
          | bad -> field_type_error "profile.flow" "an object or null" bad)
-    | `Null -> Ok None
-    | bad -> field_type_error "profile" "an object or null" bad
+    | ("instruction" | "composition"), bad ->
+      field_type_error "profile" "an object" bad
+    | "unavailable", `Null -> Ok None
+    | "unavailable", bad -> field_type_error "profile" "absent" bad
+    | unknown, _ ->
+      Error (Printf.sprintf "skills surface kind has unknown value %S" unknown)
   in
   Ok { scs_name; scs_kind; scs_usage; scs_flow }
 

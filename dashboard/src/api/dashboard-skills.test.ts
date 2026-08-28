@@ -89,10 +89,6 @@ const editorProfile = {
 }
 
 const editorPreview = {
-  reference: {
-    ...reference,
-    content_revision: 'b'.repeat(64),
-  },
   profile: {
     ...editorProfile,
     reference: {
@@ -118,6 +114,12 @@ describe('existing Skill editor contract', () => {
       status: 'valid',
       preview: editorPreview,
     })).toEqual(editorPreview)
+
+    expect(() => decodeSkillEditorPreview({
+      ok: true,
+      status: 'valid',
+      preview: { ...editorPreview, reference },
+    })).toThrow(SkillsContractError)
 
     expect(decodeSkillEditorSaveReceipt({
       status: 'saved_and_published',

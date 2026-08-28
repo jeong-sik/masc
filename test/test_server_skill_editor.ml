@@ -99,12 +99,12 @@ let test_load_preview_and_publish () =
      check string "instruction profile" "instruction" preview.profile.kind;
      check int "body remains deferred" 0 preview.profile.eager_body_bytes;
      check bool "candidate revision changes" false
-       (Skill_reference.equal reference preview.reference));
+       (Skill_reference.equal reference preview.profile.reference));
   (match Editor.save ~base_path ~reference ~source_text:edited ~refresh with
    | Error error -> fail (Editor.error_to_string error)
    | Ok (Editor.Saved_and_published { preview; _ }) ->
      check bool "new exact reference" false
-       (Skill_reference.equal reference preview.reference)
+       (Skill_reference.equal reference preview.profile.reference)
    | Ok (Unchanged _ | Saved_but_unpublished _) ->
      fail "edited Skill was not saved and published");
   let persisted =

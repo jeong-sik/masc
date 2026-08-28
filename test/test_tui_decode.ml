@@ -1506,9 +1506,9 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
     else `Null
   in
   let profile_json =
-    if flow then
-      `Assoc
-        [ ( "flow",
+    `Assoc
+      [ ( "flow",
+          if flow then
             `Assoc
               [ ( "nodes",
                   `List
@@ -1528,11 +1528,11 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
                         ; ("execution_mode", `String "serial")
                         ; ("node_ids", `List [ `String "fetch" ])
                         ] ] )
-              ] )
-        ; ("plan", `Assoc [])
-        ; ("context", `Assoc [])
-        ]
-    else `Null
+              ]
+          else `Null )
+      ; ("plan", `Assoc [])
+      ; ("context", `Assoc [])
+      ]
   in
   `Assoc
     [ ("schema", `String "masc.skill-snapshot/v1")
@@ -1590,15 +1590,14 @@ let test_decode_skills_catalog_reads_usage_and_flow () =
        | surfaces ->
            Alcotest.failf "expected one surface, got %d" (List.length surfaces))
 
-(* The ledger side warms independently of the catalog: a surface may answer
-   with null usage and no profile before any keeper has run it. That must
-   read as "tracked but unused", not fail the whole catalog. *)
-let test_decode_skills_catalog_tolerates_warming_nulls () =
+(* The ledger side warms independently of the catalog. Usage may be empty, but
+   the exact surface profile remains the capability authority. *)
+let test_decode_skills_catalog_tolerates_empty_usage_and_flow () =
   match
     Tui_decode.decode_skills_catalog
       (skills_catalog_json ~usage:false ~flow:false ())
   with
-  | Error err -> Alcotest.failf "decode failed on warming nulls: %s" err
+  | Error err -> Alcotest.failf "decode failed on empty usage/flow: %s" err
   | Ok catalog ->
       (match catalog.Tui_decode.sc_surfaces with
        | [ surface ] ->
@@ -5085,8 +5084,8 @@ let () =
       [
         Alcotest.test_case "reads usage rows and the execution flow" `Quick
           test_decode_skills_catalog_reads_usage_and_flow;
-        Alcotest.test_case "tolerates warming null usage and profile" `Quick
-          test_decode_skills_catalog_tolerates_warming_nulls;
+        Alcotest.test_case "keeps the profile while usage and flow are empty" `Quick
+          test_decode_skills_catalog_tolerates_empty_usage_and_flow;
         Alcotest.test_case "rejects a non-string kind" `Quick
           test_decode_skills_catalog_rejects_a_wrong_kind_type;
       ] );

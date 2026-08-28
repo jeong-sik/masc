@@ -20,8 +20,7 @@ type loaded =
   }
 
 type preview =
-  { reference : Skill_reference.t
-  ; profile : Keeper_skill_observability.profile
+  { profile : Keeper_skill_observability.profile
   ; diagnostics : string list
   }
 
@@ -291,8 +290,7 @@ let validate_candidate target reference source_text =
         ~content_revision:(Skill_reference.content_revision_of_source_text source_text)
     in
     Ok
-      { reference = candidate_reference
-      ; profile =
+      { profile =
           Keeper_skill_observability.of_skill_with_reference candidate_reference skill
       ; diagnostics = diagnostics_of_conformance skill.conformance
       }
@@ -367,7 +365,9 @@ let save ~base_path ~reference ~source_text ~refresh =
                 | Error reason -> Ok (Saved_but_unpublished { preview; reason })
                 | Ok snapshot ->
                   (match
-                     Skill_catalog_snapshot.resolve_reference snapshot preview.reference
+                     Skill_catalog_snapshot.resolve_reference
+                       snapshot
+                       preview.profile.reference
                    with
                    | Error _ ->
                      Ok
@@ -459,8 +459,7 @@ let preview_new ~source_id ~package_id source_text =
           ~content_revision:(Skill_reference.content_revision_of_source_text source_text)
       in
       Ok
-        { reference
-        ; profile = Keeper_skill_observability.of_skill_with_reference reference skill
+        { profile = Keeper_skill_observability.of_skill_with_reference reference skill
         ; diagnostics = diagnostics_of_conformance skill.conformance
         }
 ;;
@@ -529,7 +528,11 @@ let create ~base_path ~source_id ~package_id ~source_text ~refresh =
            (match published_snapshot publication with
             | Error reason -> Ok (Created_but_unpublished { preview; reason })
             | Ok published ->
-              (match Skill_catalog_snapshot.resolve_reference published preview.reference with
+              (match
+                 Skill_catalog_snapshot.resolve_reference
+                   published
+                   preview.profile.reference
+               with
                | Ok _ ->
                  Ok
                    (Created_and_published
@@ -913,8 +916,7 @@ end
 
 let preview_to_yojson (preview : preview) =
   `Assoc
-    [ "reference", Skill_reference.to_yojson preview.reference
-    ; "profile", Keeper_skill_observability.to_yojson preview.profile
+    [ "profile", Keeper_skill_observability.to_yojson preview.profile
     ; "diagnostics", `List (List.map (fun value -> `String value) preview.diagnostics)
     ]
 ;;

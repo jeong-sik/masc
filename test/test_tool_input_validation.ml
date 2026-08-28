@@ -265,7 +265,22 @@ let test_extra_fields_allowed () =
    while the schema said `{"type":"object"}`, so a malformed template reached
    the executor and failed there. Stated in the schema, it is refused at the
    boundary. *)
-let plan_schema = Masc.Keeper_tool_composition_surface.plan_execute_input_schema
+let plan_schema = Masc.Keeper_tool_plan_request.input_schema
+
+let test_plan_surface_publishes_request_schema () =
+  let published =
+    Masc.Keeper_tool_composition_surface.schema_tool_rows ()
+    |> List.find_map (fun (origin, (tool : Agent_core.Tool.t)) ->
+      match origin with
+      | Masc.Keeper_tool_composition_surface.Plan_execute ->
+        tool.schema.input_schema
+      | _ -> None)
+  in
+  Alcotest.(check (option string))
+    "keeper_plan_execute publishes the request parser schema"
+    (Some (Yojson.Safe.to_string plan_schema))
+    (Option.map Yojson.Safe.to_string published)
+;;
 
 let plan_args input =
   `Assoc
@@ -2516,5 +2531,9 @@ let () =
         test_oneof_null_const_matches_null_branch;
       Alcotest.test_case "null const: non-null branch matches" `Quick
         test_oneof_null_const_matches_non_null_branch;
+    ]);
+    ("plan_request_schema", [
+      Alcotest.test_case "plan tool publishes request schema" `Quick
+        test_plan_surface_publishes_request_schema;
     ]);
   ]

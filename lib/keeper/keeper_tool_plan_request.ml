@@ -43,6 +43,93 @@ type error =
 
 let kind_name = Json_util.kind_name
 
+let input_schema =
+  let node_schema =
+    `Assoc
+      [ "type", `String "object"
+      ; ( "properties"
+        , `Assoc
+            [ "id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+            ; "tool", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+            ; ( "after"
+              , `Assoc
+                  [ "type", `String "array"
+                  ; "items", `Assoc [ "type", `String "string" ]
+                  ] )
+              (* The four template shapes were spelled out in the tool's
+                 description because the schema said only "object". A reader
+                 had to learn them from prose while the validator knew them
+                 exactly. Stating them here puts the shape where a model
+                 reads structure rather than prose. It does not make them
+                 enforced: [validate_args] descends no further than the
+                 top-level schema, so [Keeper_tool_plan] is still what refuses
+                 a malformed template. Recursive shapes are named
+                 through [$ref] so [object] and [array] can hold any input. *)
+            ; ( "input"
+              , `Assoc
+                  [ "type", `String "object"
+                  ; ( "oneOf"
+                    , `List
+                        [ `Assoc
+                            [ "required", `List [ `String "kind"; `String "value" ]
+                            ; ( "properties"
+                              , `Assoc
+                                  [ ( "kind"
+                                    , `Assoc
+                                        [ "const", `String "literal" ] )
+                                  ] )
+                            ]
+                        ; `Assoc
+                            [ ( "required"
+                              , `List
+                                  [ `String "kind"
+                                  ; `String "node"
+                                  ; `String "pointer"
+                                  ] )
+                            ; ( "properties"
+                              , `Assoc
+                                  [ "kind", `Assoc [ "const", `String "output" ]
+                                  ; "node", `Assoc [ "type", `String "string" ]
+                                  ; ( "pointer"
+                                    , `Assoc [ "type", `String "string" ] )
+                                  ] )
+                            ]
+                        ; `Assoc
+                            [ ( "required"
+                              , `List [ `String "kind"; `String "fields" ] )
+                            ; ( "properties"
+                              , `Assoc
+                                  [ "kind", `Assoc [ "const", `String "object" ]
+                                  ; ( "fields"
+                                    , `Assoc [ "type", `String "array" ] )
+                                  ] )
+                            ]
+                        ; `Assoc
+                            [ ( "required"
+                              , `List [ `String "kind"; `String "items" ] )
+                            ; ( "properties"
+                              , `Assoc
+                                  [ "kind", `Assoc [ "const", `String "array" ]
+                                  ; ( "items"
+                                    , `Assoc [ "type", `String "array" ] )
+                                  ] )
+                            ]
+                        ] )
+                  ] )
+            ] )
+      ; "required", `List [ `String "id"; `String "tool" ]
+      ; "additionalProperties", `Bool false
+      ]
+  in
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc [ "nodes", `Assoc [ "type", `String "array"; "items", node_schema ] ] )
+    ; "required", `List [ `String "nodes" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
 let template_error_message = function
   | Template_not_an_object { found } ->
     Printf.sprintf "input template must be an object, found %s" found

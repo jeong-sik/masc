@@ -86,7 +86,7 @@ slots = ["deepseek.deepseek-v4-pro", "glm-coding.glm-5-turbo"]
 # "<name>" in its keeper TOML; the name must resolve to one of these tables
 # (unknown names are config-load errors, and unknown keys inside a table fail
 # the load — the registry is fail-closed). No live endpoint ships in the seed;
-# provision one with the exec-ssh bootstrap runbook, then uncomment.
+# provision one with docs/operations/ssh-endpoints-runbook.md, then uncomment.
 #
 # [exec.ssh.endpoints.dev]
 # host = "builder.local"              # required — remote host

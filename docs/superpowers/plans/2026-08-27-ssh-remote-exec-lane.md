@@ -655,11 +655,11 @@ let test_denylist_beats_allowlist () =
 - Create: `docs/operations/ssh-endpoints-runbook.md` — endpoint provisioning (bootstrap tool), fingerprint confirmation ritual, shim upgrade procedure, keeper migration steps (`sandbox_profile = "remote_ssh"` + `remote_endpoint`), failure-mode table (every named error → meaning → operator action)
 - Modify: `AGENTS.md` + any nested `AGENTS.md` whose sandbox/exec conventions changed; `config/runtime.toml` example cross-reference
 
-- [ ] **Step 1: Write the RFC** — context (Phase 0 gate shipped), decision (SSH lane as the universal remote transport; microVM = config change in Phase 2), alternatives (mTLS+HTTP executor, gRPC stream — why pinned OpenSSH wins: battle-tested auth/encryption, zero new listening service), consequences.
+- [x] **Step 1: Write the RFC** — context (Phase 0 gate shipped), decision (SSH lane as the universal remote transport; microVM = config change in Phase 2), alternatives (mTLS+HTTP executor, gRPC stream — why pinned OpenSSH wins: battle-tested auth/encryption, zero new listening service), consequences.
 
-- [ ] **Step 2: Write the runbook** — every named error string from Tasks 1-9 appears in the failure-mode table (grep the diff for `remote_ssh_` to enumerate them; the table must be complete).
+- [x] **Step 2: Write the runbook** — every named error string from Tasks 1-9 appears in the failure-mode table (grep the diff for `remote_ssh_` to enumerate them; the table must be complete).
 
-- [ ] **Step 3: AGENTS.md sweep** — update sandbox profile conventions; document the fixture-gated test (`MASC_TEST_SSH_FIXTURE`) and the static shim build.
+- [x] **Step 3: AGENTS.md sweep** — no MASC-owned `AGENTS.md` exists in this repository; the parent personal-workspace file is not part of the MASC source/PR authority. The fixture gate and static shim build are documented in the MASC-owned runbook instead.
 
 - [ ] **Step 4: Commit** — `docs: RFC-0395 SSH remote exec lane + operator runbook`
 

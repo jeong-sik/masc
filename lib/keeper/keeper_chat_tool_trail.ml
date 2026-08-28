@@ -169,12 +169,41 @@ let shorten s =
    that read a specific agent's timeline looked the same as one that read
    anything else. An empty object is the one case that legitimately says
    nothing, and [value_text] already answers [None] for it. *)
+(* Objects whose own subject is one level down. [keeper_skill] takes an
+   [identity] of {source_id, package_id, name}, and the whole-object fallback
+   below spends the 72-cell budget on the envelope: the [name] value starts
+   around byte 75 and is never reached, so two skills from one source read
+   alike. Descending one level names the skill instead.
+
+   Keys, not tool names, like the list above -- and the same shape
+   [Tool_input_path.nested_object_keys] already uses for the same job. *)
+let nested_subject_keys = [ "identity"; "reference"; "arguments"; "args" ]
+
+(* Inside one of those, [name] is the subject. It is deliberately not in
+   [subject_keys] above: seventeen tools declare a top-level [name] parameter
+   and promoting it there would rename their rows too. One level down, inside
+   an identity, the word means the one thing. *)
+let nested_first_keys = [ "name" ]
+
 let subject_of_assoc fields =
-  match
+  let direct =
     List.find_map
       (fun key -> Option.bind (List.assoc_opt key fields) value_text)
       subject_keys
-  with
+  in
+  let nested () =
+    List.find_map
+      (fun key ->
+        match List.assoc_opt key fields with
+        | Some (`Assoc inner) ->
+          List.find_map
+            (fun inner_key ->
+              Option.bind (List.assoc_opt inner_key inner) value_text)
+            (nested_first_keys @ subject_keys)
+        | Some _ | None -> None)
+      nested_subject_keys
+  in
+  match (match direct with Some _ as found -> found | None -> nested ()) with
   | Some subject -> Some (shorten subject)
   | None ->
     (* Fields that carry no text are dropped first, so a blank value cannot

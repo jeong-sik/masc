@@ -253,8 +253,44 @@ describe('toolSubject', () => {
     expect(out!.length).toBeLessThanOrEqual(72)
   })
 
-  it('returns null when no known key is present, so the caller can fall back', () => {
-    expect(toolSubject({ include_done: true, if_revision: 12 })).toBeNull()
+  it('reaches a nested identity, so two skills from one source read apart', () => {
+    expect(
+      toolSubject({
+        identity: {
+          source_id: 'project-masc',
+          package_id: 'masc-keeper-autonomy',
+          name: 'turn-opening',
+        },
+        content_revision: 'a1b2c3',
+      }),
+    ).toBe('turn-opening')
+    expect(
+      toolSubject({
+        identity: {
+          source_id: 'project-masc',
+          package_id: 'masc-keeper-autonomy',
+          name: 'work-intake',
+        },
+      }),
+    ).toBe('work-intake')
+  })
+
+  it('lets a direct key outrank a nested one', () => {
+    expect(
+      toolSubject({ file_path: 'lib/a.ml', identity: { name: 'turn-opening' } }),
+    ).toBe('lib/a.ml')
+  })
+
+  // This asserted toBeNull() on { include_done, if_revision } while the OCaml
+  // side asserted the whole object for the same input -- two implementations
+  // of one rule, pinned in opposite directions by their own tests, with no
+  // drift guard between them. The OCaml behaviour is the one that was chosen
+  // deliberately: a row with no known key used to scroll back saying only
+  // that some tool ran.
+  it('names a row by its arguments when no known key is present', () => {
+    expect(toolSubject({ include_done: true, if_revision: 12 })).toBe(
+      '{"include_done":true,"if_revision":12}',
+    )
     expect(toolSubject({})).toBeNull()
     expect(toolSubject(undefined)).toBeNull()
     expect(toolSubject('')).toBeNull()

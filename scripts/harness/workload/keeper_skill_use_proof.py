@@ -849,9 +849,9 @@ def capture_dashboard(
     }
 
 
-def write_json(path: Path, value: Any) -> bytes:
+def write_json(path: Path, value: Any, *, sort_keys: bool = True) -> bytes:
     payload = (
-        json.dumps(value, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+        json.dumps(value, indent=2, ensure_ascii=False, sort_keys=sort_keys) + "\n"
     ).encode()
     path.write_bytes(payload)
     return payload
@@ -929,7 +929,9 @@ def main() -> int:
         encoding="utf-8",
     )
     health_file = write_json(args.out / "health.json", health)
-    dashboard_file = write_json(args.out / "dashboard-tools.json", dashboard)
+    dashboard_file = write_json(
+        args.out / "dashboard-tools.json", dashboard, sort_keys=False
+    )
     (args.out / "skill-activations.json").write_bytes(durable_raw)
     (args.out / "tui-build-evidence.json").write_bytes(tui_build_raw)
     copied_tui = args.out / "masc_tui.exe"

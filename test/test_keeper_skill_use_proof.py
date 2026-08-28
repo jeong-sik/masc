@@ -674,6 +674,17 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         ):
             proof.decode_json(b'{"ledger":{},"ledger":{}}', "fixture")
 
+    def test_dashboard_artifact_preserves_ledger_revision_field_order(self):
+        _, dashboard, ledger = fixture()
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "dashboard-tools.json"
+            payload = proof.write_json(path, dashboard, sort_keys=False)
+
+        decoded = proof.decode_json(payload, "dashboard fixture")
+        projection = decoded["skill_activations"]["ledger"]
+        self.assertEqual(projection, ledger)
+        self.assertEqual(projection["revision"], proof.ledger_revision(projection))
+
     def test_accepts_call_id_action_identity(self):
         health, dashboard, ledger = fixture()
         ledger["activations"][0]["actions"][0]["identity"] = {

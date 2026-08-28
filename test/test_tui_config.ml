@@ -118,10 +118,28 @@ let io_cases =
             check_opt "none" None (Config.theme ~base_path:base)))
   ]
 
+(* Whether footers spell their hints, [tui].hints_visible. Absence must read
+   as "yes": the hints predate the key, and a reader who never set it sees
+   no change. *)
+let hints_of s = Config.hints_visible_of_doc (doc_of s)
+let check_hints = Alcotest.(check (option bool))
+
+let hints_cases =
+  [ Alcotest.test_case "reads [tui] hints_visible" `Quick (fun () ->
+        check_hints "false" (Some false)
+          (hints_of "[tui]\nhints_visible = false\n"))
+  ; Alcotest.test_case "on reads through as on" `Quick (fun () ->
+        check_hints "true" (Some true)
+          (hints_of "[tui]\nhints_visible = true\n"))
+  ; Alcotest.test_case "absent key -> None (renderer defaults to on)" `Quick
+      (fun () -> check_hints "none" None (hints_of "[tui]\ntheme = \"x\"\n"))
+  ]
+
 let () =
   Alcotest.run "tui_config"
     [ ("theme_of_doc", cases)
     ; ("table_frame_of_doc", frame_cases)
     ; ( "lift_colours", lift_cases )
+    ; ("hints_visible_of_doc", hints_cases)
     ; ("theme_io", io_cases)
     ]

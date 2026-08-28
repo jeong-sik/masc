@@ -62,3 +62,17 @@ let table_frame ~base_path =
   match doc_of_path (runtime_toml_path ~base_path) with
   | None -> None
   | Some doc -> table_frame_of_doc doc
+
+(* Whether footers spell their key hints, [tui].hints_visible. Absent reads
+   as "yes" -- the hints predate the key, and a reader who never set it must
+   see no change. Off trades the hint text for status room: the tail
+   (port, build, worktree/generation warnings) gets the whole row, and a
+   long hint list stops being cell-truncated. "?:help" stays, because the
+   reader who turned hints off still needs the door back. *)
+let hints_visible_of_doc doc =
+  Keeper_toml_loader.toml_bool_opt doc "tui.hints_visible"
+
+let hints_visible ~base_path =
+  match doc_of_path (runtime_toml_path ~base_path) with
+  | None -> None
+  | Some doc -> hints_visible_of_doc doc

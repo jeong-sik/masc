@@ -7928,6 +7928,11 @@ let main () =
   set_table_frame
     (Option.value (Masc_tui_config.table_frame ~base_path) ~default:false);
 
+  (* Same file, same moment. Absent reads as on -- the hints predate the
+     key, and a reader who never set it sees no change. *)
+  state.hints_visible <-
+    Option.value (Masc_tui_config.hints_visible ~base_path) ~default:true;
+
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
   (* Read beside [old_term] because the record cannot carry it. The literal-next
@@ -9377,6 +9382,10 @@ and is loaded on demand through keeper_skill.
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
+       | Some k when state.help_open && k = "h" ->
+           (* Session toggle; the persistent form is [tui].hints_visible in
+              runtime.toml, named on the help sheet itself. *)
+           state.hints_visible <- not state.hints_visible
        | Some k when state.help_open ->
            (match k with
             | "?" | "esc" ->

@@ -285,24 +285,17 @@ let warn_rejected_exact_output_slots registry =
        (String.concat ", " lanes))
 ;;
 
-let warn_catalog_absent_keeper_assignments resolver_snapshot =
-  let absent =
-    Runtime_exact_output_registry.catalog_absent_assignments
-      resolver_snapshot
-      ~assignments:(Runtime.keeper_assignments ())
-  in
-  (* An assignment whose target left the catalog does not fail anything —
-     the keeper silently falls back to the default runtime — so without this
-     line nothing names it. Three keepers ran that way for days
-     (2026-08-28). *)
-  (match absent with
-   | [] -> ()
-   | absent ->
-     Log.Server.error
-       "runtime: %d keeper assignment(s) target absent-from-catalog runtime(s): %s — these keepers silently run on the default runtime; update [runtime.assignments]"
-       (List.length absent)
-       (String.concat ", "
-          (List.map (fun (keeper, target) -> keeper ^ " -> " ^ target) absent)))
+(* Retracted (2026-08-28, hours after #31445): the classifier reuses
+   Exact_output.admit_target_ref, whose authority is exact-output LANE
+   admission. Keeper turn assignments resolve through a different path —
+   the [runtime] provider/model bindings — and keepers flagged by the
+   catalog predicate (codex_subscription.gpt-5.6-luna, ollama_cloud
+   targets, …) were measured running on exactly their assigned runtimes
+   the same day. The boot ERROR named ten false positives before it was
+   pulled. A correct assignment-liveness check must read the binding
+   resolver, not the frozen catalog. *)
+
+let warn_catalog_absent_keeper_assignments _resolver_snapshot = ()
 ;;
 
 let warn_rejected_exact_output_bindings resolver_snapshot =

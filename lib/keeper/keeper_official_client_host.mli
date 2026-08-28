@@ -257,6 +257,26 @@ val with_run_lifecycle_events :
     Official clients own their internal model loop, so this host boundary is
     the single MASC owner for those events. *)
 
+val clamp_reasoning_effort_to_catalog :
+  model_id:string option ->
+  requested:Llm_provider.Reasoning_effort.t option ->
+  Llm_provider.Reasoning_effort.t option
+(** Snap a requested reasoning effort into the catalog's accepted set for
+    [model_id]: the requested effort when it is accepted, otherwise the
+    nearest accepted effort (highest below; lowest when every accepted effort
+    is higher). Pure; pinned by [test_keeper_codex_effort_clamp]. *)
+
+val effective_reasoning_effort :
+  runtime_label:string ->
+  keeper_name:string ->
+  runtime_id:string ->
+  model_id:string option ->
+  requested:Llm_provider.Reasoning_effort.t option ->
+  Llm_provider.Reasoning_effort.t option
+(** {!clamp_reasoning_effort_to_catalog} plus the operator-visible info log
+    when the effort was snapped. One call site per official-client lane, so
+    Codex and Claude Code treat the same declared effort identically. *)
+
 val host_stop_result :
   runtime_id:string ->
   model:string ->

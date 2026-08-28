@@ -603,6 +603,35 @@ let run_without_lifecycle ~runtime_id ~keeper_name
       | Ok subscription -> Ok subscription
       | Error error -> Error (claude_error_to_core_error error)
     in
+    (* Snap the operator-declared effort so a value this lane cannot send does
+       not fail the turn — the same posture as the Codex lane's catalog clamp,
+       so which lane a keeper runs on no longer decides whether a config value
+       is survivable. Two layers because they answer different owners: the
+       catalog clamp obeys the model row (no-op today for anthropic rows,
+       whose accepted set the capability layer withholds), and
+       [cli_admitted_reasoning_effort] obeys the CLI's own vocabulary
+       ([minimal] -> [low]). The same value feeds the raw_trace start record
+       and the command line so observation matches the wire. *)
+    let effective_reasoning_effort =
+      Host.effective_reasoning_effort
+        ~runtime_label
+        ~keeper_name
+        ~runtime_id
+        ~model_id:config.model
+        ~requested:prepared.reasoning_effort
+      |> Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+    in
+    (match prepared.reasoning_effort, effective_reasoning_effort with
+     | Some asked, Some snapped
+       when Llm_provider.Reasoning_effort.compare asked snapped <> 0 ->
+       Log.Keeper.info
+         ~keeper_name
+         "%s reasoning effort snapped to the CLI vocabulary: model=%s asked=%s effective=%s"
+         runtime_label
+         (Option.value config.model ~default:runtime_id)
+         (Llm_provider.Reasoning_effort.to_string asked)
+         (Llm_provider.Reasoning_effort.to_string snapped)
+     | _ -> ());
     let raw_trace_run =
       Host.start_raw_trace
         ~keeper_name
@@ -612,7 +641,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ?reasoning_effort:
           (Option.map
              Llm_provider.Reasoning_effort.to_string
-             prepared.reasoning_effort)
+             effective_reasoning_effort)
         ()
     in
     let* host_dynamic_tools =
@@ -836,7 +865,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
              ~clock
              ~cwd:process_cwd
              ~dynamic_tools
-             ?reasoning_effort:prepared.reasoning_effort
+             ?reasoning_effort:effective_reasoning_effort
              ~session_mode
              ~admitted_subscription
              ~on_session_ready:(fun ~session_id ->

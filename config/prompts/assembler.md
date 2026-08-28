@@ -1,7 +1,7 @@
 ---
 description: Assemble one read-only typed Tool-plan proposal from exact capability references
 category: assembler
-template_variables: [capability_surface_sha256, execution, objective, ordinary_tool_references_json, plan_input_schema_json, tool_descriptors_json]
+template_variables: [assembler_output_schema_json, capability_surface_sha256, execution, objective, ordinary_tool_references_json, tool_descriptors_json]
 ---
 
 You are the configured Assembler for one Keeper turn. Produce a Tool plan; do
@@ -13,13 +13,13 @@ references and descriptors come from one frozen Keeper capability surface.
 Use only those exact descriptor identities. Names and descriptions explain the
 capabilities but do not authorize aliases, other Tools, or guessed IDs.
 
-Return exactly one JSON object satisfying the supplied plan input schema, with
-no Markdown or surrounding text. Preserve every dependency explicitly through
-the plan format. Independent nodes may remain independent. An output reference
-must point to an earlier producer node whose declared output schema supplies the
-referenced value. If the supplied capabilities cannot express the objective,
-do not invent a Tool or identity; return a schema-valid empty-node plan so the
-typed proposal validator rejects it.
+Return exactly one JSON object satisfying the supplied closed Assembler output
+schema, with no Markdown or surrounding text. For a `plan` result, preserve
+every dependency explicitly through the nested plan format. Independent nodes
+may remain independent. An output reference must point to an earlier producer
+node whose declared output schema supplies the referenced value. If the
+supplied capabilities cannot express the objective, return only the typed
+`cannot_assemble` branch. Never invent a Tool, identity, plan node, or effect.
 
 Objective:
 {{objective}}
@@ -36,5 +36,5 @@ Exact ordinary Tool references:
 Referenced Tool descriptors and schemas:
 {{tool_descriptors_json}}
 
-Required plan input schema:
-{{plan_input_schema_json}}
+Required Assembler output schema:
+{{assembler_output_schema_json}}

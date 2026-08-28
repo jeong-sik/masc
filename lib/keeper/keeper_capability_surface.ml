@@ -187,12 +187,22 @@ let ordinary_tool_reference capability =
 ;;
 
 let ordinary_tool_reference_schema =
+  (* [pattern] mirrors the decoder's syntax-level nonblank rule. Identity and
+     availability remain typed frozen-surface resolution, never a text
+     heuristic. *)
+  let exact_id =
+    `Assoc
+      [ "type", `String "string"
+      ; "minLength", `Int 1
+      ; "pattern", `String "[^ \t\n\012\r]"
+      ]
+  in
   `Assoc
     [ "type", `String "object"
     ; ( "properties"
       , `Assoc
-          [ "descriptor_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-          ; "capability_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+          [ "descriptor_id", exact_id
+          ; "capability_id", exact_id
           ] )
     ; "required", `List [ `String "descriptor_id"; `String "capability_id" ]
     ; "additionalProperties", `Bool false

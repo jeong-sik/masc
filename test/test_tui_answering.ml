@@ -181,9 +181,78 @@ let test_target_indexes_skip_prose () =
     (Masc_tui_answering.target_indexes lines)
 ;;
 
+(* The mark a running turn wears. Motion is a claim -- "this is changing
+   while you look at it" -- so these pin both halves of it: that it does
+   move, and that it stops when there is nothing to say. *)
+let test_the_running_mark_moves () =
+  let frames =
+    List.map (fun frame -> Masc_tui_answering.running_glyph ~frame) [ 0; 1; 2; 3 ]
+  in
+  Alcotest.(check int)
+    "four frames, none repeated" 4
+    (List.length (List.sort_uniq String.compare frames));
+  Alcotest.(check string)
+    "it comes back around" (List.nth frames 0)
+    (Masc_tui_answering.running_glyph ~frame:4)
+;;
+
+(* [-1] is "not animating", which a surface that repaints on the poll has to
+   be able to ask for. Freezing on an arbitrary quarter would read as a turn
+   stuck at that quarter; the still mark says "running" without claiming to
+   be moving. *)
+let test_not_animating_falls_back_to_the_still_mark () =
+  let still = Masc_tui_answering.running_glyph ~frame:(-1) in
+  Alcotest.(check bool)
+    "the still mark is not one of the moving frames" false
+    (List.exists
+       (fun frame -> String.equal still (Masc_tui_answering.running_glyph ~frame))
+       [ 0; 1; 2; 3 ])
+;;
+
+(* Every mark is one cell wide. The Keepers table pads the column by counting
+   bytes, so a two-cell frame would shift every column to its right on one
+   frame in four -- a table that jitters as it animates. *)
+let test_every_frame_is_one_cell () =
+  List.iter
+    (fun frame ->
+      let glyph = Masc_tui_answering.running_glyph ~frame in
+      Alcotest.(check int)
+        (Printf.sprintf "frame %d is a single 3-byte glyph" frame)
+        3 (String.length glyph))
+    [ -1; 0; 1; 2; 3 ]
+;;
+
+(* The overlay draws the same mark as the table, so one running turn does not
+   wear two different marks depending on which key the reader pressed. *)
+let test_the_overlay_wears_the_same_mark () =
+  let lines =
+    Masc_tui_answering.overlay ~frame:2 ~now:100. ~chat_target:None ~error:None
+      ~finishes:[]
+      [ running ~lane:Tui_decode.Turn_lane_chat_operation ~started:40. "kidsnote" ]
+  in
+  let running_line =
+    List.find (fun (line : Masc_tui_answering.line) -> line.tone = Masc_tui_answering.Running) lines
+  in
+  Alcotest.(check bool)
+    "the overlay row starts with frame 2's mark" true
+    (String.starts_with
+       ~prefix:(Masc_tui_answering.running_glyph ~frame:2)
+       running_line.text)
+;;
+
 let () =
   Alcotest.run "tui_answering"
-    [ ( "tui-answering"
+    [ ( "running mark"
+      , [ Alcotest.test_case "the mark moves" `Quick
+            test_the_running_mark_moves
+        ; Alcotest.test_case "not animating falls back to the still mark"
+            `Quick test_not_animating_falls_back_to_the_still_mark
+        ; Alcotest.test_case "every frame is one cell" `Quick
+            test_every_frame_is_one_cell
+        ; Alcotest.test_case "the overlay wears the same mark" `Quick
+            test_the_overlay_wears_the_same_mark
+        ] )
+    ; ( "tui-answering"
       , [ Alcotest.test_case "running rows lead with the chat target" `Quick
             test_running_rows_lead_with_the_chat_target
         ; Alcotest.test_case "a quiet fleet says so" `Quick

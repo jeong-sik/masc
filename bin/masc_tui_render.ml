@@ -235,8 +235,6 @@ let chat_markdown_cache_capacity = 128
 (* Newest events the Skill Timeline section draws. The full count still
    prints in the heading; the cap keeps one busy ledger from pushing the
    usage and catalog sections off the first screen. *)
-let skill_timeline_display_cap = 15
-
 type chat_markdown_identity = {
   cmi_style : Message_layout.style;
   cmi_keeper_name : string;
@@ -9320,7 +9318,10 @@ let render_tools (state : state) =
           in
           let total = List.length events in
           let capped =
-            List.filteri (fun index _ -> index < skill_timeline_display_cap) events
+            List.filteri
+              (fun index _ ->
+                 index < Masc_tui_types.skill_timeline_display_cap)
+              events
           in
           [ Ansi.bold,
             Printf.sprintf " Skill Timeline — %d event%s (newest first)"

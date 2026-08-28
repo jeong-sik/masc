@@ -253,6 +253,17 @@ let test_the_frame_and_the_bound_read_the_same_number () =
        ~callee:"Masc_tui_agenda.rows_taken")
 ;;
 
+let test_skill_receipt_scroll_counts_the_activation_pane () =
+  check
+    int
+    "Tools activation scroll reads the formatted ledger row count"
+    1
+    (calls
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"scrolled_surface_rows"
+       ~callee:"tools_activation_display_row_count")
+;;
+
 
 (* {1 The panel behind [;]} *)
 
@@ -398,6 +409,8 @@ let () =
             test_the_frame_and_the_bound_read_the_same_number
         ; test_case "the drawing does not measure the body itself" `Quick
             test_the_drawing_does_not_measure_the_body_itself
+        ; test_case "Skill receipt uses the activation pane row count" `Quick
+            test_skill_receipt_scroll_counts_the_activation_pane
         ] )
     ; ( "how it reads"
       , [ test_case "the clock is local" `Quick test_the_clock_is_local

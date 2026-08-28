@@ -1200,6 +1200,11 @@ type tools_pane =
   | Tools_usage
   | Tools_catalog
 
+(* The activations pane is a formatted ledger, not the registered-tool list.
+   Its key bound must count the same one-row facts the renderer emits or the
+   tail of a receipt becomes unreachable even though it is present. *)
+let skill_timeline_display_cap = 15
+
 type runtime_param_edit_mode = Friendly_value | Advanced_json
 
 type runtime_param_edit =
@@ -2812,6 +2817,55 @@ let lanes_overview_hit (state : state) ~terminal_rows ~row : lanes_overview_hit 
             let index = visible + scroll in
             if index < shown then Lanes_hit_keeper index else Lanes_hit_none
 
+let tools_activation_display_row_count state =
+  match state.tools_inventory with
+  | None -> 1
+  | Some { Tui_decode.ts_skill_activations = None; _ } -> 1
+  | Some
+      { Tui_decode.ts_skill_activations =
+          Some (Tui_decode.Skill_activations_no_session _)
+      ; _ } ->
+    1
+  | Some
+      { Tui_decode.ts_skill_activations =
+          Some (Tui_decode.Skill_activations_unavailable _)
+      ; _ } ->
+    2
+  | Some
+      { Tui_decode.ts_skill_activations =
+          Some (Tui_decode.Skill_activations_available { sap_ledger; _ })
+      ; _ } ->
+    let activations =
+      Masc.Keeper_skill_activation_ledger.activations sap_ledger
+    in
+    let event_count =
+      List.fold_left
+        (fun count
+             (activation : Masc.Keeper_skill_activation_ledger.activation) ->
+           count
+           + (if Option.is_some activation.delivery then 1 else 0)
+           + List.length activation.actions)
+        0
+        activations
+    in
+    let scoped_count =
+      Masc.Keeper_skill_activation_ledger.summarize_by_scope sap_ledger
+      |> List.length
+    in
+    let receipt_rows =
+      List.fold_left
+        (fun count
+             (activation : Masc.Keeper_skill_activation_ledger.activation) ->
+           count + 10 + List.length activation.actions)
+        0
+        activations
+    in
+    5
+    + 1
+    + min skill_timeline_display_cap event_count
+    + (4 * scoped_count)
+    + receipt_rows
+
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
     Some
@@ -2884,9 +2938,12 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         }
   | Tools ->
       listing ~error:state.tools_error
-        (match state.tools_inventory with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.ts_tools)
+        (match state.tools_pane with
+         | Tools_activations -> tools_activation_display_row_count state
+         | Tools_surface | Tools_async | Tools_usage | Tools_catalog ->
+           (match state.tools_inventory with
+            | None -> 0
+            | Some s -> List.length s.Tui_decode.ts_tools))
   | Config ->
       listing ~error:state.runtime_config_view_error
         (match state.runtime_config_view with

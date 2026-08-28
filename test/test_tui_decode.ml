@@ -1728,6 +1728,11 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                 [ "reference", exact_reference "mission-snapshot" 'b'
                 ; "kind", `String "composition"
                 ; "execution", `String "async"
+                ; ( "load_reasons"
+                  , `List
+                      [ `Assoc [ "kind", `String "task"; "task_id", `String "task-001" ]
+                      ; `Assoc [ "kind", `String "keeper_profile" ]
+                      ] )
                 ; ( "context"
                   , `Assoc
                       [ "body_bytes", `Int 1242
@@ -1763,6 +1768,8 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                 ] ] )
       ; "tool_surface_bytes", `Int 79984
       ; "skill_tool_surface_bytes", `Int 2360
+      ; "skill_discovery_bytes", `Int 369
+      ; "skill_eager_body_bytes", `Int 0
       ; "skill_body_bytes", `Int 4981
       ; "skills_left_out", `List []
       ; "skill_resource_read_max_bytes", `Int 65536
@@ -1794,6 +1801,8 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                  ets_skill_profiles = [ profile ];
                  ets_tool_surface_bytes;
                  ets_skill_tool_surface_bytes;
+                 ets_skill_discovery_bytes;
+                 ets_skill_eager_body_bytes;
                  ets_skill_body_bytes;
                  ets_tools = [ tool ];
                  ets_tool_surface_sha256 = Some digest;
@@ -1817,6 +1826,12 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check string) "profile execution" "async" profile.esp_execution;
       Alcotest.(check int) "profile nodes" 4 profile.esp_node_count;
       Alcotest.(check int) "profile parallel width" 3 profile.esp_max_parallelism;
+      Alcotest.(check bool)
+        "profile load reasons"
+        true
+        (match profile.esp_load_reasons with
+         | [ Tui_decode.Skill_task "task-001"; Skill_keeper_profile ] -> true
+         | _ -> false);
       (match profile.esp_flow with
        | Some { sf_nodes = [ node ]; sf_batches = [ batch ] } ->
          Alcotest.(check string) "flow node tool" "keeper_time_now" node.sfn_tool_name;
@@ -1824,6 +1839,8 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
        | _ -> Alcotest.fail "expected one decoded flow node and batch");
       Alcotest.(check int) "whole surface bytes" 79984 ets_tool_surface_bytes;
       Alcotest.(check int) "Skill surface bytes" 2360 ets_skill_tool_surface_bytes;
+      Alcotest.(check int) "Skill discovery bytes" 369 ets_skill_discovery_bytes;
+      Alcotest.(check int) "Skill eager bytes" 0 ets_skill_eager_body_bytes;
       Alcotest.(check int) "Skill body bytes" 4981 ets_skill_body_bytes;
       Alcotest.(check (option string)) "SKILL.md source"
         (Some "skills/mission-snapshot/SKILL.md") tool.et_skill_source;
@@ -1843,6 +1860,8 @@ let test_decode_effective_keeper_surface_rejects_legacy_skill_names () =
       ; "skill_snapshot_revision", `String (String.make 64 'c')
       ; "instruction_skills", `List [ `String "legacy-name" ]
       ; "composition_skills", `List []
+      ; "skill_discovery_bytes", `Int 0
+      ; "skill_eager_body_bytes", `Int 0
       ; "skills_left_out", `List []
       ; "count", `Int 0
       ; "tools", `List []
@@ -1892,6 +1911,8 @@ let test_decode_effective_keeper_surface_keeps_tool_suppression () =
       ; "skill_snapshot_revision", `String (String.make 64 'c')
       ; "instruction_skills", `List []
       ; "composition_skills", `List []
+      ; "skill_discovery_bytes", `Int 0
+      ; "skill_eager_body_bytes", `Int 0
       ; "skills_left_out", `List []
       ; "count", `Int 0
       ; "tools", `List []

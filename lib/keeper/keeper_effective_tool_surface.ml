@@ -15,6 +15,11 @@ type tool_delivery =
   | Tools_delivered
   | Tools_suppressed_runtime_unsupported
 
+type skill_load_reason =
+  | Catalog_default
+  | Keeper_profile
+  | Task of { task_id : string }
+
 type t =
   { keeper_name : string
   ; runtime_id : string
@@ -30,8 +35,11 @@ type t =
   ; instruction_skills : Skill_reference.t list
   ; composition_skills : Skill_reference.t list
   ; skill_profiles : Keeper_skill_observability.profile list
+  ; skill_load_reasons : (Skill_reference.t * skill_load_reason list) list
   ; tool_surface_bytes : int
   ; skill_tool_surface_bytes : int
+  ; skill_discovery_bytes : int
+  ; skill_eager_body_bytes : int
   ; skill_body_bytes : int
         (* Documents the catalog could not read, by the directory they were
            found in. They are here because this is the surface that answers
@@ -219,6 +227,30 @@ let project
       | Tools_delivered -> Keeper_skill_observability.of_catalog skill_catalog
       | Tools_suppressed_runtime_unsupported -> []
     in
+    let global_references =
+      Keeper_skill_catalog.skills global_skill_catalog
+      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) -> skill.reference)
+    in
+    let skill_load_reasons =
+      List.map
+        (fun (profile : Keeper_skill_observability.profile) ->
+           let task_reasons =
+             Keeper_task_skill_turn.task_ids_for_reference
+               task_selection
+               profile.reference
+             |> List.map (fun task_id -> Task { task_id })
+           in
+           let selection_reason =
+             match skill_names with
+             | Some _ -> [ Keeper_profile ]
+             | None ->
+               if List.exists (Skill_reference.equal profile.reference) global_references
+               then [ Catalog_default ]
+               else []
+           in
+           profile.reference, task_reasons @ selection_reason)
+        skill_profiles
+    in
     let tool_surface_bytes =
       List.fold_left
         (fun total tool ->
@@ -249,6 +281,20 @@ let project
         0
         skill_profiles
     in
+    let skill_discovery_bytes =
+      List.fold_left
+        (fun total (profile : Keeper_skill_observability.profile) ->
+           total + profile.discovery_bytes)
+        0
+        skill_profiles
+    in
+    let skill_eager_body_bytes =
+      List.fold_left
+        (fun total (profile : Keeper_skill_observability.profile) ->
+           total + profile.eager_body_bytes)
+        0
+        skill_profiles
+    in
     let tool_surface_sha256 =
       Option.map
         (fun native_posture ->
@@ -274,8 +320,11 @@ let project
       ; instruction_skills
       ; composition_skills
       ; skill_profiles
+      ; skill_load_reasons
       ; tool_surface_bytes
       ; skill_tool_surface_bytes
+      ; skill_discovery_bytes
+      ; skill_eager_body_bytes
       ; skill_body_bytes
         (* Both sides added to this record and neither replaced the other:
            main (#31092) brought the profile and byte fields above, and this
@@ -464,6 +513,31 @@ let resolve ~config ~keeper_name =
 let string_list values = `List (List.map (fun value -> `String value) values)
 let reference_list values = Skill_reference.list_to_yojson values
 
+let skill_load_reason_to_yojson = function
+  | Catalog_default -> `Assoc [ "kind", `String "catalog_default" ]
+  | Keeper_profile -> `Assoc [ "kind", `String "keeper_profile" ]
+  | Task { task_id } ->
+    `Assoc [ "kind", `String "task"; "task_id", `String task_id ]
+;;
+
+let skill_profile_to_yojson surface profile =
+  let reasons =
+    surface.skill_load_reasons
+    |> List.find_map (fun (reference, reasons) ->
+         if Skill_reference.equal reference profile.Keeper_skill_observability.reference
+         then Some reasons
+         else None)
+    |> Option.value ~default:[]
+  in
+  match Keeper_skill_observability.to_yojson profile with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       @ [ ( "load_reasons"
+           , `List (List.map skill_load_reason_to_yojson reasons) ) ])
+  | _ -> assert false
+;;
+
 let tool_delivery_to_yojson = function
   | Tools_delivered -> `Assoc [ "status", `String "delivered" ]
   | Tools_suppressed_runtime_unsupported ->
@@ -537,9 +611,11 @@ let to_yojson = function
       ; "composition_skills", reference_list surface.composition_skills
       ; ( "skill_profiles"
         , `List
-            (List.map Keeper_skill_observability.to_yojson surface.skill_profiles) )
+            (List.map (skill_profile_to_yojson surface) surface.skill_profiles) )
       ; "tool_surface_bytes", `Int surface.tool_surface_bytes
       ; "skill_tool_surface_bytes", `Int surface.skill_tool_surface_bytes
+      ; "skill_discovery_bytes", `Int surface.skill_discovery_bytes
+      ; "skill_eager_body_bytes", `Int surface.skill_eager_body_bytes
       ; "skill_body_bytes", `Int surface.skill_body_bytes
       ; "skills_left_out", string_list surface.skills_left_out
       ; "count", `Int (List.length surface.tools)

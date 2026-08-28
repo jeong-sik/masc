@@ -183,6 +183,15 @@ let partition selection =
 
 let skills selection = List.map (fun selected -> selected.skill) selection.selected
 
+let task_ids_for_reference selection reference =
+  selection.selected
+  |> List.find_map (fun selected ->
+       if Skill_reference.equal selected.reference reference
+       then Some selected.task_ids
+       else None)
+  |> Option.value ~default:[]
+;;
+
 let executable_selection ~projection selection =
   let selected =
     List.filter

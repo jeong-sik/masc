@@ -529,6 +529,24 @@ export type DashboardToolDelivery =
   | { status: 'delivered' }
   | { status: 'suppressed'; reason: 'runtime_tools_unsupported' }
 
+export type DashboardSkillLoadReason =
+  | { kind: 'catalog_default' }
+  | { kind: 'keeper_profile' }
+  | { kind: 'task'; task_id: string }
+
+export interface DashboardEffectiveSkillProfile {
+  reference: DashboardSkillReference
+  kind: string
+  execution: string
+  context: {
+    body_bytes: number
+    eager_body_bytes: number
+    discovery_bytes: number
+    tool_schema_bytes: number | null
+  }
+  load_reasons: DashboardSkillLoadReason[]
+}
+
 export type DashboardEffectiveKeeperSurface =
   | {
       status: 'available'
@@ -550,6 +568,12 @@ export type DashboardEffectiveKeeperSurface =
       skill_resource_read_max_bytes: number | null
       instruction_skills: DashboardSkillReference[]
       composition_skills: DashboardSkillReference[]
+      skill_profiles: DashboardEffectiveSkillProfile[]
+      tool_surface_bytes: number
+      skill_tool_surface_bytes: number
+      skill_discovery_bytes: number
+      skill_eager_body_bytes: number
+      skill_body_bytes: number
       skills_left_out: string[]
       count: number
       tools: Array<{ name: string; origin: { kind: string } }>

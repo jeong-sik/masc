@@ -20,6 +20,11 @@ type tool_delivery =
   | Tools_delivered
   | Tools_suppressed_runtime_unsupported
 
+type skill_load_reason =
+  | Catalog_default
+  | Keeper_profile
+  | Task of { task_id : string }
+
 type t =
   { keeper_name : string
   ; runtime_id : string
@@ -36,8 +41,11 @@ type t =
   ; instruction_skills : Skill_reference.t list
   ; composition_skills : Skill_reference.t list
   ; skill_profiles : Keeper_skill_observability.profile list
+  ; skill_load_reasons : (Skill_reference.t * skill_load_reason list) list
   ; tool_surface_bytes : int
   ; skill_tool_surface_bytes : int
+  ; skill_discovery_bytes : int
+  ; skill_eager_body_bytes : int
   ; skill_body_bytes : int
   ; skills_left_out : string list
         (** Documents the catalog could not read, by the directory they were

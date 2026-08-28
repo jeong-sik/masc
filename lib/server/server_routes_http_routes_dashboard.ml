@@ -789,6 +789,13 @@ let audit_skill_delete state agent_name ~reference ~status ~recovery ~outcome =
     Log.Dashboard.warn "Skill delete audit failed: %s" (Printexc.to_string exn)
 ;;
 
+let skill_error_recovery error =
+  Server_skill_editor.error_recovery error
+  |> Option.map (fun (recovery_id, disposition) ->
+    ( recovery_id
+    , Server_skill_editor.recovery_disposition_to_string disposition ))
+;;
+
 let respond_runtime_config_commit
       state
       agent_name
@@ -1734,7 +1741,8 @@ let add_routes ~sw ~clock router =
                        observation
                      |> Result.map_error Server_skill_snapshot_runtime.error_to_string
                  in
-                 (match
+                 Eio.Cancel.protect (fun () ->
+                 match
                     Server_skill_editor.delete
                       ~base_path
                       ~reference
@@ -1744,7 +1752,7 @@ let add_routes ~sw ~clock router =
                   | Error error ->
                     audit_skill_delete state agent_name ~reference
                       ~status:(Server_skill_editor.error_code error)
-                      ~recovery:None
+                      ~recovery:(skill_error_recovery error)
                       ~outcome:
                         (Audit_log.Failure (Server_skill_editor.error_to_string error));
                     respond_skill_editor_error ~request:req reqd error
@@ -1760,7 +1768,9 @@ let add_routes ~sw ~clock router =
                       | Deleted_but_unpublished
                           { reason; recovery_id; disposition; _ } ->
                         ( "deleted_but_unpublished"
-                        , Audit_log.Failure reason
+                        , Audit_log.Failure
+                            (Server_skill_editor.delete_unpublished_reason_to_string
+                               reason)
                         , recovery_id
                         , disposition )
                     in
@@ -1775,7 +1785,8 @@ let add_routes ~sw ~clock router =
                       ~compress:true
                       ~request:req
                       (Server_skill_editor.delete_outcome_to_yojson outcome)
-                      reqd)))
+                      reqd))
+             )
            request reqd)
   |> Http.Router.post "/api/v1/skills/editor/read" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

@@ -19,6 +19,20 @@ type recovery_disposition =
   | Quarantine_retained
   | Original_restored_with_quarantine_retained
 
+type cancellation_stage =
+  | Quarantine_settlement
+  | After_quarantine
+  | After_verification
+  | Snapshot_refresh
+
+type recovery_cause =
+  | Recovery_operation_failed of string
+  | Recovery_cancelled of cancellation_stage
+
+type delete_unpublished_reason =
+  | Publication_failed of string
+  | Publication_cancelled
+
 type loaded = private
   { reference : Skill_reference.t
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
@@ -67,7 +81,7 @@ type delete_outcome =
       }
   | Deleted_but_unpublished of
       { reference : Skill_reference.t
-      ; reason : string
+      ; reason : delete_unpublished_reason
       ; recovery_id : string
       ; disposition : recovery_disposition
       }
@@ -97,13 +111,14 @@ type error =
   | Quarantine_failed of
       { candidate_moved : bool
       ; recovery_id : string option
-      ; detail : string
+      ; disposition : recovery_disposition option
+      ; cause : recovery_cause
       }
   | Recovery_required of
       { observed : Skill_reference.content_revision option
       ; recovery_id : string
       ; disposition : recovery_disposition
-      ; detail : string
+      ; cause : recovery_cause
       }
 
 val load : base_path:string -> Skill_reference.t -> (loaded, error) result
@@ -144,6 +159,8 @@ val delete :
 
 val access_to_string : access -> string
 val recovery_disposition_to_string : recovery_disposition -> string
+val delete_unpublished_reason_to_string : delete_unpublished_reason -> string
+val error_recovery : error -> (string * recovery_disposition) option
 val error_code : error -> string
 val error_to_string : error -> string
 val loaded_to_yojson : loaded -> Yojson.Safe.t
@@ -161,6 +178,7 @@ module For_testing : sig
       and immediately before the atomic quarantine rename. *)
   val delete :
     before_quarantine:(unit -> unit) ->
+    after_move:(unit -> unit) ->
     after_quarantine:(unit -> unit) ->
     after_verification:(unit -> unit) ->
     base_path:string ->

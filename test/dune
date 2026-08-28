@@ -37,8 +37,10 @@
   masc.skill_reference
   masc.skill_snapshot
   masc.skill_snapshot_service
+  eio
   eio_main
   fs_compat
+  yojson
   unix))
 
 (env

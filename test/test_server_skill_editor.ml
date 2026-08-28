@@ -372,6 +372,7 @@ let test_delete_quarantines_then_restores_pre_mutation_replacement () =
   (match
      Editor.For_testing.delete
        ~before_quarantine:(fun () -> replace_file_atomically skill_path replacement)
+       ~after_move:(fun () -> ())
        ~after_quarantine:(fun () -> ())
        ~after_verification:(fun () -> ())
        ~base_path
@@ -413,6 +414,7 @@ let test_delete_retains_quarantine_when_original_reappears () =
       Editor.For_testing.delete
         ~before_quarantine:(fun () ->
           replace_file_atomically skill_path quarantined_replacement)
+        ~after_move:(fun () -> ())
         ~after_quarantine:(fun () -> write_file skill_path concurrent_original)
         ~after_verification:(fun () -> ())
         ~base_path
@@ -472,6 +474,7 @@ let test_delete_retains_open_fd_write_after_verification () =
          match
            Editor.For_testing.delete
              ~before_quarantine:(fun () -> ())
+             ~after_move:(fun () -> ())
              ~after_quarantine:(fun () -> ())
              ~after_verification:(fun () ->
                Unix.ftruncate fd 0;
@@ -497,6 +500,184 @@ let test_delete_retains_open_fd_write_after_verification () =
          Editor.For_testing.recovery_file_path ~source_root ~recovery_id
        in
        check string "post-verification bytes retained" later_bytes (read_file recovery_path))
+;;
+
+let recovery_path skill_path recovery_id =
+  let source_root = Filename.dirname (Filename.dirname skill_path) in
+  Editor.For_testing.recovery_file_path ~source_root ~recovery_id
+;;
+
+let test_delete_cancellation_immediately_after_move_is_typed () =
+  with_workspace @@ fun base_path ->
+  let skill_path, original, reference, refresh = setup base_path ~access:"read-write" in
+  let refresh_called = ref false in
+  let recovery_id, error =
+    match
+      Editor.For_testing.delete
+        ~before_quarantine:(fun () -> ())
+        ~after_move:(fun () ->
+          raise (Eio.Cancel.Cancelled (Failure "cancel after move")))
+        ~after_quarantine:(fun () -> ())
+        ~after_verification:(fun () -> ())
+        ~base_path
+        ~reference
+        ~confirmed:true
+        ~refresh:(fun () -> refresh_called := true; refresh ())
+    with
+    | Error
+        (Editor.Quarantine_failed
+           ({ candidate_moved = true
+            ; recovery_id = Some recovery_id
+            ; disposition = Some Quarantine_retained
+            ; cause = Recovery_cancelled Quarantine_settlement
+            } as error)) ->
+      recovery_id, Editor.Quarantine_failed error
+    | Error error -> fail (Editor.error_to_string error)
+    | Ok _ -> fail "post-move cancellation escaped as success"
+  in
+  check bool "cancelled move never refreshes" false !refresh_called;
+  check bool "source moved" false (Sys.file_exists skill_path);
+  check string "cancelled candidate retained" original (read_file (recovery_path skill_path recovery_id));
+  (match Editor.error_recovery error with
+   | Some (observed_id, Quarantine_retained) ->
+     check string "audit recovery id" recovery_id observed_id
+   | _ -> fail "moved quarantine error omitted audit recovery");
+  let json = Editor.error_to_yojson error in
+  check
+    string
+    "serialized disposition"
+    "quarantine_retained"
+    Yojson.Safe.Util.(json |> member "recovery_disposition" |> to_string);
+  check
+    string
+    "serialized cancellation stage"
+    "quarantine_settlement"
+    Yojson.Safe.Util.(json |> member "cause" |> member "stage" |> to_string)
+;;
+
+let test_delete_cancellation_after_verification_is_typed () =
+  with_workspace @@ fun base_path ->
+  let skill_path, original, reference, refresh = setup base_path ~access:"read-write" in
+  let recovery_id =
+    match
+      Editor.For_testing.delete
+        ~before_quarantine:(fun () -> ())
+        ~after_move:(fun () -> ())
+        ~after_quarantine:(fun () -> ())
+        ~after_verification:(fun () ->
+          raise (Eio.Cancel.Cancelled (Failure "cancel after verification")))
+        ~base_path
+        ~reference
+        ~confirmed:true
+        ~refresh
+    with
+    | Error
+        (Editor.Recovery_required
+           { recovery_id
+           ; disposition = Quarantine_retained
+           ; cause = Recovery_cancelled After_verification
+           ; _
+           }) ->
+      recovery_id
+    | Error error -> fail (Editor.error_to_string error)
+    | Ok _ -> fail "post-verification cancellation escaped as success"
+  in
+  check string "verified candidate retained" original (read_file (recovery_path skill_path recovery_id))
+;;
+
+let test_delete_cancellation_after_quarantine_is_typed () =
+  with_workspace @@ fun base_path ->
+  let skill_path, original, reference, refresh = setup base_path ~access:"read-write" in
+  let recovery_id =
+    match
+      Editor.For_testing.delete
+        ~before_quarantine:(fun () -> ())
+        ~after_move:(fun () -> ())
+        ~after_quarantine:(fun () ->
+          raise (Eio.Cancel.Cancelled (Failure "cancel after quarantine")))
+        ~after_verification:(fun () -> ())
+        ~base_path
+        ~reference
+        ~confirmed:true
+        ~refresh
+    with
+    | Error
+        (Editor.Recovery_required
+           ({ recovery_id
+            ; disposition = Quarantine_retained
+            ; cause = Recovery_cancelled After_quarantine
+            ; _
+            } as recovery)) ->
+      (match Editor.error_recovery (Editor.Recovery_required recovery) with
+       | Some (observed_id, Quarantine_retained) ->
+         check string "audit recovery id" recovery_id observed_id
+       | _ -> fail "after-quarantine cancellation omitted audit recovery");
+      recovery_id
+    | Error error -> fail (Editor.error_to_string error)
+    | Ok _ -> fail "after-quarantine cancellation escaped as success"
+  in
+  check string "quarantine-cancelled candidate retained" original (read_file (recovery_path skill_path recovery_id))
+;;
+
+let test_delete_refresh_cancellation_is_unpublished () =
+  with_workspace @@ fun base_path ->
+  let skill_path, original, reference, _ = setup base_path ~access:"read-write" in
+  let recovery_id =
+    match
+      Editor.delete
+        ~base_path
+        ~reference
+        ~confirmed:true
+        ~refresh:(fun () ->
+          raise (Eio.Cancel.Cancelled (Failure "cancel refresh")))
+    with
+    | Ok
+        (Editor.Deleted_but_unpublished
+           ({ reason = Publication_cancelled
+            ; recovery_id
+            ; disposition = Quarantine_retained
+            ; _
+            } as outcome)) ->
+      let json = Editor.delete_outcome_to_yojson (Editor.Deleted_but_unpublished outcome) in
+      check
+        string
+        "serialized refresh cancellation"
+        "snapshot refresh cancelled"
+        Yojson.Safe.Util.(json |> member "reason" |> to_string);
+      recovery_id
+    | Ok _ -> fail "refresh cancellation was reported as published"
+    | Error error -> fail (Editor.error_to_string error)
+  in
+  check string "refresh-cancelled candidate retained" original (read_file (recovery_path skill_path recovery_id))
+;;
+
+let test_delete_moved_settlement_failure_is_typed () =
+  with_workspace @@ fun base_path ->
+  let skill_path, original, reference, refresh = setup base_path ~access:"read-write" in
+  let recovery_id =
+    match
+      Editor.For_testing.delete
+        ~before_quarantine:(fun () -> ())
+        ~after_move:(fun () -> failwith "injected fsync boundary failure")
+        ~after_quarantine:(fun () -> ())
+        ~after_verification:(fun () -> ())
+        ~base_path
+        ~reference
+        ~confirmed:true
+        ~refresh
+    with
+    | Error
+        (Editor.Quarantine_failed
+           { candidate_moved = true
+           ; recovery_id = Some recovery_id
+           ; disposition = Some Quarantine_retained
+           ; cause = Recovery_operation_failed _
+           }) ->
+      recovery_id
+    | Error error -> fail (Editor.error_to_string error)
+    | Ok _ -> fail "moved settlement failure escaped as success"
+  in
+  check string "settlement failure retained candidate" original (read_file (recovery_path skill_path recovery_id))
 ;;
 
 let test_delete_requires_confirmation () =
@@ -572,7 +753,11 @@ let test_deleted_but_unpublished_is_explicit () =
   let refresh () = Error "injected publication failure" in
   (match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
    | Ok (Editor.Deleted_but_unpublished { reason; _ }) ->
-     check string "failure is preserved" "injected publication failure" reason
+     check
+       string
+       "failure is preserved"
+       "injected publication failure"
+       (Editor.delete_unpublished_reason_to_string reason)
    | Error error -> fail (Editor.error_to_string error)
    | Ok (Deleted_and_published _) ->
      fail "publication failure was reported as published");
@@ -608,6 +793,16 @@ let () =
             test_delete_retains_quarantine_when_original_reappears
         ; test_case "delete retains open-fd write after verification" `Quick
             test_delete_retains_open_fd_write_after_verification
+        ; test_case "delete cancellation after move is typed" `Quick
+            test_delete_cancellation_immediately_after_move_is_typed
+        ; test_case "delete cancellation after verification is typed" `Quick
+            test_delete_cancellation_after_verification_is_typed
+        ; test_case "delete cancellation after quarantine is typed" `Quick
+            test_delete_cancellation_after_quarantine_is_typed
+        ; test_case "delete refresh cancellation is unpublished" `Quick
+            test_delete_refresh_cancellation_is_unpublished
+        ; test_case "delete moved settlement failure is typed" `Quick
+            test_delete_moved_settlement_failure_is_typed
         ; test_case "delete requires confirmation" `Quick
             test_delete_requires_confirmation
         ; test_case "delete read-only source does not mutate" `Quick

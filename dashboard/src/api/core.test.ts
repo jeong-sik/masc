@@ -395,6 +395,22 @@ describe('typed API errors', () => {
     expect(error.responseData).toEqual(payload)
   })
 
+  it('keeps the indeterminate verdict when config_application grows a field', async () => {
+    // The verdict rides the state discriminator. A field-count check flipped
+    // it to undefined the moment the server added anything beside `state` —
+    // the exact moment the operator cannot tell whether the write landed.
+    const error = await apiRequestErrorFromResponse(
+      'POST',
+      '/api/v1/keepers/alpha/config',
+      new Response(JSON.stringify({
+        config_application: { state: 'indeterminate', detail: 'store fsync unconfirmed' },
+        error: { code: 'keeper_manifest_reconciliation_required' },
+      }), { status: 503 }),
+    )
+
+    expect(error.configApplicationState).toBe('indeterminate')
+  })
+
   it('uses auth_error_code as authority and keeps error prose as detail', async () => {
     const error = await apiRequestErrorFromResponse(
       'POST',

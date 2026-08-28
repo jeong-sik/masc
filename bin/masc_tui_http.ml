@@ -1342,10 +1342,15 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
       | None -> None
     in
     let config_application_indeterminate =
+      (* Read the state discriminator, not the whole object shape: a
+         structural compare flips to false the moment the server adds a
+         field beside [state], which is the write-outcome-unknown moment
+         the operator most needs reported. *)
       match parsed with
       | Some json ->
-        Json_util.assoc_member_opt "config_application" json
-        = Some (`Assoc [ "state", `String "indeterminate" ])
+        (match Json_util.assoc_member_opt "config_application" json with
+         | Some app -> Json_util.get_string app "state" = Some "indeterminate"
+         | None -> false)
       | None -> false
     in
     (match status, code, parsed with

@@ -136,6 +136,56 @@ describe('keeper config source projection', () => {
     }])
   })
 
+  it('carries an unavailable config revision with the server detail', async () => {
+    // dashboard_http_keeper_snapshot answers {state:"unavailable", detail}
+    // in place of the revision pair when it could not read it. That shape
+    // shares the two-key count with the success shape, so this pins the
+    // discriminator being read first — the old decoder fell into
+    // decodeManifestRevision(undefined) and killed the whole panel with
+    // "manifest must be an object" instead of showing the detail.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        name: 'rtprobe',
+        config_revision: { state: 'unavailable', detail: 'manifest store offline' },
+        max_context_override: null,
+        skills: { names: null },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    const config = await fetchKeeperConfig('rtprobe')
+    expect(config.config_revision).toEqual({
+      state: 'unavailable',
+      detail: 'manifest store offline',
+    })
+  })
+
+  it('rejects a write receipt whose revision is unavailable, naming the detail', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        name: 'rtprobe',
+        config_revision: {
+          manifest: { state: 'sha256', value: 'a'.repeat(64) },
+          runtime_assignment: { state: 'runtime_config_missing' },
+        },
+        config_write: {
+          revision: { state: 'unavailable', detail: 'post-write read failed' },
+          applied: true,
+          warnings: [],
+        },
+        max_context_override: null,
+        skills: { names: null },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(fetchKeeperConfig('rtprobe')).rejects.toThrow('post-write read failed')
+  })
+
   it.each([
     [
       'missing warnings',

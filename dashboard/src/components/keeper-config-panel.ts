@@ -1773,6 +1773,13 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     }
     const payload = result.payload
     if (Object.keys(payload).length === 0) return
+    if ('state' in c.config_revision) {
+      // The server could not read the revision; posting the unavailable
+      // marker as a CAS expected value can only fail later with a worse
+      // message, so surface the server's own detail here instead.
+      showToast(`설정 버전을 읽지 못해 저장할 수 없어요: ${c.config_revision.detail}`, 'error')
+      return
+    }
     const saveRequest: KeeperConfigSaveRequest = {
       owner: panelOwner,
       request: Symbol('keeper-config-save'),
@@ -1899,6 +1906,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     if (Object.keys(payload).length === 0) {
       showToast('변경사항이 없습니다', 'warning')
       cancelEdit()
+      return
+    }
+    if ('state' in c.config_revision) {
+      showToast(`설정 버전을 읽지 못해 저장할 수 없어요: ${c.config_revision.detail}`, 'error')
       return
     }
     const saveRequest: KeeperConfigSaveRequest = {

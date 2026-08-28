@@ -43,15 +43,7 @@ let normalize_status_name = String.trim
 
 let status_name_lookup_candidates raw_name =
   let trimmed = normalize_status_name raw_name in
-  if String.equal trimmed "" then
-    []
-  else
-    let aliases =
-      match Keeper_identity.canonical_keeper_name trimmed with
-      | Some candidate when not (String.equal candidate trimmed) -> [ candidate ]
-      | Some _ | None -> []
-    in
-    trimmed :: aliases
+  if String.equal trimmed "" then [] else [ trimmed ]
 
 let status_argument_fields = function
   | `Assoc fields ->
@@ -552,7 +544,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
               }
           | None -> empty_tool_audit_snapshot
         in
-         let sandbox_last_error =
+         let keeper_last_error =
            match Keeper_registry.get ~base_path:config.base_path m.name with
            | Some entry -> entry.last_error
            | None -> None
@@ -630,8 +622,8 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              `String (sandbox_profile_to_string m.sandbox_profile));
            ("network_mode",
              `String (network_mode_to_string m.network_mode));
-           ("sandbox_last_error",
-             Json_util.string_opt_to_json sandbox_last_error);
+           ("keeper_last_error",
+             Json_util.string_opt_to_json keeper_last_error);
            ("sandbox_live", sandbox_live);
            ("latest_tool_names",
              Json_util.json_string_list tool_audit_snapshot.latest_tool_names);
@@ -750,8 +742,8 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("default_cwd", `String keeper_visible_abs);
              ("sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode", `String (network_mode_to_string m.network_mode));
-             ("sandbox_last_error",
-               Json_util.string_opt_to_json sandbox_last_error);
+             ("keeper_last_error",
+               Json_util.string_opt_to_json keeper_last_error);
              ("sandbox_live", sandbox_live);
              ("allowed_paths", Json_util.json_string_list m.allowed_paths);
              ("repository_checkouts",

@@ -44,9 +44,6 @@ val compare_credentials :
 
 (** {1 Token lookup} *)
 
-val check_credential_collisions :
-  token_hash_prefix:string -> agent_credential -> agent_credential list -> (unit, masc_error) result
-
 val find_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
 

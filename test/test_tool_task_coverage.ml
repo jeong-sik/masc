@@ -277,13 +277,12 @@ let assert_goal_still_executing ctx ~goal_id =
   | Some _ -> failwith "task completion must not mutate the linked Goal"
   | None -> failwith "linked Goal disappeared"
 
-let register_test_keeper ctx ~keeper_name ~agent_name =
+let register_test_keeper ctx ~keeper_name =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String keeper_name);
-          ("agent_name", `String agent_name);
           ("trace_id", `String ("test-trace-" ^ keeper_name));
         ])
   with
@@ -1102,12 +1101,11 @@ let () = test "handle_transition_submit_does_not_have_a_disable_bypass"
 let () = test "handle_transition_submit_rejects_registered_keeper_alias"
     (fun () ->
   (
-    let ctx = make_test_ctx_with_agent "keeper-omega-agent" in
+    let ctx = make_test_ctx_with_agent "omega" in
     ignore
-      (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-agent"
+      (Workspace.bind_session ctx.config ~agent_name:"omega"
          ~capabilities:[] ());
-    register_test_keeper ctx ~keeper_name:"omega"
-      ~agent_name:"keeper-omega-agent";
+    register_test_keeper ctx ~keeper_name:"omega";
     let _ =
       Task.Tool.handle_add_task
         ~tool_name:"test_tool"
@@ -1116,7 +1114,7 @@ let () = test "handle_transition_submit_rejects_registered_keeper_alias"
         (`Assoc [ ("title", `String "Canonical submit identity") ])
     in
     (match
-       Workspace.claim_task_r ctx.config ~agent_name:"keeper-omega-agent"
+       Workspace.claim_task_r ctx.config ~agent_name:"omega"
          ~task_id:"task-001" ()
      with
      | Ok _ -> ()
@@ -1145,22 +1143,21 @@ let () = test "handle_transition_submit_rejects_registered_keeper_alias"
        an incidental FSM one. The old assertion pinned the literal "requires
        owning the task", which the message stopped using while still rejecting
        for exactly this reason. *)
-    assert (str_contains (Tool_result.message result) "keeper-omega-agent");
-    assert_task_claimed_by ctx "keeper-omega-agent"))
+    assert (str_contains (Tool_result.message result) "omega");
+    assert_task_claimed_by ctx "omega"))
 
 let () = test "keeper_reconciliation_ignores_prefix_matched_agent"
     (fun () ->
   let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let keeper_name = "omega" in
-  let keeper_agent_name = "keeper-omega-agent" in
-  let foreign_agent_name = "keeper-omega-agent-shadow" in
+  let foreign_agent_name = "omega-shadow" in
   ignore
     (Workspace.bind_session
        ctx.config
        ~agent_name:foreign_agent_name
        ~capabilities:[]
        ());
-  register_test_keeper ctx ~keeper_name ~agent_name:keeper_agent_name;
+  register_test_keeper ctx ~keeper_name;
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1205,8 +1202,7 @@ let () = test "keeper_reconciliation_accepts_short_keeper_identity"
     (fun () ->
   let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let keeper_name = "omega" in
-  let keeper_agent_name = "keeper-omega-agent" in
-  register_test_keeper ctx ~keeper_name ~agent_name:keeper_agent_name;
+  register_test_keeper ctx ~keeper_name;
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1953,13 +1949,10 @@ let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"omega"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"omega"
-    ~agent_name:"keeper-omega-agent";
-  let keeper_ctx =
-    { ctx with Task.Tool.agent_name = "keeper-omega-agent" }
-  in
+  register_test_keeper ctx ~keeper_name:"omega";
+  let keeper_ctx = { ctx with Task.Tool.agent_name = "omega" } in
   let result =
     Task.Tool.handle_claim
       ~tool_name:"test_tool"
@@ -1992,8 +1985,7 @@ let () = test "keeper_alias_claim_updates_planning_as_exact_agent" (fun () ->
   ignore
     (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-agent"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"omega"
-    ~agent_name:"keeper-omega-agent";
+  register_test_keeper ctx ~keeper_name:"omega";
   let keeper_ctx =
     { ctx with Task.Tool.agent_name = "keeper-omega" }
   in
@@ -2032,8 +2024,7 @@ let () = test "keeper_generated_alias_claim_updates_planning_as_exact_agent" (fu
   ignore
     (Workspace.bind_session ctx.config ~agent_name:"keeper-omega-warm-raven-agent"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"omega"
-    ~agent_name:"keeper-omega-agent";
+  register_test_keeper ctx ~keeper_name:"omega";
   let keeper_ctx =
     { ctx with Task.Tool.agent_name = "keeper-omega-warm-raven-agent" }
   in
@@ -2072,8 +2063,7 @@ let () = test "keeper_separator_alias_claim_updates_planning_as_exact_agent" (fu
   ignore
     (Workspace.bind_session ctx.config ~agent_name:"keeper-pi_glutton-agent"
        ~capabilities:[] ());
-  register_test_keeper ctx ~keeper_name:"pi-glutton"
-    ~agent_name:"keeper-pi-glutton-agent";
+  register_test_keeper ctx ~keeper_name:"pi-glutton";
   let keeper_ctx =
     { ctx with Task.Tool.agent_name = "keeper-pi_glutton-agent" }
   in
@@ -2278,8 +2268,8 @@ let () =
     assert (str_contains (Tool_result.message result) "Error:"))
 
 let () = test "handle_claim_next_accepts_open_claims" (fun () ->
-  let agent_name = "keeper-social-sync-agent" in
   let keeper_name = "social-sync" in
+  let agent_name = keeper_name in
   let ctx = make_test_ctx_with_agent agent_name in
   let initial_meta =
     match
@@ -2287,7 +2277,6 @@ let () = test "handle_claim_next_accepts_open_claims" (fun () ->
         (`Assoc
           [
             ("name", `String keeper_name);
-            ("agent_name", `String agent_name);
             ("trace_id", `String "trace-social-sync");
           ])
     with

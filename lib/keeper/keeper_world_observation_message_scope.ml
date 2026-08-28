@@ -18,7 +18,7 @@ let message_feed_targets (meta : keeper_meta) =
 let self_ids (meta : keeper_meta) : Keeper_identity.Keeper_id.t list =
   List.filter_map
     Keeper_identity.Keeper_id.of_string
-    [ meta.name; meta.agent_name ]
+    [ meta.name ]
   |> List.sort_uniq Keeper_identity.Keeper_id.compare
 ;;
 

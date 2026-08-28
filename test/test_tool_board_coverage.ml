@@ -95,7 +95,6 @@ let make_keeper_meta ?(name = "judge-keeper") () : Keeper_meta_contract.keeper_m
               (keeper_meta_json_parse.ml:367). Passing [name] here made every
               fixture in this file fail construction, which is why five of its
               assertions have never run. *)
-           ("agent_name", `String (Masc.Keeper_identity.keeper_agent_name name));
            ("trace_id", `String "test-trace-board");
          ])
   with
@@ -236,20 +235,19 @@ let json_member_list json key =
   | `List values -> values
   | _ -> Alcotest.failf "expected list field %s" key
 
-let test_board_actor_identity_canonicalizes_keeper_alias () =
+(* RFC-0393: keeper-ness is a registry lookup, not a name shape. With no
+   registered keeper, the old wrapper spelling is an ordinary agent name —
+   nothing is recovered from the string. *)
+let test_board_actor_identity_is_registry_backed () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let json = Server_utils.board_actor_identity_json "keeper-delta-agent" in
-  Alcotest.(check string) "kind" "keeper" (json_member_string json "kind");
-  Alcotest.(check string) "id" "delta" (json_member_string json "id");
-  Alcotest.(check string) "key" "keeper:delta" (json_member_string json "key");
-  Alcotest.(check string) "raw" "keeper-delta-agent"
-    (json_member_string json "raw");
-  Alcotest.(check string) "source" "keeper_alias_contract"
-    (json_member_string json "source");
-  Alcotest.(check string) "runtime agent" "keeper-delta-agent"
-    (json_member_string json "runtime_agent_name")
+  Alcotest.(check string) "kind" "agent" (json_member_string json "kind");
+  Alcotest.(check string) "id" "keeper-delta-agent" (json_member_string json "id");
+  Alcotest.(check string) "key" "agent:keeper-delta-agent"
+    (json_member_string json "key");
+  Alcotest.(check string) "source" "raw_agent" (json_member_string json "source")
 
 let test_board_actor_identity_keeps_non_keeper_agent () =
   with_eio @@ fun env ->
@@ -341,19 +339,13 @@ let test_inline_board_post_author_rewrites_caller_claim () =
   in
   let normalized =
     Mcp_tool_runtime_board.ensure_board_post_author
-      ~agent_name:"keeper-xi-hammer-agent" args
+      ~agent_name:"xi-hammer" args
   in
   Alcotest.(check string) "author from ctx" "xi-hammer"
     Yojson.Safe.Util.(normalized |> member "author" |> to_string);
   Alcotest.(check string) "caller claim preserved" "delta"
     Yojson.Safe.Util.(
       normalized |> member "meta" |> member "author_caller_claim" |> to_string);
-  Alcotest.(check string) "raw ctx agent preserved" "keeper-xi-hammer-agent"
-    Yojson.Safe.Util.(
-      normalized
-      |> member "meta"
-      |> member Board_tool.author_raw_agent_name_meta_key
-      |> to_string);
   Alcotest.(check string) "existing meta preserved" "probe-10297"
     Yojson.Safe.Util.(normalized |> member "meta" |> member "trace" |> to_string)
 
@@ -362,18 +354,18 @@ let test_inline_board_post_author_accepts_matching_alias () =
     make_args
       [
         ("content", `String "ctx-owned post");
-        ("author", `String "keeper-delta-agent");
+        ("author", `String "delta");
       ]
   in
   let normalized =
-    Mcp_tool_runtime_board.ensure_board_post_author
-      ~agent_name:"keeper-delta-agent" args
+    Mcp_tool_runtime_board.ensure_board_post_author ~agent_name:"delta" args
   in
   Alcotest.(check string) "author canonical" "delta"
     Yojson.Safe.Util.(normalized |> member "author" |> to_string);
   Alcotest.(check bool) "no mismatch claim" true
-    Yojson.Safe.Util.(
-      normalized |> member "meta" |> member "author_caller_claim" = `Null)
+    (match Yojson.Safe.Util.member "meta" normalized with
+     | `Null -> true
+     | meta -> Yojson.Safe.Util.member "author_caller_claim" meta = `Null)
 
 (** {2 Group 2: JSON helper functions} *)
 
@@ -989,11 +981,11 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
   in
   Alcotest.(check bool) "MCP runtime curation submit ok" true submit_ok;
   let submitted = Yojson.Safe.from_string submit_body in
-  (* #23489 routes curation_submit through [enforce_caller_identity]:
-     a same-keeper surface form ("mcp-runtime-curator") is stored as the
-     canonical keeper name via [Server_utils.board_actor_author_for_write],
-     with the raw surface preserved in meta. *)
-  Alcotest.(check string) "MCP runtime submitted_by persisted" "curator"
+  (* #23489 routes curation_submit through [enforce_caller_identity];
+     RFC-0393: the caller's name is stored verbatim — nothing is recovered
+     from its shape. *)
+  Alcotest.(check string) "MCP runtime submitted_by persisted"
+    "mcp-runtime-curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
   let read2_ok, read2_body =
     require_mcp_runtime_result "masc_board_curation_read" (make_args [])
@@ -1838,8 +1830,8 @@ let () =
           Alcotest.test_case "board_error_to_string" `Quick test_board_error_to_string;
           Alcotest.test_case "is_agent" `Quick test_is_agent;
           Alcotest.test_case "format_timestamp_absolute" `Quick test_format_timestamp_absolute;
-          Alcotest.test_case "board actor identity canonicalizes keeper alias"
-            `Quick test_board_actor_identity_canonicalizes_keeper_alias;
+          Alcotest.test_case "board actor identity is registry backed"
+            `Quick test_board_actor_identity_is_registry_backed;
           Alcotest.test_case "board actor identity keeps non-keeper agent"
             `Quick test_board_actor_identity_keeps_non_keeper_agent;
           Alcotest.test_case "board dashboard json embeds reaction summaries"

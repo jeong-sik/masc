@@ -834,12 +834,12 @@ let keeper_agent_bindings config =
                {
                  scan with
                  enabled_agent_bindings =
-                   (meta.agent_name, meta.name) :: scan.enabled_agent_bindings;
+                   (meta.name, meta.name) :: scan.enabled_agent_bindings;
                }
              else
                {
                  scan with
-                 disabled_agent_names = meta.agent_name :: scan.disabled_agent_names;
+                 disabled_agent_names = meta.name :: scan.disabled_agent_names;
                }
          | Ok None -> scan
          | Error err ->
@@ -864,7 +864,7 @@ let keeper_names_for_agent agent_bindings assignee =
   |> sorted_unique_strings
 
 let is_credentialed_external_client config assignee =
-  (not (Keeper_identity.is_keeper_principal_agent_name assignee))
+  (not (List.mem assignee (Keeper_meta_store.keeper_names config)))
   &&
   match Auth.load_credential config.Workspace_utils_backend_setup.base_path assignee with
   | Some _ -> true

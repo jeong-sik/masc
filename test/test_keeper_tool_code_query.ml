@@ -34,7 +34,6 @@ let meta () : Keeper_meta_contract.keeper_meta =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String "probe"
-        ; "agent_name", `String "keeper-probe-agent"
         ; "trace_id", `String "trace-probe"
         ; "autoboot_enabled", `Bool false
         ])

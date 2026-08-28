@@ -18,3 +18,13 @@ val table_frame : base_path:string -> bool option
 (** [table_frame_of_doc] read from the runtime file. [None] where the file,
     the table or the key is absent -- all three read as "no stored choice",
     and the caller then draws what it drew before the key existed. *)
+
+val lift_colours_of_doc : Keeper_toml_loader.toml_doc -> bool option
+val lift_colours : base_path:string -> bool option
+(** [tui].lift_colours. [None] is absent, which the caller reads as on.
+
+    On, a colour the scheme leaves under the readable floor is raised in
+    lightness until it clears -- so a status masc says with colour stays
+    visible. Off, the scheme's own colour goes out untouched, which is what
+    every other terminal UI does and what a reader on a high-contrast scheme
+    wants: for them the lift moves a colour their theme placed on purpose. *)

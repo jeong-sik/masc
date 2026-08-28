@@ -1,7 +1,11 @@
 name = "masc_keeper_up"
 description = """
 Create or update a durable keeper. Keepers auto-start on server boot and are \
-reconciled back into live presence."""
+reconciled back into live presence. Each call snapshots the keeper manifest \
+and commits compare-and-swap: if another writer commits first, the call \
+fails with keeper_manifest_revision_conflict and no side effects. Retry the \
+same call — it re-snapshots the current manifest and applies only the \
+fields you pass, so a retry cannot revert another writer's change."""
 additional_properties = false
 
 [[params]]
@@ -29,10 +33,11 @@ Exact direct-mention tokens that can wake the keeper in workspace traffic \
 name = "sandbox_profile"
 type = "string"
 enum = ["local", "docker"]
-default = "local"
+default = "docker"
 description = """
-Sandbox isolation profile. New keepers default to local with playground-only \
-writes when omitted; select docker explicitly when required."""
+Sandbox isolation profile. Pass explicitly: \"docker\" for containerized \
+execution. \"local\" is fail-closed and only resolves when the dev/test \
+hatch MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1 is set."""
 
 [[params]]
 name = "autoboot_enabled"

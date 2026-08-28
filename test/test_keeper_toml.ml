@@ -943,41 +943,19 @@ let read_text_file path =
     (fun () -> really_input_string channel (in_channel_length channel))
 ;;
 
-let neutral_local_inherit_contract = "# test-contract: neutral-local-inherit"
-
-let test_bundled_profiles_include_local_sandbox () =
+let test_bundled_profiles_reject_local_sandbox () =
+  (* RFC-0394: the local playground is fail-closed, so no bundled keeper
+     profile may pin sandbox_profile = "local". *)
   let repo = repo_root () in
-  Fun.protect
-    ~finally:(fun () -> Config_dir_resolver.reset ())
-    (fun () ->
-      with_env_restore [ "MASC_CONFIG_DIR" ] (fun () ->
-          Unix.putenv "MASC_CONFIG_DIR" (Filename.concat repo "config");
-          Config_dir_resolver.reset ();
-          let keepers_dir = Filename.concat repo "config/keepers" in
-          let contract_profiles =
-            Sys.readdir keepers_dir
-            |> Array.to_list
-            |> List.filter (fun file -> Filename.check_suffix file ".toml")
-            |> List.filter (fun file ->
-              String_util.contains_substring
-                (read_text_file (Filename.concat keepers_dir file))
-                neutral_local_inherit_contract)
-          in
-          check int "one profile owns the neutral local/inherit contract" 1
-            (List.length contract_profiles);
-          let profile_name =
-            contract_profiles |> List.hd |> Filename.chop_extension
-          in
-          match KTP.load_keeper_profile_defaults_result profile_name with
-          | Error error ->
-            fail
-              ("neutral local/inherit contract failed to load: "
-               ^ KTP.keeper_toml_load_error_to_string error)
-          | Ok defaults ->
-            check (option string) "contract sandbox profile" (Some "local")
-              (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
-            check (option string) "contract network mode" (Some "inherit")
-              (Option.map KTP.network_mode_to_string defaults.network_mode)))
+  let keepers_dir = Filename.concat repo "config/keepers" in
+  Sys.readdir keepers_dir
+  |> Array.to_list
+  |> List.filter (fun file -> Filename.check_suffix file ".toml")
+  |> List.iter (fun file ->
+       let contents = read_text_file (Filename.concat keepers_dir file) in
+       let squeezed = String.concat "" (String.split_on_char ' ' contents) in
+       check bool (file ^ " must not pin the local playground") false
+         (String_util.contains_substring squeezed "sandbox_profile=\"local\""))
 
 let concrete_keeper_inventory_path repo =
   Filename.concat repo "test/fixtures/concrete-keeper-identities.txt"
@@ -1073,7 +1051,7 @@ max_context_override	= 200000
 AGENT_CORE_OPENAI_BASE_URL = "http://127.0.0.1:1"
 |};
   (match
-     TL.edit_keeper_toml_fields
+     TL.edit_keeper_toml_fields_strict_staged
        ~path
        [ "proactive_enabled", TL.Set (TL.Toml_bool false)
        ; "sandbox_image", TL.Set (TL.Toml_string "keeper:test")
@@ -1081,7 +1059,7 @@ AGENT_CORE_OPENAI_BASE_URL = "http://127.0.0.1:1"
        ; "max_context_override", TL.Remove
        ]
    with
-   | Error error -> fail error
+   | Error error -> fail (Fs_compat.atomic_replace_failure_to_string error)
    | Ok () -> ());
   let content =
     match Safe_ops.read_file_safe path with
@@ -1115,9 +1093,10 @@ let test_keeper_toml_writer_rejects_table_assignment_shapes () =
   List.iter
     (fun (label, value) ->
       let path = Filename.concat dir (String.map (function ' ' -> '-' | c -> c) label ^ ".toml") in
-      match TL.create_keeper_toml_file ~path [ "invalid", value ] with
+      match TL.create_keeper_toml_file_strict_staged ~path [ "invalid", value ] with
       | Ok () -> failf "%s must not be rendered as a key assignment" label
-      | Error message ->
+      | Error failure ->
+        let message = Fs_compat.atomic_replace_failure_to_string failure in
         check bool (label ^ " error is explicit") true
           (String_util.contains_substring message "cannot be rendered");
         check bool (label ^ " file is not created") false (Sys.file_exists path))
@@ -1134,11 +1113,11 @@ let test_keeper_toml_writer_round_trips_control_escapes () =
     ^ "after"
   in
   (match
-     TL.edit_keeper_toml_fields
+     TL.edit_keeper_toml_fields_strict_staged
        ~path
        [ "instructions", TL.Set (TL.Toml_string value) ]
    with
-   | Error error -> fail error
+   | Error error -> fail (Fs_compat.atomic_replace_failure_to_string error)
    | Ok () -> ());
   match Safe_ops.read_file_safe path with
   | Error error -> fail error
@@ -1166,13 +1145,13 @@ let test_keeper_toml_writer_edits_multiline_assignments () =
   let update_path = Filename.concat dir "update.toml" in
   write_file update_path (fixture ());
   (match
-     TL.edit_keeper_toml_fields
+     TL.edit_keeper_toml_fields_strict_staged
        ~path:update_path
        [ "instructions", TL.Set (TL.Toml_string "updated\ninstructions")
        ; "allowed_paths", TL.Set (TL.Toml_string_array [ "/tmp/new-a" ])
        ]
    with
-   | Error error -> fail error
+   | Error error -> fail (Fs_compat.atomic_replace_failure_to_string error)
    | Ok () -> ());
   (match Safe_ops.read_file_safe update_path with
    | Error error -> fail error
@@ -1188,11 +1167,11 @@ let test_keeper_toml_writer_edits_multiline_assignments () =
   let remove_path = Filename.concat dir "remove.toml" in
   write_file remove_path (fixture ());
   (match
-     TL.edit_keeper_toml_fields
+     TL.edit_keeper_toml_fields_strict_staged
        ~path:remove_path
        [ "instructions", TL.Remove ]
    with
-   | Error error -> fail error
+   | Error error -> fail (Fs_compat.atomic_replace_failure_to_string error)
    | Ok () -> ());
   match Safe_ops.read_file_safe remove_path with
   | Error error -> fail error
@@ -1803,8 +1782,8 @@ let () =
             test_profile_defaults_materializable_for_name_uses_base_path;
           test_case "bundled keeper profiles resolve prompt defaults" `Quick
             test_bundled_keeper_profiles_resolve_prompt_defaults;
-          test_case "bundled profiles include local sandbox" `Quick
-            test_bundled_profiles_include_local_sandbox;
+          test_case "bundled profiles reject local sandbox" `Quick
+            test_bundled_profiles_reject_local_sandbox;
           test_case "OCaml sources exclude concrete Keeper identities" `Quick
             test_ocaml_sources_exclude_declared_concrete_keeper_identities;
         ] );

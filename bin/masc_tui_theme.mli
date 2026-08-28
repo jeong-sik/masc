@@ -303,3 +303,30 @@ module Glyph : sig
   val priority : int -> string
   (** ["!!!"] / ["!!"] / ["!"] / [""] for priorities 1, 2, 3, and lower. *)
 end
+
+val set_lift_enabled : bool -> unit
+(** Whether a colour the scheme leaves under the readable floor is raised
+    until it clears. On by default, which is what masc drew before the setting
+    existed.
+
+    Off sends the scheme's colour as it is. That is what ratatui, tcell and
+    lipgloss do -- emit the code, let the terminal decide -- and it is what a
+    reader on a high-contrast scheme wants, since for them the lift moves a
+    colour their theme placed deliberately. The cost is that masc says some
+    things with colour alone, and a scheme that leaves those dim stops saying
+    them. Whose call that is, is the reason this is a setting. *)
+
+val lift_is_enabled : unit -> bool
+(** What {!set_lift_enabled} was last given.
+
+    The theme screen reads this to label its last column. The count beside a
+    scheme is the number of its colours under the readable floor, and that
+    number means "lifted" under one setting and "left under the floor" under
+    the other -- so the screen has to be able to ask which.
+
+    Three changes have now moved this one binding, each correct on its own
+    base and wrong once the others landed: #31212 added the setting with no
+    reader, #31216 removed the reader-less export, #31218 added the reader,
+    and #31227 and #31228 each restored the declaration. If it looks dead
+    again, the thing that broke is the theme screen's last column, not this
+    line. *)

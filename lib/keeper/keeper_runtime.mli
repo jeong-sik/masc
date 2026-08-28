@@ -91,13 +91,9 @@ val autoboot_exclusion_reason : Workspace.config -> string -> autoboot_exclusion
 val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)
 
-val canonicalize_if_keeper : Workspace.config -> string -> string
-(** [canonicalize_if_keeper config name] returns [keeper-<n>-agent]
-    when [name] (bare or already canonical) refers to a configured
-    keeper, else returns [name] unchanged. Safe to apply at credential
-    lookup sites: dashboard / admin / external MCP clients pass through
-    untouched, keeper bare names get canonicalized so the bare-stub
-    redirect path stops being load-bearing. (PR-3b1, AuthIdentityFSM
+(** (RFC-0393 removed [canonicalize_if_keeper]: credentials are stored
+    under the keeper_name, so lookups pass the name through unchanged.
+    Historical note: PR-3b1, AuthIdentityFSM
     invariant I1 IdentityBindsToken.) *)
 
 val effective_declarative_runtime_id :

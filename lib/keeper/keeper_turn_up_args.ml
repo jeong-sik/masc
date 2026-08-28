@@ -30,6 +30,7 @@ type parsed_args = {
   native_tool_posture_present : bool;
   instructions_arg : string option;
   profile_defaults : keeper_profile_defaults;
+  declarative_manifest_snapshot : declarative_manifest_snapshot;
   instructions_opt : string option;
   autonomous_instructions_arg : string option;
   autonomous_instructions_opt : string option;
@@ -246,17 +247,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
   if not (validate_name name) then
     Error (tool_result_error ~class_:Tool_result.Policy_rejection (invalid_name_error name))
   else
-    match Keeper_identity.keeper_name_of_agent_alias name with
-    (* One parse decides both facts. Asking "is it an alias?" separately forced
-       a default keeper name for a case that parse cannot produce, and the
-       resulting message named the rejected input as its own replacement. *)
-    | Some canonical_name ->
-        Error
-          (tool_result_error ~class_:Tool_result.Policy_rejection
-             (Printf.sprintf
-                "invalid keeper name: %S is a runtime agent identity; use the canonical keeper name %S"
-                name canonical_name))
-    | None ->
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
     let runtime_id_opt_res = parse_runtime_id_opt args in
@@ -290,17 +280,17 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       get_string_opt args "autonomous_instructions"
     in
     match
-      load_keeper_profile_defaults_result_for_base_path
+      load_declarative_materialization_defaults
         ~base_path:ctx.config.base_path
         name
     with
     | Error error ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection (keeper_toml_load_error_to_string error))
-    | Ok profile_defaults ->
+    | Ok { profile_defaults; manifest_snapshot = declarative_manifest_snapshot } ->
     (* An explicit profile must be valid. When neither the call nor keeper TOML states
-       one, creation uses the local sandbox with playground-only writes. This is the
-       narrow safe bootstrap: a fresh keeper can start without a hand-authored TOML,
-       while docker remains an explicit opt-in. *)
+       one, resolution falls back to [Local] (playground-only writes) — which
+       create/update validation rejects unless the MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
+       dev/test hatch is set. Docker remains an explicit opt-in. *)
     let sandbox_profile_error =
       match sandbox_profile_opt, profile_defaults.sandbox_profile,
         profile_defaults.manifest_path
@@ -356,6 +346,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       native_tool_posture_present;
       instructions_arg;
       profile_defaults;
+      declarative_manifest_snapshot;
       instructions_opt;
       autonomous_instructions_arg;
       autonomous_instructions_opt;
@@ -370,8 +361,10 @@ let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
   in
   raw |> List.filter_map String_util.trim_nonempty |> dedupe_keep_order
 
-(* An explicit request wins over the TOML default. Without either source, use the
-   canonical local sandbox; creation pairs it with playground-only writes. *)
+(* An explicit request wins over the TOML default. Without either source, the
+   fallback resolves to [Local] — which keeper-up create/update validation
+   rejects fail-closed unless the MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1 dev/test
+   hatch is set (config-load gating follows in the same plan). *)
 let resolve_sandbox_profile ?requested ~fallback () =
   match Option.bind requested sandbox_profile_of_string with
   | Some stated -> stated
@@ -379,6 +372,14 @@ let resolve_sandbox_profile ?requested ~fallback () =
     (match fallback with
      | Some stated -> stated
      | None -> default_sandbox_profile)
+
+(* Fail-closed gate: the local playground is off unless the operator sets the
+   hatch.  See [Env_config_sandbox.Gate] for the SSOT. *)
+let validate_sandbox_profile_allowed ~profile =
+  match profile with
+  | Local when not (Env_config_sandbox.Gate.allow_local_playground ()) ->
+    Error Env_config_sandbox.Gate.disabled_message
+  | _ -> Ok ()
 
 let resolve_network_mode ~sandbox_profile ~fallback =
   fallback
@@ -413,3 +414,11 @@ let validate_sandbox_settings ~allowed_paths =
              "allowed_paths entries may not contain globs or traversal segments \
               (rejected: %s)"
              (String.concat ", " rejected))
+
+(* Gate first, then the path checks: a rejected profile must not be masked by
+   an [allowed_paths] error, and an allowed profile falls through to the
+   unchanged path validation. *)
+let validate_sandbox_settings_with_profile ~sandbox_profile ~allowed_paths =
+  match validate_sandbox_profile_allowed ~profile:sandbox_profile with
+  | Error _ as err -> err
+  | Ok () -> validate_sandbox_settings ~allowed_paths

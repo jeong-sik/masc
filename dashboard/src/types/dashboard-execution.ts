@@ -356,6 +356,10 @@ export interface ServerBuildIdentity {
   binary_commit_source?: string | null
   repo_head_commit?: string | null
   repo_head_commit_source?: string | null
+  executable_path?: string
+  /** True when the executable resolved inside `.worktrees/` — a working
+   *  tree's build serving live traffic. Absent on older servers. */
+  executable_in_worktree?: boolean
   started_at: string
   uptime_seconds: number
 }

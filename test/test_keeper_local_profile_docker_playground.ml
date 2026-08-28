@@ -13,7 +13,6 @@ let make_meta ~name ~sandbox_profile ~network_mode =
   let json =
     `Assoc
       [ "name", `String name
-      ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
       ; "trace_id", `String ("trace-" ^ name)
       ]
   in

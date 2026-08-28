@@ -20,16 +20,17 @@ let producer_keeper_name
       ~(config : Workspace_utils_backend_setup.config)
       producer
   =
-  match Keeper_identity_binding.resolve ~config ~agent_name:producer with
-  | Keeper_identity_binding.Not_found -> Ok None
-  | Keeper_identity_binding.Unique keeper_name -> Ok (Some keeper_name)
-  | Keeper_identity_binding.Ambiguous keeper_names ->
-    Error
-      (Printf.sprintf
-         "multiple registered or persisted Keepers share agent_name=%s: %s"
-         producer
-         (String.concat "," keeper_names))
-  | Keeper_identity_binding.Lookup_failed detail -> Error detail
+  match
+    Keeper_registry_lookup.find_by_name_in_base_path
+      ~base_path:config.Workspace.base_path
+      producer
+  with
+  | Some entry -> Ok (Some entry.name)
+  | None ->
+    (match Keeper_meta_store.read_meta config producer with
+     | Ok (Some _) -> Ok (Some producer)
+     | Ok None -> Ok None
+     | Error detail -> Error detail)
 ;;
 
 let wake_rejected_producer

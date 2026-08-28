@@ -53,7 +53,6 @@ let ensure_keeper config ~keeper_name =
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
             [ "name", `String keeper_name
-            ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
             ; "autoboot_enabled", `Bool false
             ])
     with

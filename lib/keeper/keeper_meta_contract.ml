@@ -279,7 +279,6 @@ type keeper_meta =
   { (* -- Identity & profile -- *)
     id : Ids.Keeper_id.t option [@default None]
   ; name : string
-  ; agent_name : string
   ; instructions : string
   ; autonomous_instructions : string option
     (** Per-keeper autonomous-turn instructions. When non-empty and the turn
@@ -378,6 +377,10 @@ let effective_meta_of_profile_defaults
   in
   match target_sandbox_profile with
   | Error _ as err -> err
+  | Ok Local when not (Env_config_sandbox.Gate.allow_local_playground ()) ->
+      Error
+        (Printf.sprintf "keeper %s rejected: %s"
+           meta.name Env_config_sandbox.Gate.disabled_message)
   | Ok sandbox_profile ->
       let default_network_mode =
         if has_profile_source then default_network_mode_for_profile sandbox_profile

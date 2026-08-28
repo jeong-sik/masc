@@ -30,6 +30,28 @@ let theme ~base_path =
   | None -> None
   | Some doc -> theme_of_doc doc
 
+(* Whether masc lifts colours the reader's theme leaves under the readable
+   floor, [tui].lift_colours. Absent reads as "yes", which is what masc did
+   before the key existed.
+
+   The lift is there to rescue a theme whose colours are too dim to read on
+   its own background. A reader who picked a high-contrast scheme has already
+   solved that, and for them the lift is not a rescue but a distortion: it
+   moves a colour the scheme's author placed deliberately. Turning it off is
+   also what every other terminal UI does -- ratatui, tcell and lipgloss emit
+   the code and let the terminal decide -- so this is the setting that makes
+   masc behave the ordinary way.
+
+   Off has a cost worth naming: masc says some things with colour alone, and
+   on a scheme that leaves those colours dim they stop being read. That is the
+   reader's call to make, which is the point of the key. *)
+let lift_colours_of_doc doc = Keeper_toml_loader.toml_bool_opt doc "tui.lift_colours"
+
+let lift_colours ~base_path =
+  match doc_of_path (runtime_toml_path ~base_path) with
+  | None -> None
+  | Some doc -> lift_colours_of_doc doc
+
 (* Whether tables draw their outer box, [tui].table_frame. Absent reads as
    "no", which is what the pane drew before the key existed: the box is paid
    for out of the columns, and taking a cell of content from a reader who did

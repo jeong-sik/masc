@@ -515,35 +515,6 @@ let load_state_result ~base_path ~keeper_name =
             (Printexc.to_string exn)))
 ;;
 
-let load_existing_state_result ~base_path ~keeper_name =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match read_primary_unlocked owner with
-         | Error _ as error -> error
-         | Ok (Primary_current state) -> replay_transition_wal_unlocked owner state
-         | Ok (Primary_absent | Primary_unreadable _)
-           when durable_state_exists_unlocked owner ->
-           replay_transition_wal_unlocked ~wal_only:true owner State.empty
-         | Ok (Primary_absent | Primary_unreadable _) ->
-           Error
-             (Printf.sprintf
-                "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
-                (keeper_name_of_owner owner)
-                (snapshot_path_of_owner owner)
-                (transition_wal_path_of_owner owner)))
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue existing-state load raised keeper=%s path=%s: %s"
-            (keeper_name_of_owner owner)
-            (snapshot_path_of_owner owner)
-            (Printexc.to_string exn)))
-;;
 
 let read_state_read_only_unlocked ~require_existing owner =
   match read_primary_unlocked owner with

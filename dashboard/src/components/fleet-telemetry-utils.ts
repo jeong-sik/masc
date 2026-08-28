@@ -55,7 +55,7 @@ export interface FleetRow {
   terminal_reason_severity?: string | null
   tool_audit_at: string | null
   sandbox_profile: string | null
-  sandbox_last_error: string | null
+  keeper_last_error: string | null
   provider_health_status: 'healthy' | 'degraded' | 'unhealthy' | null
   provider_health_label: string | null
 }
@@ -455,7 +455,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             terminal_reason_severity: keeper.trust?.latest_terminal_reason?.severity ?? null,
             tool_audit_at: keeper.tool_audit_at ?? null,
             sandbox_profile: keeper.sandbox_profile ?? null,
-            sandbox_last_error: keeper.sandbox_last_error ?? null,
+            keeper_last_error: keeper.keeper_last_error ?? null,
             provider_health_status: null,
             provider_health_label: null,
           }

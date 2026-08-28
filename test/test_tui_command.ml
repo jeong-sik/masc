@@ -8,6 +8,7 @@ let describe = function
   | Command.Task_for_keeper { title; body } -> Printf.sprintf "task:%s|%s" title body
   | Command.Task_missing_title -> "task-missing-title"
   | Command.Help -> "help"
+  | Command.Open_settings -> "open-settings"
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Interrupt_turn -> "interrupt"
@@ -56,8 +57,9 @@ let test_task_takes_the_line_as_title_and_the_rest_as_body () =
     (describe (Command.parse "/task   "))
 
 let test_pane_commands_parse_by_word () =
-  check (list string) "help, keeper, interrupt, visibility, memory, context and image"
+  check (list string) "help, settings, keeper, interrupt, visibility, memory, context and image"
     [ "help"
+    ; "open-settings"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
     ; "interrupt"
@@ -76,6 +78,7 @@ let test_pane_commands_parse_by_word () =
     (List.map
        (fun text -> describe (Command.parse text))
        [ "/help"
+       ; "/settings"
        ; "/keeper orbiter"
        ; "/keeper   "
        ; "/interrupt"
@@ -101,7 +104,7 @@ let test_every_command_has_a_help_line () =
         (List.exists
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
            Command.help_lines))
-    [ "task"; "keeper"; "interrupt"; "thinking"; "tools"; "memory"
+    [ "task"; "keeper"; "settings"; "interrupt"; "thinking"; "tools"; "memory"
     ; "context"; "help" ]
 
 let test_keeper_names_resolve_by_unique_prefix () =
@@ -334,15 +337,13 @@ let test_the_typed_run_is_what_was_pressed () =
   check string "a prefix highlights through the slash"
     "T[/ta]U[sk]D[ <title>]" (spans "/ta");
   (* Three left, so names only -- and each carries the same typed run. The
-     separator is one space: at ten commands two spaces no longer fit the
-     80-column row the bare slash has to survive on. *)
+     separator is one space. The bare slash draws its shared prefix once so
+     the complete command catalog still fits the 80-column composer. *)
   check string "one glyph, three candidates"
     "T[/t]U[ask]D[ ]T[/t]U[hinking]D[ ]T[/t]U[ools]" (spans "/t");
   check string "the bare slash highlights only itself"
-    "T[/]U[task]" (spans "/" |> fun row ->
-      match String.index_opt row 'D' with
-      | Some at -> String.sub row 0 at
-      | None -> row)
+    "T[/]U[task keeper settings interrupt thinking tools memory context image attach help]"
+    (spans "/")
 
 (* Splitting the word for colour must not lose or duplicate a glyph. *)
 let test_colour_boundaries_keep_every_glyph () =

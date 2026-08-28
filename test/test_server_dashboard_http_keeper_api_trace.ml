@@ -316,7 +316,6 @@ let make_checkpoint_inventory_meta ~name ~trace_id =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String name
-        ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
         ; "trace_id", `String trace_id
         ])
   with

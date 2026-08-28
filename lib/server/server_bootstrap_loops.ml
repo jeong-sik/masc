@@ -51,12 +51,7 @@ let keeper_agent_status_of_phase = function
 ;;
 
 let keeper_registry_agent ~now (entry : Keeper_registry.registry_entry) : Masc_domain.agent =
-  let meta = entry.meta in
-  let agent_name =
-    match String.trim meta.agent_name with
-    | "" -> Keeper_identity.keeper_agent_name entry.name
-    | name -> name
-  in
+  let agent_name = entry.name in
   let agent_meta : Masc_domain.agent_meta =
     { session_id = "keeper-registry:" ^ entry.name
     ; agent_type = "keeper"
@@ -166,23 +161,9 @@ let resolve_broadcast_mention_target ~config target =
   | Error detail -> Error detail
   | Ok (Some meta) -> Ok (Some (target, meta))
   | Ok None ->
-    (match Keeper_identity_binding.resolve ~config ~agent_name:target with
-     | Keeper_identity_binding.Unique keeper_name ->
-       (match Keeper_meta_store.read_effective_meta config keeper_name with
-        | Ok (Some meta) -> Ok (Some (keeper_name, meta))
-        | Ok None -> Ok None
-        | Error detail -> Error detail)
-     | Keeper_identity_binding.Not_found ->
-       Keeper_meta_store.persisted_keeper_for_mention_target
-         config
-         ~mention_target:target
-     | Keeper_identity_binding.Ambiguous candidates ->
-       Error
-         (Printf.sprintf
-            "broadcast mention agent identity %S is ambiguous: %s"
-            target
-            (String.concat ", " candidates))
-     | Keeper_identity_binding.Lookup_failed detail -> Error detail)
+    Keeper_meta_store.persisted_keeper_for_mention_target
+      config
+      ~mention_target:target
 
 let deliver_broadcast_mention
       ~config
@@ -1560,7 +1541,7 @@ let start_keeper_loops_owned
          ~registered_keepers:(fun () ->
            Keeper_registry.all ~base_path ()
            |> List.map (fun (entry : Keeper_registry.registry_entry) ->
-             entry.name, entry.meta.Keeper_meta_contract.agent_name))
+             entry.name, entry.name))
          delivery
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1771,7 +1752,7 @@ let start_keeper_loops_owned
                 warmup;
               let ctx : _ Keeper_types_profile.context =
                 { config
-                ; agent_name = m.agent_name
+                ; agent_name = m.name
                 ; sw
                 ; clock
                 ; proc_mgr = Some proc_mgr

@@ -144,7 +144,6 @@ let seed_runtime_meta config name =
     `Assoc
       [
         ("name", `String name);
-        ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
         ("trace_id", `String ("trace-" ^ name));
       ]
   in
@@ -167,7 +166,7 @@ instructions = %S
        instructions)
 
 let write_keeper_agent ~keepers_dir ~name instructions =
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local" ~instructions
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker" ~instructions
 
 let status_instructions_with ?(agent_name = "test-agent") ?name config =
   let args =
@@ -237,7 +236,7 @@ let resolved_keeper_name config name =
 let test_keeper_exists_config_answers_typed () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "existsprobe" in
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
     ~instructions:"exists probe instructions";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -248,8 +247,8 @@ let test_keeper_exists_config_answers_typed () =
   in
   Alcotest.(check bool) "canonical name exists" true (exists name);
   Alcotest.(check bool)
-    "agent alias spelling exists"
-    true
+    "the wrapper spelling is not the keeper (RFC-0393)"
+    false
     (exists "keeper-existsprobe-agent");
   Alcotest.(check bool) "unknown name is Ok false" false (exists "no-such-keeper");
   Alcotest.(check bool)
@@ -257,39 +256,31 @@ let test_keeper_exists_config_answers_typed () =
     false
     (exists "not/a valid;name")
 
-let test_status_resolves_keeper_alias_names () =
+(* RFC-0393: the keeper name is the only spelling a status/surface call
+   understands — wrapper forms are ordinary (unknown) names. *)
+let test_status_reads_the_keeper_name_only () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "aliasprobe" in
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
     ~instructions:"alias status instructions";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Alcotest.(check string)
-    "explicit agent alias reaches canonical keeper"
+    "the keeper name reaches its instructions"
     "alias status instructions"
-    (status_instructions_with ~name:"keeper-aliasprobe-agent" config);
-  Alcotest.(check string)
-    "prefixed alias reaches canonical keeper"
-    "alias status instructions"
-    (status_instructions_with ~name:"keeper-aliasprobe" config);
-  Alcotest.(check string)
-    "self fallback agent alias reaches canonical keeper"
-    "alias status instructions"
-    (status_instructions_with ~agent_name:"keeper-aliasprobe-agent" config)
+    (status_instructions_with ~name config)
 
-let test_keeper_surface_resolves_alias_names () =
-  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+let test_keeper_surface_uses_the_name_verbatim () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "aliasmsg" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
+    ~instructions:"verbatim keeper surface";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Alcotest.(check string)
-    "agent alias resolves for keeper surface tools"
+    "the keeper name resolves for keeper surface tools"
     name
-    (resolved_keeper_name config "keeper-aliasmsg-agent");
-  Alcotest.(check string)
-    "prefixed alias resolves for keeper surface tools"
-    name
-    (resolved_keeper_name config "keeper-aliasmsg")
+    (resolved_keeper_name config name)
 
 let test_toml_overlay_reaches_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -368,7 +359,7 @@ let test_keeper_instructions_reach_meta_json () =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 instructions = "keeper instructions"
-sandbox_profile = "local"
+sandbox_profile = "docker"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -718,7 +709,7 @@ let test_keeper_up_materializes_missing_profile_source () =
     `Assoc
       [ "name", `String name
       ; "instructions", `String "durable direct instructions"
-      ; "sandbox_profile", `String "local"
+      ; "sandbox_profile", `String "docker"
       ; "allowed_paths", `List [ `String "/tmp/nosourceup" ]
       ; "mention_targets", `List [ `String "operator" ]
       ; "proactive_enabled", `Bool false
@@ -735,7 +726,7 @@ let test_keeper_up_materializes_missing_profile_source () =
   let meta =
     { runtime_meta with
       instructions = "durable direct instructions"
-    ; sandbox_profile = Profile.Local
+    ; sandbox_profile = Profile.Docker
     ; allowed_paths = [ "/tmp/nosourceup" ]
     ; mention_targets = [ "operator" ]
     ; proactive = { enabled = false }
@@ -743,9 +734,17 @@ let test_keeper_up_materializes_missing_profile_source () =
     ; max_context_override = Some 128_001
     }
   in
-  (match Turn_up_config.persist ~config ~parsed ~meta with
+  let expected_revision =
+    match Turn_up_config.current_config_revision ~config ~keeper_name:name with
+    | Ok revision -> revision
+    | Error error ->
+      Alcotest.failf "keeper config revision read failed: %s" error
+  in
+  (match Turn_up_config.persist ~expected_revision ~config ~parsed ~meta () with
    | Ok _ -> ()
-   | Error error -> Alcotest.failf "keeper config persistence failed: %s" error);
+   | Error error ->
+     Alcotest.failf "keeper config persistence failed: %s"
+       (Turn_up_config.error_to_string error));
   let toml_path = Filename.concat keepers_dir (name ^ ".toml") in
   Alcotest.(check bool) "keeper TOML created" true (Sys.file_exists toml_path);
   match Profile.load_keeper_toml toml_path with
@@ -770,24 +769,26 @@ let test_keeper_up_materializes_missing_profile_source () =
       (Some [ "/tmp/nosourceup" ])
       defaults.allowed_paths
 
-let test_missing_profile_source_uses_runtime_defaults () =
+let test_missing_profile_source_rejects_implicit_local () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
   let name = "nosource" in
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   match Store.read_effective_meta config name with
-  | Error err -> Alcotest.failf "runtime defaults should remain readable: %s" err
+  | Error err ->
+    Alcotest.(check bool)
+      "missing declaration cannot silently select the host playground"
+      true
+      (String_util.string_contains_substring
+         ~needle:"local playground is off"
+         err)
   | Ok None -> Alcotest.fail "seeded keeper meta disappeared"
-  | Ok (Some meta) ->
-    Alcotest.(check string)
-      "runtime sandbox default"
-      "local"
-      (Profile.sandbox_profile_to_string meta.sandbox_profile)
+  | Ok (Some _) -> Alcotest.fail "missing profile source admitted implicit local"
 
 let test_status_tracks_toml_overlay_changes () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "statuscache" in
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
     ~instructions:"first cache instructions";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -795,7 +796,7 @@ let test_status_tracks_toml_overlay_changes () =
     "initial TOML instructions reach status"
     "first cache instructions"
     (status_instructions config name);
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
     ~instructions:"second cache instructions after toml edit";
   Alcotest.(check string)
     "TOML edit invalidates cached status"
@@ -805,7 +806,7 @@ let test_status_tracks_toml_overlay_changes () =
 let test_status_reports_normalized_options () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "status-options-cache" in
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
     ~instructions:"normalized status options";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -879,7 +880,7 @@ let test_status_reports_normalized_options () =
 let test_status_rejects_tail_order_outside_schema () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "status-tail-order" in
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
     ~instructions:"strict tail order";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -908,7 +909,7 @@ let test_status_rejects_malformed_options () =
   write_keeper_toml
     ~keepers_dir
     ~name
-    ~sandbox_profile:"local"
+    ~sandbox_profile:"docker"
     ~instructions:"strict status options";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -1071,7 +1072,7 @@ let test_status_schema_tracks_argument_contract () =
 let test_status_tracks_persisted_meta_without_updated_at () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "status-persisted-meta-cache" in
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
     ~instructions:"persisted meta cache";
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
@@ -1096,7 +1097,7 @@ let test_status_reads_live_registry_each_call () =
   write_keeper_toml
     ~keepers_dir
     ~name
-    ~sandbox_profile:"local"
+    ~sandbox_profile:"docker"
     ~instructions:"live registry observation";
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
@@ -1120,7 +1121,7 @@ let test_status_reads_live_registry_each_call () =
       Alcotest.(check (option string))
         "first registry observation"
         (Some "first live error")
-        (json_string_field "sandbox_last_error" (status ()));
+        (json_string_field "keeper_last_error" (status ()));
       Masc.Keeper_registry.set_last_error_entry
         ~base_path:config.base_path
         ~name
@@ -1128,12 +1129,12 @@ let test_status_reads_live_registry_each_call () =
       Alcotest.(check (option string))
         "second registry observation is not frozen by a response cache"
         (Some "second live error")
-        (json_string_field "sandbox_last_error" (status ())))
+        (json_string_field "keeper_last_error" (status ())))
 
 let test_status_surfaces_chat_operation_runtime () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "chat-operation-status" in
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
     ~instructions:"chat operation status";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -1253,14 +1254,24 @@ instructions = "Missing sandbox profile"
      | Some (`Assoc _) -> true
      | Some _ | None -> false)
 
+(* The effective-prompt render inside [keeper_config_json] walks board
+   observation collection, which performs Eio effects — outside an Eio
+   main loop it dies with [Effect.Unhandled (Cancel.Get_context)] instead
+   of reaching the assertions. *)
+let within_eio f =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  f ()
+
 let test_config_snapshot_prompt_is_nested_only () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  within_eio @@ fun () ->
   let name = "nested-prompt" in
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 instructions = "nested instructions"
-sandbox_profile = "local"
+sandbox_profile = "docker"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -1381,9 +1392,9 @@ let () =
             `Quick
             test_ensure_keeper_meta_preserves_live_usage_during_reconcile;
           Alcotest.test_case "status resolves keeper alias names" `Quick
-            test_status_resolves_keeper_alias_names;
+            test_status_reads_the_keeper_name_only;
           Alcotest.test_case "keeper surface resolves alias names" `Quick
-            test_keeper_surface_resolves_alias_names;
+            test_keeper_surface_uses_the_name_verbatim;
           Alcotest.test_case "turn setup uses effective meta" `Quick
             test_turn_setup_uses_effective_meta;
           Alcotest.test_case
@@ -1398,8 +1409,8 @@ let () =
           Alcotest.test_case "keeper_up materializes missing profile source" `Quick
             test_keeper_up_materializes_missing_profile_source;
           Alcotest.test_case
-            "missing profile source uses runtime defaults"
-            `Quick test_missing_profile_source_uses_runtime_defaults;
+            "missing profile source rejects implicit local"
+            `Quick test_missing_profile_source_rejects_implicit_local;
           Alcotest.test_case "status tracks TOML overlay edits" `Quick
             test_status_tracks_toml_overlay_changes;
           Alcotest.test_case "status reports normalized options"

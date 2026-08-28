@@ -28,7 +28,7 @@ let global =
   ; b Meta "i" "focus the composer (message the shown keeper)"
   ; b Meta ":" "command palette"
   ; b Meta ";" "agenda: what is coming, and who is waiting on you"
-  ; b Meta "@" "answering: who is mid-turn right now, and for how long"
+  ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
   ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
@@ -114,7 +114,8 @@ let for_surface = function
       [ b Navigate "j/k" "move"; b Act "Enter" "choose"; b Act "Esc" "back" ]
   | Lanes ->
       [ b Navigate "j/k" "move" ~help:"move the lane cursor"
-      ; b Act "Right / Enter" "detail" ~help:"open the selected Keeper"
+      ; b Act "Right / Enter" "detail"
+          ~help:"open the selected Keeper, or a standalone lane's exact runs"
       ; b Act "c / m" "chat" ~help:"chat with the selected Keeper"
       ; b Act "Esc" "overview"
       ]
@@ -146,6 +147,8 @@ let for_surface = function
       [ b Navigate "j/k" "move"
       ; b Act "Right / Enter" "detail"
       ; b Act "Left / Esc" "back"
+      ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
+      ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
       ; b Act "c" "complete" ~help:"complete goal"
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
@@ -223,7 +226,9 @@ let for_surface = function
            theme choice.  The pane strip says which meaning each key has. *)
       ; b Navigate "p" "runtime.toml / params / prompts / themes"
       ; b Act "e" "edit"
-          ~help:"params edit inline; runtime.toml uses preview; prompts save an override"
+          ~help:"params use a type-aware field; runtime.toml previews; prompts save an override"
+      ; b Act "E" "advanced JSON"
+          ~help:"on params only: edit the exact JSON value"
       ; b Act "Enter" "edit / use"
           ~help:"edit the selected param; on themes, use that colour scheme"
       ; b Act "x" "default / clear"
@@ -351,6 +356,34 @@ let footer_hints_fusion_detail ~scroll ~max_scroll =
         ]
         @ listing_meta))
     scroll max_scroll
+
+(* Lanes sub-modes ([lanes_mode] owns overview/list/detail/notice —
+   masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
+   name the drill-downs the same way the Fusion detail footer does. *)
+let footer_hints_lanes_run_list =
+  hints_of_bindings
+    ([ b Navigate "j/k" "move" ~help:"move the run cursor"
+     ; b Act "Right / Enter" "prompt" ~help:"open the run's prompt and output"
+     ; b Act "Left / Esc" "back" ~help:"back to the lane overview"
+     ]
+     @ listing_meta)
+
+let footer_hints_lanes_run_detail ~scroll ~max_scroll =
+  Printf.sprintf "%s  (%d/%d)"
+    (hints_of_bindings
+       ([ b Navigate "j/k" "scroll"
+        ; b Navigate "PgUp/PgDn" "page"
+        ; b Act "Left / Esc" "back" ~help:"back to the run list"
+        ]
+        @ listing_meta))
+    scroll max_scroll
+
+(* The lane notice is static — there is nothing to move through, so it keeps
+   only the way back plus the shared tail. *)
+let footer_hints_lane_notice =
+  hints_of_bindings
+    ([ b Act "Left / Esc" "back" ~help:"back to the lane overview" ]
+     @ listing_meta)
 
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)

@@ -1824,21 +1824,10 @@ let test_audit_orphan_requires_exact_registered_identity () =
     ~assignee:"alice-worker"
     ~active_name:"alice"
 
-(* The meta schema requires [agent_name] to be the canonical form derived from
-   [name], so a hardcoded name and a caller-chosen agent_name drift apart and
-   the fixture is rejected before the test under it ever runs. Deriving the name
-   from the agent_name keeps the pair consistent for whatever keeper a caller
-   picks. *)
 let keeper_meta_for_self_filter agent_name =
-  let name =
-    match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
-    | Some keeper -> keeper
-    | None -> agent_name
-  in
   let json =
     `Assoc
-      [ ("name", `String name)
-      ; ("agent_name", `String agent_name)
+      [ ("name", `String agent_name)
       ; ("trace_id", `String "trace-self-filter")
       ]
   in
@@ -1846,17 +1835,10 @@ let keeper_meta_for_self_filter agent_name =
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("keeper_meta_for_self_filter failed: " ^ err)
 
-(* Same canonical-name requirement as [keeper_meta_for_self_filter]. *)
 let keeper_meta_for_goal_filter agent_name =
-  let name =
-    match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
-    | Some keeper -> keeper
-    | None -> agent_name
-  in
   let json =
     `Assoc
-      [ ("name", `String name)
-      ; ("agent_name", `String agent_name)
+      [ ("name", `String agent_name)
       ; ("trace_id", `String "trace-goal-filter")
       ]
   in

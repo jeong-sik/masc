@@ -52,7 +52,6 @@ let make_test_meta () : Keeper_meta_contract.keeper_meta =
       (`Assoc
          [
            ("name", `String keeper_name);
-           ("agent_name", `String (keeper_name ^ "-agent"));
          ])
   with
   | Ok meta -> meta
@@ -120,7 +119,7 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     ~model_input_window:None
     ~config
     ~keeper_name:meta.name
-    ~agent_name:meta.agent_name
+    ~agent_name:meta.name
     ~turn_kind:Turn_record.Autonomous
     ~trace_id
     ~absolute_turn:turn

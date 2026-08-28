@@ -73,8 +73,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
       let default_value = function
         | Schema.Schema -> `String "masc.keeper_meta.v1"
         | Schema.Name -> `String name
-        | Schema.Agent_name ->
-          `String (Masc.Keeper_identity.keeper_agent_name name)
         | Schema.Instructions -> `String ""
         | Schema.Autonomous_instructions -> `String ""
         | Schema.Trace_id -> `String trace_id

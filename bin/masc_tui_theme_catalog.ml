@@ -1,4 +1,61 @@
-(* The bundled schemes and the slot mapping. See the interface. *)
+(* The bundled schemes and the slot mapping. See the interface.
+
+   {1 Where the colours come from}
+
+   Every body below is copied from the scheme's own published base16 form,
+   most of them by way of tinted-theming/schemes, which is where their authors
+   put them. Nothing here is a masc colour except [default-dark] and
+   [default-light]. Who wrote which one, and under what licence, is recorded
+   in docs/legal/THIRD-PARTY-THEMES.md; that file is the one to edit when a
+   scheme is added, because a name in this list without an entry there is a
+   scheme masc ships and does not credit.
+
+   The values are fetched rather than typed. A palette entered by hand is a
+   palette with a transposition in it, and the sixteen slots are ordered, so a
+   swapped pair is a theme that is subtly wrong on one colour -- the hardest
+   kind to notice and the easiest kind to introduce.
+
+   {1 Which schemes are here}
+
+   A scheme is bundled when masc can draw it faithfully, and that is decided
+   by running the readability contracts in test_tui_theme_contrast, not by
+   judgement. Fifty were measured on 2026-08-28: thirty-eight passed and
+   twelve did not, in the three ways below. One of the thirty-eight,
+   material-palenight, was then removed for a reason the contracts cannot see
+   -- its upstream carries no licence and its author has objected to reuse --
+   which leaves thirty-seven. THIRD-PARTY-THEMES.md records that separately,
+   because "masc cannot draw it" and "masc should not ship it" are different
+   answers and only the first one a test can give.
+
+   - The lift moves the hue too far, past the 8 degrees the contract allows:
+     edge-light 8.5, rose-pine-dawn 8.4, primer-light 9.8, catppuccin-latte
+     9.2, everforest-light-hard 10.2, everforest-light-medium 11.0, tomorrow
+     10.7, material-lighter 12.3. All eight are light schemes and all but one
+     fail on the same colour, Warn.
+
+     That is not a coincidence, and the schemes are not at fault. A yellow on
+     a light page already sits near the top of the lightness range, so a lift
+     that raises lightness runs out of room and the colour slides sideways
+     instead. The lift moves Oklab lightness alone, which held to 5.6 degrees
+     across the twelve schemes the 8-degree budget was drawn from; fifty is a
+     wider population than that.
+
+     Eight rejections with one shape is a finding about the lift, not about
+     the eight. Stopping the lift at the hue budget rather than at the
+     contrast floor, or clamping chroma so the hue cannot move at all, would
+     let all eight in. That is a separate change and a real design question:
+     it trades a hard readability floor for a soft one.
+
+   - The scheme's own text does not clear the receding floor: apprentice, at
+     under 3.0 between its foreground and its background. masc dims text to
+     make it recede, and there is nothing below that to dim to.
+
+   - Two keeper action colours collapse into each other for a reader with
+     deuteranopia or protanopia: nord-light and oceanicnext at 0.023 apart,
+     kanagawa-dragon at 0.022, where the contract wants separation. Worth
+     saying plainly, because it is the least obvious of the three: these
+     schemes read fine. masc cannot use them because masc spends colour on
+     telling actions apart, and for some readers these schemes do not. *)
 
 module Palette = Masc_tui_terminal_palette
 
@@ -117,6 +174,233 @@ let bundled =
        ; "a1efe4"; "66d9ef"; "ae81ff"; "cc6633"
       |]
   }
+  ; { name = "everforest-dark"
+  ; light = false
+  ; palette =
+      [| "2d353b"; "343f44"; "475258"; "859289"
+       ; "9da9a0"; "d3c6aa"; "e6e2cc"; "fdf6e3"
+       ; "e67e80"; "e69875"; "dbbc7f"; "a7c080"
+       ; "83c092"; "7fbbb3"; "d699b6"; "9da9a0"
+      |]
+  }
+  ; { name = "kanagawa-wave"
+  ; light = false
+  ; palette =
+      [| "1f1f28"; "16161d"; "223249"; "54546d"
+       ; "727169"; "dcd7ba"; "c8c093"; "717c7c"
+       ; "c34043"; "ffa066"; "c0a36e"; "76946a"
+       ; "6a9589"; "7e9cd8"; "957fb8"; "d27e99"
+      |]
+  }
+  ; { name = "rose-pine"
+  ; light = false
+  ; palette =
+      [| "191724"; "1f1d2e"; "26233a"; "6e6a86"
+       ; "908caa"; "e0def4"; "e0def4"; "524f67"
+       ; "eb6f92"; "f6c177"; "ebbcba"; "31748f"
+       ; "9ccfd8"; "c4a7e7"; "f6c177"; "524f67"
+      |]
+  }
+  ; { name = "catppuccin-macchiato"
+  ; light = false
+  ; palette =
+      [| "24273a"; "1e2030"; "363a4f"; "494d64"
+       ; "5b6078"; "cad3f5"; "f4dbd6"; "b7bdf8"
+       ; "ed8796"; "f5a97f"; "eed49f"; "a6da95"
+       ; "8bd5ca"; "8aadf4"; "c6a0f6"; "f0c6c6"
+      |]
+  }
+  ; { name = "gruvbox-light-hard"
+  ; light = true
+  ; palette =
+      [| "f9f5d7"; "ebdbb2"; "d5c4a1"; "bdae93"
+       ; "665c54"; "504945"; "3c3836"; "282828"
+       ; "9d0006"; "af3a03"; "b57614"; "79740e"
+       ; "427b58"; "076678"; "8f3f71"; "d65d0e"
+      |]
+  }
+
+  ; { name = "papercolor-light"
+  ; light = true
+  ; palette =
+      [| "eeeeee"; "c4c4c4"; "9e9e9e"; "858585"
+       ; "6b6b6b"; "5e5e5e"; "525252"; "444444"
+       ; "d70000"; "d75f00"; "d75f00"; "008700"
+       ; "0087af"; "005f87"; "8700af"; "af0000"
+      |]
+  }
+  ; { name = "one-light"
+  ; light = true
+  ; palette =
+      [| "fafafa"; "f0f0f1"; "e5e5e6"; "a0a1a7"
+       ; "696c77"; "383a42"; "202227"; "090a0b"
+       ; "ca1243"; "d75f00"; "c18401"; "50a14f"
+       ; "0184bc"; "4078f2"; "a626a4"; "986801"
+      |]
+  }
+  ; { name = "ayu-light"
+  ; light = true
+  ; palette =
+      [| "f8f9fa"; "edeff1"; "d2d4d8"; "a0a6ac"
+       ; "8A9199"; "5c6166"; "4e5257"; "404447"
+       ; "f07171"; "fa8d3e"; "f2ae49"; "6cbf49"
+       ; "4cbf99"; "399ee6"; "a37acc"; "e6ba7e"
+      |]
+  }
+  ; { name = "tokyo-night-light"
+  ; light = true
+  ; palette =
+      [| "D5D6DB"; "CBCCD1"; "DFE0E5"; "9699A3"
+       ; "4C505E"; "343B59"; "1A1B26"; "1A1B26"
+       ; "343B58"; "965027"; "166775"; "485E30"
+       ; "3E6968"; "34548A"; "5A4A78"; "8C4351"
+      |]
+  }
+  ; { name = "gruvbox-material-light-medium"
+  ; light = true
+  ; palette =
+      [| "fbf1c7"; "f2e5bc"; "d5c4a1"; "bdae93"
+       ; "665c54"; "654735"; "3c3836"; "282828"
+       ; "c14a4a"; "c35e0a"; "b47109"; "6c782e"
+       ; "4c7a5d"; "45707a"; "945e80"; "e78a4e"
+      |]
+  }
+  ; { name = "ayu-dark"
+  ; light = false
+  ; palette =
+      [| "0b0e14"; "131721"; "202229"; "3e4b59"
+       ; "bfbdb6"; "e6e1cf"; "ece8db"; "f2f0e7"
+       ; "f07178"; "ff8f40"; "ffb454"; "aad94c"
+       ; "95e6cb"; "59c2ff"; "d2a6ff"; "e6b450"
+      |]
+  }
+  ; { name = "ayu-mirage"
+  ; light = false
+  ; palette =
+      [| "1f2430"; "242936"; "323844"; "4A5059"
+       ; "707a8c"; "cccac2"; "d9d7ce"; "f3f4f5"
+       ; "f28779"; "ffad66"; "ffd173"; "d5ff80"
+       ; "95e6cb"; "73d0ff"; "d4bfff"; "f27983"
+      |]
+  }
+  ; { name = "zenburn"
+  ; light = false
+  ; palette =
+      [| "383838"; "404040"; "606060"; "6f6f6f"
+       ; "808080"; "dcdccc"; "c0c0c0"; "ffffff"
+       ; "dca3a3"; "dfaf8f"; "e0cf9f"; "5f7f5f"
+       ; "93e0e3"; "7cb8bb"; "dc8cc3"; "000000"
+      |]
+  }
+  ; { name = "tokyo-night-storm"
+  ; light = false
+  ; palette =
+      [| "24283B"; "16161E"; "343A52"; "444B6A"
+       ; "787C99"; "A9B1D6"; "CBCCD1"; "D5D6DB"
+       ; "C0CAF5"; "A9B1D6"; "0DB9D7"; "9ECE6A"
+       ; "B4F9F8"; "2AC3DE"; "BB9AF7"; "F7768E"
+      |]
+  }
+  ; { name = "catppuccin-frappe"
+  ; light = false
+  ; palette =
+      [| "303446"; "292c3c"; "414559"; "51576d"
+       ; "626880"; "c6d0f5"; "f2d5cf"; "babbf1"
+       ; "e78284"; "ef9f76"; "e5c890"; "a6d189"
+       ; "81c8be"; "8caaee"; "ca9ee6"; "eebebe"
+      |]
+  }
+  ; { name = "rose-pine-moon"
+  ; light = false
+  ; palette =
+      [| "232136"; "2a273f"; "393552"; "6e6a86"
+       ; "908caa"; "e0def4"; "e0def4"; "56526e"
+       ; "eb6f92"; "f6c177"; "ea9a97"; "3e8fb0"
+       ; "9ccfd8"; "c4a7e7"; "f6c177"; "56526e"
+      |]
+  }
+  ; { name = "tomorrow-night"
+  ; light = false
+  ; palette =
+      [| "1d1f21"; "282a2e"; "373b41"; "969896"
+       ; "b4b7b4"; "c5c8c6"; "e0e0e0"; "ffffff"
+       ; "cc6666"; "de935f"; "f0c674"; "b5bd68"
+       ; "8abeb7"; "81a2be"; "b294bb"; "a3685a"
+      |]
+  }
+  ; { name = "selenized-light"
+  ; light = true
+  ; palette =
+      [| "fbf3db"; "ece3cc"; "d5cdb6"; "909995"
+       ; "909995"; "53676d"; "3a4d53"; "3a4d53"
+       ; "cc1729"; "bc5819"; "a78300"; "428b00"
+       ; "00978a"; "006dce"; "825dc0"; "c44392"
+      |]
+  }
+  ; { name = "selenized-white"
+  ; light = true
+  ; palette =
+      [| "ffffff"; "ebebeb"; "cdcdcd"; "878787"
+       ; "878787"; "474747"; "282828"; "282828"
+       ; "bf0000"; "ba3700"; "af8500"; "008400"
+       ; "009a8a"; "0054cf"; "6b40c3"; "dd0f9d"
+      |]
+  }
+  ; { name = "horizon-light"
+  ; light = true
+  ; palette =
+      [| "FDF0ED"; "FADAD1"; "F9CBBE"; "BDB3B1"
+       ; "948C8A"; "403C3D"; "302C2D"; "201C1D"
+       ; "F7939B"; "F6661E"; "FBE0D9"; "94E1B0"
+       ; "DC3318"; "DA103F"; "1D8991"; "E58C92"
+      |]
+  }
+  ; { name = "edge-dark"
+  ; light = false
+  ; palette =
+      [| "262729"; "313235"; "3d3f42"; "4a4c4f"
+       ; "95989d"; "afb2b5"; "caccce"; "e4e5e6"
+       ; "e77171"; "eba31a"; "dbb774"; "a1bf78"
+       ; "5ebaa5"; "73b3e7"; "d390e7"; "5ebaa5"
+      |]
+  }
+  ; { name = "selenized-dark"
+  ; light = false
+  ; palette =
+      [| "103c48"; "184956"; "2d5b69"; "72898f"
+       ; "72898f"; "adbcbc"; "cad8d9"; "cad8d9"
+       ; "fa5750"; "ed8649"; "dbb32d"; "75b938"
+       ; "41c7b9"; "4695f7"; "af88eb"; "f275be"
+      |]
+  }
+  ; { name = "horizon-dark"
+  ; light = false
+  ; palette =
+      [| "1C1E26"; "232530"; "2E303E"; "6F6F70"
+       ; "9DA0A2"; "CBCED0"; "DCDFE4"; "E3E6EE"
+       ; "E93C58"; "E58D7D"; "EFB993"; "EFAF8E"
+       ; "24A8B4"; "DF5273"; "B072D1"; "E4A382"
+      |]
+  }
+  ; { name = "primer-dark-dimmed"
+  ; light = false
+  ; palette =
+      [| "1c2128"; "373e47"; "444c56"; "545d68"
+       ; "768390"; "909dab"; "adbac7"; "cdd9e5"
+       ; "f47067"; "e0823d"; "c69026"; "57ab5a"
+       ; "96d0ff"; "539bf5"; "e275ad"; "ae5622"
+      |]
+  }
+  ; { name = "atelier-heath-light"
+  ; light = true
+  ; palette =
+      [| "f7f3f7"; "d8cad8"; "ab9bab"; "9e8f9e"
+       ; "776977"; "695d69"; "292329"; "1b181b"
+       ; "ca402b"; "a65926"; "bb8a35"; "918b3b"
+       ; "159393"; "516aec"; "7b59c0"; "cc33cc"
+      |]
+  }
+
   ]
 ;;
 

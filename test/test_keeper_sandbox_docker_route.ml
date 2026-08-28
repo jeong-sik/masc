@@ -210,7 +210,6 @@ let make_meta ~name ~sandbox () =
   let fields =
     [
       ("name", `String name);
-      ("agent_name", `String (Keeper_identity.keeper_agent_name name));
       ("trace_id", `String ("trace-" ^ name));
     ]
   in

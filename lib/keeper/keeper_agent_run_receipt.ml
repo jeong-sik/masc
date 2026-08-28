@@ -135,7 +135,7 @@ let finalize
   in
   let receipt =
     { Keeper_execution_receipt.keeper_name = meta.name
-    ; agent_name = meta.agent_name
+    ; agent_name = meta.name
     ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
     ; turn_count = !receipt_turn_count_ref
     ; agent_core_turn_count = !receipt_turn_count_ref

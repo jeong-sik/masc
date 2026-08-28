@@ -207,7 +207,7 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
         [
           ("source", `String "keeper_status_bridge");
           ("keeper_name", `String meta.name);
-          ("agent_name", `String meta.agent_name);
+          ("agent_name", `String meta.name);
           ("paused", `Bool meta.paused);
           ("attention", `Assoc attention_fields);
           ("runtime_blocker", `Assoc blocker_fields);
@@ -221,7 +221,7 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
           keeper_attention_summary ~meta ~reason ~runtime_blocker_summary;
         target_type = Operator_action_constants.keeper_target_type;
         target_id = Some meta.name;
-        actor = Some meta.agent_name;
+        actor = Some meta.name;
         evidence;
       }
     in

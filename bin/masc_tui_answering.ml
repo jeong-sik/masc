@@ -4,21 +4,32 @@
     this overlay is the "+2" unfolded — every running keeper with its lane
     and how long the turn has been going, the pane's last chat target first,
     because that is the answer the operator who pressed the key is waiting
-    on. Pure projection over the polled rows so the shape is testable
-    without a terminal. *)
+    on. Keepers that just finished stay listed for a while (see
+    {!finish_glow_ttl_seconds}): "it is done" is the other half of the
+    question the operator walked away holding. Pure projection over the
+    polled rows so the shape is testable without a terminal. *)
 
 open Masc
 
 type tone =
   | Heading
   | Running
+  | Done
   | Unknown
   | Quiet
 
 type line =
   { text : string
   ; tone : tone
+  ; target : string option
+        (** The keeper this row names, when Enter can open its chat:
+            running and just-finished rows carry it, prose rows do not. *)
   }
+
+(* How long a finished turn keeps its ✓ row (and its footer glow) before the
+   fact goes quiet. Long enough to survive a glance away, short enough that
+   the overlay stays "right now", not a log. *)
+let finish_glow_ttl_seconds = 60.
 
 (* Wire spelling from [Keeper_owner.turn_lane_to_string], not a local
    re-spelling: the overlay names the lane the server named. *)
@@ -39,9 +50,62 @@ let elapsed_text ~now started_at =
   else Printf.sprintf "%dh%02dm" (seconds / 3600) (seconds mod 3600 / 60)
 ;;
 
+let is_running (row : Tui_decode.keeper_turn_row) =
+  match row.ktr_state with
+  | Tui_decode.Keeper_turn_running _ -> true
+  | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _ ->
+      false
+;;
+
+(** Names that were mid-turn in [previous] and are idle in [current] — the
+    turns that finished between two polls. A keeper that went unavailable is
+    not finished (the owner lookup failing says nothing about its turn), and
+    a keeper missing from [current] is not finished either (it was removed,
+    not answered). *)
+let newly_finished ~previous ~current =
+  List.filter_map
+    (fun (row : Tui_decode.keeper_turn_row) ->
+      if not (is_running row) then None
+      else
+        List.find_map
+          (fun (next : Tui_decode.keeper_turn_row) ->
+            if
+              String.equal next.ktr_keeper_name row.ktr_keeper_name
+              && next.ktr_state = Tui_decode.Keeper_turn_idle
+            then Some row.ktr_keeper_name
+            else None)
+          current)
+    previous
+;;
+
+(** Carry the finish glow forward across one poll: drop entries older than
+    the TTL, drop a keeper that started running again (the badge takes over),
+    and put the turns that just finished in front. *)
+let advance_finishes ~now ~previous_rows ~current_rows finishes =
+  let fresh =
+    List.map (fun name -> (name, now))
+      (newly_finished ~previous:previous_rows ~current:current_rows)
+  in
+  let running_again name =
+    List.exists
+      (fun (row : Tui_decode.keeper_turn_row) ->
+        String.equal row.ktr_keeper_name name && is_running row)
+      current_rows
+  in
+  let kept =
+    List.filter
+      (fun (name, finished_at) ->
+        now -. finished_at <= finish_glow_ttl_seconds
+        && (not (running_again name))
+        && not (List.mem_assoc name fresh))
+      finishes
+  in
+  fresh @ kept
+;;
+
 let overlay ~(now : float) ~(chat_target : string option)
-    ~(error : string option) (rows : Tui_decode.keeper_turn_row list) :
-    line list =
+    ~(error : string option) ~(finishes : (string * float) list)
+    (rows : Tui_decode.keeper_turn_row list) : line list =
   let running, unavailable, idle_count =
     List.fold_left
       (fun (running, unavailable, idle) (row : Tui_decode.keeper_turn_row) ->
@@ -68,22 +132,45 @@ let overlay ~(now : float) ~(chat_target : string option)
         mine @ others
     | None -> running
   in
+  let live_finishes =
+    List.filter
+      (fun (_, finished_at) -> now -. finished_at <= finish_glow_ttl_seconds)
+      finishes
+  in
   let name_width =
+    let widest =
+      List.fold_left
+        (fun widest (name, _, _) -> max widest (String.length name))
+        0 running
+    in
     List.fold_left
-      (fun widest (name, _, _) -> max widest (String.length name))
-      0 running
+      (fun widest (name, _) -> max widest (String.length name))
+      widest live_finishes
   in
   let error_lines =
     match error with
     | None -> []
     | Some detail ->
-        [ { text = Printf.sprintf "poll failed: %s" detail; tone = Unknown }
-        ; { text = "showing the last rows that arrived"; tone = Quiet }
+        [ { text = Printf.sprintf "poll failed: %s" detail
+          ; tone = Unknown
+          ; target = None
+          }
+        ; { text = "showing the last rows that arrived"
+          ; tone = Quiet
+          ; target = None
+          }
         ]
   in
   let running_lines =
     match running with
-    | [] -> [ { text = "nobody is answering right now"; tone = Quiet } ]
+    | [] ->
+        if live_finishes = [] then
+          [ { text = "nobody is answering right now"
+            ; tone = Quiet
+            ; target = None
+            }
+          ]
+        else []
     | _ ->
         List.map
           (fun (name, lane, started_at) ->
@@ -92,21 +179,52 @@ let overlay ~(now : float) ~(chat_target : string option)
                   (lane_word lane)
                   (elapsed_text ~now started_at)
             ; tone = Running
+            ; target = Some name
             })
           running
+  in
+  let finished_lines =
+    List.map
+      (fun (name, finished_at) ->
+        { text =
+            Printf.sprintf "\xe2\x9c\x93 %-*s  answered %s ago" name_width
+              name
+              (elapsed_text ~now finished_at)
+        ; tone = Done
+        ; target = Some name
+        })
+      live_finishes
   in
   let unavailable_lines =
     List.map
       (fun (name, detail) ->
         { text = Printf.sprintf "? %s \xe2\x80\x94 %s" name detail
         ; tone = Unknown
+        ; target = None
         })
       unavailable
   in
   let idle_line =
     if idle_count = 0 then []
     else
-      [ { text = Printf.sprintf "%d idle" idle_count; tone = Quiet } ]
+      [ { text = Printf.sprintf "%d idle" idle_count
+        ; tone = Quiet
+        ; target = None
+        }
+      ]
   in
-  error_lines @ running_lines @ unavailable_lines @ idle_line
+  error_lines @ running_lines @ finished_lines @ unavailable_lines @ idle_line
+;;
+
+(** Indexes of the rows Enter can act on, in display order. The cursor moves
+    over these, not over prose. *)
+let target_indexes lines =
+  let rec loop index acc = function
+    | [] -> List.rev acc
+    | line :: rest ->
+        loop (index + 1)
+          (if Option.is_some line.target then index :: acc else acc)
+          rest
+  in
+  loop 0 [] lines
 ;;

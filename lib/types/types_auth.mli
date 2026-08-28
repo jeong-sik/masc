@@ -66,10 +66,6 @@ val agent_role_of_yojson : Yojson.Safe.t -> (agent_role, string) result
     distinguish a wrong-type bug from a wrong-shape bug without
     re-dumping the full payload. *)
 
-val valid_agent_role_strings : string list
-(** [["worker"; "admin"]] — used as the allowed-values set in
-    JSON-schema generators. *)
-
 (** {1 Agent credential} *)
 
 type agent_credential = {

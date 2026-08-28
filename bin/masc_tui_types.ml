@@ -342,6 +342,27 @@ type planning_mode =
   | Planning_list
   | Planning_detail of string
 
+(** Lanes surface sub-mode. The overview lists the standalone LLM lane rows
+    above the Keeper table; [Lanes_run_list] drills into one standalone
+    lane's recent exact runs, and [Lanes_run_detail] reads one run's recorded
+    prompt and output. The lane id rides along so Left/Esc from a run returns
+    to the list it came from. [Lanes_lane_notice] answers Enter on a lane
+    whose runs record no LLM prompt/output at all: a static pane that says
+    what is recorded instead, rather than a run list that would read empty. *)
+type lanes_mode =
+  | Lanes_overview
+  | Lanes_run_list of string
+  | Lanes_run_detail of string * string
+  | Lanes_lane_notice of string
+
+(** Which Lanes overview section the row cursor is in. The Keeper rows keep
+    [lanes_cursor]; the standalone observation rows are fixed above the table
+    and have their own index, so the active section is a fact, not a pair of
+    cursors competing for the same keys. *)
+type lanes_section =
+  | Lanes_section_standalone
+  | Lanes_section_keeper
+
 (** One authority for the Fusion surface's list/detail state. The top-level
     [surface] only says Fusion is open; it does not repeat this mode. *)
 type fusion_mode =
@@ -465,6 +486,9 @@ type planning_goal = Tui_decode.planning_goal
   pg_target_value: string option;
   pg_proof: Tui_decode.goal_proof;
   pg_last_review_note: string option;
+  pg_last_review_at: string option;
+  pg_created_at: string option;
+  pg_updated_at: string option;
 }
 
 type planning_rollup = Tui_decode.planning_rollup
@@ -512,22 +536,99 @@ type planning_snapshot = Tui_decode.planning_snapshot
   pl_generated_at: string;
 }
 
-let planning_visible_goals (goals : planning_goal list) : planning_goal list =
+(* Which lifecycle slice the list shows. [Planning_filter_active] is the
+   default: dropped goals from long ago are archive, not the working set, and
+   a default that showed them read as clutter. *)
+type planning_filter =
+  | Planning_filter_all
+  | Planning_filter_active
+  | Planning_filter_completed
+  | Planning_filter_dropped
+
+let planning_filter_label = function
+  | Planning_filter_all -> "all"
+  | Planning_filter_active -> "active"
+  | Planning_filter_completed -> "completed"
+  | Planning_filter_dropped -> "dropped"
+
+let next_planning_filter = function
+  | Planning_filter_all -> Planning_filter_active
+  | Planning_filter_active -> Planning_filter_completed
+  | Planning_filter_completed -> Planning_filter_dropped
+  | Planning_filter_dropped -> Planning_filter_all
+
+(* How the visible goals are ordered. [Planning_sort_phase_priority] keeps the
+   historical lifecycle-then-priority grouping as the default. *)
+type planning_sort =
+  | Planning_sort_phase_priority
+  | Planning_sort_updated
+  | Planning_sort_due
+
+let planning_sort_label = function
+  | Planning_sort_phase_priority -> "phase/P1-P5"
+  | Planning_sort_updated -> "updated"
+  | Planning_sort_due -> "due"
+
+let next_planning_sort = function
+  | Planning_sort_phase_priority -> Planning_sort_updated
+  | Planning_sort_updated -> Planning_sort_due
+  | Planning_sort_due -> Planning_sort_phase_priority
+
+let planning_passes_filter filter (goal : planning_goal) =
+  match filter, goal.pg_phase with
+  | Planning_filter_all, _ -> true
+  | Planning_filter_active, (Goal_phase.Executing | Goal_phase.Verifying) -> true
+  | Planning_filter_completed, Goal_phase.Completed -> true
+  | Planning_filter_dropped, Goal_phase.Dropped -> true
+  | Planning_filter_active, (Goal_phase.Completed | Goal_phase.Dropped)
+  | Planning_filter_completed, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Dropped)
+  | Planning_filter_dropped, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed) ->
+      false
+
+(* RFC 3339 timestamps and ISO dates compare lexicographically, so the sort
+   keys stay strings; [None] always sorts last regardless of direction. *)
+let planning_compare_updated_desc left right =
+  match left, right with
+  | Some left, Some right -> String.compare right left
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> 0
+
+let planning_compare_due_asc left right =
+  match left, right with
+  | Some left, Some right -> String.compare left right
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> 0
+
+(* Filter first, then sort: the sort only ever sees rows the reader asked
+   for. Stable everywhere, so equal keys keep the server's newest-first
+   order rather than inventing another timestamp contract in the TUI. *)
+let planning_visible_goals ~filter ~sort (goals : planning_goal list)
+    : planning_goal list =
   let phase_rank = function
     | Goal_phase.Executing -> 0
     | Goal_phase.Verifying -> 1
     | Goal_phase.Completed -> 2
     | Goal_phase.Dropped -> 3
   in
-  (* The server already keeps equally-ranked goals newest first. Group the
-     lifecycle and priority here, but keep that useful recency ordering for
-     ties instead of inventing another timestamp contract in the TUI. *)
-  List.stable_sort
-    (fun left right ->
-       match Int.compare (phase_rank left.pg_phase) (phase_rank right.pg_phase) with
-       | 0 -> Int.compare left.pg_priority right.pg_priority
-       | order -> order)
-    goals
+  let compare =
+    match sort with
+    | Planning_sort_phase_priority ->
+        fun left right ->
+          (match
+             Int.compare (phase_rank left.pg_phase) (phase_rank right.pg_phase)
+           with
+           | 0 -> Int.compare left.pg_priority right.pg_priority
+           | order -> order)
+    | Planning_sort_updated ->
+        fun left right ->
+          planning_compare_updated_desc left.pg_updated_at right.pg_updated_at
+    | Planning_sort_due ->
+        fun left right ->
+          planning_compare_due_asc left.pg_due_date right.pg_due_date
+  in
+  List.stable_sort compare (List.filter (planning_passes_filter filter) goals)
 
 type board_sort =
   | Board_hot
@@ -1037,6 +1138,94 @@ type config_pane =
   | Config_prompts
   | Config_themes
 
+type runtime_param_edit_mode = Friendly_value | Advanced_json
+
+type runtime_param_edit =
+  { rpe_key : string
+  ; rpe_value_type : string
+  ; rpe_draft : string
+  ; rpe_replace_on_type : bool
+  ; rpe_mode : runtime_param_edit_mode
+  }
+
+let runtime_param_type_name value_type =
+  String.lowercase_ascii (String.trim value_type)
+
+let runtime_param_value_text ~value_type json_text =
+  let parsed =
+    try Some (Yojson.Safe.from_string json_text) with
+    | Yojson.Json_error _ -> None
+  in
+  match runtime_param_type_name value_type, parsed with
+  | ("bool" | "boolean"), Some (`Bool true) -> "on"
+  | ("bool" | "boolean"), Some (`Bool false) -> "off"
+  | "string", Some (`String value) -> value
+  | _, Some (`String value) -> value
+  | _, Some _ | _, None -> json_text
+
+let runtime_param_friendly_text (row : Tui_decode.runtime_param_row) =
+  runtime_param_value_text ~value_type:row.rpr_value_type row.rpr_current_json
+
+let runtime_param_edit_of_row ~advanced (row : Tui_decode.runtime_param_row) =
+  { rpe_key = row.rpr_key
+  ; rpe_value_type = row.rpr_value_type
+  ; rpe_draft =
+      (if advanced then row.rpr_current_json else runtime_param_friendly_text row)
+  ; rpe_replace_on_type = true
+  ; rpe_mode = (if advanced then Advanced_json else Friendly_value)
+  }
+
+let runtime_param_edit_append edit text =
+  { edit with
+    rpe_draft =
+      (if edit.rpe_replace_on_type then text else edit.rpe_draft ^ text)
+  ; rpe_replace_on_type = false
+  }
+
+let runtime_param_edit_backspace edit =
+  { edit with
+    rpe_draft =
+      (if edit.rpe_replace_on_type then ""
+       else Masc_tui_message_layout.drop_last_utf8_scalar edit.rpe_draft)
+  ; rpe_replace_on_type = false
+  }
+
+let runtime_param_edit_clear edit =
+  { edit with rpe_draft = ""; rpe_replace_on_type = false }
+
+let runtime_param_edit_toggle_bool edit =
+  let next =
+    match String.lowercase_ascii (String.trim edit.rpe_draft) with
+    | "on" | "true" | "yes" | "1" -> "off"
+    | _ -> "on"
+  in
+  { edit with rpe_draft = next; rpe_replace_on_type = false }
+
+let runtime_param_edit_value edit =
+  let parse_json () =
+    try Ok (Yojson.Safe.from_string edit.rpe_draft) with
+    | Yojson.Json_error detail -> Error ("Invalid JSON value: " ^ detail)
+  in
+  match edit.rpe_mode with
+  | Advanced_json -> parse_json ()
+  | Friendly_value ->
+    (match runtime_param_type_name edit.rpe_value_type with
+     | "bool" | "boolean" ->
+       (match String.lowercase_ascii (String.trim edit.rpe_draft) with
+        | "on" | "true" | "yes" | "1" -> Ok (`Bool true)
+        | "off" | "false" | "no" | "0" -> Ok (`Bool false)
+        | _ -> Error "Choose on or off")
+     | "int" | "integer" ->
+       (match int_of_string_opt (String.trim edit.rpe_draft) with
+        | Some value -> Ok (`Int value)
+        | None -> Error "Enter a whole number")
+     | "float" | "number" ->
+       (match float_of_string_opt (String.trim edit.rpe_draft) with
+        | Some value when Float.is_finite value -> Ok (`Float value)
+        | Some _ | None -> Error "Enter a number")
+     | "string" -> Ok (`String edit.rpe_draft)
+     | _ -> parse_json ())
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -1059,6 +1248,14 @@ type state = {
      is open. *)
   mutable answering_open: bool;
   mutable answering_scroll: int;
+  (* Cursor over the overlay's actionable rows (running / just finished);
+     Enter opens that keeper's chat. An index into the overlay's line list,
+     kept on a target row by the key handler. *)
+  mutable answering_cursor: int;
+  (* Keepers whose turn finished within the glow TTL, newest first, with
+     the poll time that saw them finish. Fed by comparing consecutive
+     keeper_turns polls; read by the footer glow and the overlay's ✓ rows. *)
+  mutable keeper_turn_finishes: (string * float) list;
   (* [/context] opens the last observed provider-input inspector. It is an
      overlay rather than another surface because it answers "what is in this
      Keeper's current head" from whichever Keeper surface raised the question.
@@ -1132,6 +1329,11 @@ type state = {
      did before there was a choice to make. *)
   mutable theme_choice: string option;
   mutable theme_cursor: int;
+  (* What was in force when the reader entered the themes pane, so Esc can put
+     it back. [None] inside [Some] is a real answer -- they were following the
+     terminal -- which is why this is an option of an option: the outer one
+     says whether a preview is running at all. *)
+  mutable theme_before_preview: string option option;
   mutable prompts_snapshot: Tui_decode.prompts_snapshot option;
   mutable prompts_error: string option;
   mutable prompts_cursor: int;
@@ -1294,10 +1496,10 @@ type state = {
   mutable runtime_params_error: string option;
   mutable runtime_params_loading: bool;
   (* The Runtime params pane is an operator surface, not a passive dump.
-     Selection and the in-progress JSON value live separately from the shared
+     Selection and the in-progress typed value live separately from the shared
      Config scroll used by runtime.toml/prompt bodies. *)
   mutable runtime_params_cursor: int;
-  mutable runtime_param_edit: (string * string) option;
+  mutable runtime_param_edit: runtime_param_edit option;
   mutable runtime_params_notice: (bool * string) option;
   mutable keeper_gate_judges: (string * string) list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
@@ -1344,6 +1546,10 @@ type state = {
   mutable planning_cursor: int;
   mutable planning_scroll: int;
   mutable planning_mode: planning_mode;
+  (* Client-side over the already-loaded goals: [f]/[s] re-render without a
+     refetch. *)
+  mutable planning_filter: planning_filter;
+  mutable planning_sort: planning_sort;
   (* A goal lifecycle request armed for a second keypress, and what the last
      one answered. Arming rather than pressing keeps the detail view's plain
      letters safe: c/x/o are lifecycle only once, and any other key disarms. *)
@@ -1366,6 +1572,19 @@ type state = {
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_generation: int;
+  (* Run drill-down under the standalone observation rows. [lane_runs] is the
+     summary page of the lane named in [lanes_mode]; payloads stay behind the
+     per-run detail fetch, so the list never holds one. *)
+  mutable lanes_mode: lanes_mode;
+  mutable lanes_section: lanes_section;
+  mutable lanes_standalone_cursor: int;
+  mutable lane_runs: Tui_decode.lane_run_summary list option;
+  mutable lane_runs_error: string option;
+  mutable lane_runs_cursor: int;
+  mutable lane_runs_scroll: int;
+  mutable lane_run_detail: Tui_decode.lane_run_detail option;
+  mutable lane_run_detail_error: string option;
+  mutable lane_run_detail_scroll: int;
   (* Read from the same composite body as [lanes]. A Keeper the producer has
      not projected is simply absent from this list, which the Secrets tab
      shows as "no projection" rather than as an empty credential set. *)
@@ -1688,6 +1907,23 @@ let keeper_reading (state : state) (keeper : keeper) :
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+(** The standalone lane row under the cursor, when the cursor is in the
+    standalone section. *)
+let selected_standalone_lane (state : state) =
+  match state.lanes_section, state.standalone_lanes with
+  | Lanes_section_standalone, Some snapshot ->
+      List.nth_opt snapshot.Tui_decode.sls_lanes state.lanes_standalone_cursor
+  | Lanes_section_standalone, None | Lanes_section_keeper, _ -> None
+
+(** Row count of the standalone observation matrix, snapshot or not. Every
+    mapping between the Lanes overview's two sections and one flat index --
+    the "/" search list, its landing, a mouse press -- reads this, so the
+    count cannot drift between the list and the landing. *)
+let lanes_standalone_count (state : state) =
+  match state.standalone_lanes with
+  | None -> 0
+  | Some snapshot -> List.length snapshot.Tui_decode.sls_lanes
+
 (** The typed Keeper identity on the selected Lanes row. *)
 let selected_lane_name (state : state) =
   match state.lanes with
@@ -1773,6 +2009,8 @@ let create_state
   agenda_scroll = 0;
   answering_open = false;
   answering_scroll = 0;
+  answering_cursor = 0;
+  keeper_turn_finishes = [];
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -1809,6 +2047,7 @@ let create_state
   config_pane = Config_runtime;
   theme_choice = None;
   theme_cursor = 0;
+  theme_before_preview = None;
   prompts_snapshot = None;
   prompts_error = None;
   prompts_cursor = 0;
@@ -1921,6 +2160,8 @@ let create_state
   planning_cursor = 0;
   planning_scroll = 0;
   planning_mode = Planning_list;
+  planning_filter = Planning_filter_active;
+  planning_sort = Planning_sort_phase_priority;
   goal_action_armed = None;
   goal_action_error = None;
   schedules = None;
@@ -1934,6 +2175,16 @@ let create_state
   standalone_lanes = None;
   standalone_lanes_error = None;
   standalone_lanes_generation = 0;
+  lanes_mode = Lanes_overview;
+  lanes_section = Lanes_section_keeper;
+  lanes_standalone_cursor = 0;
+  lane_runs = None;
+  lane_runs_error = None;
+  lane_runs_cursor = 0;
+  lane_runs_scroll = 0;
+  lane_run_detail = None;
+  lane_run_detail_error = None;
+  lane_run_detail_scroll = 0;
   keeper_secrets = [];
   lanes_error = None;
   lanes_action_error = None;
@@ -2200,6 +2451,7 @@ type clamped_scroll =
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
   | Planning_detail_scroll of int
+  | Lane_run_detail_scroll of int
   (* An open diff's rows are built by the drawing, out of the recorded before
      and after text, so the keypress cannot count them. It steps unbounded and
      the frame reports back what it could actually use: without that report
@@ -2221,6 +2473,7 @@ let apply_clamped_scroll (state : state) = function
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
+  | Lane_run_detail_scroll value -> state.lane_run_detail_scroll <- value
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
@@ -2313,6 +2566,29 @@ let standalone_lanes_chrome ~row_count ~error ~truncated =
 ;;
 
 let lanes_scrolled (state : state) =
+  match state.lanes_mode with
+  | Lanes_run_list _ ->
+      (* The run list replaces the two-section overview, so the typed model
+         counts its rows instead of the Keeper table's. *)
+      { sc_count =
+          (match state.lane_runs with
+           | None -> 0
+           | Some runs -> List.length runs)
+      ; sc_chrome = listing_chrome ~error:state.lane_runs_error
+      ; sc_overflow_takes_row = true
+      ; sc_preview_keep = None
+      }
+  | Lanes_run_detail _ | Lanes_lane_notice _ ->
+      (* The detail's and the notice's lines are built by the drawing; the
+         frame reports the clamp through [clamped_scroll], so no count is
+         knowable here. The notice is shorter than any frame and never
+         scrolls, but it shares the shape. *)
+      { sc_count = 0
+      ; sc_chrome = 0
+      ; sc_overflow_takes_row = false
+      ; sc_preview_keep = None
+      }
+  | Lanes_overview ->
   (* The renderer draws one title and one divider around either the five
      standalone rows or its single loading/error row. This belongs in the
      typed scroll model: subtracting it only while drawing lets key movement
@@ -2341,6 +2617,103 @@ let lanes_scrolled (state : state) =
   ; sc_preview_keep = None
   }
 
+(** One styled line of the lane notice pane. The text is static -- the pane
+    explains a recording boundary and fetches nothing -- so the style travels
+    with the line and the renderer only translates constructors into Theme
+    tokens. *)
+type lane_notice_line =
+  | Lane_notice_heading of string
+  | Lane_notice_text of string
+  | Lane_notice_dim of string
+
+(* What the Verifier lane notice says. Its runs live in the verification
+   registries (lib/verification_run_registry.ml and
+   lib/goal_verification_run_registry.ml) with outcome, elapsed and tool
+   observations but no LLM prompt/output, so the run-list drill-down would be
+   an empty reading; the pane names what is recorded and where it is read
+   instead. *)
+let verifier_lane_notice_lines =
+  [ Lane_notice_heading "  This lane records no LLM prompt/output"
+  ; Lane_notice_text ""
+  ; Lane_notice_text
+      "  Verifier runs are kept by the verification registries, not the"
+  ; Lane_notice_text
+      "  exact-lane run store. A run records its outcome, elapsed time, and"
+  ; Lane_notice_text
+      "  tool observations with output excerpts -- never a prompt."
+  ; Lane_notice_text ""
+  ; Lane_notice_dim
+      "  Read them on the Verification surface: Tab to Verify, or press :"
+  ; Lane_notice_dim "  and type \"go verify\"."
+  ]
+
+(** Where a left-button press lands on the Lanes overview, as a row of one of
+    its two sections. *)
+type lanes_overview_hit =
+  | Lanes_hit_standalone of int  (** index into [sls_lanes] *)
+  | Lanes_hit_keeper of int  (** index into [kls_lanes] *)
+  | Lanes_hit_none  (** chrome, notes and padding: nothing to select *)
+
+(* The first standalone row is the frame's sixth line: surface strip, box top,
+   header, divider, matrix heading. [render_lanes_overview] draws in that
+   order and this answers a click from the same order -- a row added to either
+   section moves both. *)
+let lanes_overview_first_standalone_row = 6
+
+let lanes_overview_hit (state : state) ~terminal_rows ~row : lanes_overview_hit =
+  if row < lanes_overview_first_standalone_row then Lanes_hit_none
+  else
+    let standalone_count = lanes_standalone_count state in
+    let standalone_note_rows =
+      match state.standalone_lanes with
+      | None ->
+          (* The single loading/error note row that stands in for the matrix. *)
+          1
+      | Some snapshot ->
+          (if snapshot.Tui_decode.sls_exact_run_projection_truncated then 1
+           else 0)
+          + if Option.is_some state.standalone_lanes_error then 1 else 0
+    in
+    let offset = row - lanes_overview_first_standalone_row in
+    if offset < standalone_count then Lanes_hit_standalone offset
+    else
+      (* Below the matrix: its note rows, then the Keeper table's divider,
+         column header and divider, then one row and a divider per error
+         notice -- the rows the drawing spends before the first Keeper row. *)
+      let keeper_first_row =
+        lanes_overview_first_standalone_row + standalone_count
+        + standalone_note_rows + 3
+        + (if Option.is_some state.lanes_error then 2 else 0)
+        + (if Option.is_some state.lanes_action_error then 2 else 0)
+      in
+      if row < keeper_first_row then Lanes_hit_none
+      else
+        let shown =
+          match state.lanes with
+          | None -> 0
+          | Some snapshot -> List.length snapshot.Tui_decode.kls_lanes
+        in
+        if shown = 0 then Lanes_hit_none
+        else
+          let layout = lanes_scrolled state in
+          let content_height =
+            Masc_tui_scroll.content_height
+              ~rows:(surface_body_rows state ~terminal_rows)
+              ~chrome:layout.sc_chrome ~count:layout.sc_count
+              ~preview_keep:layout.sc_preview_keep
+              ~overflow_takes_row:layout.sc_overflow_takes_row
+          in
+          let visible = row - keeper_first_row in
+          if visible >= content_height then Lanes_hit_none
+          else
+            (* The drawing clamps the scroll against the same bound, so a
+               press on a windowed row names the Keeper shown there. *)
+            let scroll =
+              max 0 (min state.lanes_scroll (max 0 (shown - content_height)))
+            in
+            let index = visible + scroll in
+            if index < shown then Lanes_hit_keeper index else Lanes_hit_none
+
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
     Some
@@ -2368,7 +2741,10 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
           (match state.verification with
            | None -> 0
            | Some s -> List.length s.Tui_decode.vs_requests)
-  | Lanes -> Some (lanes_scrolled state)
+  | Lanes ->
+      (match state.lanes_mode with
+       | Lanes_run_detail _ | Lanes_lane_notice _ -> None
+       | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state))
   | Harness ->
       if Option.is_some state.harness_detail then None
       else
@@ -2447,10 +2823,29 @@ let surface_row_texts (state : state) : surface -> string list option = function
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
   | Lanes ->
-      Option.map
-        (fun s ->
-          List.map (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
-        state.lanes
+      (match state.lanes_mode with
+       | Lanes_run_list _ | Lanes_run_detail _ | Lanes_lane_notice _ -> None
+       | Lanes_overview ->
+           (* The standalone lane labels lead: the observation matrix sits
+              above the Keeper table on screen, so a match index below
+              [lanes_standalone_count] names a standalone row and anything at
+              or past it a Keeper row. The landing in [search_land] reads the
+              same split. *)
+           let standalone =
+             match state.standalone_lanes with
+             | None -> []
+             | Some snapshot ->
+                 List.map
+                   (fun (lane : Tui_decode.standalone_lane) -> lane.sl_label)
+                   snapshot.Tui_decode.sls_lanes
+           in
+           (match state.lanes with
+            | Some s ->
+                Some
+                  (standalone
+                   @ List.map
+                       (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
+            | None -> (match standalone with [] -> None | _ -> Some standalone)))
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else
@@ -2593,6 +2988,7 @@ let approval_items (state : state) =
    a chat the roster can open. *)
 type palette_action =
   | Palette_goto of surface
+  | Palette_config of config_pane
   | Palette_chat of string
   | Palette_task of string
   | Palette_board_post of string
@@ -2684,9 +3080,10 @@ let workspace_entries_count_label total =
   else Printf.sprintf " (%d)" total
 
 let palette_entries (state : state) =
-  List.map
-    (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
-    surface_ring
+  [ "settings", Palette_config Config_params ]
+  @ List.map
+      (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
+      surface_ring
   @ List.map
       (fun (keeper : keeper) ->
         ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))

@@ -88,8 +88,6 @@ let validate_registry_entry ~base_path name (entry : registry_entry) =
   then Error (Name_mismatch { expected = expected_name; actual = entry.name })
   else if not (String.equal (String.trim entry.meta.name) expected_name)
   then Error (Name_mismatch { expected = expected_name; actual = entry.meta.name })
-  else if String.equal (String.trim entry.meta.agent_name) ""
-  then Error (Meta_validation_failed { reason = "meta.agent_name is empty" })
   else
     validate_runtime_fields entry.meta.runtime
 ;;
@@ -98,8 +96,6 @@ let validate_registry_meta ~base_path:_ name (meta : keeper_meta) =
   let expected_name = String.trim name in
   if not (String.equal (String.trim meta.name) expected_name)
   then Error (Name_mismatch { expected = expected_name; actual = meta.name })
-  else if String.equal (String.trim meta.agent_name) ""
-  then Error (Meta_validation_failed { reason = "meta.agent_name is empty" })
   else Ok ()
 ;;
 
@@ -124,16 +120,7 @@ let canonicalize_registry_meta ~operation ~base_path name (meta : keeper_meta) =
   | Error
       ((Name_mismatch _ | Meta_validation_failed _) as reason) ->
       let expected_name = String.trim name in
-      let expected_agent_name = Keeper_identity.keeper_agent_name expected_name in
-      let repaired =
-        { meta with
-          name = expected_name
-        ; agent_name =
-            (if String.equal (String.trim meta.agent_name) ""
-             then expected_agent_name
-             else meta.agent_name)
-        }
-      in
+      let repaired = { meta with name = expected_name } in
       record_invalid_registry_entry ~operation ~name reason;
       (match validate_registry_meta ~base_path name repaired with
        | Ok () -> repaired

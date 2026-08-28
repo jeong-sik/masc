@@ -285,32 +285,12 @@ let cached_keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit () =
 ;;
 
 let cached_keeper_config_json config name =
-  let cache_key = keeper_config_cache_key config name in
-  let cached =
-    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
-      let status, body =
-        Domain_pool_ref.submit_io_or_inline (fun () ->
-          Dashboard_http_keeper.keeper_config_json config name)
-      in
-      `Assoc
-        [ ( "status"
-          , `String
-              (match status with
-               | `OK -> "ok"
-               | `Not_found -> "not_found") )
-        ; "body", body
-        ])
-  in
-  match cached with
-  | `Assoc fields ->
-    let status =
-      match List.assoc_opt "status" fields with
-      | Some (`String "not_found") -> `Not_found
-      | _ -> `OK
-    in
-    let body = cached_assoc_body_or_self cached fields in
-    status, body
-  | other -> `OK, other
+  (* The response carries the manifest's content revision used by config CAS.
+     A TTL cache could hand an editor a superseded token after masc_keeper_up
+     or another in-process writer commits, so this authority-bearing endpoint
+     always reads the current bytes. *)
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    Dashboard_http_keeper.keeper_config_json config name)
 ;;
 
 (* Dashboard hydration fetches every keeper's chat history concurrently on
@@ -1605,22 +1585,8 @@ let handle_keeper_get_subroutes state req request reqd =
         Server_utils.int_query_param req "limit" ~default:10
         |> max 1 |> min 100
       in
-      (* Use keeper name as agent_name for eval lookup.
-         Keepers may also have a separate agent_name — look up both. *)
-      let config = (Mcp_server.workspace_config state) in
-      let agent_name_opt =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some m) when m.agent_name <> name -> Some m.agent_name
-        | _ -> None
-      in
-      let snapshots_by_name =
-        Dashboard_eval_feed.read_latest ~base_path ~agent_name:name ~limit
-      in
       let snapshots =
-        match agent_name_opt with
-        | Some agent_name when snapshots_by_name = [] ->
-            Dashboard_eval_feed.read_latest ~base_path ~agent_name ~limit
-        | _ -> snapshots_by_name
+        Dashboard_eval_feed.read_latest ~base_path ~agent_name:name ~limit
       in
       let latest_verdict =
         match snapshots with

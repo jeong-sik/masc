@@ -534,7 +534,7 @@ let commit_prepared_compaction_with
            ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta retry_meta)
            ~keeper_name:retry_meta.name
            ~session
-           ~agent_name:retry_meta.agent_name
+           ~agent_name:retry_meta.name
            ~ctx:commit_context
            ~expected_source_ref:source_ref
        with
@@ -596,7 +596,7 @@ let commit_prepared_compaction_with
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string CheckpointFailures)
            ~labels:
-             [ "keeper", retry_meta.agent_name
+             [ "keeper", retry_meta.name
              ; ( "operation"
                , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
              ]

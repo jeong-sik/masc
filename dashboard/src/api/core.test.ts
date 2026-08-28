@@ -353,6 +353,48 @@ describe('post', () => {
 })
 
 describe('typed API errors', () => {
+  it('reads a typed code from a structured REST error object', async () => {
+    const error = await apiRequestErrorFromResponse(
+      'POST',
+      '/api/v1/keepers/alpha/config',
+      new Response(JSON.stringify({
+        error: {
+          code: 'keeper_config_revision_conflict',
+          expected: { state: 'missing' },
+          observed: { state: 'sha256', value: 'a'.repeat(64) },
+        },
+      }), { status: 409 }),
+    )
+
+    expect(error.errorCode).toBe('keeper_config_revision_conflict')
+    expect(error.status).toBe(409)
+  })
+
+  it('preserves reconciliation state and authoritative reload instruction', async () => {
+    const payload = {
+      config_application: { state: 'indeterminate' },
+      runtime_sync: false,
+      authoritative_reload_required: true,
+      error: {
+        code: 'keeper_manifest_reconciliation_required',
+        path: '/workspace/.masc/config/keepers/alpha.toml',
+        observed: { state: 'unreadable', detail: 'injected' },
+      },
+    }
+    const error = await apiRequestErrorFromResponse(
+      'POST',
+      '/api/v1/keepers/alpha/config',
+      new Response(JSON.stringify(payload), { status: 503 }),
+    )
+
+    expect(error.errorCode).toBe('keeper_manifest_reconciliation_required')
+    expect(error.configApplied).toBeUndefined()
+    expect(error.configApplicationState).toBe('indeterminate')
+    expect(error.runtimeSync).toBe(false)
+    expect(error.authoritativeReloadRequired).toBe(true)
+    expect(error.responseData).toEqual(payload)
+  })
+
   it('uses auth_error_code as authority and keeps error prose as detail', async () => {
     const error = await apiRequestErrorFromResponse(
       'POST',

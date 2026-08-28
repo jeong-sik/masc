@@ -72,7 +72,6 @@
   test_keeper_memory_lane
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
-  test_broadcast_wakeup_policy
   test_broadcast_stores_raw_text
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -121,7 +120,6 @@
   test_host_fd_pressure_poller
   test_operator_control_actions
   test_operator_control_snapshot_state
-  test_operator_control_snapshot
   test_operator_control_judgment
   test_with_cleanups_on_release
   test_auth_login
@@ -170,7 +168,6 @@
   test_progress
   test_validation
   test_channel_gate_binding_store
-  test_channel_gate_connector_routes
   test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state
   test_dashboard
@@ -256,7 +253,6 @@
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
-  test_keeper_supervisor
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_compaction_llm_summarizer
@@ -266,8 +262,6 @@
   test_playground_paths
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
-  test_keeper_effective_meta_overlay
-  test_keeper_create_admission_transaction
   test_metrics_rotation
   test_tool_error
   test_tool_token
@@ -309,13 +303,11 @@
   test_exec_core
   test_exec_dispatch
   test_keeper_tool_execute_typed_input
-  test_keeper_tool_execute_stream_close
   test_keeper_sandbox_containment
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
   test_keeper_transition_audit
   test_keeper_tool_search_files_containment
-  test_keeper_sandbox_docker_route
   test_keeper_efficiency_protocol
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
@@ -416,7 +408,6 @@
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
   test_broadcast_stores_raw_text
-  test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
@@ -466,7 +457,6 @@
   test_operator_control_actions
   test_operator_control_confirm
   test_operator_control_snapshot_state
-  test_operator_control_snapshot
   test_operator_control_judgment
   test_operator_control_support
   test_with_cleanups_on_release
@@ -516,7 +506,6 @@
   test_progress
   test_validation
   test_channel_gate_binding_store
-  test_channel_gate_connector_routes
   test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state
   test_dashboard
@@ -603,7 +592,6 @@
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
-  test_keeper_supervisor
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_compaction_llm_summarizer
@@ -613,8 +601,6 @@
   test_playground_paths
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
-  test_keeper_effective_meta_overlay
-  test_keeper_create_admission_transaction
   test_metrics_rotation
   test_tool_error
   test_tool_token
@@ -656,13 +642,11 @@
   test_exec_core
   test_exec_dispatch
   test_keeper_tool_execute_typed_input
-  test_keeper_tool_execute_stream_close
   test_keeper_sandbox_containment
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
   test_keeper_transition_audit
   test_keeper_tool_search_files_containment
-  test_keeper_sandbox_docker_route
   test_keeper_efficiency_protocol
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
@@ -764,6 +748,89 @@
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
   masc.skill_config masc.skill_reference masc.skill_snapshot))
 
+; Extracted from the big (tests ...) group above: the fixtures run the typed
+; dispatch on a keeper meta whose sandbox_profile resolves to Local (the
+; profile is incidental — the suite measures stream finalization on rejected
+; dispatches), and dispatch now rejects Local fail-closed without the hatch.
+(test
+ (name test_keeper_tool_execute_stream_close)
+ (modules test_keeper_tool_execute_stream_close)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries masc_test_deps))
+
+; Extracted from the big (tests ...) group above: a handful of typed-dispatch
+; cases run on a keeper meta whose sandbox_profile resolves to Local (the
+; profile is incidental — the suite measures routing/finalization, not sandbox
+; isolation), and dispatch now rejects Local fail-closed without the hatch.
+(test
+ (name test_keeper_sandbox_docker_route)
+ (modules test_keeper_sandbox_docker_route)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries
+  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.skill_config masc.skill_reference masc.skill_snapshot))
+
+; Extracted from the big (tests ...) group above: the keeper fixture TOMLs
+; seed sandbox_profile = "local" (incidental — the suite measures mention
+; wakeup/delivery policy, not sandbox isolation), and keeper-up validation
+; now rejects Local fail-closed without the hatch.
+(test
+ (name test_broadcast_wakeup_policy)
+ (modules test_broadcast_wakeup_policy)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries
+  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.skill_config masc.skill_reference masc.skill_snapshot))
+
+; Extracted from the big (tests ...) group above: the declarative keeper
+; fixture TOMLs seed sandbox_profile = "local" (incidental — the suite
+; measures supervisor boot/meta materialization, not sandbox isolation),
+; and keeper-up validation now rejects Local fail-closed without the hatch.
+(test
+ (name test_keeper_supervisor)
+ (modules test_keeper_supervisor)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries
+  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.skill_config masc.skill_reference masc.skill_snapshot))
+
+; Extracted from the big (tests ...) group above: the connector route
+; fixtures boot keepers whose sandbox_profile resolves to Local (incidental —
+; the suite measures channel-gate connector route contracts, not sandbox
+; isolation), and keeper-up validation now rejects Local fail-closed without
+; the hatch.
+(test
+ (name test_channel_gate_connector_routes)
+ (modules test_channel_gate_connector_routes)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries
+  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.skill_config masc.skill_reference masc.skill_snapshot))
+
 ; Repository catalog tests depend only on the focused repo_manager library.
 ; The iMessage connector's platform-independent core. Needs sqlite3 directly
 ; because it builds a fixture chat.db rather than reading the real one, which
@@ -854,6 +921,63 @@
  (modules test_operator_control_snapshot_cache)
  (libraries alcotest yojson masc_test_deps eio_main))
 
+; Extracted from the big (tests ...) group above: the "keeper up ok" case
+; creates a keeper without a sandbox_profile, which resolves to Local and is
+; now rejected fail-closed. The profile is incidental to what this suite
+; measures (operator snapshot contents), so the stanza sets the dev/test
+; hatch rather than migrating the fixture to docker (no daemon here).
+(test
+ (name test_operator_control_snapshot)
+ (modules test_operator_control_snapshot test_operator_control_support)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries masc_test_deps masc.keeper_identity))
+
+; Extracted from the big (tests ...) group above: the cases pass
+; sandbox_profile = "local" explicitly to exercise admission fencing around
+; creation — the profile is incidental to the transaction semantics under
+; test — and keeper-up validation now rejects Local fail-closed without the
+; hatch.
+(test
+ (name test_keeper_create_admission_transaction)
+ (modules test_keeper_create_admission_transaction)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries masc_test_deps))
+
+; Extracted from the big (tests ...) group above: most fixtures declare
+; sandbox_profile = "local" (or carry no profile source, which resolves to the
+; persisted-meta placeholder Local) because the sandbox is incidental to the
+; overlay/status semantics under test — and config load now rejects Local
+; fail-closed without the hatch.
+(test
+ (name test_keeper_effective_meta_overlay)
+ (modules test_keeper_effective_meta_overlay)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries
+  masc_test_deps
+  masc_schedule
+  multimodal
+  bigstringaf
+  masc.keeper_checkpoint_ref
+  masc.embedded_config
+  masc.keeper_identity
+  masc.mcp_client
+  masc.tool_spawn
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot))
+
 ; Focused CI gate: the conditions wire vocabulary must match on both ends.
 ; #26569 had the encoder emitting thirteen fields while the client zod object
 ; declared eleven; zod strips undeclared keys, so two conditions never reached
@@ -911,7 +1035,7 @@
  (deps
   %{workspace_root}/lib/keeper/keeper_unified_turn.ml
   %{workspace_root}/lib/keeper/keeper_turn.ml)
- (libraries alcotest ast_grep))
+ (libraries alcotest ast_grep masc_test_deps))
 
 (test
  (name test_tool_call_log_requeue_on_failure)
@@ -1190,10 +1314,8 @@
   test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_tool_failure_parity
-  test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
-  test_dashboard_http_core
   test_dashboard_composite_claim_window
   test_eval_feed
   test_dashboard_verification
@@ -1204,7 +1326,6 @@
   test_activity_graph
   test_tool_agent_timeline_build
   test_masc_log
-  test_dashboard_namespace_truth
   test_library_resource_topic
   test_dashboard_snapshot
   test_server_runtime_startup_maintenance
@@ -1214,9 +1335,6 @@
   test_server_timing
   test_server_startup_takeover
   test_keeper_identity_parse
-  test_keeper_identity_normalize
-  test_workspace_bind_fail_closed
-  test_keeper_identity_outcome_label
   test_capability_registry
   test_tool_misc_web_fetch
   test_tool_local_runtime_probe
@@ -1335,10 +1453,8 @@
   test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_tool_failure_parity
-  test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
-  test_dashboard_http_core
   test_dashboard_composite_claim_window
   test_eval_feed
   test_dashboard_verification
@@ -1349,7 +1465,6 @@
   test_activity_graph
   test_tool_agent_timeline_build
   test_masc_log
-  test_dashboard_namespace_truth
   test_library_resource_topic
   test_dashboard_snapshot
   test_server_runtime_startup_maintenance
@@ -1359,9 +1474,6 @@
   test_server_timing
   test_server_startup_takeover
   test_keeper_identity_parse
-  test_keeper_identity_normalize
-  test_workspace_bind_fail_closed
-  test_keeper_identity_outcome_label
   test_capability_registry
   test_tool_misc_web_fetch
   test_tool_local_runtime_probe
@@ -1488,11 +1600,54 @@
   decompress.gz)
  (deps ../bin/main_eio.exe))
 
+; Extracted from the Group 3 (tests ...) list above: the read-model fixtures
+; seed sandbox_profile = "local" (incidental — the suite measures namespace
+; truth, not sandbox isolation), and keeper-up validation now rejects Local
+; fail-closed without the hatch.
+(test
+ (name test_dashboard_namespace_truth)
+ (modules test_dashboard_namespace_truth)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries masc_test_deps))
+
+; Extracted from the Group 3 (tests ...) list above: the config-sync fixture
+; TOML seeds sandbox_profile = "local" (incidental — the suite measures
+; dashboard behavior contracts such as config POST materializing a missing
+; keeper TOML, not sandbox isolation), and keeper config update validation
+; now rejects Local fail-closed without the hatch.
+(test
+ (name test_dashboard_http_core)
+ (modules test_dashboard_http_core)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries
+  masc_test_deps
+  masc_test_runtime
+  masc.embedded_config
+  masc.skill_config
+  masc.skill_reference
+  bigstringaf
+  terminal_size
+  masc.jsonl_writer
+  decompress.de
+  decompress.gz))
+
 (test
  (name test_server_bootstrap_durable_demand_owner)
  (modules test_server_bootstrap_durable_demand_owner)
  (libraries alcotest masc_test_deps masc_test_runtime))
 
+; MASC_EXEC_ALLOW_LOCAL_PLAYGROUND: a bootstrap fixture TOML seeds
+; sandbox_profile = "local" (incidental — the suite measures server runtime
+; bootstrap/health wiring, not sandbox isolation), and keeper-up validation
+; now rejects Local fail-closed without the hatch.
 (test
  (name test_server_runtime_bootstrap)
  (modules test_server_runtime_bootstrap)
@@ -1503,16 +1658,22 @@
   bigstringaf)
  (deps ../bin/main_eio.exe)
   (action
-   (setenv MASC_MAIN_EIO_EXE %{dep:../bin/main_eio.exe} (run %{test}))))
+   (setenv MASC_EXEC_ALLOW_LOCAL_PLAYGROUND true
+    (setenv MASC_MAIN_EIO_EXE %{dep:../bin/main_eio.exe} (run %{test})))))
 
 ; Stable dashboard behavior contracts only. The HTTP core executable also
 ; contains source-shape assertions, so CI selects its behavior suite; the
-; briefing executable is behavior-only and runs in full.
+; briefing executable is behavior-only and runs in full. The HTTP core run
+; carries the local-playground hatch: its config-sync fixture seeds
+; sandbox_profile = "local", incidental to the behavior contracts.
 (rule
  (alias runtest-dashboard-http-behavior-contracts)
  (action
   (progn
-   (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts")
+   (setenv
+    MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+    true
+    (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts"))
    (run %{exe:test_dashboard_briefing.exe}))))
 
 (test
@@ -1699,9 +1860,18 @@
   unix
   yojson))
 
+; MASC_EXEC_ALLOW_LOCAL_PLAYGROUND: the keeper meta fixtures carry no
+; sandbox_profile, which resolves to Local (incidental — the suite measures
+; schedule consumer dispatch and occurrence recovery, not sandbox
+; isolation), and dispatch now rejects Local fail-closed without the hatch.
 (test
  (name test_schedule_consumer_dispatch)
  (modules test_schedule_consumer_dispatch)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
  (libraries masc_test_deps masc_schedule masc_server))
 
 (test
@@ -1718,9 +1888,19 @@
   unix
   yojson))
 
+; MASC_EXEC_ALLOW_LOCAL_PLAYGROUND: the schedule tool fixtures create a
+; keeper whose sandbox_profile resolves to Local (incidental — the suite
+; measures schedule tool create/list/get/cancel wiring, not sandbox
+; isolation), and keeper-up validation now rejects Local fail-closed without
+; the hatch.
 (test
  (name test_schedule_tool_wiring)
  (modules test_schedule_tool_wiring)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
  (libraries masc_test_deps masc_schedule))
 
 ; Typed TOML field resolution.
@@ -3550,3 +3730,8 @@
  (modules test_keeper_composition_async_broker)
  (libraries masc_test_deps masc_schedule multimodal bigstringaf
    masc.keeper_checkpoint_ref masc.embedded_config masc.tool_spawn))
+
+(test
+ (name test_keeper_local_playground_gate)
+ (modules test_keeper_local_playground_gate)
+ (libraries masc_test_deps))

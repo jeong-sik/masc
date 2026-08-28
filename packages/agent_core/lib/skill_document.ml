@@ -4,7 +4,7 @@ type standard_field =
   | License
   | Compatibility
   | Metadata
-  | Allowed_tools
+  | Allowed_tools_syntax_only
 
 type field =
   | Standard of standard_field
@@ -72,7 +72,6 @@ type t =
   ; description : string
   ; license : string option
   ; compatibility : string option
-  ; allowed_tools : string option
   ; metadata : (string * string) list
   ; metadata_values : (string * extension_value) list
   ; extensions : (string * extension_value) list
@@ -144,7 +143,7 @@ let standard_field_of_key = function
   | "license" -> Some License
   | "compatibility" -> Some Compatibility
   | "metadata" -> Some Metadata
-  | "allowed-tools" -> Some Allowed_tools
+  | "allowed-tools" -> Some Allowed_tools_syntax_only
   | _ -> None
 ;;
 
@@ -448,10 +447,15 @@ let decode_stripped ~directory_name contents =
                  | Ok value -> value, []
                  | Error diagnostic -> None, [ diagnostic ]
                in
-               let allowed_tools, allowed_tools_diagnostics =
-                 match optional_string fields Allowed_tools "allowed-tools" with
-                 | Ok value -> value, []
-                 | Error diagnostic -> None, [ diagnostic ]
+               let ignored_tool_hint_diagnostics =
+                 match
+                   optional_string
+                     fields
+                     Allowed_tools_syntax_only
+                     "allowed-tools"
+                 with
+                 | Ok _ -> []
+                 | Error diagnostic -> [ diagnostic ]
                in
                let metadata, metadata_values, metadata_diagnostics = metadata fields in
                let extension_values = extensions fields in
@@ -479,7 +483,7 @@ let decode_stripped ~directory_name contents =
                  name_diagnostics
                  @ license_diagnostics
                  @ compatibility_diagnostics
-                 @ allowed_tools_diagnostics
+                 @ ignored_tool_hint_diagnostics
                  @ metadata_diagnostics
                  @ extension_diagnostics
                  @ length_diagnostics
@@ -490,7 +494,6 @@ let decode_stripped ~directory_name contents =
                  ; description
                  ; license
                  ; compatibility
-                 ; allowed_tools
                  ; metadata
                  ; metadata_values
                  ; extensions = extension_values
@@ -556,7 +559,7 @@ let standard_field_to_string = function
   | License -> "license"
   | Compatibility -> "compatibility"
   | Metadata -> "metadata"
-  | Allowed_tools -> "allowed-tools"
+  | Allowed_tools_syntax_only -> "allowed-tools"
 ;;
 
 let field_to_string = function

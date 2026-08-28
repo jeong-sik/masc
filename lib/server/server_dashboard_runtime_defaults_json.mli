@@ -28,8 +28,5 @@ val resolved_of_snapshot : Runtime.dashboard_runtime_defaults_snapshot -> resolv
 (** Project one typed Runtime snapshot into the dashboard wire structure without
     rereading mutable runtime state. *)
 
-val resolved_of_runtime : unit -> resolved
-(** Capture one typed Runtime snapshot and project it. *)
-
 val current : generated_at_iso:string -> unit -> Yojson.Safe.t
 (** [build] applied to {!resolved_of_runtime}. *)

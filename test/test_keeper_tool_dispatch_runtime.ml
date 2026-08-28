@@ -94,8 +94,6 @@ let make_meta ?(name = "keeper-exec-tools") () =
       (`Assoc
         [
           ("name", `String name);
-          ( "agent_name"
-          , `String (Masc.Keeper_identity.keeper_agent_name name) );
           ("trace_id", `String "keeper-exec-tools-trace");
           ("allowed_paths", `List [ `String "*" ]);
         ])
@@ -1003,12 +1001,11 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
            Masc.Keeper_tool_call_log.reset_for_testing ();
            bundle.cleanup ())
          (fun () ->
-            let agent_name = Masc.Keeper_identity.keeper_agent_name meta.name in
             let trace_id = "keeper-tool-observation-exact-invocation" in
             let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
             Masc.Keeper_tool_call_log.set_turn_context
               ~cell:turn_ctx_cell
-              ~agent_name
+              ~agent_name:meta.name
               ~trace_id
               ~turn:0
               ~keeper_turn_id:1
@@ -1059,7 +1056,7 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                 ~net
                 ~config:
                   { (Agent_core.Types.default_config ~model:"test-model") with
-                    name = agent_name
+                    name = meta.name
                   }
                 ~tools:bundle.tools
                 ~options:{ Agent_core.Agent.default_options with hooks }
@@ -1076,7 +1073,7 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                   ?tool_approval:options.tool_approval
                   ~event_bus:(Some event_bus)
                   ~tracer:options.tracer
-                  ~agent_name
+                  ~agent_name:meta.name
                   ~turn_count:0
                   ~usage:(Agent_core.Agent.state agent).usage
                   [ Agent_core.Types.ToolUse
@@ -2402,7 +2399,7 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
 let test_keeper_task_claim_accepts_specific_task_id () =
   with_exec_fixture "keeper_tool_dispatch_specific_task_claim"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-      ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+      ignore (Workspace.init config ~agent_name:(Some meta.name));
       ignore
         (Workspace.add_task config ~title:"higher priority task" ~priority:1
            ~description:"should not be claimed by explicit task_id");
@@ -2440,7 +2437,7 @@ let test_keeper_task_claim_accepts_specific_task_id () =
       match task_status "task-002" with
       | Masc_domain.Claimed { assignee; _ }
       | Masc_domain.InProgress { assignee; _ } ->
-        check string "assignee" meta.agent_name assignee
+        check string "assignee" meta.name assignee
       | _ -> fail "requested task should be claimed or auto-started")
 
 let test_unknown_tool_returns_exact_error () =

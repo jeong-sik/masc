@@ -59,7 +59,6 @@ let task_scope_meta () =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String "task-scope-test"
-        ; "agent_name", `String "keeper-task-scope-test-agent"
         ; "trace_id", `String "trace-task-scope-test"
         ; "current_task_id", `String "task-meta"
         ])

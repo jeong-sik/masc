@@ -44,10 +44,6 @@ val valid_vote_direction_strings : string list
     [vote_direction_of_string_opt] accepts.  Used by the JSON Schema
     generator for the [direction] enum field in the vote MCP tool. *)
 
-val all_vote_directions : vote_direction list
-(** Witness list — one entry per {!vote_direction}
-    constructor, in declaration order. *)
-
 val vote_direction_of_string_opt : string -> vote_direction option
 (** Sound partial parser: case-insensitive, trims whitespace, and
     accepts only ["up"] / ["down"].  Empty or unknown input returns

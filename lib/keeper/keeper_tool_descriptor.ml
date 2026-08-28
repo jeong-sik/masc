@@ -2083,9 +2083,9 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~input_schema_source:Canonical_registry
       ~id:"keeper.vision.analyze_image"
-      ~name:Keeper_tool_runtime_schemas.analyze_image.name
-      ~description:Keeper_tool_runtime_schemas.analyze_image.description
-      ~input_schema:Keeper_tool_runtime_schemas.analyze_image.input_schema
+      ~name:Keeper_tool_runtime_schemas.keeper_analyze_image.name
+      ~description:Keeper_tool_runtime_schemas.keeper_analyze_image.description
+      ~input_schema:Keeper_tool_runtime_schemas.keeper_analyze_image.input_schema
       (* [Internal_name] keeps the read-only vision sub-call model-visible. *)
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_analyze_image

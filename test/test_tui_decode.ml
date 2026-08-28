@@ -433,7 +433,7 @@ let refuted_verdict reason =
     ]
 ;;
 
-let decoded_proof ?verification ?last_review_note () =
+let decoded_proof ?verification ?last_review_note ?(extra = []) () =
   let fields =
     [ "id", `String "goal-x"
     ; "title", `String "Goal x"
@@ -444,6 +444,7 @@ let decoded_proof ?verification ?last_review_note () =
     @ (match last_review_note with
        | None -> []
        | Some note -> [ "last_review_note", `String note ])
+    @ extra
   in
   match Tui_decode.decode_planning_snapshot
           (`Assoc
@@ -566,6 +567,34 @@ let test_planning_goal_keeps_the_last_review_note () =
     (Some "blocked on the platform gap")
     (decoded_proof ~last_review_note:"blocked on the platform gap" ())
       .Tui_decode.pg_last_review_note
+;;
+
+let test_planning_goal_keeps_the_server_timestamps () =
+  let goal =
+    decoded_proof
+      ~extra:[ "created_at", `String "2026-08-01T09:00:00Z"
+             ; "updated_at", `String "2026-08-23T13:15:16Z"
+             ; "last_review_at", `String "2026-08-22T10:00:00Z" ]
+      ()
+  in
+  Alcotest.(check (option string)) "created_at is decoded"
+    (Some "2026-08-01T09:00:00Z") goal.Tui_decode.pg_created_at;
+  Alcotest.(check (option string)) "updated_at is decoded"
+    (Some "2026-08-23T13:15:16Z") goal.Tui_decode.pg_updated_at;
+  Alcotest.(check (option string)) "last_review_at is decoded"
+    (Some "2026-08-22T10:00:00Z") goal.Tui_decode.pg_last_review_at
+;;
+
+(* A server build that predates the timestamp fields still decodes; the TUI
+   renders what is there rather than refusing the goal. *)
+let test_planning_goal_tolerates_missing_timestamps () =
+  let goal = decoded_proof () in
+  Alcotest.(check (option string)) "created_at absent" None
+    goal.Tui_decode.pg_created_at;
+  Alcotest.(check (option string)) "updated_at absent" None
+    goal.Tui_decode.pg_updated_at;
+  Alcotest.(check (option string)) "last_review_at absent" None
+    goal.Tui_decode.pg_last_review_at
 ;;
 
 let planning_snapshot_json ?(running_key = "in_progress") () =
@@ -1325,6 +1354,34 @@ let test_x10_and_sgr_agree_on_the_wheel () =
        Alcotest.(check (option string))
          (Printf.sprintf "button %d" button) sgr x10)
     [ (64, "<64;10;5"); (65, "<65;10;5"); (0, "<0;10;5"); (66, "<66;10;5") ]
+
+(* The left press is the one report a surface can map to a row. Only the
+   unmodified press answers -- a release would act twice per click, and a
+   chord or drag is a gesture, not a choice. *)
+let test_sgr_left_press_reports_the_row_and_column () =
+  match Tui_decode.sgr_left_press "<0;10;5" 'M' with
+  | Some (5, 10) -> ()
+  | Some (row, column) ->
+      Alcotest.failf "expected row 5 column 10, got %d;%d" row column
+  | None -> Alcotest.fail "a plain left press should report its position"
+
+let test_sgr_left_press_ignores_releases_chords_and_wheel () =
+  let cases =
+    [ ("<0;10;5", 'm') (* release *)
+    ; ("<4;10;5", 'M') (* shift chord *)
+    ; ("<32;10;5", 'M') (* drag *)
+    ; ("<64;10;5", 'M') (* wheel *)
+    ; ("<0;10", 'M') (* short span *)
+    ]
+  in
+  List.iter
+    (fun (params, final) ->
+       match Tui_decode.sgr_left_press params final with
+       | None -> ()
+       | Some (row, column) ->
+           Alcotest.failf "report %S should stay unclaimed, got %d;%d" params
+             row column)
+    cases
 
 type parent_node = {
   node_id : string;
@@ -3166,7 +3223,25 @@ let test_decode_server_identity_survives_a_bare_health () =
     Alcotest.(check string) "no base path either" ""
       identity.Tui_decode.sid_base_path;
     Alcotest.(check (option (float 0.001))) "and no age is None" None
-      identity.Tui_decode.sid_binary_commit_age_s
+      identity.Tui_decode.sid_binary_commit_age_s;
+    Alcotest.(check (option bool))
+      "an absent worktree verdict is unknown, not a lane" None
+      identity.Tui_decode.sid_executable_in_worktree
+
+let test_decode_server_identity_reads_the_worktree_verdict () =
+  let with_flag value =
+    `Assoc [ ("build", `Assoc [ ("executable_in_worktree", `Bool value) ]) ]
+  in
+  (match Tui_decode.decode_server_identity (with_flag true) with
+   | Error detail -> Alcotest.fail detail
+   | Ok identity ->
+     Alcotest.(check (option bool)) "a worktree binary says so" (Some true)
+       identity.Tui_decode.sid_executable_in_worktree);
+  match Tui_decode.decode_server_identity (with_flag false) with
+  | Error detail -> Alcotest.fail detail
+  | Ok identity ->
+    Alcotest.(check (option bool)) "a root binary says so too" (Some false)
+      identity.Tui_decode.sid_executable_in_worktree
 
 let test_decode_server_identity_takes_an_integer_age () =
   (* The server writes the age as a float today; a whole-second value would
@@ -3347,6 +3422,166 @@ let test_decode_librarian_page_keeps_the_server_cursor () =
         page.Tui_decode.lrp_run_id;
       Alcotest.(check (option (pair (float 0.0) string))) "next cursor"
         (Some (42.5, "judge-older")) page.Tui_decode.lrp_next
+
+let lane_run_summary_json ?(lane = "librarian_exact") ?(status = "succeeded")
+    ?(completion = true) run_id =
+  `Assoc
+    ([ "run_id", `String run_id
+     ; "lane", `String lane
+     ; "actor", `String "omicron"
+     ; "started_at", `Float 100.
+     ; "status", `String status
+     ]
+     @
+     if completion then
+       [ "elapsed_s", `Float 1.25; "selected_slot", `String "qwen-primary" ]
+     else [])
+
+let test_decode_lane_run_page_filters_to_one_lane () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool true
+      ; ( "runs"
+        , `List
+            [ lane_run_summary_json "lib-1"
+            ; lane_run_summary_json ~lane:"hitl_auto_judge" "judge-1"
+            ; lane_run_summary_json "lib-2"
+            ] )
+      ]
+  in
+  match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok page ->
+      Alcotest.(check (list string)) "only the requested lane"
+        [ "lib-1"; "lib-2" ]
+        (List.map (fun run -> run.Tui_decode.lrs_run_id) page.Tui_decode.lrpg_runs);
+      (* The cursor names the page's last row, not the last matching one:
+         paging past a page without a hit must still make progress. *)
+      Alcotest.(check (option (pair (float 0.0) string))) "next cursor"
+        (Some (100., "lib-2")) page.Tui_decode.lrpg_next
+
+let test_decode_lane_run_page_running_run_has_no_completion_fields () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool false
+      ; "runs", `List [ lane_run_summary_json ~status:"running"
+                            ~completion:false "lib-live" ]
+      ]
+  in
+  match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok page ->
+      (match page.Tui_decode.lrpg_runs with
+       | [ run ] ->
+           Alcotest.(check (option (float 0.0))) "no elapsed yet" None
+             run.Tui_decode.lrs_elapsed_s;
+           Alcotest.(check (option string)) "no slot yet" None
+             run.Tui_decode.lrs_selected_slot;
+           Alcotest.(check (option (pair (float 0.0) string))) "no next page"
+             None page.Tui_decode.lrpg_next
+       | _ -> Alcotest.fail "expected exactly one run")
+
+let test_decode_lane_run_status_is_typed () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool false
+      ; ( "runs"
+        , `List
+            [ lane_run_summary_json ~status:"succeeded" "lib-ok"
+            ; lane_run_summary_json ~status:"completion_durability_unknown"
+                "lib-dubious"
+            ; lane_run_summary_json ~status:"exploded" "lib-new"
+            ] )
+      ]
+  in
+  match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok page ->
+      (match page.Tui_decode.lrpg_runs with
+       | [ ok; dubious; novel ] ->
+           Alcotest.(check string) "known label" "succeeded"
+             (Tui_decode.lane_run_status_label ok.Tui_decode.lrs_status);
+           Alcotest.(check bool) "durability variant" true
+             (dubious.Tui_decode.lrs_status
+              = Tui_decode.Lane_run_completion_durability_unknown);
+           (* A label the producer adds later must survive the decode, not
+              vanish into a default. *)
+           Alcotest.(check string) "unknown label is preserved" "exploded"
+             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status)
+       | _ -> Alcotest.fail "expected three runs")
+
+let lane_run_detail_json ?(output = true) run_id =
+  `Assoc
+    [ ( "run"
+      , `Assoc
+          ([ "run_id", `String run_id
+           ; "lane", `String "compaction_exact"
+           ; "actor", `String "omicron"
+           ; "started_at", `Float 100.
+           ; "status", `String (if output then "succeeded" else "running")
+           ; ( "input"
+             , `Assoc
+                 [ "kind", `String "exact"
+                 ; "payload", `Assoc [ "rendered_prompt", `String "compact this" ]
+                 ] )
+           ]
+           @ (if output then
+                [ "elapsed_s", `Float 0.5
+                ; "selected_slot", `Null
+                ; "output", `Assoc [ "summary", `String "done" ]
+                ]
+              else []))
+      )
+    ]
+
+let test_decode_lane_run_detail_carries_prompt_and_output () =
+  match Tui_decode.decode_lane_run_detail (lane_run_detail_json "cmp-1") with
+  | Error detail -> Alcotest.fail detail
+  | Ok detail ->
+      Alcotest.(check string) "run id" "cmp-1" detail.Tui_decode.lrd_run_id;
+      Alcotest.(check string) "lane" "compaction_exact" detail.Tui_decode.lrd_lane;
+      Alcotest.(check (option (float 0.0))) "elapsed" (Some 0.5)
+        detail.Tui_decode.lrd_elapsed_s;
+      (match detail.Tui_decode.lrd_input_payload with
+       | `Assoc fields ->
+           Alcotest.(check bool) "prompt payload" true
+             (List.assoc_opt "rendered_prompt" fields
+              = Some (`String "compact this"))
+       | _ -> Alcotest.fail "payload must be the recorded object");
+      (match detail.Tui_decode.lrd_output with
+       | Some (`Assoc fields) ->
+           Alcotest.(check bool) "output payload" true
+             (List.assoc_opt "summary" fields = Some (`String "done"))
+       | _ -> Alcotest.fail "a completed run carries its output")
+
+let test_decode_lane_run_detail_running_has_no_output () =
+  match
+    Tui_decode.decode_lane_run_detail (lane_run_detail_json ~output:false "cmp-live")
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok detail ->
+      Alcotest.(check (option (float 0.0))) "no elapsed yet" None
+        detail.Tui_decode.lrd_elapsed_s;
+      Alcotest.(check bool) "no output while running" true
+        (Option.is_none detail.Tui_decode.lrd_output)
+
+let test_decode_lane_run_detail_requires_the_payload () =
+  let json =
+    `Assoc
+      [ ( "run"
+        , `Assoc
+            [ "run_id", `String "cmp-bad"
+            ; "lane", `String "compaction_exact"
+            ; "actor", `String "omicron"
+            ; "started_at", `Float 100.
+            ; "status", `String "succeeded"
+            ; "input", `Assoc [ "kind", `String "exact" ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_lane_run_detail json with
+  | Ok _ -> Alcotest.fail "a run record without input.payload must not decode"
+  | Error _ -> ()
 
 (* The composite endpoint serves several screens from one body. These pin the
    part the Secrets tab reads: names and counts, never a value, and a Keeper
@@ -3787,6 +4022,21 @@ let () =
         Alcotest.test_case "rejects duplicate lane ids" `Quick
           test_decode_standalone_lanes_rejects_duplicate_ids;
       ] );
+    ( "decode_lane_runs",
+      [
+        Alcotest.test_case "page filters to one lane and keeps the cursor" `Quick
+          test_decode_lane_run_page_filters_to_one_lane;
+        Alcotest.test_case "running run has no completion fields" `Quick
+          test_decode_lane_run_page_running_run_has_no_completion_fields;
+        Alcotest.test_case "status decodes to a variant, unknown preserved" `Quick
+          test_decode_lane_run_status_is_typed;
+        Alcotest.test_case "detail carries prompt and output" `Quick
+          test_decode_lane_run_detail_carries_prompt_and_output;
+        Alcotest.test_case "running detail has no output" `Quick
+          test_decode_lane_run_detail_running_has_no_output;
+        Alcotest.test_case "detail requires the payload" `Quick
+          test_decode_lane_run_detail_requires_the_payload;
+      ] );
     ( "decode_fusion",
       [
         Alcotest.test_case "keeps typed origin and panel-to-judge order" `Quick
@@ -3863,6 +4113,10 @@ let () =
           test_planning_goal_separates_unreadable_from_unreviewed;
         Alcotest.test_case "keeps the last review note" `Quick
           test_planning_goal_keeps_the_last_review_note;
+        Alcotest.test_case "keeps the server timestamps" `Quick
+          test_planning_goal_keeps_the_server_timestamps;
+        Alcotest.test_case "tolerates missing timestamps" `Quick
+          test_planning_goal_tolerates_missing_timestamps;
       ] );
     ( "decode_fleet_safety",
       [
@@ -3953,6 +4207,11 @@ let () =
         Alcotest.test_case "clicks, releases, horizontal wheel stay unclaimed"
           `Quick
           test_sgr_click_and_horizontal_wheel_stay_unclaimed;
+        Alcotest.test_case "left press reports the row and column" `Quick
+          test_sgr_left_press_reports_the_row_and_column;
+        Alcotest.test_case "left press ignores releases, chords and wheel"
+          `Quick
+          test_sgr_left_press_ignores_releases_chords_and_wheel;
       ] );
     ( "x10_mouse",
       [
@@ -3990,6 +4249,8 @@ let () =
           test_decode_server_identity_survives_a_bare_health;
         Alcotest.test_case "takes an integer age" `Quick
           test_decode_server_identity_takes_an_integer_age;
+        Alcotest.test_case "reads the worktree verdict" `Quick
+          test_decode_server_identity_reads_the_worktree_verdict;
       ] );
     ( "bounded_parent_depth",
       [

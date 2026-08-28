@@ -90,6 +90,12 @@ type planning_goal = {
   pg_last_review_note : string option;
       (** What a keeper or operator wrote at the last transition. Free text,
           unlike {!pg_proof}, which is the judge's. *)
+  pg_last_review_at : string option;
+  pg_created_at : string option;
+  pg_updated_at : string option;
+      (** Server timestamps (RFC 3339). Optional: an older server build may
+          not emit them, and the TUI renders what is there rather than
+          refusing the goal. *)
 }
 
 type planning_rollup = {
@@ -971,6 +977,11 @@ type server_identity = {
   sid_binary_commit_age_s : float option;
   sid_base_path : string;
   sid_masc_root : string;
+  sid_executable_in_worktree : bool option;
+      (** Whether the server's executable resolved inside [.worktrees/]
+          (health [build.executable_in_worktree]). [None] on an older server
+          that does not carry the field — unknown, so no warning and no
+          all-clear. *)
 }
 (** Which server the TUI is talking to, as [/health] reports it.
 
@@ -1023,6 +1034,60 @@ val decode_librarian_actual_input :
   run_id:string -> Yojson.Safe.t -> (string list, string) result
 (** Read [run.input.payload.actual_input] from one exact-lane detail response,
     prefixed with the run/actor/status identity the TUI displays above it. *)
+
+(* One exact-lane run as the paged listing serves it: identity and outcome,
+   never the payloads. Completion fields are absent while the run is still
+   running. *)
+
+(* The producer's [Exact_lane_run_registry.status_label] vocabulary as a
+   variant; an unrecognized label keeps its text under [Lane_run_other]. *)
+type lane_run_status =
+  | Lane_run_running
+  | Lane_run_succeeded
+  | Lane_run_cancelled
+  | Lane_run_failed
+  | Lane_run_completion_persistence_failed
+  | Lane_run_completion_durability_unknown
+  | Lane_run_other of string
+
+val lane_run_status_label : lane_run_status -> string
+
+type lane_run_summary =
+  { lrs_run_id : string
+  ; lrs_lane : string
+  ; lrs_actor : string
+  ; lrs_started_at : float
+  ; lrs_status : lane_run_status
+  ; lrs_elapsed_s : float option
+  ; lrs_selected_slot : string option
+  }
+
+type lane_run_page =
+  { lrpg_runs : lane_run_summary list
+  ; lrpg_next : (float * string) option
+  }
+
+type lane_run_detail =
+  { lrd_run_id : string
+  ; lrd_lane : string
+  ; lrd_actor : string
+  ; lrd_started_at : float
+  ; lrd_status : lane_run_status
+  ; lrd_elapsed_s : float option
+  ; lrd_selected_slot : string option
+  ; lrd_input_payload : Yojson.Safe.t
+  ; lrd_output : Yojson.Safe.t option
+  }
+
+val decode_lane_run_page :
+  lane:string -> Yojson.Safe.t -> (lane_run_page, string) result
+(** One cursor page of exact-lane summaries, filtered to [lane]. [lrpg_next]
+    is the page cursor of the unfiltered page, so paging does not stall on a
+    page where the lane has no runs. *)
+
+val decode_lane_run_detail : Yojson.Safe.t -> (lane_run_detail, string) result
+(** The whole record of one exact-lane run, [input.payload] and [output]
+    included; [lrd_output] is [None] while the run is still running. *)
 
 type log_kind =
   | Log_turn
@@ -1193,6 +1258,13 @@ val verification_verdict_outcome :
     horizontal wheel). [parameters] is the raw CSI parameter span
     (["<64;10;5"]), [final] the CSI final byte. *)
 val sgr_wheel_key : string -> char -> string option
+
+(** Decode one SGR mouse report into the [(row, column)] of an unmodified
+    left-button press (button [0], final [M]), 1-based as the terminal
+    reports it. Releases, modifier chords, drags and wheel reports return
+    [None] — acting on those would double-fire or claim a gesture nobody
+    meant. *)
+val sgr_left_press : string -> char -> (int * int) option
 
 (** Decode the button byte of a legacy X10 mouse report ([CSI M] plus three raw
     bytes) into [wheel-up] / [wheel-down].

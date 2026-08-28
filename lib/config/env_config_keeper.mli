@@ -128,10 +128,10 @@ end
 (** {1 Keeper vision tool} *)
 
 module KeeperVision : sig
-  (** Raw image-byte budget for [analyze_image], clamped to [1, 10 MiB]. *)
+  (** Raw image-byte budget for [keeper_analyze_image], clamped to [1, 10 MiB]. *)
   val max_image_bytes : unit -> int
 
-  (** Output-token budget for [analyze_image], shared by the reasoning phase and
+  (** Output-token budget for [keeper_analyze_image], shared by the reasoning phase and
       the answer on the /v1 vision fleet, clamped to [4096, 131072]. Default
       65536. *)
   val max_output_tokens : unit -> int

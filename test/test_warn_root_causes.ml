@@ -60,18 +60,13 @@ let publication_recovery_turn_context ~registry ~keeper_name =
     }
 ;;
 
-(* [agent_name] is not free-form: keeper_meta_json_parse rejects a persisted
-   meta whose agent_name is not [Keeper_identity.keeper_agent_name name]
-   ("keeper-<name>-agent"). Spelling it out here as [name] made every test in
-   this suite that builds a meta fail at construction. Derive it the same way
-   production does so a change to the canonical form breaks in one place. *)
+(* RFC-0393: the keeper meta carries one name and nothing derived from it. *)
 let make_meta ?(name = "test-keeper") ?tool_groups () : Keeper_meta_contract.keeper_meta =
   (* [tool_groups] is not part of the persisted-meta JSON schema (the parser
      always decodes it to [None]); set it on the parsed record directly so a
      declared keeper's surface can be exercised without schema drift. *)
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc [("name", `String name);
-             ("agent_name", `String (Keeper_identity.keeper_agent_name name));
              ("trace_id", `String "test-trace-warn")]) with
   | Ok meta -> { meta with tool_groups }
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
@@ -555,7 +550,7 @@ let test_tool_bundle_does_not_emit_full_universe_assignment () =
             "bundle assembly must not claim an LLM-visible assignment"
             None
             (Tool_assignment_telemetry.find_latest_assignment_id
-               ~agent_id:meta.agent_name)))
+               ~agent_id:meta.name)))
 
 let test_tool_assignment_telemetry_is_before_turn_scoped () =
   check bool "bundle source does not emit assignment" true

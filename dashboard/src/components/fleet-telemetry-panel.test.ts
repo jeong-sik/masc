@@ -318,7 +318,7 @@ describe('FleetTelemetryPanel', () => {
         {
           ...executionResponse.keepers[0],
           sandbox_profile: 'docker',
-          sandbox_last_error: 'bind EPERM at /var/folders/tmp',
+          keeper_last_error: 'bind EPERM at /var/folders/tmp',
         },
       ],
     } satisfies DashboardExecutionResponse)

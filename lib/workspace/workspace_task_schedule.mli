@@ -11,7 +11,6 @@ val task_is_claim_pool_candidate : Masc_domain.task -> bool
 
 val underscore_name : string -> string
 val hyphen_name : string -> string
-val keeper_name_from_agent_name : string -> string option
 val agent_record_keeper_name : config -> agent_name:string -> string option
 val keeper_receipt_candidate_names : config -> agent_name:string -> string list
 val directory_exists : string -> bool

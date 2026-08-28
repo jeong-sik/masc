@@ -238,7 +238,7 @@ let prepare_agent_setup
            ~user_message
            ~dynamic_context)
   in
-  let agent_name = meta.agent_name in
+  let agent_name = meta.name in
   let global_skill_catalog, skill_projection_diagnostics =
     Keeper_skill_catalog.of_snapshot skill_snapshot
   in
@@ -520,7 +520,7 @@ let prepare_agent_setup
   let record_tool_assignment ~turn ~tool_list ~lane =
     let (_assignment_id : Tool_assignment_telemetry.assignment_id) =
       Tool_assignment_telemetry.emit_assigned
-        ~agent_id:meta.agent_name
+        ~agent_id:meta.name
         ~profile:"keeper"
         ~tool_list
         ~reason:

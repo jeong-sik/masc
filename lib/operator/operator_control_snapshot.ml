@@ -238,7 +238,7 @@ let keepers_json
                            ; "pipeline_stage", `String "paused"
                            ; "phase", phase_str
                            ; "name", `String meta.name
-                           ; "agent_name", `String meta.agent_name
+                           ; "agent_name", `String meta.name
                            ; ( "status"
                              , `String
                                  (Keeper_status_runtime.control_plane_status_to_string
@@ -400,7 +400,7 @@ let keepers_json
                          ; "pipeline_stage", `String pipeline_stage
                          ; "phase", phase_str
                          ; "name", `String meta.name
-                         ; "agent_name", `String meta.agent_name
+                         ; "agent_name", `String meta.name
                          ; ( "trace_id"
                            , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                            )

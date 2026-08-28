@@ -68,22 +68,12 @@ let event_to_json (e : timeline_event) : Yojson.Safe.t =
       ("detail", e.detail);
     ]
 
-let keeper_actor_id agent_name = "keeper-" ^ agent_name ^ "-agent"
 
-(* Keeper identity is persisted in two string forms across the stores: the
-   short handle ("albini") and the full actor id ("keeper-albini-agent");
-   some call sites also use the "keeper:albini" prefix form. A single agent's
-   rows must match whichever form the store wrote, so every identity
-   comparison routes through this one predicate.
-
-   Root cause: keeper identity has no typed canonical representation — the
-   short handle and actor id are two untyped strings used interchangeably.
-   The surgical fix unifies the comparison the activity path already did;
-   the proper fix is a typed [Keeper_id] with one canonical form plus
-   explicit projections (RFC-scale, tracked separately). *)
+(* RFC-0393: a keeper is written everywhere under its keeper_name. The
+   only second form is the Activity_graph entity key ("keeper:<name>"),
+   which is a kind namespace, not a spelling of the identity. *)
 let identity_matches ~(agent_name : string) (candidate : string) : bool =
   String.equal candidate agent_name
-  || String.equal candidate (keeper_actor_id agent_name)
   || String.equal candidate ("keeper:" ^ agent_name)
 
 let activity_event_matches_agent ~(agent_name : string) (e : Activity_graph.event) =

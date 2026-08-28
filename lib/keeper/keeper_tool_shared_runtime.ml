@@ -205,14 +205,6 @@ let resolve_keeper_confined_write_path
   | Error rejection -> user_message_error rejection
 ;;
 
-let resolve_keeper_path ~config ~meta ~raw_path =
-  resolve_keeper_confined_write_path
-    ~config
-    ~meta
-    ~endpoint:Keeper_alerting_path.Follow_referent
-    ~raw_path
-  |> Result.map Keeper_alerting_path.confined_host_path
-;;
 
 let resolve_keeper_read_path
       ~(config : Workspace.config)
@@ -295,7 +287,7 @@ let verify_keeper_confined_root (confined : Keeper_alerting_path.confined_path) 
      | Eio.Io _ as exn -> Error (Printexc.to_string exn))
 ;;
 
-let keeper_agent_sender ~(meta : keeper_meta) = meta.agent_name
+let keeper_agent_sender ~(meta : keeper_meta) = meta.name
 
 let shell_readonly_limit args =
   max 1 (min 200 (Safe_ops.json_int ~default:40 "limit" args))

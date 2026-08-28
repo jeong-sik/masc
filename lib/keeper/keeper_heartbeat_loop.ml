@@ -18,7 +18,6 @@ module Cycle = Keeper_heartbeat_loop_cycle
 (* Presence/identity sync extracted to
    [Keeper_heartbeat_loop_presence] (godfile decomp). *)
 let effective_keepalive_meta = Keeper_heartbeat_loop_presence.effective_keepalive_meta
-let repair_identity_drift_for_keepalive = Keeper_heartbeat_loop_presence.repair_identity_drift_for_keepalive
 let keeper_agent_status = Keeper_heartbeat_loop_presence.keeper_agent_status
 let sync_keeper_presence = Keeper_heartbeat_loop_presence.sync_keeper_presence
 
@@ -1137,11 +1136,6 @@ let run_heartbeat_loop
           ~base_path:ctx.config.base_path
           ~fallback:m
           ~disk_meta_opt:owner_meta
-      in
-      let meta_current =
-        match repair_identity_drift_for_keepalive ~ctx meta_current with
-        | Some repaired -> repaired
-        | None -> meta_current
       in
       (* A live lane evaluates every configured heartbeat tick. Busy/idle
          labels, observer count, and prior activity never suppress the cycle;

@@ -505,6 +505,28 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
         ; Masc_tui_footer.Server_base_path
             (Terminal_text.single_line identity.Tui_decode.sid_base_path)
         ]
+        @
+        (* Only a definite yes warns: an older server that cannot say
+           (None) must not read as either lane. *)
+        (match identity.Tui_decode.sid_executable_in_worktree with
+         | Some true -> [ Masc_tui_footer.Server_worktree_binary ]
+         | Some false | None -> [])
+        @
+        (* This TUI's own embedded commit against the server's: the pair
+           that told "restart masc" apart from "the feature is not merged"
+           by hand every time. Silent when either side cannot testify. *)
+        (let self = Masc.Build_identity.current () in
+         match
+           Masc_tui_footer.build_mismatch_item
+             ~tui_commit:self.Masc.Build_identity.binary_commit
+             ~tui_age_s:
+               (Option.map float_of_int
+                  self.Masc.Build_identity.binary_commit_age_seconds)
+             ~server_commit:identity.Tui_decode.sid_binary_commit
+             ~server_age_s:identity.Tui_decode.sid_binary_commit_age_s
+         with
+         | Some item -> [ item ]
+         | None -> [])
   in
   (* A workspace disagreement rides the footer every surface already draws,
      rather than replacing the screen. The reads that would be wrong under a
@@ -530,20 +552,58 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
       List.filter_map
         (fun (row : Tui_decode.keeper_turn_row) ->
           match row.ktr_state with
-          | Tui_decode.Keeper_turn_running _ -> Some row.ktr_keeper_name
+          | Tui_decode.Keeper_turn_running { started_at_unix; _ } ->
+              Some (row.ktr_keeper_name, started_at_unix)
           | Tui_decode.Keeper_turn_idle
           | Tui_decode.Keeper_turn_unavailable _ -> None)
         state.keeper_turns
     in
     let running =
       match state.msg_target_keeper_name with
-      | Some target when List.mem target running ->
-          target :: List.filter (fun name -> name <> target) running
+      | Some target when List.mem_assoc target running ->
+          (target, List.assoc target running)
+          :: List.filter (fun (name, _) -> name <> target) running
       | Some _ | None -> running
     in
-    match running with [] -> [] | _ -> [ Masc_tui_footer.Keeper_answering running ]
+    match running with
+    | [] -> []
+    | (_, lead_started_at) :: _ ->
+        (* The lead keeper's elapsed time rides the badge: a turn that has
+           been running for twenty minutes reads as the stall it probably
+           is, from every surface. Clamped so clock skew never counts up
+           from the future. *)
+        let lead_elapsed_s =
+          Some
+            (int_of_float
+               (Float.max 0. (Unix.gettimeofday () -. lead_started_at)))
+        in
+        [ Masc_tui_footer.Keeper_answering
+            { names = List.map fst running; lead_elapsed_s }
+        ]
   in
-  Masc_tui_footer.line ~status:(status @ identity @ conflict @ answering)
+  (* The glow after a finish: the newest one leads, the rest fold into +N.
+     [advance_finishes] already dropped expired entries and keepers that
+     started running again, but a footer drawn between polls still filters
+     by its own clock so the glow dies on time, not on the next poll. *)
+  let answered =
+    let now = Unix.gettimeofday () in
+    match
+      List.filter
+        (fun (_, finished_at) ->
+          now -. finished_at <= Masc_tui_answering.finish_glow_ttl_seconds)
+        state.keeper_turn_finishes
+    with
+    | [] -> []
+    | (name, finished_at) :: rest ->
+        [ Masc_tui_footer.Keeper_answered
+            { name
+            ; seconds_ago = int_of_float (Float.max 0. (now -. finished_at))
+            ; more = List.length rest
+            }
+        ]
+  in
+  Masc_tui_footer.line
+    ~status:(status @ identity @ conflict @ answering @ answered)
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
@@ -1883,12 +1943,19 @@ let render_approvals (state : state) =
    posts and 588 are automation; the 22 a person wrote are what an operator is
    scanning for, so those are the ones that get a mark. *)
 let board_kind_mark = function
-  | Some Post_by_person -> Ansi.bold ^ "@" ^ Ansi.reset
+  | Some Post_by_person -> Ansi.bold ^ (Theme.info ()) ^ "@" ^ Ansi.reset
   | Some Post_by_automation -> Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
   | Some Post_by_system -> " "
   | Some (Post_kind_unknown _) -> (Theme.warn ()) ^ "?" ^ Ansi.reset
   | None -> " "
 ;;
+
+(* The score is a reading, not text: up-voted draws ok, down-voted bad, and
+   zero -- most posts -- stays muted rather than claiming a colour. *)
+let board_score_style votes =
+  if votes > 0 then (Theme.ok ())
+  else if votes < 0 then (Theme.bad ())
+  else (Theme.muted ())
 
 (** The draft pane. For a new post the commit-message convention is stated
     on screen rather than assumed: first line is the title, the rest is the
@@ -2011,29 +2078,46 @@ let render_board_list (state : state) =
       if idx < count then begin
         let p = List.nth state.board_posts idx in
         let is_selected = idx = state.board_cursor in
+        let id =
+          Ansi.cyan ^ fit_width (Terminal_text.single_line p.bp_id) 12
+          ^ Ansi.reset
+        in
+        let hearth =
+          Ansi.dim
+          ^ fit_width
+              (match Terminal_text.optional_single_line p.bp_hearth with
+               | Some hearth -> hearth
+               | None -> "")
+              12
+          ^ Ansi.reset
+        in
+        let author =
+          Masc_tui_theme.tone Masc_tui_theme.Accent
+          ^ fit_width (Terminal_text.single_line p.bp_author) 16
+          ^ Ansi.reset
+        in
+        let score =
+          (board_score_style p.bp_votes)
+          ^ Printf.sprintf "+%d" p.bp_votes
+          ^ Ansi.reset
+        in
+        let replies = Ansi.dim ^ Printf.sprintf "c%d" p.bp_comment_count
+          ^ Ansi.reset in
         let line =
-          Printf.sprintf "  %s %s  %s  %s  %s  +%d  c%d"
+          Printf.sprintf "  %s %s  %s  %s  %s  %s  %s"
             (board_kind_mark p.bp_kind)
-            (fit_width (Terminal_text.single_line p.bp_id) 12)
-            (Ansi.dim
-             ^ fit_width
-                 (match Terminal_text.optional_single_line p.bp_hearth with
-                  | Some hearth -> hearth
-                  | None -> "")
-                 12
-             ^ Ansi.reset)
-            (fit_width (Terminal_text.single_line p.bp_author) 16)
+            id
+            hearth
+            author
             (fit_width (Terminal_text.single_line p.bp_title) (cols - 68))
-            p.bp_votes
-            p.bp_comment_count
+            score
+            replies
         in
-        let content =
-          if is_selected then
-            Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-          else
-            "  " ^ line
-        in
-        box_line buf cols content
+        let content = "  " ^ line in
+        if is_selected then
+          box_line_selected buf cols (Masc_tui_theme.strip_sgr content)
+        else
+          box_line buf cols content
       end else
         box_empty buf cols
     done
@@ -2387,6 +2471,25 @@ let planning_selected_detail (goal : planning_goal) =
       Printf.sprintf "%s \xc2\xb7 %s \xc2\xb7 %s" goal.pg_id metric proof
 ;;
 
+(* Freshness in one short word: the exact timestamps live in the detail
+   pane; the row only needs to separate "touched today" from "quiet for
+   weeks". A timestamp that does not parse renders nothing here -- the raw
+   string is still shown unmodified in the detail pane. *)
+let planning_updated_age ~now (goal : planning_goal) =
+  match goal.pg_updated_at with
+  | None -> None
+  | Some iso ->
+      Option.map
+        (fun then_ ->
+           let delta = max 0. (now -. then_) in
+           if delta < 60. then "now"
+           else if delta < 3600. then
+             Printf.sprintf "%dm" (int_of_float (delta /. 60.))
+           else if delta < 86400. then
+             Printf.sprintf "%dh" (int_of_float (delta /. 3600.))
+           else Printf.sprintf "%dd" (int_of_float (delta /. 86400.)))
+        (Masc_domain.parse_iso8601_opt iso)
+
 (** Render the Planning surface (list view). *)
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -2395,11 +2498,14 @@ let render_planning_list (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
 
-  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let now_unix = Unix.gettimeofday () in
+  let now = Unix.localtime now_unix in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  order:phase/P1-P5  %s  %s"
+  let header = Printf.sprintf "%s  order:%s  show:%s  %s  %s"
     (screen_title " MASC Planning")
+    (planning_sort_label state.planning_sort)
+    (planning_filter_label state.planning_filter)
     timestamp
     (connection_badge state) in
 
@@ -2410,7 +2516,9 @@ let render_planning_list (state : state) =
   let goals =
     match state.planning with
     | None -> []
-    | Some p -> planning_visible_goals p.pl_goals
+    | Some p ->
+        planning_visible_goals ~filter:state.planning_filter
+          ~sort:state.planning_sort p.pl_goals
   in
   let count = List.length goals in
   let planning_error =
@@ -2445,7 +2553,14 @@ let render_planning_list (state : state) =
        box_divider buf cols;
 
        if count = 0 then begin
-         box_line buf cols (Ansi.dim ^ "  (no goals)" ^ Ansi.reset);
+         (* An empty filter and an empty store are different facts: the first
+            says how to see the rest, the second has nothing to show. *)
+         let empty_note =
+           match p.pl_goals with
+           | [] -> "  (no goals)"
+           | _ -> "  no goals in this filter (f to change)"
+         in
+         box_line buf cols (Ansi.dim ^ empty_note ^ Ansi.reset);
          for _ = 1 to rows - 11 do
            box_empty buf cols
          done
@@ -2469,6 +2584,11 @@ let render_planning_list (state : state) =
               | Some d -> "  " ^ d
               | None -> ""
             in
+             let age =
+               match planning_updated_age ~now:now_unix g with
+               | Some a -> "  " ^ a
+               | None -> ""
+             in
              let line =
                Printf.sprintf "  %s[%s]%s %s P%d  %-16s %s%s"
                  status_color
@@ -2479,8 +2599,9 @@ let render_planning_list (state : state) =
                  (fit_width (Terminal_text.single_line g.pg_id) 16)
                  (fit_width
                     (Terminal_text.single_line g.pg_title)
-                    (cols - 47 - Message_layout.display_width due))
-                 (Ansi.dim ^ due ^ Ansi.reset)
+                    (cols - 47 - Message_layout.display_width due
+                     - Message_layout.display_width age))
+                 (Ansi.dim ^ age ^ due ^ Ansi.reset)
              in
              let content =
                if is_selected then
@@ -2502,7 +2623,7 @@ let render_planning_list (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:"j/k:move  right/Enter:detail  r:refresh  Tab:next");
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:"j/k:move  f:filter  s:sort  right/Enter:detail  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"planning-list" ~rows:terminal_rows
       ~cols buf
@@ -2510,9 +2631,10 @@ let render_planning_list (state : state) =
 (** Render the Planning surface (detail view). *)
 (* Border, header, divider, title, phase, due, metric, blank, divider,
    border, footer: the eleven rows the detail draws whatever the goal says.
-   A lifecycle arm and a refused request each add one more when they are
-   there, so the block is measured against them rather than against a
-   constant that would push the footer off a full screen. *)
+   A lifecycle arm, a refused request, and each present goal timestamp each
+   add one more when they are there, so the block is measured against them
+   rather than against a constant that would push the footer off a full
+   screen. *)
 let planning_detail_fixed_rows = 11
 
 let planning_detail_tone (tone : Planning_detail.tone) =
@@ -2559,6 +2681,24 @@ let planning_detail_pane (state : state)
        box_line buf cols
          (Printf.sprintf "  Metric: %s%s" m target)
    | None -> box_empty buf cols);
+  (* The goal's own timeline, dim like the Board read pane's timestamps:
+     when it was opened, when it last moved, when it was last reviewed. *)
+  let timestamp_lines =
+    List.filter_map
+      (fun (label, value) ->
+         Option.map
+           (fun iso ->
+              Printf.sprintf "  %-9s%s" (label ^ ":")
+                (Terminal_text.short_timestamp (Terminal_text.single_line iso)))
+           value)
+      [ "created", goal.pg_created_at
+      ; "updated", goal.pg_updated_at
+      ; "reviewed", goal.pg_last_review_at
+      ]
+  in
+  List.iter
+    (fun line -> box_line_styled buf cols ~style:Ansi.dim line)
+    timestamp_lines;
   box_line_styled buf cols ~style:Ansi.dim
     ("  Link: "
      ^ Link.reference Goal (Terminal_text.single_line goal.pg_id));
@@ -2615,6 +2755,7 @@ let planning_detail_pane (state : state)
   in
   let chrome_rows =
     planning_detail_fixed_rows
+    + List.length timestamp_lines
     + linked_rows
     + (match armed with Some _ -> 1 | None -> 0)
     + (match state.goal_action_error with Some _ -> 1 | None -> 0)
@@ -2681,7 +2822,9 @@ let render_planning_detail (state : state)
       let goals =
         match state.planning with
         | None -> []
-        | Some p -> planning_visible_goals p.pl_goals
+        | Some p ->
+            planning_visible_goals ~filter:state.planning_filter
+              ~sort:state.planning_sort p.pl_goals
       in
       let selected =
         let rec find i = function
@@ -2708,7 +2851,7 @@ let render_planning_detail (state : state)
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         "j/k:scroll  Y:copy link  left/Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
+         "j/k:scroll  f:filter  s:sort  Y:copy link  left/Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
   finish_surface state ~clamped:(Planning_detail_scroll scroll)
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
 
@@ -3815,7 +3958,7 @@ let standalone_lane_row width (lane : Tui_decode.standalone_lane) =
   in
   fit_width line width
 
-let render_lanes (state : state) =
+let render_lanes_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let inner = max 1 (framed_inner_width cols) in
@@ -3857,39 +4000,39 @@ let render_lanes (state : state) =
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ Ansi.cyan) standalone_heading;
-  let standalone_rows =
-    match state.standalone_lanes with
-    | Some snapshot ->
-        let rows =
-          List.map (standalone_lane_row inner) snapshot.Tui_decode.sls_lanes
-        in
-        let rows =
-          if snapshot.sls_exact_run_projection_truncated
-          then
-            rows
-            @ [ Printf.sprintf
-                  "%s  WINDOWED · exact runs %d/%d; counts and p50 use newest bounded window%s"
-                  Ansi.yellow snapshot.sls_exact_run_projection_count
-                  snapshot.sls_exact_run_source_total Ansi.reset
-              ]
-          else rows
-        in
-        (match state.standalone_lanes_error with
-         | None -> rows
-         | Some detail ->
-             rows
-             @ [ Ansi.yellow ^ "  STALE · refresh failed: "
-                 ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-               ])
-    | None ->
-        [ (match state.standalone_lanes_error with
-           | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
-           | Some detail ->
-               Ansi.red ^ "  standalone lane observation unavailable: "
-               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
-        ]
-  in
-  List.iter (box_line buf cols) standalone_rows;
+  (* The standalone rows are drawn directly rather than through a row list
+     because the selection band has to land on a lane row, not on the
+     windowed/stale notes that follow them. *)
+  (match state.standalone_lanes with
+   | Some snapshot ->
+       List.iteri
+         (fun index (lane : Tui_decode.standalone_lane) ->
+           let row = standalone_lane_row inner lane in
+           if
+             state.lanes_section = Lanes_section_standalone
+             && index = state.lanes_standalone_cursor
+           then box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
+           else box_line buf cols row)
+         snapshot.Tui_decode.sls_lanes;
+       if snapshot.sls_exact_run_projection_truncated then
+         box_line buf cols
+           (Printf.sprintf
+              "%s  WINDOWED · exact runs %d/%d; counts and p50 use newest bounded window%s"
+              Ansi.yellow snapshot.sls_exact_run_projection_count
+              snapshot.sls_exact_run_source_total Ansi.reset);
+       (match state.standalone_lanes_error with
+        | None -> ()
+        | Some detail ->
+            box_line buf cols
+              (Ansi.yellow ^ "  STALE · refresh failed: "
+               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset))
+   | None ->
+       box_line buf cols
+         (match state.standalone_lanes_error with
+          | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
+          | Some detail ->
+              Ansi.red ^ "  standalone lane observation unavailable: "
+              ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset));
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_lane_header columns);
   box_divider buf cols;
@@ -3932,7 +4075,10 @@ let render_lanes (state : state) =
       | None -> box_empty buf cols
       | Some lane ->
           let row = keeper_lane_row columns lane in
-          if index + scroll = state.lanes_cursor then
+          if
+            state.lanes_section = Lanes_section_keeper
+            && index + scroll = state.lanes_cursor
+          then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
           else box_line buf cols row
     done;
@@ -3943,6 +4089,266 @@ let render_lanes (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
+
+(* Status colours for exact-lane runs, keyed on the decoded variant; a label
+   the producer adds later decodes to [Lane_run_other] and reads muted until
+   it is named here. *)
+let lane_run_status_style = function
+  | Tui_decode.Lane_run_succeeded -> Theme.ok ()
+  | Tui_decode.Lane_run_cancelled -> Theme.warn ()
+  | Tui_decode.Lane_run_failed
+  | Tui_decode.Lane_run_completion_persistence_failed
+  | Tui_decode.Lane_run_completion_durability_unknown -> Theme.bad ()
+  | Tui_decode.Lane_run_running -> Theme.info ()
+  | Tui_decode.Lane_run_other _ -> Theme.muted ()
+
+let lane_run_clock started_at =
+  let tm = Unix.localtime started_at in
+  Printf.sprintf "%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let standalone_lane_label (state : state) lane_id =
+  match state.standalone_lanes with
+  | None -> lane_id
+  | Some snapshot ->
+      (match
+         List.find_opt
+           (fun (lane : Tui_decode.standalone_lane) ->
+             String.equal lane.sl_lane_id lane_id)
+           snapshot.Tui_decode.sls_lanes
+       with
+       | Some lane -> lane.sl_label
+       | None -> lane_id)
+
+(** Recent exact runs of one standalone lane. The list is the paged summary:
+    no payload ever crosses it, so an Enter here is what fetches a prompt. *)
+let render_lane_run_list (state : state) ~lane_id =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let runs =
+    match state.lane_runs with
+    | None -> []
+    | Some runs -> runs
+  in
+  let shown = List.length runs in
+  let header =
+    Printf.sprintf "%s · %s (%d runs)  %s"
+      (screen_title " MASC Lanes")
+      (fit_width
+         (Terminal_text.single_line (standalone_lane_label state lane_id))
+         20)
+      shown (connection_badge state)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (Printf.sprintf "  %-17s %-16s %-11s %-8s %-16s %s" "STARTED" "ACTOR"
+       "STATUS" "ELAPSED" "SLOT" "RUN ID");
+  box_divider buf cols;
+  (match state.lane_runs_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:(Theme.bad ())
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let layout = lanes_scrolled state in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+      ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
+      ~overflow_takes_row:layout.sc_overflow_takes_row
+  in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.lane_runs_scroll max_scroll) in
+  if shown = 0 then begin
+    let empty =
+      match
+        empty_page_of ~snapshot:state.lane_runs ~error:state.lane_runs_error
+      with
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
+      | Page_empty -> "  (no retained exact runs for this lane)"
+    in
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for index = 0 to content_height - 1 do
+      match List.nth_opt runs (index + scroll) with
+      | None -> box_empty buf cols
+      | Some (run : Tui_decode.lane_run_summary) ->
+          let elapsed =
+            match run.lrs_elapsed_s with
+            | None -> "—"
+            | Some seconds -> Printf.sprintf "%.1fs" seconds
+          in
+          let line =
+            Printf.sprintf "  %-17s %-16s %s%-11s%s %-8s %-16s %s"
+              (lane_run_clock run.lrs_started_at)
+              (fit_width (Terminal_text.single_line run.lrs_actor) 16)
+              (lane_run_status_style run.lrs_status)
+              (Tui_decode.lane_run_status_label run.lrs_status)
+              Ansi.reset elapsed
+              (fit_width
+                 (Terminal_text.single_line_or ~default:"—"
+                    run.lrs_selected_slot)
+                 16)
+              (fit_width (Terminal_text.single_line run.lrs_run_id) 12)
+          in
+          if index + scroll = state.lane_runs_cursor then
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+          else box_line buf cols line
+    done;
+  if shown > content_height then
+    box_line_styled buf cols ~style:(Theme.recede ())
+      (Printf.sprintf "[%d runs, scroll %d]" shown scroll);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:Masc_tui_keys.footer_hints_lanes_run_list);
+  finish_surface state ~surface_key:"lane-runs" ~rows:terminal_rows ~cols buf
+
+(* A payload renders whole up to a bound; past it the frame shows the head and
+   says so, rather than hanging the TUI on the kind of body that made the
+   listing drop payloads. The cut lands on a line boundary so no multibyte
+   sequence is split. *)
+let lane_run_render_max_bytes = 65536
+
+let lane_run_payload_lines json =
+  let full = Yojson.Safe.pretty_to_string json in
+  let text =
+    if String.length full <= lane_run_render_max_bytes then full
+    else
+      let cut =
+        match String.rindex_from_opt full lane_run_render_max_bytes '\n' with
+        | Some newline -> newline
+        | None -> lane_run_render_max_bytes
+      in
+      Printf.sprintf "%s\n…(truncated, total %d bytes)" (String.sub full 0 cut)
+        (String.length full)
+  in
+  String.split_on_char '\n' text
+  |> List.map (fun line -> Ansi.reset, "  " ^ Terminal_text.single_line line)
+
+let lane_run_detail_lines (detail : Tui_decode.lane_run_detail) =
+  let elapsed_slot =
+    match detail.lrd_elapsed_s, detail.lrd_selected_slot with
+    | None, None -> ""
+    | Some seconds, None -> Printf.sprintf "  ·  %.1fs" seconds
+    | None, Some slot ->
+        Printf.sprintf "  ·  slot %s" (Terminal_text.single_line slot)
+    | Some seconds, Some slot ->
+        Printf.sprintf "  ·  %.1fs  ·  slot %s" seconds
+          (Terminal_text.single_line slot)
+  in
+  [ Ansi.bold, "  RUN"
+  ; Ansi.reset, "  Run: " ^ Terminal_text.single_line detail.lrd_run_id
+  ; Ansi.reset, "  Lane: " ^ Terminal_text.single_line detail.lrd_lane
+  ; Ansi.reset, "  Actor: " ^ Terminal_text.single_line detail.lrd_actor
+  ; Ansi.dim, "  Started: " ^ lane_run_clock detail.lrd_started_at
+  ; ( lane_run_status_style detail.lrd_status
+    , "  Status: " ^ Tui_decode.lane_run_status_label detail.lrd_status ^ elapsed_slot )
+  ; Ansi.dim, ""
+  ; Ansi.bold, "  INPUT (prompt payload)"
+  ]
+  @ lane_run_payload_lines detail.lrd_input_payload
+  @ [ Ansi.dim, ""; Ansi.bold, "  OUTPUT" ]
+  @ (match detail.lrd_output with
+     | None ->
+         [ (Theme.muted ()), "  (run has not completed; no output recorded)" ]
+     | Some output -> lane_run_payload_lines output)
+
+let render_lane_run_detail (state : state) ~run_id =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 8192 in
+  let detail =
+    match state.lane_run_detail with
+    | Some detail when String.equal detail.Tui_decode.lrd_run_id run_id ->
+        Some detail
+    | Some _ | None -> None
+  in
+  let header =
+    Printf.sprintf "%s  %s  %s"
+      (screen_title " MASC Lane Run")
+      (fit_width (Terminal_text.single_line run_id) 38)
+      (connection_badge state)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  (match state.lane_run_detail_error with
+   | None -> ()
+   | Some error ->
+       box_line_styled buf cols ~style:(Theme.bad ())
+         ("  " ^ Keeper_chat.terminal_safe_text error);
+       box_divider buf cols);
+  let chrome_rows =
+    if Option.is_some state.lane_run_detail_error then 7 else 5
+  in
+  let content_height = max 1 (rows - chrome_rows) in
+  let lines =
+    match detail, state.lane_run_detail_error with
+    | None, None -> [ Ansi.dim, "  (loading exact run record)" ]
+    | None, Some _ ->
+        [ Ansi.dim, "  (load failed; nothing here is a reading)" ]
+    | Some detail, (Some _ | None) -> lane_run_detail_lines detail
+  in
+  let total = List.length lines in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min state.lane_run_detail_scroll max_scroll) in
+  for index = 0 to content_height - 1 do
+    match List.nth_opt lines (index + scroll) with
+    | None -> box_empty buf cols
+    | Some (style, line) -> box_line_styled buf cols ~style line
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail ~scroll ~max_scroll));
+  finish_surface state ~clamped:(Lane_run_detail_scroll scroll)
+    ~surface_key:"lane-run" ~rows:terminal_rows ~cols buf
+
+(* The lane notice is static: it explains a recording boundary and fetches
+   nothing, so it draws its lines whole with no scroll model, and the text
+   itself lives in [Masc_tui_types.verifier_lane_notice_lines] where a test
+   can pin it. *)
+let render_lane_notice (state : state) ~lane_id =
+  let terminal_rows, cols = get_terminal_size () in
+  let buf = Buffer.create 2048 in
+  let header =
+    Printf.sprintf "%s · %s  %s"
+      (screen_title " MASC Lanes")
+      (fit_width
+         (Terminal_text.single_line (standalone_lane_label state lane_id))
+         20)
+      (connection_badge state)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  List.iter
+    (fun line ->
+       match line with
+       | Lane_notice_heading text ->
+           box_line_styled buf cols ~style:Ansi.bold text
+       | Lane_notice_text text -> box_line buf cols text
+       | Lane_notice_dim text -> box_line_styled buf cols ~style:Ansi.dim text)
+    verifier_lane_notice_lines;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:Masc_tui_keys.footer_hints_lane_notice);
+  finish_surface state ~surface_key:"lane-notice" ~rows:terminal_rows ~cols buf
+
+let render_lanes (state : state) =
+  match state.lanes_mode with
+  | Lanes_overview -> render_lanes_overview state
+  | Lanes_run_list lane_id -> render_lane_run_list state ~lane_id
+  | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
+  | Lanes_lane_notice lane_id -> render_lane_notice state ~lane_id
 
 (** Render keeper detail view with live context and scrolling *)
 (* The detail box alone -- borders, title, scrolled content -- written into
@@ -9289,7 +9695,7 @@ let render_runtime_params (state : state) =
   (match state.runtime_params_notice with
    | None ->
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  Live overrides · persisted in .masc/runtime_params.json · server validates type/range"
+       "  Enter edits by type · E is advanced JSON · overrides persist in .masc/runtime_params.json"
    | Some (ok, detail) ->
      box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
        ("  " ^ Terminal_text.single_line detail));
@@ -9325,12 +9731,6 @@ let render_runtime_params (state : state) =
   let count = List.length state.runtime_params in
   let cursor = max 0 (min state.runtime_params_cursor (count - 1)) in
   let first = if cursor < content_height then 0 else cursor - content_height + 1 in
-  let display_json text =
-    match Yojson.Safe.from_string text with
-    | `String value -> value
-    | _ -> text
-    | exception Yojson.Json_error _ -> text
-  in
   (match state.runtime_params_error with
    | Some detail ->
      box_line buf cols ((Theme.bad ()) ^ "설정을 읽지 못했습니다: " ^ Ansi.reset
@@ -9356,10 +9756,15 @@ let render_runtime_params (state : state) =
              Printf.sprintf "  %s %-43s %-16s%s"
                (if row.rpr_has_override then "●" else "○")
                (Terminal_text.single_line row.rpr_key)
-               (Terminal_text.single_line (display_json row.rpr_current_json))
+               (Terminal_text.single_line
+                  (runtime_param_value_text ~value_type:row.rpr_value_type
+                     row.rpr_current_json))
                (if row.rpr_has_override
                 then Printf.sprintf "  default %s"
-                       (Terminal_text.single_line (display_json row.rpr_default_json))
+                       (Terminal_text.single_line
+                          (runtime_param_value_text
+                             ~value_type:row.rpr_value_type
+                             row.rpr_default_json))
                 else "")
            in
            if first + index = cursor then box_line_selected buf cols line
@@ -9370,20 +9775,53 @@ let render_runtime_params (state : state) =
      end);
   (match state.runtime_param_edit with
    | None -> ()
-   | Some (key, draft) ->
+   | Some edit ->
+     let friendly_bool =
+       edit.rpe_mode = Friendly_value
+       && List.mem (runtime_param_type_name edit.rpe_value_type)
+            [ "bool"; "boolean" ]
+     in
+     let field_label =
+       match edit.rpe_mode with
+       | Advanced_json -> "JSON>"
+       | Friendly_value when friendly_bool -> "choice>"
+       | Friendly_value -> "value>"
+     in
+     let draft = Terminal_text.single_line edit.rpe_draft in
+     let draft =
+       if edit.rpe_replace_on_type && not friendly_bool
+       then Theme.selection ^ draft ^ Ansi.reset
+       else draft
+     in
      box_divider buf cols;
      box_line buf cols
-       (Printf.sprintf "  %svalue>%s %s" Ansi.bold Ansi.reset
-          (fit_width (Terminal_text.single_line draft) (max 1 (cols - 12))));
+       (Printf.sprintf "  %s%s%s %s" Ansi.bold field_label Ansi.reset
+          (fit_width draft (max 1 (cols - 12))));
      box_line_styled buf cols ~style:(Theme.recede ())
-       (Printf.sprintf "  editing %s · JSON value · Enter apply · Ctrl-U clear · Esc cancel"
-          (Terminal_text.single_line key)));
+       (Printf.sprintf "  editing %s · %s"
+          (Terminal_text.single_line edit.rpe_key)
+          (match edit.rpe_mode with
+           | Advanced_json -> "advanced JSON · Enter apply · Esc cancel"
+           | Friendly_value when friendly_bool ->
+             "Left/Right/Space toggle · Enter apply · Esc cancel"
+           | Friendly_value ->
+             "type to replace · Enter apply · Esc cancel")));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (if editing then "type JSON  Enter:apply  Ctrl-U:clear  Esc:cancel"
-          else "j/k:select  Enter/e:edit  x:default  p:next  r:reload"));
+         (match state.runtime_param_edit with
+          | Some edit
+            when edit.rpe_mode = Friendly_value
+                 && List.mem (runtime_param_type_name edit.rpe_value_type)
+                      [ "bool"; "boolean" ] ->
+            "Left/Right/Space:toggle  Enter:apply  Esc:cancel"
+          | Some { rpe_mode = Friendly_value; _ } ->
+            "type:value  Enter:apply  Ctrl-U:clear  Esc:cancel"
+          | Some { rpe_mode = Advanced_json; _ } ->
+            "type JSON  Enter:apply  Ctrl-U:clear  Esc:cancel"
+          | None ->
+            "j/k:select  Enter/e:edit  E:advanced JSON  x:default  p:next"));
   finish_surface state ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
 ;;
 
@@ -9538,8 +9976,16 @@ let render_themes (state : state) =
   let content_height = max 1 (rows - 6) in
   let cursor = max 0 (min state.theme_cursor (List.length entries - 1)) in
   let scroll = max 0 (cursor - content_height + 1) in
+  (* The count in the last column is the number of measured colours that sit
+     under the readable floor. What happens to them depends on [tui]
+     lift_colours: with the lift on they are raised, with it off they are
+     drawn as the scheme's author published them. The same number means two
+     different things, so the heading has to say which one, or a reader with
+     the lift off reads "3 lifted" about three colours nothing lifted. *)
+  let lift_on = Masc_tui_theme.lift_is_enabled () in
   box_line_styled buf cols ~style:Ansi.dim
-    (Printf.sprintf "  %-24s %-9s %-10s %s" "theme" "page" "lifted" "")
+    (Printf.sprintf "  %-26s %-18s %-9s %-12s" "theme" "colours" "page"
+       (if lift_on then "lifted" else "below floor"))
   ;
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
@@ -9549,14 +9995,35 @@ let render_themes (state : state) =
           | Some name -> String.equal name entry.name
           | None -> false
         in
+        (* The scheme drawn in its own colours. A name and the word "dark"
+           say almost nothing about whether a reader will like a palette; two
+           dozen cells of it say most of what they need. Each block is painted
+           as background so the colour fills the cell rather than being a
+           glyph's worth of it. *)
+        let swatch =
+          entry.Theme_choice.swatch
+          |> List.map (fun rgb ->
+               Printf.sprintf "\027[48;2;%d;%d;%dm  \027[49m"
+                 (Masc_tui_terminal_palette.red rgb)
+                 (Masc_tui_terminal_palette.green rgb)
+                 (Masc_tui_terminal_palette.blue rgb))
+          |> String.concat ""
+        in
+        (* Built in two halves with the swatch spliced between them, never
+           through a width specifier. OCaml pads by bytes, and a swatch is
+           mostly escape bytes -- run it through [%-24s] and the padding is
+           computed against the escapes, which then get cut mid-sequence and
+           printed as "49m". *)
         let row =
-          Printf.sprintf "  %s %-24s %-9s %-10s"
+          Printf.sprintf "  %s %-24s "
             (if picked then chosen_mark else " ")
             (Terminal_text.single_line entry.name)
-            (if entry.light then "light" else "dark")
-            (match entry.lifted with
-             | 0 -> "none"
-             | count -> Printf.sprintf "%d of %d" count entry.measured)
+          ^ swatch
+          ^ Printf.sprintf "  %-9s %-12s"
+              (if entry.light then "light" else "dark")
+              (match entry.lifted with
+               | 0 -> "none"
+               | count -> Printf.sprintf "%d of %d" count entry.measured)
         in
         if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
         else box_line buf cols row
@@ -10197,6 +10664,7 @@ let answering_lines (state : state) =
     ~now:(Unix.gettimeofday ())
     ~chat_target:state.msg_target_keeper_name
     ~error:state.keeper_turns_error
+    ~finishes:state.keeper_turn_finishes
     state.keeper_turns
 
 let answering_viewport (state : state) =
@@ -10223,19 +10691,32 @@ let render_answering (state : state) =
       ~height:content_height
       state.answering_scroll
   in
-  let paint (line : Masc_tui_answering.line) =
-    match line.Masc_tui_answering.tone with
-    | Masc_tui_answering.Heading -> Ansi.bold ^ line.Masc_tui_answering.text ^ Ansi.reset
-    | Masc_tui_answering.Running -> Ansi.cyan ^ line.Masc_tui_answering.text ^ Ansi.reset
-    | Masc_tui_answering.Unknown -> (Theme.warn ()) ^ line.Masc_tui_answering.text ^ Ansi.reset
-    | Masc_tui_answering.Quiet -> Ansi.dim ^ line.Masc_tui_answering.text ^ Ansi.reset
+  let paint ~selected (line : Masc_tui_answering.line) =
+    let tone_prefix =
+      match line.Masc_tui_answering.tone with
+      | Masc_tui_answering.Heading -> Ansi.bold
+      | Masc_tui_answering.Running -> Ansi.cyan
+      | Masc_tui_answering.Done -> Theme.ok ()
+      | Masc_tui_answering.Unknown -> Theme.warn ()
+      | Masc_tui_answering.Quiet -> Ansi.dim
+    in
+    (* The cursor is a gutter caret, not a full-row band: the row keeps its
+       tone, and rows Enter cannot act on never wear the caret. *)
+    let caret =
+      if selected && Option.is_some line.Masc_tui_answering.target then "\xe2\x96\xb8 "
+      else "  "
+    in
+    caret ^ tone_prefix ^ line.Masc_tui_answering.text ^ Ansi.reset
   in
   lines
-  |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
-  |> List.iter (fun line -> framed_line buf cols (paint line));
+  |> List.mapi (fun i line -> (i, line))
+  |> List.filter (fun (i, _) -> i >= scroll && i < scroll + content_height)
+  |> List.iter (fun (i, line) ->
+         framed_line buf cols (paint ~selected:(i = state.answering_cursor) line));
   framed_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:move  Enter:open chat  Esc:close");
   finish_surface state ~surface_key:"answering" ~rows:terminal_rows ~cols buf
 ;;
 

@@ -20,6 +20,30 @@ module For_testing : sig
   val exact_lane_run_permission : Masc_domain.permission
   val runtime_probe_read_permission : Masc_domain.permission
 
+  val handle_runtime_assignment_post :
+    Mcp_server.server_state ->
+    string ->
+    Httpun.Request.t ->
+    Httpun.Reqd.t ->
+    string ->
+    unit
+
+  val handle_runtime_assignment_post_with :
+    set_assignment:
+      (runtime_config_path:string ->
+       keeper_name:string ->
+       runtime_id:string option ->
+       expected:Runtime.keeper_assignment_revision ->
+       unit ->
+       (Runtime.keeper_assignment_write Runtime.config_lock_receipt,
+        Runtime.keeper_assignment_cas_error) result) ->
+    Mcp_server.server_state ->
+    string ->
+    Httpun.Request.t ->
+    Httpun.Reqd.t ->
+    string ->
+    unit
+
   val fusion_run_detail_response :
     registry:Fusion_run_registry.t ->
     path:string ->

@@ -48,23 +48,38 @@ let clear_screen = "\027[2J"
    frame reliably row 1 of the window. *)
 let enter_alternate_screen = "\027[?1049h"
 let leave_alternate_screen = "\027[?1049l"
-(* OSC 11 asks the terminal to make its own background this colour; OSC 111
-   puts it back. Both belong here rather than in the theme module: a scheme is
-   a set of colours, and painting the window those colours live in is the
+(* OSC 10 and 11 are the terminal's own text and page colours; 110 and 111 put
+   them back. Both belong here rather than in the theme module: a scheme is a
+   set of colours, and painting the window those colours live in is the
    renderer's job. A terminal that does not know these ignores them, which is
    why they can be sent unconditionally.
 
-   The reset matters more than the set. A terminal keeps whatever background
-   it was last told to use, so an exit that skips OSC 111 leaves the reader's
-   shell wearing masc's colours until they close the window. *)
-let set_background_color rgb =
-  Printf.sprintf "\027]11;rgb:%02x/%02x/%02x\027\\" 
+   They are set as a pair, and the type below makes that the only thing a
+   caller can do. Sending one alone is not a smaller version of the change,
+   it is the readable case turned into the unreadable one: paint the page
+   white and leave the reader's near-white default text on it and masc draws
+   white on white. That was live between #31196 and this change.
+
+   The reset matters more than the set. A terminal keeps whatever colours it
+   was last told to use, so an exit that skips 110 and 111 leaves the reader's
+   shell wearing masc's until they close the window. *)
+type page =
+  { foreground : Masc_tui_terminal_palette.rgb
+  ; background : Masc_tui_terminal_palette.rgb
+  }
+
+let osc_color code rgb =
+  Printf.sprintf "\027]%d;rgb:%02x/%02x/%02x\027\\" code
     (Masc_tui_terminal_palette.red rgb)
     (Masc_tui_terminal_palette.green rgb)
     (Masc_tui_terminal_palette.blue rgb)
 ;;
 
-let reset_background_color = "\027]111\027\\"
+let set_page_colors { foreground; background } =
+  osc_color 10 foreground ^ osc_color 11 background
+;;
+
+let reset_page_colors = "\027]110\027\\\027]111\027\\"
 
 let erase_line = "\027[2K"
 let hide_cursor = "\027[?25l"
@@ -85,12 +100,12 @@ let last_frame_is_compact presenter =
 (* Sent when a scheme is picked and when one is dropped. [None] is "follow the
    terminal", which is a reset rather than a colour: masc has no opinion to
    send once the reader has withdrawn theirs. *)
-let sync_background ~write ~flush background =
+let sync_page ~write ~flush page =
   try
     write
-      (match background with
-       | Some rgb -> set_background_color rgb
-       | None -> reset_background_color);
+      (match page with
+       | Some page -> set_page_colors page
+       | None -> reset_page_colors);
     flush ()
   with _ -> ()
 ;;
@@ -108,8 +123,8 @@ let cleanup presenter ~write ~flush =
       ((if presenter.synchronized_output then end_synchronized_output else "")
        ^ reset_style ^ show_cursor ^ enable_autowrap
        (* Before leaving the alternate screen, so the shell that comes back is
-          already wearing its own background rather than masc's. *)
-       ^ reset_background_color ^ leave_alternate_screen
+          already wearing its own colours rather than masc's. *)
+       ^ reset_page_colors ^ leave_alternate_screen
        (* Started at probe time so a theme switch would be reported. Left on,
           the terminal keeps reporting to whatever runs next, which receives
           [CSI ? 997 ; n n] as typed input it never asked for. *)

@@ -63,16 +63,7 @@ let names_a_keeper_lane ~config name =
 ;;
 
 let keeper_of_agent_binding ~config ~actor =
-  match Keeper_identity_binding.resolve ~config ~agent_name:actor with
-  | Keeper_identity_binding.Not_found -> Ok None
-  | Keeper_identity_binding.Unique keeper_name -> Ok (Some keeper_name)
-  | Keeper_identity_binding.Ambiguous keeper_names ->
-    Error
-      (Printf.sprintf
-         "multiple registered or persisted Keepers share agent_name=%s: %s"
-         actor
-         (String.concat "," keeper_names))
-  | Keeper_identity_binding.Lookup_failed detail -> Error detail
+  if names_a_keeper_lane ~config actor then Ok (Some actor) else Ok None
 ;;
 
 (* [created_by] is written as a canonical Keeper name. *)

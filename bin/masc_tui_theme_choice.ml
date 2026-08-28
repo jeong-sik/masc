@@ -9,11 +9,18 @@ type entry =
   ; light : bool
   ; measured : int
   ; lifted : int
+  ; swatch : Palette.rgb list
   }
 
 (* What a status or role colour has to clear to be read as text. The same
-   floor [Masc_tui_theme] lifts against, so the count shown beside a theme is
-   the count that will actually be lifted. *)
+   floor [Masc_tui_theme] lifts against, so the count counts the colours the
+   lift would raise.
+
+   Whether it does raise them is a separate answer -- [tui] lift_colours, held
+   in [Masc_tui_theme]. This count does not consult it, because the count is a
+   property of the scheme and stays true either way: with the lift on these
+   are the colours it raises, with it off these are the colours left under the
+   floor. The screen that shows the count is what has to say which. *)
 let text_floor = 4.5
 
 (* The colours a reader sees a meaning in. Not every ANSI slot -- a theme is
@@ -43,6 +50,11 @@ let entries () =
           ; light = Catalog.light scheme
           ; measured = List.length measured_slots
           ; lifted = lifted_count palette
+          ; swatch =
+              (* The page first, then the colours masc reads meaning from, so
+                 a row shows the scheme the way the screen will. *)
+              Palette.background palette
+              :: List.filter_map (Palette.ansi palette) measured_slots
           })
     Catalog.bundled
 ;;

@@ -91,7 +91,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("ts_unix", `Float now_ts);
         ("channel", `String (Keeper_world_observation.channel_to_string channel));
         ("name", `String meta.name);
-        ("agent_name", `String meta.agent_name);
+        ("agent_name", `String meta.name);
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);

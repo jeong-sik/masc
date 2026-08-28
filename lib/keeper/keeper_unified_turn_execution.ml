@@ -164,7 +164,7 @@ let run (ctx : ctx)
     let result =
       Otel_genai.with_keeper_turn_span
         ~keeper_name:run_meta.name
-        ~agent_name:run_meta.agent_name
+        ~agent_name:run_meta.name
         ~runtime_id:execution.runtime_id
         ~trace_id:
           (Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)

@@ -269,6 +269,12 @@ type planning_goal = {
   pg_target_value : string option;
   pg_proof : goal_proof;
   pg_last_review_note : string option;
+  (* RFC 3339 server timestamps. Optional because an older server build may
+     not emit them; the TUI renders what is there rather than refusing the
+     goal. *)
+  pg_last_review_at : string option;
+  pg_created_at : string option;
+  pg_updated_at : string option;
 }
 
 type planning_rollup = {
@@ -1173,6 +1179,25 @@ let sgr_wheel_key (parameters : string) (final : char) : string option =
         else None
     | [] -> None
 
+(** Decode an SGR mouse report into the position of a plain left-button press.
+
+    Only the unmodified press (button [0], final [M]) answers: a release
+    (final [m]) would act twice per click, and modifier/motion bits mean the
+    operator was dragging or chord-clicking rather than choosing a row. The
+    position is 1-based, the way the terminal reports it, and stays row/column
+    ordered the way a frame thinks. Everything else stays [None] for the same
+    reason [sgr_wheel_key] gives: an unconsumed report must not masquerade as
+    a claimed key. *)
+let sgr_left_press (parameters : string) (final : char) : (int * int) option =
+  if final <> 'M' then None
+  else
+    match String.split_on_char ';' parameters with
+    | [ "<0"; column; row ] -> (
+        match int_of_string_opt column, int_of_string_opt row with
+        | Some column, Some row when column > 0 && row > 0 -> Some (row, column)
+        | _, _ -> None)
+    | _ -> None
+
 (** Decode the button byte of a legacy X10 mouse report ([CSI M] followed by
     three raw bytes) into the same key an SGR report produces.
 
@@ -1219,6 +1244,16 @@ let optional_bool_field json key =
   | `Bool value -> Ok (Some value)
   | `Null -> Ok None
   | bad -> field_type_error key "a boolean or null" bad
+
+(* Absent reads as [None] here: the exact-lane run summary omits its
+   completion fields entirely while a run is still running, rather than
+   sending null. *)
+let optional_float_field json key =
+  match member key json with
+  | `Float value -> Ok (Some value)
+  | `Int value -> Ok (Some (Float.of_int value))
+  | `Null -> Ok None
+  | bad -> field_type_error key "a float or null" bad
 
 let required_int_field json key =
   match member key json with
@@ -1368,6 +1403,9 @@ let decode_planning_goal json =
   let* pg_metric = optional_string_field json "metric" in
   let* pg_target_value = optional_string_field json "target_value" in
   let* pg_last_review_note = optional_string_field json "last_review_note" in
+  let* pg_last_review_at = optional_string_field json "last_review_at" in
+  let* pg_created_at = optional_string_field json "created_at" in
+  let* pg_updated_at = optional_string_field json "updated_at" in
   let pg_proof = decode_goal_proof (member "verification" json) in
   Ok
     {
@@ -1380,6 +1418,9 @@ let decode_planning_goal json =
       pg_target_value;
       pg_proof;
       pg_last_review_note;
+      pg_last_review_at;
+      pg_created_at;
+      pg_updated_at;
     }
 
 let decode_planning_rollup json =
@@ -3755,6 +3796,7 @@ type server_identity = {
   sid_binary_commit_age_s : float option;
   sid_base_path : string;
   sid_masc_root : string;
+  sid_executable_in_worktree : bool option;
 }
 
 (* [/health] answers before the workspace is fully up, so every field here is
@@ -3778,6 +3820,13 @@ let decode_server_identity json =
     | Some (`Int value) -> Some (float_of_int value)
     | Some _ | None -> None
   in
+  let sid_executable_in_worktree =
+    (* Three-valued on purpose: [None] is an older server that does not
+       carry the field, and the footer must not warn (or vouch) on it. *)
+    match Option.map (member "executable_in_worktree") build with
+    | Some (`Bool value) -> Some value
+    | Some _ | None -> None
+  in
   Ok
     { sid_version =
         (match member "version" json with
@@ -3787,6 +3836,7 @@ let decode_server_identity json =
     ; sid_binary_commit_age_s
     ; sid_base_path = string_in paths "effective_base_path"
     ; sid_masc_root = string_in paths "effective_masc_root"
+    ; sid_executable_in_worktree
     }
 ;;
 
@@ -3909,6 +3959,133 @@ let decode_librarian_actual_input ~run_id json =
              |> String.split_on_char '\n'))
   | `Null -> Error "latest Librarian run has no actual_input"
   | _ -> Error "latest Librarian actual_input is not an object"
+;;
+
+(* One exact-lane run as the paged listing serves it: identity and outcome,
+   never the payloads (the payloads are why the listing omits them — see
+   Exact_lane_run_registry.run_summary_fields). Completion fields are absent
+   while the run is still running. *)
+
+(* The producer's [Exact_lane_run_registry.status_label] vocabulary, decoded
+   back into a variant so consumers match on the type rather than the string.
+   An unrecognized label keeps its text under [Lane_run_other] — dropping the
+   word would be a silent decode, rejecting it would fail the whole page on
+   one unfamiliar run. *)
+type lane_run_status =
+  | Lane_run_running
+  | Lane_run_succeeded
+  | Lane_run_cancelled
+  | Lane_run_failed
+  | Lane_run_completion_persistence_failed
+  | Lane_run_completion_durability_unknown
+  | Lane_run_other of string
+
+let lane_run_status_of_string = function
+  | "running" -> Lane_run_running
+  | "succeeded" -> Lane_run_succeeded
+  | "cancelled" -> Lane_run_cancelled
+  | "failed" -> Lane_run_failed
+  | "completion_persistence_failed" -> Lane_run_completion_persistence_failed
+  | "completion_durability_unknown" -> Lane_run_completion_durability_unknown
+  | other -> Lane_run_other other
+
+let lane_run_status_label = function
+  | Lane_run_running -> "running"
+  | Lane_run_succeeded -> "succeeded"
+  | Lane_run_cancelled -> "cancelled"
+  | Lane_run_failed -> "failed"
+  | Lane_run_completion_persistence_failed -> "completion_persistence_failed"
+  | Lane_run_completion_durability_unknown -> "completion_durability_unknown"
+  | Lane_run_other other -> other
+
+type lane_run_summary =
+  { lrs_run_id : string
+  ; lrs_lane : string
+  ; lrs_actor : string
+  ; lrs_started_at : float
+  ; lrs_status : lane_run_status
+  ; lrs_elapsed_s : float option
+  ; lrs_selected_slot : string option
+  }
+
+type lane_run_page =
+  { lrpg_runs : lane_run_summary list
+  ; lrpg_next : (float * string) option
+  }
+
+type lane_run_detail =
+  { lrd_run_id : string
+  ; lrd_lane : string
+  ; lrd_actor : string
+  ; lrd_started_at : float
+  ; lrd_status : lane_run_status
+  ; lrd_elapsed_s : float option
+  ; lrd_selected_slot : string option
+  ; lrd_input_payload : Yojson.Safe.t
+  ; lrd_output : Yojson.Safe.t option
+  }
+
+let decode_lane_run_summary json =
+  let* lrs_run_id = required_string_field json "run_id" in
+  let* lrs_lane = required_string_field json "lane" in
+  let* lrs_actor = required_string_field json "actor" in
+  let* lrs_started_at = require_float_field json "started_at" in
+  let* lrs_status = required_string_field json "status" in
+  let* lrs_elapsed_s = optional_float_field json "elapsed_s" in
+  let* lrs_selected_slot = optional_string_field json "selected_slot" in
+  Ok
+    { lrs_run_id
+    ; lrs_lane
+    ; lrs_actor
+    ; lrs_started_at
+    ; lrs_status = lane_run_status_of_string lrs_status
+    ; lrs_elapsed_s
+    ; lrs_selected_slot
+    }
+;;
+
+(* The page answers every lane mixed together; the caller is after one. The
+   cursor still comes from the page's last row, filtered or not — filtering
+   first would stall paging on a page where the lane simply has no runs. *)
+let decode_lane_run_page ~lane json =
+  let* runs_json = required_list_field json "runs" in
+  let* has_more = required_bool_field json "has_more" in
+  let* runs = decode_list "runs" decode_lane_run_summary runs_json in
+  let lrpg_runs =
+    List.filter (fun run -> String.equal run.lrs_lane lane) runs
+  in
+  let* lrpg_next =
+    if not has_more
+    then Ok None
+    else
+      match List.rev runs with
+      | [] -> Error "exact lane page says has_more but has no cursor row"
+      | last :: _ -> Ok (Some (last.lrs_started_at, last.lrs_run_id))
+  in
+  Ok { lrpg_runs; lrpg_next }
+;;
+
+let decode_lane_run_detail json =
+  let* run = required_object_field json "run" in
+  let* summary = decode_lane_run_summary run in
+  let* input = required_object_field run "input" in
+  let* lrd_input_payload = required_member input "payload" in
+  let lrd_output =
+    match member "output" run with
+    | `Null -> None
+    | value -> Some value
+  in
+  Ok
+    { lrd_run_id = summary.lrs_run_id
+    ; lrd_lane = summary.lrs_lane
+    ; lrd_actor = summary.lrs_actor
+    ; lrd_started_at = summary.lrs_started_at
+    ; lrd_status = summary.lrs_status
+    ; lrd_elapsed_s = summary.lrs_elapsed_s
+    ; lrd_selected_slot = summary.lrs_selected_slot
+    ; lrd_input_payload
+    ; lrd_output
+    }
 ;;
 
 let decode_fleet_safety json =

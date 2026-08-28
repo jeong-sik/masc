@@ -33,27 +33,24 @@ let model_of_agent name = function
 
 let test_projects_active_models_to_agents_wire () =
   let keeper_name = "alice" in
-  let keeper_agent_name = "keeper-" ^ keeper_name ^ "-agent" in
   let keepers =
     [ `Assoc
         [ "name", `String keeper_name
-        ; "agent_name", `String keeper_agent_name
+        ; "agent_name", `String keeper_name
         ; "active_model", `String "model-x"
         ]
     ]
   in
   let agents =
-    [ agent ~agent_type:"keeper" keeper_agent_name
-    ; agent ~agent_type:"test" keeper_name
-    ]
+    [ agent ~agent_type:"keeper" keeper_name; agent ~agent_type:"test" "bob" ]
   in
   let agents_json = Dashboard_execution.For_test.agents_json ~keepers ~agents in
-  check json "canonical keeper agent receives its model"
+  check json "the keeper agent receives its model"
     (`String "model-x")
-    (model_of_agent keeper_agent_name agents_json);
-  check json "same bare name does not receive the keeper model"
+    (model_of_agent keeper_name agents_json);
+  check json "an unrelated agent does not receive the keeper model"
     `Null
-    (model_of_agent keeper_name agents_json)
+    (model_of_agent "bob" agents_json)
 ;;
 
 let () =

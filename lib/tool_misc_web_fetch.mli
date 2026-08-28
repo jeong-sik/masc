@@ -18,9 +18,6 @@ val validate_redirect_target : string -> (unit, string) result
     address, no RFC 6761 localhost name).  Exposed so the per-hop
     boundary can be exercised without a network round trip. *)
 
-val default_max_chars : int
-(** Default maximum output length for extracted content. *)
-
 val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.result
 (** [handle ~tool_name ~start_time args] handles [masc_web_fetch] tool dispatch.
     Required: [url] (string, http/https only).

@@ -127,14 +127,10 @@ let sanitize_event_traced (value : event) : event =
   end;
   sanitized
 
-let event_json_string (value : event) =
-  value |> sanitize_event |> event_to_yojson |> Yojson.Safe.to_string
 
 let format_sse_event_data ~seq data =
   Printf.sprintf "id: %d\nevent: activity\ndata: %s\n\n" seq data
 
-let format_sse_event (value : event) =
-  format_sse_event_data ~seq:value.seq (event_json_string value)
 
 (* ================================================================ *)
 (* Event reading                                                    *)

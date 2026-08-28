@@ -1240,7 +1240,6 @@ let make_keeper_meta_json ?(name = "alpha")
       (`Assoc
         [
           ("name", `String name);
-          ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
           ("updated_at", `String updated_at);
         ])
@@ -1256,7 +1255,6 @@ let make_keeper_meta ?(paused = false) ?(name = "alpha")
       (`Assoc
         [
           ("name", `String name);
-          ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
           ("updated_at", `String updated_at);
         ])
@@ -1908,7 +1906,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
             ~status:
               (Types.InProgress
                  {
-                   assignee = executor.Keeper_meta_contract.agent_name;
+                   assignee = executor.Keeper_meta_contract.name;
                    started_at = "2026-06-26T00:00:01Z";
                  })
             ()

@@ -8,6 +8,7 @@ import { signal } from '@preact/signals'
 import {
   patchKeeperConfig,
 } from '../api/dashboard'
+import { ApiRequestError } from '../api/core'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
@@ -439,6 +440,7 @@ const runtimeDraft = signal<KeeperRuntimeDraftState | null>(null)
 const activeKeeperConfigOwner = signal<KeeperConfigPanelOwner | null>(null)
 const runtimeSaving = signal(false)
 const runtimeSaveRequest = signal<KeeperConfigSaveRequest | null>(null)
+const promptSaveRequest = signal<KeeperConfigSaveRequest | null>(null)
 const runtimeDirectiveSaving = signal<'pause' | 'resume' | 'wakeup' | null>(null)
 function resetKeeperConfigPanelDrafts(): void {
   editMode.value = false
@@ -450,6 +452,7 @@ function resetKeeperConfigPanelDrafts(): void {
   activeKeeperConfigOwner.value = null
   runtimeSaving.value = false
   runtimeSaveRequest.value = null
+  promptSaveRequest.value = null
   runtimeDirectiveSaving.value = null
   hookFilterQuery.value = ''
   globalArchExpanded.value = false
@@ -511,6 +514,55 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   }
 }
 
+// Re-base a runtime draft onto a freshly loaded config after a revision
+// conflict, keeping exactly the fields the user changed relative to the base
+// they saw. Re-saving a stale-base draft against the fresh config would
+// diff the *old base values* as if the user had edited them, silently
+// reverting the other writer's changes on untouched fields.
+export function rebaseRuntimeDraftOnFreshConfig(
+  draft: RuntimeDraft,
+  seen: KeeperConfig,
+  fresh: KeeperConfig,
+): RuntimeDraft {
+  const base = initRuntimeDraftFromConfig(seen)
+  const rebased = initRuntimeDraftFromConfig(fresh)
+  if (draft.runtime_id !== base.runtime_id) rebased.runtime_id = draft.runtime_id
+  if (draft.autoboot_enabled !== base.autoboot_enabled) {
+    rebased.autoboot_enabled = draft.autoboot_enabled
+  }
+  if (draft.max_context_override !== base.max_context_override) {
+    rebased.max_context_override = draft.max_context_override
+  }
+  if (draft.sandbox_profile !== base.sandbox_profile) {
+    rebased.sandbox_profile = draft.sandbox_profile
+  }
+  if (draft.mention_targets_text !== base.mention_targets_text) {
+    rebased.mention_targets_text = draft.mention_targets_text
+  }
+  if (draft.network_mode !== base.network_mode) rebased.network_mode = draft.network_mode
+  if (draft.allowed_paths_text !== base.allowed_paths_text) {
+    rebased.allowed_paths_text = draft.allowed_paths_text
+  }
+  if (draft.proactive_enabled !== base.proactive_enabled) {
+    rebased.proactive_enabled = draft.proactive_enabled
+  }
+  if (draft.autonomous_wake_prompt !== base.autonomous_wake_prompt) {
+    rebased.autonomous_wake_prompt = draft.autonomous_wake_prompt
+  }
+  const draftSelection = draft.skill_selection
+  const baseSelection = base.skill_selection
+  const selectionChanged =
+    draftSelection.mode !== baseSelection.mode
+    || (draftSelection.mode === 'names'
+        && baseSelection.mode === 'names'
+        && draftSelection.names_text !== baseSelection.names_text)
+    || (draftSelection.mode === 'all'
+        && baseSelection.mode === 'all'
+        && draftSelection.prior_names_text !== baseSelection.prior_names_text)
+  if (selectionChanged) rebased.skill_selection = { ...draftSelection }
+  return rebased
+}
+
 export function keeperRuntimeConfigWriteUnsupportedReason(c: KeeperConfig): string | null {
   const name = c.name?.trim()
   if (!name) {
@@ -530,6 +582,25 @@ function keeperConfigManifestSource(c: KeeperConfig): string {
 }
 
 const KEEPER_CONFIG_API = '/api/v1/keepers/:name/config'
+
+export function keeperConfigFailureRequiresAuthoritativeReload(error: unknown): boolean {
+  return error instanceof ApiRequestError
+    && (
+      error.errorCode === 'keeper_manifest_reconciliation_required'
+      || error.errorCode === 'keeper_config_composite_reconciliation_required'
+      || error.authoritativeReloadRequired
+      || (error.configApplied === true && error.runtimeSync === false)
+    )
+}
+
+export function configDurabilityWarningMessage(
+  subject: string,
+  warnings: NonNullable<KeeperConfig['config_write']>['warnings'],
+): string | null {
+  if (warnings.length === 0) return null
+  const warningCodes = warnings.map(warning => warning.code).join(', ')
+  return `${subject} 적용됐지만 config durability 경고가 있습니다: ${warningCodes}`
+}
 const KEEPER_DIRECTIVE_API = '/api/v1/keepers/:name/directive'
 const DASHBOARD_GOALS_API = '/api/v1/dashboard/goals'
 const RUNTIME_PROVIDERS_API = '/api/v1/providers'
@@ -1696,7 +1767,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     runtimeSaveRequest.value = saveRequest
     runtimeSaving.value = true
     try {
-      const updated = await patchKeeperConfig(keeperName, payload)
+      const updated = await patchKeeperConfig(keeperName, payload, c.config_revision)
       const activeOwner = activeKeeperConfigOwner.value
       if (
         activeOwner?.keeperName !== saveRequest.owner.keeperName
@@ -1704,8 +1775,57 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ) return
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
-      showToast('Keeper 설정 저장 완료', 'success')
+      const durabilityWarning = configDurabilityWarningMessage(
+        'Keeper 설정은',
+        updated.config_write?.warnings ?? [],
+      )
+      if (durabilityWarning) {
+        showToast(durabilityWarning, 'warning')
+      } else {
+        showToast('Keeper 설정 저장 완료', 'success')
+      }
     } catch (err) {
+      const activeOwner = activeKeeperConfigOwner.value
+      if (
+        activeOwner?.keeperName !== saveRequest.owner.keeperName
+        || activeOwner.epoch !== saveRequest.owner.epoch
+      ) return
+      if (
+        err instanceof ApiRequestError
+        && err.errorCode === 'keeper_config_revision_conflict'
+      ) {
+        // The config the user saw is the closure [c]; capture the in-flight
+        // draft before the reload subscription resets it from the fresh
+        // config, then re-apply only the user's own edits on the fresh base.
+        const staleDraft =
+          runtimeDraft.value?.keeperName === keeperName
+            ? runtimeDraft.value.draft
+            : null
+        const seenConfig = c
+        await loadKeeperConfig(keeperName, { force: true })
+        const freshState = configState.value
+        if (staleDraft && freshState.status === 'loaded') {
+          runtimeDraft.value = {
+            keeperName,
+            draft: rebaseRuntimeDraftOnFreshConfig(
+              staleDraft,
+              seenConfig,
+              freshState.data,
+            ),
+          }
+        }
+        showToast(
+          'Keeper 설정이 다른 화면에서 변경되어 최신 값을 불러왔습니다. 편집한 내용은 남겨뒀으니 확인 후 다시 저장해주세요',
+          'warning',
+        )
+        return
+      }
+      if (keeperConfigFailureRequiresAuthoritativeReload(err)) {
+        runtimeDraft.value = null
+        await loadKeeperConfig(keeperName, { force: true })
+        showToast('Keeper 설정 저장 결과를 확정할 수 없어 권위 설정을 다시 불러왔습니다', 'warning')
+        return
+      }
       const msg = err instanceof Error ? err.message : '저장 실패'
       showToast(msg, 'error')
     } finally {
@@ -1768,10 +1888,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       cancelEdit()
       return
     }
+    const saveRequest: KeeperConfigSaveRequest = {
+      owner: panelOwner,
+      request: Symbol('keeper-prompt-config-save'),
+    }
+    promptSaveRequest.value = saveRequest
     saving.value = true
     saveError.value = null
     try {
-      const updated = await patchKeeperConfig(keeperName, payload)
+      const updated = await patchKeeperConfig(keeperName, payload, c.config_revision)
       const activeOwner = activeKeeperConfigOwner.value
       if (
         activeOwner?.keeperName !== panelOwner.keeperName
@@ -1782,11 +1907,48 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       editMode.value = false
       editDraft.value = null
       lastSavedAt.value = new Date().toISOString()
-      showToast('프롬프트 저장 완료', 'success')
+      const durabilityWarning = configDurabilityWarningMessage(
+        '프롬프트는',
+        updated.config_write?.warnings ?? [],
+      )
+      if (durabilityWarning) {
+        showToast(durabilityWarning, 'warning')
+      } else {
+        showToast('프롬프트 저장 완료', 'success')
+      }
     } catch (err) {
+      const activeOwner = activeKeeperConfigOwner.value
+      if (
+        activeOwner?.keeperName !== saveRequest.owner.keeperName
+        || activeOwner.epoch !== saveRequest.owner.epoch
+      ) return
+      if (
+        err instanceof ApiRequestError
+        && err.errorCode === 'keeper_config_revision_conflict'
+      ) {
+        // Single-field draft: keep the user's text and stay in edit mode.
+        // The next save diffs against the freshly loaded config, so only the
+        // still-changed instructions field is sent with the fresh revision.
+        await loadKeeperConfig(keeperName, { force: true })
+        showToast(
+          'Keeper 설정이 다른 화면에서 변경되어 최신 값을 불러왔습니다. 편집한 내용은 남겨뒀으니 확인 후 다시 저장해주세요',
+          'warning',
+        )
+        return
+      }
+      if (keeperConfigFailureRequiresAuthoritativeReload(err)) {
+        editMode.value = false
+        editDraft.value = null
+        await loadKeeperConfig(keeperName, { force: true })
+        showToast('Keeper 설정 저장 결과를 확정할 수 없어 권위 설정을 다시 불러왔습니다', 'warning')
+        return
+      }
       saveError.value = err instanceof Error ? err.message : '저장 실패'
     } finally {
-      saving.value = false
+      if (promptSaveRequest.value?.request === saveRequest.request) {
+        promptSaveRequest.value = null
+        saving.value = false
+      }
     }
   }
 
@@ -2134,10 +2296,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />
     `}
 
-    ${c.sandbox_last_error ? html`
+    ${c.keeper_last_error ? html`
       <${Callout}
         title="샌드박스 오류"
-        body=${c.sandbox_last_error}
+        body=${c.keeper_last_error}
         tone="warn"
       />
     ` : null}

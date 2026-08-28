@@ -29,7 +29,6 @@ let valid_json () =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ "name", `String "strict-meta"
-         ; "agent_name", `String (Keeper_identity.keeper_agent_name "strict-meta")
          ; "trace_id", `String "trace-strict-meta"
          ])
     |> Result.get_ok

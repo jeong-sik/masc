@@ -296,7 +296,7 @@ let keeper_context_to_yojson (meta : Keeper_meta_contract.keeper_meta) =
     Ok
       (`Assoc
          [ "lane_keeper_name", `String meta.name
-         ; "agent_name", `String meta.agent_name
+         ; "agent_name", `String meta.name
          ; "keeper_record_id", Json_util.option_to_yojson Ids.Keeper_id.to_yojson meta.id
          ; ( "keeper_runtime_uid"
            , Json_util.option_to_yojson Keeper_id.uid_to_yojson meta.keeper_id )

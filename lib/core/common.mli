@@ -9,17 +9,6 @@
 (** [true] when [MASC_STRICT_FINALIZERS] env is truthy. Callers can
     opt into raising finally-block exceptions instead of swallowing
     them. *)
-val handle_finalizer_error :
-  module_name:string ->
-  label:string ->
-  during_exception:bool ->
-  backtrace:Printexc.raw_backtrace ->
-  exn ->
-  unit
-(** Logs a finalizer failure. When [during_exception = false] and
-    [strict_finalizers ()] is [true], re-raises [exn] with its backtrace
-    so strict runs surface hidden bugs. *)
-
 val protect :
   module_name:string ->
   finally_label:string ->

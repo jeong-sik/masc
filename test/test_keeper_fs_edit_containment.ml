@@ -77,7 +77,6 @@ let make_meta name =
   let json =
     `Assoc
       [ "name", `String name
-      ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
       ; "trace_id", `String ("trace-" ^ name)
       ; "always_allow", `Bool false
       ]

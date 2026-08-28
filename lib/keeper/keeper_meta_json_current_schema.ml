@@ -17,7 +17,6 @@ let invalid_currentf format =
 type field =
   | Schema
   | Name
-  | Agent_name
   | Instructions
   | Autonomous_instructions
   | Trace_id
@@ -58,7 +57,6 @@ type field =
 let all_fields =
   [ Schema
   ; Name
-  ; Agent_name
   ; Instructions
   ; Autonomous_instructions
   ; Trace_id
@@ -100,7 +98,6 @@ let all_fields =
 let field_name = function
   | Schema -> "schema"
   | Name -> "name"
-  | Agent_name -> "agent_name"
   | Instructions -> "instructions"
   | Autonomous_instructions -> "autonomous_instructions"
   | Trace_id -> "trace_id"

@@ -379,11 +379,26 @@ let test_commit_ts_git_status_failure_is_observed () =
         true
         (after >= before +. 1.0)
 
+let test_path_is_in_worktree_pins_the_convention () =
+  let in_worktree = Masc.Build_identity.path_is_in_worktree in
+  Alcotest.(check bool) "a .worktrees exe is a worktree binary" true
+    (in_worktree "/Users/x/masc/.worktrees/feature/a/_build/default/bin/main_eio.exe");
+  Alcotest.(check bool) "the root build is not" false
+    (in_worktree "/Users/x/masc/_build/default/bin/main_eio.exe");
+  Alcotest.(check bool)
+    "a directory merely named worktrees does not trip it" false
+    (in_worktree "/Users/x/worktrees-tools/bin/main_eio.exe");
+  Alcotest.(check bool) "current() carries the verdict for this process"
+    (in_worktree (Masc.Build_identity.current ()).executable_path)
+    (Masc.Build_identity.current ()).executable_in_worktree
+
 let () =
   Alcotest.run "build_identity"
     [
       ( "identity",
         [
+          Alcotest.test_case "path_is_in_worktree pins the convention" `Quick
+            test_path_is_in_worktree_pins_the_convention;
           Alcotest.test_case "resolve commit prefers embedded" `Quick
             test_resolve_commit_prefers_embedded;
           Alcotest.test_case "resolve commit details prefers embedded binary"

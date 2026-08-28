@@ -35,7 +35,7 @@ load by `lib/keeper/keeper_types_profile.ml`, not started with an empty prompt.
 [keeper]
 autoboot_enabled = true
 proactive_enabled = true
-sandbox_profile = "local"
+sandbox_profile = "docker"
 mention_targets = ["reviewer", "리뷰어"]
 allowed_paths = ["workspace/yousleepwhen/masc"]
 
@@ -54,7 +54,7 @@ Counted across the eleven Keepers on one live runtime, 2026-08-25:
 |---|---:|---|
 | `autoboot_enabled` | 11/11 | Whether the server starts this Keeper on boot |
 | `instructions` | 11/11 | The Keeper's whole prompt; rejected if empty |
-| `sandbox_profile` | 11/11 | `local` runs on the host, `docker` in a container |
+| `sandbox_profile` | 11/11 | `docker` runs in a container. `local` (host execution) is fail-closed by default — RFC-0394 |
 | `proactive_enabled` | 9/11 | Whether it takes turns on its own, or only when addressed |
 | `mention_targets` | 7/11 | The names that route a board mention to it |
 | `network_mode` | 6/11 | Network reachability for its sandbox |
@@ -64,6 +64,10 @@ Counted across the eleven Keepers on one live runtime, 2026-08-25:
 
 The first three are what every Keeper on that runtime sets. Treat the rest as
 answers to a question you have actually run into.
+
+A dev/test process that still needs the `local` profile can lift the gate with
+`MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1`; dispatch under the hatch logs a warning
+naming the keeper.
 
 Unknown keys fail closed. The full field contract is
 [`docs/KEEPER-FILE-MODEL.md`](KEEPER-FILE-MODEL.md).

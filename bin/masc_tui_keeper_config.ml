@@ -60,6 +60,152 @@ let editor_stem json =
 
 let editable_field_names = List.map editable_field_name editable_fields
 
+let is_lowercase_sha256 value =
+  String.length value = 64
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' -> true
+         | _ -> false)
+       value
+
+let exact_keys expected fields =
+  List.length fields = List.length expected
+  && List.for_all (fun key -> List.mem_assoc key fields) expected
+
+let validate_manifest_revision = function
+  | `Assoc [ ("state", `String "missing") ] -> Ok ()
+  | `Assoc fields when exact_keys [ "state"; "value" ] fields ->
+    (match List.assoc_opt "state" fields, List.assoc_opt "value" fields with
+     | Some (`String "sha256"), Some (`String value)
+       when is_lowercase_sha256 value -> Ok ()
+     | _ -> Error "keeper config manifest revision is invalid")
+  | _ -> Error "keeper config manifest revision is invalid"
+
+let validate_assignment = function
+  | `Assoc [ ("state", `String "missing") ] -> Ok ()
+  | `Assoc fields when exact_keys [ "state"; "runtime_id" ] fields ->
+    (match List.assoc_opt "state" fields, List.assoc_opt "runtime_id" fields with
+     | Some (`String "assigned"), Some (`String runtime_id)
+       when String.trim runtime_id <> "" -> Ok ()
+     | _ -> Error "keeper runtime assignment state is invalid")
+  | _ -> Error "keeper runtime assignment state is invalid"
+
+let validate_runtime_assignment_revision = function
+  | `Assoc [ ("state", `String "runtime_config_missing") ] -> Ok ()
+  | `Assoc fields
+    when exact_keys [ "state"; "source_revision"; "assignment" ] fields ->
+    (match
+       List.assoc_opt "state" fields,
+       List.assoc_opt "source_revision" fields,
+       List.assoc_opt "assignment" fields
+     with
+     | ( Some (`String "runtime_config_present")
+       , Some (`String source_revision)
+       , Some assignment )
+       when is_lowercase_sha256 source_revision ->
+       validate_assignment assignment
+     | _ -> Error "keeper runtime assignment revision is invalid")
+  | _ -> Error "keeper runtime assignment revision is invalid"
+
+let validate_config_revision = function
+  | `Assoc fields
+    when exact_keys [ "manifest"; "runtime_assignment" ] fields ->
+    (match
+       List.assoc_opt "manifest" fields,
+       List.assoc_opt "runtime_assignment" fields
+     with
+     | Some manifest, Some runtime_assignment ->
+       Result.bind
+         (validate_manifest_revision manifest)
+         (fun () -> validate_runtime_assignment_revision runtime_assignment)
+     | _ -> Error "keeper config revision is incomplete")
+  | _ -> Error "keeper config revision is invalid"
+
+let expected_config_revision before =
+  match member "config_revision" before with
+  | Some revision ->
+    Result.map (fun () -> revision) (validate_config_revision revision)
+  | None -> Error "keeper config revision was not observed"
+
+let expected_runtime_assignment_revision before =
+  Result.bind
+    (expected_config_revision before)
+    (fun revision ->
+      match member "runtime_assignment" revision with
+      | Some runtime_assignment -> Ok runtime_assignment
+      | None -> Error "keeper runtime assignment revision was not observed")
+
+let decode_unchanged_runtime_assignment_response = function
+  | `Assoc fields
+    when exact_keys [ "ok"; "applied"; "assignment_revision"; "warnings" ] fields ->
+    (match
+       List.assoc_opt "ok" fields,
+       List.assoc_opt "applied" fields,
+       List.assoc_opt "assignment_revision" fields,
+       List.assoc_opt "warnings" fields
+     with
+     | Some (`Bool true), Some (`Bool false), Some revision, Some (`List warnings)
+       when List.for_all
+              (function
+                | `Assoc warning_fields
+                  when exact_keys [ "code"; "detail" ] warning_fields ->
+                  (match
+                     List.assoc_opt "code" warning_fields,
+                     List.assoc_opt "detail" warning_fields
+                   with
+                   | Some (`String _), Some (`String _) -> true
+                   | _ -> false)
+                | _ -> false)
+              warnings ->
+       Result.map (fun () -> revision) (validate_runtime_assignment_revision revision)
+     | _ -> Error "runtime assignment response is not an unchanged write")
+  | _ -> Error "runtime assignment response must be an object"
+
+let config_write_warning_codes json =
+  match member "config_write" json with
+  | Some (`Assoc fields)
+    when exact_keys [ "revision"; "applied"; "warnings" ] fields ->
+    (match
+       List.assoc_opt "revision" fields,
+       List.assoc_opt "applied" fields,
+       List.assoc_opt "warnings" fields
+     with
+     | Some revision, Some (`Bool _), Some (`List warnings) ->
+       Result.bind
+         (validate_config_revision revision)
+         (fun () ->
+           let rec decode acc = function
+             | [] -> Ok (List.rev acc)
+             | `Assoc warning_fields :: rest
+               when exact_keys [ "code"; "detail" ] warning_fields ->
+               (match
+                  List.assoc_opt "code" warning_fields,
+                  List.assoc_opt "detail" warning_fields
+                with
+                | Some (`String code), Some (`String detail)
+                  when String.trim code <> "" && String.trim detail <> "" ->
+                  decode (code :: acc) rest
+                | _ -> Error "config durability warning is malformed")
+             | _ -> Error "config durability warning is malformed"
+           in
+           decode [] warnings)
+     | _ -> Error "config_write receipt is malformed")
+  | Some _ -> Error "config_write receipt is malformed"
+  | None -> Error "config_write receipt is missing"
+
+let config_write_status_message ~keeper_name json =
+  Result.map
+    (function
+      | [] -> "system", keeper_name ^ ": changed settings applied"
+      | warning_codes ->
+        ( "error"
+        , Printf.sprintf
+            "%s: settings applied with %d config durability warning(s): %s"
+            keeper_name
+            (List.length warning_codes)
+            (String.concat ", " warning_codes) ))
+    (config_write_warning_codes json)
+
 let patch_of_edit ~before ~after =
   match after with
   | `Assoc edited_fields ->
@@ -83,7 +229,13 @@ let patch_of_edit ~before ~after =
                  | Some old_value -> not (Yojson.Safe.equal value old_value)
                  | None -> true)
         in
-        Ok (`Assoc changed)
+        if changed = []
+        then Ok (`Assoc [])
+        else
+          Result.map
+            (fun revision ->
+              `Assoc (("expected_config_revision", revision) :: changed))
+            (expected_config_revision before)
   | _ -> Error "keeper settings must remain a JSON object"
 
 (* Marker column. The glyph carries the editable/read-only split on its own,
@@ -185,6 +337,73 @@ let counted = function
   | [ _ ] -> "1 line"
   | lines -> Printf.sprintf "%d lines" (List.length lines)
 
+let render_manifest_revision = function
+  | `Assoc [ ("state", `String "missing") ] -> Ok "manifest=missing"
+  | `Assoc fields when exact_keys [ "state"; "value" ] fields ->
+    (match List.assoc_opt "state" fields, List.assoc_opt "value" fields with
+     | Some (`String "sha256"), Some (`String value)
+       when is_lowercase_sha256 value -> Ok ("manifest=sha256:" ^ value)
+     | _ -> Error ())
+  | _ -> Error ()
+
+let render_assignment = function
+  | `Assoc [ ("state", `String "missing") ] -> Ok "assignment=missing"
+  | `Assoc fields when exact_keys [ "state"; "runtime_id" ] fields ->
+    (match List.assoc_opt "state" fields, List.assoc_opt "runtime_id" fields with
+     | Some (`String "assigned"), Some (`String runtime_id)
+       when String.trim runtime_id <> "" -> Ok ("assignment=assigned:" ^ runtime_id)
+     | _ -> Error ())
+  | _ -> Error ()
+
+let render_runtime_assignment_revision = function
+  | `Assoc [ ("state", `String "runtime_config_missing") ] -> Ok "runtime=missing"
+  | `Assoc fields
+    when exact_keys [ "state"; "source_revision"; "assignment" ] fields ->
+    (match
+       List.assoc_opt "state" fields,
+       List.assoc_opt "source_revision" fields,
+       List.assoc_opt "assignment" fields
+     with
+     | ( Some (`String "runtime_config_present")
+       , Some (`String source_revision)
+       , Some assignment )
+       when is_lowercase_sha256 source_revision ->
+       Result.map
+         (fun rendered_assignment ->
+           Printf.sprintf "runtime=present source=sha256:%s %s"
+             source_revision rendered_assignment)
+         (render_assignment assignment)
+     | _ -> Error ())
+  | _ -> Error ()
+
+let render_config_revision = function
+  | `Assoc fields when exact_keys [ "manifest"; "runtime_assignment" ] fields ->
+    (match
+       List.assoc_opt "manifest" fields,
+       List.assoc_opt "runtime_assignment" fields
+     with
+     | Some manifest, Some runtime_assignment ->
+       Result.bind
+         (validate_config_revision (`Assoc fields)
+          |> Result.map_error (fun _detail -> ()))
+         (fun () ->
+           Result.bind
+             (render_manifest_revision manifest)
+             (fun rendered_manifest ->
+               Result.map
+                 (fun rendered_runtime ->
+                   rendered_manifest ^ " | " ^ rendered_runtime)
+                 (render_runtime_assignment_revision runtime_assignment)))
+     | _ -> Error ())
+  | _ -> Error ()
+
+let config_revision_value = function
+  | Some revision ->
+    (match render_config_revision revision with
+     | Ok rendered -> rendered
+     | Error () -> "invalid composite config revision")
+  | None -> "invalid composite config revision"
+
 (* One document, but the reader has to be able to answer "will [e] change
    this?" without counting rows against the editor stem. The glyph answers it
    on every line, and the field count in the heading is taken from the same
@@ -235,6 +454,8 @@ let view_lines ~sanitize json =
       (fun () -> skill_selection_value (at [ "skills"; "names" ]))
   ; ""
   ; section "derived" "read-only"
+  ; read_only_value_row "Config revision"
+      (fun () -> config_revision_value (at [ "config_revision" ]))
   ; read_only_value_row "Effective paths"
       (fun () -> string_list_value (at [ "effective_allowed_paths" ]))
   ; ""

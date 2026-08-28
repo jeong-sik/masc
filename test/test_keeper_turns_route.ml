@@ -139,8 +139,6 @@ let test_installed_keeper_rides_as_an_idle_row () =
           Masc_test_deps.meta_of_json_fixture
             (`Assoc
               [ ("name", `String keeper_name)
-              ; ( "agent_name"
-                , `String (Keeper_identity.keeper_agent_name keeper_name) )
               ; ("trace_id", `String "trace-keeper-turns-route")
               ; ("autoboot_enabled", `Bool false)
               ])

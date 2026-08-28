@@ -44,7 +44,6 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused f =
          Masc_test_deps.meta_of_json_fixture
            (`Assoc
               [ "name", `String keeper_name
-              ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
               ; "trace_id", `String "trace-paused-cancel-owner"
               ; "autoboot_enabled", `Bool false
               ])

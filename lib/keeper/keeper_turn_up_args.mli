@@ -34,6 +34,7 @@ type parsed_args =
   ; native_tool_posture_present : bool
   ; instructions_arg : string option
   ; profile_defaults : keeper_profile_defaults
+  ; declarative_manifest_snapshot : declarative_manifest_snapshot
   ; instructions_opt : string option
   ; autonomous_instructions_arg : string option
   ; autonomous_instructions_opt : string option
@@ -78,9 +79,12 @@ val resolve_sandbox_profile :
   sandbox_profile
 (** An explicit [requested] profile wins over the TOML [fallback].
 
-    When neither source states a profile, returns the canonical local sandbox default.
-    Fresh keepers also default to an empty [allowed_paths] list, so that local sandbox
-    is restricted to [.masc/playground/<keeper_name>/].
+    When neither source states a profile, the fallback resolves to [Local],
+    which keeper-up validation (create/update) rejects unless the dev/test
+    hatch [MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1] is set; config-load gating
+    follows in the same fail-closed plan.  Fresh keepers still default to an
+    empty [allowed_paths] list, which under [Local] restricts writes to
+    [.masc/playground/<keeper_name>/].
 
     [requested] is the caller's raw string; an unparseable one is treated as absent,
     since the gate rejects those first. *)
@@ -90,7 +94,20 @@ val resolve_network_mode :
   fallback:network_mode option ->
   network_mode
 
+(** Reject the [Local] sandbox profile while the local playground is gated off
+    (fail-closed).  The hatch is [Env_config_sandbox.Gate]. *)
+val validate_sandbox_profile_allowed :
+  profile:sandbox_profile ->
+  (unit, string) result
+
 (** Validate allowed_paths without changing behavior by sandbox backend. *)
 val validate_sandbox_settings :
+  allowed_paths:string list ->
+  (unit, string) result
+
+(** [validate_sandbox_settings] with the profile gate
+    ([validate_sandbox_profile_allowed]) running first. *)
+val validate_sandbox_settings_with_profile :
+  sandbox_profile:sandbox_profile ->
   allowed_paths:string list ->
   (unit, string) result

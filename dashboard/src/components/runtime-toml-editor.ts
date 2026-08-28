@@ -278,13 +278,31 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   }
 
   async function handleAssignmentPatch(keeperName: string, runtimeId: string | null) {
-    if (saving || loadState === 'loading' || dirty) return
+    if (saving || loadState === 'loading' || dirty || !config) return
     setSaving(true)
     setError(null)
     setNotice(null)
     try {
-      const saved = await patchRuntimeAssignment(keeperName, runtimeId)
-      await adoptSavedRuntimeConfig(saved)
+      const environment = parseRuntimeTomlEnvironment(config.source_text)
+      const currentRuntimeId = environment.assignments[keeperName]
+      const expectedAssignmentRevision = {
+        state: 'runtime_config_present' as const,
+        source_revision: config.source_revision,
+        assignment: currentRuntimeId
+          ? { state: 'assigned' as const, runtime_id: currentRuntimeId }
+          : { state: 'missing' as const },
+      }
+      const saved = await patchRuntimeAssignment(
+        keeperName,
+        runtimeId,
+        expectedAssignmentRevision,
+      )
+      if ('assignment_revision' in saved) {
+        setNotice('runtime assignment unchanged')
+        await refresh()
+      } else {
+        await adoptSavedRuntimeConfig(saved)
+      }
     } catch (err: unknown) {
       setError(errorToString(err))
     } finally {

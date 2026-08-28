@@ -75,21 +75,6 @@ type agent_profile = {
   korean_name : string;
 }
 
-(** Extract the Keeper name from a MASC agent name.
-    "keeper-example-agent" -> "example", "claude-agent-abc" -> "claude-agent-abc"
-
-    [Keeper_identity] owns this parse. It enumerates the four accepted
-    spellings — keeper-/-agent, keeper_/_agent, and the two mixed forms — and
-    its own comment records what happens when a spelling is known in one place
-    and not another. This function used to hand-roll the first pair with
-    [String.sub s 7] and [String.sub s (len - 6) 6], so an agent named
-    keeper_example_agent kept its affixes and the profile lookup below searched
-    for a directory of that name. *)
-let extract_keeper_name (agent_name : string) : string =
-  match Keeper_identity.keeper_name_of_agent_alias agent_name with
-  | Some keeper_name -> keeper_name
-  | None -> agent_name
-
 (** Neo4j agent identity cache.  Loaded lazily on first lookup; once
     populated the Hashtbl is read-only.
 
@@ -163,7 +148,7 @@ let get_agent_profile (name : string) : agent_profile =
      A future change should either:
        (a) require live-backed surfaces and raise/warn when no data is found, or
        (b) populate from a guaranteed registry so no agent falls through. *)
-  let keeper_name = extract_keeper_name name in
+  let keeper_name = name in
   let neo4j_profile = lookup_neo4j_profile keeper_name in
   match neo4j_profile with
   | Some profile -> profile

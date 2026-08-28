@@ -10,7 +10,9 @@ type standard_field =
   | License
   | Compatibility
   | Metadata
-  | Allowed_tools
+  | Allowed_tools_syntax_only
+  (** Parser/diagnostic tag for the official experimental field. The decoded
+      value is deliberately discarded and grants no MASC runtime authority. *)
 
 type field =
   | Standard of standard_field
@@ -82,10 +84,6 @@ type t = private
   ; description : string
   ; license : string option
   ; compatibility : string option
-  ; allowed_tools : string option
-        (** YAML-decoded [allowed-tools] string. MASC preserves this
-            experimental field for observation without interpreting its tokens;
-            it does not grant tools or narrow the runtime tool surface. *)
   ; metadata : (string * string) list
         (** Unique, specification-conforming string metadata. Ambiguous
             duplicate keys and non-string values are excluded here. *)

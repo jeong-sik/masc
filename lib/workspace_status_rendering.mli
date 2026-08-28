@@ -17,18 +17,6 @@
     bool-flag) stay private — the rendered string is the
     operator contract; intermediate atoms are not. *)
 
-val active_task_assignee : Masc_domain.task_status -> string option
-(** [active_task_assignee status] returns the assignee for the
-    active states ([Claimed] / [InProgress] /
-    [AwaitingVerification]), and [None] for the terminal /
-    unclaimed states ([Todo] / [Done] / [Cancelled]).
-
-    Distinct from [task_assignee] (private): [task_assignee]
-    returns ["unclaimed"] for [Todo] and the [cancelled_by]
-    name for [Cancelled], which is fine for display but wrong
-    for set-membership filtering — this exposed function is
-    the canonical "who currently owns the task" predicate. *)
-
 val assigned_task_ids :
   matches_you:(string -> bool) ->
   Masc_domain.task list ->

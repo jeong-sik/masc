@@ -137,6 +137,21 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
             "masc_start failed while setting project scope: %s"
             (Mcp_server.workspace_switch_error_to_string error)))
   | Ok active_config ->
+    (* RFC-0393 D4: identity uniqueness is durable truth. An external agent
+       binding under a name that already names a Keeper would poison every
+       ledger attribution for that Keeper, so the join is refused at this
+       boundary. Keeper runtimes do not bind through masc_start. *)
+    if
+      List.mem
+        (String.trim agent_name)
+        (Keeper_meta_store.keeper_names active_config)
+    then
+      Some
+        (runtime_err_workflow ~tool_name ~start_time
+           (Printf.sprintf
+              "masc_start refused: %S already names a Keeper; join under a different agent name"
+              agent_name))
+    else
     (* Step 2: bind session (idempotent) *)
     let session_binding_result =
       try

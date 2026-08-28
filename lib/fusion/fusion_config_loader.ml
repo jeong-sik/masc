@@ -4,14 +4,7 @@
 (* base_path 기준 runtime.toml 절대경로. Config_dir_resolver SSOT 재사용
    (MASC_CONFIG_DIR override + <base_path>/.masc/config/ fallback 모두 honored). *)
 let runtime_toml_path ~base_path : string =
-  let inputs = Config_dir_resolver.inputs_from_env () in
-  let resolution =
-    Config_dir_resolver.resolve_with
-      { inputs with Config_dir_resolver.env_base_path = Some base_path }
-  in
-  Filename.concat
-    resolution.Config_dir_resolver.config_root.Config_dir_resolver.path
-    Config_dir_resolver.runtime_toml_filename
+  Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
 
 let load ~base_path : (Fusion_policy.t, string) result =
   let path = runtime_toml_path ~base_path in

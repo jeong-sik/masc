@@ -52,6 +52,17 @@ val footer_hints_fusion_detail : scroll:int -> max_scroll:int -> string
 (** The Fusion detail footer. Separate from {!footer_hints} because it appends
     the live scroll position, which the static per-surface table cannot know. *)
 
+val footer_hints_lanes_run_list : string
+(** The Lanes run-list footer: the drill-down under a standalone lane row. *)
+
+val footer_hints_lanes_run_detail : scroll:int -> max_scroll:int -> string
+(** The Lanes run-detail footer, with the live scroll position appended the
+    same way the Fusion detail footer does. *)
+
+val footer_hints_lane_notice : string
+(** The Lanes lane-notice footer. The pane is static, so it keeps only the
+    way back plus the shared tail. *)
+
 val help_sections :
   ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list
 (** Sections for the help sheet. [current] puts that surface's own section

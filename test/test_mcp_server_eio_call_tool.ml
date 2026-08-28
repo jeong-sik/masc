@@ -21,15 +21,10 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let make_keeper_meta ?agent_name ?current_task_id name =
-  let agent_name =
-    Option.value agent_name
-      ~default:(Masc.Keeper_identity.keeper_agent_name name)
-  in
+let make_keeper_meta ?current_task_id name =
   let fields =
     [
       ("name", `String name);
-      ("agent_name", `String agent_name);
       ("trace_id", `String ("trace-test-" ^ name));
     ]
     @
@@ -658,7 +653,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
         (Some ("trace-test-" ^ keeper_name))
         ctx.trace_id;
       check (option string) "agent_name"
-        (Some (Masc.Keeper_identity.keeper_agent_name keeper_name))
+        (Some keeper_name)
         ctx.agent_name;
       check (option string) "session_id"
         (Some "session-explicit")
@@ -783,7 +778,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (row |> U.member "task_id" |> U.to_string);
       let runtime_contract = row |> U.member "runtime_contract" in
       check string "runtime contract agent"
-        (Masc.Keeper_identity.keeper_agent_name keeper_name)
+        keeper_name
         (runtime_contract |> U.member "agent_name" |> U.to_string);
       check string "runtime contract sandbox profile"
         (row |> U.member "sandbox_profile" |> U.to_string)
@@ -842,7 +837,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (trajectory_json |> U.member "runtime_contract" |> U.member "keeper_name"
          |> U.to_string);
       check string "trajectory runtime agent"
-        (Masc.Keeper_identity.keeper_agent_name keeper_name)
+        keeper_name
         (trajectory_json |> U.member "runtime_contract" |> U.member "agent_name"
          |> U.to_string);
       check bool "trajectory runtime has runtime_profile field" true

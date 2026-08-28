@@ -57,7 +57,6 @@ let meta =
   let json =
     `Assoc
       [ ("name", `String "alpha")
-      ; ("agent_name", `String (Keeper_identity.keeper_agent_name "alpha"))
       ; ("trace_id", `String "trace-ask-alpha")
       ]
   in

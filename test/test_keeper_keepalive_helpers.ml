@@ -70,8 +70,33 @@ let make_in_progress_task ~id ~assignee : Types.task =
     skills = [];
   }
 
+(* Reconcile persists the recovered current_task_id through the per-Keeper
+   Owner, and the Owner inventory is installed once at boot — a fixture that
+   skips the install reproduces "Keeper owner inventory is not installed"
+   instead of the reconcile under test (issue #31192). Mirrors the
+   [install_from_store] fixtures in test_keeper_effective_meta_overlay /
+   test_heartbeat_integration. *)
+let with_owner_runtime config f =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let install () =
+    match
+      Keeper_owner_registry.install_from_store
+        ~sw
+        ~operation_runner:None
+        ~on_turn_slot_released:None
+        config
+    with
+    | Ok _ -> ()
+    | Error error ->
+      fail (Keeper_owner_registry.install_error_to_string error)
+  in
+  f ~install
+
 let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =
   with_temp_workspace (fun config ->
+    with_owner_runtime config @@ fun ~install ->
     let keeper_name = "heartbeat-current-task-owner" in
     let agent_name = keeper_name in
     let task_id = "task-heartbeat-current" in
@@ -79,6 +104,7 @@ let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =
     (match Keeper_meta_store.replace_snapshot config meta with
      | Ok () -> ()
      | Error err -> fail ("write_meta failed: " ^ err));
+    install ();
     Workspace.write_backlog config
       {
         Types.tasks = [ make_in_progress_task ~id:task_id ~assignee:agent_name ];

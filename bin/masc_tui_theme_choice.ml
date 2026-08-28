@@ -9,6 +9,7 @@ type entry =
   ; light : bool
   ; measured : int
   ; lifted : int
+  ; swatch : Palette.rgb list
   }
 
 (* What a status or role colour has to clear to be read as text. The same
@@ -43,6 +44,11 @@ let entries () =
           ; light = Catalog.light scheme
           ; measured = List.length measured_slots
           ; lifted = lifted_count palette
+          ; swatch =
+              (* The page first, then the colours masc reads meaning from, so
+                 a row shows the scheme the way the screen will. *)
+              Palette.background palette
+              :: List.filter_map (Palette.ansi palette) measured_slots
           })
     Catalog.bundled
 ;;

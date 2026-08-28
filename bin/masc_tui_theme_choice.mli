@@ -16,6 +16,10 @@ type entry =
             masc has to lift them. Zero means the scheme's author already
             cleared it everywhere masc looks -- the quiet answer, not the
             empty one. *)
+  ; swatch : Masc_tui_terminal_palette.rgb list
+        (** The colours a row can draw beside the name, in the order masc
+            reads meaning from them, plus the page they sit on. A name tells a
+            reader nothing about whether they will like it; these do. *)
   }
 
 val entries : unit -> entry list

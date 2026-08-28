@@ -287,9 +287,20 @@ let status_ansi_color = function
    does not, the same colour is lifted in lightness alone until it does, so a
    red stays a red. Where the terminal said nothing, the plain code goes out,
    which is what this drew before. *)
+(* Whether the lift runs at all. Held beside the palette rather than threaded
+   through every drawing call, for the same reason the palette is: the answer
+   is one reader's setting and every row wants it. *)
+let lift_enabled = ref true
+
+let set_lift_enabled value = lift_enabled := value
+let lift_is_enabled () = !lift_enabled
+
 let ansi_readable_for ~colors_enabled ~project palette color =
   let code = ansi_color_code color in
-  if not colors_enabled then code
+  (* Off means the scheme's own colour goes out untouched -- what every other
+     terminal UI does, and what a reader on a high-contrast scheme asked for
+     by picking one. *)
+  if (not colors_enabled) || not !lift_enabled then code
   else
     match palette with
     | None -> code

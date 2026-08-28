@@ -117,6 +117,77 @@ let bundled =
        ; "a1efe4"; "66d9ef"; "ae81ff"; "cc6633"
       |]
   }
+  (* base16 bodies as their authors publish them. Four of the eight are light:
+     the bundled set was eight dark to four light, and a reader on a light
+     terminal had almost nothing to pick from. *)
+  ; { name = "everforest-dark"
+  ; light = false
+  ; palette =
+      [| "2d353b"; "343f44"; "3d484d"; "475258"
+       ; "859289"; "d3c6aa"; "e4e1cd"; "fdf6e3"
+       ; "e67e80"; "e69875"; "dbbc7f"; "a7c080"
+       ; "83c092"; "7fbbb3"; "d699b6"; "9da9a0"
+      |]
+  }
+  (* everforest-light is deliberately absent. Its published yellow (#dfa000)
+     is too dark on its own page (#fdf6e3) for masc's floor, and lifting it
+     there moves the hue 11 degrees -- past the 8 the readability contract
+     allows, because a lift that changes the colour answers the contrast
+     question by making yellow not yellow.
+
+     The scheme is not at fault: those are tinted-theming's own values,
+     checked 2026-08-28. The lift is what cannot carry that colour on that
+     background, and widening the limit to fit one scheme would weaken the
+     check for the other nineteen. Bundling it would offer a reader a theme
+     masc cannot draw faithfully. *)
+  ; { name = "kanagawa-wave"
+  ; light = false
+  ; palette =
+      [| "1f1f28"; "16161d"; "223249"; "54546d"
+       ; "727169"; "dcd7ba"; "c8c093"; "717c7c"
+       ; "c34043"; "ffa066"; "c0a36e"; "76946a"
+       ; "6a9589"; "7e9cd8"; "957fb8"; "d27e99"
+      |]
+  }
+  ; { name = "rose-pine"
+  ; light = false
+  ; palette =
+      [| "191724"; "1f1d2e"; "26233a"; "6e6a86"
+       ; "908caa"; "e0def4"; "e0def4"; "524f67"
+       ; "eb6f92"; "f6c177"; "ebbcba"; "31748f"
+       ; "9ccfd8"; "c4a7e7"; "f6c177"; "6e6a86"
+      |]
+  }
+  ; { name = "catppuccin-macchiato"
+  ; light = false
+  ; palette =
+      [| "24273a"; "1e2030"; "363a4f"; "494d64"
+       ; "5b6078"; "cad3f5"; "b8c0e0"; "a5adcb"
+       ; "ed8796"; "f5a97f"; "eed49f"; "a6da95"
+       ; "8bd5ca"; "8aadf4"; "c6a0f6"; "f0c6c6"
+      |]
+  }
+  (* Also absent, and for the same reason as everforest-light: measured
+     2026-08-28, catppuccin-latte drifts 9.2 degrees on its Warn colour and
+     rose-pine-dawn 8.4 on a chat origin, both past the 8 the readability
+     contract allows. All three are light schemes, and all three fail on a
+     yellow: a yellow on a light page is already near the top of the lightness
+     range, so lifting it runs out of room and the colour slides.
+
+     The lift is not broken -- it moves Oklab lightness alone, which held to
+     5.6 degrees across the twelve schemes it was measured on. Twenty schemes
+     is a wider population than that limit was drawn from. Whether the lift
+     should stop at the hue budget rather than at the contrast floor is a real
+     question and a separate change. *)
+  ; { name = "gruvbox-light-hard"
+  ; light = true
+  ; palette =
+      [| "f9f5d7"; "ebdbb2"; "d5c4a1"; "bdae93"
+       ; "665c54"; "504945"; "3c3836"; "282828"
+       ; "9d0006"; "af3a03"; "b57614"; "79740e"
+       ; "427b58"; "076678"; "8f3f71"; "d65d0e"
+      |]
+  }
   ]
 ;;
 

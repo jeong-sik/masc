@@ -19,14 +19,16 @@ type current_selection =
 type tool_observation_outcome =
   | Succeeded
   | Failed
+  | Unknown
 
 type tool_observation =
   { tool_name : string
   ; outcome : tool_observation_outcome
   }
 (** Host-authored current-turn tool evidence. Tool payloads stay excluded from
-    the Librarian prompt; this says only which tool completed and whether its
-    typed execution outcome was success or failure. *)
+    the Librarian prompt; this says only which tool completed and its typed
+    execution outcome. [Unknown] remains explicit rather than being treated as
+    evidence of either success or failure. *)
 
 type input =
   { turn_ref : Ids.Turn_ref.t

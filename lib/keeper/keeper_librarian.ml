@@ -16,6 +16,7 @@ type current_selection =
 type tool_observation_outcome =
   | Succeeded
   | Failed
+  | Unknown
 
 type tool_observation =
   { tool_name : string
@@ -154,6 +155,7 @@ let format_keeper_instructions_for_prompt instructions =
 let tool_observation_outcome_to_string = function
   | Succeeded -> "succeeded"
   | Failed -> "failed"
+  | Unknown -> "unknown"
 ;;
 
 let format_tool_observations_for_prompt observations =

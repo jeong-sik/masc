@@ -252,7 +252,8 @@ let finalize
          ; outcome =
              (match detail.execution_outcome with
               | Tool_result.Ok -> Keeper_librarian.Succeeded
-              | Tool_result.Error -> Keeper_librarian.Failed)
+              | Tool_result.Error -> Keeper_librarian.Failed
+              | Tool_result.Unknown -> Keeper_librarian.Unknown)
          }
           : Keeper_librarian.tool_observation))
     in

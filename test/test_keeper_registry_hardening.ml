@@ -284,6 +284,35 @@ let test_wakeup_running_reports_typed_outcome () =
      fail "offline keeper did not return Deferred_not_running")
 ;;
 
+(* A turn failure derives phase [Failing] while the fiber stays alive. Only a
+   turn can set [turn_healthy] back, and only a wake starts a turn, so refusing
+   the wake here deadlocks the keeper permanently. Measured 2026-08-28: one
+   upstream 500 left a keeper refusing 181 wakes over 18 hours. *)
+let test_wakeup_reaches_failing_keeper () =
+  KR.For_testing.clear ();
+  let failing = register "failing" in
+  (match
+     KR.dispatch_event ~base_path "failing" (KSM.Turn_failed { consecutive = 1 })
+   with
+   | Ok _ -> ()
+   | Error _ -> fail "turn failure was not accepted");
+  (match KR.get ~base_path "failing" with
+   | Some entry ->
+     check string "turn failure derives failing" "failing" (KSM.phase_to_string entry.phase)
+   | None -> fail "failing keeper left the registry");
+  Atomic.set failing.fiber_wakeup false;
+  match KR.wakeup_running ~intent:KR.Hitl_resolution ~base_path "failing" with
+  | KR.Signaled ->
+    (match KR.get ~base_path "failing" with
+     | Some entry ->
+       check bool "failing keeper receives the wake" true (Atomic.get entry.fiber_wakeup)
+     | None -> fail "failing keeper left the registry")
+  | KR.Deferred_not_running phase ->
+    fail ("failing keeper refused the wake: " ^ KSM.phase_to_string phase)
+  | KR.Deferred_unregistered | KR.Deferred_lifecycle _ ->
+    fail "failing keeper did not return Signaled"
+;;
+
 let test_wakeup_running_exact_preserves_owner_lane () =
   KR.For_testing.clear ();
   let captured = register "exact-owner" in
@@ -840,6 +869,10 @@ let () =
             "reports signaled and deferred outcomes"
             `Quick
             test_wakeup_running_reports_typed_outcome
+        ; test_case
+            "a failing keeper still receives the wake"
+            `Quick
+            test_wakeup_reaches_failing_keeper
         ; test_case
             "exact wake signals only the captured owner lane"
             `Quick

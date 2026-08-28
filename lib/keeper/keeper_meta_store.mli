@@ -39,6 +39,13 @@ type current_meta_rejection =
           the accumulated counters and the persisted task binding.  The
           lossless fix is stripping retired fields or filling missing ones. *)
 
+val read_meta_file_path_read_only :
+  ownership_root:string ->
+  string ->
+  (Keeper_meta_contract.keeper_meta option, current_meta_rejection) result
+(** Strict no-follow snapshot read. It does not apply enumerated-field repair
+    or update failure-reporting state. *)
+
 (** Deploy-gate twin of [read_meta_file_path]: the same decode decision
     (exact decode, then the issue #28844 enumerated-field repair with a
     redecode), shared with the runtime read so the two cannot drift, minus
@@ -55,6 +62,14 @@ val validate_current_meta_file_result :
 (** List keeper names with persisted JSON in [.masc/keepers/].
     Sidecars filtered, names validated, sorted ascending. *)
 val persisted_keeper_names_result : Workspace.config -> (string list, string) result
+val persisted_keeper_names_read_only_result :
+  Workspace.config -> (string list, string) result
+(** Read-only persisted catalog inventory. A missing Keeper store is an empty
+    catalog and is not created. *)
+val retained_keeper_names_read_only_result :
+  Workspace.config -> (string list, string) result
+(** Union of persisted metadata owners and typed retained Keeper runtime
+    directories, read without creating or repairing state. *)
 val persisted_keeper_names : Workspace.config -> string list
 
 

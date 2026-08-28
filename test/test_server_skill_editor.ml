@@ -555,6 +555,63 @@ let test_delete_cancellation_immediately_after_move_is_typed () =
     Yojson.Safe.Util.(json |> member "cause" |> member "stage" |> to_string)
 ;;
 
+let test_delete_parent_cancellation_while_waiting_for_path_lock () =
+  with_workspace @@ fun base_path ->
+  let skill_path, original, reference, refresh = setup base_path ~access:"read-write" in
+  let refresh_called = ref false in
+  let observed_refresh () =
+    refresh_called := true;
+    refresh ()
+  in
+  let lock = Masc.Keeper_fs.acquire_path_lock skill_path in
+  Fun.protect
+    ~finally:(fun () -> Masc.Keeper_fs.release_path_lock skill_path lock)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let holder_entered, resolve_holder_entered = Eio.Promise.create () in
+       let release_holder, resolve_release_holder = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         Eio.Mutex.use_rw
+           ~protect:true
+           (Masc.Keeper_fs.path_lock_mutex lock)
+           (fun () ->
+              Eio.Promise.resolve resolve_holder_entered ();
+              Eio.Promise.await release_holder));
+       Eio.Promise.await holder_entered;
+       let cancellation_context, resolve_cancellation_context = Eio.Promise.create () in
+       let child_result, resolve_child_result = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           try
+             Eio.Cancel.sub (fun cancellation ->
+               Eio.Promise.resolve resolve_cancellation_context cancellation;
+               ignore
+                 (Editor.delete
+                    ~base_path
+                    ~reference
+                    ~confirmed:true
+                    ~refresh:observed_refresh));
+             `Returned
+           with
+           | Eio.Cancel.Cancelled _ -> `Cancelled
+         in
+         Eio.Promise.resolve resolve_child_result result);
+       let cancellation = Eio.Promise.await cancellation_context in
+       Eio.Cancel.cancel cancellation (Failure "cancel path-lock waiter");
+       Eio.Promise.resolve resolve_release_holder ();
+       (match Eio.Promise.await child_result with
+        | `Cancelled -> ()
+        | `Returned -> fail "path-lock cancellation was protected"));
+  check bool "cancelled waiter never refreshes" false !refresh_called;
+  check string "cancelled waiter leaves SKILL.md unchanged" original (read_file skill_path);
+  let source_root = Filename.dirname (Filename.dirname skill_path) in
+  check
+    (list string)
+    "cancelled waiter creates no recovery candidate"
+    [ "sample" ]
+    (Sys.readdir source_root |> Array.to_list |> List.sort String.compare)
+;;
+
 let test_delete_cancellation_after_verification_is_typed () =
   with_workspace @@ fun base_path ->
   let skill_path, original, reference, refresh = setup base_path ~access:"read-write" in
@@ -795,6 +852,8 @@ let () =
             test_delete_retains_open_fd_write_after_verification
         ; test_case "delete cancellation after move is typed" `Quick
             test_delete_cancellation_immediately_after_move_is_typed
+        ; test_case "delete parent cancellation while waiting for path lock" `Quick
+            test_delete_parent_cancellation_while_waiting_for_path_lock
         ; test_case "delete cancellation after verification is typed" `Quick
             test_delete_cancellation_after_verification_is_typed
         ; test_case "delete cancellation after quarantine is typed" `Quick

@@ -1741,14 +1741,15 @@ let add_routes ~sw ~clock router =
                        observation
                      |> Result.map_error Server_skill_snapshot_runtime.error_to_string
                  in
+                 let result =
+                   Server_skill_editor.delete
+                     ~base_path
+                     ~reference
+                     ~confirmed:(Option.value confirmed ~default:false)
+                     ~refresh
+                 in
                  Eio.Cancel.protect (fun () ->
-                 match
-                    Server_skill_editor.delete
-                      ~base_path
-                      ~reference
-                      ~confirmed:(Option.value confirmed ~default:false)
-                      ~refresh
-                  with
+                  match result with
                   | Error error ->
                     audit_skill_delete state agent_name ~reference
                       ~status:(Server_skill_editor.error_code error)

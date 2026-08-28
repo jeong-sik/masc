@@ -119,6 +119,7 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
          undeclared turn bound therefore falls back to the probe ceiling rather
          than to no ceiling. *)
       timeout_s = Some (Float.min max_probe_timeout_s config.timeout_s)
+      ; wall_clock_ceiling_s = None
     }
   in
   match
@@ -172,6 +173,7 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
          undeclared turn bound therefore falls back to the probe ceiling rather
          than to no ceiling. *)
       timeout_s = Some (Float.min max_probe_timeout_s config.timeout_s)
+      ; wall_clock_ceiling_s = None
     }
   in
   match

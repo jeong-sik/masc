@@ -33,6 +33,11 @@ type config =
         [None]. *)
     (** Maximum silence between valid stream-json messages. It is not a total
         turn-duration bound. *)
+  ; wall_clock_ceiling_s : float option
+    (** Whole-turn wall-clock ceiling measured from spawn ([None] selects the
+        shared hours-scale default). The idle timeout above resets on every
+        emitted line, so this is the only bound a turn of continuous thin
+        progress cannot outlive (#31242). *)
   }
 
 val default_config : cwd:string -> model:string -> config

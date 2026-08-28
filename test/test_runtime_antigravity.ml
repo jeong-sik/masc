@@ -156,6 +156,7 @@ let run_fixture
     ?(timeout_s = 2.0)
     ?admission_timeout_s
     ?(no_turn_deadline = false)
+    ?wall_clock_ceiling_s
     ?(prompt = "Return the fixture marker")
     path
   =
@@ -165,6 +166,7 @@ let run_fixture
         cli_path = path
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
+      ; wall_clock_ceiling_s
       }
     in
     Runtime_antigravity.run_turn
@@ -693,6 +695,45 @@ let test_stream_idle_timeout_is_typed () =
        | Ok _ -> fail "silent Antigravity stream ignored its idle timeout")
 ;;
 
+let test_wall_clock_ceiling_ends_a_dripping_turn () =
+  (* Lines arrive inside every idle window (0.2s apart < 2.0s), so the idle
+     timeout never fires; only the whole-turn ceiling can end this turn. *)
+  with_fixture
+    ~line_delay_s:0.2
+    [ init ()
+    ; step (); step (); step (); step (); step (); step ()
+    ; step (); step (); step (); step (); step (); step ()
+    ]
+    (fun path ->
+       match run_fixture ~timeout_s:2.0 ~wall_clock_ceiling_s:0.7 path with
+       | Error (Runtime_antigravity.Timeout seconds) ->
+         check bool
+           "ceiling bounds the reported timeout"
+           true
+           (seconds > 0.0 && seconds <= 0.7)
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a dripping stream outlived the wall-clock ceiling")
+;;
+
+let test_wall_clock_ceiling_bounds_a_turn_without_idle_deadline () =
+  (* [no_turn_deadline] leaves the idle timeout at [None]; the ceiling is
+     still a deadline, so a silently held stdout cannot outlive it. *)
+  with_fixture
+    ~stdout_holder_s:5.0
+    [ init () ]
+    (fun path ->
+       match
+         run_fixture ~no_turn_deadline:true ~wall_clock_ceiling_s:0.3 path
+       with
+       | Error (Runtime_antigravity.Timeout seconds) ->
+         check bool
+           "ceiling bounds the reported timeout"
+           true
+           (seconds > 0.0 && seconds <= 0.3)
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "an unbounded silent turn outlived the wall-clock ceiling")
+;;
+
 let test_no_deadline_keeps_init_bounded () =
   with_fixture
     ~sleep_s:0.2
@@ -910,6 +951,14 @@ let () =
             "stream idle timeout is typed"
             `Quick
             test_stream_idle_timeout_is_typed
+        ; test_case
+            "wall-clock ceiling ends a dripping turn"
+            `Quick
+            test_wall_clock_ceiling_ends_a_dripping_turn
+        ; test_case
+            "wall-clock ceiling bounds a turn without idle deadline"
+            `Quick
+            test_wall_clock_ceiling_bounds_a_turn_without_idle_deadline
         ; test_case
             "no deadline keeps init bounded"
             `Quick

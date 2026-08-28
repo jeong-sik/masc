@@ -143,14 +143,99 @@ let test_current_json_exposes_runtime_binary_identity () =
     current.runtime_instance_id
     (json |> member "runtime_instance_id" |> to_string)
 
-let executable_provenance_json ?(extra = []) ~commit ~fingerprint ~sha256 () =
+let fixture_dashboard_tree_sha256 () =
+  let digest = String.make 64 'd' in
+  Printf.sprintf {|[{"path":"index.html","sha256":"%s","size":9}]|} digest
+  |> fun value -> Digestif.SHA256.(digest_string value |> to_hex)
+;;
+
+let executable_provenance_json
+      ?(extra = [])
+      ?source_root
+      ?dashboard_snapshot_root
+      ?(executable_inode = 2)
+      ~commit
+      ~fingerprint
+      ~sha256
+      ()
+  =
+  let source_root =
+    Option.value ~default:(Sys.getcwd ()) source_root |> Unix.realpath
+  in
+  let source_root_stat = Unix.stat source_root in
+  let dashboard_snapshot_root =
+    Option.value ~default:source_root dashboard_snapshot_root |> Unix.realpath
+  in
+  let dashboard_snapshot_stat = Unix.stat dashboard_snapshot_root in
+  let dashboard_asset_sha256 = String.make 64 'd' in
+  let dashboard_tree_sha256 = fixture_dashboard_tree_sha256 () in
+  let dashboard_assets =
+    let build_receipt =
+      `Assoc
+        [ "schema", `String "masc.run-local-dashboard-build.v1"
+        ; "producer", `String "scripts/build-dashboard-if-needed.sh --prepare-exact + --build-exact"
+        ; "source_root", `String source_root
+        ; "source_root_device", `Int source_root_stat.st_dev
+        ; "source_root_inode", `Int source_root_stat.st_ino
+        ; "source_commit", `String commit
+        ; "head_tree", `String (String.make 40 'f')
+        ; "index_tree", `String (String.make 40 'e')
+        ; "input_sha256", `String (String.make 64 'a')
+        ; "input_file_count", `Int 12
+        ; "input_matches_head", `Bool true
+        ; "lock_sha256", `String (String.make 64 'b')
+        ; "build_mode", `String "production"
+        ; "environment_path", `String "/verified"
+        ; "environment_path_identity_sha256", `String (String.make 64 '4')
+        ; "environment_path_executable_sha256", `String (String.make 64 '5')
+        ; "environment_path_executable_count", `Int 73
+        ; "environment_profile_sha256", `String (String.make 64 'c')
+        ; "node_executable", `String "/verified/node"
+        ; "node_executable_sha256", `String (String.make 64 '1')
+        ; "node_version", `String "v24.0.0"
+        ; "node_platform", `String "darwin"
+        ; "node_arch", `String "arm64"
+        ; "package_manager_kind", `String "pnpm"
+        ; "package_manager_executable", `String "/verified/pnpm"
+        ; "package_manager_executable_sha256", `String (String.make 64 '2')
+        ; "pnpm_version", `String "10.0.0"
+        ; "vite_version", `String "7.0.0"
+        ; "installed_graph_metadata_sha256", `String (String.make 64 '3')
+        ; "installed_graph_metadata_count", `Int 42
+        ; "output_tree_sha256", `String dashboard_tree_sha256
+        ; "output_file_count", `Int 1
+        ]
+    in
+    `Assoc
+      [ "state", `String "available"
+      ; "schema", `String "masc.run-local-dashboard-assets.v1"
+      ; "source_root", `String (Filename.concat source_root "assets/dashboard")
+      ; "snapshot_root", `String dashboard_snapshot_root
+      ; "snapshot_device", `Int dashboard_snapshot_stat.st_dev
+      ; "snapshot_inode", `Int dashboard_snapshot_stat.st_ino
+      ; "tree_sha256", `String dashboard_tree_sha256
+      ; "file_count", `Int 1
+      ; "build_receipt", build_receipt
+      ; ( "files"
+        , `List
+            [ `Assoc
+                [ "path", `String "index.html"
+                ; "size", `Int 9
+                ; "sha256", `String dashboard_asset_sha256
+                ] ] )
+      ]
+  in
   `Assoc
-    ([ "schema", `String "masc.run-local-executable-identity.v1"
+    ([ "schema", `String "masc.run-local-executable-identity.v2"
      ; "binary_commit", `String commit
      ; "build_input_fingerprint", `String fingerprint
+     ; "source_root", `String source_root
+     ; "source_root_device", `Int source_root_stat.st_dev
+     ; "source_root_inode", `Int source_root_stat.st_ino
+     ; "dashboard_assets", dashboard_assets
      ; "executable_sha256", `String sha256
      ; "executable_device", `Int 1
-     ; "executable_inode", `Int 2
+     ; "executable_inode", `Int executable_inode
      ]
      @ extra)
   |> Yojson.Safe.to_string
@@ -162,8 +247,53 @@ let test_executable_provenance_requires_exact_identity () =
   let sha256 = String.make 64 'c' in
   let raw = executable_provenance_json ~commit ~fingerprint ~sha256 () in
   let expected : Build_identity.executable_provenance =
+    let source_root = Unix.realpath (Sys.getcwd ()) in
+    let source_root_stat = Unix.stat source_root in
+    let dashboard_assets : Build_identity.dashboard_assets_provenance =
+      { source_root = Filename.concat source_root "assets/dashboard"
+      ; snapshot_root = source_root
+      ; snapshot_device = source_root_stat.st_dev
+      ; snapshot_inode = source_root_stat.st_ino
+      ; tree_sha256 = fixture_dashboard_tree_sha256 ()
+      ; build_source_commit = commit
+      ; build_head_tree = String.make 40 'f'
+      ; build_index_tree = String.make 40 'e'
+      ; build_input_sha256 = String.make 64 'a'
+      ; build_input_file_count = 12
+      ; build_input_matches_head = true
+      ; build_lock_sha256 = String.make 64 'b'
+      ; build_mode = "production"
+      ; build_environment_path = "/verified"
+      ; build_environment_path_identity_sha256 = String.make 64 '4'
+      ; build_environment_path_executable_sha256 = String.make 64 '5'
+      ; build_environment_path_executable_count = 73
+      ; build_environment_profile_sha256 = String.make 64 'c'
+      ; build_producer = "scripts/build-dashboard-if-needed.sh --prepare-exact + --build-exact"
+      ; build_node_executable = "/verified/node"
+      ; build_node_executable_sha256 = String.make 64 '1'
+      ; build_node_version = "v24.0.0"
+      ; build_node_platform = "darwin"
+      ; build_node_arch = "arm64"
+      ; build_package_manager_kind = "pnpm"
+      ; build_package_manager_executable = "/verified/pnpm"
+      ; build_package_manager_executable_sha256 = String.make 64 '2'
+      ; build_pnpm_version = "10.0.0"
+      ; build_vite_version = "7.0.0"
+      ; build_installed_graph_metadata_sha256 = String.make 64 '3'
+      ; build_installed_graph_metadata_count = 42
+      ; files =
+          [ { Build_identity.relative_path = "index.html"
+            ; size = 9
+            ; sha256 = String.make 64 'd'
+            } ]
+      }
+    in
     { binary_commit = commit
     ; build_input_fingerprint = fingerprint
+    ; source_root
+    ; source_root_device = source_root_stat.st_dev
+    ; source_root_inode = source_root_stat.st_ino
+    ; dashboard_assets = Some dashboard_assets
     ; executable_sha256 = sha256
     ; executable_device = 1
     ; executable_inode = 2
@@ -201,6 +331,11 @@ let test_executable_provenance_rejects_mismatches () =
     | Error actual -> Alcotest.(check string) label expected actual
     | Ok _ -> Alcotest.fail (label ^ ": malformed sidecar was accepted")
   in
+  let map_top_fields transform raw =
+    match Yojson.Safe.from_string raw with
+    | `Assoc fields -> `Assoc (transform fields) |> Yojson.Safe.to_string
+    | _ -> Alcotest.fail "fixture provenance is not an object"
+  in
   check_error
     "digest mismatch"
     "executable provenance executable digest differs"
@@ -216,15 +351,12 @@ let test_executable_provenance_rejects_mismatches () =
   check_error
     "replacement inode"
     "executable provenance executable inode differs"
-    (`Assoc
-       [ "schema", `String "masc.run-local-executable-identity.v1"
-       ; "binary_commit", `String commit
-       ; "build_input_fingerprint", `String fingerprint
-       ; "executable_sha256", `String sha256
-       ; "executable_device", `Int 1
-       ; "executable_inode", `Int 3
-       ]
-     |> Yojson.Safe.to_string);
+    (executable_provenance_json
+       ~commit
+       ~fingerprint
+       ~sha256
+       ~executable_inode:3
+       ());
   check_error
     "unknown fields"
     "executable provenance has unsupported fields"
@@ -233,21 +365,53 @@ let test_executable_provenance_rejects_mismatches () =
        ~commit
        ~fingerprint
        ~sha256
-       ())
+       ());
+  let exact = executable_provenance_json ~commit ~fingerprint ~sha256 () in
+  check_error
+    "same-count unknown field"
+    "executable provenance has unsupported fields"
+    (map_top_fields
+       (List.map (fun (name, value) ->
+          if String.equal name "source_root_inode" then "unexpected", value else name, value))
+       exact);
+  check_error
+    "missing field"
+    "executable provenance has unsupported fields"
+    (map_top_fields
+       (List.filter (fun (name, _) -> not (String.equal name "source_root_inode")))
+       exact);
+  check_error
+    "duplicate field"
+    "executable provenance has unsupported fields"
+    (map_top_fields
+       (fun fields -> ("binary_commit", `String commit) :: fields)
+       exact)
 ;;
 
 let test_executable_provenance_binding_rejects_replacement_and_forgery () =
   let path = Filename.temp_file "build-provenance" ".json" in
+  let snapshot_root = Filename.temp_file "dashboard-blobs" "" in
+  Sys.remove snapshot_root;
+  Unix.mkdir snapshot_root 0o700;
   let commit = String.make 40 'a' in
   let sha256 = String.make 64 'c' in
-  let raw = executable_provenance_json ~commit ~fingerprint:(String.make 64 'b') ~sha256 () in
+  let raw =
+    executable_provenance_json
+      ~dashboard_snapshot_root:snapshot_root
+      ~commit
+      ~fingerprint:(String.make 64 'b')
+      ~sha256
+      ()
+  in
   let write value =
     if Sys.file_exists path then Unix.chmod path 0o600;
     Out_channel.with_open_bin path (fun channel -> output_string channel value);
     Unix.chmod path 0o400
   in
   Fun.protect
-    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    ~finally:(fun () ->
+      if Sys.file_exists path then Sys.remove path;
+      if Sys.file_exists snapshot_root then Unix.rmdir snapshot_root)
     (fun () ->
       write raw;
       let sidecar = Unix.lstat path in
@@ -269,6 +433,117 @@ let test_executable_provenance_binding_rejects_replacement_and_forgery () =
       Alcotest.(check bool) "same-byte replacement rejected" true (Result.is_error (validate ()));
       write (raw ^ " ");
       Alcotest.(check bool) "forged bytes rejected" true (Result.is_error (validate ())))
+;;
+
+let test_executable_provenance_binding_rejects_source_root_replacement () =
+  let source_root = Filename.temp_file "build-source-root" "" in
+  Sys.remove source_root;
+  Unix.mkdir source_root 0o755;
+  let displaced_root = source_root ^ ".displaced" in
+  let snapshot_root = Filename.temp_file "dashboard-blobs" "" in
+  Sys.remove snapshot_root;
+  Unix.mkdir snapshot_root 0o700;
+  let sidecar_path = Filename.temp_file "build-provenance" ".json" in
+  let commit = String.make 40 'a' in
+  let sha256 = String.make 64 'c' in
+  let raw =
+    executable_provenance_json
+      ~source_root
+      ~dashboard_snapshot_root:snapshot_root
+      ~commit
+      ~fingerprint:(String.make 64 'b')
+      ~sha256
+      ()
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists sidecar_path then Sys.remove sidecar_path;
+      if Sys.file_exists source_root then Unix.rmdir source_root;
+      if Sys.file_exists displaced_root then Unix.rmdir displaced_root;
+      if Sys.file_exists snapshot_root then Unix.rmdir snapshot_root)
+    (fun () ->
+      Out_channel.with_open_bin sidecar_path (fun channel -> output_string channel raw);
+      Unix.chmod sidecar_path 0o400;
+      let sidecar = Unix.lstat sidecar_path in
+      let digest = Digestif.SHA256.(digest_string raw |> to_hex) in
+      let validate () =
+        Build_identity.For_testing.validate_executable_provenance_binding
+          ~path:sidecar_path
+          ~expected_sidecar_sha256:digest
+          ~expected_sidecar_device:sidecar.st_dev
+          ~expected_sidecar_inode:sidecar.st_ino
+          ~expected_binary_commit:commit
+          ~expected_executable_sha256:sha256
+          ~expected_executable_device:1
+          ~expected_executable_inode:2
+      in
+      Alcotest.(check bool) "original source root accepted" true (Result.is_ok (validate ()));
+      Unix.rename source_root displaced_root;
+      Unix.mkdir source_root 0o755;
+      Alcotest.(check bool)
+        "replacement source root inode rejected"
+        true
+      (Result.is_error (validate ())))
+;;
+
+let test_dashboard_resolution_is_bound_and_fails_closed_after_replacement () =
+  let source_root = Filename.temp_file "dashboard-source" "" in
+  Sys.remove source_root;
+  Unix.mkdir source_root 0o755;
+  let displaced_root = source_root ^ ".displaced" in
+  let snapshot_root = Filename.temp_file "dashboard-blobs" "" in
+  Sys.remove snapshot_root;
+  Unix.mkdir snapshot_root 0o700;
+  let blob_name = String.make 64 'd' in
+  let blob_path = Filename.concat snapshot_root blob_name in
+  Out_channel.with_open_bin blob_path (fun channel -> output_string channel "manifest!");
+  Unix.chmod blob_path 0o600;
+  let commit = String.make 40 'a' in
+  let sha256 = String.make 64 'c' in
+  let raw =
+    executable_provenance_json
+      ~source_root
+      ~dashboard_snapshot_root:snapshot_root
+      ~commit
+      ~fingerprint:(String.make 64 'b')
+      ~sha256
+      ()
+  in
+  let provenance =
+    Build_identity.parse_executable_provenance
+      ~expected_binary_commit:commit
+      ~expected_executable_sha256:sha256
+      ~expected_executable_device:1
+      ~expected_executable_inode:2
+      raw
+    |> Result.get_ok
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists blob_path then Sys.remove blob_path;
+      if Sys.file_exists snapshot_root then Unix.rmdir snapshot_root;
+      if Sys.file_exists source_root then Unix.rmdir source_root;
+      if Sys.file_exists displaced_root then Unix.rmdir displaced_root)
+    (fun () ->
+      (match Build_identity.For_testing.resolve_dashboard_asset provenance "index.html" with
+       | Build_identity.Dashboard_asset_bound { path; expected_size; _ } ->
+         Alcotest.(check string) "bound blob path" (Unix.realpath blob_path) path;
+         Alcotest.(check int) "bound size" 9 expected_size
+       | _ -> Alcotest.fail "manifested index did not resolve to bound CAS bytes");
+      (match Build_identity.For_testing.resolve_dashboard_asset provenance "assets/missing.js" with
+       | Build_identity.Dashboard_asset_not_manifested -> ()
+       | _ -> Alcotest.fail "unmanifested asset did not fail closed");
+      let unavailable = { provenance with dashboard_assets = None } in
+      (match Build_identity.For_testing.resolve_dashboard_asset unavailable "index.html" with
+       | Build_identity.Dashboard_assets_unavailable -> ()
+       | _ -> Alcotest.fail "receipt-less bound launch did not stay unavailable");
+      Unix.rename source_root displaced_root;
+      Unix.mkdir source_root 0o755;
+      (match Build_identity.For_testing.resolve_dashboard_asset provenance "index.html" with
+       | Build_identity.Dashboard_assets_invalid
+           (Build_identity.Dashboard_source_root_invalid
+              Build_identity.Source_root_inode_differs) -> ()
+       | _ -> Alcotest.fail "source-root replacement did not invalidate bound assets"))
 ;;
 
 let test_pick_repo_candidates_exe_first_when_distinct () =
@@ -422,6 +697,10 @@ let () =
             test_executable_provenance_rejects_mismatches;
           Alcotest.test_case "executable provenance rejects replacement and forgery" `Quick
             test_executable_provenance_binding_rejects_replacement_and_forgery;
+          Alcotest.test_case "executable provenance rejects source root replacement" `Quick
+            test_executable_provenance_binding_rejects_source_root_replacement;
+          Alcotest.test_case "dashboard resolution fails closed after replacement" `Quick
+            test_dashboard_resolution_is_bound_and_fails_closed_after_replacement;
           Alcotest.test_case "runtime cwd snapshot is resolver backed" `Quick
             test_runtime_cwd_is_resolver_backed_snapshot;
           Alcotest.test_case "current JSON exposes runtime binary identity" `Quick

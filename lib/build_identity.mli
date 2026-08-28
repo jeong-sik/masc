@@ -39,8 +39,9 @@ type t = {
   binary_commit_age_seconds : int option;
   repo_head_commit : string option;
     (** Current checkout HEAD probed at runtime from [repo_root], when
-        available.  Useful operational context, but not proof that the
-        executable was built from this commit. *)
+        available. A run-local provenance binding projects its launch-time
+        source HEAD so this field and [repo_root] share one authority. Useful
+        operational context, but not proof without the provenance fields. *)
   repo_head_commit_source : string option;
   repo_head_commit_unix_ts : float option;
   repo_head_commit_age_seconds : int option;
@@ -84,10 +85,121 @@ val current : unit -> t
 type executable_provenance = {
   binary_commit : string;
   build_input_fingerprint : string;
+  source_root : string;
+  source_root_device : int;
+  source_root_inode : int;
+  dashboard_assets : dashboard_assets_provenance option;
   executable_sha256 : string;
   executable_device : int;
   executable_inode : int;
 }
+
+and dashboard_asset_entry = {
+  relative_path : string;
+  size : int;
+  sha256 : string;
+}
+
+and dashboard_assets_provenance = {
+  source_root : string;
+  snapshot_root : string;
+  snapshot_device : int;
+  snapshot_inode : int;
+  tree_sha256 : string;
+  build_source_commit : string;
+  build_head_tree : string;
+  build_index_tree : string;
+  build_input_sha256 : string;
+  build_input_file_count : int;
+  build_input_matches_head : bool;
+  build_lock_sha256 : string;
+  build_mode : string;
+  build_environment_path : string;
+  build_environment_path_identity_sha256 : string;
+  build_environment_path_executable_sha256 : string;
+  build_environment_path_executable_count : int;
+  build_environment_profile_sha256 : string;
+  build_producer : string;
+  build_node_executable : string;
+  build_node_executable_sha256 : string;
+  build_node_version : string;
+  build_node_platform : string;
+  build_node_arch : string;
+  build_package_manager_kind : string;
+  build_package_manager_executable : string;
+  build_package_manager_executable_sha256 : string;
+  build_pnpm_version : string;
+  build_vite_version : string;
+  build_installed_graph_metadata_sha256 : string;
+  build_installed_graph_metadata_count : int;
+  files : dashboard_asset_entry list;
+}
+
+type source_root_invalid_reason =
+  | Source_root_unreadable
+  | Source_root_not_canonical
+  | Source_root_not_directory
+  | Source_root_owner_differs
+  | Source_root_device_differs
+  | Source_root_inode_differs
+
+type launch_source_root_state =
+  | Unbound
+  | Bound_valid of string
+  | Bound_invalid of source_root_invalid_reason
+
+type dashboard_asset_invalid_reason =
+  | Dashboard_source_root_invalid of source_root_invalid_reason
+  | Dashboard_snapshot_unreadable
+  | Dashboard_snapshot_not_canonical
+  | Dashboard_snapshot_metadata_differs
+  | Dashboard_asset_metadata_differs
+
+type dashboard_asset_resolution =
+  | Dashboard_assets_unbound
+  | Dashboard_assets_invalid of dashboard_asset_invalid_reason
+  | Dashboard_assets_unavailable
+  | Dashboard_asset_not_manifested
+  | Dashboard_asset_bound of {
+      path : string;
+      launch_source_root : string;
+      launch_source_device : int;
+      launch_source_inode : int;
+      expected_size : int;
+      expected_sha256 : string;
+      tree_sha256 : string;
+      snapshot_root : string;
+      snapshot_device : int;
+      snapshot_inode : int;
+      file_count : int;
+      build_source_commit : string;
+      build_head_tree : string;
+      build_index_tree : string;
+      build_input_sha256 : string;
+      build_input_file_count : int;
+      build_input_matches_head : bool;
+      build_lock_sha256 : string;
+      build_mode : string;
+      build_environment_path : string;
+      build_environment_path_identity_sha256 : string;
+      build_environment_path_executable_sha256 : string;
+      build_environment_path_executable_count : int;
+      build_environment_profile_sha256 : string;
+      build_producer : string;
+      build_node_executable : string;
+      build_node_executable_sha256 : string;
+      build_node_version : string;
+      build_node_platform : string;
+      build_node_arch : string;
+      build_package_manager_kind : string;
+      build_package_manager_executable : string;
+      build_package_manager_executable_sha256 : string;
+      build_pnpm_version : string;
+      build_vite_version : string;
+      build_installed_graph_metadata_sha256 : string;
+      build_installed_graph_metadata_count : int;
+    }
+
 
 val parse_executable_provenance :
   expected_binary_commit:string ->
@@ -97,19 +209,38 @@ val parse_executable_provenance :
   string ->
   (executable_provenance, string) result
 (** Decode the exact sidecar bound to a content-addressed local executable.
-    The sidecar is accepted only when its commit, executable digest, device,
-    and inode match the independently observed values. *)
+    The sidecar is accepted only when its commit, source-root identity,
+    executable digest, device, and inode match the independently observed
+    values. *)
 
 val bind_executable_provenance :
   path:string -> sha256:string -> device:int -> inode:int -> (unit, string) result
 (** Bind a content-addressed provenance sidecar to this process exactly once.
-    The supplied digest, embedded commit, and running executable bytes are all
-    validated before the immutable value becomes visible through [current]. *)
+    The supplied digest, embedded commit, source-root device/inode, and running
+    executable bytes are validated before the immutable value becomes visible
+    through [current]. *)
 
 val repo_root : unit -> string option
-(** Git root used for the running server binary, preferring the executable
-    directory over the process cwd.  This is separate from the MASC base path,
-    which may intentionally point at a different workspace such as [~/me]. *)
+(** Exact source root from the immutable run-local provenance binding when
+    present. General launches fall back to probing the executable directory,
+    then the process cwd. This is separate from the MASC base path. *)
+
+val launch_source_root_state : unit -> launch_source_root_state
+(** Revalidate the bound source pathname/device/inode on every observation.
+    [Bound_invalid] never authorizes a fallback to cwd, environment, or another
+    checkout. *)
+
+val resolve_dashboard_asset : string -> dashboard_asset_resolution
+(** Resolve one dashboard-relative path against the immutable content-addressed
+    launch snapshot. General launches return [Dashboard_assets_unbound]. Bound
+    launches fail closed on source/snapshot replacement and return the exact
+    expected byte identity for manifested files. *)
+
+val dashboard_manifest_identity : unit -> dashboard_assets_provenance option
+(** Frozen launch manifest identity without current-path validity inference.
+    This remains inspectable after source/snapshot replacement; callers must
+    pair it with [resolve_dashboard_asset] for current serving validity. *)
+
 
 val resolve_commit :
   embedded:string option ->
@@ -165,4 +296,6 @@ module For_testing : sig
   val observe_probe_failure : site:string -> exn -> unit
   val probe_commit_unix_ts : string option -> float option
   val runtime_cwd : unit -> string
+  val resolve_dashboard_asset :
+    executable_provenance -> string -> dashboard_asset_resolution
 end

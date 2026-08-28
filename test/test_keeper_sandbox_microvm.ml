@@ -346,7 +346,7 @@ let test_live_turn_runtime_cat () =
     Fun.protect
       ~finally:(fun () ->
         match
-          Masc.Keeper_turn_sandbox_runtime.teardown_keeper_vm ~config ~meta ()
+          Masc.Keeper_turn_sandbox_runtime.teardown_keeper_sandbox ~config ~meta ()
         with
         | Ok () -> ()
         | Error message -> Alcotest.failf "teardown failed: %s" message)
@@ -378,7 +378,7 @@ let test_live_turn_runtime_cat () =
              booted_in);
     (* After teardown the stable name must be gone. *)
     (match
-       Masc.Keeper_turn_sandbox_runtime.teardown_keeper_vm ~config ~meta ()
+       Masc.Keeper_turn_sandbox_runtime.teardown_keeper_sandbox ~config ~meta ()
      with
      | Ok () -> ()
      | Error message ->

@@ -47,6 +47,12 @@ val sandbox_ttl_sec_label_key : string
 val sandbox_turn_id_label_key : string
 
 val turn_container_kind : string
+(** Value of the [masc.mcp.kind] label on a one-turn container. *)
+
+val persistent_container_kind : string
+(** Value of the [masc.mcp.kind] label on a keeper-lifetime container:
+    adopted across turns and server restarts, removed only when the keeper
+    is. *)
 
 val current_owner_pid : unit -> int
 (** The pid written as [masc.mcp.owner_pid] and the one a filter must supply to

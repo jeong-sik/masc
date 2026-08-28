@@ -786,21 +786,20 @@ let complete_cleanup
         with
         | Error detail -> block ~config operation Registry_unregister detail
         | Ok registry_unregistered ->
-          (* The microvm lane keeps one guest per keeper across turns, so turn
-             teardown deliberately leaves it running; this is the only place
-             that knows the keeper is gone for good. Without it a removed
-             keeper left ~400 MB of guest behind for somebody to notice by
-             hand.
+          (* Both sandbox lanes keep one container per keeper across turns,
+             so turn teardown deliberately leaves it running; this is the
+             only place that knows the keeper is gone for good. Without it a
+             removed keeper left ~400 MB of guest (or a persistent Docker
+             container) behind for somebody to notice by hand.
 
              After the unregister, not before: a failed unregister leaves the
              keeper registered, and a keeper that is still registered must
-             keep its guest. A teardown failure is logged rather than
+             keep its sandbox. A teardown failure is logged rather than
              blocking -- the keeper is already gone from the registry, and
              refusing to finish would leave the shutdown half-applied over a
-             guest that can be removed by hand. Docker keepers have no guest
-             under this name, so the call is a no-op for them. *)
+             container that can be removed by hand. *)
           (match
-             Keeper_turn_sandbox_runtime.teardown_keeper_vm_by_name
+             Keeper_turn_sandbox_runtime.teardown_keeper_sandbox_by_name
                ~config
                ~keeper_name:operation.keeper_name
                ()
@@ -809,7 +808,7 @@ let complete_cleanup
            | Error detail ->
              Log.Keeper.warn
                ~keeper_name:operation.keeper_name
-               "keeper removed but its microvm guest was not: %s"
+               "keeper removed but its sandbox container was not: %s"
                detail);
           finish registry_unregistered))
 ;;

@@ -1,8 +1,10 @@
-(** Turn-scoped keeper Docker sandbox runtime.
+(** Turn-scoped handle on a keeper-lifetime sandbox container.
 
-    Lazily starts one hardened container for a keeper turn and reuses it across
-    compatible tool calls. The runtime keeps the keeper playground mounted
-    read-write while the root filesystem stays read-only. *)
+    Lazily ensures one hardened container per keeper (adopting what a previous
+    turn or server left running) and reuses it across compatible tool calls.
+    The runtime keeps the keeper playground mounted read-write while the root
+    filesystem stays read-only. Turn cleanup drops the handle without removing
+    the container; the keeper's shutdown finalization removes it. *)
 
 type t
 
@@ -23,10 +25,12 @@ val host_root : t -> string
 val prepare_github_identity_secret_files :
   ?timeout_sec:float -> t -> (string list, string) result
 (** After authorization, observe and bind the container to the current GitHub
-    identity, then return every turn snapshot whose token must remain
-    redacted. The observation is the operation's linearization point: a later
-    central login change is picked up by the next Execute. Superseded snapshots
-    remain redaction-only until turn cleanup. *)
+    identity, then return every credential file whose token must remain
+    redacted. Docker: the bind is [ensure_started] itself and the redaction
+    target is the stable [hosts.yml] the running container has mounted; a
+    central login reaches it through the mount. Microvm: the guest's identity
+    is its boot-time snapshot, and a drift from the central revision drops
+    the handle so the next boot rebuilds it. *)
 
 val cleanup : t -> unit
 (** Best-effort teardown. Safe to call multiple times. *)
@@ -40,6 +44,10 @@ module For_testing : sig
 
   val get_state : t -> state
   val set_state : t -> state -> unit
+  val keeper_docker_container_name : t -> string
+  (** The stable per-keeper container name, so the naming contract (stable
+      across turns, split by network mode, bound to the base path) is
+      testable without a docker daemon. *)
 end
 
 val container_path_of_host :
@@ -120,32 +128,25 @@ val run_bash_with_status :
   unit ->
   (Unix.process_status * string, string) result
 
-val release_microvm_identity : t -> unit
-(** Release the GitHub identity snapshot a keeper-lifetime guest had
-    mounted. Turn cleanup deliberately skips this for microvm -- the guest
-    outlives the turn and the snapshot is a directory it has mounted -- so
-    the caller that removes the guest calls this after it is gone. *)
-
-val teardown_keeper_vm_by_name :
+val teardown_keeper_sandbox_by_name :
   ?timeout_sec:float ->
   config:Workspace.config ->
   keeper_name:string ->
   unit ->
   (unit, string) result
-(** {!teardown_keeper_vm} for callers that hold the keeper's name and not its
-    meta -- shutdown finalization, which runs after the registry entry is
-    gone. The guest name derives from the name alone. *)
+(** {!teardown_keeper_sandbox} for callers that hold the keeper's name and
+    not its meta -- shutdown finalization, which runs after the registry
+    entry is gone. Both targets (the microvm guest name, the
+    persistent-container label selection) derive from the name alone. *)
 
-val teardown_keeper_vm :
+val teardown_keeper_sandbox :
   ?timeout_sec:float ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   unit ->
   (unit, string) result
-(** Remove the keeper-lifetime microvm guest for [meta], if any. Turn
-    cleanup deliberately leaves the guest running (the 4-second VM boot is
-    paid once per keeper, not per turn); this is the remove path, for
-    keeper teardown and operators. A missing guest is a successful
-    teardown. Not yet wired to keeper_down — until that lands, a deleted
-    keeper's guest stays resident (~400 MB) and this function (or
-    [container stop <masc-keeper-vm-...>]) collects it. *)
+(** Remove the keeper-lifetime containers for [meta]: the microvm guest and
+    the persistent Docker containers, if any. Turn cleanup deliberately
+    leaves both running (the guest boot and the container start are paid
+    once per keeper, not per turn); this is the remove path, run at keeper
+    shutdown finalization. A missing container is a successful teardown. *)

@@ -75,6 +75,30 @@ val docker_args :
   container_masc_dir:string ->
   (string list, string) result
 
+(** Stable-directory variant for keeper-lifetime containers: the mount is the
+    live config directory (read-only), not a per-turn snapshot, so identity
+    changes made on the host reach a running container through the bind
+    mount. Includes the git credential wiring env; call
+    [refresh_git_credential_config] on adoption to keep the derived gitconfig
+    in step with hosts.yml. *)
+val docker_args_persistent :
+  config:Workspace.config ->
+  keeper_name:string ->
+  container_masc_dir:string ->
+  (string list, string) result
+
+(** Rewrites the derived gitconfig inside the stable config directory from
+    the hosts it currently holds. Pure function of hosts.yml; a no-op when
+    the keeper is unconfigured. *)
+val refresh_git_credential_config :
+  config:Workspace.config -> keeper_name:string -> (bool, string) result
+
+(** The stable config directory, when the keeper has one at all. Readers that
+    only need "where would hosts.yml live" use this instead of provisioning
+    with [ensure_config_dir]. *)
+val existing_config_dir :
+  config:Workspace.config -> keeper_name:string -> (string option, string) result
+
 (** Docker counterpart of [runtime_env_for_tool]. Each dispatch receives an
     immutable read-only snapshot, including when the Keeper is unconfigured,
     plus an explicit cleanup capability. A host login that happens while a

@@ -80,10 +80,12 @@ let write_two_panes buf ~left_cols ~left ~right =
    different question from which row is open. *)
 let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
   framed_top buf cols;
+  (* Focus wears a caret, not a key list: which keys work is the footer's
+     sentence; which pane hears them is this one glyph. *)
   framed_line buf cols
     ((if focused then Ansi.bold else Ansi.dim)
-     ^ Printf.sprintf " %s (%d)%s" title (List.length labels)
-         (if focused then "  [j/k]" else "")
+     ^ Printf.sprintf " %s%s (%d)" (if focused then "\xe2\x96\xb8 " else "") title
+         (List.length labels)
      ^ Ansi.reset);
   framed_divider buf cols;
   let content_height = max 0 (rows - framed_chrome_rows) in
@@ -484,6 +486,12 @@ let lexed_span (text, kind) =
     if String.equal style "" then text else style ^ text ^ Ansi.reset
 ;;
 
+(* Where key hints live: the footer, and only the footer. A surface's body
+   may say *state* — an armed two-step ("same key again to send"), what the
+   composer's Enter will do — but never list available keys; a key listed in
+   two places drifts in one of them, and a reader who has to scan the body
+   for keys on one screen and the footer on another reports exactly
+   "the key help keeps moving around" (2026-08-28). *)
 let footer_line ?(status = []) (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
@@ -1709,12 +1717,13 @@ let render_approvals (state : state) =
   (* Both Gate lanes, always on screen here — exactly one row, so the body
      arithmetic below can subtract it as a constant. The durable rows obey
      the external lane, and an operator deciding them needs to see which
-     switch they are under. [e] cycles the external lane. *)
+     switch they are under. The [e] that cycles the external lane lives in
+     the footer with every other key. *)
   box_line buf cols
     (match state.gate_modes, Terminal_text.optional_single_line state.gate_error with
      | Some modes, _ ->
          Printf.sprintf
-           "  %sGate workspace:%s  ·  outside services:%s  [e] cycle outside lane%s"
+           "  %sGate workspace:%s  ·  outside services:%s%s"
            Ansi.dim
            modes.Tui_decode.glm_workspace
            modes.Tui_decode.glm_external
@@ -1851,7 +1860,7 @@ let render_approvals (state : state) =
            the because is why this call was held at all — an operator
            repeating the same yes needs the reason visible, not the name
            of a policy table they cannot open. *)
-        Printf.sprintf "  %s%s  [y] allow  [n] deny%s\\n  %swhy: %s%s"
+        Printf.sprintf "  %s%s%s\\n  %swhy: %s%s"
           (Theme.warn ())
           (fit_width
              (Terminal_text.single_line held.kta_question)
@@ -1867,7 +1876,7 @@ let render_approvals (state : state) =
         (* A durable Gate ask: it keeps until answered, and the answer goes
            through the dashboard resolve route. What the eye needs is who
            wants to touch what, and that the decision spends here. *)
-        Printf.sprintf "  %s%s → %s  [y] approve  [n] reject%s"
+        Printf.sprintf "  %s%s → %s%s"
           (Theme.warn ())
           (fit_width
              (Terminal_text.single_line pending.Tui_decode.gp_keeper)
@@ -1930,7 +1939,8 @@ let render_approvals (state : state) =
   let hints =
     match state.ask_answer_mode with
     | Ask_browsing ->
-        "j/k:move  y/n:decide  a:answer a question  r:refresh  Tab:next"
+        "j/k:move  y/n:decide  e:outside lane  a:answer a question  \
+         r:refresh  Tab:next"
     | Ask_answering { aam_ask_id } ->
         (* Say when the next Enter sends. The approval queue two panes up
            already draws its armed state; this one announced itself only as an
@@ -9171,9 +9181,9 @@ let render_code (state : state) =
     in
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim)
-       ^ " " ^ Terminal_text.single_line where
+       ^ (if list_focused then " \xe2\x96\xb8 " else " ")
+       ^ Terminal_text.single_line where
        ^ workspace_entries_count_label total
-       ^ (if list_focused then "  [j/k]" else "")
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
     let status_rows =

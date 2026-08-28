@@ -144,8 +144,11 @@ Task Skill은 실행 projection과 prompt에서 unavailable이며 admission 전�
   그 스킬이 current 블록에 안 실린다. 그래서 별도 블록으로 뽑는다.
 
 두 블록 모두 canonical exact reference와 그 turn의 typed surface를 싣는다(본문 X).
-instruction은 그 객체를 그대로 `keeper_skill`에 전달하고, composition은 투영된 exact
-composition tool을 호출한다. 같은 tool name 충돌 등으로 실행 불가능한 reference는
+instruction은 그 reference의 키(`Skill_reference.key` — source/package/name 세 부분을
+1:1로 담은 불투명 문자열)를 `keeper_skill`에 전달하고, composition은 투영된 exact
+composition tool을 호출한다. content revision은 모델 쪽에 없다. 그 turn이 얼린 목록이
+이미 어느 revision인지 정하고 있으므로, 키는 그 목록에 대고만 풀린다 — 목록 밖의
+키는 스냅샷에 있어도 풀리지 않는다. 같은 tool name 충돌 등으로 실행 불가능한 reference는
 unavailable로 표시한다. 이름-only fallback은 없다. 본문은 매 턴 prompt에 넣지 않고
 필요할 때 읽는다.
 
@@ -188,7 +191,7 @@ Tools 화면에서 `J/K`로 published Skill을 고르고 `e`를 누르면 `$EDIT
 flowchart TD
   M["모델이 도구 호출"] --> K{"어느 도구?"}
   K -->|"keeper_compose_&lt;name&gt;"| CR["합성 실행<br/>plan + descriptor가 동시성 결정<br/>execution=async면 durable broker"]
-  K -->|"keeper_skill(exact reference[, file])"| IR["지시 본문/리소스 원문 반환<br/>exact activation 기록"]
+  K -->|"keeper_skill(skill=key[, file])"| IR["지시 본문/리소스 원문 반환<br/>exact activation 기록"]
   CR --> EV["tool_calls 스토어<br/>노드 행 + composition_run 종결 행"]
   IR --> EV
   EV --> SSE["SSE keeper_tool_call_evidence_committed"]

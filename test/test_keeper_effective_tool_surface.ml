@@ -379,13 +379,30 @@ let test_projection_names_equal_turn_surface_authority () =
          |> Yojson.Safe.Util.to_list
          |> List.map Yojson.Safe.Util.to_string
        in
-       check (list string) "schema requires the canonical exact reference"
-         [ "identity"; "content_revision" ] required;
-       check bool "name-only input is absent" true
-         (input_schema
-          |> Yojson.Safe.Util.member "properties"
-          |> Yojson.Safe.Util.member "name"
-          = `Null))
+       (* One key, and nothing else required. The reference used to be the
+          input, and this pinned its two halves; the revision is no longer the
+          model's to carry, because the turn that projected this surface froze
+          which one the key resolves to. *)
+       check (list string) "schema requires one key" [ "skill" ] required;
+       let skill_property =
+         input_schema
+         |> Yojson.Safe.Util.member "properties"
+         |> Yojson.Safe.Util.member "skill"
+       in
+       (* A closed choice, not a free string: the standard's advice for a
+          dispatcher, and what keeps a key from another turn out. *)
+       check bool "the key is constrained to this turn's Skills" true
+         (skill_property |> Yojson.Safe.Util.member "enum" <> `Null);
+       (* The halves it used to take are gone rather than optional -- an
+          accepted second shape is a second contract. *)
+       List.iter
+         (fun absent ->
+           check bool (absent ^ " is not a parameter") true
+             (input_schema
+              |> Yojson.Safe.Util.member "properties"
+              |> Yojson.Safe.Util.member absent
+              = `Null))
+         [ "identity"; "content_revision"; "name" ])
 ;;
 
 let test_external_composition_preserves_snapshot_provenance () =

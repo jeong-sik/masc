@@ -1,40 +1,13 @@
 name = "keeper_skill"
-description = "Read one frozen instruction Skill body by its canonical exact reference. When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded. Use the exact reference projected by the current Task or this tool's Available list; names alone are never accepted."
+description = "Read one frozen instruction Skill body by the exact key the Available list below offers. When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded. Only a key from this turn's Available list resolves; a key from another turn, or a bare Skill name, is refused."
 additional_properties = false
 
 [[params]]
-name = "identity"
-type = "object"
-required = true
-additional_properties = false
-description = "Exact Skill identity from the frozen turn snapshot."
-
-[[params.params]]
-name = "source_id"
+name = "skill"
 type = "string"
 required = true
 min_length = 1
-
-[[params.params]]
-name = "package_id"
-type = "string"
-required = true
-min_length = 1
-
-[[params.params]]
-name = "name"
-type = "string"
-required = true
-min_length = 1
-
-[[params]]
-name = "content_revision"
-type = "string"
-required = true
-min_length = 64
-max_length = 64
-pattern = "^[0-9a-f]{64}$"
-description = "Canonical domain-separated SHA-256 content revision derived from the exact frozen SKILL.md bytes."
+description = "Exact key of one Skill, copied from this tool's Available list. It identifies the Skill and the frozen revision this turn holds; there is nothing else to supply."
 
 [[params]]
 name = "file"

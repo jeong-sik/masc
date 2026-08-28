@@ -213,43 +213,58 @@ let instruction_skill_description (instruction_skills : instruction_skill list) 
   skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
 ;;
 
-(* A closed choice, rebuilt each turn from the Skills that turn froze. The
-   model cannot name one that is not there, which is the property the exact
-   reference used to buy by making the name unguessable. The standard's own
-   integration guide asks for exactly this ("constrain the name parameter to
-   the set of valid skill names, e.g. as an enum in the tool schema"). *)
+(* The shape comes from the TOML with every other tool definition; only the
+   choice is injected here, because the choice is what changes per turn.
+
+   Writing the whole schema in OCaml would put the model-facing sentences back
+   in the source the prose ratchet exists to keep them out of, and would leave
+   [config/tools/keeper_skill.toml] declaring parameters nothing reads --
+   which RFC-prompts-and-tool-definitions-outside-ocaml calls a config with no
+   consumer.
+
+   The enum itself is the standard's own advice for a dispatcher: constrain
+   the name to the set of valid names so the model cannot invent one. It is
+   rebuilt from the Skills this turn froze, so a key from another turn is not
+   in it. *)
 let instruction_skill_input_schema (instruction_skills : instruction_skill list) =
   let keys =
     instruction_skills
     |> List.map (fun (skill : instruction_skill) ->
          `String (Skill_reference.key skill.reference))
   in
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc
-          [ ( "skill"
-            , `Assoc
-                [ "type", `String "string"
-                ; "enum", `List keys
-                ; ( "description"
-                  , `String
-                      "Exact source/package/name key of one Skill from the \
-                       Available list above." )
-                ] )
-          ; ( "file"
-            , `Assoc
-                [ "type", `String "string"
-                ; ( "description"
-                  , `String
-                      "Optional bundled resource path relative to the Skill \
-                       root, exactly as SKILL.md names it. Omit it to read \
-                       the frozen Skill body." )
-                ] )
-          ] )
-    ; "required", `List [ `String "skill" ]
-    ; "additionalProperties", `Bool false
-    ]
+  let with_choice = function
+    | `Assoc property_fields ->
+      `Assoc
+        (("enum", `List keys)
+         :: List.filter
+              (fun (field, _) -> not (String.equal field "enum"))
+              property_fields)
+    | other -> other
+  in
+  match skill_tool_schema.input_schema with
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (field, value) ->
+           if not (String.equal field "properties")
+           then field, value
+           else
+             match value with
+             | `Assoc properties ->
+               ( field
+               , `Assoc
+                   (List.map
+                      (fun (name, property) ->
+                        if String.equal name "skill"
+                        then name, with_choice property
+                        else name, property)
+                      properties) )
+             | other -> field, other)
+         fields)
+  (* The TOML is the shape's only home. A schema invented here would disagree
+     with the file the next reader edits, so a shape this code does not
+     recognise passes through rather than being replaced. *)
+  | other -> other
 ;;
 
 type 'evidence schema_tool_origin =
@@ -1336,7 +1351,22 @@ let make_instruction_skill_tool
              ~tool_name:name
              ~class_:Tool_result.Workflow_rejection
              ~start_time
-             "keeper_skill requires one canonical exact Skill reference"
+             (* The keys this turn holds, so a rejected call has somewhere to
+                go. This said only what the shape should be, and the branch
+                that listed the alternatives sat behind a resolution that
+                cannot fail -- so a wrong key ended the attempt with no way
+                back. A caller that named nothing gets the same list. *)
+             (Printf.sprintf
+                "keeper_skill takes one `skill` key from this turn; this \
+                 keeper carries: %s"
+                (match instruction_skills with
+                 | [] -> "(none)"
+                 | skills ->
+                   String.concat ", "
+                     (List.map
+                        (fun (skill : instruction_skill) ->
+                          Skill_reference.key skill.reference)
+                        skills)))
          | Error Duplicate_resource_path ->
            Tool_result.make_err
              ~tool_name:name

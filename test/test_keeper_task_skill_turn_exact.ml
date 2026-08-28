@@ -554,7 +554,13 @@ let test_exact_reference_consumer_rejects_name_fallback () =
     run_skill_tool tool (`Assoc [ "skill", `String "only/guide/not-here" ])
   in
   check bool "a key this turn did not offer is refused" false
-    (String_util.contains_substring absent_output "EXACT_BODY")
+    (String_util.contains_substring absent_output "EXACT_BODY");
+  (* And the refusal says what it would have taken. A rejected call that only
+     names the shape ends the attempt: the model has no way to find the key it
+     should have used, and the branch that used to list them sat behind a
+     resolution that cannot fail. *)
+  check bool "the refusal lists the keys this turn holds" true
+    (String_util.contains_substring absent_output (Reference.key reference))
 ;;
 
 (* The resolver searches the Skills this turn handed the tool, not the
@@ -604,39 +610,28 @@ let test_the_resolver_cannot_reach_past_this_turn () =
     (String_util.contains_substring withheld_output "WITHHELD_BODY")
 ;;
 
-(* The key has to be one-to-one with the identity, because the model is
-   offered a set of them and the server matches one back.
+(* The key is one-to-one with the identity because no part can carry the
+   separator. That is not this function's doing -- it is enforced where each
+   part is built -- so what is worth pinning is that the guarantee still
+   holds, at the boundary that would break it first.
 
-   A separator cannot promise that. [package_id] rejects [/] at construction
-   but [name] is taken as written, so joining with one would fold
-   ("a/b", "c") and ("a", "b/c") onto the same key and one Skill would shadow
-   the other with nothing said. Length prefixes are injective whatever the
-   parts contain. *)
-let test_the_key_cannot_fold_two_identities_together () =
-  let source text =
-    match Skill_source_config.source_id_of_string text with
-    | Ok id -> id
-    | Error _ -> fail "fixture source id is invalid"
-  in
-  let key source_text package_text name =
-    Reference.identity_key
-      (Reference.make_identity
-         ~source_id:(source source_text)
-         ~package_id:(package package_text)
-         ~name)
-  in
-  (* The package half of that pair is already unrepresentable --
-     [Package_id_contains_separator] refuses it at construction -- so the
-     collision a separator would allow has to be built the way it could
-     actually arrive: a name that eats the boundary. *)
+   An earlier version of this test built ("a","b/c") by hand and compared it
+   to ("a","b/c/"), which passes under any encoding and proved nothing. The
+   check that means something is that the parser refuses the character at
+   all. *)
+let test_no_part_of_the_key_can_carry_the_separator () =
   check bool
-    "a name that looks like two parts stays one"
-    false
-    (String.equal (key "s" "a" "b/c") (key "s" "a" "b/c/"));
+    "a package id with a separator is refused at construction"
+    true
+    (Result.is_error (Reference.package_id_of_directory "a/b"));
   check bool
-    "a shared prefix across two parts does not collide"
-    false
-    (String.equal (key "s" "ab" "c") (key "s" "a" "bc"))
+    "and a backslash too"
+    true
+    (Result.is_error (Reference.package_id_of_directory "a\\b"));
+  check bool
+    "a source id with a separator is refused at construction"
+    true
+    (Result.is_error (Skill_source_config.source_id_of_string "a/b"))
 ;;
 
 (* What this change was for. The catalogue used to carry the whole
@@ -946,8 +941,8 @@ let () =
             test_resolved_body_stays_frozen_after_new_snapshot
         ; Alcotest.test_case "the catalogue costs a key, not a reference" `Quick
             test_the_catalogue_costs_a_key_not_a_reference
-        ; Alcotest.test_case "the key cannot fold two identities together"
-            `Quick test_the_key_cannot_fold_two_identities_together
+        ; Alcotest.test_case "no part of the key can carry the separator"
+            `Quick test_no_part_of_the_key_can_carry_the_separator
         ; Alcotest.test_case "the resolver cannot reach past this turn" `Quick
             test_the_resolver_cannot_reach_past_this_turn
         ; test_case "resource read is exact and deferred" `Quick

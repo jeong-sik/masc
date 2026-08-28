@@ -82,9 +82,17 @@ val key : t -> string
     to, so a caller that has the snapshot does not need the model to echo the
     hash back to it.
 
-    Not a parser: nothing reconstructs an identity from this. It is a name to
-    offer as a closed choice and to resolve against a list that was already
-    projected. *)
+    One-to-one with the three parts, because none of them can contain the
+    separator where it is built: [source_id] is a portable name, [package_id]
+    rejects separators, and a Skill name takes only letters, digits and
+    hyphens. Nothing parses this back and nothing may — it is offered as a
+    closed choice and matched by equality against a list that was already
+    projected — but it stays legible, because a chat row names a Skill call
+    by it.
+
+    In-process only. It is a Hashtbl key and an equality, never written to a
+    file or a wire field — an encoding change has to stay a recompile, not a
+    migration. *)
 
 val identity_to_yojson : identity -> Yojson.Safe.t
 val to_yojson : t -> Yojson.Safe.t

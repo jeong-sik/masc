@@ -182,10 +182,15 @@ let flow_of_plan plan =
   { nodes; batches }
 ;;
 
+(* What one Skill costs in the catalogue, measured as the line that is
+   actually written: [instruction_skill_description] prints "key: description".
+
+   It counted the reference JSON instead, which was right while the catalogue
+   printed one. After the catalogue moved to keys this kept reporting the old
+   size -- so the gauge that a reader would check to see the saving was the
+   one thing that could not see it. The [2] is ": ". *)
 let instruction_discovery_bytes reference description =
-  String.length (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
-  + 2
-  + String.length description
+  String.length (Skill_reference.key reference) + 2 + String.length description
 ;;
 
 let of_skill_with_reference reference (skill : Keeper_skill_catalog.skill) =

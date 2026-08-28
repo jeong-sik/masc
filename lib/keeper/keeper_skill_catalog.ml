@@ -537,8 +537,20 @@ let exact_surface_to_yojson surface =
     | Exact_unavailable { diagnostic } ->
       "unavailable", None, Some diagnostic
   in
+  (* The key, not the whole reference.
+
+     A row here and a line in [keeper_skill]'s Available list name the same
+     Skill, and they used to name it two different ways: this carried
+     {identity, content_revision} while the catalogue carried a key. The model
+     read both in one prompt, and the tool took only one of them.
+
+     The revision is not lost, it is not the model's to carry: the turn that
+     projected this row froze which revision the key resolves to, and the
+     server resolves it. A composition row has needed only its [tool_name]
+     all along; an instruction row now needs only its key, so the two kinds
+     read the same way. *)
   `Assoc
-    ([ "reference", Skill_reference.to_yojson surface.reference
+    ([ "skill", `String (Skill_reference.key surface.reference)
      ; "kind", `String kind
      ]
      @ Option.to_list (Option.map (fun value -> "tool_name", `String value) tool_name)

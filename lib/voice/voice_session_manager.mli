@@ -48,10 +48,6 @@ val generate_session_id : unit -> string
 val string_of_status : session_status -> string
 (** Inverse of {!status_of_string_opt}. *)
 
-val status_of_string_opt : string -> session_status option
-(** [Some] only for the three wire-format names; any other input
-    returns [None] (#8612 — never silently maps unknowns to [Idle]). *)
-
 val string_of_conversation_mode : conversation_mode -> string
 val transport_mode_of_conversation_mode : conversation_mode -> string
 val realtime_supported : conversation_mode -> bool

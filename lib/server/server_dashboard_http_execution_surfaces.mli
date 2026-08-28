@@ -170,11 +170,6 @@ val start_execution_trust_refresh_loop :
 
 (** {1 Snapshot accessors} *)
 
-val dashboard_execution_snapshot_json : unit -> Yojson.Safe.t
-(** Returns the most recent successful execution
-    snapshot (or the initialization placeholder when no
-    refresh has succeeded yet). *)
-
 (** {1 HTTP route entries} *)
 
 val dashboard_execution_cached_http_body :

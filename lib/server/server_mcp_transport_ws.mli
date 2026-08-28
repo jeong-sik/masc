@@ -367,25 +367,6 @@ val dashboard_unsubscribe :
     [?slices] is [None], unsubscribes from every slice.
     Requires a prior {!dashboard_hello}. *)
 
-val dashboard_ping :
-  session_id:string ->
-  unit ->
-  (Yojson.Safe.t, string) result
-(** Lightweight heartbeat endpoint for browser dashboards.
-    Requires a prior {!dashboard_hello}; stale or unauthenticated sessions
-    fail so the client can reconnect and re-handshake. *)
-
-val dashboard_ack :
-  session_id:string ->
-  seq:int ->
-  ?buffered_amount:int ->
-  unit ->
-  (Yojson.Safe.t, string) result
-(** Records the client's ack of [seq] and the optional
-    [WebSocket.bufferedAmount] reading.  Used by the
-    backpressure observer to gate further sends when the
-    client cannot keep up. *)
-
 (** {1 Test-only seams (via [module Ws =] alias)}
 
     [test/test_ws_transport.ml] takes

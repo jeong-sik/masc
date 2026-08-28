@@ -20,8 +20,6 @@ type attention_item = {
 
 val severity_to_string : severity -> string
 
-val severity_icon : severity -> string
-
 (** Coerce to canonical {!Severity.t} for cross-module communication. *)
 val to_severity : severity -> Severity.t
 

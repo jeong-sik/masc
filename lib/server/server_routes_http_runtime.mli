@@ -215,17 +215,6 @@ val make_health_json :
     at the contract seam: a future "drop unused metric" PR
     must touch this. *)
 
-val make_health_probe_json :
-  ?listener:string ->
-  request_authority:Server_request_authority.authority ->
-  Httpun.Request.t ->
-  Yojson.Safe.t
-(** [make_health_probe_json ?listener ~request_authority request] builds the cheap default
-    [/health] probe body.  It keeps liveness/readiness-facing fields such as
-    [startup], [paths], [transport], [logs], and quick GC counters, but skips
-    durable keeper scans, reaction-ledger JSONL reads, config TOML scans, and
-    contract-verdict ledger inspection. *)
-
 val make_health_response_json :
   ?listener:string ->
   request_authority:Server_request_authority.authority ->

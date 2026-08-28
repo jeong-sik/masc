@@ -17,15 +17,8 @@ val trim_trailing_slashes : string -> string
     both become [""].  Paths keep their root: use
     {!Env_config_core.strip_path_trailing_slashes} for those. *)
 
-val ollama_default_port : int
-
 (** ["http://127.0.0.1:<ollama_default_port>"]. *)
 val ollama_default_url : string
-
-(** [":<ollama_default_port>"] — substring used by Ollama URL
-    heuristics. Anchored to {!ollama_default_port} so a port change
-    updates every classifier in one place. *)
-val ollama_port_needle : string
 
 (** Ollama native API path for the running-models ("process status")
     endpoint. Used by {!Runtime_http_probe} and
@@ -52,10 +45,6 @@ val openai_chat_completions_path : string
 val chat_completions_path : string
 
 (** {1 CLI transport discriminator} *)
-
-(** ["cli:"] — prefix marking a CLI-backed transport (e.g.
-    [cli:codex]). *)
-val cli_transport_prefix : string
 
 (** Strict prefix match for {!cli_transport_prefix}. *)
 val is_cli_transport_url : string -> bool
@@ -153,8 +142,6 @@ val normalize_loopback_base_url : string -> string
     single URL and has no second value to keep in step. *)
 
 (** {1 Vite dev frontend} *)
-
-val vite_dev_default_port : int
 
 (** Ordered [127.0.0.1 → localhost → [::1]] on {!vite_dev_default_port};
     matches the historical CORS allowlist. *)

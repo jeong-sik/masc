@@ -23,42 +23,6 @@ val provider_health_reachable : status:int option -> bool
     as reachable" and need a synchronized update with the health-check
     probe. *)
 
-val classify_runtime_blocker :
-  provider_reachable:bool ->
-  slot_reachable:bool ->
-  chat_contract_status:string ->
-  expected_model:string option ->
-  actual_model_id:string option ->
-  expected_slots:int option ->
-  actual_slots_total:int ->
-  expected_ctx:int option ->
-  actual_ctx:int option ->
-  chat_completion_compatible:bool ->
-  string option * string option
-(** [classify_runtime_blocker ~provider_reachable ~slot_reachable
-      ~chat_contract_status ~expected_model ~actual_model_id
-      ~expected_slots ~actual_slots_total ~expected_ctx
-      ~actual_ctx ~chat_completion_compatible] grades a runtime
-    snapshot through 6 cascading checks.  Returns
-    [(blocker_code, message)]:
-
-    + [(Some "provider_unreachable", _)] when provider or slots
-      endpoint failed.
-    + [(Some "provider_protocol_incompatible", _)] when chat
-      completions probe failed.
-    + [(Some "provider_model_mismatch", _)] when expected_model
-      is set but actual differs (or actual is missing).
-    + [(Some "slot_count_insufficient", _)] when actual slots
-      below expected.
-    + [(Some "ctx_mismatch", _)] when expected_ctx differs from
-      actual.
-    + [(Some "chat_contract_incompatible", _)] when contract
-      status is ["rejected"].
-    + [(None, None)] when all checks pass.
-
-    Pinned blocker codes — operator dashboards parse these
-    strings.  Drift breaks tooltip + alerting downstream. *)
-
 val runtime_verify_json :
   ?runtime_pool:string ->
   ?expected_slots:int ->

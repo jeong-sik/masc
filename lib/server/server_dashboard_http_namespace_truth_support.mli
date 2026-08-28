@@ -27,18 +27,6 @@
     [execution_summary_json],
     [execution_top_queue]). *)
 
-val dashboard_namespace_truth_focus_json :
-  initialized:bool ->
-  runtime_count:int ->
-  top_queue:Yojson.Safe.t ->
-  Yojson.Safe.t
-(** Renders the namespace-truth focus / suggested-action
-    block from the top execution-queue entry.  When
-    [top_queue] is present, it derives [suggested_tab],
-    [suggested_surface], [suggested_params] from the
-    queue head action.  Otherwise it reports the
-    namespace initialization/runtime state. *)
-
 val compose_namespace_truth_snapshot :
   config:Workspace.config ->
   initialized:bool ->

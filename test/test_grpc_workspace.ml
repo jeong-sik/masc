@@ -15,7 +15,6 @@ let keeper_meta ~name ~agent_name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String name
-        ; "agent_name", `String agent_name
         ; "trace_id", `String ("trace-" ^ name)
         ])
   with
@@ -725,7 +724,7 @@ let test_heartbeat_projects_keeper_pause_not_workspace_pause () =
       ~finally:Keeper_registry.For_testing.clear
       (fun () ->
     let workspace_config = Workspace_utils.default_config dir in
-    let agent_name = "keeper-alpha-agent" in
+    let agent_name = "alpha" in
     let keeper_name = "alpha" in
     ignore (Masc.Workspace.init workspace_config ~agent_name:(Some agent_name));
     let meta = keeper_meta ~name:keeper_name ~agent_name in

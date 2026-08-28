@@ -216,7 +216,7 @@ let runtime_mcp_keeper_log_context_of_entry
   let config = Workspace.default_config entry.base_path in
   {
     keeper_name = entry.name;
-    agent_name = Some entry.meta.agent_name;
+    agent_name = Some entry.name;
     model;
     trace_id = Some trace_id;
     session_id;
@@ -645,7 +645,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     else
       Keeper_registry.all ~base_path:config.base_path ()
       |> List.find_opt (fun (entry : Keeper_registry.registry_entry) ->
-        String.equal entry.meta.agent_name agent_name)
+        String.equal entry.name agent_name)
   in
   (* RFC-0233 PR-1: one mint per execution at this dispatch boundary. The
      tool_calls row, the trajectory row and the [Tool_called] telemetry event

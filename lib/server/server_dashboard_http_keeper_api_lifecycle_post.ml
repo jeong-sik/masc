@@ -316,7 +316,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               contradictory stopped/executing surfaces. Wake an already
               running fiber without changing its pause disposition. *)
            Keeper_keepalive.process_directive
-             ~agent_name:entry.meta.agent_name
+             ~agent_name:entry.name
              Keeper_directive.Wakeup;
            refresh_keeper_execution_surfaces
              ~config

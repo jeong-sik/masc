@@ -79,7 +79,7 @@ let degraded_keeper_dashboard_row
   in
   `Assoc
     ([ ("name", `String m.name)
-     ; ("agent_name", `String m.agent_name)
+     ; ("agent_name", `String m.name)
      ; ( "keeper_id"
        , match m.keeper_id with
          | Some keeper_id -> `String (Keeper_id.Uid.to_string keeper_id)
@@ -119,7 +119,7 @@ let invalid_profile_dashboard_row ~keeper_name error =
   in
   `Assoc
     [ ("name", `String keeper_name)
-    ; ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name))
+    ; ("agent_name", `String keeper_name)
     ; ("phase", `String "Offline")
     ; ("lifecycle_phase", `String "Offline")
     ; ("pipeline_stage", `String "offline")
@@ -625,7 +625,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           let outcomes_json =
             compute_outcomes_rollup
               ~keeper_name:m.name
-              ~agent_name:m.agent_name
+              ~agent_name:m.name
               ~recent_crash_count
               ~registry_entry
           in
@@ -732,7 +732,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("outcomes", outcomes_json);
             ] @ runtime_blocker_fields @ attention_fields @ [
               ("supervisor_diagnostics", supervisor_diagnostics);
-              ("agent_name", `String m.agent_name);
+              ("agent_name", `String m.name);
               ( "keeper_id",
                 match m.keeper_id with
                 | Some keeper_id ->
@@ -891,12 +891,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 let try_name agent_name =
                   Dashboard_eval_feed.read_latest ~base_path ~agent_name ~limit:1
                 in
-                let snapshots =
-                  match try_name m.name with
-                  | (_ :: _) as ss -> ss
-                  | [] when m.agent_name <> m.name -> try_name m.agent_name
-                  | other -> other
-                in
+                let snapshots = try_name m.name in
                 match snapshots with
                 | s :: _ ->
                     `Assoc [
@@ -1003,7 +998,7 @@ let execution_trust_row_of_meta
   in
   `Assoc
     [ ("name", `String m.name)
-    ; ("agent_name", `String m.agent_name)
+    ; ("agent_name", `String m.name)
     ; ( "keeper_id"
       , match m.keeper_id with
         | Some keeper_id -> `String (Keeper_id.Uid.to_string keeper_id)

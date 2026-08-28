@@ -36,7 +36,6 @@ let keeper_meta name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
           [ "name", `String name
-          ; "agent_name", `String (Keeper_identity.keeper_agent_name name)
           ; "trace_id", `String ("trace-" ^ name)
           ])
   with
@@ -109,7 +108,7 @@ let test_initialized_lane_uses_owner_cursor () =
     (persist_discoverable
        (signal
           ~post_id:"cursor-baseline"
-          ~author:meta.agent_name
+          ~author:meta.name
           ~title:"cursor baseline"
           ~content:"establish a non-empty cursor"));
   ignore

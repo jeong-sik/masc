@@ -41,7 +41,6 @@ let make_goal_reconciler_meta () =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String "goal-reconciler"
-        ; "agent_name", `String "keeper-goal-reconciler-agent"
         ; "trace_id", `String "trace-goal-reconciler"
         ; "allowed_paths", `List [ `String "*" ]
         ; "autoboot_enabled", `Bool false

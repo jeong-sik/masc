@@ -10,10 +10,7 @@
    Tool lines are dropped — tool activity is already surfaced by the timeline's
    [tool.called] source, so re-emitting the chat store's tool rows would
    double-count. *)
-let chat_store_keeper_name raw =
-  match Keeper_identity.canonical_keeper_name raw with
-  | Some keeper_name -> keeper_name
-  | None -> String.trim raw
+let chat_store_keeper_name raw = String.trim raw
 
 let lines_for ~base_dir ~keeper_name : Tool_agent_timeline.chat_line list =
   let keeper_name = chat_store_keeper_name keeper_name in
@@ -33,12 +30,7 @@ let lines_for ~base_dir ~keeper_name : Tool_agent_timeline.chat_line list =
                })
 
 let same_keeper_identity left right =
-  match
-    ( Keeper_identity.canonical_keeper_name left,
-      Keeper_identity.canonical_keeper_name right )
-  with
-  | Some l, Some r -> String.equal l r
-  | _ -> String.equal (String.trim left) (String.trim right)
+  String.equal (String.trim left) (String.trim right)
 
 let lines_for_self ~base_dir ~caller_keeper_name ~agent_name =
   if same_keeper_identity caller_keeper_name agent_name then

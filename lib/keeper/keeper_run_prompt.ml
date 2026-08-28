@@ -138,7 +138,7 @@ let build_turn_context
    in
    Log.Keeper.routine
      "[substrate:system_prompt] agent=%s turn=%d length=%d hash=%s"
-     meta.agent_name (start_turn_count + 1) segment.Keeper_agent_prompt_metrics.bytes hash16);
+     meta.name (start_turn_count + 1) segment.Keeper_agent_prompt_metrics.bytes hash16);
   (* [substrate:task_assignment] observability *)
   (let user_seg = prompt_metrics.Keeper_agent_prompt_metrics.user_message_segment in
    let dyn_seg = prompt_metrics.Keeper_agent_prompt_metrics.dynamic_context_segment in
@@ -151,7 +151,7 @@ let build_turn_context
    Log.Keeper.routine
      "[substrate:task_assignment] agent=%s turn=%d user_length=%d \
       user_hash=%s dyn_length=%d dyn_hash=%s"
-     meta.agent_name (start_turn_count + 1) user_seg.Keeper_agent_prompt_metrics.bytes
+     meta.name (start_turn_count + 1) user_seg.Keeper_agent_prompt_metrics.bytes
      (pick_hash16 user_seg) dyn_seg.Keeper_agent_prompt_metrics.bytes (pick_hash16 dyn_seg));
   (* 6. Append user message and persist. *)
   let user_msg = Agent_core.Types.user_msg user_message in

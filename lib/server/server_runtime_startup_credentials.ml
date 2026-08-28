@@ -88,18 +88,15 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   let excluded_keepers =
     Keeper_runtime.autoboot_excluded_keeper_reasons (Mcp_server.workspace_config state)
   in
-  let keeper_agent_names =
-    List.map Keeper_identity.keeper_agent_name keeper_names
-  in
   let synced_count, failed =
-    List.fold_left2
-      (fun (synced_count, failed) keeper_name agent_name ->
-        match Auth.ensure_keeper_credential base_path ~agent_name with
+    List.fold_left
+      (fun (synced_count, failed) keeper_name ->
+        match Auth.ensure_keeper_credential base_path ~agent_name:keeper_name with
         | Ok _ -> (synced_count + 1, failed)
         | Error err ->
             ( synced_count,
               (keeper_name, Masc_domain.masc_error_to_string err) :: failed ))
-      (0, []) keeper_names keeper_agent_names
+      (0, []) keeper_names
   in
   if synced_count > 0 then
     Log.Server.info
@@ -124,29 +121,11 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
          Log.Server.error
            "startup keeper credential sync failed for %s: %s"
            keeper_name detail);
-  (* #10440: write a short-form alias for each keeper so callers
-     that look up by [agent_name=<keeper_name>] resolve directly
-     instead of relying on runtime alias fallback.
-     Without the alias, 8/14 keepers fail [load_credential] for the
-     short-form lookup path (per the issue's evidence on the live
-     fleet). *)
-  List.iter2
-    (fun keeper_name agent_name ->
-      if not (String.equal keeper_name agent_name) then
-        match
-          Auth.ensure_credential_alias base_path
-            ~canonical_name:agent_name ~alias_name:keeper_name
-        with
-        | Ok () -> ()
-        | Error err ->
-            Log.Server.warn
-              "short-form alias write failed: keeper=%s canonical=%s: %s"
-              keeper_name agent_name
-              (Masc_domain.masc_error_to_string err))
-    keeper_names keeper_agent_names;
+  (* RFC-0393: a keeper's credential lives under its keeper_name — the
+     decorated agent alias and the #10440 short-form alias mirror it
+     required are gone. *)
   let rotation_outcomes =
-    Auth.rotate_shared_tokens_for_agents base_path
-      ~agent_names:keeper_agent_names
+    Auth.rotate_shared_tokens_for_agents base_path ~agent_names:keeper_names
   in
   List.iter
     (fun (outcome : Auth.rotation_outcome) ->

@@ -42,7 +42,6 @@ let make_local_meta ~name : Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [ ("name", `String name)
-      ; ("agent_name", `String ("keeper-" ^ name ^ "-agent"))
       ; ("trace_id", `String ("trace-" ^ name))
       ; ("allowed_paths", `List [ `String "*" ])
       ]

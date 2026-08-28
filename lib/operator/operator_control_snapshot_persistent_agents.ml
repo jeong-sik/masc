@@ -115,7 +115,7 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                (`Assoc
                    ([ "runtime_class", `String "keeper"
                     ; "name", `String meta.name
-                    ; "agent_name", `String meta.agent_name
+                    ; "agent_name", `String meta.name
                     ; ( "trace_id"
                       , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
                     ; "status", `String status

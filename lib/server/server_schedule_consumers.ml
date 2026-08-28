@@ -408,26 +408,7 @@ let resolve_keeper_wake_target config requested_name =
             requested_name
             detail)
      | Ok (Some _) -> Ok requested_name
-     | Ok None ->
-       (match
-          Keeper_identity_binding.resolve
-            ~config
-            ~agent_name:requested_name
-        with
-        | Keeper_identity_binding.Unique keeper_name -> Ok keeper_name
-        | Keeper_identity_binding.Not_found -> Ok requested_name
-        | Keeper_identity_binding.Ambiguous keeper_names ->
-          Error
-            (Printf.sprintf
-               "scheduled keeper wake target is ambiguous target=%s keepers=%s"
-               requested_name
-               (String.concat "," keeper_names))
-        | Keeper_identity_binding.Lookup_failed detail ->
-          Error
-            (Printf.sprintf
-               "scheduled keeper wake target identity lookup failed target=%s: %s"
-               requested_name
-               detail)))
+     | Ok None -> Ok requested_name)
 ;;
 
 let body_keeper_wake_urgency payload =

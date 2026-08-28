@@ -43,15 +43,7 @@ let normalize_status_name = String.trim
 
 let status_name_lookup_candidates raw_name =
   let trimmed = normalize_status_name raw_name in
-  if String.equal trimmed "" then
-    []
-  else
-    let aliases =
-      match Keeper_identity.canonical_keeper_name trimmed with
-      | Some candidate when not (String.equal candidate trimmed) -> [ candidate ]
-      | Some _ | None -> []
-    in
-    trimmed :: aliases
+  if String.equal trimmed "" then [] else [ trimmed ]
 
 let status_argument_fields = function
   | `Assoc fields ->

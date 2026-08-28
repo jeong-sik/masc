@@ -14,15 +14,6 @@ val find_by_name : string -> registry_entry option
     queue nobody reads. *)
 val find_by_name_in_base_path : base_path:string -> string -> registry_entry option
 
-(** Look up a keeper by agent_name across all base_paths (O(n) scan). *)
-val find_by_agent_name : string -> registry_entry option
-
-(** Look up every Keeper with an exact [agent_name] binding in one base path.
-    The list is intentionally not collapsed: duplicate bindings are an
-    identity ambiguity and callers must not choose one heuristically. *)
-val find_all_by_agent_name_in_base_path :
-  base_path:string -> string -> registry_entry list
-
 (** Look up a keeper by stable UID across all base_paths (O(n) scan). *)
 val find_by_id : Keeper_id.Uid.t -> registry_entry option
 

@@ -90,23 +90,12 @@ let ask_json (a : Keeper_ask.ask) =
              a.questions) );
     ]
 
-(* Which Keeper is calling.
-
-   A Keeper reaches its own tools under whatever name its runtime was spawned
-   with -- the [keeper-<name>-agent] alias, a bare [keeper-<name>], or a
-   generated nickname -- while the registry holds one name. RFC-0232 put every
-   spelling behind [canonical_keeper_name]; matching one of them here by hand
-   is how a live Keeper ends up refused by a guard written for unregistered
-   callers. A name it does not recognise passes through and fails the registry
-   check, which is the honest answer for a caller that is not a Keeper.
-
-   Named rather than inlined so the tests call the resolution the tools use
-   instead of a lookalike beside it. *)
-let asking_keeper_name agent_name =
-  Option.value (Keeper_identity.canonical_keeper_name agent_name) ~default:agent_name
-
 let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result option =
-  let keeper_name = asking_keeper_name ctx.agent_name in
+  (* RFC-0393: a Keeper reaches its tools under its keeper_name — there is no
+     alias or nickname spelling to unwrap. A name the registry does not know
+     fails the registry check, which is the honest answer for a caller that
+     is not a Keeper. *)
+  let keeper_name = ctx.agent_name in
   let reject detail =
     (* A refused question is worth a line. The Keeper sees the rejection in
        its own result; an operator wondering why nothing is waiting on them
@@ -268,7 +257,7 @@ let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.resul
      store is keyed on the registry name, so reading under an unresolved
      spelling returns an empty list rather than an error. A Keeper would be
      told it never asked. *)
-  let keeper_name = asking_keeper_name ctx.agent_name in
+  let keeper_name = ctx.agent_name in
   let include_resolved = bool_field "include_resolved" ctx.arguments in
   let wanted_ask_id = string_option_field "ask_id" ctx.arguments in
   let rows = Keeper_ask_store.rows ~base_path ~keeper_name in
@@ -304,7 +293,7 @@ let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.resul
 
 let handle_ask_withdraw ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let base_path = ctx.config.base_path in
-  let keeper_name = asking_keeper_name ctx.agent_name in
+  let keeper_name = ctx.agent_name in
   let reject detail =
     Log.Keeper.info "keeper_ask_withdraw: keeper=%s refused=%s" keeper_name detail;
     Some

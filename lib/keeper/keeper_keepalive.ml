@@ -40,20 +40,7 @@ let get_bus () = Event_bus_slots.get_keeper ()
 
 (* ── gRPC directive processing ── *)
 
-let keeper_entry_by_identity_opt identity =
-  match Keeper_registry_lookup.find_by_agent_name identity with
-  | Some entry -> Some entry
-  | None ->
-    (match Keeper_registry_lookup.find_by_name identity with
-     | Some entry -> Some entry
-     | None ->
-       (match Keeper_identity.canonical_keeper_name_from_agent_name identity with
-        | Some keeper_name ->
-          (match Keeper_registry_lookup.find_by_name keeper_name with
-           | Some entry -> Some entry
-           | None -> None)
-        | None -> None))
-;;
+let keeper_entry_by_identity_opt identity = Keeper_registry_lookup.find_by_name identity
 
 let with_keeper_entry_by_identity ~identity ~on_missing f =
   match keeper_entry_by_identity_opt identity with
@@ -144,16 +131,10 @@ let not_in_registry_warn_decision ~agent_name ~now =
 
 let log_directive_agent_not_in_registry ~agent_name ~action =
   let known_keeper () =
-    match Keeper_tool_shared_runtime.find_registry_meta ~keeper_name:agent_name ~source_layer:"directive" with
-    | Some _ -> true
-    | None ->
-      (match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
-       | None -> false
-       | Some canonical_name ->
-         Option.is_some
-           (Keeper_tool_shared_runtime.find_registry_meta
-              ~keeper_name:canonical_name
-              ~source_layer:"directive"))
+    Option.is_some
+      (Keeper_tool_shared_runtime.find_registry_meta
+         ~keeper_name:agent_name
+         ~source_layer:"directive")
   in
   if known_keeper ()
   then
@@ -392,7 +373,7 @@ let reconcile_current_task_id_for_heartbeat ~config ~agent_name =
 ;;
 
 let registry_current_task_id agent_name =
-  match Keeper_registry_lookup.find_by_agent_name agent_name with
+  match Keeper_registry_lookup.find_by_name agent_name with
   | Some e -> e.meta.current_task_id
   | None -> None
 ;;
@@ -467,11 +448,6 @@ let bootstrap_live_keeper_meta ?lifecycle_token ~(ctx : _ context) (m : keeper_m
     then (
       let (_init_msg : string) = Workspace.init ctx.config ~agent_name:None in
       ());
-    let m =
-      match repair_identity_drift_for_keepalive ?lifecycle_token ~ctx m with
-      | Some repaired -> repaired
-      | None -> m
-    in
     let synced = m in
     (* Reset stale timestamp from previous server lifecycle.
 
@@ -706,7 +682,6 @@ type start_keepalive_outcome =
   | Keepalive_started of Keeper_registry.registry_entry
   | Keepalive_already_registered of Keeper_registry.registry_entry
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
-  | Keepalive_identity_unrepairable
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
   | Keepalive_memory_lane_not_ready of Keeper_memory_lane.lifecycle_open_error
@@ -724,7 +699,6 @@ let start_keepalive_outcome_to_string = function
       (Keeper_lane.Id.to_string (Keeper_lane.id entry.lane))
   | Keepalive_lifecycle_denied denial ->
     Keeper_lifecycle_admission.autonomous_denial_to_wire denial
-  | Keepalive_identity_unrepairable -> "keeper identity drift could not be repaired"
   | Keepalive_registration_rejected
       (Keeper_registry.Registration_shutdown_reserved operation_id) ->
     Printf.sprintf
@@ -835,19 +809,6 @@ let start_keepalive
     record_lifecycle_start_denial m denial;
     Keepalive_lifecycle_denied denial
   | Keeper_lifecycle_admission.Autonomous_admitted ->
-  match repair_identity_drift_for_keepalive ?lifecycle_token ~ctx m with
-  | None ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string HeartbeatFailures)
-      ~labels:[ "keeper", m.name; "phase", "identity_drift_unrepairable" ]
-      ();
-    Log.Keeper.emit
-      Log.Error
-      ~category:Log.Heartbeat
-      ~details:(`Assoc [ "keeper", `String m.name; "reason", `String "identity_drift_unrepairable" ])
-      (Printf.sprintf "start_keepalive skipped %s: identity drift could not be repaired" m.name);
-    Keepalive_identity_unrepairable
-  | Some m ->
     let existing_entry =
       Keeper_registry.get ~base_path:ctx.config.base_path m.name
     in

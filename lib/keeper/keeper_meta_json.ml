@@ -17,7 +17,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   object_of_field_values
     [ Schema, `String "masc.keeper_meta.v1"
     ; Name, `String m.name
-    ; Agent_name, `String m.agent_name
     ; Instructions, `String m.instructions
     ; ( Autonomous_instructions
       , match m.autonomous_instructions with

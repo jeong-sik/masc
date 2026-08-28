@@ -27,7 +27,6 @@ type turn_runtime_delta =
   ; usage : usage_delta
   ; counters : turn_counter_deltas
   ; next_keeper_id : Keeper_id.Uid.t option
-  ; next_agent_name : string
   ; next_trace_id : Keeper_id.Trace_id.t
   ; next_trace_history : string list
   ; next_last_handoff_ts : float
@@ -37,13 +36,6 @@ type turn_runtime_delta =
   ; updated_at : string
   }
 
-type identity_handoff =
-  { keeper_id : Keeper_id.Uid.t option
-  ; agent_name : string
-  ; trace_id : Keeper_id.Trace_id.t
-  ; trace_history : string list
-  ; updated_at : string
-  }
 
 type shutdown_latch = Operator_stopped
 
@@ -83,7 +75,6 @@ type meta_command =
       ; updated_at : string
       }
   | Update_profile of profile_update
-  | Handoff_identity of identity_handoff
   | Repair_trace_identity of
       { trace_id : Keeper_id.Trace_id.t
       ; trace_history : string list
@@ -304,7 +295,6 @@ let turn_runtime_delta_of_snapshots
           ; compaction_count
           }
       ; next_keeper_id = after.keeper_id
-      ; next_agent_name = after.agent_name
       ; next_trace_id = after_rt.trace_id
       ; next_trace_history = after_rt.trace_history
       ; next_last_handoff_ts = after_rt.last_handoff_ts
@@ -421,7 +411,6 @@ let apply_turn_runtime_delta
     Ok
       { meta with
         keeper_id = delta.next_keeper_id
-      ; agent_name = delta.next_agent_name
       ; runtime
       ; updated_at = delta.updated_at
       }
@@ -487,22 +476,6 @@ let apply_existing (state : state) meta command =
          ; agent_core_env = update.agent_core_env
          ; tool_groups = update.tool_groups
          ; updated_at = update.updated_at
-         })
-  | Handoff_identity handoff ->
-    let runtime =
-      { meta.runtime with
-        trace_id = handoff.trace_id
-      ; trace_history = handoff.trace_history
-      }
-    in
-    Ok
-      (with_meta
-         state
-         { meta with
-           keeper_id = handoff.keeper_id
-         ; agent_name = handoff.agent_name
-         ; runtime
-         ; updated_at = handoff.updated_at
          })
   | Repair_trace_identity repair ->
     let runtime =

@@ -37,9 +37,6 @@ let make_meta () =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
           [ "name", `String "tool-kind-keeper"
-          ; ( "agent_name"
-            , `String
-                (Masc.Keeper_identity.keeper_agent_name "tool-kind-keeper") )
           ; "trace_id", `String "tool-kind-trace"
           ; "allowed_paths", `List [ `String "*" ]
           ])

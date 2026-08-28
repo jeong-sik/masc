@@ -15,7 +15,7 @@ let emit_tool_exec
     ignore
       (Activity_graph.emit
          config
-         ~actor:(Activity_graph.entity ~kind:"agent" meta.agent_name)
+         ~actor:(Activity_graph.entity ~kind:"agent" meta.name)
          ~subject:(Activity_graph.entity ~kind:"tool" tool_name)
          ~kind:
            (Activity_graph.tool_execution_event_kind_to_string

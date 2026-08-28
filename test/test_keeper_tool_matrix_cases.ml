@@ -118,7 +118,6 @@ let make_meta ?(name = keeper_matrix_owner) () =
       (`Assoc
         [
           ("name", `String name);
-          ("agent_name", `String name);
           ("trace_id", `String "keeper-tool-matrix-trace");
           ("allowed_paths", `List [ `String "*" ]);
         ])
@@ -219,7 +218,7 @@ let ensure_keeper_claim fixture =
   ignore (Generic.ensure_task fixture.generic);
   ignore
     (Masc.Workspace.claim_next_r fixture.config
-       ~agent_name:fixture.meta.agent_name ())
+       ~agent_name:fixture.meta.name ())
 
 let ensure_voice_session fixture =
   let mgr = Masc.Keeper_voice_local.get_session_manager () in

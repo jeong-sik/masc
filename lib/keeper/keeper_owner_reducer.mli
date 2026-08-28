@@ -33,7 +33,6 @@ type turn_runtime_delta =
   ; usage : usage_delta
   ; counters : turn_counter_deltas
   ; next_keeper_id : Keeper_id.Uid.t option
-  ; next_agent_name : string
   ; next_trace_id : Keeper_id.Trace_id.t
   ; next_trace_history : string list
   ; next_last_handoff_ts : float
@@ -43,13 +42,6 @@ type turn_runtime_delta =
   ; updated_at : string
   }
 
-type identity_handoff =
-  { keeper_id : Keeper_id.Uid.t option
-  ; agent_name : string
-  ; trace_id : Keeper_id.Trace_id.t
-  ; trace_history : string list
-  ; updated_at : string
-  }
 
 type shutdown_latch = Operator_stopped
 
@@ -89,7 +81,6 @@ type meta_command =
       ; updated_at : string
       }
   | Update_profile of profile_update
-  | Handoff_identity of identity_handoff
   | Repair_trace_identity of
       { trace_id : Keeper_id.Trace_id.t
       ; trace_history : string list

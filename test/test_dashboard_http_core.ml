@@ -316,7 +316,6 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [ "name", `String name
-          ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
           ; "trace_id", `String trace_id
           ])
     with
@@ -1549,7 +1548,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [ "name", `String name
-          ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
           ; "trace_id", `String "execution-trust-narrow-trace"
           ])
     with
@@ -1603,7 +1601,7 @@ let test_execution_trust_uses_narrow_keeper_projection () =
   check (list string) "wire field set remains exact"
     execution_trust_keeper_row_keys keys;
   check string "name" name (row |> member "name" |> to_string);
-  check string "agent name" (Masc.Keeper_identity.keeper_agent_name name)
+  check string "agent name" name
     (row |> member "agent_name" |> to_string);
   check string "trace id" "execution-trust-narrow-trace"
     (row |> member "trace_id" |> to_string);
@@ -2161,7 +2159,6 @@ let test_offline_keeper_composite_exposes_secret_projection () =
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
            [ "name", `String keeper_name
-           ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name keeper_name)
            ; "trace_id", `String "offline-secret-trace"
            ])
     with
@@ -2207,7 +2204,6 @@ let keeper_state_diagram_meta ?last_runtime_attempt_provider name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          ([ "name", `String name
-          ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
           ; "trace_id", `String ("trace-" ^ name)
           ]
           @ runtime_attempt_fields))
@@ -2816,7 +2812,6 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [ "name", `String keeper_name
-          ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
           ; "trace_id", `String "continuity-reconcile-trace"
           ])
     with
@@ -3090,7 +3085,6 @@ let prepare_config_sync_keeper ~sw config name =
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [ "name", `String name
-          ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
           ; "trace_id", `String (name ^ "-trace")
           ])
     with
@@ -3536,7 +3530,6 @@ let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
               Masc_test_deps.meta_of_json_fixture
                 (`Assoc
                   [ "name", `String name
-                  ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
                   ; "trace_id", `String (name ^ "-trace")
                   ])
             with

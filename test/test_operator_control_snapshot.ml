@@ -109,7 +109,6 @@ let test_usage_does_not_create_context_snapshot () =
         (`Assoc
           [
             ("name", `String "ctx-ratio-demo");
-            ("agent_name", `String "keeper-ctx-ratio-demo-agent");
             ("trace_id", `String "trace-ctx-ratio-demo");
           ])
     with
@@ -405,7 +404,6 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
                 ("trace_id", `String "trace-paused-runtime-trust");
                 ("runtime_id", `String "runtime.primary");
               ])
@@ -426,7 +424,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
           [
             ("schema", `String "keeper.execution_receipt.v1");
             ("keeper_name", `String keeper_name);
-            ("agent_name", `String meta.agent_name);
+            ("agent_name", `String meta.name);
             ("trace_id", `String "trace-paused-runtime-trust");
             ("turn_count", `Int 12);
             ("outcome", `String "error");
@@ -546,8 +544,6 @@ let test_lightweight_snapshot_surfaces_heartbeat_read_error () =
           Masc_test_deps.meta_of_json_fixture
             (`Assoc
               [ ("name", `String keeper_name)
-              ; ( "agent_name"
-                , `String (Keeper_identity.keeper_agent_name keeper_name) )
               ; ("trace_id", `String "trace-heartbeat-read-error")
               ])
         with
@@ -607,7 +603,6 @@ let test_diagnostic_uses_persisted_heartbeat_freshness () =
           Masc_test_deps.meta_of_json_fixture
             (`Assoc
               [ "name", `String keeper_name
-              ; "agent_name", `String "keeper-heartbeat-health-agent"
               ; "trace_id", `String "trace-heartbeat-health"
               ; "total_turns", `Int 1
               ])
@@ -636,12 +631,7 @@ let test_diagnostic_uses_persisted_heartbeat_freshness () =
         heartbeat_timestamp
         (diagnostic |> member "last_heartbeat" |> to_string);
       let active_keeper_name = "active-health" in
-      let active_meta =
-        { meta with
-          name = active_keeper_name
-        ; agent_name = "keeper-active-health-agent"
-        }
-      in
+      let active_meta = { meta with name = active_keeper_name } in
       append_heartbeat_snapshot
         config
         active_keeper_name
@@ -813,7 +803,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
           [
             ("schema", `String "keeper.execution_receipt.v1");
             ("keeper_name", `String keeper_name);
-            ("agent_name", `String meta.agent_name);
+            ("agent_name", `String meta.name);
             ("trace_id", `String "trace-receipt-causal-lightweight");
             ("turn_count", `Int 3);
             ("outcome", `String "ok");

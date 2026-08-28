@@ -295,7 +295,7 @@ let verify_keeper_confined_root (confined : Keeper_alerting_path.confined_path) 
      | Eio.Io _ as exn -> Error (Printexc.to_string exn))
 ;;
 
-let keeper_agent_sender ~(meta : keeper_meta) = meta.agent_name
+let keeper_agent_sender ~(meta : keeper_meta) = meta.name
 
 let shell_readonly_limit args =
   max 1 (min 200 (Safe_ops.json_int ~default:40 "limit" args))

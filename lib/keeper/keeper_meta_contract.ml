@@ -279,7 +279,6 @@ type keeper_meta =
   { (* -- Identity & profile -- *)
     id : Ids.Keeper_id.t option [@default None]
   ; name : string
-  ; agent_name : string
   ; instructions : string
   ; autonomous_instructions : string option
     (** Per-keeper autonomous-turn instructions. When non-empty and the turn

@@ -1841,7 +1841,7 @@ let handle_masc_local_runtime_with_outcome
   in
   Tool_local_runtime.dispatch
     { Tool_local_runtime_core.config
-    ; agent_name = meta.agent_name
+    ; agent_name = meta.name
     ; authorize_external_effect = Some authorize_external_effect
     }
     ~name
@@ -1887,7 +1887,7 @@ let handle_masc_keeper_with_outcome
   in
   !Keeper_dispatch_ref.dispatch
       ~config
-      ~agent_name:meta.agent_name
+      ~agent_name:meta.name
       ~publication_recovery_provider
       ?sw
       ?clock

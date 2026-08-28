@@ -32,7 +32,6 @@ let keeper_meta () =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String "task-create-test"
-        ; "agent_name", `String "keeper-task-create-test-agent"
         ; "trace_id", `String "trace-task-create-test"
         ])
   with
@@ -79,10 +78,10 @@ let test_keeper_broadcast_forwards_typed_cache_signal () =
        ignore
          (Masc.Workspace.bind_session
             config
-            ~agent_name:meta.agent_name
+            ~agent_name:meta.name
             ~capabilities:[ "test" ]
             ());
-       let subject = Masc.Workspace.resolve_agent_name config meta.agent_name in
+       let subject = Masc.Workspace.resolve_agent_name config meta.name in
        ignore
          (Masc.Workspace.add_task
             config
@@ -623,7 +622,7 @@ let test_strict_done_submits_for_verification () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
-       let agent_name = "keeper-task-create-test-agent" in
+       let agent_name = "task-create-test" in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        ignore
          (Masc.Workspace.add_task
@@ -679,7 +678,7 @@ let test_default_done_is_terminal () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
-       let agent_name = "keeper-task-create-test-agent" in
+       let agent_name = "task-create-test" in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        ignore
          (Masc.Workspace.add_task
@@ -778,7 +777,7 @@ let test_done_refuses_oversized_artifact_evidence () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
-       let agent_name = "keeper-task-create-test-agent" in
+       let agent_name = "task-create-test" in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        ignore
          (Masc.Workspace.add_task
@@ -899,7 +898,6 @@ let release_test_meta () =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String "release-test"
-        ; "agent_name", `String "keeper-release-test-agent"
         ; "trace_id", `String "trace-release-test"
         ])
   with
@@ -917,7 +915,7 @@ let with_release_fixture f =
        ignore
          (Masc.Workspace.bind_session
             config
-            ~agent_name:meta.agent_name
+            ~agent_name:meta.name
             ~capabilities:[ "test" ]
             ());
        ignore

@@ -17,7 +17,6 @@ let test_meta () =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ "name", `String "failed-batch"
-         ; "agent_name", `String "keeper-failed-batch-agent"
          ; "trace_id", `String "trace-failed-batch"
          ])
   with

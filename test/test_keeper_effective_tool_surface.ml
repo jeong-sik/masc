@@ -526,7 +526,6 @@ let test_turn_admission_uses_dedicated_instruction_reader () =
            Masc_test_deps.meta_of_json_fixture
              (`Assoc
                 [ "name", `String "skill-admission"
-                ; "agent_name", `String "keeper-skill-admission-agent"
                 ; "trace_id", `String "skill-admission-trace"
                 ])
          with
@@ -558,7 +557,7 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
        ignore (Workspace.init config ~agent_name:None);
        let snapshot = skill_snapshot () in
        let guide_reference = reference_by_name snapshot "guide" in
-       let agent_name = "keeper-skill-held-agent" in
+       let agent_name = "skill-held" in
        let add ~skills ~title =
          match
            Workspace.add_task_with_result
@@ -598,7 +597,6 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
            Masc_test_deps.meta_of_json_fixture
              (`Assoc
                 [ "name", `String "skill-held"
-                ; "agent_name", `String agent_name
                 ; "trace_id", `String "skill-held-trace"
                 ])
          with

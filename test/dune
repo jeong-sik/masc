@@ -1190,7 +1190,6 @@
   test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_tool_failure_parity
-  test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
   test_dashboard_http_core
@@ -1214,9 +1213,6 @@
   test_server_timing
   test_server_startup_takeover
   test_keeper_identity_parse
-  test_keeper_identity_normalize
-  test_workspace_bind_fail_closed
-  test_keeper_identity_outcome_label
   test_capability_registry
   test_tool_misc_web_fetch
   test_tool_local_runtime_probe
@@ -1335,7 +1331,6 @@
   test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_tool_failure_parity
-  test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
   test_dashboard_http_core
@@ -1359,9 +1354,6 @@
   test_server_timing
   test_server_startup_takeover
   test_keeper_identity_parse
-  test_keeper_identity_normalize
-  test_workspace_bind_fail_closed
-  test_keeper_identity_outcome_label
   test_capability_registry
   test_tool_misc_web_fetch
   test_tool_local_runtime_probe

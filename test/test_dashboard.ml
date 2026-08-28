@@ -149,7 +149,6 @@ let make_test_meta name =
       (`Assoc
         [
           ("name", `String name);
-          ("agent_name", `String name);
           ("trace_id", `String ("trace-" ^ name));
         ])
   with

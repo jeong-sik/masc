@@ -41,7 +41,7 @@ let write_heartbeat_snapshot
         ; "ts_unix", `Float now_ts
         ; "channel", `String "heartbeat"
         ; "name", `String meta_current.name
-        ; "agent_name", `String meta_current.agent_name
+        ; "agent_name", `String meta_current.name
         ; "trace_id", `String (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
         ; ( "message_count"
           , Json_util.option_to_yojson (fun count -> `Int count) message_count )

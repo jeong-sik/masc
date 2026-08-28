@@ -299,7 +299,7 @@ let evidence_artifact_total_bytes ~(config : Workspace.config)
     (fun reference ->
        Workspace_verification_store.artifact_reference_size
          ~base_path:config.base_path
-         ~worker:meta.agent_name
+         ~worker:meta.name
          reference)
     evidence_refs
   |> List.fold_left ( + ) 0
@@ -470,7 +470,7 @@ let handle_keeper_task_tool_with_outcome
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
     let orphans =
       Workspace.audit_orphan_tasks config
-      |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
+      |> List.filter (fun (_, assignee) -> assignee <> meta.name)
     in
     let orphans = List.filteri (fun i _ -> i < limit) orphans in
     let items =
@@ -659,7 +659,7 @@ let handle_keeper_task_tool_with_outcome
         match
           Workspace.claim_task_r
             config
-            ~agent_name:meta.agent_name
+            ~agent_name:meta.name
             ~task_id:requested_task_id
             ()
         with
@@ -696,7 +696,7 @@ let handle_keeper_task_tool_with_outcome
              keeper whose backlog holds only its own routing/report tasks falls
              into the fallback, drops the goal-scope filter, and claims its own
              task right back — exactly the case this is meant to prevent. *)
-          Workspace.claim_next_r config ~agent_name:meta.agent_name
+          Workspace.claim_next_r config ~agent_name:meta.name
             ~hard_filter:auto_claim_eligible
             ()
       in
@@ -765,7 +765,7 @@ let handle_keeper_task_tool_with_outcome
           [
             ( "claim_observation",
               Task.Tool.build_claim_observation_payload
-                ~now:(Time_compat.now ()) ~agent_name:meta.agent_name
+                ~now:(Time_compat.now ()) ~agent_name:meta.name
                 ~task_id ~scope_widened );
             ( "claimed_task",
               `Assoc

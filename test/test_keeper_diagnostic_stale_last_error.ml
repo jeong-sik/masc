@@ -24,7 +24,6 @@ let meta_with_persisted_reason ~last_turn_ts =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String "stalekeeper"
-        ; "agent_name", `String "keeper-stalekeeper-agent"
         ; "trace_id", `String "trace-stalekeeper"
         ; "last_proactive_outcome", `String "error"
         ; ( "last_proactive_reason"

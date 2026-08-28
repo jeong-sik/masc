@@ -15,7 +15,6 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String name
-        ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
         ; "trace_id", `String ("trace-" ^ name)
         ; "autoboot_enabled", `Bool false
         ])

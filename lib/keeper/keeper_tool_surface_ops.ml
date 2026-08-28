@@ -112,70 +112,6 @@ let attach_assoc_field key value = function
   | `Assoc fields -> `Assoc ((key, value) :: fields)
   | other -> other
 
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : keeper_meta) =
-  let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
-  if String.equal expected_agent_name meta.agent_name then
-    Ok (meta, None)
-  else
-    let previous_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    let new_trace_id_raw = Keeper_identity.generate_trace_id () in
-    let* new_trace_id =
-      Keeper_id.Trace_id.of_string new_trace_id_raw
-      |> Result.map_error (fun err ->
-          Printf.sprintf
-            "failed to reseed keeper identity for %s: invalid trace_id %s (%s)"
-            meta.name new_trace_id_raw err)
-    in
-    let* updated_meta =
-      match
-        Keeper_owner_registry.apply_meta
-          ~base_path:config.base_path
-          ~keeper_name:meta.name
-          (Keeper_owner_reducer.Handoff_identity
-             { keeper_id = meta.keeper_id
-             ; agent_name = expected_agent_name
-             ; trace_id = new_trace_id
-             ; trace_history =
-                 Json_util.dedupe_keep_order
-                   (previous_trace_id :: meta.runtime.trace_history)
-             ; updated_at = Keeper_meta_contract.now_iso ()
-             })
-      with
-      | Ok (Some updated_meta) -> Ok updated_meta
-      | Ok None ->
-        Error
-          (Printf.sprintf
-             "failed to reseed keeper identity for %s: owner metadata missing"
-             meta.name)
-      | Error error ->
-        Error
-          (Printf.sprintf
-             "failed to persist reseeded keeper identity for %s: %s"
-             meta.name
-             (Keeper_owner_registry.command_error_to_string error))
-    in
-    let base_dir = Keeper_types_profile.session_base_dir config in
-    ignore
-      (Keeper_context_runtime.create_session
-         ~session_id:new_trace_id_raw
-         ~base_dir);
-    Ok
-      ( updated_meta,
-        Some
-          (`Assoc
-             [
-               ("reason", `String "agent_name_mismatch");
-               ("keeper_name", `String updated_meta.name);
-               ("previous_agent_name", `String meta.agent_name);
-               ("expected_agent_name", `String expected_agent_name);
-               ("previous_trace_id", `String previous_trace_id);
-               ("new_trace_id", `String new_trace_id_raw);
-             ]) )
-
-let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
-  maybe_reseed_keeper_identity_config ~config:ctx.config meta
-
 let prepare_keeper_up_identity ctx args =
   let name = String.trim (get_string args "name" "") in
   let* resolved =
@@ -183,18 +119,17 @@ let prepare_keeper_up_identity ctx args =
     |> Result.map_error (fun err -> Printf.sprintf "%s" err)
   in
   match resolved with
-  | None -> Ok (args, None)
+  | None -> Ok args
   | Some (_resolved_name, meta) ->
-      let* updated_meta, identity_reseed = maybe_reseed_keeper_identity ctx meta in
       let prepared_args =
         match args with
         | `Assoc fields ->
             `Assoc
-              (("name", `String updated_meta.name)
+              (("name", `String meta.name)
               :: List.remove_assoc "name" fields)
         | other -> other
       in
-      Ok (prepared_args, identity_reseed)
+      Ok prepared_args
 let startup_not_ready_error_data elapsed =
   `Assoc
     [ ("error", `String "server_initializing")
@@ -213,17 +148,12 @@ let with_keeper_startup_gate f =
     f ()
 let execute_keeper_up ctx args : tool_result =
   match
-    let* prepared_args, identity_reseed = prepare_keeper_up_identity ctx args in
+    let* prepared_args = prepare_keeper_up_identity ctx args in
     let result = Turn.handle_keeper_up ctx prepared_args in
     if not (tool_result_success result) then
       Ok result
     else
       let json = Tool_result.data result in
-      let json =
-        match identity_reseed with
-        | Some note -> attach_assoc_field "identity_reseed" note json
-        | None -> json
-      in
       invalidate_keeper_list_cache ();
       Ok (tool_result_ok_data (annotate_keeper_json ~runtime_class:"keeper" json))
   with
@@ -272,7 +202,7 @@ let keeper_list_error_row_json ~runtime_class config name err =
     | Some meta ->
         [
           ("meta", keeper_brief_meta_json meta);
-          ("agent_name", `String meta.agent_name);
+          ("agent_name", `String meta.name);
           ("created_at", `String meta.created_at);
           ("updated_at", `String meta.updated_at);
           ("autoboot_enabled", `Bool meta.autoboot_enabled);
@@ -352,7 +282,7 @@ let keeper_list_row_json ~runtime_class config name =
         (`Assoc (
           [
             ("runtime_class", `String runtime_class); ("name", `String meta.name);
-            ("meta", keeper_brief_meta_json meta); ("agent_name", `String meta.agent_name);
+            ("meta", keeper_brief_meta_json meta); ("agent_name", `String meta.name);
             ("status", `String status); ("phase", `String phase);
             ("health", `String health);
             ("paused", `Bool meta.paused);
@@ -376,24 +306,15 @@ let prepare_passive_keeper_identity_config ~(config : Workspace.config) ~(agent_
     | name -> name
   in
   if String.equal requested_name "" then
-    Ok (args, None)
+    Ok args
   else
     let* resolved =
       read_meta_resolved config requested_name
       |> Result.map_error (fun err -> Printf.sprintf "%s" err)
     in
     match resolved with
-    | None -> Ok (args, None)
-    | Some (_resolved_name, meta) ->
-        let* updated_meta, identity_reseed =
-          maybe_reseed_keeper_identity_config ~config meta
-        in
-        Ok (with_keeper_name args updated_meta.name, identity_reseed)
-
-let attach_identity_reseed ?identity_reseed json =
-  match identity_reseed with
-  | None -> json
-  | Some note -> attach_assoc_field "identity_reseed" note json
+    | None -> Ok args
+    | Some (_resolved_name, meta) -> Ok (with_keeper_name args meta.name)
 let handle_keeper_up ctx args : tool_result =
   with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
 
@@ -426,7 +347,7 @@ let keeper_up_body
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_status_body ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
   match
-    let* prepared_args, identity_reseed =
+    let* prepared_args =
       prepare_passive_keeper_identity_config ~config ~agent_name args
     in
     let result =
@@ -438,11 +359,8 @@ let keeper_status_body ~(config : Workspace.config) ~(agent_name : string) args 
     if not (tool_result_success result) then
       Ok result
     else
-      let json = Tool_result.data result in
       let json =
-        json
-        |> annotate_keeper_json ~runtime_class:"keeper"
-        |> attach_identity_reseed ?identity_reseed
+        Tool_result.data result |> annotate_keeper_json ~runtime_class:"keeper"
       in
       Ok (tool_result_ok_data json)
   with
@@ -454,15 +372,7 @@ let handle_keeper_status ctx args : tool_result =
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_name_lookup_candidates raw_name =
   let trimmed = String.trim raw_name in
-  if String.equal trimmed "" then
-    []
-  else
-    let aliases =
-      match Keeper_identity.canonical_keeper_name trimmed with
-      | Some candidate when not (String.equal candidate trimmed) -> [ candidate ]
-      | Some _ | None -> []
-    in
-    trimmed :: aliases
+  if String.equal trimmed "" then [] else [ trimmed ]
 
 (* Resolution carries the meta it read (RFC-0371 B6). The name-only shape
    below discarded it, which forced the preflight one call later to read the

@@ -118,7 +118,7 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
   match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
   | Some { current_turn_observation = Some obs; _ } ->
     (try
-       let _heartbeat = Workspace.heartbeat ctx.config ~agent_name:meta.agent_name in
+       let _heartbeat = Workspace.heartbeat ctx.config ~agent_name:meta.name in
        ()
      with
      | Eio.Cancel.Cancelled _ as e -> raise e

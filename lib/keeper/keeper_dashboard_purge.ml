@@ -23,11 +23,6 @@ type resolve_error =
       { expected_keeper_name : string
       ; persisted_keeper_name : string
       }
-  | Keeper_agent_name_invalid of
-      { keeper_name : string
-      ; agent_name : string
-      ; detail : string
-      }
   | Keeper_owner_unavailable of
       { keeper_name : string
       ; detail : string
@@ -95,12 +90,6 @@ let resolve_error_to_string = function
       "dashboard Keeper purge metadata owner mismatch: expected=%s persisted=%s"
       expected_keeper_name
       persisted_keeper_name
-  | Keeper_agent_name_invalid { keeper_name; agent_name; detail } ->
-    Printf.sprintf
-      "dashboard Keeper purge metadata has an invalid agent owner: keeper=%s agent=%S error=%s"
-      keeper_name
-      agent_name
-      detail
   | Keeper_owner_unavailable { keeper_name; detail } ->
     Printf.sprintf
       "dashboard Keeper purge cannot read Owner shutdown state: keeper=%s error=%s"
@@ -121,16 +110,14 @@ let canonical_requested_name requested_name =
   else
     match Workspace.validate_agent_name requested_name with
     | Error detail -> Error (Invalid_requested_name { requested_name; detail })
-    | Ok _ -> Ok (requested_name, Keeper_identity.canonical_keeper_name requested_name)
+    | Ok _ -> Ok requested_name
 ;;
 
 let resolve (config : Workspace.config) requested_name =
   match canonical_requested_name requested_name with
   | Error _ as error -> error
-  | Ok (requested_name, canonical_name) ->
-    match canonical_name with
-    | None -> Ok None
-    | Some keeper_name ->
+  | Ok requested_name ->
+      let keeper_name = requested_name in
       let metadata_path = Keeper_types_profile.keeper_meta_path config keeper_name in
       let configuration_path =
         Config_dir_resolver.keeper_toml_path_opt_for_base_path
@@ -142,35 +129,29 @@ let resolve (config : Workspace.config) requested_name =
          Error
            (Keeper_metadata_unreadable { keeper_name; metadata_path; detail })
        | Ok (Some meta) when String.equal meta.name keeper_name ->
-         (match Workspace.validate_agent_name meta.agent_name with
-          | Ok _ ->
-            (* Two signals, because the two lanes admit turns differently. The
-               autonomous cycle only enters through a phase [can_execute_turn]
-               admits, but the chat lane runs
-               [run_keeper_invocation_turn_admitted] and never changes phase —
-               [mark_turn_started] writes [current_turn_observation] and leaves
-               [phase] alone. A phase-only guard therefore reads a Paused
-               Keeper answering a chat message as purgeable. *)
-            (match Keeper_registry.get ~base_path:config.base_path keeper_name with
-             | Some entry when Keeper_state_machine.can_execute_turn entry.phase ->
-               Error
-                 (Keeper_lane_executing
-                    { keeper_name
-                    ; phase = Keeper_state_machine.phase_to_string entry.phase
-                    ; live_turn_id = None
-                    })
-             | Some { current_turn_observation = Some observation; phase; _ } ->
-               Error
-                 (Keeper_lane_executing
-                    { keeper_name
-                    ; phase = Keeper_state_machine.phase_to_string phase
-                    ; live_turn_id = Some observation.turn_id
-                    })
-             | Some _ | None -> Ok (Some { requested_name; keeper_name; meta }))
-          | Error detail ->
+         (* Two signals, because the two lanes admit turns differently. The
+            autonomous cycle only enters through a phase [can_execute_turn]
+            admits, but the chat lane runs
+            [run_keeper_invocation_turn_admitted] and never changes phase —
+            [mark_turn_started] writes [current_turn_observation] and leaves
+            [phase] alone. A phase-only guard therefore reads a Paused
+            Keeper answering a chat message as purgeable. *)
+         (match Keeper_registry.get ~base_path:config.base_path keeper_name with
+          | Some entry when Keeper_state_machine.can_execute_turn entry.phase ->
             Error
-              (Keeper_agent_name_invalid
-                 { keeper_name; agent_name = meta.agent_name; detail }))
+              (Keeper_lane_executing
+                 { keeper_name
+                 ; phase = Keeper_state_machine.phase_to_string entry.phase
+                 ; live_turn_id = None
+                 })
+          | Some { current_turn_observation = Some observation; phase; _ } ->
+            Error
+              (Keeper_lane_executing
+                 { keeper_name
+                 ; phase = Keeper_state_machine.phase_to_string phase
+                 ; live_turn_id = Some observation.turn_id
+                 })
+          | Some _ | None -> Ok (Some { requested_name; keeper_name; meta }))
        | Ok (Some meta) ->
          Error
            (Keeper_metadata_name_mismatch
@@ -188,8 +169,7 @@ let resolve (config : Workspace.config) requested_name =
 let existing_operation (config : Workspace.config) requested_name =
   match canonical_requested_name requested_name with
   | Error _ as error -> error
-  | Ok (_, None) -> Ok None
-  | Ok (_, Some keeper_name) ->
+  | Ok keeper_name ->
     let snapshot =
       Keeper_owner_registry.shutdown_operation_id
         ~base_path:config.base_path
@@ -243,7 +223,7 @@ let existing_operation (config : Workspace.config) requested_name =
 
 let submit ~config ~actor ({ requested_name; keeper_name; meta } : target) =
   let context : Keeper_shutdown_types.dashboard_purge_context =
-    { requested_name; agent_name = meta.agent_name }
+    { requested_name; agent_name = meta.name }
   in
   let request : Keeper_shutdown_prepare_join.request =
     { actor

@@ -53,6 +53,62 @@ let test_masc_start_tilde_rejects_empty_initial_home () =
         (String_util.contains_substring message "HOME is required to expand '~'"))
 ;;
 
+(* RFC-0393 D4: identity uniqueness. A name that already names a Keeper is
+   refused at the join boundary — an external agent binding under it would
+   poison every ledger attribution for that Keeper. *)
+let test_masc_start_refuses_a_keeper_name () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = Cases.temp_dir "mcp-start-keeper-collision-" in
+  let saved_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      Cases.cleanup_dir base_path;
+      restore_env "MASC_BASE_PATH" saved_base_path)
+    (fun () ->
+      Unix.putenv "MASC_BASE_PATH" base_path;
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:None);
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ ("name", `String "tool-matrix")
+              ; ("trace_id", `String "trace-tool-matrix-collision")
+              ])
+        with
+        | Ok meta -> meta
+        | Error e -> Alcotest.fail e
+      in
+      (match Masc.Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail e);
+      let fixture =
+        Cases.make_fixture
+          sw
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~fs:(Eio.Stdenv.fs env)
+          ~net:(Eio.Stdenv.net env)
+          ~mono_clock:(Eio.Stdenv.mono_clock env)
+          (Eio.Stdenv.clock env)
+          ~base_path
+          Cases.Fresh
+      in
+      let result =
+        Cases.execute_tool
+          fixture
+          ~name:"masc_start"
+          ~arguments:
+            (`Assoc [ ("path", `String base_path) ])
+      in
+      Alcotest.(check bool) "rejected" false (Tool_result.is_success result);
+      let message = Tool_result.message result in
+      if not (String_util.contains_substring message "already names a Keeper")
+      then Alcotest.failf "unexpected refusal message: %s" message)
+;;
+
 let test_masc_start_surfaces_claim_failure_after_task_commit () =
   Eio_main.run
   @@ fun env ->
@@ -625,6 +681,10 @@ let () =
             "surfaces claim failure after task commit"
             `Quick
             test_masc_start_surfaces_claim_failure_after_task_commit
+        ; Alcotest.test_case
+            "refuses a Keeper name at the join boundary"
+            `Quick
+            test_masc_start_refuses_a_keeper_name
         ; Alcotest.test_case
             "surfaces current-task failure after claim commit"
             `Quick

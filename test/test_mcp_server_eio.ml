@@ -85,16 +85,11 @@ let test_agent_identity ~uuid ~session_key : Masc.Client_identity.t =
     metadata = [];
   }
 
-let make_keeper_meta ?agent_name name =
-  let agent_name =
-    Option.value agent_name
-      ~default:(Keeper_identity.keeper_agent_name name)
-  in
+let make_keeper_meta name =
   let json =
     `Assoc
       [
          ("name", `String name);
-         ("agent_name", `String agent_name);
          ("trace_id", `String ("trace-test-" ^ name));
        ]
   in
@@ -2175,9 +2170,8 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
       cleanup_dir base_path)
     (fun () ->
       let keeper_name = "alpha" in
-      let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       let keeper_meta =
-        make_keeper_meta ~agent_name:keeper_agent_name keeper_name
+        make_keeper_meta keeper_name
       in
       ignore
         (Keeper_registry.For_testing.register ~base_path keeper_name
@@ -2197,7 +2191,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
                     ("name", `String "masc_status");
                     ( "arguments",
                       `Assoc
-                        [ ("_agent_name", `String keeper_agent_name) ] );
+                        [ ("_agent_name", `String keeper_name) ] );
                   ] );
             ])
       in
@@ -2382,10 +2376,9 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execu
     (fun () ->
       Keeper_registry.For_testing.clear ();
       let keeper_name = "alpha" in
-      let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       ignore
         (Keeper_registry.For_testing.register ~base_path keeper_name
-           (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
+           (make_keeper_meta keeper_name));
       let state = Mcp_eio.For_testing.create_state ~base_path () in
       let token = Auth.ensure_internal_keeper_token base_path in
       let request = Yojson.Safe.to_string (`Assoc [
@@ -2397,7 +2390,7 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execu
           ( "arguments",
             `Assoc
               [
-                ("_agent_name", `String keeper_agent_name);
+                ("_agent_name", `String keeper_name);
                 ("argv", `List [ `String "pwd" ]);
               ] );
         ]);

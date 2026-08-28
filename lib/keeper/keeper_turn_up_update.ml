@@ -377,7 +377,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
                               (start_keepalive_outcome_to_string
                                  (Keepalive_already_registered entry)))
                        | ( Keepalive_lifecycle_denied _
-                         | Keepalive_identity_unrepairable
                          | Keepalive_registration_rejected _
                          | Keepalive_fiber_start_rejected _
                          | Keepalive_memory_lane_not_ready _

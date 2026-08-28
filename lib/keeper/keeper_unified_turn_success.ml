@@ -186,7 +186,7 @@ let emit_activity_graph
        let event =
          Activity_graph.emit
         config
-        ~actor:{ kind = "agent"; id = updated_meta.Keeper_meta_contract.agent_name }
+        ~actor:{ kind = "agent"; id = updated_meta.Keeper_meta_contract.name }
         ~kind:activity_kind
         ~payload:
           (`Assoc

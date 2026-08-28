@@ -156,7 +156,6 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
       (`Assoc
         [
           ("name", `String name);
-          ("agent_name", `String (Masc.Keeper_identity.keeper_agent_name name));
           ("trace_id", `String trace_id);
         ])
   with
@@ -175,16 +174,11 @@ let test_registry_canonicalizes_mismatched_meta_on_register () =
       KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let registry_name = "keeper-registry-register-repair" in
-      let bad_meta =
-        { (make_keeper_meta ~name:"wrong-register-name" ()) with agent_name = "" }
-      in
+      let bad_meta = make_keeper_meta ~name:"wrong-register-name" () in
       ignore (KR.For_testing.register ~base_path:config.base_path registry_name bad_meta);
       match KR.get ~base_path:config.base_path registry_name with
       | Some entry ->
-          check string "registry repairs meta name" registry_name entry.meta.name;
-          check string "registry repairs empty agent name"
-            (Masc.Keeper_identity.keeper_agent_name registry_name)
-            entry.meta.agent_name
+          check string "registry repairs meta name" registry_name entry.meta.name
       | None -> fail "expected registered keeper after canonical register repair")
 
 let test_dispatch_keeper_phase_event_uses_workspace_base_path () =

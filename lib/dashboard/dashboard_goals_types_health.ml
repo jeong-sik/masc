@@ -23,11 +23,7 @@ let keeper_name_matches_meta metas name =
   List.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> String.equal meta.name name) metas
 
 let keeper_name_of_assignee metas assignee =
-  match Keeper_identity.canonical_keeper_name_from_agent_name assignee with
-  | Some keeper_name -> Some keeper_name
-  | None ->
-      if keeper_name_matches_meta metas assignee then Some assignee
-      else None
+  if keeper_name_matches_meta metas assignee then Some assignee else None
 
 let goal_fsm_state_kind = function
   | Goal_phase.Executing -> "executing"

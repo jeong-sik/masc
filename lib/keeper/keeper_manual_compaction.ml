@@ -152,7 +152,7 @@ let append_manifest
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let context : Keeper_runtime_manifest.turn_context =
     { manifest_keeper_name = meta.name
-    ; manifest_agent_name = Some meta.agent_name
+    ; manifest_agent_name = Some meta.name
     ; manifest_trace_id = trace_id
     ; manifest_keeper_turn_id = Some recovery.checkpoint.turn_count
     }

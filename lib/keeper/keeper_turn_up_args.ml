@@ -246,17 +246,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
   if not (validate_name name) then
     Error (tool_result_error ~class_:Tool_result.Policy_rejection (invalid_name_error name))
   else
-    match Keeper_identity.keeper_name_of_agent_alias name with
-    (* One parse decides both facts. Asking "is it an alias?" separately forced
-       a default keeper name for a case that parse cannot produce, and the
-       resulting message named the rejected input as its own replacement. *)
-    | Some canonical_name ->
-        Error
-          (tool_result_error ~class_:Tool_result.Policy_rejection
-             (Printf.sprintf
-                "invalid keeper name: %S is a runtime agent identity; use the canonical keeper name %S"
-                name canonical_name))
-    | None ->
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
     let runtime_id_opt_res = parse_runtime_id_opt args in

@@ -377,7 +377,7 @@ let test_held_task_skills_section_absent_without_held_tasks () =
    a skill, and not the current task. *)
 let test_held_task_skills_projection () =
   let config = Lazy.force prompt_config in
-  let assignee = meta.agent_name in
+  let assignee = meta.name in
   let held id ~by ~skills ~status =
     let task_status =
       match status with

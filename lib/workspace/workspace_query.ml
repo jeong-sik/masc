@@ -158,23 +158,32 @@ let state_backed_active_agents config =
   let state = read_state config in
   state.active_agents |> normalized_string_list |> List.map (state_backed_agent state)
 
+(* Reading the runtime roster can fail on its own while the rest of the
+   observation succeeds. The empty list that comes back then is
+   indistinguishable from "no runtime agents are up", so the detail travels
+   beside it and the caller decides whether anyone is told: the log line alone
+   left [masc_status] answering with a shorter roster and no sign that a read
+   had failed. *)
 let runtime_agents config =
-  try (Atomic.get Workspace_hooks.runtime_agents_fn) config with
+  try (Atomic.get Workspace_hooks.runtime_agents_fn) config, None with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+    let detail = Printexc.to_string exn in
     Log.Workspace.warn
       "runtime_agents_fn failed while reading active agents: %s"
-      (Printexc.to_string exn);
-    []
+      detail;
+    [], Some ("runtime agent roster: " ^ detail)
 
 let agent_status_is_active = function
   | Masc_domain.Active | Busy | Listening -> true
   | Inactive -> false
 
 let active_runtime_agents config =
-  runtime_agents config
-  |> List.filter (fun (agent : Masc_domain.agent) ->
-         agent_status_is_active agent.status)
+  let agents, failure = runtime_agents config in
+  ( List.filter
+      (fun (agent : Masc_domain.agent) -> agent_status_is_active agent.status)
+      agents
+  , failure )
 
 let merge_agents primary secondary =
   let seen = Hashtbl.create (List.length primary + List.length secondary) in
@@ -193,16 +202,25 @@ let get_agents_raw config =
   let agents_path = agents_dir config in
   load_agents_from_dir config agents_path ~include_inactive:true
 
-(** Return active agents only.  Returns [[]] when MASC is not
-    initialized — safe for dashboard and display contexts.
-    Replaces the former [get_agents_raw_in_workspace]. *)
-let get_active_agents config =
-  if not (root_is_initialized config) then []
-  else
+(** Active agents together with whatever went wrong while reading them. The
+    roster is merged from three sources and one can fail while the others
+    answer, so a caller that shows the roster to a person can say so instead of
+    presenting a short list as a complete one. *)
+let get_active_agents_observed config =
+  if not (root_is_initialized config)
+  then [], []
+  else (
     let agents_path = agents_dir config in
     let workspace_agents = load_agents_from_dir config agents_path ~include_inactive:false in
     let state_agents = state_backed_active_agents config in
-    merge_agents (merge_agents workspace_agents state_agents) (active_runtime_agents config)
+    let runtime, runtime_failure = active_runtime_agents config in
+    ( merge_agents (merge_agents workspace_agents state_agents) runtime
+    , Option.to_list runtime_failure ))
+
+(** Return active agents only.  Returns [[]] when MASC is not
+    initialized — safe for dashboard and display contexts.
+    Replaces the former [get_agents_raw_in_workspace]. *)
+let get_active_agents config = fst (get_active_agents_observed config)
 
 (** Like [get_agents_raw] but returns [[]] when not initialized
     instead of raising.  Includes inactive agents.

@@ -51,6 +51,14 @@ val get_agents_raw : config -> Masc_domain.agent list
     initialized — safe for dashboard and display contexts. *)
 val get_active_agents : config -> Masc_domain.agent list
 
+val get_active_agents_observed : config -> Masc_domain.agent list * string list
+(** The roster together with the reads that failed while building it. The
+    roster is merged from three sources, so one can fail while the others
+    answer and the shorter list that results says nothing about it. A caller
+    that shows the roster to a person should use this and report what is
+    missing; {!get_active_agents} keeps the plain list for callers that only
+    consume the names. *)
+
 (** Like {!get_agents_raw} but returns [[]] when not initialized
     instead of raising.  Includes inactive agents.
     Useful for keeper backlog-triage enrollment. *)

@@ -297,6 +297,59 @@ let test_duplicate_request_context_is_rejected_at_submit_and_decode () =
     | Async.Rejected _ -> fail "persisted duplicate request context was access-rejected")
 ;;
 
+let test_non_json_numbers_are_rejected_at_submit_and_decode () =
+  with_temp_base "keeper-msg-context-numbers-" (fun base_path ->
+    Eio_main.run
+    @@ fun _env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let worker_runs = ref 0 in
+    let invalid_values =
+      [ `Intlit "not-a-number"; `Float Float.nan; `Float Float.infinity ]
+    in
+    List.iter
+      (fun invalid_value ->
+         match
+           Async.submit
+             ~request_context:[ "invalid_number", invalid_value ]
+             ~background_sw:sw
+             ~base_path
+             ~caller
+             ~keeper_name:"context-keeper"
+             ~f:(fun _request_sw ->
+               incr worker_runs;
+               Masc.Keeper_types_profile.tool_result_ok "unexpected")
+             ()
+         with
+         | Error (Async.Submit_invalid_request_context _) -> ()
+         | Error error ->
+           failf
+             "wrong non-JSON number rejection: %s"
+             (Async.submit_error_to_json error |> Yojson.Safe.to_string)
+         | Ok _ -> fail "non-JSON request context number was accepted")
+      invalid_values;
+    check int "invalid numbers start no worker" 0 !worker_runs;
+    let request_id =
+      completed_request
+        ~base_path
+        ~sw
+        ~request_context:[ "valid_large_integer", `Intlit "9223372036854775808" ]
+    in
+    let terminal_path =
+      Async.For_testing.terminal_record_path ~base_path ~request_id
+      |> Option.get
+    in
+    Yojson.Safe.from_file terminal_path
+    |> rewrite_request_context (`Assoc [ "invalid_number", `Intlit "not-a-number" ])
+    |> Yojson.Safe.to_file terminal_path;
+    match Async.poll ~base_path ~caller request_id with
+    | Async.Unreadable _ -> ()
+    | Async.Found _ -> fail "persisted non-JSON request context number was decoded"
+    | Async.Absent -> fail "persisted non-JSON request context number disappeared"
+    | Async.Rejected _ ->
+      fail "persisted non-JSON request context number was access-rejected")
+;;
+
 let error_kind_by_basename errors basename =
   errors
   |> List.find_map (fun (error : Async.active_inventory_record_error) ->
@@ -375,6 +428,9 @@ let () =
         ; quick
             "duplicate context rejects submit and durable decode"
             test_duplicate_request_context_is_rejected_at_submit_and_decode
+        ; quick
+            "non-JSON numbers reject submit and durable decode"
+            test_non_json_numbers_are_rejected_at_submit_and_decode
         ; quick "missing active partition is empty" test_missing_partition_is_empty
         ] )
     ]

@@ -92,6 +92,10 @@ import {
   registerKeeperConfigUpdateHandler,
 } from './keeper-config-state'
 
+// The CAS conflict code Keeper_turn_up_update.config_revision_conflict_code
+// writes on the OCaml side — the one language-boundary copy in this bundle.
+const REVISION_CONFLICT_CODE = 'keeper_config_revision_conflict'
+
 async function refreshKeeperSurfacesAfterConfigSave(): Promise<void> {
   // Re-fetch the right-rail runtime-trace evidence (drift badge) immediately;
   // refreshKeeperRuntimeStatus below only updates the live-runtime slice, which
@@ -1812,7 +1816,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ) return
       if (
         err instanceof ApiRequestError
-        && err.errorCode === 'keeper_config_revision_conflict'
+        && err.errorCode === REVISION_CONFLICT_CODE
       ) {
         // The config the user saw is the closure [c]; capture the in-flight
         // draft before the reload subscription resets it from the fresh
@@ -1948,7 +1952,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ) return
       if (
         err instanceof ApiRequestError
-        && err.errorCode === 'keeper_config_revision_conflict'
+        && err.errorCode === REVISION_CONFLICT_CODE
       ) {
         // Single-field draft: keep the user's text and stay in edit mode.
         // The next save diffs against the freshly loaded config, so only the

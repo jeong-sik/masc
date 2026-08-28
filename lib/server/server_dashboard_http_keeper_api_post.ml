@@ -923,7 +923,7 @@ let respond_config_revision_conflict ~request reqd ~name
       ; "runtime_sync", `Bool false
       ; ( "error"
         , `Assoc
-            [ "code", `String "keeper_config_revision_conflict"
+            [ "code", `String Keeper_turn_up_update.config_revision_conflict_code
             ; "expected", Keeper_turn_up_config_persistence.config_revision_to_yojson expected
             ; "observed", Keeper_turn_up_config_persistence.config_revision_to_yojson observed
             ] )

@@ -682,9 +682,10 @@ let test_keeper_tools_list_json_uses_typed_groups () =
           (Masc.Keeper_capability_search.error_to_yojson error))
    | Ok _ -> fail "malformed FTS query was accepted");
   let empty =
-    Masc.Keeper_tool_in_process_runtime.handle_tools_list
+    Masc.Keeper_tool_in_process_runtime.handle_tools_list_from_meta
       ~meta
       ~args:(`Assoc [ "query", `String "  " ])
+      ()
   in
   (match empty.KTE.disposition with
    | Tool_result.Failed Tool_result.Policy_rejection -> ()

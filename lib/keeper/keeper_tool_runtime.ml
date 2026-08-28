@@ -33,6 +33,9 @@ type context =
   ; gate_grant : Keeper_gate.cycle_grant option
     (* Exact human decision delivered to this Keeper lane. External-effect
        handlers may consume it only after matching their normalized request. *)
+  ; capability_surface : Keeper_capability_surface.t option
+    (* Frozen by the enclosing Keeper turn. Compatibility dispatch callers
+       that do not own a turn surface leave this absent. *)
   }
 
 let descriptor_for_internal internal_name =
@@ -169,7 +172,18 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_execution.success_data
          (Keeper_tool_in_process_runtime.handle_time_now ~args))
   | Tool_tools_list ->
-    Some (Keeper_tool_in_process_runtime.handle_tools_list ~meta:ctx.meta ~args)
+    Some
+      (match ctx.capability_surface with
+       | Some capability_surface ->
+         Keeper_tool_in_process_runtime.handle_tools_list
+           ~capability_surface
+           ~args
+           ()
+       | None ->
+         Keeper_tool_in_process_runtime.handle_tools_list_from_meta
+           ~meta:ctx.meta
+           ~args
+           ())
   | Tool_context_status ->
     Some
       (Keeper_tool_execution.success

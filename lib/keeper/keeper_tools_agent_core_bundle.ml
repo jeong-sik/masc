@@ -55,6 +55,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?skill_activation_context
       ?(allow_unrecorded_skill_surface = false)
       ?turn_ctx_cell
+      ?capability_surface
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
   : tool_bundle
@@ -369,6 +370,7 @@ let make_tool_bundle_for_descriptors_with_policy
                  ?continuation_channel
                  ?gate_context:gate_context_provider
                  ?gate_grant
+                 ?capability_surface
                  ?record_gate_result
                  ?on_completed
                  ~on_deferred:mark_deferred_tool_result
@@ -550,6 +552,7 @@ let make_tool_bundle_for_capability_surface
     ~allow_unrecorded_skill_surface:false
     ?turn_ctx_cell
     ~descriptors:(Keeper_capability_surface.descriptors capability_surface)
+    ~capability_surface
     ()
 ;;
 

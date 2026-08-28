@@ -15,13 +15,12 @@ let handle_time_now ~args:_ =
   `Assoc [ "now_iso", `String now_iso; "now_unix", `Float now_unix ]
 ;;
 
-let handle_tools_list ~(meta : keeper_meta) ~args =
+let handle_tools_list_with ~list_json ~search_json ~args =
   match Json_util.assoc_member_opt "query" args with
   | None ->
-    Keeper_tool_execution.success
-      (Keeper_tool_shared_runtime.keeper_tools_list_json ~meta)
+    Keeper_tool_execution.success (list_json ())
   | Some (`String query) ->
-    (match Keeper_tool_shared_runtime.keeper_tools_search_json ~meta ~query with
+    (match search_json ~query with
      | Ok data -> Keeper_tool_execution.success_data data
      | Error error ->
        let data =
@@ -56,6 +55,26 @@ let handle_tools_list ~(meta : keeper_meta) ~args =
       ~metadata:data
       ~message:"keeper_tools_list query must be a string."
       data
+;;
+
+let handle_tools_list ~capability_surface ~args () =
+  handle_tools_list_with
+    ~list_json:(fun () ->
+      Keeper_tool_shared_runtime.keeper_tools_list_json_for_surface
+        ~capability_surface)
+    ~search_json:(fun ~query ->
+      Keeper_tool_shared_runtime.keeper_tools_search_json_for_surface
+        ~capability_surface
+        ~query)
+    ~args
+;;
+
+let handle_tools_list_from_meta ~meta ~args () =
+  handle_tools_list_with
+    ~list_json:(fun () -> Keeper_tool_shared_runtime.keeper_tools_list_json ~meta)
+    ~search_json:(fun ~query ->
+      Keeper_tool_shared_runtime.keeper_tools_search_json ~meta ~query)
+    ~args
 ;;
 
 type external_gate_block =

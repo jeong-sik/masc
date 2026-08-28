@@ -23,6 +23,7 @@ let make_keeper_tool_handler
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?capability_surface
       ?record_gate_result
       ?observe_execution_evidence
       ?on_completed
@@ -226,6 +227,7 @@ let make_keeper_tool_handler
                 ?continuation_channel
                 ?gate_context
                 ?gate_grant
+                ?capability_surface
                 ?agent_core_invocation
                 ~input
                 ()

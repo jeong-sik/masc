@@ -918,6 +918,28 @@ let turn_timeout_opt_field ~(path : string) (tbl : Otoml.t)
             value))
 ;;
 
+(* Read the optional per-model [wall-clock-ceiling-s]. Unlike
+   [turn-timeout-s] there is no "0 removes the bound" form: the whole-turn
+   ceiling ({!Runtime_wall_clock}) is the fail-safe against a turn that keeps
+   emitting forever, so the config may tighten it but never delete it. Absent
+   keeps the runtime default ceiling. *)
+let wall_clock_ceiling_opt_field ~(path : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  match number_opt_field ~path ~key:"wall-clock-ceiling-s" tbl with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when value > 0.0 && Float.is_finite value -> Ok (Some value)
+  | Ok (Some value) ->
+    Error
+      (error
+         (path ^ ".wall-clock-ceiling-s")
+         (Printf.sprintf
+            "wall-clock-ceiling-s must be a positive finite number (the \
+             ceiling can be tightened but not removed), got %g"
+            value))
+;;
+
 (* Read the optional per-model [temperature]. A TOML integer (1) or float (1.0)
    both read as a float so an operator is not tripped by "1 vs 1.0". Absent →
    [Ok None] (caller keeps its fallback). Wrong type or out of
@@ -1040,6 +1062,7 @@ let parse_model (id : string) (tbl : Otoml.t)
     let min_p_result = probability_opt_field ~path ~key:"min-p" tbl in
     let reasoning_effort_result = reasoning_effort_opt_field ~path tbl in
     let turn_timeout_result = turn_timeout_opt_field ~path tbl in
+    let wall_clock_ceiling_result = wall_clock_ceiling_opt_field ~path tbl in
     let max_prompt_bytes_result =
       positive_int_opt_field ~path ~key:"max-prompt-bytes" tbl
     in
@@ -1052,6 +1075,7 @@ let parse_model (id : string) (tbl : Otoml.t)
     let* min_p = min_p_result in
     let* reasoning_effort = reasoning_effort_result in
     let* turn_timeout_s = turn_timeout_result in
+    let* wall_clock_ceiling_s = wall_clock_ceiling_result in
     let* max_prompt_bytes = max_prompt_bytes_result in
     match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
     | _ :: _ as errors -> Error errors
@@ -1071,6 +1095,7 @@ let parse_model (id : string) (tbl : Otoml.t)
         ; min_p
         ; reasoning_effort
         ; turn_timeout_s
+        ; wall_clock_ceiling_s
         ; max_prompt_bytes
         ; capabilities        })
 ;;

@@ -140,9 +140,16 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
     | Observer.Agent_completed -> (Turn_settled, "agent done", "")
     | Observer.Agent_failed -> (Failure, "agent failed", "")
     | Observer.Agent_yielded -> (Quiet, "agent yielded", "")
-    | Observer.Tool_approval_completed -> (Attention, "approval settled", tool)
+    (* Where the tool name is the whole detail, an event that carries none
+       leaves the cell empty rather than printing the [?] the default stands
+       for. A lone [?] in the Detail column reads as a failure marker and says
+       nothing; [masc:audit_event] drew one. The arms above spell the tool
+       into a longer sentence, where the placeholder still marks its slot. *)
+    | Observer.Tool_approval_completed ->
+        (Attention, "approval settled", Option.value ~default:"" e.Observer.tool)
     | Observer.Telemetry -> (Quiet, "telemetry", "")
-    | Observer.Agent_core_other name -> (Attention, name, tool)
+    | Observer.Agent_core_other name ->
+        (Attention, name, Option.value ~default:"" e.Observer.tool)
   in
   let detail =
     match e.Observer.task with

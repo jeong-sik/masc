@@ -161,6 +161,11 @@ type model_spec =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
        [@equal fun a b -> a = b]
   ; turn_timeout_s : float option
+  ; wall_clock_ceiling_s : float option
+        (** [wall-clock-ceiling-s] — per-model ceiling on one official-client
+            turn's total duration, in seconds; unlike [turn-timeout-s] it never
+            resets, and it can only tighten the runtime default, never remove
+            it. *)
   ; max_prompt_bytes : int option
   ; capabilities : model_capabilities option
   }

@@ -24,6 +24,9 @@ let resolve_reasoning_effort ~runtime_id =
 
 let resolve_turn_timeout_s ~runtime_id = Runtime.turn_timeout_s_of_runtime_id runtime_id
 
+let resolve_wall_clock_ceiling_s ~runtime_id =
+  Runtime.wall_clock_ceiling_s_of_runtime_id runtime_id
+
 let resolve_max_prompt_bytes ~runtime_id =
   Runtime.max_prompt_bytes_of_runtime_id runtime_id
 

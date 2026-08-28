@@ -3809,8 +3809,9 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
       List.iter
         (fun raw ->
            let json = Yojson.Safe.from_string raw in
-           check string "typed shell ir required"
-             "Typed Shell IR input is required. Provide non-empty argv or pipeline."
+           check string "cmd is refused by the parser, which names script"
+             "cmd is not a field of this tool; the shell form is named \
+              script"
              Yojson.Safe.Util.(member "error" json |> to_string);
            check bool "typed marker" true
              Yojson.Safe.Util.(member "typed" json |> to_bool))
@@ -3819,6 +3820,42 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
       | first :: rest ->
         List.iter (check string "repeated failures stay byte-identical" first) rest
       | [] -> fail "expected dispatch outputs")
+
+(* task-777: #29813 advertised [script] in the schema while a key pre-check
+   in the dispatch refused any call that used it. The admission is the
+   parser now, so a schema-conformant script call must reach execution. *)
+let test_tool_execute_script_form_is_admitted_and_runs () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "tool_execute_script_form_runs"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let input =
+        `Assoc [ "script", `String "printf begin- && printf end" ]
+      in
+      let raw =
+        KET.execute_keeper_tool_call
+          ~config ~meta ~publication_recovery ~ctx_work
+          ~name:"tool_execute" ~input ()
+      in
+      let json = Yojson.Safe.from_string raw in
+      check bool "script form executes" true
+        Yojson.Safe.Util.(member "ok" json |> to_bool);
+      check string "the and-chain ran both commands" "begin-end"
+        Yojson.Safe.Util.(member "output" json |> to_string))
+
+let test_tool_execute_empty_input_names_all_three_forms () =
+  with_exec_fixture "tool_execute_empty_input_names_forms"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let raw =
+        KET.execute_keeper_tool_call
+          ~config ~meta ~publication_recovery ~ctx_work
+          ~name:"tool_execute" ~input:(`Assoc []) ()
+      in
+      let json = Yojson.Safe.from_string raw in
+      check string "no-source refusal names every form"
+        "$.argv, $.pipeline or $.script is required"
+        Yojson.Safe.Util.(member "error" json |> to_string))
 
 let keeper_delegate_input_schema () =
   match
@@ -7191,6 +7228,10 @@ let () =
         test_manual_gate_defers_tool_execute_before_process;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
+      test_case "tool_execute script form is admitted and runs" `Quick
+        test_tool_execute_script_form_is_admitted_and_runs;
+      test_case "tool_execute empty input names all three forms" `Quick
+        test_tool_execute_empty_input_names_all_three_forms;
       test_case "Agent Core handler threads Eio context to keeper dispatch" `Quick
         test_agent_core_handler_threads_eio_context_to_keeper_dispatch;
       test_case "registered dispatch does not require masc_ prefix" `Quick

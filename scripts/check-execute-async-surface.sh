@@ -60,7 +60,7 @@ require_normalized_text \
 
 require_normalized_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
-  "Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr." \
+  "Accepted fields: argv, pipeline, script, env, cwd, timeout_sec, stdin, stdout, stderr." \
   "typed Execute accepted-field list"
 # The sentence is in the tool's description, which now lives in the TOML the
 # model is handed rather than in an OCaml literal. Check it where it is.

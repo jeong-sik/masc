@@ -259,7 +259,10 @@
  (name masc_tui_observer)
  (wrapped false)
  (modules masc_tui_observer)
- (libraries masc_tui_keeper_chat_projection yojson))
+ ; masc for the wire's own routing table: which event types are whole-projection
+ ; pushes is the wire's business, and this decoder used to keep a copy that had
+ ; drifted by two.
+ (libraries masc masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_command)
@@ -323,7 +326,8 @@
  (name masc_tui_answering)
  (wrapped false)
  (modules masc_tui_answering)
- (libraries masc))
+ ; masc_tui_message_layout owns the span ladder both this and [age_text] read.
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_keys)

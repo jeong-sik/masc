@@ -243,6 +243,16 @@ type model_spec =
         otherwise.
         Resolved via {!Runtime.turn_timeout_s_of_runtime_id} →
         {!Runtime_inference.resolve_turn_timeout_s}. *)
+  ; wall_clock_ceiling_s : float option
+    (** [wall-clock-ceiling-s] — per-model ceiling on one official-client
+        turn's total duration, in seconds. Unlike [turn-timeout-s] it does not
+        reset on protocol messages: a turn that keeps emitting still ends when
+        the ceiling expires ({!Runtime_wall_clock}). [None] keeps the runtime
+        default ceiling; there is deliberately no "0 removes the bound" form —
+        the ceiling is the fail-safe against unbounded turns, so the config
+        may only tighten it, never delete it.
+        Resolved via {!Runtime.wall_clock_ceiling_s_of_runtime_id} →
+        {!Runtime_inference.resolve_wall_clock_ceiling_s}. *)
   ; max_prompt_bytes : int option
     (** [max-prompt-bytes] — per-model ceiling on the history an official-client
         start turn seeds its conversation with, in bytes.

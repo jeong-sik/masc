@@ -923,6 +923,44 @@ let test_age_reads_as_seconds_then_minutes () =
     ; (-100., Some "3m20s")
     ]
 
+(* The ladder did not go past minutes, and the Fusion table drew every one of
+   its 28 rows through it: [12045m~], five figures cut by a seven-cell column,
+   so a day-old run and a nine-day-old run were the same shape.
+
+   The widest reading is what a column has to hold, so it is pinned: a span
+   just under a year is seven cells, which is what the Fusion column already
+   was. *)
+let test_an_age_climbs_to_hours_and_days () =
+  List.iter
+    (fun (seconds, expected) ->
+      check (option string)
+        (Printf.sprintf "%.0f seconds" seconds)
+        (Some expected)
+        (Layout.age_text ~now:seconds ~since:0.))
+    [ (3599., "59m59s")
+    ; (3600., "1h00m")
+    ; (41989., "11h39m")
+    ; (86399., "23h59m")
+    ; (86400., "1d00h")
+    ; (722_730., "8d08h")
+    ; (31_535_999., "364d23h")
+    ];
+  check bool "the widest reading fits the column it is drawn in" true
+    (match Layout.age_text ~now:31_535_999. ~since:0. with
+     | Some text -> String.length text <= 7
+     | None -> false)
+
+(* One ladder, two ways in. They differ in what a span from the future means
+   -- an age says nothing, a duration clamps -- not in how a span reads. *)
+let test_the_two_spellings_of_a_span_agree () =
+  List.iter
+    (fun seconds ->
+      check (option string)
+        (Printf.sprintf "%.0f seconds reads the same either way" seconds)
+        (Some (Layout.span_text seconds))
+        (Layout.age_text ~now:seconds ~since:0.))
+    [ 42.; 134.; 41989.; 722_730. ]
+
 (* A clock that moved backwards says nothing rather than a negative age: the
    row that shows this has no way to draw "-4s" that a reader could use. *)
 let test_a_backwards_clock_says_nothing () =
@@ -1406,6 +1444,10 @@ let () =
             test_last_page_start_keeps_the_last_item_reachable
         ; test_case "age reads as seconds then minutes" `Quick
             test_age_reads_as_seconds_then_minutes
+        ; test_case "an age climbs to hours and days" `Quick
+            test_an_age_climbs_to_hours_and_days
+        ; test_case "the two spellings of a span agree" `Quick
+            test_the_two_spellings_of_a_span_agree
         ; test_case "a backwards clock says nothing" `Quick
             test_a_backwards_clock_says_nothing
         ; test_case "history wraps by cells without byte loss" `Quick

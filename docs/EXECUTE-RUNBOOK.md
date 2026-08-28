@@ -6,8 +6,11 @@ status: runbook
 
 This runbook documents the current operator surface for `Execute` and
 adjacent structured process routing. Execute is typed-only: callers provide
-one non-empty `argv` process vector or `pipeline`. Raw command strings and the old
-background task lifecycle are not part of the callable surface.
+one non-empty `argv` process vector, a `pipeline`, or a `script` command line
+that the bash-subset parser lowers to the same Shell IR — nothing is handed
+to a shell, and a construct outside the subset is refused by name. Raw
+`cmd` strings and the old background task lifecycle are not part of the
+callable surface.
 
 ## Related Documents
 
@@ -105,7 +108,7 @@ scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_docker_streaming.ex
 
 `Execute` remains synchronous at the callable-surface level. The public schema
 rejects legacy background flags and accepts only typed command fields:
-`executable`, `argv`, `pipeline`, `env`, `cwd`, `timeout_sec`, `stdin`,
+`argv`, `pipeline`, `script`, `env`, `cwd`, `timeout_sec`, `stdin`,
 `stdout`, and `stderr`. It does not expose `job_id`, `request_id`, `poll`, or
 `cancel` fields.
 

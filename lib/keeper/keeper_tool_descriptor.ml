@@ -683,8 +683,9 @@ let public_descriptors =
       ~internal_name:"tool_execute"
       ~description:
         "Execute one opaque typed process invocation inside the Keeper sandbox. \
-         Provide one non-empty argv process vector, or an explicit typed \
-         pipeline. Use typed stdin/stdout/stderr fields for \
+         Provide one non-empty argv process vector, an explicit typed \
+         pipeline, or a script command line that is parsed rather than handed \
+         to a shell. Use typed stdin/stdout/stderr fields for \
          I/O and typed env for environment variables. MASC validates the input \
          shape, path jail, sandbox target, and external-effect Gate but never \
          interprets program or subcommand meaning. The invoked program owns \

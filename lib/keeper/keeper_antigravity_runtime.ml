@@ -575,7 +575,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name
            | None -> Some config.timeout_s
            | Some seconds when seconds <= 0.0 -> None
            | Some seconds -> Some seconds)
-      ; wall_clock_ceiling_s = None
+      ; wall_clock_ceiling_s =
+          Runtime_inference.resolve_wall_clock_ceiling_s ~runtime_id
       }
     in
     let* () =
@@ -736,10 +737,13 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         in
         let projected =
           Host.host_stop_result
+            ~runtime_id
             ~model:config.model
             ~session_id
             ~turn_id
             ~turns_used:turn_count
+            ~latency_ms:
+              (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
             stop
         in
         let* () =

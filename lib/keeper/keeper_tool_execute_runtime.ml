@@ -176,7 +176,6 @@ end
 
 (* Typed Execute input projections extracted to
    [Keeper_tool_execute_input] (godfile decomp). *)
-let has_typed_execute_input_key = Keeper_tool_execute_input.has_typed_execute_input_key
 let assoc_upsert = Keeper_tool_execute_input.assoc_upsert
 let typed_input_command_text = Keeper_tool_execute_input.typed_input_command_text
 let typed_input_has_env = Keeper_tool_execute_input.typed_input_has_env
@@ -992,24 +991,20 @@ let handle_tool_execute_with_outcome
       ~(args : Yojson.Safe.t)
       ()
   =
-  if has_typed_execute_input_key args
-  then
-    handle_tool_execute_typed
-      ~turn_sandbox_factory
-      ~config
-      ~meta
-      ?continuation_channel
-      ?gate_context
-      ?gate_grant
-      ~args
-      ()
-  else
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Policy_rejection
-      ~effect_disposition:Tool_result.Proven_pre_effect
-      (error_json
-         ~fields:[ "typed", `Bool true ]
-         "Typed Shell IR input is required. Provide non-empty argv or pipeline.")
+  (* No key pre-check: [Keeper_tool_execute_typed_input.of_json] is the one
+     admission door, and its errors name the field that was wrong. A second
+     key list here is a copy that diverges — #29813 advertised [script] in
+     the schema while this function still refused it, so every
+     schema-conformant script call bounced before the parser could read it. *)
+  handle_tool_execute_typed
+    ~turn_sandbox_factory
+    ~config
+    ~meta
+    ?continuation_channel
+    ?gate_context
+    ?gate_grant
+    ~args
+    ()
 ;;
 
 let handle_tool_execute

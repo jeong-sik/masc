@@ -1089,10 +1089,31 @@ let last_page_start ~height row_costs =
     min (count - 1) (walk (count - 1) 0)
   end
 
+(* One span, in the largest unit that still carries a remainder. Every reading
+   is at most seven cells wide, so a column sized for the longest span holds
+   every shorter one.
+
+   The tiers stopped at minutes here, and the Fusion table drew its ages
+   through this: all 28 rows read [12045m~], five figures of minutes cut by
+   the column. A day-old run and a nine-day-old run were the same shape. The
+   comment beside the Gate row that prompted the hour tier says what applies
+   just as well here -- an operator weighs the number, and five figures is
+   arithmetic homework, not a weight.
+
+   Two callers spell a span this way and they used to hold separate ladders
+   with separate ceilings: this one stopped at minutes, [duration_text]
+   stopped at hours. They differ in what a span from the future means, which
+   is theirs to decide, not in how a span reads. *)
+let span_text seconds =
+  let whole = int_of_float (Float.max 0. seconds) in
+  if whole < 60 then Printf.sprintf "%ds" whole
+  else if whole < 3600 then Printf.sprintf "%dm%02ds" (whole / 60) (whole mod 60)
+  else if whole < 86_400 then
+    Printf.sprintf "%dh%02dm" (whole / 3600) (whole mod 3600 / 60)
+  else Printf.sprintf "%dd%02dh" (whole / 86_400) (whole mod 86_400 / 3600)
+
 let age_text ~now ~since =
   let seconds = now -. since in
-  if seconds < 0. then None
-  else
-    let whole = int_of_float seconds in
-    if whole < 60 then Some (Printf.sprintf "%ds" whole)
-    else Some (Printf.sprintf "%dm%02ds" (whole / 60) (whole mod 60))
+  (* A clock that moved backwards says nothing rather than a negative age. The
+     row that shows this has no way to draw "-4s" a reader could use. *)
+  if seconds < 0. then None else Some (span_text seconds)

@@ -4134,6 +4134,28 @@ let test_decode_execute_gate_row_leads_with_the_command () =
     (Some "git clone --depth 1 https://github.com/jeong-sik/masc")
     preview
 
+let test_decode_execute_gate_row_shows_the_script_line () =
+  (* The script form carries the command line whole; the row shows it as
+     written rather than falling back to the serialized envelope. *)
+  let preview =
+    decoded_execute_preview
+      ~preview:"{\"schema\":\"masc.keeper_gate.request.v1\"}"
+      ~input:
+        (`Assoc
+           [ ("schema", `String "masc.keeper_gate.request.v1");
+             ( "input",
+               `Assoc
+                 [ ("cwd", `String ".");
+                   ("script", `String "uname -a && id && pwd");
+                 ] );
+           ])
+  in
+  Alcotest.check
+    Alcotest.(option string)
+    "the row shows the script line"
+    (Some "uname -a && id && pwd")
+    preview
+
 let test_decode_execute_gate_row_carries_where_it_would_run () =
   (* The command alone does not say this, and it changes what the command
      means: cloning into a container is not cloning onto the host. *)
@@ -4855,6 +4877,8 @@ let () =
           test_decode_gate_identity_row_reads_its_target;
         Alcotest.test_case "an execute row leads with the command" `Quick
           test_decode_execute_gate_row_leads_with_the_command;
+        Alcotest.test_case "an execute row shows the script line" `Quick
+          test_decode_execute_gate_row_shows_the_script_line;
         Alcotest.test_case "an execute row reads a pipeline" `Quick
           test_decode_execute_gate_row_reads_a_pipeline;
         Alcotest.test_case "an execute row carries where it would run" `Quick

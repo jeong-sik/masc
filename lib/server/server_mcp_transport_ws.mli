@@ -377,18 +377,14 @@ val dashboard_unsubscribe :
     the public lifecycle / handler family above. *)
 
 val valid_dashboard_slice : string -> bool
-(** Returns [true] for the canonical slice names
-    ([execution] / [operator] / [transport] / [namespace] /
-    [composite]).  Mirrored into {!dashboard_subscribe}'s
-    validation.  Must equal the image of
-    {!dashboard_slice_for_sse_type}: a name accepted here but
-    absent there is a subscription no event can reach. *)
+(** {!Masc.Dashboard_event_slices.valid_slice}, under the name
+    {!dashboard_subscribe} validates with. *)
 
 val dashboard_slice_for_sse_type : string -> string option
-(** The slice an SSE event type is delivered on, or [None] to
-    raw-forward.  Exposed so a test can compare its image
-    against {!valid_dashboard_slice}; the two drifted apart
-    for a day after #27027 with nothing to catch it. *)
+(** {!Masc.Dashboard_event_slices.slice_for_sse_type}, under the
+    name this transport routes with.  The two used to be
+    separate lists here and drifted apart for a day after
+    #27027; the slice names are now that table's image. *)
 
 val client_buffer_limit_bytes : unit -> int
 (** Resolved client-buffer threshold (in bytes) used by

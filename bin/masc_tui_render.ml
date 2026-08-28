@@ -6958,12 +6958,27 @@ let render_fusion_list (state : state) =
           (screen_title " MASC Fusion") shown timestamp
           (connection_badge state)
   in
+  (* Measured from the rows, the way the Approvals table measures its own
+     name column. Eighteen of twenty-eight keepers were cut at sixteen while
+     RUN, a [kmsg-] and thirty-two hex digits nobody reads off a screen, sat
+     whole beside them -- and the detail pane already carries that id in full
+     under Link. RUN is last, so what it loses is the end of an identifier the
+     pane below repeats. *)
+  let keeper_width =
+    List.fold_left
+      (fun widest (run : Tui_decode.fusion_run) ->
+        max widest
+          (Message_layout.display_width
+             (Terminal_text.single_line run.fur_keeper)))
+      16 runs
+    |> min 26
+  in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-8s %-7s %-9s %-16s %-10s %-10s %s" "TIME" "AGE"
-       "STATUS" "KEEPER" "PRESET" "TOPOLOGY" "RUN");
+    (Printf.sprintf "  %-8s %-7s %-9s %-*s %-10s %-10s %s" "TIME" "AGE"
+       "STATUS" keeper_width "KEEPER" "PRESET" "TOPOLOGY" "RUN");
   box_divider buf cols;
   (match state.fusion_error with
    | None -> ()
@@ -7002,12 +7017,13 @@ let render_fusion_list (state : state) =
       | Some run ->
           let status = fusion_run_status_to_string run.fur_status in
           let line =
-            Printf.sprintf "%-8s %-7s %s%-9s%s %-16s %-10s %-10s %s"
+            (* [fit_width] pads, so the cell is already the column's width. *)
+            Printf.sprintf "%-8s %-7s %s%-9s%s %s %-10s %-10s %s"
               (fusion_run_clock run)
               (fit_width (fusion_run_age ~now:now_epoch run) 7)
               (fusion_run_status_color run.fur_status)
               status Ansi.reset
-              (fit_width (Terminal_text.single_line run.fur_keeper) 16)
+              (fit_width (Terminal_text.single_line run.fur_keeper) keeper_width)
               (fit_width (Terminal_text.single_line run.fur_preset) 10)
               (fit_width
                  (Fusion_types.fusion_topology_to_string run.fur_topology)
@@ -9527,12 +9543,26 @@ let render_acting (state : state) =
             Terminal_text.clock_timestamp
               (Masc_domain.iso8601_of_unix_seconds row.Acting.at)
           in
+          (* The Event column is sized for the two-word labels the taught
+             events carry ("agent start", "waiting queue"). A type this build
+             was not taught has no such label -- its name is all there is, and
+             it is a wire identifier, so it ran off the column at every width:
+             [approval:summar~], [transport_healt~]. Those rows have no detail
+             either, so the label takes the empty column rather than the
+             reader losing the only thing the row says. *)
+          let detail = Terminal_text.single_line row.Acting.detail in
+          let label = Terminal_text.single_line row.Acting.label in
           let line =
-            Printf.sprintf "  %-8s %-16s %s %-16s %s" clock
-              (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
-              (Acting.glyph_text row.Acting.glyph)
-              (fit_width (Terminal_text.single_line row.Acting.label) 16)
-              (Terminal_text.single_line row.Acting.detail)
+            if detail = "" then
+              Printf.sprintf "  %-8s %-16s %s %s" clock
+                (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
+                (Acting.glyph_text row.Acting.glyph)
+                label
+            else
+              Printf.sprintf "  %-8s %-16s %s %-16s %s" clock
+                (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
+                (Acting.glyph_text row.Acting.glyph)
+                (fit_width label 16) detail
           in
           box_line_styled buf cols ~style line
     done;

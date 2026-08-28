@@ -5,6 +5,10 @@ val resolve_reasoning_effort :
     declared reasoning control. *)
 
 val resolve_turn_timeout_s : runtime_id:string -> float option
+
+val resolve_wall_clock_ceiling_s : runtime_id:string -> float option
+(** Per-model whole-turn ceiling override for {!Runtime_wall_clock}; [None]
+    keeps the runtime default ceiling. *)
 (** The per-model [turn-timeout-s] declared for [runtime_id], or [None] when
     the model leaves it unset. Streaming official-client adapters use it as
     their protocol-idle liveness window. *)

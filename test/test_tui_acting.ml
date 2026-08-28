@@ -106,6 +106,32 @@ let test_a_stream_frame_draws_its_keeper_and_what_it_was () =
   check string "detail names the frame" "CUSTOM KEEPER_TOOL_RESULT_READY"
     row.Acting.detail
 
+(* A type this build was not taught puts its name in the Event column and its
+   tool in Detail. [masc:audit_event] carries no tool, and the cell drew the
+   [?] the default stood for -- which in a column of tool names reads as a
+   failure marker and says nothing. Read on screen as:
+
+     -                ? masc:audit_event ?
+
+   The name is what the row has; an absent tool adds nothing to it. *)
+let test_an_untaught_event_without_a_tool_says_only_its_name () =
+  let row =
+    Acting.row_of_event ~at:100. ~duration_ms:None
+      (agent_core ~kind:(Observer.Agent_core_other "masc:audit_event") "-")
+  in
+  check string "the name is the label" "masc:audit_event" row.Acting.label;
+  check string "and nothing stands in for the tool it has none of" ""
+    row.Acting.detail
+
+let test_an_untaught_event_with_a_tool_still_names_it () =
+  let row =
+    Acting.row_of_event ~at:100. ~duration_ms:None
+      (agent_core ~kind:(Observer.Agent_core_other "masc:something")
+         ~tool:"read_file" "analyst")
+  in
+  check string "a tool it does have is still the detail" "read_file"
+    row.Acting.detail
+
 (* The screen that prompted this: 927 rows held, two of them actions, and the
    whole page inside one second. A reply sends one frame per token, so 1,200
    frames arriving after two real events used to push both out of a ring
@@ -321,6 +347,10 @@ let () =
             test_one_reply_does_not_bury_the_actions_it_sits_between
         ; test_case "a stream frame draws its keeper and what it was" `Quick
             test_a_stream_frame_draws_its_keeper_and_what_it_was
+        ; test_case "an untaught event without a tool says only its name" `Quick
+            test_an_untaught_event_without_a_tool_says_only_its_name
+        ; test_case "an untaught event with a tool still names it" `Quick
+            test_an_untaught_event_with_a_tool_still_names_it
         ; test_case "a long reply does not evict the log it streams into" `Quick
             test_a_long_reply_does_not_evict_the_log_it_streams_into
         ; test_case "the old arrival trim would have lost them" `Quick

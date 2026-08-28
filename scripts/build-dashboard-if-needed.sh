@@ -5,6 +5,55 @@
 
 set -euo pipefail
 
+FORCE_BUILD=0
+EXPECTED_PM_EXECUTABLE=""
+EXPECTED_PM_KIND=""
+EXPECTED_PM_SHA256=""
+EXPECTED_NODE_EXECUTABLE=""
+EXPECTED_NODE_SHA256=""
+EXPECTED_BUILD_PATH=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --force)
+      FORCE_BUILD=1
+      shift
+      ;;
+    --package-manager-executable)
+      EXPECTED_PM_EXECUTABLE="$2"
+      shift 2
+      ;;
+    --package-manager-kind)
+      EXPECTED_PM_KIND="$2"
+      shift 2
+      ;;
+    --package-manager-sha256)
+      EXPECTED_PM_SHA256="$2"
+      shift 2
+      ;;
+    --node-executable)
+      EXPECTED_NODE_EXECUTABLE="$2"
+      shift 2
+      ;;
+    --node-sha256)
+      EXPECTED_NODE_SHA256="$2"
+      shift 2
+      ;;
+    --build-path)
+      EXPECTED_BUILD_PATH="$2"
+      shift 2
+      ;;
+    *)
+      echo "usage: $0 [--force] [--package-manager-executable PATH --package-manager-kind pnpm|corepack --package-manager-sha256 SHA256]" >&2
+      exit 2
+      ;;
+  esac
+done
+if { [ -n "$EXPECTED_PM_EXECUTABLE" ] && { [ -z "$EXPECTED_PM_KIND" ] || [ -z "$EXPECTED_PM_SHA256" ] || [ -z "$EXPECTED_NODE_EXECUTABLE" ] || [ -z "$EXPECTED_NODE_SHA256" ] || [ -z "$EXPECTED_BUILD_PATH" ]; }; } \
+  || { [ -z "$EXPECTED_PM_EXECUTABLE" ] && { [ -n "$EXPECTED_PM_KIND" ] || [ -n "$EXPECTED_PM_SHA256" ] || [ -n "$EXPECTED_NODE_EXECUTABLE" ] || [ -n "$EXPECTED_NODE_SHA256" ] || [ -n "$EXPECTED_BUILD_PATH" ]; }; }; then
+  echo "dashboard package-manager identity arguments must be provided together" >&2
+  exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DASHBOARD_DIR="$REPO_ROOT/dashboard"
@@ -13,20 +62,63 @@ STAMP="$OUTPUT_DIR/.build-stamp"
 
 # No dashboard source — nothing to do
 if [ ! -f "$DASHBOARD_DIR/package.json" ]; then
+  if [ "$FORCE_BUILD" = "1" ]; then
+    echo "[dashboard] package.json missing; exact force build cannot continue." >&2
+    exit 1
+  fi
   exit 0
 fi
 
 dashboard_pm=()
 dashboard_pm_label=""
-if command -v pnpm >/dev/null 2>&1; then
+if [ -n "$EXPECTED_PM_EXECUTABLE" ]; then
+  if [ ! -f "$EXPECTED_PM_EXECUTABLE" ] || [ ! -x "$EXPECTED_PM_EXECUTABLE" ] \
+    || [ ! -f "$EXPECTED_NODE_EXECUTABLE" ] || [ ! -x "$EXPECTED_NODE_EXECUTABLE" ]; then
+    echo "[dashboard] expected package-manager executable is unavailable." >&2
+    exit 1
+  fi
+  if [ "$(shasum -a 256 "$EXPECTED_PM_EXECUTABLE" | cut -d' ' -f1)" != "$EXPECTED_PM_SHA256" ]; then
+    echo "[dashboard] expected package-manager executable digest differs." >&2
+    exit 1
+  fi
+  if [ "$(shasum -a 256 "$EXPECTED_NODE_EXECUTABLE" | cut -d' ' -f1)" != "$EXPECTED_NODE_SHA256" ]; then
+    echo "[dashboard] expected Node executable digest differs." >&2
+    exit 1
+  fi
+  case "$EXPECTED_PM_KIND" in
+    pnpm) dashboard_pm=("$EXPECTED_NODE_EXECUTABLE" "$EXPECTED_PM_EXECUTABLE") ;;
+    corepack) dashboard_pm=("$EXPECTED_NODE_EXECUTABLE" "$EXPECTED_PM_EXECUTABLE" pnpm) ;;
+    *)
+      echo "[dashboard] expected package-manager invocation kind is invalid." >&2
+      exit 2
+      ;;
+  esac
+elif command -v pnpm >/dev/null 2>&1; then
   dashboard_pm=(pnpm)
 elif command -v corepack >/dev/null 2>&1; then
   dashboard_pm=(corepack pnpm)
 else
-  echo "[dashboard] pnpm/corepack not found, skipping." >&2
-  exit 0
+  if [ "$FORCE_BUILD" = "1" ]; then
+    echo "[dashboard] pnpm/corepack not found; exact force build cannot continue." >&2
+    exit 1
+  else
+    echo "[dashboard] pnpm/corepack not found, skipping." >&2
+    exit 0
+  fi
 fi
 dashboard_pm_label="${dashboard_pm[*]}"
+
+require_expected_package_manager_identity() {
+  if [ -z "$EXPECTED_PM_EXECUTABLE" ]; then
+    return 0
+  fi
+  [ -f "$EXPECTED_PM_EXECUTABLE" ] \
+    && [ -x "$EXPECTED_PM_EXECUTABLE" ] \
+    && [ "$(shasum -a 256 "$EXPECTED_PM_EXECUTABLE" | cut -d' ' -f1)" = "$EXPECTED_PM_SHA256" ] \
+    && [ -f "$EXPECTED_NODE_EXECUTABLE" ] \
+    && [ -x "$EXPECTED_NODE_EXECUTABLE" ] \
+    && [ "$(shasum -a 256 "$EXPECTED_NODE_EXECUTABLE" | cut -d' ' -f1)" = "$EXPECTED_NODE_SHA256" ]
+}
 
 generated_index_has_remote_startup_resources() {
   local index="$OUTPUT_DIR/index.html"
@@ -45,8 +137,21 @@ generated_index_has_remote_startup_resources() {
   return 1
 }
 
+sanitize_dashboard_build_environment() {
+  local variable_name=""
+  for variable_name in ${!VITE_@}; do
+    unset "$variable_name"
+  done
+  unset BUNDLE_REPORT MASC_DASHBOARD_PROXY_TARGET NODE_ENV NODE_OPTIONS
+  export NODE_ENV=production
+  if [ -n "$EXPECTED_BUILD_PATH" ]; then
+    export PATH="$EXPECTED_BUILD_PATH"
+  fi
+}
+
 # Check if rebuild is needed: source mtimes, missing output, or invalid output.
 needs_rebuild() {
+  [ "$FORCE_BUILD" = "1" ] && return 0
   # No stamp or no output → must build
   [ ! -f "$STAMP" ] && return 0
   [ ! -f "$OUTPUT_DIR/index.html" ] && return 0
@@ -87,8 +192,8 @@ if needs_rebuild; then
     echo "[dashboard] Unable to create temp log file; falling back to stderr-less logging." >&2
     log_file="/dev/null"
   fi
-  if [ -d "$DASHBOARD_DIR/node_modules" ]; then
-    if (cd "$DASHBOARD_DIR" && "${dashboard_pm[@]}" run build >"$log_file" 2>&1); then
+  if [ "$FORCE_BUILD" != "1" ] && [ -d "$DASHBOARD_DIR/node_modules" ]; then
+    if (cd "$DASHBOARD_DIR" && sanitize_dashboard_build_environment && require_expected_package_manager_identity && "${dashboard_pm[@]}" run build >"$log_file" 2>&1); then
       tail -n 3 "$log_file" >&2 || true
       if [ "$log_file" != "/dev/null" ]; then
         rm -f "$log_file"
@@ -100,13 +205,13 @@ if needs_rebuild; then
     echo "[dashboard] Existing deps build failed, retrying after ${dashboard_pm_label} install..." >&2
   fi
 
-  if ! (cd "$DASHBOARD_DIR" && "${dashboard_pm[@]}" install --frozen-lockfile --prefer-offline >"$log_file" 2>&1 && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
+  if ! (cd "$DASHBOARD_DIR" && sanitize_dashboard_build_environment && require_expected_package_manager_identity && "${dashboard_pm[@]}" install --frozen-lockfile --prefer-offline >"$log_file" 2>&1 && require_expected_package_manager_identity && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
     tail -n 20 "$log_file" >&2 || true
     if [ "$log_file" != "/dev/null" ]; then
       rm -f "$log_file"
     fi
     echo "[dashboard] Build FAILED. Dashboard SPA is stale — fix vite errors or pass --non-fatal." >&2
-    if [[ "${MASC_DASHBOARD_BUILD_NON_FATAL:-}" == "1" ]]; then
+    if [ "$FORCE_BUILD" != "1" ] && [[ "${MASC_DASHBOARD_BUILD_NON_FATAL:-}" == "1" ]]; then
       echo "[dashboard] Continuing (MASC_DASHBOARD_BUILD_NON_FATAL=1)." >&2
       exit 0
     fi

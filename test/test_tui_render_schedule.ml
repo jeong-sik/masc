@@ -105,8 +105,41 @@ let test_terminal_size_cache_reprobes_only_after_invalidation () =
     (Schedule.Terminal_size_cache.get cache ~probe);
   Schedule.Terminal_size_cache.invalidate cache;
   next_size := None;
-  check (pair int int) "probe failure uses fallback" (24, 80)
-    (Schedule.Terminal_size_cache.get cache ~probe)
+  check (pair int int) "probe failure keeps last valid size" (1, 4)
+    (Schedule.Terminal_size_cache.get cache ~probe);
+  let empty = Schedule.Terminal_size_cache.create ~fallback:(24, 80) in
+  check (pair int int) "first probe failure uses fallback" (24, 80)
+    (Schedule.Terminal_size_cache.get empty ~probe)
+
+let test_terminal_size_cache_refreshes_without_losing_last_valid () =
+  let next_size = ref (Some (46, 180)) in
+  let probes = ref 0 in
+  let probe () =
+    incr probes;
+    !next_size
+  in
+  let cache = Schedule.Terminal_size_cache.create ~fallback:(24, 80) in
+  check bool "startup shape is new" true
+    (Schedule.Terminal_size_cache.refresh cache ~probe
+    = Schedule.Terminal_size_cache.Changed (46, 180));
+  next_size := Some (42, 180);
+  check bool "resize without signal is a change" true
+    (Schedule.Terminal_size_cache.refresh cache ~probe
+    = Schedule.Terminal_size_cache.Changed (42, 180));
+  next_size := None;
+  check bool "transient failure keeps resized shape unchanged" true
+    (Schedule.Terminal_size_cache.refresh cache ~probe
+    = Schedule.Terminal_size_cache.Unchanged (42, 180));
+  check (pair int int) "frame read shares refreshed shape" (42, 180)
+    (Schedule.Terminal_size_cache.get cache ~probe);
+  check int "one probe per refresh, none per frame read" 3 !probes;
+  let unavailable = Schedule.Terminal_size_cache.create ~fallback:(24, 80) in
+  check bool "first unavailable refresh installs fallback" true
+    (Schedule.Terminal_size_cache.refresh unavailable ~probe
+    = Schedule.Terminal_size_cache.Changed (24, 80));
+  check bool "repeated unavailable refresh is unchanged" true
+    (Schedule.Terminal_size_cache.refresh unavailable ~probe
+    = Schedule.Terminal_size_cache.Unchanged (24, 80))
 
 let test_render_widths_are_total () =
   check int "negative width clamps to zero" 0 (Schedule.nonnegative_width (-1));
@@ -567,6 +600,8 @@ let () =
             test_input_burst_stays_inside_one_frame_window
         ; test_case "terminal size is cached until resize" `Quick
             test_terminal_size_cache_reprobes_only_after_invalidation
+        ; test_case "terminal size refresh keeps last valid shape" `Quick
+            test_terminal_size_cache_refreshes_without_losing_last_valid
         ; test_case "derived render widths are total" `Quick
             test_render_widths_are_total
         ; test_case "interrupted input waits retry" `Quick

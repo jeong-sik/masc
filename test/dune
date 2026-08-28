@@ -3189,6 +3189,7 @@
  (name test_tui_agenda)
  (modules test_tui_agenda)
  (deps
+  %{workspace_root}/bin/masc_tui.ml
   %{workspace_root}/bin/masc_tui_render.ml
   %{workspace_root}/bin/masc_tui_types.ml)
  (libraries

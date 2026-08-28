@@ -25,6 +25,15 @@ module Terminal_profile = Masc_tui_terminal_profile
 module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
 
+(* Tools rows are the exact projection the renderer draws, so their scroll
+   bound belongs to that projection rather than a second reconstruction in
+   the state module. Every other counted surface remains state-owned. *)
+let scrolled_surface state surface =
+  match surface with
+  | Tools -> Some (Masc_tui_render.tools_scrolled state)
+  | _ -> Masc_tui_types.scrolled_surface state surface
+;;
+
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
@@ -119,6 +128,13 @@ let move_surface_scroll (state : state) ~rows ~delta ~current =
       if delta >= 0 then
         Masc_tui_scroll.down ~count:scrolled.sc_count ~height current
       else Masc_tui_scroll.up ~count:scrolled.sc_count ~height current
+
+let move_surface_to_end (state : state) ~rows ~current =
+  match scrolled_surface state state.view with
+  | None -> current
+  | Some scrolled ->
+      let height = surface_body_height ~rows scrolled in
+      Masc_tui_scroll.maximum ~count:scrolled.sc_count ~height
 
 (* The rows a surface has to draw in. The same arithmetic the drawing does --
    a bound worked out from a different height than the frame uses is not a
@@ -9392,6 +9408,14 @@ and is loaded on demand through keeper_skill.
          this input sees the old frame; the next loop would be one key too
          late. *)
       consume_resize_request ();
+      (* One direct ioctl snapshot owns both this interaction's bounds and its
+         eventual frame. This also observes resizes from terminals that omit
+         SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
+      (match refresh_terminal_size () with
+       | Render_schedule.Terminal_size_cache.Changed _ ->
+           Frame_presenter.invalidate frame_presenter;
+           Render_schedule.request render_schedule Render_schedule.Force
+       | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
@@ -10836,6 +10860,11 @@ and is loaded on demand through keeper_skill.
            (match state.view with
             | Approvals -> answer_presented_approval Deny
             | _ -> ())
+       | Some "home" when state.view = Tools -> state.tools_scroll <- 0
+       | Some "end" when state.view = Tools ->
+           state.tools_scroll <-
+             move_surface_to_end state ~rows:(surface_rows state)
+               ~current:state.tools_scroll
        | Some ("pageup" | "pagedown") ->
            let page = surface_page_rows state in
            let direction = if key = Some "pagedown" then 1 else -1 in

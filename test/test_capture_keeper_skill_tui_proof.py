@@ -108,6 +108,120 @@ def fixture(action_identity=None):
 
 
 class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
+    def test_backend_pty_size_reads_the_exact_ttyd_child(self):
+        process_table = "  100     1 ??\n  101   100 ttys001\n"
+        with (
+            mock.patch.object(
+                capture.subprocess,
+                "check_output",
+                return_value=process_table,
+            ),
+            mock.patch.object(capture.os, "open", return_value=7) as open_tty,
+            mock.patch.object(
+                capture.os,
+                "get_terminal_size",
+                return_value=capture.os.terminal_size((180, 42)),
+            ),
+            mock.patch.object(capture.os, "close") as close_tty,
+        ):
+            observed = capture.backend_pty_size(100)
+
+        self.assertEqual(
+            observed,
+            {
+                "child_pid": 101,
+                "device": "/dev/ttys001",
+                "cols": 180,
+                "rows": 42,
+            },
+        )
+        open_tty.assert_called_once_with(
+            Path("/dev/ttys001"), capture.os.O_RDONLY | capture.os.O_NOCTTY
+        )
+        close_tty.assert_called_once_with(7)
+
+    def test_ttyd_identity_binds_version_and_executable_digest(self):
+        with tempfile.TemporaryDirectory() as raw:
+            ttyd = Path(raw) / "ttyd"
+            ttyd.write_bytes(b"exact ttyd binary")
+            completed = mock.Mock(returncode=0, stdout=b"ttyd version 1.7.7\n")
+            with mock.patch.object(capture.subprocess, "run", return_value=completed):
+                observed = capture.ttyd_executable_identity(ttyd)
+
+        self.assertEqual(observed["path"], str(ttyd.resolve()))
+        self.assertEqual(observed["bytes"], len(b"exact ttyd binary"))
+        self.assertEqual(observed["sha256"], capture.digest_bytes(b"exact ttyd binary"))
+        self.assertEqual(observed["version"], "ttyd version 1.7.7")
+
+    def test_ttyd_session_executes_the_attested_resolved_path(self):
+        page = mock.Mock()
+        context = mock.Mock()
+        context.new_page.return_value = page
+        browser = mock.Mock()
+        browser.new_context.return_value = context
+        process = mock.Mock()
+        attested = {
+            "path": "/attested/ttyd",
+            "bytes": 42,
+            "sha256": "a" * 64,
+            "version": "ttyd version 1.7.7",
+        }
+        backend = {
+            "child_pid": 321,
+            "device": "/dev/ttys001",
+            "cols": 180,
+            "rows": 42,
+        }
+        with (
+            mock.patch.object(
+                capture, "ttyd_executable_identity", return_value=attested
+            ),
+            mock.patch.object(
+                capture.subprocess, "Popen", return_value=process
+            ) as popen,
+            mock.patch.object(capture, "wait_port"),
+            mock.patch.object(capture, "synchronize_ttyd_terminal_size"),
+            mock.patch.object(capture, "backend_pty_size", return_value=backend),
+            capture.ttyd_session(
+                browser=browser,
+                ttyd=Path("relative/ttyd"),
+                executable=Path("/proof/masc_tui.exe"),
+                base_path="/workspace",
+                host="127.0.0.1",
+                api_port=8935,
+                cols=180,
+                rows=42,
+                timeout=3.0,
+                token="token",
+            ),
+        ):
+            pass
+
+        self.assertEqual(popen.call_args.args[0][0], "/attested/ttyd")
+
+    def test_ttyd_size_is_replayed_after_the_pty_connects(self):
+        page = mock.Mock()
+
+        capture.synchronize_ttyd_terminal_size(page, cols=180, rows=42, timeout=3.0)
+
+        size = {"cols": 180, "rows": 42}
+        self.assertEqual(page.evaluate.call_args_list[0].args[1], size)
+        replay_script = page.evaluate.call_args_list[1].args[0]
+        self.assertIn("intermediateRows", replay_script)
+        self.assertIn("window.term.resize(size.cols, size.rows)", replay_script)
+        self.assertEqual(page.evaluate.call_args_list[1].args[1], size)
+        self.assertIn(
+            ".xterm-screen",
+            page.wait_for_function.call_args_list[1].args[0],
+        )
+        self.assertEqual(
+            page.wait_for_function.call_args_list[1].kwargs["arg"],
+            "MASC Overview",
+        )
+        self.assertEqual(
+            page.wait_for_function.call_args_list[1].kwargs["timeout"], 3000
+        )
+
     def test_strict_http_and_tui_child_share_explicit_bearer(self):
         token = "strict-tui-token"
 
@@ -620,7 +734,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         self.assertIn("id=call-skill-1", observations["receipt_block"])
         self.assertEqual(visible_frames, [receipt])
         self.assertEqual(captured_frames, [0])
-        self.assertEqual([call.args[1] for call in press.call_args_list], ["j", "j"])
+        self.assertEqual([call.args[1] for call in press.call_args_list], ["End", "k"])
 
     def test_tools_surface_connection_rejects_disconnected(self):
         self.assertTrue(

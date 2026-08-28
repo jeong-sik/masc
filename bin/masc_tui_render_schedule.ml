@@ -352,9 +352,14 @@ let allocate_keeper_columns ~inner_width =
     }
 
 module Terminal_size_cache = struct
+  type refresh =
+    | Changed of (int * int)
+    | Unchanged of (int * int)
+
   type t = {
     fallback : int * int;
     mutable cached : (int * int) option;
+    mutable invalidated : bool;
   }
 
   (* Box rows require two borders and one space on each side. Clamping a
@@ -366,19 +371,36 @@ module Terminal_size_cache = struct
 
   let create ~fallback =
     if not (valid fallback) then invalid_arg "terminal fallback must be positive";
-    { fallback = normalize fallback; cached = None }
+    { fallback = normalize fallback; cached = None; invalidated = true }
 
-  let invalidate cache = cache.cached <- None
+  let invalidate cache = cache.invalidated <- true
 
-  let get cache ~probe =
-    match cache.cached with
-    | Some size -> size
-    | None ->
-        let size =
-          match probe () with
-          | Some size when valid size -> normalize size
-          | Some _ | None -> cache.fallback
-        in
+  let probe_or_last cache ~probe =
+    match probe () with
+    | Some size when valid size ->
+        let size = normalize size in
         cache.cached <- Some size;
         size
+    | Some _ | None ->
+        (match cache.cached with
+         | Some size -> size
+         | None ->
+             cache.cached <- Some cache.fallback;
+             cache.fallback)
+
+  let get cache ~probe =
+    match cache.cached, cache.invalidated with
+    | Some size, false -> size
+    | None, false -> cache.fallback
+    | (Some _ | None), true ->
+        cache.invalidated <- false;
+        probe_or_last cache ~probe
+
+  let refresh cache ~probe =
+    let previous = cache.cached in
+    cache.invalidated <- false;
+    let current = probe_or_last cache ~probe in
+    match previous with
+    | Some size when size = current -> Unchanged current
+    | Some _ | None -> Changed current
 end

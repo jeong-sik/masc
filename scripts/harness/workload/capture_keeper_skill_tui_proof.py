@@ -599,6 +599,115 @@ def safe_environment(base_path: str, host: str, token: str) -> dict[str, str]:
     return environment
 
 
+def ttyd_executable_identity(ttyd: Path) -> dict[str, Any]:
+    resolved = ttyd.resolve(strict=True)
+    payload = resolved.read_bytes()
+    version = subprocess.run(
+        [str(resolved), "--version"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    require(version.returncode == 0, "ttyd --version failed")
+    version_text = version.stdout.decode(errors="replace").strip()
+    require(version_text != "", "ttyd --version returned no identity")
+    return {
+        "path": str(resolved),
+        "bytes": len(payload),
+        "sha256": digest_bytes(payload),
+        "version": version_text,
+    }
+
+
+def backend_pty_size(ttyd_pid: int) -> dict[str, Any]:
+    process_rows = subprocess.check_output(
+        ["ps", "-axo", "pid=,ppid=,tty="], text=True
+    ).splitlines()
+    processes: list[tuple[int, int, str]] = []
+    for row in process_rows:
+        fields = row.split()
+        if len(fields) != 3:
+            continue
+        raw_pid, raw_parent, tty = fields
+        try:
+            processes.append((int(raw_pid), int(raw_parent), tty))
+        except ValueError:
+            continue
+    descendants = {ttyd_pid}
+    changed = True
+    while changed:
+        changed = False
+        for pid, parent, _tty in processes:
+            if parent in descendants and pid not in descendants:
+                descendants.add(pid)
+                changed = True
+    candidates = [
+        (pid, tty)
+        for pid, _parent, tty in processes
+        if pid in descendants - {ttyd_pid} and tty not in ("?", "??", "-")
+    ]
+    require(
+        len(candidates) == 1,
+        f"ttyd has {len(candidates)} descendant PTYs instead of one",
+    )
+    child_pid, tty = candidates[0]
+    tty_parts = Path(tty).parts
+    require(
+        tty_parts != () and ".." not in tty_parts and not Path(tty).is_absolute(),
+        "ttyd child TTY name is unsafe",
+    )
+    tty_path = Path("/dev").joinpath(*tty_parts)
+    descriptor = os.open(tty_path, os.O_RDONLY | os.O_NOCTTY)
+    try:
+        size = os.get_terminal_size(descriptor)
+    finally:
+        os.close(descriptor)
+    return {
+        "child_pid": child_pid,
+        "device": str(tty_path),
+        "cols": size.columns,
+        "rows": size.lines,
+    }
+
+
+def replay_ttyd_terminal_size(page: Any, *, cols: int, rows: int) -> None:
+    size = {"cols": cols, "rows": rows}
+    page.evaluate(
+        """size => {
+          const intermediateRows = size.rows === 1 ? 2 : size.rows - 1;
+          window.term.resize(size.cols, intermediateRows);
+          window.term.resize(size.cols, size.rows);
+        }""",
+        size,
+    )
+
+
+def synchronize_ttyd_terminal_size(
+    page: Any, *, cols: int, rows: int, timeout: float
+) -> None:
+    size = {"cols": cols, "rows": rows}
+    page.evaluate("size => window.term.resize(size.cols, size.rows)", size)
+    page.wait_for_function(
+        "size => window.term && window.term.cols === size.cols && window.term.rows === size.rows",
+        arg=size,
+        timeout=int(timeout * 1000),
+    )
+    # ttyd exposes window.term before its WebSocket is ready. Its initial
+    # screen contains one blank cell, so wait for the TUI's first backend
+    # frame; ttyd has applied its preferences before forwarding that frame.
+    page.wait_for_function(
+        "marker => document.querySelector('.xterm-screen')?.innerText.includes(marker)",
+        arg="MASC Overview",
+        timeout=int(timeout * 1000),
+    )
+    replay_ttyd_terminal_size(page, cols=cols, rows=rows)
+    page.wait_for_function(
+        "size => window.term && window.term.cols === size.cols && window.term.rows === size.rows",
+        arg=size,
+        timeout=int(timeout * 1000),
+    )
+
+
 @contextmanager
 def ttyd_session(
     *,
@@ -614,8 +723,10 @@ def ttyd_session(
     token: str,
 ) -> Iterator[Any]:
     web_port = free_port()
+    ttyd_identity_before = ttyd_executable_identity(ttyd)
+    resolved_ttyd = ttyd_identity_before["path"]
     command = [
-        str(ttyd),
+        resolved_ttyd,
         "-p",
         str(web_port),
         "-i",
@@ -664,16 +775,35 @@ def ttyd_session(
         page.wait_for_function(
             "() => Boolean(window.term)", timeout=int(timeout * 1000)
         )
-        page.evaluate(
-            "size => window.term.resize(size.cols, size.rows)",
-            {"cols": cols, "rows": rows},
+        synchronize_ttyd_terminal_size(page, cols=cols, rows=rows, timeout=timeout)
+        backend_before = backend_pty_size(process.pid)
+        require(
+            (backend_before["cols"], backend_before["rows"]) == (cols, rows),
+            "ttyd backend PTY size differs from the requested terminal size",
         )
-        page.wait_for_function(
-            "size => window.term && window.term.cols === size.cols && window.term.rows === size.rows",
-            arg={"cols": cols, "rows": rows},
-            timeout=int(timeout * 1000),
+        terminal_attestation = {
+            "requested": {"cols": cols, "rows": rows},
+            "backend_before": backend_before,
+            "ttyd": ttyd_identity_before,
+        }
+        yield page, terminal_attestation
+        backend_after = backend_pty_size(process.pid)
+        require(
+            (backend_after["cols"], backend_after["rows"]) == (cols, rows),
+            "ttyd backend PTY size changed during TUI capture",
         )
-        yield page
+        require(
+            ttyd_executable_identity(Path(resolved_ttyd)) == ttyd_identity_before,
+            "ttyd executable identity changed during TUI capture",
+        )
+        terminal_attestation.update(
+            {
+                "frontend": page.evaluate(
+                    "() => ({cols: window.term.cols, rows: window.term.rows})"
+                ),
+                "backend_after": backend_after,
+            }
+        )
     finally:
         if context is not None:
             context.close()
@@ -1027,6 +1157,7 @@ def scroll_to_skill_receipt(
     expected = expected_receipt_lines(activation, actions)
     next_receipt_index = 0
     frames: list[str] = []
+    jumped_to_end = False
     while time.monotonic() < deadline:
         visible = screen_text(page)
         normalized_lines = [line.strip(" │") for line in visible.splitlines()]
@@ -1083,9 +1214,22 @@ def scroll_to_skill_receipt(
                 observations["receipt_block"] = "\n".join(expected)
         if len(observations) == 3 and next_receipt_index == len(expected):
             return visible, observations, frames
-        press(page, "j")
-        page.wait_for_timeout(25)
+        if (
+            not jumped_to_end
+            and next_receipt_index == 0
+            and "skill_header" in observations
+            and "session_line" in observations
+        ):
+            press(page, "End")
+            jumped_to_end = True
+        elif jumped_to_end and next_receipt_index == 0:
+            press(page, "k")
+        else:
+            press(page, "j")
         advanced = screen_text(page)
+        while advanced == visible and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+            advanced = screen_text(page)
         if advanced == visible:
             required = {"skill_header", "session_line", "receipt_block"}
             missing = sorted(required - observations.keys())
@@ -1185,7 +1329,7 @@ def main() -> int:
                 rows=args.rows,
                 timeout=args.timeout,
                 token=token,
-            ) as page:
+            ) as (page, terminal_attestation):
                 wait_screen(page, "MASC Overview", args.timeout)
                 goto_tools(page, args.timeout)
                 visited_keepers = select_exact_keeper(
@@ -1221,11 +1365,10 @@ def main() -> int:
                     tools_surface_is_connected(after_screenshot),
                     "TUI Tools surface disconnected while taking the screenshot",
                 )
-                terminal = page.evaluate(
-                    "() => ({cols: window.term.cols, rows: window.term.rows})"
-                )
         finally:
             browser.close()
+
+    terminal = terminal_attestation
 
     health_after = read_json_url(
         f"{selected['base_url']}/health?full=1", args.timeout, token
@@ -1257,7 +1400,7 @@ def main() -> int:
             }
         )
     result = {
-        "schema": "masc.keeper-skill-tui-proof.v3",
+        "schema": "masc.keeper-skill-tui-proof.v4",
         "captured_at": utc_now(),
         "source": {
             "expected_sha": selected["expected_sha"],

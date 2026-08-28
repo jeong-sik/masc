@@ -333,3 +333,16 @@ let compact_text ?(max_len = 160) raw =
   in
   if normalized = "" then ""
   else utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"…" normalized |> to_string
+
+(* One spelling test for the canonical stored form of a SHA-256: 64 lowercase
+   hex characters. Before this lived here, three surfaces wrote the same
+   triple guard (length, lowercase, hex alphabet) by hand — two of them
+   through Digestif.of_hex_opt behind length+lowercase guards, which this
+   predicate decides identically without the dependency. *)
+let is_lowercase_sha256_hex value =
+  String.length value = 64
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' -> true
+         | _ -> false)
+       value

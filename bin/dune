@@ -623,7 +623,7 @@
  (name masc_tui_keeper_config)
  (wrapped false)
  (modules masc_tui_keeper_config)
- (libraries yojson masc_tui_theme))
+ (libraries yojson masc_tui_theme masc.string_util))
 
 (library
  (name masc_tui_keeper_sandbox)

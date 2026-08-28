@@ -39,6 +39,10 @@ function decodeMaxContextOverride(value: unknown): number | null {
   )
 }
 
+// 64 lowercase hex characters — the canonical stored SHA-256 spelling,
+// String_util.is_lowercase_sha256_hex on the OCaml side.
+const SHA256_HEX_RE = /^[0-9a-f]{64}$/
+
 function decodeSkillNames(value: unknown): string[] | null {
   if (value === null) return null
   if (Array.isArray(value) && value.every(name => typeof name === 'string')) {
@@ -59,7 +63,7 @@ function decodeManifestRevision(value: unknown): KeeperManifestRevision {
   if (
     value.state === 'sha256'
     && typeof value.value === 'string'
-    && /^[0-9a-f]{64}$/.test(value.value)
+    && SHA256_HEX_RE.test(value.value)
     && Object.keys(value).length === 2
   ) {
     return { state: 'sha256', value: value.value }
@@ -78,7 +82,7 @@ function decodeRuntimeAssignmentRevision(value: unknown): KeeperRuntimeAssignmen
     return { state: 'runtime_config_missing' }
   }
   if (value.state !== 'runtime_config_present' || typeof value.source_revision !== 'string'
-    || !/^[0-9a-f]{64}$/.test(value.source_revision) || !isRecord(value.assignment)
+    || !SHA256_HEX_RE.test(value.source_revision) || !isRecord(value.assignment)
     || Object.keys(value).length !== 3) {
     throw new Error('Invalid keeper config response: runtime_assignment revision is malformed')
   }

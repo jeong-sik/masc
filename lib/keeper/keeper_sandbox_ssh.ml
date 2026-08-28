@@ -136,6 +136,10 @@ let ensure_control_path_dir path =
 
 let create ?ssh_bin ~base_path ~keeper_name
     ~(endpoint : Exec_ssh_endpoint.t) () =
+  let* () =
+    Exec_ssh_endpoint.validate_destination
+      ~host:endpoint.host ~user:endpoint.user
+  in
   let ssh_bin =
     match ssh_bin with
     | Some path -> path

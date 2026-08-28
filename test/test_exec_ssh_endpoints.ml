@@ -202,6 +202,32 @@ remote_root = "/srv/masc/playground"
     check bool "names whitespace" true
       (contains "whitespace" (render_errors errors))
 
+let test_destination_option_injection_rejected () =
+  let reject ~field ~value =
+    let host = if field = "host" then value else "builder.local" in
+    let user = if field = "user" then value else "masc-exec" in
+    let toml =
+      Printf.sprintf
+        {|
+[exec.ssh.endpoints.dev]
+host = %S
+user = %S
+remote_root = "/srv/masc/playground"
+|}
+        host user
+    in
+    match parse_cfg toml with
+    | Ok _ -> failf "unsafe SSH %s %S must be rejected" field value
+    | Error errors ->
+      let rendered = render_errors errors in
+      check bool "named endpoint error" true
+        (contains "remote_ssh_endpoint_invalid" rendered);
+      check bool "names option injection" true
+        (contains "option injection" rendered)
+  in
+  reject ~field:"user" ~value:"-oProxyCommand=/bin/echo pwned #";
+  reject ~field:"host" ~value:"-F"
+
 let test_relative_remote_root_rejected () =
   let toml =
     {|
@@ -240,6 +266,8 @@ let () =
         ; test_case "duplicate table rejected" `Quick
             test_duplicate_endpoint_table_rejected
         ; test_case "padded host rejected" `Quick test_padded_host_rejected
+        ; test_case "destination option injection rejected" `Quick
+            test_destination_option_injection_rejected
         ; test_case "relative remote_root rejected" `Quick
             test_relative_remote_root_rejected
         ; test_case "port bounds" `Quick test_port_bounds

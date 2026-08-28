@@ -128,6 +128,23 @@ let endpoint : Exec_ssh_endpoint.t =
   }
 ;;
 
+let test_destination_validation_before_side_effects () =
+  let base_path = temp_dir () in
+  let unsafe =
+    { endpoint with user = "-oProxyCommand=/bin/echo option-injection #" }
+  in
+  (match
+     Keeper_sandbox_ssh.create ~base_path ~keeper_name:"keeper-a"
+       ~endpoint:unsafe ()
+   with
+   | Ok _ -> fail "unsafe typed endpoint reached SSH runner creation"
+   | Error error ->
+     check bool "named endpoint error" true
+       (String.starts_with ~prefix:"remote_ssh_endpoint_invalid:" error));
+  check bool "no control-path side effect" false
+    (Sys.file_exists (Filename.concat base_path ".masc/run/ssh"))
+;;
+
 let with_eio f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -386,5 +403,7 @@ let () =
               test_cancellation_kills_local_ssh
           ; test_case "Shell IR target resolves endpoint" `Quick
               test_shell_ir_target_resolves_endpoint
+          ; test_case "unsafe typed destination rejected before side effects"
+              `Quick test_destination_validation_before_side_effects
           ] )
       ]

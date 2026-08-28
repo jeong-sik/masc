@@ -29,6 +29,40 @@ let default_port = 22
 let default_connect_timeout_sec = 10
 let default_max_concurrent_sessions = 8
 
+let validate_destination ~host ~user =
+  let validate kind value =
+    if value = ""
+    then Error (Printf.sprintf "remote_ssh_endpoint_invalid: %s must not be empty" kind)
+    else if value.[0] = '-'
+    then
+      Error
+        (Printf.sprintf
+           "remote_ssh_endpoint_invalid: %s must not begin with '-' (OpenSSH option injection)"
+           kind)
+    else if String.contains value '@'
+    then
+      Error
+        (Printf.sprintf
+           "remote_ssh_endpoint_invalid: %s must not contain '@'"
+           kind)
+    else if
+      String.exists
+        (fun c ->
+          let code = Char.code c in
+          code <= 0x20 || code = 0x7f)
+        value
+    then
+      Error
+        (Printf.sprintf
+           "remote_ssh_endpoint_invalid: %s must not contain whitespace or control bytes"
+           kind)
+    else Ok ()
+  in
+  match validate "host" host with
+  | Error _ as error -> error
+  | Ok () -> validate "user" user
+;;
+
 type t =
   { name : string  (** Registry key — the [<name>] in the table header. *)
   ; host : string  (** Remote host (required). *)

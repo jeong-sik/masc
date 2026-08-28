@@ -1271,6 +1271,13 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   in
   let host_result = exec_ssh_required_string ~path tbl ~key:"host" in
   let user_result = exec_ssh_required_string ~path tbl ~key:"user" in
+  let destination_result =
+    match host_result, user_result with
+    | Ok host, Ok user ->
+      Exec_ssh_endpoint.validate_destination ~host ~user
+      |> Result.map_error (fun message -> error path message)
+    | Error _, _ | _, Error _ -> Ok ()
+  in
   let remote_root_result = exec_ssh_remote_root_field ~path tbl in
   let port_result = exec_ssh_port_field ~path tbl in
   let identity_file_result = exact_non_empty_string_opt_field ~path tbl "identity_file" in
@@ -1299,6 +1306,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   let field_errors =
     errs host_result
     @ errs user_result
+    @ errs destination_result
     @ errs remote_root_result
     @ errs port_result
     @ errs identity_file_result
@@ -1314,6 +1322,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
     (match
        ( host_result
        , user_result
+       , destination_result
        , remote_root_result
        , port_result
        , identity_file_result
@@ -1325,6 +1334,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
      with
      | ( Ok host
        , Ok user
+       , Ok ()
        , Ok remote_root
        , Ok port
        , Ok identity_file

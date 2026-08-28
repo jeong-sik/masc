@@ -9,6 +9,7 @@ type setup_error =
   | Prompt_contract_unavailable of string
   | Registry_unavailable
   | Lane_unavailable
+  | Lane_preference_unavailable of string
   | Lane_resolved_without_slots
   | Candidate_invalid of
       { position : int
@@ -92,7 +93,7 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
-let prepare ~base_path:_ ~keeper_name:_ ~net candidate =
+let prepare ~base_path ~keeper_name ~net candidate =
   match
     ( Keeper_board_attention_candidate.status_view
         candidate.Keeper_board_attention_candidate.status
@@ -131,6 +132,14 @@ let prepare ~base_path:_ ~keeper_name:_ ~net candidate =
     let* resolved =
       Runtime_exact_output_registry.resolve_lane registry ~lane_id
       |> Result.map_error (fun _ -> Lane_unavailable)
+    in
+    let* resolved =
+      (Keeper_exact_lane_preference.apply
+         ~base_path
+         ~keeper_name
+         ~lane_id
+         resolved)
+      |> Result.map_error (fun detail -> Lane_preference_unavailable detail)
     in
     let* candidates = flow_candidates resolved.selected_slots in
     (match candidates with

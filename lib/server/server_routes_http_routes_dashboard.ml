@@ -955,11 +955,10 @@ end
    rather than a field on the workspace one: the two answer different
    questions, and a body that omitted [keeper_name] would otherwise move
    every keeper at once. *)
-(* Which of the lane's admitted judges this Keeper is put to first. Naming a
-   slot the lane does not offer is refused here rather than at the next
-   judgment, so an operator finds out while they are still looking at the
-   screen they set it on. *)
-let handle_gate_keeper_judge_body state operator_name request reqd body_str =
+(* Which admitted slot this Keeper uses first in one exact-output lane. Naming
+   a slot the lane does not offer is refused here rather than on the next run,
+   so the operator learns while still looking at the setting. *)
+let handle_keeper_exact_lane_body state operator_name request reqd body_str =
   let refuse message =
     respond_json_value_with_cors ~status:`Bad_request request reqd
       (operator_error_json message)
@@ -971,8 +970,10 @@ let handle_gate_keeper_judge_body state operator_name request reqd body_str =
       | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
         []
     in
-    match List.assoc_opt "keeper_name" fields with
-    | Some (`String keeper_name) when String.trim keeper_name <> "" -> (
+    match List.assoc_opt "keeper_name" fields, List.assoc_opt "lane_id" fields with
+    | ( Some (`String keeper_name)
+      , Some (`String lane_id) )
+      when String.trim keeper_name <> "" && String.trim lane_id <> "" -> (
       match
         match List.assoc_opt "slot_id" fields with
         | None | Some `Null -> Ok None
@@ -983,9 +984,19 @@ let handle_gate_keeper_judge_body state operator_name request reqd body_str =
       | Error message -> refuse message
       | Ok slot_id -> (
         let config = Mcp_server.workspace_config state in
+        let set () =
+          Keeper_exact_lane_preference.set
+            config ~actor:operator_name ~keeper_name ~lane_id slot_id
+        in
         match
-          Keeper_gate_judge_slot.set config ~actor:operator_name ~keeper_name
-            slot_id
+          match slot_id with
+          | None -> set ()
+          | Some slot_id ->
+            Result.bind
+              (Keeper_exact_lane_preference.validate_admitted_slot
+                 ~lane_id
+                 ~slot_id)
+              set
         with
         | Error message -> refuse message
         | Ok current ->
@@ -993,8 +1004,9 @@ let handle_gate_keeper_judge_body state operator_name request reqd body_str =
             (Printf.sprintf "gate:%s;" config.base_path);
           Sse.broadcast
             (`Assoc
-               [ "type", `String "gate_keeper_judge_changed"
+               [ "type", `String "keeper_exact_lane_preference_changed"
                ; "keeper_name", `String keeper_name
+               ; "lane_id", `String lane_id
                ; ( "slot_id"
                  , match slot_id with
                    | Some slot_id -> `String slot_id
@@ -1004,12 +1016,14 @@ let handle_gate_keeper_judge_body state operator_name request reqd body_str =
             (`Assoc
                [ "ok", `Bool true
                ; "keeper_name", `String keeper_name
+               ; "lane_id", `String lane_id
                ; ( "slot_id"
                  , match current with
-                   | Some current -> `String current.Keeper_gate_judge_slot.slot_id
+                   | Some current ->
+                     `String current.Keeper_exact_lane_preference.slot_id
                    | None -> `Null )
                ])))
-    | Some _ | None -> refuse "keeper_name is required"
+    | _, _ -> refuse "keeper_name and lane_id are required"
   with Yojson.Json_error message -> refuse message
 ;;
 
@@ -2334,14 +2348,15 @@ let add_routes ~sw ~clock router =
              ( `List []
              , `Assoc [ "state", `String "unavailable"; "error", `String detail ] )
          in
-         let judges, judges_state =
-           match Keeper_gate_judge_slot.all ~base_path with
+         let exact_lanes, exact_lanes_state =
+           match Keeper_exact_lane_preference.all ~base_path with
            | Ok rows ->
              ( `List
                  (List.map
-                    (fun (row : Keeper_gate_judge_slot.t) ->
+                    (fun (row : Keeper_exact_lane_preference.t) ->
                       `Assoc
                         [ "keeper_name", `String row.keeper_name
+                        ; "lane_id", `String row.lane_id
                         ; "slot_id", `String row.slot_id
                         ])
                     rows)
@@ -2354,8 +2369,8 @@ let add_routes ~sw ~clock router =
            (`Assoc
               [ "modes", modes
               ; "modes_state", modes_state
-              ; "judges", judges
-              ; "judges_state", judges_state
+              ; "exact_lanes", exact_lanes
+              ; "exact_lanes_state", exact_lanes_state
               ])
            reqd)
          request reqd)
@@ -2365,11 +2380,11 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd
              (handle_gate_keeper_mode_body state operator_name request reqd))
          request reqd)
-  |> Http.Router.post "/api/v1/dashboard/gate/keeper-judge" (fun request reqd ->
+  |> Http.Router.post "/api/v1/dashboard/runtime/keeper-exact-lane" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
-             (handle_gate_keeper_judge_body state operator_name request reqd))
+             (handle_keeper_exact_lane_body state operator_name request reqd))
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/external-mode" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

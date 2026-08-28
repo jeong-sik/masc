@@ -24,8 +24,3 @@ val keeper_modes : base_path:string -> string
     it: one keeper's stance changing must not rewrite the file every other
     keeper's decision is read from. Holds only keepers an operator has
     actually moved, so the file is also the list of them. *)
-
-val keeper_judge_slots : base_path:string -> string
-(** Per-Keeper judge preferences. Its own file rather than a field beside
-    the mode overrides: the two are set at different times for different
-    reasons, and clearing one must not be a way to lose the other. *)

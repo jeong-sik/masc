@@ -130,14 +130,15 @@ let dashboard_json ~base_path ~limit ~window_minutes =
     | Error detail ->
       `List [], `Assoc [ "state", `String "unavailable"; "error", `String detail ]
   in
-  let keeper_judges, keeper_judges_state =
-    match Keeper_gate_judge_slot.all ~base_path with
+  let keeper_exact_lanes, keeper_exact_lanes_state =
+    match Keeper_exact_lane_preference.all ~base_path with
     | Ok rows ->
       ( `List
           (List.map
-             (fun (row : Keeper_gate_judge_slot.t) ->
+             (fun (row : Keeper_exact_lane_preference.t) ->
                `Assoc
                  [ "keeper_name", `String row.keeper_name
+                 ; "lane_id", `String row.lane_id
                  ; "slot_id", `String row.slot_id
                  ; "updated_by", `String row.actor
                  ; "updated_at", `String row.changed_at
@@ -161,8 +162,8 @@ let dashboard_json ~base_path ~limit ~window_minutes =
     ; "approval_rules_state", approval_rules_state
     ; "keeper_modes", keeper_modes
     ; "keeper_modes_state", keeper_modes_state
-    ; "keeper_judges", keeper_judges
-    ; "keeper_judges_state", keeper_judges_state
+    ; "keeper_exact_lanes", keeper_exact_lanes
+    ; "keeper_exact_lanes_state", keeper_exact_lanes_state
     ; "hitl", hitl_status_json ~base_path
     ]
 ;;

@@ -22,7 +22,7 @@ import type {
   KeeperApprovalQueueState,
   KeeperApprovalRulesState,
   KeeperGateModeOverride,
-  KeeperGateJudgePreference,
+  KeeperExactLanePreference,
   KeeperGateSettingsState,
   KeeperAutoJudgeRearmExpectation,
   GateDecisionSource,
@@ -217,6 +217,24 @@ function normalizeKeeperSettingRows<T>(
     return gateSnapshotProtocolDrift(`unavailable ${field} must be empty`)
   }
   return rows as T[]
+}
+
+function normalizeKeeperExactLanePreference(raw: unknown): KeeperExactLanePreference | null {
+  if (!isRecord(raw)) return null
+  if (!hasExactKeys(raw, ['keeper_name', 'lane_id', 'slot_id', 'updated_by', 'updated_at'])) {
+    return null
+  }
+  const keeperName = typeof raw.keeper_name === 'string' ? raw.keeper_name.trim() : ''
+  const laneId = typeof raw.lane_id === 'string' ? raw.lane_id.trim() : ''
+  const slotId = typeof raw.slot_id === 'string' ? raw.slot_id.trim() : ''
+  if (keeperName === '' || laneId === '' || slotId === '') return null
+  return {
+    keeper_name: keeperName,
+    lane_id: laneId,
+    slot_id: slotId,
+    updated_by: typeof raw.updated_by === 'string' ? raw.updated_by : '',
+    updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : '',
+  }
 }
 
 function normalizeGateModeValue(raw: unknown): GateMode | null {
@@ -525,15 +543,15 @@ export function fetchDashboardGate(
       keeperModesState,
       item => normalizeKeeperSettingRow(item, 'mode', normalizeGateModeValue) as KeeperGateModeOverride | null,
     )
-    const keeperJudgesState = normalizeKeeperSettingsState(raw.keeper_judges_state, 'keeper_judges_state')
-    const keeperJudges = normalizeKeeperSettingRows<KeeperGateJudgePreference>(
-      raw.keeper_judges,
-      'keeper_judges',
-      keeperJudgesState,
-      item =>
-        normalizeKeeperSettingRow(item, 'slot_id', value =>
-          typeof value === 'string' && value.trim() !== '' ? value.trim() : null,
-        ) as KeeperGateJudgePreference | null,
+    const keeperExactLanesState = normalizeKeeperSettingsState(
+      raw.keeper_exact_lanes_state,
+      'keeper_exact_lanes_state',
+    )
+    const keeperExactLanes = normalizeKeeperSettingRows<KeeperExactLanePreference>(
+      raw.keeper_exact_lanes,
+      'keeper_exact_lanes',
+      keeperExactLanesState,
+      normalizeKeeperExactLanePreference,
     )
     return {
       generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
@@ -548,8 +566,8 @@ export function fetchDashboardGate(
       approval_rules_state: approvalRulesState,
       keeper_modes: keeperModes,
       keeper_modes_state: keeperModesState,
-      keeper_judges: keeperJudges,
-      keeper_judges_state: keeperJudgesState,
+      keeper_exact_lanes: keeperExactLanes,
+      keeper_exact_lanes_state: keeperExactLanesState,
       hitl: normalizeHitlStatus(raw.hitl),
     }
   })

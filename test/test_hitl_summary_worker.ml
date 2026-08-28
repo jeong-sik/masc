@@ -688,6 +688,60 @@ let test_flow_order_completion_and_replay () =
        check int "replay made no second POST" 1 (F.post_count first))
 ;;
 
+let test_keeper_preference_reorders_the_hitl_lane () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-per-keeper-preference" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let first =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       let preferred =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "deny")))
+       in
+       publish_lane
+         [ "hitl-default"; "hitl-preferred" ]
+         (F.resolver_snapshot
+            ~source:"hitl-per-keeper-preference"
+            [ { id = "hitl-default"; base_url = first.base_url }
+            ; { id = "hitl-preferred"; base_url = preferred.base_url }
+            ]);
+       (match
+          Masc.Keeper_exact_lane_preference.set
+            (Masc.Workspace.default_config base_path)
+            ~actor:"test"
+            ~keeper_name:"keeper"
+            ~lane_id:Worker.For_testing.lane_id
+            (Some "hitl-preferred")
+        with
+        | Ok _ -> ()
+        | Error detail -> fail detail);
+       let entry = pending_entry ~base_path () in
+       let prepared = prepare_exn entry in
+       let declared =
+         Worker.For_testing.flow_evidence prepared
+         |> fun evidence ->
+         List.map candidate_id evidence.declared_candidate_snapshot
+       in
+       check
+         (list string)
+         "Keeper preference first, declared failover retained"
+         [ "hitl-preferred"; "hitl-default" ]
+         declared)
+;;
+
 let test_predispatch_failure_advances_only_to_agent_core_successor () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "hitl-flow-failover" @@ fun base_path ->
@@ -2107,6 +2161,10 @@ let () =
             "pre-dispatch failure advances to AGENT_CORE successor"
             `Quick
             test_predispatch_failure_advances_only_to_agent_core_successor
+        ; test_case
+            "Keeper preference reorders the HITL lane"
+            `Quick
+            test_keeper_preference_reorders_the_hitl_lane
         ; test_case
             "JSON-syntax candidate admits without structured capability"
             `Quick

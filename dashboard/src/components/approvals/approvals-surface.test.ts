@@ -132,8 +132,8 @@ function responseWithQueue(
     approval_rules_state,
     keeper_modes: [],
     keeper_modes_state: { state: 'ready' },
-    keeper_judges: [],
-    keeper_judges_state: { state: 'ready' },
+    keeper_exact_lanes: [],
+    keeper_exact_lanes_state: { state: 'ready' },
     hitl,
     ...extra,
   } as DashboardGateResponse
@@ -1593,9 +1593,10 @@ describe('ApprovalsSurface', () => {
           updated_at: '2026-08-27T05:00:00Z',
         },
       ],
-      keeper_judges: [
+      keeper_exact_lanes: [
         {
           keeper_name: 'kidsnote',
+          lane_id: 'hitl_auto_judge',
           slot_id: 'glm-coding.glm-5-turbo',
           updated_by: 'vincent',
           updated_at: '2026-08-27T05:00:00Z',
@@ -1611,9 +1612,10 @@ describe('ApprovalsSurface', () => {
     expect(modeRows[0]?.textContent).toContain('kidsnote')
     // The label an operator picked in the mode control, not the wire value.
     expect(modeRows[0]?.textContent).toContain('Human')
-    const judgeRows = container.querySelectorAll('[data-testid="keeper-judge-row"]')
-    expect(judgeRows.length).toBe(1)
-    expect(judgeRows[0]?.textContent).toContain('glm-coding.glm-5-turbo')
+    const exactLaneRows = container.querySelectorAll('[data-testid="keeper-exact-lane-row"]')
+    expect(exactLaneRows.length).toBe(1)
+    expect(exactLaneRows[0]?.textContent).toContain('hitl_auto_judge')
+    expect(exactLaneRows[0]?.textContent).toContain('glm-coding.glm-5-turbo')
   })
 
   it('says nobody was singled out rather than showing nothing', async () => {

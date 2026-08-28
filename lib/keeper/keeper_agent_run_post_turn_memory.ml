@@ -137,6 +137,7 @@ let run
             }
           in
           Keeper_librarian_runtime.run_best_effort
+            ~base_path:config.Workspace.base_path
             ~keepers_dir
             ~keeper_id:meta.name
             ~expected_revision

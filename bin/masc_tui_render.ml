@@ -232,6 +232,11 @@ let document_markdown ~width body =
 let chat_markdown_theme_revision = 1
 let chat_markdown_cache_capacity = 128
 
+(* Newest events the Skill Timeline section draws. The full count still
+   prints in the heading; the cap keeps one busy ledger from pushing the
+   usage and catalog sections off the first screen. *)
+let skill_timeline_display_cap = 15
+
 type chat_markdown_identity = {
   cmi_style : Message_layout.style;
   cmi_keeper_name : string;
@@ -8764,12 +8769,11 @@ let render_tools (state : state) =
         let timeline_lines =
           (* Newest-first event stream over the loaded ledger: one line per
              delivery or observed action, so "what just ran" reads top-down
-             without walking per-activation receipts. *)
-          let time_of ts =
-            let clean = Terminal_text.single_line ts in
-            let len = String.length clean in
-            if len >= 19 then String.sub clean 11 8 else clean
-          in
+             without walking per-activation receipts. Row clocks go through
+             the shared [Terminal_text.clock_timestamp]: slicing HH:MM:SS
+             out of the RFC 3339 string would draw a UTC clock under a
+             header in the terminal's zone (nine hours apart in Seoul). *)
+          let time_of ts = Terminal_text.clock_timestamp ts in
           let events =
             List.concat_map
               (fun (activation :
@@ -8804,7 +8808,7 @@ let render_tools (state : state) =
           in
           let total = List.length events in
           let capped =
-            List.filteri (fun index _ -> index < 15) events
+            List.filteri (fun index _ -> index < skill_timeline_display_cap) events
           in
           [ Ansi.bold,
             Printf.sprintf " Skill Timeline — %d event%s (newest first)"

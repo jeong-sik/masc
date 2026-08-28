@@ -202,6 +202,22 @@ let instruction_skill_description (instruction_skills : instruction_skill list) 
   skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
 ;;
 
+(* Every refusal that turns on the reference answers with the references the
+   keeper actually carries. A caller without the revision at hand — the log
+   shows empty strings and copied placeholders — has to be handed the exact
+   value here, because nothing else on its surface can say it (task-828). *)
+let carried_references_text (instruction_skills : instruction_skill list) =
+  match instruction_skills with
+  | [] -> "(none)"
+  | skills ->
+    String.concat
+      ", "
+      (List.map
+         (fun (skill : instruction_skill) ->
+            Skill_reference.to_yojson skill.reference |> Yojson.Safe.to_string)
+         skills)
+;;
+
 type 'evidence schema_tool_origin =
   | Declared_composition of 'evidence
   | Plan_execute
@@ -1260,7 +1276,10 @@ let make_instruction_skill_tool
              ~tool_name:name
              ~class_:Tool_result.Workflow_rejection
              ~start_time
-             "keeper_skill requires one canonical exact Skill reference"
+             (Printf.sprintf
+                "keeper_skill requires one canonical exact Skill reference; \
+                 this keeper carries: %s"
+                (carried_references_text instruction_skills))
          | Error Duplicate_resource_path ->
            Tool_result.make_err
              ~tool_name:name
@@ -1416,15 +1435,7 @@ let make_instruction_skill_tool
                 (Printf.sprintf
                    "no instruction Skill matches exact reference %s; this keeper carries: %s"
                    (Skill_reference.to_yojson asked |> Yojson.Safe.to_string)
-                   (match instruction_skills with
-                    | [] -> "(none)"
-                    | skills ->
-                      String.concat ", "
-                        (List.map
-                           (fun (skill : instruction_skill) ->
-                              Skill_reference.to_yojson skill.reference
-                              |> Yojson.Safe.to_string)
-                           skills)))))))
+                   (carried_references_text instruction_skills))))))
 ;;
 
 module For_testing = struct

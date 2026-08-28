@@ -303,14 +303,12 @@ let local_wall_budget t timeout_sec =
 ;;
 
 let remote_cwd t cwd =
-  let normalized =
-    Keeper_alerting_path.normalize_path_for_check cwd
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  let endpoint_root =
-    Keeper_alerting_path.normalize_path_for_check t.endpoint.remote_root
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
+  (* Both strings name paths on the endpoint, so cleanup is lexical only:
+     resolving them against the host filesystem substitutes host symlinks and
+     macOS firmlinks into a cwd the shim then cannot enter (see
+     Keeper_remote_path.normalize_remote). *)
+  let normalized = Keeper_remote_path.normalize_remote cwd in
+  let endpoint_root = Keeper_remote_path.normalize_remote t.endpoint.remote_root in
   if String.equal normalized endpoint_root
   then Ok endpoint_root
   else

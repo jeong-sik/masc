@@ -12,6 +12,13 @@ type scope =
   | Outside_workspace of string      (** path escapes the workspace root *)
   | Absolute_unknown of string      (** absolute path we cannot place *)
 
+val lexical_normalize_abs : string -> string
+(** Collapse empty, [.], and [..] segments of an absolute path without
+    consulting the filesystem ([..] at the root is dropped). The remote
+    execution lane uses this for endpoint-namespace paths, where host
+    resolution would substitute host symlinks and macOS firmlinks into paths
+    that only exist on the endpoint. *)
+
 val classify : raw:string -> cwd:string -> t
 (** Classify [raw] relative to [cwd].  Arm selection is deterministic
     and fail-closed: a path that cannot be resolved lands in

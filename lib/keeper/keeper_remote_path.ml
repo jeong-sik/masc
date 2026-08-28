@@ -22,20 +22,48 @@
     Every current call site belongs to one of those categories. New remote I/O
     must use this module instead of adding another prefix rewrite. *)
 
-let normalize path =
+let normalize_host path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
+;;
+
+(* Remote-namespace strings must never be resolved against the host
+   filesystem: realpath substitutes host symlinks and macOS firmlinks into
+   them (on macOS, /home/x resolves to /System/Volumes/Data/home/x), and the
+   substituted path is what the shim then fails to find on the endpoint. The
+   endpoint owns real resolution — its cwd jail runs realpath there — so the
+   host side only cleans dot segments lexically. *)
+let normalize_remote path =
+  Masc_exec.Path_scope.lexical_normalize_abs path
+  |> Keeper_alerting_path.strip_trailing_slashes
+;;
+
+(* Keeper-relative logical path: same lexical discipline, without
+   absolutizing. Leading [..] segments survive so escape detection below
+   still sees them. *)
+let normalize_logical path =
+  let parts = String.split_on_char '/' path in
+  let stack =
+    List.fold_left
+      (fun stack part ->
+        match part, stack with
+        | ("" | "."), _ -> stack
+        | "..", top :: rest when top <> ".." -> rest
+        | part, _ -> part :: stack)
+      [] parts
+  in
+  String.concat "/" (List.rev stack)
 ;;
 
 let safe_keeper keeper = Playground_paths.sanitize_keeper_name keeper
 
 let host_root ~base_path ~keeper =
   Filename.concat base_path (Playground_paths.bundle_root (safe_keeper keeper))
-  |> normalize
+  |> normalize_host
 ;;
 
 let remote_root ~(endpoint : Exec_ssh_endpoint.t) ~keeper =
-  Filename.concat endpoint.remote_root (safe_keeper keeper) |> normalize
+  Filename.concat endpoint.remote_root (safe_keeper keeper) |> normalize_remote
 ;;
 
 let at_or_below ~root path =
@@ -56,14 +84,8 @@ let host_to_remote ~base_path ~(endpoint : Exec_ssh_endpoint.t) ~keeper path =
   let rroot = remote_root ~endpoint ~keeper in
   if Filename.is_relative path
   then
-    let logical =
-      let normalized = normalize path in
-      if String.starts_with ~prefix:("." ^ Filename.dir_sep) normalized
-      then
-        String.sub normalized 2 (String.length normalized - 2)
-      else normalized
-    in
-    if String.equal logical "." || String.equal logical ""
+    let logical = normalize_logical path in
+    if String.equal logical ""
     then Ok rroot
     else if String.equal logical ".."
             || String.starts_with ~prefix:(".." ^ Filename.dir_sep) logical
@@ -72,25 +94,29 @@ let host_to_remote ~base_path ~(endpoint : Exec_ssh_endpoint.t) ~keeper path =
         (Printf.sprintf
            "remote_ssh_path_jail_violation: keeper-relative path %s escapes %s"
            path hroot)
-    else Ok (Filename.concat rroot logical |> normalize)
+    else Ok (Filename.concat rroot logical)
   else
-    let path = normalize path in
-    if at_or_below ~root:rroot path
-    then Ok path
-    else if at_or_below ~root:hroot path
-    then
-      let suffix = suffix_below ~root:hroot path in
-      if String.equal suffix "" then Ok rroot else Ok (Filename.concat rroot suffix)
+    let remote_candidate = normalize_remote path in
+    if at_or_below ~root:rroot remote_candidate
+    then Ok remote_candidate
     else
-      Error
-        (Printf.sprintf
-           "remote_ssh_path_jail_violation: %s is outside keeper playground %s"
-           path hroot)
+      (* Not endpoint-namespace: read it as a host bookkeeping path, where
+         resolving against the host filesystem is the correct comparison. *)
+      let host_candidate = normalize_host path in
+      if at_or_below ~root:hroot host_candidate
+      then
+        let suffix = suffix_below ~root:hroot host_candidate in
+        if String.equal suffix "" then Ok rroot else Ok (Filename.concat rroot suffix)
+      else
+        Error
+          (Printf.sprintf
+             "remote_ssh_path_jail_violation: %s is outside keeper playground %s"
+             path hroot)
 ;;
 
 let remote_to_logical ~(endpoint : Exec_ssh_endpoint.t) ~keeper path =
   let rroot = remote_root ~endpoint ~keeper in
-  let normalized = normalize path in
+  let normalized = normalize_remote path in
   if String.equal normalized rroot
   then "."
   else if at_or_below ~root:rroot normalized

@@ -95,7 +95,6 @@ let gate_meta () =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String "local-gated"
-        ; "agent_name", `String "keeper-local-gated-agent"
         ; "trace_id", `String "trace-local-gated"
         ])
   with

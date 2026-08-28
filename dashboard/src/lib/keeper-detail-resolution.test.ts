@@ -33,13 +33,8 @@ describe('resolveKeeperForDetail (#12283)', () => {
   })
 
   it('rejects fallback whose name does not match the requested keeper', () => {
-    const other: Keeper = { name: 'qa-king', agent_name: 'qa-king' } as unknown as Keeper
+    const other: Keeper = { name: 'qa-king' } as unknown as Keeper
     expect(resolveKeeperForDetail('sangsu', null, other, 0)).toBeNull()
-  })
-
-  it('matches fallback by agent_name', () => {
-    const aliased: Keeper = { name: 'sangsu', agent_name: 'sangsu_v2' } as unknown as Keeper
-    expect(resolveKeeperForDetail('sangsu_v2', null, aliased, 0)).toBe(aliased)
   })
 
   it('returns null when both live and fallback are absent', () => {

@@ -134,7 +134,6 @@ let candidate ?(id = "candidate-worker") ?(recorded_at = 1.0) () : A.candidate =
         ; ( "keeper_context"
           , `Assoc
               [ "lane_keeper_name", `String keeper_name
-              ; "agent_name", `String "alpha-agent"
               ; "keeper_record_id", `Null
               ; "keeper_runtime_uid", `Null
               ; "instructions", `String "continue"

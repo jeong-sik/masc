@@ -96,7 +96,6 @@ type t = {
   schema_version : int;
   ts : string;
   keeper_name : string;
-  agent_name : string option;
   trace_id : string;
   keeper_turn_id : int option;
   agent_core_turn_count : int option;
@@ -120,7 +119,6 @@ type decoded_row =
 
 type turn_context = {
   manifest_keeper_name : string;
-  manifest_agent_name : string option;
   manifest_trace_id : string;
   manifest_keeper_turn_id : int option;
 }

@@ -56,9 +56,7 @@ let keeper_name = "rw-e0-blocked-purge"
 let purge_intent =
   { reason =
       Dashboard_keeper_purge
-        { requested_name = keeper_name
-        ; agent_name = Printf.sprintf "keeper-%s-agent" keeper_name
-        }
+        { requested_name = keeper_name }
   ; remove_session = true
   }
 ;;

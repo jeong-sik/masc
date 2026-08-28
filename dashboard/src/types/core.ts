@@ -157,8 +157,7 @@ export interface BoardActorIdentity {
   key: string
   display_name: string
   raw: string
-  source?: 'keeper_registry_agent_name' | 'keeper_registry_name' | 'keeper_alias_contract' | 'raw_agent'
-  runtime_agent_name?: string
+  source?: 'keeper_registry_name' | 'raw_agent'
 }
 
 /**
@@ -1169,7 +1168,6 @@ export interface Keeper {
   registered?: boolean
   emoji?: string
   koreanName?: string
-  agent_name?: string
   trace_id?: string
   model?: string
   primary_model?: string

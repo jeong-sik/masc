@@ -496,7 +496,7 @@ describe('KeeperLaneStrip', () => {
   it('renders an explicit gap when the keeper is absent from the inventory', () => {
     const el = mount(html`
       <${KeeperLaneStrip}
-        keeper=${keeperFixture({ name: 'ghost', agent_name: 'agent-ghost' })}
+        keeper=${keeperFixture({ name: 'ghost' })}
         inventory=${inventoryFixture()}
         ready=${true}
         loading=${false}

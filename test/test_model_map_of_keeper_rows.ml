@@ -36,7 +36,6 @@ let test_projects_active_models_to_agents_wire () =
   let keepers =
     [ `Assoc
         [ "name", `String keeper_name
-        ; "agent_name", `String keeper_name
         ; "active_model", `String "model-x"
         ]
     ]

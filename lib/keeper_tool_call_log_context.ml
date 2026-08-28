@@ -114,7 +114,6 @@ let runtime_observability_contract_json_for_call ~keeper_name ~cell () =
   let ctx = get_turn_context_record ~cell () in
   Keeper_runtime_contract.runtime_observability_contract_json_from_fields
     ~keeper_name
-    ?agent_name:ctx.agent_name
     ?trace_id:ctx.trace_id
     ?session_id:ctx.session_id
     ?keeper_turn_id:ctx.keeper_turn_id

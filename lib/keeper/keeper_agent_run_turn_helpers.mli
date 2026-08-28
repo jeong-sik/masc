@@ -19,7 +19,6 @@ val emit_turn_end_safely : keeper_name:string -> unit -> unit
 
 val runtime_manifest_context :
   keeper_name:string ->
-  agent_name:string ->
   trace_id:string ->
   keeper_turn_id:int ->
   Keeper_runtime_manifest.turn_context
@@ -58,7 +57,6 @@ type append_manifest_fn =
 val make_append_manifest :
   config:Workspace.config ->
   keeper_name:string ->
-  agent_name:string ->
   trace_id:string ->
   runtime_id:string ->
   turn_start:Mtime.t ->

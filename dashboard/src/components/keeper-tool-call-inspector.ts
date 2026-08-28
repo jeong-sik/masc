@@ -699,7 +699,7 @@ function ToolCallEvidenceSection({ entry }: { entry: ToolCallEntry }) {
       <${EvidenceBlock}
         title="runtime contract"
         pairs=${[
-          ['agent', contract?.agent_name],
+          ['keeper', contract?.keeper_name],
           ['generation', contract?.generation !== undefined ? String(contract.generation) : undefined],
           ['sandbox root', contract?.sandbox_root],
           ['allowed paths', joinedOrAbsent(contract?.allowed_paths)],

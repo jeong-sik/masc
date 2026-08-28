@@ -317,7 +317,6 @@ let cleanup_reason_to_json = function
     `Assoc
       [ "kind", `String "dashboard_keeper_purge"
       ; "requested_name", `String context.requested_name
-      ; "agent_name", `String context.agent_name
       ]
 ;;
 
@@ -709,8 +708,7 @@ let cleanup_reason_of_json json =
   | "supervisor_cleanup" -> Ok Supervisor_cleanup
   | "dashboard_keeper_purge" ->
     let* requested_name = string "requested_name" json in
-    let* agent_name = string "agent_name" json in
-    Ok (Dashboard_keeper_purge { requested_name; agent_name })
+    Ok (Dashboard_keeper_purge { requested_name })
   | value ->
     Error
       (Decode_error (Printf.sprintf "unknown shutdown cleanup reason: %S" value))

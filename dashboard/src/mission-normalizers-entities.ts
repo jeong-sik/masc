@@ -122,7 +122,6 @@ export function normalizeKeeperBrief(raw: unknown): DashboardMissionKeeperBrief 
   if (!name) return null
   return {
     name,
-    agent_name: asString(raw.agent_name) ?? null,
     status: asString(raw.status),
     generation: asNumber(raw.generation),
     context_ratio: asNumber(raw.context_ratio) ?? null,

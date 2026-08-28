@@ -375,7 +375,6 @@ let to_json_with_operator_disposition
   let runtime_contract =
     Keeper_runtime_contract.runtime_observability_contract_json_from_fields
       ~keeper_name:receipt.keeper_name
-      ~agent_name:receipt.agent_name
       ~trace_id:receipt.trace_id
       ~session_id:receipt.trace_id
       ?keeper_turn_id:receipt.turn_count
@@ -405,7 +404,6 @@ let to_json_with_operator_disposition
     [ "schema", `String Keeper_types_support.execution_receipt_schema
     ; "recorded_at", `String receipt.ended_at
     ; "keeper_name", `String receipt.keeper_name
-    ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
     ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
     ; ( "agent_core_turn_count", Json_util.int_opt_to_json receipt.agent_core_turn_count )
@@ -500,7 +498,6 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
   `Assoc
     [ "schema", `String "keeper.operator_broadcast_required.v1"
     ; "keeper_name", `String receipt.keeper_name
-    ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
     ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
     ; "disposition", `String disposition_s
@@ -542,7 +539,7 @@ let emit_operator_broadcast_event config (receipt : t) ~disposition ~reason =
   let event =
     Activity_graph.emit
       config
-      ~actor:{ Activity_graph.kind = "agent"; id = receipt.agent_name }
+      ~actor:{ Activity_graph.kind = "agent"; id = receipt.keeper_name }
       ~kind:"keeper.operator_broadcast_required"
       ~payload
       ()

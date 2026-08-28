@@ -521,10 +521,10 @@ let model_map_of_keeper_rows keepers =
   List.fold_left
     (fun model_map -> function
       | `Assoc _ as keeper_json ->
-        (match Json_util.assoc_member_opt "agent_name" keeper_json,
+        (match Json_util.assoc_member_opt "name" keeper_json,
                Json_util.assoc_member_opt "active_model" keeper_json with
-         | Some (`String agent_name), Some (`String model) ->
-           Agent_name_map.add agent_name model model_map
+         | Some (`String keeper_name), Some (`String model) ->
+           Agent_name_map.add keeper_name model model_map
          | Some (`String _), _
          | _, Some (`String _)
          | _, _ -> model_map)

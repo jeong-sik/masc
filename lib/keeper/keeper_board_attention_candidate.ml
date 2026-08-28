@@ -296,7 +296,6 @@ let keeper_context_to_yojson (meta : Keeper_meta_contract.keeper_meta) =
     Ok
       (`Assoc
          [ "lane_keeper_name", `String meta.name
-         ; "agent_name", `String meta.name
          ; "keeper_record_id", Json_util.option_to_yojson Ids.Keeper_id.to_yojson meta.id
          ; ( "keeper_runtime_uid"
            , Json_util.option_to_yojson Keeper_id.uid_to_yojson meta.keeper_id )
@@ -1191,7 +1190,6 @@ let optional_string_of_yojson ~context = function
 
 let keeper_context_current_fields =
   [ "lane_keeper_name"
-  ; "agent_name"
   ; "keeper_record_id"
   ; "keeper_runtime_uid"
   ; "instructions"
@@ -1219,10 +1217,6 @@ let validate_keeper_context ~keeper_name json =
     if String.equal lane_keeper_name keeper_name
     then Ok ()
     else Error (context ^ ".lane_keeper_name does not match candidate keeper_name")
-  in
-  let* agent_name_json = field ~context "agent_name" fields in
-  let* (_ : string) =
-    string_json ~context:(context ^ ".agent_name") agent_name_json
   in
   let* instructions_json = field ~context "instructions" fields in
   let* (_ : string) =

@@ -137,7 +137,6 @@ let execution_smoke_fixture_json () =
             `Assoc
               [
                 ("name", `String "local-alpha");
-                ("agent_name", `String "local-alpha");
                 ("status", `String "busy");
                 ("tone", `String "ok");
                 ("state", `String "working");
@@ -157,7 +156,6 @@ let execution_smoke_fixture_json () =
             `Assoc
               [
                 ("name", `String "local-beta");
-                ("agent_name", `String "local-beta");
                 ("status", `String "active");
                 ("tone", `String "warn");
                 ("state", `String "quiet");
@@ -177,7 +175,6 @@ let execution_smoke_fixture_json () =
             `Assoc
               [
                 ("name", `String "local-gamma");
-                ("agent_name", `String "local-gamma");
                 ("status", `String "idle");
                 ("tone", `String "ok");
                 ("state", `String "watching");
@@ -201,7 +198,6 @@ let execution_smoke_fixture_json () =
             `Assoc
               [
                 ("name", `String "local-alpha");
-                ("agent_name", `String "local-alpha");
                 ("status", `String "busy");
                 ("tone", `String "ok");
                 ("state", `String "working");
@@ -216,7 +212,6 @@ let execution_smoke_fixture_json () =
             `Assoc
               [
                 ("name", `String "local-beta");
-                ("agent_name", `String "local-beta");
                 ("status", `String "active");
                 ("tone", `String "warn");
                 ("state", `String "quiet");
@@ -235,7 +230,6 @@ let execution_smoke_fixture_json () =
             `Assoc
               [
                 ("name", `String "dm-keeper");
-                ("agent_name", `String "dm-keeper");
                 ("status", `String "active");
                 ("tone", `String "bad");
                 ("state", `String "critical");
@@ -265,7 +259,6 @@ let execution_smoke_fixture_json () =
             `Assoc
               [
                 ("name", `String "local-delta");
-                ("agent_name", `String "local-delta");
                 ("status", `String "inactive");
                 ("tone", `String "bad");
                 ("state", `String "offline");
@@ -393,7 +386,6 @@ let execution_smoke_fixture_json () =
             `Assoc
               [
                 ("name", `String "dm-keeper");
-                ("agent_name", `String "dm-keeper");
                 ("status", `String "active");
                 ("turn_count", `Int 84);
                 ("context_ratio", `Float 0.91);

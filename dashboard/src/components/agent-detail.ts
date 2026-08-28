@@ -200,7 +200,7 @@ export function AgentDetailOverlay() {
   // Don't show koreanName if it's actually an agent runtime name, not Korean text
   const koreanName = rawKoreanName && rawKoreanName !== agentName && rawKoreanName !== displayName
     ? rawKoreanName : null
-  const keeperIdentity = keeperIdentityHint(keeper?.name, keeper?.agent_name)
+  const keeperIdentity = keeperIdentityHint(keeper?.name)
   // Skip secondaryLabel when keeperIdentity already shows the agent runtime name
   const showSecondaryLabel = secondaryLabel && !keeperIdentity
   const titleId = `agent-detail-title-${agentName}`

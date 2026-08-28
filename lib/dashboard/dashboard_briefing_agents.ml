@@ -76,12 +76,9 @@ let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
   let table = Hashtbl.create 8 in
   List.iter
     (fun keeper ->
-      let keeper_name = String_util.trim_nonempty (string_field "name" keeper) in
-      let agent_name = String_util.trim_nonempty (string_field "agent_name" keeper) in
-      match keeper_name, agent_name with
-      | Some keeper_name, Some agent_name ->
-          Hashtbl.replace table agent_name keeper_name
-      | Some _, None | None, _ -> ())
+      match String_util.trim_nonempty (string_field "name" keeper) with
+      | Some keeper_name -> Hashtbl.replace table keeper_name keeper_name
+      | None -> ())
     keepers;
   table
 

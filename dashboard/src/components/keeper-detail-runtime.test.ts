@@ -129,7 +129,6 @@ describe('resolveKeeperObservedToolAudit', () => {
 
     const missionBrief: DashboardMissionKeeperBrief = {
       name: 'sangsu',
-      agent_name: 'sangsu',
       status: 'active',
       latest_tool_names: ['mission_brief_tool'],
       latest_tool_call_count: 3,
@@ -158,7 +157,6 @@ describe('resolveKeeperObservedToolAudit', () => {
 
     const missionBrief: DashboardMissionKeeperBrief = {
       name: 'sangsu',
-      agent_name: 'sangsu',
       status: 'active',
     }
 

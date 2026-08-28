@@ -467,7 +467,6 @@ describe('keeper tool telemetry fetchers', () => {
             prompt_fingerprint: '464ce7b3280c24fe1cbdcd990a70db87',
             runtime_contract: {
               keeper_name: 'keeper-alpha',
-              agent_name: 'keeper-alpha-agent',
               trace_id: 'trace-1',
               session_id: 'trace-1',
               generation: 1,
@@ -536,7 +535,7 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.tool_choice).toBeUndefined()
     expect(entry?.prompt_fingerprint).toBe('464ce7b3280c24fe1cbdcd990a70db87')
     expect(entry?.runtime_contract).toMatchObject({
-      agent_name: 'keeper-alpha-agent',
+      keeper_name: 'keeper-alpha',
       generation: 1,
       sandbox_root: '/sandbox/keeper-alpha/',
       allowed_paths: ['.masc/playground/keeper-alpha/'],

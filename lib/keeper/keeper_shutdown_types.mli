@@ -17,7 +17,6 @@ type meta_disposition =
 
 type dashboard_purge_context =
   { requested_name : string
-  ; agent_name : string
   }
 
 type cleanup_reason =

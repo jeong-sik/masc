@@ -249,7 +249,7 @@ export function RegistrySurface() {
                           <div class="rk-facet prov" title="참조하는 프롬프트 파일">
                             <span class="rk-f-lyr"></span>
                             <span class="rk-f-arrow">←</span>
-                            <span class="rk-f-val">${keeper.agent_name ?? '직접 정의'}</span>
+                            <span class="rk-f-val">직접 정의</span>
                           </div>
                           <div class="rk-facet rt" title="바인딩된 런타임">
                             <span class="rk-f-lyr"></span>

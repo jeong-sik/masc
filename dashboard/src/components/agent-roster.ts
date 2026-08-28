@@ -484,7 +484,6 @@ function keeperRelationKeys(source: Keeper): string[] {
   const keys = [
     relationKey('keeper-id', source.keeper_id),
     relationKey('keeper-name', source.name),
-    relationKey('agent-name', source.agent_name),
   ]
   return Array.from(new Set(keys.filter((key): key is string => key != null)))
 }

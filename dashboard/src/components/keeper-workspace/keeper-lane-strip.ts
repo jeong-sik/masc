@@ -132,12 +132,7 @@ function inventoryEntry(
   keeper: Keeper,
 ): DashboardKeeperWaitingKeeper | null {
   if (!inventory) return null
-  const byName = inventory.keepers.find(k => k.keeper_name === keeper.name)
-  if (byName) return byName
-  if (keeper.agent_name != null && keeper.agent_name !== '') {
-    return inventory.keepers.find(k => k.keeper_name === keeper.agent_name) ?? null
-  }
-  return null
+  return inventory.keepers.find(k => k.keeper_name === keeper.name) ?? null
 }
 
 function LaneGap({ children }: { children: VNode | string }): VNode {

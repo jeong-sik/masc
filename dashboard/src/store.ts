@@ -36,7 +36,6 @@ import {
 } from './keeper-store-normalize'
 import { buildAgentMotion, normalizeAgentKey, type AgentMotionSnapshot } from './components/common/agent-motion'
 import {
-  canonicalKeeperNameFromAgentName,
   keeperIdentityKeys,
   keeperPrincipalKey,
 } from './components/common/keeper-identity'
@@ -589,9 +588,9 @@ function keeperPrincipalLookup(keeperList: Keeper[]): Map<string, string> {
   const lookup = new Map<string, string>()
   for (const keeper of keeperList) {
     const principal =
-      keeperPrincipalKey(keeper.keeper_id, keeper.name, keeper.agent_name)
+      keeperPrincipalKey(keeper.keeper_id, keeper.name)
       ?? normalizeAgentKey(keeper.name)
-    for (const key of keeperIdentityKeys(keeper.keeper_id, keeper.name, keeper.agent_name)) {
+    for (const key of keeperIdentityKeys(keeper.keeper_id, keeper.name)) {
       lookup.set(normalizeAgentKey(key), principal)
     }
   }
@@ -604,10 +603,7 @@ function actorPrincipalKey(
 ): string {
   const raw = normalizeAgentKey(value)
   if (!raw) return raw
-  const known = lookup.get(raw)
-  if (known) return known
-  const alias = canonicalKeeperNameFromAgentName(value)
-  return alias ? `keeper:${alias.toLowerCase()}` : raw
+  return lookup.get(raw) ?? raw
 }
 
 function boardPostPrincipalKey(
@@ -637,7 +633,7 @@ export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = 
   const boardByAgent = groupByKey(boardPostList, p => boardPostPrincipalKey(p, keeperLookup))
   const keepersByAgent = groupByKey(
     keeperList,
-    k => keeperPrincipalKey(k.keeper_id, k.name, k.agent_name) ?? normalizeAgentKey(k.name),
+    k => keeperPrincipalKey(k.keeper_id, k.name) ?? normalizeAgentKey(k.name),
   )
 
   for (const agent of agents.value) {
@@ -1308,7 +1304,6 @@ function sameBoardAuthorIdentity(previous: BoardPost, next: BoardPost): boolean 
     && (left?.key ?? null) === (right?.key ?? null)
     && (left?.display_name ?? null) === (right?.display_name ?? null)
     && (left?.raw ?? null) === (right?.raw ?? null)
-    && (left?.runtime_agent_name ?? null) === (right?.runtime_agent_name ?? null)
 }
 
 function canReuseBoardPost(previous: BoardPost, next: BoardPost): boolean {

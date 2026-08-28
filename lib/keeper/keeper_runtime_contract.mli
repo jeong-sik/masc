@@ -5,7 +5,6 @@ val runtime_observability_contract_json :
 
 val runtime_contract_json_from_fields :
   keeper_name:string ->
-  ?agent_name:string ->
   ?trace_id:string ->
   ?session_id:string ->
   ?generation:int ->
@@ -24,7 +23,6 @@ val runtime_contract_json_from_fields :
 
 val runtime_observability_contract_json_from_fields :
   keeper_name:string ->
-  ?agent_name:string ->
   ?trace_id:string ->
   ?session_id:string ->
   ?generation:int ->

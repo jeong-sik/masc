@@ -631,7 +631,6 @@ let run_turn
   let runtime_manifest_context =
     Turn_helpers.runtime_manifest_context
       ~keeper_name:meta.name
-      ~agent_name:meta.name
       ~trace_id
       ~keeper_turn_id:manifest_keeper_turn_id
   in
@@ -643,7 +642,6 @@ let run_turn
     Turn_helpers.make_append_manifest
       ~config
       ~keeper_name:meta.name
-      ~agent_name:meta.name
       ~trace_id
       ~runtime_id:runtime_id_string
       ~turn_start

@@ -37,7 +37,7 @@ export type ToolCallPathResolution = {
 // duplicate the top-level row (keeper_name, trace_id, session_id, task_id,
 // goal_ids, keeper_turn_id, sandbox_profile) are not repeated here.
 export type ToolCallRuntimeContract = {
-  agent_name?: string
+  keeper_name?: string
   generation?: number
   sandbox_root?: string
   allowed_paths?: string[]
@@ -204,7 +204,7 @@ function decodePathResolution(raw: unknown): ToolCallPathResolution | undefined 
 function decodeRuntimeContract(raw: unknown): ToolCallRuntimeContract | undefined {
   if (!isRecord(raw)) return undefined
   return {
-    agent_name: asString(raw.agent_name),
+    keeper_name: asString(raw.keeper_name),
     generation: asNumber(raw.generation),
     sandbox_root: asString(raw.sandbox_root),
     allowed_paths: asStringArray(raw.allowed_paths),

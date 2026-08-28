@@ -670,7 +670,7 @@ describe('TelemetryUnified', () => {
         source: 'agent_core_event',
         ts_unix: 1_775_709_400,
         event_type: 'turn_ready',
-        agent_name: 'keeper-alpha-agent',
+        agent_name: 'alpha',
         turn: 42,
       },
       {
@@ -680,7 +680,7 @@ describe('TelemetryUnified', () => {
         payload: [
           'Context_window_usage',
           {
-            agent_name: 'keeper-alpha-agent',
+            agent_name: 'alpha',
             turn: 42,
             estimated_tokens: 1234,
           },
@@ -693,7 +693,7 @@ describe('TelemetryUnified', () => {
         tool: 'keeper_tasks_list',
         turn: 42,
         runtime_contract: {
-          agent_name: 'keeper-alpha-agent',
+          keeper_name: 'alpha',
         },
       },
       {
@@ -714,7 +714,7 @@ describe('TelemetryUnified', () => {
     expect(items[0]).toMatchObject({
       kind: 'group',
       category: 'turn',
-      label: 'keeper-alpha-agent · turn 42',
+      label: 'alpha · turn 42',
       count: 3,
     })
     expect(items[1]).toMatchObject({ kind: 'entry' })

@@ -99,17 +99,14 @@ val board_fetch_limit :
     actor-aggregation pipeline. *)
 
 (** [board_actor_keeper_identity raw] returns
-    [Some (keeper_name, runtime_agent_name, source)] when [raw]
-    resolves to a keeper through any of the three lookup tiers,
-    [None] otherwise.  [source] is one of the three literals
+    [Some (keeper_name, source)] when [raw] is a registry keeper
+    name, [None] otherwise.  [source] is one of the two literals
     listed above — operator runbooks grep on these. *)
 
 val board_actor_identity_json : string -> Yojson.Safe.t
 (** [board_actor_identity_json raw] renders the resolved identity
     as a JSON object with fields [kind] (["keeper"] or ["agent"])
-    / [id] / [key] / [display_name] / [raw] / [source].  Keeper
-    matches additionally include [runtime_agent_name] when the
-    runtime agent name differs from the canonical keeper name. *)
+    / [id] / [key] / [display_name] / [raw] / [source]. *)
 
 val board_actor_entity : string -> Activity_graph.entity_ref
 (** [board_actor_entity raw] returns the graph entity (kind +

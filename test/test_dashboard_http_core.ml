@@ -1524,8 +1524,7 @@ max-request-body-bytes = 65536
 |}
 
 let execution_trust_keeper_row_keys =
-  [ "agent_name"
-  ; "current_task_id"
+  [ "current_task_id"
   ; "keeper_id"
   ; "name"
   ; "phase"
@@ -1582,7 +1581,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
       (List.map
          (fun key -> key, full_row_field key)
          [ "name"
-         ; "agent_name"
          ; "keeper_id"
          ; "phase"
          ; "pipeline_stage"
@@ -1602,8 +1600,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
   check (list string) "wire field set remains exact"
     execution_trust_keeper_row_keys keys;
   check string "name" name (row |> member "name" |> to_string);
-  check string "agent name" name
-    (row |> member "agent_name" |> to_string);
   check string "trace id" "execution-trust-narrow-trace"
     (row |> member "trace_id" |> to_string);
   check bool "trust summary remains populated" true
@@ -2883,7 +2879,6 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
        let keeper_row =
          `Assoc
            [ "name", `String keeper_name
-           ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
            ; "keeper_id", `String ("k-" ^ keeper_name)
            ; "status", `String "active"
              (* #30084 moved [continuity_row_of_keeper] off the folded [status]

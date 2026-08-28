@@ -496,11 +496,7 @@ function inventoryEntryFor(
   keeperName: string,
 ): DashboardKeeperWaitingKeeper | null {
   if (!inventory) return null
-  const byName = inventory.keepers.find(k => k.keeper_name === keeperName)
-  if (byName) return byName
-  const agentName = keepers.value.find(k => k.name === keeperName)?.agent_name
-  if (agentName) return inventory.keepers.find(k => k.keeper_name === agentName) ?? null
-  return null
+  return inventory.keepers.find(k => k.keeper_name === keeperName) ?? null
 }
 
 /** Design KeeperWaitQueue — the keeper detail rail's 작업 대기열 section.

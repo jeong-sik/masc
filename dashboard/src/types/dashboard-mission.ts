@@ -88,7 +88,6 @@ export interface DashboardMissionAgentBrief {
 
 export interface DashboardMissionKeeperBrief {
   name: string
-  agent_name?: string | null
   status?: string
   generation?: number
   context_ratio?: number | null
@@ -232,7 +231,6 @@ export interface OperatorKeeperSnapshot {
    *  row. Separate from `status`, which folded this axis into the phase. */
   health?: string | null
   registered?: boolean
-  agent_name?: string
   status?: string
   context_ratio?: number | null
   generation?: number

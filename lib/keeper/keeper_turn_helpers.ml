@@ -192,7 +192,6 @@ let record_pre_dispatch_terminal_observation
   let ended_at = now_iso () in
   let receipt : Keeper_execution_receipt.t =
     { keeper_name = meta.name
-    ; agent_name = meta.name
     ; trace_id
     ; turn_count =
         (match keeper_turn_id with
@@ -242,7 +241,7 @@ let record_pre_dispatch_terminal_observation
       | None -> Keeper_execution_receipt.outcome_kind_to_string outcome
     in
     Keeper_runtime_manifest.make ~ts:ended_at ~keeper_name:meta.name
-      ~agent_name:meta.name ~trace_id ?keeper_turn_id ~event
+      ~trace_id ?keeper_turn_id ~event
       ~runtime_id:runtime_id_string ~status ?decision ~receipt_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in

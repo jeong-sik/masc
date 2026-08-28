@@ -180,7 +180,6 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                  `Assoc
                    ([
                       ("name", `String name);
-                      ("agent_name", member_assoc "agent_name" keeper);
                       ("status", `String status);
                       ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
                       ("context_metrics_unavailable", context_metrics_unavailable);
@@ -205,10 +204,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                        Keeper_runtime.autoboot_exclusion_reason_opt_to_yojson
                          (Keeper_runtime.autoboot_exclusion_reason config name));
                     ]
-                    @ keeper_tool_audit_json_fields config registry_lookup keeper
-                        (match String_util.trim_nonempty (string_field "agent_name" keeper) with
-                         | Some agent_name -> agent_name
-                         | None -> name));
+                    @ keeper_tool_audit_json_fields config registry_lookup keeper name);
              })
   |> List.sort (fun left right ->
          let by_pressure = Int.compare right.pressure_rank left.pressure_rank in

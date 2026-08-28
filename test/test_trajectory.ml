@@ -372,7 +372,6 @@ let test_entry_to_json_includes_contract_and_radius () =
   let runtime_contract =
     Keeper_runtime_contract.runtime_observability_contract_json_from_fields
       ~keeper_name:"alpha"
-      ~agent_name:"alpha-agent"
       ~trace_id:"trace-alpha"
       ~sandbox_profile:"docker"
       ()
@@ -429,7 +428,6 @@ let test_runtime_contract_projection_redacts_backend_details () =
   let keeper_visible =
     Keeper_runtime_contract.runtime_contract_json_from_fields
       ~keeper_name:"alpha"
-      ~agent_name:"alpha-agent"
       ~trace_id:"trace-alpha"
       ~sandbox_profile:"docker"
       ~sandbox_root:"/workspace"
@@ -439,7 +437,6 @@ let test_runtime_contract_projection_redacts_backend_details () =
   let observability =
     Keeper_runtime_contract.runtime_observability_contract_json_from_fields
       ~keeper_name:"alpha"
-      ~agent_name:"alpha-agent"
       ~trace_id:"trace-alpha"
       ~sandbox_profile:"docker"
       ~sandbox_root:"/workspace"

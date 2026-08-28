@@ -79,11 +79,11 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).not.toContain('claude-live-model')
   })
 
-  it('matches keeper-agent task assignees to the canonical keeper name', () => {
+  it('matches task assignees by the keeper name only — wrapper spellings do not match', () => {
     const summary = keeperWorkSummary(
       'sangsu',
       [keeperFixture()],
-      [taskFixture({ assignee: 'keeper-sangsu-agent' })],
+      [taskFixture({ assignee: 'sangsu' }), taskFixture({ id: 'task-152', assignee: 'keeper-sangsu-agent' })],
     )
 
     expect(summary.currentTaskId).toBe('task-151')

@@ -16,7 +16,7 @@ import type { BoardPost } from './board-state'
 function contextInferenceTargetKeeper(post: BoardPost): string | undefined {
   const identity = post.author_identity
   if (identity?.kind === 'keeper') {
-    return identity.id?.trim() || identity.runtime_agent_name?.trim() || identity.raw?.trim() || post.author.trim() || undefined
+    return identity.id?.trim() || identity.raw?.trim() || post.author.trim() || undefined
   }
   const list = keepers.value
   return list[0]?.name || undefined

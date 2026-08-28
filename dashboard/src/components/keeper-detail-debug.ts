@@ -24,7 +24,6 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   // Extra fields from keeper object
   const extras: { title: string; value: string; mono?: boolean }[] = []
   if (keeper.trace_id) extras.push({ title: '추적 ID', value: keeper.trace_id, mono: true })
-  if (keeper.agent_name) extras.push({ title: '에이전트', value: keeper.agent_name })
   if (keeper.context_source) extras.push({ title: '컨텍스트 소스', value: keeper.context_source })
   if (keeper.context_tokens != null) extras.push({ title: '컨텍스트 토큰', value: formatTokens(keeper.context_tokens) })
   if (keeper.context_max != null) extras.push({ title: '컨텍스트 최대', value: formatTokens(keeper.context_max) })

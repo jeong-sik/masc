@@ -4,7 +4,6 @@ let manifest ~event ~decision ~links =
   { M.schema_version = 1
   ; M.ts = "2026-05-22T00:00:00Z"
   ; M.keeper_name = "test-keeper"
-  ; M.agent_name = None
   ; M.trace_id = "trace/test"
   ; M.keeper_turn_id = Some 1
   ; M.agent_core_turn_count = Some 1

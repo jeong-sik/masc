@@ -175,7 +175,6 @@ let worker_state_of_agent
       `Assoc
         [
           ("name", `String agent.name);
-          ("agent_name", `String agent.name);
           ("keeper_name",
             match agent.meta with
             | Some meta -> Json_util.string_opt_to_json meta.keeper_name
@@ -350,7 +349,6 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
       `Assoc
         ([
            ("name", `String name);
-           ("agent_name", member_assoc "agent_name" keeper);
            ("keeper_id", member_assoc "keeper_id" keeper);
            ("status", `String status);
            ("tone", `String (Dashboard_utils.string_of_tone tone));

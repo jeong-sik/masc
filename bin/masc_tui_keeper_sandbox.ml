@@ -9,13 +9,6 @@ type container =
   ; owner_pid : int option
   }
 
-type identity =
-  { agent_name : string option
-  ; expected_agent_name : string option
-  ; agent_name_matches : bool option
-  ; warnings : string list
-  }
-
 type t =
   { sandbox_profile : string option
   ; configured_network_mode : string option
@@ -25,7 +18,6 @@ type t =
   ; container_error : string option
   ; why_no_container : string option
   ; keeper_last_error : string option
-  ; identity : identity option
   }
 
 let assoc field = function
@@ -51,20 +43,6 @@ let int_opt ?key ~path fields =
   | None | Some `Null -> Ok None
   | Some (`Int value) -> Ok (Some value)
   | Some _ -> Error (path ^ " must be an integer or null")
-
-let string_list ~sanitize ?key ~path fields =
-  match field (Option.value key ~default:path) fields with
-  | None | Some `Null -> Ok []
-  | Some (`List values) ->
-    List.fold_right
-      (fun value result ->
-        match value, result with
-        | `String value, Ok values -> Ok (sanitize value :: values)
-        | `String _, (Error _ as error) -> error
-        | _, _ -> Error (path ^ " entries must be strings"))
-      values
-      (Ok [])
-  | Some _ -> Error (path ^ " must be a list or null")
 
 let decode_container ~sanitize index json =
   let open Result.Syntax in
@@ -118,32 +96,6 @@ let decode_containers ~sanitize fields =
     |> Result.map Option.some
   | Some _ -> Error "sandbox_live.containers must be a list or null"
 
-let decode_identity ~sanitize fields =
-  match field "identity" fields with
-  | None | Some `Null -> Ok None
-  | Some json ->
-    let open Result.Syntax in
-    let* fields = assoc "sandbox_live.identity" json in
-    let* agent_name =
-      string_opt ~sanitize ~key:"agent_name"
-        ~path:"sandbox_live.identity.agent_name" fields
-    in
-    let* expected_agent_name =
-      string_opt ~sanitize
-        ~key:"expected_agent_name"
-        ~path:"sandbox_live.identity.expected_agent_name"
-        fields
-    in
-    let* agent_name_matches =
-      bool_opt ~key:"agent_name_matches"
-        ~path:"sandbox_live.identity.agent_name_matches" fields
-    in
-    let* warnings =
-      string_list ~sanitize ~key:"warnings"
-        ~path:"sandbox_live.identity.warnings" fields
-    in
-    Ok (Some { agent_name; expected_agent_name; agent_name_matches; warnings })
-
 let decode ~sanitize json =
   let open Result.Syntax in
   let* root = assoc "keeper status" json in
@@ -175,7 +127,6 @@ let decode ~sanitize json =
   let* why_no_container =
     string_opt ~sanitize ~path:"why_no_container" live
   in
-  let* identity = decode_identity ~sanitize live in
   Ok
     { sandbox_profile
     ; configured_network_mode
@@ -185,7 +136,6 @@ let decode ~sanitize json =
     ; container_error
     ; why_no_container
     ; keeper_last_error
-    ; identity
     }
 
 let styled code text =
@@ -292,29 +242,6 @@ let view_lines ~width reading =
     | None -> []
     | Some reason -> wrapped_rows ~width ~label:"Why no container" ~tone:`Info reason
   in
-  let identity_lines =
-    match reading.identity with
-    | None -> []
-    | Some identity ->
-      let match_line =
-        match identity.agent_name_matches with
-        | Some true ->
-          wrapped_rows ~width ~label:"Identity" ~tone:`Ok
-            (Printf.sprintf "%s matches canonical name"
-               (value identity.agent_name))
-        | Some false ->
-          wrapped_rows ~width ~label:"Identity" ~tone:`Bad
-            (Printf.sprintf "%s expected %s"
-               (value identity.agent_name)
-               (value identity.expected_agent_name))
-        | None ->
-          wrapped_rows ~width ~label:"Identity" ~tone:`Muted "not reported"
-      in
-      match_line
-      @ List.concat_map
-          (wrapped_rows ~width ~label:"Warning" ~tone:`Warn)
-          identity.warnings
-  in
   [ " " ^ styled Masc_tui_theme.Sgr.bold "sandbox flow"
   ; flow_row ~tone:`Info "Declared" declared
   ]
@@ -330,4 +257,3 @@ let view_lines ~width reading =
   @ container_lines ~width reading.containers
   @ explanation_lines
   @ error_lines
-  @ (if identity_lines = [] then [] else "" :: identity_lines)

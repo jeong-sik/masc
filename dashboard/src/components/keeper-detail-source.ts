@@ -5,12 +5,9 @@ import type {
 } from '../types'
 
 export function resolveKeeperMissionBrief(
-  keeper: Pick<Keeper, 'name' | 'agent_name'>,
+  keeper: Pick<Keeper, 'name'>,
 ): DashboardMissionKeeperBrief | null {
-  return missionKeeperBriefs.value.find(brief =>
-    brief.name === keeper.name
-      || (brief.agent_name && keeper.agent_name && brief.agent_name === keeper.agent_name))
-    ?? null
+  return missionKeeperBriefs.value.find(brief => brief.name === keeper.name) ?? null
 }
 
 interface KeeperObservedToolAuditSnapshot {

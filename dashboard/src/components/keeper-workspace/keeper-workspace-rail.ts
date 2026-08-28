@@ -120,7 +120,7 @@ function heartbeatEtaSeconds(keeper: Keeper): number | null {
 }
 
 function ownedTasks(keeper: Keeper): Task[] {
-  return tasks.value.filter(t => t.assignee === keeper.name || (keeper.agent_name != null && t.assignee === keeper.agent_name))
+  return tasks.value.filter(t => t.assignee === keeper.name)
 }
 
 function taskStateClass(status: Task['status']): string {

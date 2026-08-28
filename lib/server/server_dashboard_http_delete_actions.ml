@@ -501,9 +501,8 @@ let handle_dashboard_keeper_purge_completion config operation =
                  { verb = Keeper_lifecycle_events.Purged; phase = None })
             operation.keeper_name
             (Printf.sprintf
-               "requested_name=%s agent_name=%s shutdown_operation=%s"
+               "requested_name=%s shutdown_operation=%s"
                context.requested_name
-               context.agent_name
                operation_id)
             ();
           Log.Keeper.info
@@ -557,7 +556,6 @@ let respond_keeper_purge_operation_accepted ~request reqd operation =
          [ ("ok", `Bool true)
          ; ("accepted", `Bool true)
          ; ("target_kind", `String "keeper")
-         ; ("agent_name", `String context.agent_name)
          ; ("keeper_name", `String operation.keeper_name)
          ; ( "operation_id"
            , `String

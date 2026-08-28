@@ -60,9 +60,7 @@ export function asNullableIsoTimestamp(value: unknown): string | null {
 function normalizeBoardActorSource(raw: unknown): BoardActorIdentity['source'] {
   const source = asString(raw, '').trim()
   switch (source) {
-    case 'keeper_registry_agent_name':
     case 'keeper_registry_name':
-    case 'keeper_alias_contract':
     case 'raw_agent':
       return source
     default:
@@ -536,7 +534,6 @@ function normalizeBoardActorIdentity(
   const key = asString(raw.key, '').trim() || `${kind}:${id.toLowerCase()}`
   const displayName = asString(raw.display_name, '').trim() || id
   const original = asString(raw.raw, '').trim() || fallbackRaw
-  const runtimeAgentName = asString(raw.runtime_agent_name, '').trim()
   return {
     kind,
     id,
@@ -544,7 +541,6 @@ function normalizeBoardActorIdentity(
     display_name: displayName,
     raw: original,
     source: normalizeBoardActorSource(raw.source),
-    runtime_agent_name: runtimeAgentName || undefined,
   }
 }
 

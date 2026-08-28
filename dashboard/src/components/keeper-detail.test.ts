@@ -245,7 +245,6 @@ describe('openKeeperDetail', () => {
   it('only clears detail state for the matching keeper when cleanup is scoped', () => {
     const keeper: Keeper = {
       name: 'sangsu',
-      agent_name: 'sangsu-agent',
       status: 'active',
     }
 
@@ -259,7 +258,7 @@ describe('openKeeperDetail', () => {
     expect(mocks.resetKeeperConfig).not.toHaveBeenCalled()
     expect(mocks.selectKeeper).not.toHaveBeenCalled()
 
-    clearKeeperDetailSelection('sangsu-agent')
+    clearKeeperDetailSelection('sangsu')
 
     expect(selectedKeeper.value).toBeNull()
     expect(mocks.resetKeeperConfig).toHaveBeenCalledTimes(1)

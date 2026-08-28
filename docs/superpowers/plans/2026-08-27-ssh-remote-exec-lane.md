@@ -621,9 +621,9 @@ let test_denylist_beats_allowlist () =
 - Create: `test/fixtures/sshd/Dockerfile` (alpine + openssh + git + gh + the statically built shim installed at `/usr/local/bin/masc-exec-shim`; a dedicated fixture keypair baked with 0600; `MaxSessions 10`)
 - Create: `test/fixtures/sshd/entrypoint.sh`, `scripts/test-ssh-fixture.sh` (build image, run container on an ephemeral port, export `MASC_TEST_SSH_FIXTURE=host:port:keydir`)
 
-- [ ] **Step 1: Fixture scripts first** — `scripts/test-ssh-fixture.sh` builds the image (running `scripts/build-shim-static.sh` if the artifact is stale), starts the container, waits for sshd readiness, prints the fixture coordinates. It must clean up the container on exit (trap).
+- [x] **Step 1: Fixture scripts first** — `scripts/test-ssh-fixture.sh` builds the image (running `scripts/build-shim-static.sh` if the artifact is stale), starts the container, waits for sshd readiness, prints the fixture coordinates. It must clean up the container on exit (trap).
 
-- [ ] **Step 2: Write the integration test** — `test/test_keeper_ssh_integration.ml` skips loudly unless `MASC_TEST_SSH_FIXTURE` is set (Alcotest `skip` pattern used elsewhere in the suite — find the precedent with `grep -rn "Skip\|skip" test/*.ml | grep -i env | head -5`). Cases against the live fixture:
+- [x] **Step 2: Write the integration test** — `test/test_keeper_ssh_integration.ml` skips loudly unless `MASC_TEST_SSH_FIXTURE` is set (Alcotest `skip` pattern used elsewhere in the suite — find the precedent with `grep -rn "Skip\|skip" test/*.ml | grep -i env | head -5`). Cases against the live fixture:
 
 ```ocaml
 (* echo round-trip: stdout/stderr split preserved, exit 0 *)
@@ -644,7 +644,7 @@ let test_denylist_beats_allowlist () =
    remote_ssh_endpoint_unreachable *)
 ```
 
-- [ ] **Step 3: Run gated locally** — `scripts/test-ssh-fixture.sh` in one shell, then `MASC_TEST_SSH_FIXTURE=... scripts/dune-local.sh build test/test_keeper_ssh_integration.exe && _build/default/test/test_keeper_ssh_integration.exe`. Record the outcome in the PR description (CI without Docker skips the fixture — same posture as other Docker-dependent tests).
+- [x] **Step 3: Run gated locally** — `scripts/test-ssh-fixture.sh` in one shell, then `MASC_TEST_SSH_FIXTURE=... scripts/dune-local.sh build test/test_keeper_ssh_integration.exe && _build/default/test/test_keeper_ssh_integration.exe`. Record the outcome in the PR description (CI without Docker skips the fixture — same posture as other Docker-dependent tests).
 
 - [ ] **Step 4: Commit** — `test(keeper): SSH lane end-to-end fixture — cancel reaps remote pgid, host ps invariant`
 

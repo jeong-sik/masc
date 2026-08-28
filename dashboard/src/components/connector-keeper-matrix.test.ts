@@ -26,7 +26,6 @@ const mkConnector = (id: string, overrides: Partial<GateConnectorInfo> = {}): Ga
 
 const mkKeeper = (name: string): GateKeeper => ({
   name,
-  runtimeLabel: '',
   status: 'idle',
 })
 

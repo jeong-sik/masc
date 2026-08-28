@@ -103,11 +103,11 @@ const REAL_COMPOSITE_PAYLOAD = {
 /** Decoded gate keeper product values consumed by FsmHub. */
 const REAL_GATE_KEEPERS_SHAPE: GateKeepersData = {
   keepers: [
-    { name: 'analyst', runtimeLabel: 'keeper-analyst-agent', status: 'busy' },
-    { name: 'ani1999', runtimeLabel: 'keeper-ani1999-agent', status: 'inactive' },
-    { name: 'cheolsu', runtimeLabel: 'keeper-cheolsu-agent', status: 'active' },
-    { name: 'janitor', runtimeLabel: 'keeper-janitor-agent', status: 'active' },
-    { name: 'masc-improver', runtimeLabel: 'keeper-masc-improver-agent', status: 'active' },
+    { name: 'analyst', status: 'busy' },
+    { name: 'ani1999', status: 'inactive' },
+    { name: 'cheolsu', status: 'active' },
+    { name: 'janitor', status: 'active' },
+    { name: 'masc-improver', status: 'active' },
   ],
   directoryIssues: [],
   listing: { total: 5, limit: 200, truncated: false },

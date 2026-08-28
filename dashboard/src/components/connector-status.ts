@@ -178,12 +178,7 @@ export function filterKeeperGroups(
 ): readonly KeeperGroup[] {
   const needle = query.trim().toLowerCase()
   if (needle === '') return groups
-  return groups.filter(group => {
-    if (group.name.toLowerCase().includes(needle)) return true
-    const runtime = group.keeper?.runtimeLabel.toLowerCase() ?? ''
-    if (runtime !== '' && runtime.includes(needle)) return true
-    return false
-  })
+  return groups.filter(group => group.name.toLowerCase().includes(needle))
 }
 
 type ConnectorStatusSnapshot = {
@@ -1133,7 +1128,6 @@ function ConnectorLivePanel({
                         ? html`
                             <div class="text-3xs text-[var(--color-fg-disabled)]">
                               status ${keeper.status || 'unknown'}
-                              ${keeper.runtimeLabel === '' ? '' : ` · runtime ${keeper.runtimeLabel}`}
                             </div>
                           `
                         : null}

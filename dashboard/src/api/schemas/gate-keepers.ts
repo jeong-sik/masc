@@ -7,12 +7,18 @@ const KeeperMetaWireSchema = Schema.Struct({
   updated_at: Schema.NonEmptyString,
 })
 
+// Mirror of the healthy row built by keeper_list_row_json in
+// lib/keeper/keeper_tool_surface_ops.ml. RFC-0393 removed the agent_name
+// echo key; phase/health/paused/next_action ride the same row.
 const GateKeeperWireSchema = Schema.Struct({
   runtime_class: Schema.Literal('keeper'),
   name: Schema.NonEmptyString,
   meta: KeeperMetaWireSchema,
-  agent_name: Schema.NonEmptyString,
   status: Schema.NonEmptyString,
+  phase: Schema.NonEmptyString,
+  health: Schema.NonEmptyString,
+  paused: Schema.Boolean,
+  next_action: Schema.NullOr(Schema.String),
   keepalive_running: Schema.Boolean,
   autoboot_enabled: Schema.Boolean,
   proactive_enabled: Schema.Boolean,
@@ -42,7 +48,6 @@ const GateKeeperIssueWithMetaWireSchema = Schema.extend(
   GateKeeperIssueBaseWireSchema,
   Schema.Struct({
     meta: KeeperMetaWireSchema,
-    agent_name: Schema.NonEmptyString,
     created_at: Schema.NonEmptyString,
     updated_at: Schema.NonEmptyString,
     autoboot_enabled: Schema.Boolean,
@@ -54,7 +59,6 @@ const GateKeeperIssueWithoutMetaWireSchema = Schema.extend(
   GateKeeperIssueBaseWireSchema,
   Schema.Struct({
     meta: Schema.Null,
-    agent_name: Schema.Null,
     created_at: Schema.Null,
     updated_at: Schema.Null,
   }),
@@ -136,7 +140,6 @@ const GateKeepersValidatedWireSchema = GateKeepersWireSchema.pipe(
 
 export interface GateKeeper {
   readonly name: string
-  readonly runtimeLabel: string
   readonly status: string
 }
 
@@ -207,7 +210,6 @@ function toGateKeepersData(wire: GateKeepersWire): GateKeepersData {
     } else {
       keepers.push({
         name: entry.name,
-        runtimeLabel: entry.agent_name === entry.name ? '' : entry.agent_name,
         status: entry.status,
       })
     }

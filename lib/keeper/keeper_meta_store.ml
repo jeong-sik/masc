@@ -285,6 +285,21 @@ type current_meta_rejection =
   | Unreadable of string
   | Not_current of string
 
+let read_meta_file_path_read_only ~ownership_root path =
+  match Fs_compat.load_owned_regular_file ~ownership_root path with
+  | Error error ->
+    Error (Unreadable (Fs_compat.owned_regular_file_read_error_to_string error))
+  | Ok None -> Ok None
+  | Ok (Some contents) ->
+    (match Yojson.Safe.from_string contents with
+     | exception Yojson.Json_error detail -> Error (Unreadable detail)
+     | json ->
+       (match decode_current_meta_with_repair json with
+        | Ok (Exact meta) -> Ok (Some meta)
+        | Ok (Repaired { decode_error; _ }) -> Error (Not_current decode_error)
+        | Error detail -> Error (Not_current detail)))
+;;
+
 let validate_current_meta_file_result path : (unit, current_meta_rejection) result =
   (* Deploy-gate twin of [read_meta_file_path]: the same decode decision
      through [decode_current_meta_with_repair], minus the fail-open and the
@@ -323,6 +338,109 @@ let persisted_keeper_names_result config =
        |> List.filter_map Keeper_runtime_root_entry.metadata_keeper_name
        |> List.filter validate_name
        |> List.sort String.compare)
+;;
+
+let retained_root_entries_read_only_result config =
+  let dir = Workspace.keepers_runtime_dir config in
+  match Unix.lstat dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok (dir, [])
+  | exception Unix.Unix_error (cause, _, _) ->
+    Error
+      (Printf.sprintf
+         "failed to inspect keeper directory %s: %s"
+         dir
+         (Unix.error_message cause))
+  | ({ Unix.st_kind = Unix.S_DIR; _ } as initial_stat) ->
+    (match Unix.opendir dir with
+     | exception Unix.Unix_error (cause, _, _) ->
+       Error
+         (Printf.sprintf
+            "failed to open keeper directory %s: %s"
+            dir
+            (Unix.error_message cause))
+     | handle ->
+       let rec read reversed =
+         match Unix.readdir handle with
+         | entry -> read (entry :: reversed)
+         | exception End_of_file -> Ok (List.rev reversed)
+         | exception Unix.Unix_error (cause, _, _) ->
+           Error (Unix.error_message cause)
+       in
+       let entries = read [] in
+       let closed =
+         match Unix.closedir handle with
+         | () -> Ok ()
+         | exception Unix.Unix_error (cause, _, _) ->
+           Error (Unix.error_message cause)
+       in
+       (match entries, closed, Unix.lstat dir with
+        | Ok files, Ok (), final_stat
+          when final_stat.Unix.st_kind = Unix.S_DIR
+               && final_stat.st_dev = initial_stat.st_dev
+               && final_stat.st_ino = initial_stat.st_ino ->
+          Ok (dir, files)
+        | Error detail, _, _ | _, Error detail, _ ->
+          Error
+            (Printf.sprintf "failed to list keeper directory %s: %s" dir detail)
+        | _, _, _ -> Error ("keeper store changed while listing: " ^ dir)
+        | exception Unix.Unix_error (cause, _, _) ->
+          Error
+            (Printf.sprintf
+               "keeper store changed while listing %s: %s"
+               dir
+               (Unix.error_message cause))))
+  | _ -> Error (Printf.sprintf "keeper store is not a directory: %s" dir)
+;;
+
+let persisted_keeper_names_read_only_result config =
+  retained_root_entries_read_only_result config
+  |> Result.map (fun (_dir, files) ->
+       files
+       |> List.filter_map Keeper_runtime_root_entry.metadata_keeper_name
+       |> List.filter validate_name
+       |> List.sort String.compare)
+;;
+
+let retained_keeper_names_read_only_result config =
+  let open Result.Syntax in
+  let* dir, entries = retained_root_entries_read_only_result config in
+  let* names =
+    List.fold_left
+      (fun result entry ->
+         let* names = result in
+         if String.equal entry "." || String.equal entry ".."
+         then Ok names
+         else
+         match Keeper_runtime_root_entry.metadata_keeper_name entry with
+         | Some name when validate_name name -> Ok (name :: names)
+         | Some _ -> Ok names
+         | None ->
+           let path = Filename.concat dir entry in
+           (match Unix.lstat path with
+            | { Unix.st_kind = Unix.S_DIR; _ } ->
+              Keeper_id.Keeper_name.of_string entry
+              |> Result.map_error (fun detail ->
+                   Printf.sprintf
+                     "invalid retained Keeper directory %S: %s"
+                     entry
+                     detail)
+              |> Result.map (fun name ->
+                   Keeper_id.Keeper_name.to_string name :: names)
+            | { Unix.st_kind = Unix.S_LNK; _ } ->
+              (match Keeper_id.Keeper_name.of_string entry with
+               | Ok _ -> Error ("retained Keeper entry is a symlink: " ^ entry)
+               | Error _ -> Ok names)
+            | _ -> Ok names
+            | exception Unix.Unix_error (cause, _, _) ->
+              Error
+                (Printf.sprintf
+                   "failed to inspect retained Keeper entry %s: %s"
+                   entry
+                   (Unix.error_message cause))))
+      (Ok [])
+      entries
+  in
+  Ok (List.sort_uniq String.compare names)
 ;;
 
 let persisted_keeper_names config =

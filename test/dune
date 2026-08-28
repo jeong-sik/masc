@@ -3084,7 +3084,9 @@
 (test
  (name test_tui_observer)
  (modules test_tui_observer)
- (libraries alcotest masc_tui_observer yojson))
+ ; masc for the routing table the decoder classifies by: the test quantifies
+ ; over the same vocabulary rather than restating it.
+ (libraries alcotest masc masc_tui_observer yojson))
 
 (test
  (name test_tui_clipboard)

@@ -235,19 +235,16 @@ let test_ws_upgrade_accept_rejects_wrong_version () =
 
 (* ====== Dashboard route-scoped slices ====== *)
 
-(* Every event type the bus can carry into a delta.  A literal, because
-   [dashboard_slice_for_sse_type] is a closed match with a [_ -> None]
-   catch-all: nothing enumerates its domain, so a new arm has to be added here
-   too, and the assertion below is what makes that visible. *)
+(* The vocabulary, from the table that defines it. This was a literal list
+   here, kept by hand because the router was a closed match with a [_ -> None]
+   catch-all and nothing enumerated its domain -- so a new arm had to be added
+   here too, and a forgotten one left the new type untested rather than
+   failing. It also still named "namespace_truth_snapshot", removed from the
+   router in #27664 and silently dropped by the filter_map below. *)
 let mapped_sse_event_types =
-  [ "project_snapshot"
-  ; "namespace_truth_snapshot"
-  ; "execution_snapshot"
-  ; "operator_snapshot"
-  ; "operator_digest"
-  ; "transport_health_snapshot"
-  ; "keeper_composite_changed"
-  ]
+  List.map
+    (fun (entry : Masc.Dashboard_event_slices.entry) -> entry.event_type)
+    Masc.Dashboard_event_slices.entries
 
 let test_dashboard_route_scoped_slices_are_valid () =
   List.iter

@@ -9531,12 +9531,26 @@ let render_acting (state : state) =
             Terminal_text.clock_timestamp
               (Masc_domain.iso8601_of_unix_seconds row.Acting.at)
           in
+          (* The Event column is sized for the two-word labels the taught
+             events carry ("agent start", "waiting queue"). A type this build
+             was not taught has no such label -- its name is all there is, and
+             it is a wire identifier, so it ran off the column at every width:
+             [approval:summar~], [transport_healt~]. Those rows have no detail
+             either, so the label takes the empty column rather than the
+             reader losing the only thing the row says. *)
+          let detail = Terminal_text.single_line row.Acting.detail in
+          let label = Terminal_text.single_line row.Acting.label in
           let line =
-            Printf.sprintf "  %-8s %-16s %s %-16s %s" clock
-              (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
-              (Acting.glyph_text row.Acting.glyph)
-              (fit_width (Terminal_text.single_line row.Acting.label) 16)
-              (Terminal_text.single_line row.Acting.detail)
+            if detail = "" then
+              Printf.sprintf "  %-8s %-16s %s %s" clock
+                (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
+                (Acting.glyph_text row.Acting.glyph)
+                label
+            else
+              Printf.sprintf "  %-8s %-16s %s %-16s %s" clock
+                (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
+                (Acting.glyph_text row.Acting.glyph)
+                (fit_width label 16) detail
           in
           box_line_styled buf cols ~style line
     done;

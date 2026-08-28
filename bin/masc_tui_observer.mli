@@ -123,8 +123,10 @@ type event =
       (** The keeper's waiting queue changed. Names the keeper in
           [keeper_name], not [name]. *)
   | Snapshot of string
-      (** A whole-projection push ([execution_snapshot], [operator_snapshot],
-          [project_snapshot]); the name is kept, the payload is not. *)
+      (** A whole-projection push; the name is kept, the payload is not. Which
+          types these are comes from the wire's own routing table
+          ({!Masc.Dashboard_event_slices}) rather than a list here, because
+          the list here had drifted by two. *)
   | Other of string  (** A [type] this build was not taught, by name. *)
 
 (** One decoded frame. A frame that is not an event this build can read is

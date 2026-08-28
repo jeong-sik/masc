@@ -289,11 +289,25 @@ let event_of_json (json : Yojson.Safe.t) =
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_chat_appended
                 { keeper; connector = string_field fields "connector"; at })
-      | Some
-          (("execution_snapshot" | "operator_snapshot" | "project_snapshot") as
-           name) ->
-          Ok (Snapshot name)
-      | Some other -> Ok (Other other))
+      | Some other -> (
+          (* Which event types are whole-projection pushes is the wire's
+             business, not this decoder's. Three were named here and the
+             server routes five: the two that were missing --
+             [operator_digest] and [transport_health_snapshot] -- arrived as
+             untaught types, and an untaught type counts as an action, so the
+             Acting filter that exists to show what a keeper did filled with
+             server pushes instead. Both were on screen when this was found.
+
+             [Dashboard_event_slices] is that table, read here and by the
+             server that routes with it. The table says which types replace a
+             projection outright, so a delta is not mistaken for one -- and
+             the keeper events, including the one delta with a slice, are
+             matched above and never reach here anyway. *)
+          match
+            Masc.Dashboard_event_slices.carries_whole_projection other
+          with
+          | true -> Ok (Snapshot other)
+          | false -> Ok (Other other)))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       Error "event is not a JSON object"
 

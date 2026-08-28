@@ -208,11 +208,17 @@ def ledger(activations, session_id="trace-one"):
     return value
 
 
+def ledger_raw(value):
+    return (json.dumps(value, sort_keys=True) + "\n").encode()
+
+
 def dashboard(value):
     return {
         "effective_keeper_surface": {
             "status": "available",
             "keeper_name": "keeper-one",
+            "runtime_id": "runtime-one",
+            "tool_delivery": {"status": "delivered"},
         },
         "skill_activations": {
             "status": "available",
@@ -225,6 +231,24 @@ def dashboard(value):
                 value["activations"], value["transition_rejections"]
             ),
         },
+    }
+
+
+def unavailable_dashboard(value, status="unavailable"):
+    surface = {
+        "status": status,
+        "keeper_name": "keeper-one",
+    }
+    if status == "unavailable":
+        surface.update(
+            {
+                "reason": "declared_skill_missing",
+                "detail": "current surface cache has not published the Skill yet",
+            }
+        )
+    return {
+        "effective_keeper_surface": surface,
+        "skill_activations": dashboard(value)["skill_activations"],
     }
 
 
@@ -261,6 +285,8 @@ def validate(activations):
         historical_after=historical(copy.deepcopy(durable)),
         durable_ledger=durable,
         durable_ledger_after=copy.deepcopy(durable),
+        durable_ledger_raw=ledger_raw(durable),
+        durable_ledger_after_raw=ledger_raw(durable),
     )
 
 
@@ -306,6 +332,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
             historical_after=historical(copy.deepcopy(durable)),
             durable_ledger=durable,
             durable_ledger_after=copy.deepcopy(durable),
+            durable_ledger_raw=ledger_raw(durable),
+            durable_ledger_after_raw=ledger_raw(durable),
         )
 
         self.assertEqual(joined["result"]["kind"], "exact_skill_invocation")
@@ -314,6 +342,314 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
             joined["ledger"]["dashboard_projection_kind"],
             "current_session_differs_historical_exact",
         )
+
+    def test_unavailable_current_surface_uses_exact_historical_authority(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        unavailable = unavailable_dashboard(durable)
+
+        joined = joiner.validate_join(
+            receipt=producer,
+            receipt_raw=raw,
+            expected_receipt_sha256=proof.digest_bytes(raw),
+            source_before=source(),
+            source_after=source(),
+            health_before=health(),
+            health_after=health(),
+            dashboard_before=unavailable,
+            dashboard_after=copy.deepcopy(unavailable),
+            historical_before=historical(durable),
+            historical_after=historical(copy.deepcopy(durable)),
+            durable_ledger=durable,
+            durable_ledger_after=copy.deepcopy(durable),
+            durable_ledger_raw=ledger_raw(durable),
+            durable_ledger_after_raw=ledger_raw(durable),
+        )
+
+        self.assertEqual(joined["result"]["kind"], "exact_skill_invocation")
+        self.assertEqual(joined["result"]["match_count"], 1)
+        self.assertEqual(
+            joined["ledger"]["dashboard_projection_kind"],
+            "exact_session",
+        )
+        self.assertTrue(joined["ledger"]["dashboard_equals_durable"])
+        self.assertEqual(joined["current_projection"]["before"]["status"], "available")
+        self.assertEqual(
+            joined["current_surface"]["before"],
+            {
+                "status": "unavailable",
+                "keeper_name": "keeper-one",
+                "reason": "declared_skill_missing",
+                "detail": "current surface cache has not published the Skill yet",
+            },
+        )
+
+    def test_missing_current_surface_is_a_typed_historical_observation(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        missing = unavailable_dashboard(durable)
+        del missing["effective_keeper_surface"]
+
+        joined = joiner.validate_join(
+            receipt=producer,
+            receipt_raw=raw,
+            expected_receipt_sha256=proof.digest_bytes(raw),
+            source_before=source(),
+            source_after=source(),
+            health_before=health(),
+            health_after=health(),
+            dashboard_before=missing,
+            dashboard_after=missing,
+            historical_before=historical(durable),
+            historical_after=historical(copy.deepcopy(durable)),
+            durable_ledger=durable,
+            durable_ledger_after=copy.deepcopy(durable),
+            durable_ledger_raw=ledger_raw(durable),
+            durable_ledger_after_raw=ledger_raw(durable),
+        )
+
+        self.assertEqual(
+            joined["ledger"]["dashboard_projection_kind"],
+            "exact_session",
+        )
+        self.assertEqual(joined["current_surface"]["before"], {"status": "missing"})
+
+    def test_null_current_surface_is_rejected_as_malformed(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        malformed = unavailable_dashboard(durable)
+        malformed["effective_keeper_surface"] = None
+
+        with self.assertRaisesRegex(
+            joiner.JoinError, "effective Keeper surface is not an object"
+        ):
+            joiner.validate_join(
+                receipt=producer,
+                receipt_raw=raw,
+                expected_receipt_sha256=proof.digest_bytes(raw),
+                source_before=source(),
+                source_after=source(),
+                health_before=health(),
+                health_after=health(),
+                dashboard_before=malformed,
+                dashboard_after=copy.deepcopy(malformed),
+                historical_before=historical(durable),
+                historical_after=historical(copy.deepcopy(durable)),
+                durable_ledger=durable,
+                durable_ledger_after=copy.deepcopy(durable),
+                durable_ledger_raw=ledger_raw(durable),
+                durable_ledger_after_raw=ledger_raw(durable),
+            )
+
+    def test_warming_current_surface_keeps_available_current_projection_strict(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        warming = unavailable_dashboard(durable, status="warming")
+
+        joined = joiner.validate_join(
+            receipt=producer,
+            receipt_raw=raw,
+            expected_receipt_sha256=proof.digest_bytes(raw),
+            source_before=source(),
+            source_after=source(),
+            health_before=health(),
+            health_after=health(),
+            dashboard_before=warming,
+            dashboard_after=copy.deepcopy(warming),
+            historical_before=historical(durable),
+            historical_after=historical(copy.deepcopy(durable)),
+            durable_ledger=durable,
+            durable_ledger_after=copy.deepcopy(durable),
+            durable_ledger_raw=ledger_raw(durable),
+            durable_ledger_after_raw=ledger_raw(durable),
+        )
+
+        self.assertEqual(joined["ledger"]["dashboard_projection_kind"], "exact_session")
+        self.assertTrue(joined["ledger"]["dashboard_equals_durable"])
+        self.assertEqual(joined["current_surface"]["before"]["status"], "warming")
+
+    def test_nonavailable_surface_cannot_hide_available_current_ledger_mismatch(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        foreign_keeper = unavailable_dashboard(copy.deepcopy(durable))
+        foreign_keeper["skill_activations"]["keeper_name"] = "keeper-foreign"
+        wrong_tool_ledger = copy.deepcopy(durable)
+        wrong_tool_ledger["activations"][0]["skill_tool_use_id"] = "call-foreign"
+        wrong_tool_ledger["revision"] = proof.ledger_revision(wrong_tool_ledger)
+        wrong_tool = unavailable_dashboard(wrong_tool_ledger, status="warming")
+        wrong_runtime_ledger = copy.deepcopy(durable)
+        wrong_runtime_ledger["activations"][0]["runtime_id"] = "runtime-foreign"
+        wrong_runtime_ledger["revision"] = proof.ledger_revision(wrong_runtime_ledger)
+        wrong_runtime = unavailable_dashboard(wrong_runtime_ledger, status="warming")
+        wrong_delivery_ledger = copy.deepcopy(durable)
+        wrong_delivery_ledger["activations"][0]["delivery"]["runtime_id"] = (
+            "runtime-foreign"
+        )
+        wrong_delivery_ledger["revision"] = proof.ledger_revision(wrong_delivery_ledger)
+        wrong_delivery = unavailable_dashboard(wrong_delivery_ledger, status="warming")
+
+        for current, error in (
+            (foreign_keeper, "Skill ledger Keeper differs"),
+            (wrong_tool, "Dashboard ledger differs from durable ledger"),
+            (wrong_runtime, "Dashboard ledger differs from durable ledger"),
+            (wrong_delivery, "Dashboard ledger differs from durable ledger"),
+        ):
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(joiner.JoinError, error):
+                    joiner.validate_join(
+                        receipt=producer,
+                        receipt_raw=raw,
+                        expected_receipt_sha256=proof.digest_bytes(raw),
+                        source_before=source(),
+                        source_after=source(),
+                        health_before=health(),
+                        health_after=health(),
+                        dashboard_before=current,
+                        dashboard_after=copy.deepcopy(current),
+                        historical_before=historical(durable),
+                        historical_after=historical(copy.deepcopy(durable)),
+                        durable_ledger=durable,
+                        durable_ledger_after=copy.deepcopy(durable),
+                        durable_ledger_raw=ledger_raw(durable),
+                        durable_ledger_after_raw=ledger_raw(durable),
+                    )
+
+    def test_missing_current_projection_uses_historical_raw_authority(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        missing_projection = unavailable_dashboard(durable)
+        del missing_projection["skill_activations"]
+
+        joined = joiner.validate_join(
+            receipt=producer,
+            receipt_raw=raw,
+            expected_receipt_sha256=proof.digest_bytes(raw),
+            source_before=source(),
+            source_after=source(),
+            health_before=health(),
+            health_after=health(),
+            dashboard_before=missing_projection,
+            dashboard_after=copy.deepcopy(missing_projection),
+            historical_before=historical(durable),
+            historical_after=historical(copy.deepcopy(durable)),
+            durable_ledger=durable,
+            durable_ledger_after=copy.deepcopy(durable),
+            durable_ledger_raw=ledger_raw(durable),
+            durable_ledger_after_raw=ledger_raw(durable),
+        )
+
+        self.assertEqual(
+            joined["ledger"]["dashboard_projection_kind"],
+            "current_projection_missing_historical_exact",
+        )
+        self.assertFalse(joined["ledger"]["dashboard_equals_durable"])
+        self.assertEqual(joined["current_projection"]["before"], {"status": "missing"})
+
+    def test_null_current_projection_is_rejected_as_malformed(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        malformed = unavailable_dashboard(durable)
+        malformed["skill_activations"] = None
+
+        with self.assertRaisesRegex(
+            joiner.JoinError, "current Skill projection is not an object"
+        ):
+            joiner.validate_join(
+                receipt=producer,
+                receipt_raw=raw,
+                expected_receipt_sha256=proof.digest_bytes(raw),
+                source_before=source(),
+                source_after=source(),
+                health_before=health(),
+                health_after=health(),
+                dashboard_before=malformed,
+                dashboard_after=copy.deepcopy(malformed),
+                historical_before=historical(durable),
+                historical_after=historical(copy.deepcopy(durable)),
+                durable_ledger=durable,
+                durable_ledger_after=copy.deepcopy(durable),
+                durable_ledger_raw=ledger_raw(durable),
+                durable_ledger_after_raw=ledger_raw(durable),
+            )
+
+    def test_unavailable_current_projection_uses_historical_raw_authority(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        unavailable_projection = unavailable_dashboard(durable)
+        unavailable_projection["skill_activations"] = {
+            "status": "unavailable",
+            "keeper_name": "keeper-one",
+            "reason": "activation_ledger_unreadable",
+            "detail": "current session ledger is not readable",
+        }
+
+        joined = joiner.validate_join(
+            receipt=producer,
+            receipt_raw=raw,
+            expected_receipt_sha256=proof.digest_bytes(raw),
+            source_before=source(),
+            source_after=source(),
+            health_before=health(),
+            health_after=health(),
+            dashboard_before=unavailable_projection,
+            dashboard_after=copy.deepcopy(unavailable_projection),
+            historical_before=historical(durable),
+            historical_after=historical(copy.deepcopy(durable)),
+            durable_ledger=durable,
+            durable_ledger_after=copy.deepcopy(durable),
+            durable_ledger_raw=ledger_raw(durable),
+            durable_ledger_after_raw=ledger_raw(durable),
+        )
+
+        self.assertEqual(
+            joined["ledger"]["dashboard_projection_kind"],
+            "current_projection_unavailable_historical_exact",
+        )
+        self.assertFalse(joined["ledger"]["dashboard_equals_durable"])
+        self.assertEqual(
+            joined["current_projection"]["before"],
+            {
+                "status": "unavailable",
+                "keeper_name": "keeper-one",
+                "reason": "activation_ledger_unreadable",
+                "detail": "current session ledger is not readable",
+            },
+        )
+
+    def test_available_current_surface_keeps_runtime_and_delivery_guards(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        cases = []
+        wrong_runtime = dashboard(durable)
+        wrong_runtime["effective_keeper_surface"]["runtime_id"] = "runtime-other"
+        cases.append((wrong_runtime, "surface runtime differs"))
+        suppressed = dashboard(durable)
+        suppressed["effective_keeper_surface"]["tool_delivery"] = {
+            "status": "suppressed",
+            "reason": "runtime_tools_unsupported",
+        }
+        cases.append((suppressed, "did not deliver tools"))
+
+        for current, error in cases:
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(joiner.JoinError, error):
+                    joiner.validate_join(
+                        receipt=producer,
+                        receipt_raw=raw,
+                        expected_receipt_sha256=proof.digest_bytes(raw),
+                        source_before=source(),
+                        source_after=source(),
+                        health_before=health(),
+                        health_after=health(),
+                        dashboard_before=current,
+                        dashboard_after=copy.deepcopy(current),
+                        historical_before=historical(durable),
+                        historical_after=historical(copy.deepcopy(durable)),
+                        durable_ledger=durable,
+                        durable_ledger_after=copy.deepcopy(durable),
+                        durable_ledger_raw=ledger_raw(durable),
+                        durable_ledger_after_raw=ledger_raw(durable),
+                    )
 
     def test_one_exact_turn_match_selects_exact_identity(self):
         joined = validate([activation("call-skill-1")])
@@ -393,6 +729,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 historical_after=historical(copy.deepcopy(durable)),
                 durable_ledger=durable,
                 durable_ledger_after=copy.deepcopy(durable),
+                durable_ledger_raw=ledger_raw(durable),
+                durable_ledger_after_raw=ledger_raw(durable),
             )
 
     def test_receipt_tamper_is_rejected_by_out_of_band_sha(self):
@@ -417,6 +755,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 historical_after=historical(copy.deepcopy(durable)),
                 durable_ledger=durable,
                 durable_ledger_after=copy.deepcopy(durable),
+                durable_ledger_raw=ledger_raw(durable),
+                durable_ledger_after_raw=ledger_raw(durable),
             )
 
     def test_forged_terminal_owner_digest_and_turn_ref_are_rejected(self):
@@ -457,6 +797,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                         historical_after=historical(copy.deepcopy(durable)),
                         durable_ledger=durable,
                         durable_ledger_after=copy.deepcopy(durable),
+                        durable_ledger_raw=ledger_raw(durable),
+                        durable_ledger_after_raw=ledger_raw(durable),
                     )
 
     def test_server_restart_is_rejected(self):
@@ -479,6 +821,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 historical_after=historical(copy.deepcopy(durable)),
                 durable_ledger=durable,
                 durable_ledger_after=copy.deepcopy(durable),
+                durable_ledger_raw=ledger_raw(durable),
+                durable_ledger_after_raw=ledger_raw(durable),
             )
 
     def test_dashboard_ledger_advance_during_join_is_rejected(self):
@@ -504,6 +848,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 historical_after=historical(copy.deepcopy(durable)),
                 durable_ledger=durable,
                 durable_ledger_after=copy.deepcopy(durable),
+                durable_ledger_raw=ledger_raw(durable),
+                durable_ledger_after_raw=ledger_raw(durable),
             )
 
     def test_durable_ledger_advance_during_join_is_rejected(self):
@@ -529,6 +875,37 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 historical_after=historical(advanced),
                 durable_ledger=durable,
                 durable_ledger_after=advanced,
+                durable_ledger_raw=ledger_raw(durable),
+                durable_ledger_after_raw=ledger_raw(advanced),
+            )
+
+    def test_durable_ledger_raw_byte_change_during_join_is_rejected(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        projected = dashboard(durable)
+        before_raw = ledger_raw(durable)
+        after_raw = (json.dumps(durable, indent=2, sort_keys=True) + "\n").encode()
+        self.assertNotEqual(after_raw, before_raw)
+
+        with self.assertRaisesRegex(
+            joiner.JoinError, "durable Skill ledger bytes changed"
+        ):
+            joiner.validate_join(
+                receipt=producer,
+                receipt_raw=raw,
+                expected_receipt_sha256=proof.digest_bytes(raw),
+                source_before=source(),
+                source_after=source(),
+                health_before=health(),
+                health_after=health(),
+                dashboard_before=projected,
+                dashboard_after=copy.deepcopy(projected),
+                historical_before=historical(durable),
+                historical_after=historical(copy.deepcopy(durable)),
+                durable_ledger=durable,
+                durable_ledger_after=copy.deepcopy(durable),
+                durable_ledger_raw=before_raw,
+                durable_ledger_after_raw=after_raw,
             )
 
     def test_typed_historical_projection_must_equal_raw_durable_ledger(self):
@@ -553,6 +930,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 historical_after=historical(copy.deepcopy(forged)),
                 durable_ledger=durable,
                 durable_ledger_after=copy.deepcopy(durable),
+                durable_ledger_raw=ledger_raw(durable),
+                durable_ledger_after_raw=ledger_raw(durable),
             )
 
     def test_unavailable_typed_historical_projection_is_rejected(self):
@@ -583,6 +962,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 historical_after=unavailable,
                 durable_ledger=durable,
                 durable_ledger_after=copy.deepcopy(durable),
+                durable_ledger_raw=ledger_raw(durable),
+                durable_ledger_after_raw=ledger_raw(durable),
             )
 
     def test_duplicate_key_receipt_is_rejected_by_shared_strict_decoder(self):

@@ -522,10 +522,19 @@ def validate_join_authorities(
             historical_after=decoded["historical-skill-activations-after.json"],
             durable_ledger=decoded["durable-skill-activations-before.json"],
             durable_ledger_after=decoded["durable-skill-activations-after.json"],
+            durable_ledger_raw=payloads["durable-skill-activations-before.json"],
+            durable_ledger_after_raw=payloads["durable-skill-activations-after.json"],
         )
     except ledger_join.JoinError as error:
         raise VerificationError(f"join raw authority is invalid: {error}") from error
-    for field in ("producer", "server", "ledger", "result"):
+    for field in (
+        "producer",
+        "server",
+        "ledger",
+        "current_surface",
+        "current_projection",
+        "result",
+    ):
         require(
             join.get(field) == recomputed[field],
             f"join manifest {field} differs from raw authority",

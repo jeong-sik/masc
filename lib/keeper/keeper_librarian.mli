@@ -19,6 +19,7 @@ type current_selection =
 type tool_observation_outcome =
   | Succeeded
   | Failed
+  | Unknown
 
 type tool_observation =
   { tool_name : string

@@ -85,3 +85,31 @@ val inspect_argv : container_name:string -> string list
 val running_of_inspect_json : string -> (bool, string) result
 (** [Ok true] iff [.[0].status.state = "running"]. The caller maps a
     non-zero inspect exit to absent before calling this. *)
+
+type sweep_candidate =
+  { container_id : string
+  ; keeper_name : string option
+  ; owner_pid : int option
+  }
+
+type sweep_outcome =
+  { removed : string list
+  ; failed : (string * string) list
+  }
+
+val sweep_candidates_of_json :
+  is_pid_alive:(int -> bool) -> Yojson.Safe.t -> sweep_candidate list
+(** Guests in a [container list --format json] listing whose owning server is
+    gone. A guest is keeper-lifetime, so age proves nothing; what marks one
+    abandoned is its owner pid naming a process that no longer exists. A
+    guest whose label is missing or unparseable is not a candidate -- this
+    build cannot say whose it is, and removing a running guest to tidy up is
+    worse than leaking one. *)
+
+val sweep_abandoned_guests :
+  timeout_sec:float ->
+  is_pid_alive:(int -> bool) ->
+  run_argv:(timeout_sec:float -> string list -> Unix.process_status * string) ->
+  sweep_outcome
+(** Remove every abandoned guest, reporting what happened. An unreadable
+    listing removes nothing. *)

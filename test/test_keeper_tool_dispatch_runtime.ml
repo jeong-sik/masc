@@ -4723,6 +4723,64 @@ let frozen_capability_surface ~tool_groups =
     ~task_skills:[]
 ;;
 
+let test_frozen_surface_lists_and_searches_operator_only_tool () =
+  let capability_surface = frozen_capability_surface ~tool_groups:[] in
+  let list_result =
+    Masc.Keeper_tool_in_process_runtime.handle_tools_list
+      ~capability_surface
+      ~args:(`Assoc [])
+      ()
+  in
+  check bool "complete inventory list completes" true
+    (list_result.disposition = Tool_result.Completed ());
+  let descriptor =
+    Yojson.Safe.Util.(
+      parse_json list_result.raw_output
+      |> member "descriptor_surface"
+      |> to_list)
+    |> List.find_opt (fun row ->
+      String.equal
+        "masc_keeper_up"
+        Yojson.Safe.Util.(row |> member "internal_name" |> to_string))
+    |> function
+    | Some row -> row
+    | None -> fail "operator-only Tool is absent from keeper_tools_list"
+  in
+  check string "operator-only list availability"
+    "not_model_invocable"
+    Yojson.Safe.Util.(descriptor |> member "availability" |> to_string);
+  check int "operator-only list has no active names" 0
+    Yojson.Safe.Util.(descriptor |> member "active_names" |> to_list |> List.length);
+  let search_result =
+    Masc.Keeper_tool_in_process_runtime.handle_capability_search
+      ~capability_surface
+      ~args:(`Assoc [ "query", `String "masc_keeper_up" ])
+      ()
+  in
+  check bool "operator-only inventory search completes" true
+    (search_result.disposition = Tool_result.Completed ());
+  let matches =
+    match search_result.data with
+    | Some data -> Yojson.Safe.Util.(data |> member "matches" |> to_list)
+    | None -> fail "operator-only inventory search omitted typed data"
+  in
+  let found =
+    List.exists
+      (fun row ->
+         let capability =
+           Yojson.Safe.Util.(row |> member "candidate" |> member "capability")
+         in
+         String.equal
+           "masc_keeper_up"
+           Yojson.Safe.Util.(capability |> member "internal_name" |> to_string)
+         && String.equal
+              "not_model_invocable"
+              Yojson.Safe.Util.(capability |> member "availability" |> to_string))
+      matches
+  in
+  check bool "operator-only Tool search retains typed availability" true found
+;;
+
 let execution_data_exn label (result : KET.executed_tool_result) =
   match result.data with
   | Some data -> data
@@ -7423,6 +7481,8 @@ let () =
     ("keeper_tools_list_json", [
       test_case "uses typed groups" `Quick
         test_keeper_tools_list_json_uses_typed_groups;
+      test_case "lists and searches operator-only Tools" `Quick
+        test_frozen_surface_lists_and_searches_operator_only_tool;
       test_case "Agent Core receives typed search failures" `Quick
         test_tools_search_error_reaches_agent_core_as_typed_payload;
       test_case "descriptor route miss is typed runtime failure" `Quick

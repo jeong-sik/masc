@@ -227,3 +227,7 @@ val session_base_dir : Workspace.config -> string
 
 (** [.masc/traces/<trace_id>/] directory. *)
 val keeper_session_dir : Workspace.config -> string -> string
+
+val session_store_path : Workspace.config -> string
+(** Pure path to the retained trace-session store. Unlike
+    {!keeper_session_dir}, this accessor does not create the directory. *)

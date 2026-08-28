@@ -791,9 +791,12 @@ let keeper_dir (config : Workspace.config) : string =
   let d = Workspace.keepers_runtime_dir config in
   ensure_dir d
 
+let session_store_path (config : Workspace.config) : string =
+  Filename.concat (Workspace.masc_root_dir config) "traces"
+;;
+
 let session_base_dir (config : Workspace.config) : string =
-  let d = Filename.concat (Workspace.masc_root_dir config) "traces" in
-  ensure_dir d
+  ensure_dir (session_store_path config)
 
 let keeper_session_dir (config : Workspace.config) (trace_id : string) : string =
   Filename.concat (session_base_dir config) trace_id

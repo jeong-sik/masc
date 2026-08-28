@@ -204,6 +204,10 @@ type decode_error =
 
 type store_error =
   | Lock_failed of string
+  | Canonical_root_failed of
+      { path : string
+      ; cause : Unix.error
+      }
   | Read_failed of Fs_compat.owned_regular_file_read_error
   | Decode_failed of decode_error
   | Invocation_id_collision of string
@@ -278,6 +282,24 @@ val load_existing :
   (t option, store_error) result
 (** Read an already-materialized ledger. Unlike {!load}, absence remains
     [None] instead of being projected as a synthetic empty ledger. *)
+
+val load_existing_read_only :
+  config:Workspace.config ->
+  trace_id:Keeper_id.Trace_id.t ->
+  (t option, store_error) result
+(** Strict snapshot read that creates neither the trace root nor a session lock.
+    The durable writer publishes by atomic rename, while
+    {!Fs_compat.load_owned_regular_file} verifies the opened descriptor before
+    and after reading. Use this for observational fleet discovery; mutations
+    must continue to use the locked operations above. *)
+
+val load_existing_read_only_from_root :
+  ownership_root:string ->
+  trace_id:Keeper_id.Trace_id.t ->
+  (t option, store_error) result
+(** Same snapshot read using a caller-pinned, canonical retained-trace root.
+    Fleet discovery uses this to avoid resolving a replaced configured root
+    independently for every session. *)
 
 val record :
   config:Workspace.config ->

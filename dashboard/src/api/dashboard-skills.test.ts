@@ -217,14 +217,27 @@ describe('existing Skill editor contract', () => {
 const coverage = {
   composition_scan_limit: 5000,
   composition_rows_scanned: 17,
-  instruction_ledgers_loaded: 2,
+  coverage_complete: false as const,
+  activation_scope: 'current_keeper_sessions' as const,
+  activation_ledgers_loaded: 2,
   unavailable: [],
 }
 
 describe('skill evidence contract', () => {
+  it('rejects the retired bounded-evidence schema', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v1',
+      status: 'never_observed',
+      reference,
+      activation: null,
+      composition: null,
+      coverage,
+    })).toThrow(SkillsContractError)
+  })
+
   it('keeps instruction activation and composition result in one exact envelope', () => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v1',
+      schema: 'masc.skill-evidence/v2',
       status: 'observed',
       reference,
       activation: {
@@ -249,7 +262,7 @@ describe('skill evidence contract', () => {
 
   it('rejects observed status without any observed evidence', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v1',
+      schema: 'masc.skill-evidence/v2',
       status: 'observed',
       reference,
       activation: null,
@@ -260,8 +273,8 @@ describe('skill evidence contract', () => {
 
   it('keeps partial ledger coverage visible when nothing was observed', () => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v1',
-      status: 'never_observed',
+      schema: 'masc.skill-evidence/v2',
+      status: 'not_observed_in_current_coverage',
       reference,
       activation: null,
       composition: null,

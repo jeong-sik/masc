@@ -5495,3 +5495,112 @@ let decode_verification_evidence json =
        | _ -> Error "available evidence carries no items list")
   | `String other -> Error ("unknown evidence access state: " ^ other)
   | _ -> Error "evidence access state is missing"
+
+type skill_evidence_status =
+  | Skill_evidence_observed
+  | Skill_evidence_not_observed_in_current_coverage
+
+type skill_evidence_coverage =
+  { sec_composition_scan_limit : int
+  ; sec_composition_rows_scanned : int
+  ; sec_activation_ledgers_loaded : int
+  ; sec_unavailable : string list
+  }
+
+type skill_evidence =
+  { se_status : skill_evidence_status
+  ; se_activation : Yojson.Safe.t option
+  ; se_composition : Yojson.Safe.t option
+  ; se_coverage : skill_evidence_coverage
+  }
+
+let decode_skill_evidence_optional_object field json =
+  match json with
+  | `Assoc fields when not (List.mem_assoc field fields) ->
+    Error ("Skill evidence " ^ field ^ " is required")
+  | `Assoc _ ->
+    (match member field json with
+     | `Null -> Ok None
+     | `Assoc _ as value -> Ok (Some value)
+     | _ -> Error ("Skill evidence " ^ field ^ " must be an object or null"))
+  | _ -> Error "Skill evidence must be an object"
+;;
+
+let decode_skill_evidence_nonnegative_int field json =
+  match member field json with
+  | `Int value when value >= 0 -> Ok value
+  | _ -> Error ("Skill evidence coverage " ^ field ^ " must be nonnegative")
+;;
+
+let decode_skill_evidence json =
+  if member "schema" json <> `String "masc.skill-evidence/v2"
+  then Error "Skill evidence schema is unsupported"
+  else
+    let* _reference =
+      match Skill_reference.of_yojson (member "reference" json) with
+      | Ok reference -> Ok reference
+      | Error _ -> Error "Skill evidence reference is invalid"
+    in
+    let* se_activation = decode_skill_evidence_optional_object "activation" json in
+    let* se_composition = decode_skill_evidence_optional_object "composition" json in
+    let observed = Option.is_some se_activation || Option.is_some se_composition in
+    let* se_status =
+      match member "status" json, observed with
+      | `String "observed", true -> Ok Skill_evidence_observed
+      | `String "not_observed_in_current_coverage", false ->
+        Ok Skill_evidence_not_observed_in_current_coverage
+      | `String ("observed" | "not_observed_in_current_coverage"), _ ->
+        Error "Skill evidence status disagrees with its observations"
+      | _ -> Error "Skill evidence status is unsupported"
+    in
+    match member "coverage" json with
+    | `Assoc _ as coverage ->
+      let* () =
+        match member "coverage_complete" coverage with
+        | `Bool false -> Ok ()
+        | _ -> Error "Skill evidence coverage must remain incomplete"
+      in
+      let* () =
+        match member "activation_scope" coverage with
+        | `String "current_keeper_sessions" -> Ok ()
+        | _ -> Error "Skill evidence activation scope is unsupported"
+      in
+      let* sec_composition_scan_limit =
+        match member "composition_scan_limit" coverage with
+        | `Int value when value > 0 -> Ok value
+        | _ -> Error "Skill evidence composition scan limit must be positive"
+      in
+      let* sec_composition_rows_scanned =
+        decode_skill_evidence_nonnegative_int
+          "composition_rows_scanned"
+          coverage
+      in
+      let* sec_activation_ledgers_loaded =
+        decode_skill_evidence_nonnegative_int
+          "activation_ledgers_loaded"
+          coverage
+      in
+      let* sec_unavailable =
+        match member "unavailable" coverage with
+        | `List values ->
+          let rec decode acc = function
+            | [] -> Ok (List.rev acc)
+            | `String value :: rest -> decode (value :: acc) rest
+            | _ -> Error "Skill evidence unavailable rows must be strings"
+          in
+          decode [] values
+        | _ -> Error "Skill evidence unavailable rows must be a list"
+      in
+      Ok
+        { se_status
+        ; se_activation
+        ; se_composition
+        ; se_coverage =
+            { sec_composition_scan_limit
+            ; sec_composition_rows_scanned
+            ; sec_activation_ledgers_loaded
+            ; sec_unavailable
+            }
+        }
+    | _ -> Error "Skill evidence coverage must be an object"
+;;

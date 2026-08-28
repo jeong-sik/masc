@@ -1692,3 +1692,26 @@ type verification_evidence =
 
 val decode_verification_evidence :
   Yojson.Safe.t -> (verification_evidence, string) result
+
+(** Strict hard-cut decoder for [/api/v1/skills/evidence]. The endpoint's
+    current projection is explicitly incomplete; missing or weakened coverage
+    fields are rejected instead of becoming zeroes in the terminal. *)
+type skill_evidence_status =
+  | Skill_evidence_observed
+  | Skill_evidence_not_observed_in_current_coverage
+
+type skill_evidence_coverage =
+  { sec_composition_scan_limit : int
+  ; sec_composition_rows_scanned : int
+  ; sec_activation_ledgers_loaded : int
+  ; sec_unavailable : string list
+  }
+
+type skill_evidence =
+  { se_status : skill_evidence_status
+  ; se_activation : Yojson.Safe.t option
+  ; se_composition : Yojson.Safe.t option
+  ; se_coverage : skill_evidence_coverage
+  }
+
+val decode_skill_evidence : Yojson.Safe.t -> (skill_evidence, string) result

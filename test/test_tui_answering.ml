@@ -210,17 +210,29 @@ let test_not_animating_falls_back_to_the_still_mark () =
        [ 0; 1; 2; 3 ])
 ;;
 
-(* Every mark is one cell wide. The Keepers table pads the column by counting
-   bytes, so a two-cell frame would shift every column to its right on one
-   frame in four -- a table that jitters as it animates. *)
+(* Every mark is one cell wide.
+
+   The Keepers table concatenates the mark ahead of the cells it fits, so the
+   mark is the one thing in that row nothing measures. A two-cell frame would
+   push every column to its right on one frame in four: a table that jitters
+   as it animates.
+
+   Cells, not bytes. Counting bytes looks like the same check and is not --
+   U+4E00 is three bytes and two cells, so a byte count would wave through
+   exactly the frame this exists to catch. *)
 let test_every_frame_is_one_cell () =
   List.iter
     (fun frame ->
       let glyph = Masc_tui_answering.running_glyph ~frame in
       Alcotest.(check int)
-        (Printf.sprintf "frame %d is a single 3-byte glyph" frame)
-        3 (String.length glyph))
-    [ -1; 0; 1; 2; 3 ]
+        (Printf.sprintf "frame %d occupies one cell" frame)
+        1
+        (Masc_tui_message_layout.display_width glyph))
+    [ -1; 0; 1; 2; 3 ];
+  (* The check has teeth: a three-byte two-cell glyph fails it. *)
+  Alcotest.(check int)
+    "a wide three-byte glyph would not pass" 2
+    (Masc_tui_message_layout.display_width "\xe4\xb8\x80")
 ;;
 
 (* The overlay draws the same mark as the table, so one running turn does not

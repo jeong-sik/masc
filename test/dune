@@ -3355,7 +3355,15 @@
 (test
  (name test_tui_answering)
  (modules test_tui_answering)
- (libraries alcotest astring masc masc_tui_answering))
+ ; masc_tui_message_layout so the mark can be measured in cells rather than
+ ; bytes: the Keepers table concatenates the mark ahead of the cells it fits,
+ ; so its width is the one thing in that row nothing else checks.
+ (libraries
+  alcotest
+  astring
+  masc
+  masc_tui_answering
+  masc_tui_message_layout))
 
 (test
  (name test_keeper_turn_preview)

@@ -13,7 +13,7 @@ let argv ?(network = Profile.Network_none) () =
     ~container_cwd:"/home/keeper/playground/probe"
     ~host_root:"/base/.masc/playground/microvm/probe"
     ~image:"masc-keeper-sandbox:local"
-    ~network_args:(Result.value ~default:[] (M.network_args network))
+    ~network_args:(M.network_args ~dns:(Some "1.1.1.1") network)
     ~uid:501
     ~gid:20
     ~env_args:[ "--env"; "MASC_PROBE=1" ]
@@ -75,18 +75,28 @@ let test_closed_network_is_spelled_on_the_command () =
   Alcotest.(check (list string))
     "none closes the network"
     [ "--network"; "none" ]
-    (Result.value ~default:[] (M.network_args Profile.Network_none));
-  (* inherit is refused rather than silently producing no argument: container
-     has no host network, so a guest would run with no route while the profile
-     still claimed one. Measured on container 1.3.0. *)
-  Alcotest.(check bool)
-    "inherit is refused"
-    true
-    (Result.is_error (M.network_args Profile.Network_inherit));
+    (M.network_args ~dns:(Some "1.1.1.1") Profile.Network_none);
+  (* inherit uses container's NAT, which routes outside. What it needs is a
+     nameserver: the guest's resolver points at the gateway and the gateway
+     refuses DNS from inside, so an inherit guest with no --dns routes fine
+     and resolves nothing -- which reads as a dead network and is what made
+     an earlier version refuse inherit on a claim that was wrong. *)
+  Alcotest.(check (list string))
+    "inherit carries the nameserver"
+    [ "--dns"; "1.1.1.1" ]
+    (M.network_args ~dns:(Some "1.1.1.1") Profile.Network_inherit);
+  Alcotest.(check (list string))
+    "an empty nameserver passes no --dns"
+    []
+    (M.network_args ~dns:(Some "") Profile.Network_inherit);
   Alcotest.(check bool)
     "the closed network reaches run_argv"
     true
-    (adjacent ~flag:"--network" ~value:"none" (argv ~network:Profile.Network_none ()))
+    (adjacent ~flag:"--network" ~value:"none" (argv ~network:Profile.Network_none ()));
+  Alcotest.(check bool)
+    "an inherit guest is given a resolver"
+    true
+    (adjacent ~flag:"--dns" ~value:"1.1.1.1" (argv ~network:Profile.Network_inherit ()))
 
 let test_image_and_shell_come_last () =
   let a = argv () in

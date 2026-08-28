@@ -69,6 +69,10 @@ end
 (** {1 Runtime — image and execution mode} *)
 module Runtime : sig
   val docker_image : unit -> string
+
+  val microvm_dns : unit -> string
+  (** Nameserver handed to a microvm guest on the default network. Empty
+      passes no [--dns]. *)
   (** Env: [MASC_KEEPER_SANDBOX_DOCKER_IMAGE].  Default:
       ["masc-keeper-sandbox:local"]. *)
 

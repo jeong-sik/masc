@@ -312,12 +312,17 @@ jobs:
       - name: Check route tool catalog registration
         run: bash scripts/audit-route-tool-catalog.sh
 
-      # Eleven repo-scanning audits that existed and never ran. scripts/ holds
-      # 182 scripts and ci.yml called 63 of them; these are the audit/check
-      # ones that read only tracked files, so CI can run them as-is. The rest
-      # of the unwired set either reads a live .masc runtime (credential and
-      # fleet audits, meaningless on a runner) or needs a tool the image lacks
-      # (valgrind), and stays out.
+      # Repo-scanning audits that existed and never ran. scripts/ holds 182
+      # scripts and ci.yml called 63 of them; these are the audit/check ones
+      # that read only tracked files, so CI can run them as-is. The rest of
+      # the unwired set either reads a live .masc runtime (credential and
+      # fleet audits, meaningless on a runner), needs a tool the image lacks
+      # (valgrind), or takes arguments a loop cannot pass, and stays out.
+      #
+      # Six more joined on 2026-08-28. Each exits non-zero on a violation and
+      # each already passed on main, so nothing was blocking them — they were
+      # simply never added here. Together they cost ~35s, most of it
+      # audit-ocaml-spec-nav-line-refs (24s) and audit-code-smell (10s).
       # Its own step because it takes arguments, which the loop below cannot
       # pass. The walk used to descend into every worktree and never finish,
       # which is why an audit this specific sat unwired (#27386); at ~6s it is
@@ -339,6 +344,12 @@ jobs:
             audit-cross-module-exhaustive-match.sh \
             audit-path-ssot.sh \
             audit-tla-cfg-orphan.sh \
+            audit-code-smell.sh \
+            audit-ocaml-phase-count.sh \
+            audit-ocaml-spec-nav-line-refs.sh \
+            audit-tla-annotation-drift.sh \
+            audit-tla-ml-line-refs.sh \
+            audit-tla-phase-count.sh \
             check_silent_failure.sh \
             check-board-attention-exact-flow-boundary.sh \
             check-compaction-exact-flow-boundary.sh \

@@ -21,12 +21,28 @@ set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-# Measured, not computed: 14 is what the widened scan reports on main. The
-# previous 9 came from a narrower pattern that skipped scripts/ci/ entirely
-# and did not match lint-* names, so three self-declared gates
-# (check-logging-consistency, lint-cancel-guard, tla-mutation-lint-ratchet)
-# were invisible to it. See #27626.
-UNWIRED_BASELINE=11
+# Measured, not computed: 14 is what the scan reports after the 2026-08-28
+# wire-up. The previous 9 came from a narrower pattern that skipped
+# scripts/ci/ entirely and did not match lint-* names, so three
+# self-declared gates (check-logging-consistency, lint-cancel-guard,
+# tla-mutation-lint-ratchet) were invisible to it. See #27626.
+#
+# The constant read 11 while the comment above it said 14, and the scan
+# reported 20 — this gate failed on every run it ever had, including at the
+# oldest commit this clone holds. Six audits were wired into ci.yml on
+# 2026-08-28, taking the scan to 14, and the constant now matches a
+# measurement rather than an intention.
+#
+# What stays out, and why:
+#   - live .masc runtime: audit-keeper-credential-drift,
+#     audit-keeper-credential-uuid-integrity, audit-keeper-fleet-readiness
+#   - missing tool (valgrind): check-memory-leak
+#   - takes required arguments: check-pr-hygiene, check-pr-sync,
+#     check-release-train-guard, verify_audit_claim
+#   - reports rather than gates (always exits 0): lint-ignore-without-comment
+#   - currently failing, so wiring would pin main red: audit-agent-core-payload
+#     (21 of 95 offsets), audit-rfc-closeout-lag, ci/check-logging-consistency
+UNWIRED_BASELINE=14
 
 all="$(mktemp)"
 called="$(mktemp)"

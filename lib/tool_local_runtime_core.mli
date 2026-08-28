@@ -79,39 +79,5 @@ val split_ws : string -> string list
 
 (** {1 Process introspection} *)
 
-val discover_processes :
-  unit -> (llama_process list, string) Result.t
-(** [discover_processes ()] runs [ps -ax -o pid=,command=]
-    through [Process_eio.run_argv_with_status] and
-    parses the output into typed records.
-
-    {2 Filter}
-
-    Two-stage filter on each line:
-    1. Command must contain the substring [["llama-server"]].
-    2. Some token must end with [["llama-server"]] (catches the
-       binary path while excluding accidental
-       "llama-server-something-else" matches).
-
-    {2 Cmdline flag extraction (pinned)}
-
-    | Flag | Field |
-    |---|---|
-    | [--port] | [port] (parsed int) |
-    | [--host] | [host] |
-    | [--alias] | [alias] |
-    | [-m] | [model_path] |
-    | [-c] | [ctx_size] (parsed int) |
-    | [--batch-size] | [batch_size] |
-    | [--ubatch-size] | [ubatch_size] |
-    | [--slots] (presence) | [slots_enabled] |
-
-    {2 Errors}
-
-    Returns [Error "ps failed with exit code <N>"] /
-    ["ps killed by signal <N>"] / ["ps stopped by signal <N>"]
-    on subprocess failure.  5-second timeout (operator-tunable
-    only by code change). *)
-
 (** {1 Model discovery} *)
 

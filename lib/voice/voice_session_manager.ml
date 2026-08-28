@@ -312,13 +312,6 @@ let end_session t ~agent_id =
       true
     | None -> false)
 
-let suspend_session t ~agent_id =
-  with_lock t (fun () ->
-    match Hashtbl.find_opt t.sessions agent_id with
-    | Some session ->
-      session.status <- Suspended;
-      save_session t session
-    | None -> ())
 
 let resume_session t ~agent_id =
   with_lock t (fun () ->

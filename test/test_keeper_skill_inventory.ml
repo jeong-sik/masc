@@ -462,6 +462,45 @@ let test_tool_reference_json_is_closed () =
       |> to_string)
 ;;
 
+let test_tool_reference_schema_matches_the_strict_decoder () =
+  let module Surface = Masc.Keeper_capability_surface in
+  let validate label value expected_ok =
+    let schema_ok =
+      match
+        Masc.Tool_input_validation.validate_args
+          ~schema:Surface.ordinary_tool_reference_schema
+          ~name:"ordinary_tool_reference"
+          ~args:value
+          ()
+      with
+      | Ok _ -> true
+      | Error _ -> false
+    in
+    let decoder_ok = Result.is_ok (Surface.ordinary_tool_reference_of_yojson value) in
+    check bool (label ^ " schema") expected_ok schema_ok;
+    check bool (label ^ " decoder") expected_ok decoder_ok
+  in
+  validate
+    "exact object"
+    (`Assoc
+       [ "descriptor_id", `String "tool.read"
+       ; "capability_id", `String "filesystem.read"
+       ])
+    true;
+  validate
+    "missing capability"
+    (`Assoc [ "descriptor_id", `String "tool.read" ])
+    false;
+  validate
+    "unknown field"
+    (`Assoc
+       [ "descriptor_id", `String "tool.read"
+       ; "capability_id", `String "filesystem.read"
+       ; "name", `String "Read"
+       ])
+    false
+;;
+
 let tool_capability_by_internal_name surface internal_name =
   Masc.Keeper_capability_surface.tool_capabilities surface
   |> List.find_opt (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
@@ -1047,6 +1086,8 @@ let () =
             test_forged_tool_reference_rejects_unknown_and_mismatch
         ; test_case "Tool reference JSON is closed" `Quick
             test_tool_reference_json_is_closed
+        ; test_case "Tool reference schema matches decoder" `Quick
+            test_tool_reference_schema_matches_the_strict_decoder
         ; test_case "operator-only Tool inventory and search" `Quick
             test_operator_only_tool_is_in_inventory_and_search
         ; test_case "complete inventory preserves Agent Core surface" `Quick

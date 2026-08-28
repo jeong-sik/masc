@@ -332,7 +332,8 @@ let approval_resolve_approve_name = "approve"
 let approval_resolve_reject_name = "reject"
 let approval_resolve_decision_required_message = "decision is required"
 let approval_resolve_decision_invalid_message = "decision must be 'approve' or 'reject'"
-let approval_resolve_default_reject_reason = "dashboard rejected approval"
+let approval_resolve_reject_reason_required_message =
+  "reason is required when decision is 'reject'"
 
 type approval_resolve_decision =
   | Approval_resolve_approve
@@ -356,11 +357,17 @@ let approval_resolve_decision_of_json args =
      | name when String.equal name approval_resolve_approve_name ->
        Ok Approval_resolve_approve
      | name when String.equal name approval_resolve_reject_name ->
-       let reason =
-         Safe_ops.json_string_opt approval_resolve_reason_field args
-         |> Option.value ~default:approval_resolve_default_reject_reason
-       in
-       Ok (Approval_resolve_reject reason)
+       (* A refusal the keeper cannot read is a refusal it cannot answer:
+          polisher spent 20+ turns re-sending echo ok against the constant
+          "dashboard rejected approval" because nothing said what was
+          missing. An absent reason is a bad request, not a default. *)
+       (match
+          Safe_ops.json_string_opt approval_resolve_reason_field args
+          |> Option.map String.trim
+        with
+        | None | Some "" ->
+          Error (Bad_request approval_resolve_reject_reason_required_message)
+        | Some reason -> Ok (Approval_resolve_reject reason))
      | _ -> Error (Bad_request approval_resolve_decision_invalid_message))
 ;;
 

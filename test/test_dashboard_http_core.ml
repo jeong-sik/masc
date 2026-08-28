@@ -1618,6 +1618,51 @@ let test_execution_trust_does_not_call_full_keeper_projection () =
        source
        "keepers_dashboard_json ~compact:true")
 
+(* A refusal the keeper cannot read is a refusal it cannot answer. The
+   dashboard used to fill an omitted reason with the constant "dashboard
+   rejected approval", so a rejected keeper had nothing to act on: polisher
+   re-sent `echo ok` for 20+ turns against that string. RFC-0305 already
+   forbids defaulting an omitted [decision] to approve; a rejection's reason
+   is the same class of field. *)
+let test_gate_resolve_requires_reason_on_reject () =
+  let attempt reason_field =
+    let fields =
+      [ "id", `String "appr_regression_reject_reason"
+      ; "decision", `String "reject"
+      ]
+      @ reason_field
+    in
+    Server_dashboard_http.dashboard_gate_resolve_http_json
+      ~base_path:"/nonexistent/base/path"
+      ~created_by:"regression-test"
+      ~args:(`Assoc fields)
+  in
+  let expect_bad_request label result =
+    match result with
+    | Error (Server_dashboard_http.Bad_request msg) ->
+      Alcotest.(check string)
+        label
+        "reason is required when decision is 'reject'"
+        msg
+    | Error other ->
+      Alcotest.failf
+        "%s: expected Bad_request, got %s"
+        label
+        (Server_dashboard_http.approval_resolve_http_error_to_string other)
+    | Ok _ -> Alcotest.failf "%s: reject without a reason must not resolve" label
+  in
+  expect_bad_request "omitted reason" (attempt []);
+  expect_bad_request "empty reason" (attempt [ "reason", `String "" ]);
+  expect_bad_request "blank reason" (attempt [ "reason", `String "   " ]);
+  (* A supplied reason clears parsing and reaches the queue, where this
+     synthetic id has nothing to resolve. Any error other than Bad_request
+     proves the reason was accepted. *)
+  match attempt [ "reason", `String "clone target is unverified" ] with
+  | Error (Server_dashboard_http.Bad_request msg) ->
+    Alcotest.failf "a supplied reason must parse, got Bad_request: %s" msg
+  | Error _ | Ok _ -> ()
+;;
+
 let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
   let open Yojson.Safe.Util in
   let change : Masc.Keeper_gate_mode.change =
@@ -4262,6 +4307,8 @@ let () =
             test_state_diagram_runtime_projection_redacts_live_runtime_evidence;
           test_case "activation config materializes missing TOML" `Quick
             test_config_post_materializes_missing_toml;
+          test_case "reject without a reason is a bad request" `Quick
+            test_gate_resolve_requires_reason_on_reject;
         ] );
       ( "lifecycle event classification (#22071)",
         [ test_case "typed wire lifecycle round-trips" `Quick

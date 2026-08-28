@@ -12,7 +12,11 @@ val unsupported_docker_flags : string list
     unknown option rather than ignoring it, so this list is what a reader
     must weigh when choosing the profile, not a runtime fallback. *)
 
-val network_args : Keeper_types_profile_sandbox.network_mode -> string list
+val network_args :
+  Keeper_types_profile_sandbox.network_mode -> (string list, string) result
+(** [Network_inherit] is refused: container has no host network and its
+    default network does not route outside, so honouring it silently would
+    leave the keeper with no route while its profile still claimed one. *)
 
 val run_argv :
   container_name:string ->
@@ -26,3 +30,8 @@ val run_argv :
   env_args:string list ->
   memory:string ->
   string list
+
+val image_present : image:string -> timeout_sec:float -> (unit, string) result
+(** Gate the run on the image already being in container's store. container
+    has no [--pull=never]: without this, a missing image is fetched from a
+    registry rather than refused. *)

@@ -230,7 +230,20 @@ let cleanup_oneshot_container ~container_name =
        retry_after_failure ~probe_error ())
 ;;
 
-let ensure_docker_shell_image_available ~image ~timeout_sec =
+(* Each backend answers about its own store. container keeps images apart
+   from the Docker daemon, so asking docker whether the image exists would
+   pass for an image container cannot see -- and container run, having no
+   --pull=never, would then fetch instead of failing. *)
+let ensure_shell_image_available ~(meta : keeper_meta) ~image ~timeout_sec =
+  match meta.sandbox_profile with
+  | Keeper_types_profile_sandbox.Micro_vm ->
+    (match Keeper_sandbox_microvm.network_args meta.network_mode with
+     | Error detail -> Error ("microvm_shell_failed: " ^ detail)
+     | Ok _ ->
+       (match Keeper_sandbox_microvm.image_present ~image ~timeout_sec with
+        | Ok () -> Ok ()
+        | Error detail -> Error ("microvm_shell_failed: " ^ detail)))
+  | Keeper_types_profile_sandbox.Local | Keeper_types_profile_sandbox.Docker ->
   match
     Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
       ~image
@@ -308,7 +321,12 @@ let docker_run_argv
         ~base_path:config.base_path
         ~container_root
     @ secret_args
-    @ network_args
+    (* Not the caller's [network_args]: those are Docker's spelling, and
+       inherit arrives as "--network host", which container rejects with
+       "network host not found". The profile-aware args are validated before
+       this argv is built, so this cannot be reached with an unsupported
+       mode. *)
+    @ Result.value ~default:[] (Keeper_sandbox_microvm.network_args meta.network_mode)
     @ identity_mounts
     @ [ image; "bash"; "-l"; "-s" ]
   | Keeper_types_profile_sandbox.Local | Keeper_types_profile_sandbox.Docker ->
@@ -511,7 +529,7 @@ let run_docker_shell_command_with_status_internal
                 match ensure_keeper_sandbox_runtime ~timeout_sec with
                 | Error err -> sandbox_error err
                 | Ok seccomp_args ->
-                  (match ensure_docker_shell_image_available ~image ~timeout_sec with
+                  (match ensure_shell_image_available ~meta ~image ~timeout_sec with
                    | Error err -> sandbox_error err
                    | Ok () ->
                      let uid = Unix.getuid () in

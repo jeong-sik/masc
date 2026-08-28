@@ -63,7 +63,6 @@ type entry =
   ; directory : string
   ; document : Agent_core.Skill_document.t
   ; conformance : Agent_core.Skill_document.conformance
-  ; source_text : string
   ; content_revision : content_revision
   }
 
@@ -399,7 +398,6 @@ let build_entries sources =
                            ; directory
                            ; document
                            ; conformance
-                           ; source_text
                            ; content_revision = content_revision source_text
                            }
                            :: entries

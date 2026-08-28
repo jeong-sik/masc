@@ -27,7 +27,6 @@ let test_official_document () =
     "description"
     "Process PDF files when requested."
     document.description;
-  Alcotest.(check (option string)) "no allowed-tools" None document.allowed_tools;
   Alcotest.(check (list (pair string string)))
     "metadata"
     [ "author", "example-org"; "version", "1.0" ]
@@ -258,60 +257,50 @@ let test_invalid_optional_values_are_diagnostic () =
        (Skill_document.diagnostics null_compatibility))
 ;;
 
-let test_allowed_tools_preserves_skills_ref_string_vector () =
-  let valid =
+let test_tool_preapproval_hint_is_syntax_only () =
+  let decoded =
     Skill_document.decode
       ~directory_name:"my-skill"
       "---\nname: my-skill\ndescription: A test skill\nallowed-tools: Bash(jq:*) Bash(git:*)\n---\nBody"
   in
-  check_conformance "conformant" valid;
-  let document = document_exn valid in
-  Alcotest.(check (option string))
-    "skills-ref positive parser vector"
-    (Some "Bash(jq:*) Bash(git:*)")
-    document.allowed_tools;
+  check_conformance "conformant" decoded;
+  let document = document_exn decoded in
   Alcotest.(check (list (pair string string)))
     "not merged into client metadata"
     []
     document.metadata;
   Alcotest.(check int)
-    "not treated as an extension"
+    "recognized syntax is not retained as an extension"
     0
     (List.length document.extensions)
 ;;
 
-(* The Agent Skills specification owns the string shape. The reference parser
-   copies the YAML value without validating that shape, so its positive vector
-   does not define null or list behavior. MASC keeps a non-string document
-   usable with an explicit conformance diagnostic and no observed value. *)
-let test_allowed_tools_non_string_is_masc_conformance_diagnostic () =
+let test_tool_preapproval_hint_non_string_is_diagnostic () =
   List.iter
     (fun (label, value) ->
        let decoded =
          Skill_document.decode
-           ~directory_name:"allowed-tools"
+           ~directory_name:"tool-hint"
            (Printf.sprintf
-              "---\nname: allowed-tools\ndescription: Diagnose a non-string allowed-tools value.\nallowed-tools: %s\n---\nBody"
+              "---\nname: tool-hint\ndescription: Diagnose a non-string tool hint.\nallowed-tools: %s\n---\nBody"
               value)
        in
        check_conformance "runtime_compatible" decoded;
-       Alcotest.(check (option string))
-         (label ^ " is not retained")
-         None
-         (document_exn decoded).allowed_tools;
        Alcotest.(check bool)
          label
          true
          (List.exists
             (function
               | Skill_document.Invalid_field_type
-                  { field = Skill_document.Standard Skill_document.Allowed_tools
+                  { field =
+                      Skill_document.Standard
+                        Skill_document.Allowed_tools_syntax_only
                   ; expected = Skill_document.String_value
                   } ->
                 true
               | _ -> false)
             (Skill_document.diagnostics decoded)))
-    [ "null allowed-tools", "null"; "sequence allowed-tools", "[Read]" ]
+    [ "null tool hint", "null"; "sequence tool hint", "[Read]" ]
 ;;
 
 let test_foreign_and_duplicate_metadata_is_preserved_without_ambiguity () =
@@ -457,13 +446,13 @@ let () =
             `Quick
             test_invalid_optional_values_are_diagnostic
         ; Alcotest.test_case
-            "allowed-tools skills-ref string vector"
+            "allowed-tools syntax has no runtime state"
             `Quick
-            test_allowed_tools_preserves_skills_ref_string_vector
+            test_tool_preapproval_hint_is_syntax_only
         ; Alcotest.test_case
-            "allowed-tools non-string MASC policy"
+            "allowed-tools non-string diagnostic"
             `Quick
-            test_allowed_tools_non_string_is_masc_conformance_diagnostic
+            test_tool_preapproval_hint_non_string_is_diagnostic
         ; Alcotest.test_case
             "foreign and duplicate metadata"
             `Quick

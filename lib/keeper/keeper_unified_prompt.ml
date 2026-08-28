@@ -1176,19 +1176,55 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
         (match failures with
          | [] -> ()
          | failures ->
-           Buffer.add_string ubuf
-             "Rejected already — do not repeat these calls unchanged:\n";
+           (* Both lines are model-facing prose, so they live in
+              config/prompts assets (RFC prompts-and-tool-definitions-
+              outside-ocaml); a registry failure degrades to the bare data,
+              mirroring the held-task skills render above. *)
+           let render key vars ~fallback =
+             match Prompt_registry.render_prompt_template key vars with
+             | Ok text -> String.trim text
+             | Error detail ->
+               Log.Misc.error
+                 "keeper rejected-call digest prompt %s did not render, falling back to \
+                  the bare data: %s"
+                 key
+                 detail;
+               fallback
+           in
+           let heading =
+             render Prompt_names.keeper_observation_rejected_digest_heading [] ~fallback:""
+           in
+           if not (String.equal heading "")
+           then Buffer.add_string ubuf (heading ^ "\n");
            List.iter
              (fun (digest : Keeper_own_recent_actions.failure_digest) ->
-               Buffer.add_string ubuf
-                 (Printf.sprintf "- %s %s ×%d (last turn %d)%s\n"
-                    digest.failure_tool
-                    digest.failure_input
-                    digest.failure_count
-                    digest.failure_last_turn
-                    (match digest.failure_detail with
-                     | None -> ""
-                     | Some detail -> " — " ^ detail)))
+               let detail_suffix =
+                 match digest.failure_detail with
+                 | None -> ""
+                 | Some detail -> " — " ^ detail
+               in
+               let count = string_of_int digest.failure_count in
+               let last_turn = string_of_int digest.failure_last_turn in
+               let row =
+                 render
+                   Prompt_names.keeper_observation_rejected_digest_row
+                   [ "tool", digest.failure_tool
+                   ; "input", digest.failure_input
+                   ; "count", count
+                   ; "last_turn", last_turn
+                   ; "detail_suffix", detail_suffix
+                   ]
+                   ~fallback:
+                     (String.concat
+                        " "
+                        [ "-"
+                        ; digest.failure_tool
+                        ; digest.failure_input
+                        ; "×" ^ count
+                        ; "@" ^ last_turn ^ detail_suffix
+                        ])
+               in
+               Buffer.add_string ubuf (row ^ "\n"))
              failures);
         Buffer.add_string ubuf (String.concat "\n" kept);
         Buffer.add_string ubuf "\n\n";

@@ -58,6 +58,15 @@ module Agent_id : sig
 end = struct
   type t = string
 
+  (* This is a shape gate, not an identity. It answers "can this string be used
+     as an id" -- it does not answer "who is this" and does not know whether the
+     name belongs to a keeper, a human, or an external bot. That question is a
+     registry lookup at the caller (RFC-0393).
+
+     Its counterpart on the other axis is [Keeper_identity.Keeper_id], which
+     folds two names for comparison and validates nothing. The two names read
+     like a keeper/agent pair and are not; see the comment on [Keeper_id]. *)
+
   (* Allow alphanumeric, dot, dash, underscore, with optional single colon for
      namespacing e.g. keeper:keeper-test-98295-0. Bare colons, multiple colons,
      or leading colons are rejected.

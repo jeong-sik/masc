@@ -278,7 +278,7 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
         let fmt =
           if compact
           then Board_tool_format.format_post_compact
-          else Board_tool_format.format_post
+          else fun post -> Board_tool_format.format_post post
         in
         fmt p ^ indicator
       in
@@ -305,6 +305,33 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
 
 let handle_post_get ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
+  (* Injected by the MCP dispatch from the caller's own identity, never
+     model-supplied (same rewrite as vote's [voter]). Absent on paths with no
+     caller identity, which render no marker. *)
+  let viewer = get_string_opt args "viewer" in
+  (* A vote-store read error degrades to "no marker" rather than failing the
+     whole read: the listing's tallies are still current, and the marker is a
+     projection of the reader's own durable vote, not a gate. *)
+  let viewer_vote_of_comment comment_id =
+    Option.bind viewer (fun voter ->
+      match
+        Board_dispatch.current_vote_for_comment
+          ~voter
+          ~comment_id:(Board.Comment_id.to_string comment_id)
+      with
+      | Ok vote -> vote
+      | Error _ -> None)
+  in
+  let viewer_vote_of_post post_id =
+    Option.bind viewer (fun voter ->
+      match
+        Board_dispatch.current_vote_for_post
+          ~voter
+          ~post_id:(Board.Post_id.to_string post_id)
+      with
+      | Ok vote -> vote
+      | Error _ -> None)
+  in
   match Board_dispatch.get_post_and_comments ~post_id () with
   | Error (Board.Post_not_found _) ->
     (* Idempotent: post no longer exists (deleted/expired/TTL).
@@ -320,7 +347,9 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
   | Error e ->
     Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok (post, comments) ->
-    let post_str = Board_tool_format.format_post post in
+    let post_str =
+      Board_tool_format.format_post ?viewer_vote:(viewer_vote_of_post post.id) post
+    in
     let total_comments = List.length comments in
     let comment_offset = get_int args "comment_offset" 0 in
     let comment_limit =
@@ -340,7 +369,11 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
       then "\n\nNo comments."
       else (
         let shown_count = List.length sliced in
-        let formatted = Board_tool_format.format_comment_tree sliced in
+        let formatted =
+          Board_tool_format.format_comment_tree
+            ~viewer_vote_of:viewer_vote_of_comment
+            sliced
+        in
         let pagination =
           if has_more
           then

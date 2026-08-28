@@ -266,6 +266,7 @@ export { fetchDashboardMissionBriefing, fetchDashboardPlanning } from './dashboa
 export type {
   DashboardToolInventoryItem,
   DashboardFullHealthResponse,
+  DashboardSurfaceHealth,
   ToolMetricsTopEntry,
   ToolMetricsResponse,
   DashboardScheduledAutomationFsm,

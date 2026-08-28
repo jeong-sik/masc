@@ -60,12 +60,12 @@ let credential_state (ctx : context) ~actual_name =
        in-memory channel, re-read per tool call. RFC-0393: whether [name]
        is a keeper is a registry lookup, not a name-shape parse. *)
     match
-      ( Keeper_registry_lookup.find_by_name_in_base_path
+      ( (Atomic.get Workspace_hooks.keeper_registered_fn)
           ~base_path:ctx.config.base_path
-          name
+          ~agent_name:name
       , Auth.internal_keeper_token () )
     with
-    | Some _, Some raw ->
+    | true, Some raw ->
       let token = String.trim raw in
       (not (String.equal token ""))
       && Auth.verify_internal_keeper_token ctx.config.base_path ~token

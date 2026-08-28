@@ -40,6 +40,12 @@ val activity_emit_fn : (Workspace_utils_backend_setup.config ->
 val runtime_agents_fn :
   (Workspace_utils_backend_setup.config -> Masc_domain.agent list) Atomic.t
 
+(** Whether [agent_name] is present in the live Keeper registry for
+    [base_path]. The default is [false]; the runtime installs the registry
+    lookup before tool dispatch. *)
+val keeper_registered_fn :
+  (base_path:string -> agent_name:string -> bool) Atomic.t
+
 (** Whether a schedule keeper_wake target has durable keeper metadata.
     [Ok true] = registered, [Ok false] = absent, [Error] = read failure.
     Default allows every target; the runtime installs the

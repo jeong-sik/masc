@@ -249,6 +249,9 @@ let record_anti_rationalization_outcome ~outcome ~runtime =
 ;;
 
 let install () =
+  Atomic.set Workspace_hooks.keeper_registered_fn (fun ~base_path ~agent_name ->
+    Option.is_some
+      (Keeper_registry_lookup.find_by_name_in_base_path ~base_path agent_name));
   Atomic.set Workspace_hooks.schedule_wake_target_registered_fn (fun config keeper_name ->
     match Keeper_meta_store.read_effective_meta config keeper_name with
     | Ok (Some _) -> Ok true

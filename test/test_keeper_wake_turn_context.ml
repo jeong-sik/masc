@@ -484,6 +484,11 @@ let task_id_exn value =
   | Error message -> fail message
 
 let test_current_task_unavailable_is_explicit () =
+  (* The needles assert the configured prose (config/prompts/
+     keeper.observation.current_task_unobservable.md), so the repo prompt
+     config must be loaded the way the passing siblings load it; without it
+     the renderer falls back to different built-in wording. *)
+  with_repo_prompt_config @@ fun () ->
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
@@ -502,6 +507,7 @@ let test_current_task_unavailable_is_explicit () =
     (contains ~needle:"primary and recovery backlog decode failed" world_state)
 
 let test_current_task_missing_is_explicit () =
+  with_repo_prompt_config @@ fun () ->
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
@@ -516,6 +522,7 @@ let test_current_task_missing_is_explicit () =
     (contains ~needle:"Do not infer or invent task details" world_state)
 
 let test_recovered_current_task_is_non_authoritative () =
+  with_repo_prompt_config @@ fun () ->
   let recovered_task : Masc_domain.task =
     make_task ~task_status:(Masc_domain.Todo : Masc_domain.task_status) ()
   in

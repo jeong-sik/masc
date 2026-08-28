@@ -267,6 +267,10 @@ type http_rate_limit_scope =
   | Agent
   | Sse_connection
 
+type response_write_acceptance =
+  | Accepted_by_writer
+  | Rejected_by_writer
+
 let http_protocols = [ H1; H2 ]
 let http_rate_limit_scopes = [ Client_ip; Agent; Sse_connection ]
 
@@ -301,11 +305,14 @@ let () =
     http_protocols
 ;;
 
-let record_http_rate_limit_response ~protocol ~scope =
-  Otel_metric_store.inc_counter
-    Otel_metric_store.metric_http_rate_limit_responses
-    ~labels:(http_rate_limit_labels ~protocol ~scope)
-    ()
+let record_http_rate_limit_response ~acceptance ~protocol ~scope =
+  match acceptance with
+  | Rejected_by_writer -> ()
+  | Accepted_by_writer ->
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_http_rate_limit_responses
+      ~labels:(http_rate_limit_labels ~protocol ~scope)
+      ()
 ;;
 
 let http_listener_mode_runtime : string Atomic.t = Atomic.make "unknown"

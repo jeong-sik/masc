@@ -163,10 +163,16 @@ type http_rate_limit_scope =
   | Agent
   | Sse_connection
 
-(** Records one HTTP 429 response at the transport response boundary.  Both
+type response_write_acceptance =
+  | Accepted_by_writer
+  | Rejected_by_writer
+
+(** Records one HTTP 429 response only when the transport writer accepted it.
+    This does not claim that the peer received the bytes.  Protocol and scope
     labels come from closed sums, so the metric cardinality is fixed. *)
 val record_http_rate_limit_response
-  :  protocol:http_protocol
+  :  acceptance:response_write_acceptance
+  -> protocol:http_protocol
   -> scope:http_rate_limit_scope
   -> unit
 
@@ -193,8 +199,8 @@ val record_http_accept_error : mode:string -> error:string -> unit
     histogram (self-registered on first call). *)
 val record_http_accept_latency : mode:string -> float -> unit
 
-(** Snapshot of primary HTTP accept-loop status and emitted HTTP 429 counters
-    for [/health] and dashboard transport health. *)
+(** Snapshot of primary HTTP accept-loop status and writer-accepted HTTP 429
+    counters for [/health] and dashboard transport health. *)
 val http_listener_json : ?now:float -> unit -> Yojson.Safe.t
 
 (** {1 WebSocket metrics} *)

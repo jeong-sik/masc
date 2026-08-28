@@ -318,9 +318,25 @@ let test_http_rate_limit_response_counter () =
     Otel_metric_store.metric_total
       Otel_metric_store.metric_http_rate_limit_responses
   in
-  TM.record_http_rate_limit_response ~protocol:TM.H1 ~scope:TM.Client_ip;
-  TM.record_http_rate_limit_response ~protocol:TM.H1 ~scope:TM.Client_ip;
-  TM.record_http_rate_limit_response ~protocol:TM.H2 ~scope:TM.Agent;
+  TM.record_http_rate_limit_response
+    ~acceptance:TM.Rejected_by_writer
+    ~protocol:TM.H1
+    ~scope:TM.Client_ip;
+  check (float 0.01) "a rejected writer does not count a response" 0.0
+    (http_rate_limit_value ~protocol:"h1" ~scope:"client_ip"
+     -. h1_ip_before);
+  TM.record_http_rate_limit_response
+    ~acceptance:TM.Accepted_by_writer
+    ~protocol:TM.H1
+    ~scope:TM.Client_ip;
+  TM.record_http_rate_limit_response
+    ~acceptance:TM.Accepted_by_writer
+    ~protocol:TM.H1
+    ~scope:TM.Client_ip;
+  TM.record_http_rate_limit_response
+    ~acceptance:TM.Accepted_by_writer
+    ~protocol:TM.H2
+    ~scope:TM.Agent;
   check (float 0.01) "H1 client-IP responses only increase" 2.0
     (http_rate_limit_value ~protocol:"h1" ~scope:"client_ip"
      -. h1_ip_before);

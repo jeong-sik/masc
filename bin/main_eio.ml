@@ -89,22 +89,28 @@ let is_rate_limit_exempt path =
     httpun raises when the reqd has already entered its error-handling path
     (e.g. client disconnect during a long AGENT_CORE turn — 2026-05-05 cycle9
     FATAL race, also see [Http_server_eio.safe_respond_with_string]).
-    [Eio.Cancel.Cancelled] is always re-raised. *)
+    [Eio.Cancel.Cancelled] is always re-raised.  The result says only whether
+    httpun accepted the response write, not whether the peer received it. *)
 let safe_reqd_respond reqd response body =
-  try Httpun.Reqd.respond_with_string reqd response body
+  try
+    Httpun.Reqd.respond_with_string reqd response body;
+    Transport_metrics.Accepted_by_writer
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Failure msg ->
       Log.Server.warn
         "[http] reqd respond skipped (invalid state; 2026-05-05 AGENT_CORE cancel race): %s"
-        msg
+        msg;
+      Transport_metrics.Rejected_by_writer
   | exn ->
       Log.Server.warn "[http] reqd respond unexpected exception: %s"
-        (Printexc.to_string exn)
+        (Printexc.to_string exn);
+      Transport_metrics.Rejected_by_writer
 
-(** Returns true if the request was rate-limited and a 429 response was
-    sent on [reqd]. Caller should short-circuit further handling in that
-    case. Health-probe paths are always allowed through.
+(** Returns true if the request was rate-limited and a 429 response write was
+    attempted on [reqd]. Caller should short-circuit further handling in that
+    case. The accepted-response counter advances only when the writer returns
+    normally. Health-probe paths are always allowed through.
 
     Enforces two complementary rate limits:
     1. Per-client IP (via [client_addr]) — protects against volumetric abuse.
@@ -122,11 +128,14 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
         ("content-length", string_of_int (String.length body)) ::
         rl_headers
       ) in
+      let acceptance =
+        safe_reqd_respond reqd
+          (Httpun.Response.create ~headers `Too_many_requests) body
+      in
       Transport_metrics.record_http_rate_limit_response
+        ~acceptance
         ~protocol:Transport_metrics.H1
         ~scope:Transport_metrics.Client_ip;
-      safe_reqd_respond reqd
-        (Httpun.Response.create ~headers `Too_many_requests) body;
       true
     end else
       match auth_token_from_request request with
@@ -147,12 +156,15 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
                     :: ("content-length", string_of_int (String.length body))
                     :: rl_headers)
                 in
+                let acceptance =
+                  safe_reqd_respond reqd
+                    (Httpun.Response.create ~headers `Too_many_requests)
+                    body
+                in
                 Transport_metrics.record_http_rate_limit_response
+                  ~acceptance
                   ~protocol:Transport_metrics.H1
                   ~scope:Transport_metrics.Agent;
-                safe_reqd_respond reqd
-                  (Httpun.Response.create ~headers `Too_many_requests)
-                  body;
                 true
               end
 
@@ -181,7 +193,7 @@ let try_mcp_validation_block
          @ mcp_headers "-" protocol_version)
     in
     let response = Httpun.Response.create ~headers `Forbidden in
-    safe_reqd_respond reqd response body;
+    ignore (safe_reqd_respond reqd response body);
     true
   end
   else if is_mcp_transport && request.Httpun.Request.meth <> `OPTIONS &&
@@ -192,7 +204,7 @@ let try_mcp_validation_block
       :: json_headers "-" protocol_version origin
     ) in
     let response = Httpun.Response.create ~headers `Bad_request in
-    safe_reqd_respond reqd response body;
+    ignore (safe_reqd_respond reqd response body);
     true
   end
   else false

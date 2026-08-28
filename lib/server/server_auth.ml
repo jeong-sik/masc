@@ -886,11 +886,12 @@ let respond_agent_rate_limited ~rl_key request reqd =
     rl_headers @
     cors_headers origin
   ) in
-  Transport_metrics.record_http_rate_limit_response
-    ~protocol:Transport_metrics.H1
-    ~scope:Transport_metrics.Agent;
   Httpun.Reqd.respond_with_string reqd
-    (Httpun.Response.create ~headers `Too_many_requests) body
+    (Httpun.Response.create ~headers `Too_many_requests) body;
+  Transport_metrics.record_http_rate_limit_response
+    ~acceptance:Transport_metrics.Accepted_by_writer
+    ~protocol:Transport_metrics.H1
+    ~scope:Transport_metrics.Agent
 
 (** Extract a per-agent rate-limit key from the request.  Prefers the bearer
     token (keyed by a short SHA-256 prefix) over the declared agent-name

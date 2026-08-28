@@ -1092,6 +1092,17 @@ and drain_auto_judge_owner
     Error detail
 
 and drain_auto_judges ~base_path =
+  (* The sweep admits owners by their EFFECTIVE mode, not by the workspace
+     mode alone. A stricter keeper override can hold one keeper in
+     auto_judge while the workspace sits in manual or always_allow — the
+     old workspace-mode short-circuit left that keeper's approvals queued
+     with nothing sweeping them (the hazard keeper_gate_mode.ml's
+     strictness comment predicted for the loosening direction, reached
+     from the stricter one). The same filter also stops sweeping an owner
+     a manual override holds ABOVE an auto_judge workspace, which the old
+     branch judged strictly but drained anyway. The workspace read stays
+     first so an unreadable mode store remains a loud error, not an empty
+     sweep. *)
   match Keeper_gate_mode.read ~base_path with
   | Error detail ->
     Log.Keeper.error
@@ -1099,9 +1110,7 @@ and drain_auto_judges ~base_path =
       base_path
       detail;
     Error detail
-  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
-    Ok { started_ids = []; failures = [] }
-  | Ok Keeper_gate_mode.Auto_judge ->
+  | Ok (_ : Keeper_gate_mode.t) ->
     (match Keeper_approval_queue.list_pending_entries_for_workspace ~base_path with
      | Error error ->
        Error (Keeper_approval_queue.storage_error_to_string error)
@@ -1115,6 +1124,24 @@ and drain_auto_judges ~base_path =
            Auto_judge_owner_set.empty
            entries
        in
+       let auto_judge_owners =
+         List.filter
+           (fun (owner_base_path, keeper_name) ->
+              match
+                Keeper_gate_mode.resolve ~base_path:owner_base_path ~keeper_name
+              with
+              | Ok Keeper_gate_mode.Auto_judge -> true
+              | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
+                false
+              | Error detail ->
+                Log.Keeper.error
+                  ~keeper_name
+                  "Auto Judge drain owner mode unresolved workspace=%s: %s"
+                  owner_base_path
+                  detail;
+                false)
+           (Auto_judge_owner_set.elements owners)
+       in
        Ok
          (drain_auto_judge_owners_with
             ~drain_owner:(fun ~base_path ~keeper_name ->
@@ -1124,7 +1151,7 @@ and drain_auto_judges ~base_path =
                       outcome.started_id, outcome.failures)
               |> Result.map_error
                    Keeper_approval_queue.storage_error_to_string)
-            (Auto_judge_owner_set.elements owners)))
+            auto_judge_owners))
 ;;
 
 type recovered_work =
@@ -1134,10 +1161,13 @@ type recovered_work =
       * Keeper_approval_queue_rules_types.hitl_context_summary
 
 let recovered_work_for_base_path ~base_path =
-  let enabled =
+  (* Boot recovery admits owners by their EFFECTIVE mode, mirroring
+     [drain_auto_judges]: a keeper override held in auto_judge above a
+     manual/always_allow workspace must be recovered too, or restart —
+     the only escape from a stalled owner — recovers nothing for it. *)
+  let workspace_readable =
     match Keeper_gate_mode.read ~base_path with
-    | Ok Keeper_gate_mode.Auto_judge -> true
-    | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) -> false
+    | Ok (_ : Keeper_gate_mode.t) -> true
     | Error detail ->
       Log.Keeper.error
         "Auto Judge recovery unavailable workspace=%s: %s"
@@ -1145,7 +1175,7 @@ let recovered_work_for_base_path ~base_path =
         detail;
       false
   in
-  if not enabled
+  if not workspace_readable
   then Ok []
   else
     Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
@@ -1156,6 +1186,24 @@ let recovered_work_for_base_path ~base_path =
            Auto_judge_owner_set.add (auto_judge_owner entry) owners)
         Auto_judge_owner_set.empty
         entries
+    in
+    let owners =
+      Auto_judge_owner_set.filter
+        (fun (owner_base_path, keeper_name) ->
+           match
+             Keeper_gate_mode.resolve ~base_path:owner_base_path ~keeper_name
+           with
+           | Ok Keeper_gate_mode.Auto_judge -> true
+           | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
+             false
+           | Error detail ->
+             Log.Keeper.error
+               ~keeper_name
+               "Auto Judge recovery owner mode unresolved workspace=%s: %s"
+               owner_base_path
+               detail;
+             false)
+        owners
     in
     let recovered_work_for_entry
           (entry : Keeper_approval_queue_rules_types.pending_approval)

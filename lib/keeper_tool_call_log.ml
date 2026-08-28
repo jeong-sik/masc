@@ -578,6 +578,9 @@ let log_call
       ?disposition
       ?file_change_evidence
       ?composition_tool
+      ?assembler_run_id
+      ?proposal_id
+      ?proposal_provenance
       ?skill_reference
       ?composition_run_id
       ?composition_node_id
@@ -754,6 +757,32 @@ let log_call
         |> List.filter_map (fun (key, value) ->
           Option.map (fun value -> key, `String value) value)
       in
+      let proposal_id_field =
+        match proposal_id with
+        | Some value ->
+          [ ( "proposal_id"
+            , `String (Keeper_plan_proposal.Proposal_id.to_string value) )
+          ]
+        | None -> []
+      in
+      let proposal_provenance_fields =
+        (match assembler_run_id with
+         | Some value ->
+           [ ( "assembler_run_id"
+             , `String
+                 (Keeper_plan_proposal_execution_request.Assembler_run_id.to_string
+                    value) )
+           ]
+         | None -> [])
+        @
+        match proposal_provenance with
+        | Some value ->
+          [ ( "proposal_provenance_status"
+            , `String
+                (Keeper_plan_proposal_provenance.status_to_string value) )
+          ]
+        | None -> []
+      in
       let skill_reference_field =
         match skill_reference with
         | Some reference -> [ "skill_reference", Skill_reference.to_yojson reference ]
@@ -874,6 +903,8 @@ let log_call
            @ typed_result_fields
            @ file_change_evidence_field
            @ composition_fields
+           @ proposal_id_field
+           @ proposal_provenance_fields
            @ skill_reference_field
            @ composition_execution_field
            @ composition_tool_kind_field

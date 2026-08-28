@@ -7,6 +7,12 @@ turn's frozen capability surface and rejects any mismatch before execution."""
 additional_properties = false
 
 [[params]]
+name = "assembler_run_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params]]
 name = "proposal_id"
 type = "string"
 required = true

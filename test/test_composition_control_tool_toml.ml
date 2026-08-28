@@ -23,7 +23,9 @@ let expected_proposal_execute_input_schema : Yojson.Safe.t =
     [ "type", `String "object"
     ; ( "properties"
       , `Assoc
-          [ ( "proposal_id"
+          [ ( "assembler_run_id"
+            , `Assoc [ "type", `String "string"; "minLength", `Int 1 ] )
+          ; ( "proposal_id"
             , `Assoc
                 [ "type", `String "string"
                 ; "pattern", `String "^[0-9a-f]{64}$"
@@ -40,7 +42,11 @@ let expected_proposal_execute_input_schema : Yojson.Safe.t =
                 ] )
           ] )
     ; ( "required"
-      , `List [ `String "proposal_id"; `String "approval_tools" ] )
+      , `List
+          [ `String "assembler_run_id"
+          ; `String "proposal_id"
+          ; `String "approval_tools"
+          ] )
     ; "additionalProperties", `Bool false
     ]
 ;;

@@ -231,6 +231,9 @@ let node_result_to_json (result : Executor.node_result) =
 
 let observe_node_result
       ~composition_tool
+      ~assembler_run_id
+      ~proposal_id
+      ~proposal_provenance
       ~composition_execution
       ~composition_tool_kind
       ~composition_run_id
@@ -268,6 +271,9 @@ let observe_node_result
       ~result_bytes:result.result_bytes
       ?truncated_to:result.truncated_to
       ~composition_tool
+      ?assembler_run_id
+      ?proposal_id
+      ?proposal_provenance
       ~composition_run_id:
         (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
       ~composition_node_id:(Keeper_tool_plan.Node_id.to_string result.node_id)
@@ -289,6 +295,31 @@ let observe_node_result
       ();
     if not !committed
     then failwith "composition telemetry commit callback was not delivered";
+    let proposal_id_field =
+      match proposal_id with
+      | Some value ->
+        [ ( "proposal_id"
+          , `String (Keeper_plan_proposal.Proposal_id.to_string value) )
+        ]
+      | None -> []
+    in
+    let proposal_provenance_fields =
+      (match assembler_run_id with
+       | Some value ->
+         [ ( "assembler_run_id"
+           , `String
+               (Keeper_plan_proposal_execution_request.Assembler_run_id.to_string
+                  value) )
+         ]
+       | None -> [])
+      @
+      match proposal_provenance with
+      | Some value ->
+        [ ( "proposal_provenance_status"
+          , `String (Keeper_plan_proposal_provenance.status_to_string value) )
+        ]
+      | None -> []
+    in
     let fields =
       [ "type", `String "keeper_tool_call_evidence_committed"
       ; "name", `String meta.name
@@ -324,6 +355,8 @@ let observe_node_result
       ; "ts_unix", `Float (Time_compat.now ())
       ; "tool_use_id", `String result.tool_use_id
       ]
+      @ proposal_id_field
+      @ proposal_provenance_fields
     in
     Sse.broadcast (`Assoc fields)
   in
@@ -343,6 +376,9 @@ let observe_node_result
 
 let observe_composition_run_summary
       ~composition_tool
+      ~assembler_run_id
+      ~proposal_id
+      ~proposal_provenance
       ?skill_reference
       ~composition_execution
       ~composition_tool_kind
@@ -384,6 +420,9 @@ let observe_composition_run_summary
       ~execution_mode:schedule.execution_mode
       ?typed_result
       ~composition_tool
+      ?assembler_run_id
+      ?proposal_id
+      ?proposal_provenance
       ?skill_reference
       ~composition_run_id:
         (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
@@ -458,6 +497,9 @@ let observe_async_run_settlement
            in
            observe_composition_run_summary
              ~composition_tool
+             ~assembler_run_id:None
+             ~proposal_id:None
+             ~proposal_provenance:None
              ~skill_reference
              ~composition_execution:Catalog.Async
              ~composition_tool_kind
@@ -758,6 +800,9 @@ let async_worker_result
          (fun turn_context ->
             observe_node_result
               ~composition_tool:tool_name
+              ~assembler_run_id:None
+              ~proposal_id:None
+              ~proposal_provenance:None
               ~composition_execution:entry.execution
               ~composition_tool_kind:(Catalog.tool_kind entry)
               ~composition_run_id
@@ -1639,6 +1684,9 @@ let make_tools_with_authority
                       (fun turn_context ->
                          observe_node_result
                            ~composition_tool:tool_name
+                           ~assembler_run_id:None
+                           ~proposal_id:None
+                           ~proposal_provenance:None
                            ~composition_execution:entry.execution
                            ~composition_tool_kind:(Catalog.tool_kind entry)
                            ~composition_run_id
@@ -1718,6 +1766,9 @@ let make_tools_with_authority
              in
              observe_composition_run_summary
                ~composition_tool:tool_name
+               ~assembler_run_id:None
+               ~proposal_id:None
+               ~proposal_provenance:None
                ~skill_reference:skill.reference
                ~composition_execution:Catalog.Inline
                ~composition_tool_kind:(Catalog.tool_kind entry)
@@ -1828,6 +1879,9 @@ let make_tools_with_authority
                             (fun turn_context ->
                                observe_node_result
                                  ~composition_tool:tool_name
+                                 ~assembler_run_id:None
+                                 ~proposal_id:None
+                                 ~proposal_provenance:None
                                  ~composition_execution:Catalog.Inline
                                  ~composition_tool_kind:plan_execute_tool_kind
                                  ~composition_run_id
@@ -1904,6 +1958,7 @@ let make_tools_with_authority
   let proposal_execute_tool =
     let module Execution_request = Keeper_plan_proposal_execution_request in
     let module Proposal = Keeper_plan_proposal in
+    let module Provenance = Keeper_plan_proposal_provenance in
     let module Store = Keeper_plan_proposal_store in
     let tool_name = proposal_execute_tool_name in
     let tool_kind = proposal_execute_tool_kind in
@@ -1916,19 +1971,36 @@ let make_tools_with_authority
         ~metadata:data
         (Yojson.Safe.to_string data)
     in
-    let execute_loaded ~start_time ~parent_invocation proposal =
+    let provenance_fields ~assembler_run_id ~proposal_id provenance =
+      [ ( "assembler_run_id"
+        , `String
+            (Execution_request.Assembler_run_id.to_string assembler_run_id) )
+      ; "proposal_id", `String (Proposal.Proposal_id.to_string proposal_id)
+      ; ( "proposal_provenance_status"
+        , `String (Provenance.status_to_string provenance) )
+      ]
+    in
+    let execute_loaded
+          ~start_time
+          ~parent_invocation
+          ~input
+          ~assembler_run_id
+          ~proposal_provenance
+          proposal
+      =
       let plan = Proposal.plan proposal in
+      let proposal_id = Proposal.id proposal in
       match Executor.outer_completion plan with
       | Agent_core.Tool_contract.Terminal_after_success _ ->
         reject
           ~start_time
           ~class_:Tool_result.Policy_rejection
           (`Assoc
-            [ "error", `String "proposal_contains_terminal_tool"
-            ; ( "proposal_id"
-              , `String
-                  (Proposal.id proposal |> Proposal.Proposal_id.to_string) )
-            ])
+            ([ "error", `String "proposal_contains_terminal_tool" ]
+             @ provenance_fields
+                 ~assembler_run_id
+                 ~proposal_id
+                 proposal_provenance))
       | Agent_core.Tool_contract.Continue_after_success ->
         let turn_context =
           Option.map
@@ -1968,6 +2040,9 @@ let make_tools_with_authority
                  (fun turn_context ->
                     observe_node_result
                       ~composition_tool:tool_name
+                      ~assembler_run_id:(Some assembler_run_id)
+                      ~proposal_id:(Some proposal_id)
+                      ~proposal_provenance:(Some proposal_provenance)
                       ~composition_execution:Catalog.Inline
                       ~composition_tool_kind:tool_kind
                       ~composition_run_id
@@ -2002,52 +2077,59 @@ let make_tools_with_authority
              } ->
            ());
         let result =
-          match execution with
-          | Ok settled ->
-            Tool_result.make_ok
-              ~tool_name
-              ~start_time
-              ~data:
-                (`Assoc
-                  [ "composition_tool", `String tool_name
-                  ; tool_kind_field tool_kind
-                  ; ( "proposal_id"
-                    , `String
-                        (Proposal.id proposal
-                         |> Proposal.Proposal_id.to_string) )
-                  ; "actions", `List (List.map node_result_to_json settled)
-                  ])
-              ()
-          | Error _ ->
-            result_of_execution
-              ~tool_name
-              ~tool_kind
-              ~start_time
-              execution
+          result_of_execution ~tool_name ~tool_kind ~start_time execution
+          |> Provenance.attach_to_result
+               ~assembler_run_id
+               ~proposal_id
+               proposal_provenance
         in
-        (match
-           Tool_bridge.attach_artifact_manifest
-             ~base_path:config.base_path
-             result
-         with
-         | Ok result -> result
-         | Error { message; _ } ->
-           Option.iter
-             (fun mark_failed ->
-                mark_failed
-                  { Keeper_tools_agent_core.failure_class =
-                      Tool_result.Runtime_failure
-                  ; effect_disposition = Tool_result.Effect_outcome_unknown
-                  ; diagnostic =
-                      "composition result manifest persistence failed: "
-                      ^ message
-                  })
-             on_failed;
-           Tool_result.make_err
-             ~tool_name
-             ~class_:Tool_result.Runtime_failure
-             ~start_time
-             "composition result manifest persistence failed")
+        let result =
+          match
+            Tool_bridge.attach_artifact_manifest
+              ~base_path:config.base_path
+              result
+          with
+          | Ok result -> result
+          | Error { message; _ } ->
+            Option.iter
+              (fun mark_failed ->
+                 mark_failed
+                   { Keeper_tools_agent_core.failure_class =
+                       Tool_result.Runtime_failure
+                   ; effect_disposition = Tool_result.Effect_outcome_unknown
+                   ; diagnostic =
+                       "composition result manifest persistence failed: "
+                       ^ message
+                   })
+              on_failed;
+            Tool_result.make_err
+              ~tool_name
+              ~class_:Tool_result.Runtime_failure
+              ~start_time
+              "composition result manifest persistence failed"
+          |> Provenance.attach_to_result
+               ~assembler_run_id
+               ~proposal_id
+               proposal_provenance
+        in
+        observe_composition_run_summary
+          ~composition_tool:tool_name
+          ~assembler_run_id:(Some assembler_run_id)
+          ~proposal_id:(Some proposal_id)
+          ~proposal_provenance:(Some proposal_provenance)
+          ~composition_execution:Catalog.Inline
+          ~composition_tool_kind:tool_kind
+          ~composition_run_id
+          ~parent_invocation
+          ~meta
+          ~turn_context
+          ~input
+          ~output_text:(Tool_result.message result)
+          ~success:(Tool_result.is_success result)
+          ~duration_ms:(Tool_result.duration_ms result)
+          ~typed_result:result
+          ();
+        result
     in
     Tool_bridge.agent_core_tool_of_masc_with_execution_env
       ~descriptor:
@@ -2088,30 +2170,64 @@ let make_tools_with_authority
                      ; "detail", Execution_request.error_to_yojson error
                      ])
                | Ok request ->
+                 let assembler_run_id =
+                   Execution_request.assembler_run_id request
+                 in
+                 let proposal_id = Execution_request.proposal_id request in
+                 let proposal_provenance =
+                   Provenance.verify
+                     ~registry:(Exact_lane_run_registry.global ())
+                     ~assembler_run_id
+                     ~proposal_id
+                 in
+                 (match proposal_provenance with
+                  | Provenance.Retained_contradiction _ ->
+                    reject
+                      ~start_time
+                      ~class_:Tool_result.Policy_rejection
+                      (`Assoc
+                        ([ "error", `String "proposal_provenance_contradiction"
+                         ; "provenance", Provenance.to_yojson proposal_provenance
+                         ]
+                         @ provenance_fields
+                             ~assembler_run_id
+                             ~proposal_id
+                             proposal_provenance))
+                  | ( Provenance.Retained_match
+                    | Provenance.Retained_unconfirmed
+                    | Provenance.Not_retained ) ->
                  (match capability_authority with
                   | Keeper_tool_runtime.Compatibility_meta ->
                     reject
                       ~start_time
                       ~class_:Tool_result.Policy_rejection
                       (`Assoc
-                        [ "error", `String "frozen_surface_required"
-                        ; "tool", `String tool_name
-                        ])
+                        ([ "error", `String "frozen_surface_required"
+                         ; "tool", `String tool_name
+                         ]
+                         @ provenance_fields
+                             ~assembler_run_id
+                             ~proposal_id
+                             proposal_provenance))
                   | Keeper_tool_runtime.Frozen_surface _ ->
                     (match
                        Store.load
                          ~descriptors
                          config
-                         (Execution_request.proposal_id request)
+                         proposal_id
                      with
                      | Error error ->
                        reject
                          ~start_time
                          ~class_:Tool_result.Workflow_rejection
                          (`Assoc
-                           [ "error", `String "proposal_load_failed"
-                           ; "detail", Store.error_to_yojson error
-                           ])
+                           ([ "error", `String "proposal_load_failed"
+                            ; "detail", Store.error_to_yojson error
+                            ]
+                            @ provenance_fields
+                                ~assembler_run_id
+                                ~proposal_id
+                                proposal_provenance))
                      | Ok proposal ->
                        let stored_approval_tools =
                          Proposal.plan proposal
@@ -2131,13 +2247,17 @@ let make_tools_with_authority
                            ~start_time
                            ~class_:Tool_result.Policy_rejection
                            (`Assoc
-                             [ ( "error"
-                               , `String
-                                   "proposal_approval_tools_mismatch" )
-                             ; ( "expected_approval_tools"
-                               , Json_util.json_string_list
-                                   stored_approval_tools )
-                             ])
+                             ([ ( "error"
+                                , `String
+                                    "proposal_approval_tools_mismatch" )
+                              ; ( "expected_approval_tools"
+                                , Json_util.json_string_list
+                                    stored_approval_tools )
+                              ]
+                              @ provenance_fields
+                                  ~assembler_run_id
+                                  ~proposal_id
+                                  proposal_provenance))
                        else
                          (match Proposal.execution proposal with
                           | Proposal.Async ->
@@ -2145,14 +2265,21 @@ let make_tools_with_authority
                               ~start_time
                               ~class_:Tool_result.Workflow_rejection
                               (`Assoc
-                                [ "error", `String "not_supported"
-                                ; "mode", `String "async"
-                                ])
+                                ([ "error", `String "not_supported"
+                                 ; "mode", `String "async"
+                                 ]
+                                 @ provenance_fields
+                                     ~assembler_run_id
+                                     ~proposal_id
+                                     proposal_provenance))
                           | Proposal.Inline ->
                             execute_loaded
                               ~start_time
                               ~parent_invocation
-                              proposal))))))
+                              ~input
+                              ~assembler_run_id
+                              ~proposal_provenance
+                              proposal)))))))
   in
   let has_async =
     List.exists

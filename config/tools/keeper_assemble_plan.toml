@@ -53,6 +53,6 @@ key_constraints = [
   "References are exact identities from this Keeper turn's frozen capability surface.",
   "The call invokes only the Assembler exact-output lane and stores a proposal.",
   "No ordinary Tool and no proposal execution runs during assembly.",
-  "Pass the returned execution_request unchanged; it binds approval to the stored plan's exact Tool sequence.",
+  "Pass the returned execution_request unchanged; it binds the selected Assembler run and approval to the stored plan's exact Tool sequence.",
 ]
 alternatives = ["keeper_plan_execute"]

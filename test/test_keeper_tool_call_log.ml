@@ -465,6 +465,15 @@ let test_composition_action_context_persisted () =
         ; duration_ms = 12.5
         }
     in
+    let assembler_run_id =
+      Keeper_plan_proposal_execution_request.Assembler_run_id.of_string
+        "exact-assembler-run-42"
+      |> Result.get_ok
+    in
+    let proposal_id =
+      Keeper_plan_proposal.Proposal_id.of_string (String.make 64 'a')
+      |> Result.get_ok
+    in
     Keeper_tool_call_log.log_call
       ~keeper_name:"delta"
       ~tool_name:"keeper_fs_read"
@@ -474,6 +483,9 @@ let test_composition_action_context_persisted () =
       ~duration_ms:12.5
       ~typed_result
       ~composition_tool:"keeper_research_pipeline"
+      ~assembler_run_id
+      ~proposal_id
+      ~proposal_provenance:Keeper_plan_proposal_provenance.Retained_match
       ~skill_reference
       ~composition_run_id:"run-42"
       ~composition_node_id:"fetch_sources"
@@ -494,6 +506,9 @@ let test_composition_action_context_persisted () =
         ; "composition node", "composition_node_id", "fetch_sources"
         ; "composition execution", "composition_execution", "async"
         ; "outer provider call", "parent_tool_use_id", "outer-7"
+        ; "Assembler producer run", "assembler_run_id", "exact-assembler-run-42"
+        ; "proposal identity", "proposal_id", String.make 64 'a'
+        ; "proposal provenance", "proposal_provenance_status", "retained_match"
         ]
       ; Alcotest.(check string)
           "exact Skill reference"

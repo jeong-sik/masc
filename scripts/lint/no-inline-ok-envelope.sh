@@ -35,19 +35,6 @@ ALLOWLIST=(
   # dashboard frontend that parses generated_at/cached/stale before
   # status.
   "lib/dashboard/dashboard_briefing_sections.ml"
-
-
-  # Single-shot health endpoint, no caller chain. De-prioritized — safe
-  # to migrate but no test/wire impact.
-  "lib/http_server_eio.ml"
-
-  # ---- Temporary allowlist entries — REMOVE after T27 (#14876) merges ----
-  # T27 deletes these inline json_ok helpers in tool_misc_web_search and
-  # tool_misc_web_fetch (consolidating to Tool_args.ok_response). This
-  # PR was opened in parallel with T27; once T27 lands these two lines
-  # disappear from origin/main and the entries below must be deleted.
-  "lib/tool_misc_web_fetch.ml"
-  "lib/tool_misc_web_search.ml"
 )
 
 count=0

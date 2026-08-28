@@ -376,6 +376,7 @@ let every_settled_status_is_announced () =
         ; keeper_name = submitter
         ; base_path
         ; submitted_by = submitter
+        ; request_context = None
         ; status
         ; submitted_at = 1.0
         ; completed_at = Some 2.0
@@ -431,6 +432,7 @@ let a_non_durable_settlement_is_not_announced () =
       ; keeper_name = submitter
       ; base_path
       ; submitted_by = submitter
+      ; request_context = None
       ; status = Async.Done { ok = true; body = "{}"; data = None }
       ; submitted_at = 1.0
       ; completed_at = Some 2.0

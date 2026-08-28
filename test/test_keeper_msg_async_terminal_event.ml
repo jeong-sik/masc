@@ -383,6 +383,7 @@ let test_same_entry_record_is_sensitive_to_every_field () =
     ; keeper_name = "kp"
     ; base_path = "/tmp/base"
     ; submitted_by = "operator"
+    ; request_context = None
     ; status = A.Queued
     ; submitted_at = 100.0
     ; completed_at = None
@@ -394,6 +395,9 @@ let test_same_entry_record_is_sensitive_to_every_field () =
     ; "keeper_name", { base with keeper_name = "other" }
     ; "base_path", { base with base_path = "/tmp/other" }
     ; "submitted_by", { base with submitted_by = "someone" }
+    ; ( "request_context"
+      , { base with request_context = Some [ "kind", `String "test" ] }
+      )
     ; "status", { base with status = A.Running }
     ; "submitted_at", { base with submitted_at = 101.0 }
     ; "completed_at", { base with completed_at = Some 200.0 }

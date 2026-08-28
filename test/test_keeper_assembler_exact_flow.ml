@@ -2,6 +2,8 @@ open Alcotest
 open Masc
 
 module Descriptor = Keeper_tool_descriptor
+module Async = Keeper_msg_async
+module Catalog = Keeper_tool_composition_catalog
 module Exact = Exact_lane_run_registry
 module Fixture = Compaction_exact_output_fixture
 module Flow = Keeper_assembler_exact_flow
@@ -557,6 +559,37 @@ let find_agent_core_tool tools name =
   | None -> failf "Agent-Core bundle omitted %s" name
 ;;
 
+let await_async_done ~clock ~config ~caller request_id =
+  (* The worker is a single local read Tool in this scenario. Five seconds is
+     a test-runner deadlock guard, not product scheduling policy; measured
+     completion is below one millisecond after the broker accepts it. *)
+  Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+    let rec loop () =
+      match Async.poll ~base_path:config.Workspace.base_path ~caller request_id with
+      | Async.Found
+          { status = Async.Done { ok = true; data = Some data; _ }; _ } ->
+        data
+      | Async.Found
+          { status = Async.Done { ok = true; data = None; _ }; _ } ->
+        fail "async proposal completed without typed data"
+      | Async.Found
+          { status = Async.Done { ok = false; body; _ }; _ } ->
+        failf "async proposal failed: %s" body
+      | Async.Found
+          { status = (Async.Queued | Async.Running | Async.Cancelling _); _ } ->
+        Eio.Fiber.yield ();
+        loop ()
+      | Async.Found { status = Async.Lost { reason }; _ }
+      | Async.Found { status = Async.Cancelled { reason; _ }; _ }
+      | Async.Found { status = Async.Persistence_failed { reason; _ }; _ }
+      | Async.Unreadable reason ->
+        failf "async proposal lost durable truth: %s" reason
+      | Async.Absent -> fail "async proposal request disappeared"
+      | Async.Rejected _ -> fail "async proposal request ownership was rejected"
+    in
+    loop ())
+;;
+
 let test_model_visible_tool_produces_proposal_without_tool_execution () =
   with_eio_base "assembler-model-visible-tool"
   @@ fun ~sw ~net ~clock ~base_path:_ ~config ~request:_ ->
@@ -1091,62 +1124,385 @@ let test_model_visible_tool_produces_proposal_without_tool_execution () =
             (Some "deferred")
             (Safe_ops.json_string_opt "disposition" summary)
         | _ -> assert false);
-       let async_proposal =
+       check int "proposal execution does not recall the Assembler" 1
+         (Fixture.post_count accepted))
+;;
+
+let test_model_visible_async_proposal_uses_durable_broker () =
+  with_eio_base "assembler-model-visible-async"
+  @@ fun ~sw ~net ~clock ~base_path:_ ~config ~request:_ ->
+  let accepted =
+    Fixture.start_server
+      ~sw
+      ~net
+      ~clock
+      (Fixture.Reply (Fixture.openai_response plan_output))
+  in
+  publish_lane
+    [ { Fixture.id = "assembler-async-accepted"; base_url = accepted.base_url } ];
+  let capability_surface = surface () in
+  let time_reference = reference capability_surface "keeper_time_now" in
+  let web_fetch_reference = reference capability_surface "WebFetch" in
+  let meta = assembler_meta "assembler-async-tool-test" in
+  let publication_recovery =
+    { Keeper_publication_recovery_availability.provider =
+        Keeper_publication_recovery_availability.non_runtime_provider
+    ; keeper_name = meta.name
+    }
+  in
+  let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+  (match
+     Keeper_gate_mode.set
+       config
+       ~actor:"assembler-async-test"
+       Keeper_gate_mode.Always_allow
+   with
+   | Ok _ -> ()
+   | Error detail -> failf "failed to allow async WebFetch: %s" detail);
+  Keeper_tool_call_log.set_turn_context
+    ~cell:turn_ctx_cell
+    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    ~session_id:"assembler-async-session"
+    ~turn:1
+    ();
+  let bundle =
+    Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot:
+        (Keeper_context_runtime.create
+           ~eio:false
+           ~system_prompt:"assembler async Tool test")
+      ~clock
+      ~turn_ctx_cell
+      ~capability_surface
+      ()
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      bundle.cleanup ();
+      Keeper_tool_call_log.reset_for_testing ())
+    (fun () ->
+       let invoke tool tool_use_id input =
+         let invocation =
+           Agent_core.Tool_contract.Invocation.create
+             ~tool_use_id
+             ~turn:1
+             ~schedule:
+               { Agent_core.Tool_contract.planned_index = 0
+               ; batch_index = 0
+               ; batch_size = 1
+               ; execution_mode = Agent_core.Tool_contract.Serial
+               }
+             ~completion:(Agent_core.Tool.completion tool)
+         in
+         match Agent_core.Tool.execute ~invocation tool input with
+         | Ok output -> Yojson.Safe.from_string output.content
+         | Error error -> failf "%s failed: %s" tool.schema.name error.message
+       in
+       let assemble_tool = find_agent_core_tool bundle.tools "keeper_assemble_plan" in
+       let assembled =
+         invoke
+           assemble_tool
+           "assembler-async-propose"
+           (`Assoc
+             [ "objective", `String "Read the current time asynchronously"
+             ; "execution", `String "async"
+             ; ( "ordinary_tool_references"
+               , `List
+                   [ Surface.ordinary_tool_reference_to_yojson time_reference ] )
+             ])
+       in
+       let proposal_id =
+         match field "proposal_id" assembled with
+         | Some (`String value) -> value
+         | _ -> fail "async Assembler result omitted proposal_id"
+       in
+       let execution_request =
+         match field "execution_request" assembled with
+         | Some (`Assoc fields) ->
+           `Assoc
+             (List.map
+                (fun (name, value) ->
+                   if String.equal name "assembler_run_id"
+                   then name, `String "assembler-run-not-retained"
+                   else name, value)
+                fields)
+         | None -> fail "async Assembler result omitted execution_request"
+         | Some _ -> fail "async execution_request was not an object"
+       in
+       let proposal_tool =
+         find_agent_core_tool bundle.tools "keeper_proposal_execute"
+       in
+       Keeper_tool_call_log.reset_for_testing ();
+       Keeper_tool_call_log.init ~base_path:config.base_path ();
+       let submitted =
+         invoke proposal_tool "assembler-async-execute" execution_request
+       in
+       check (option string) "async submission retains proposal identity"
+         (Some proposal_id)
+         (match field "proposal_id" submitted with
+          | Some (`String value) -> Some value
+          | _ -> None);
+       check (option string) "async submission names durable execution mode"
+         (Some "async")
+         (match field "execution" submitted with
+          | Some (`String value) -> Some value
+          | _ -> None);
+       check (option string) "retention eviction does not hard-gate async work"
+         (Some "not_retained")
+         (match field "proposal_provenance_status" submitted with
+          | Some (`String value) -> Some value
+          | _ -> None);
+       let request_id =
+         match field "request_id" submitted with
+         | Some (`String value) -> value
+         | _ -> fail "async submission omitted request_id"
+       in
+       let terminal =
+         await_async_done ~clock ~config ~caller:meta.name request_id
+       in
+       check (option string) "durable terminal result retains proposal identity"
+         (Some proposal_id)
+         (match field "proposal_id" terminal with
+          | Some (`String value) -> Some value
+          | _ -> None);
+       check (option string) "durable terminal retains Assembler run identity"
+         (Some "assembler-run-not-retained")
+         (match field "assembler_run_id" terminal with
+          | Some (`String value) -> Some value
+          | _ -> None);
+       check (option string) "durable terminal retains provenance status"
+         (Some "not_retained")
+         (match field "proposal_provenance_status" terminal with
+          | Some (`String value) -> Some value
+          | _ -> None);
+       (match field "actions" terminal with
+        | Some (`List [ `Assoc action ]) ->
+          check (option string) "async worker executed the stored Tool"
+            (Some "keeper_time_now")
+            (match List.assoc_opt "tool_name" action with
+             | Some (`String value) -> Some value
+             | _ -> None)
+        | _ -> fail "async terminal result omitted its typed action");
+       let rows =
+         Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:4 ()
+       in
+       check int "async execution records one summary and one node" 2
+         (List.length rows);
+       List.iter
+         (fun row ->
+            check (option string) "async telemetry preserves evicted producer id"
+              (Some "assembler-run-not-retained")
+              (Safe_ops.json_string_opt "assembler_run_id" row);
+            check (option string) "async telemetry joins the proposal"
+              (Some proposal_id)
+              (Safe_ops.json_string_opt "proposal_id" row);
+            check (option string) "async telemetry records unavailable provenance"
+              (Some "not_retained")
+              (Safe_ops.json_string_opt "proposal_provenance_status" row);
+            check (option string) "async telemetry joins the parent Tool call"
+              (Some "assembler-async-execute")
+              (Safe_ops.json_string_opt "parent_tool_use_id" row))
+         rows;
+       check int "async telemetry shares one composition run" 1
+         (rows
+          |> List.filter_map
+               (Safe_ops.json_string_opt "composition_run_id")
+          |> List.sort_uniq String.compare
+          |> List.length);
+       let status_tool =
+         find_agent_core_tool bundle.tools Catalog.status_tool_name
+       in
+       let status =
+         invoke
+           status_tool
+           "assembler-async-status"
+           (`Assoc [ "request_id", `String request_id ])
+       in
+       check (option string) "model-visible status reads durable completion"
+         (Some "done")
+         (match field "status" status with
+          | Some (`String value) -> Some value
+          | _ -> None);
+       (match field "request_context" status with
+        | Some context ->
+          check (option string) "status retains accepted Assembler run"
+            (Some "assembler-run-not-retained")
+            (match field "assembler_run_id" context with
+             | Some (`String value) -> Some value
+             | _ -> None);
+          check (option string) "status retains accepted proposal"
+            (Some proposal_id)
+            (match field "proposal_id" context with
+             | Some (`String value) -> Some value
+             | _ -> None);
+          check (option string) "status retains accepted provenance"
+            (Some "not_retained")
+            (match field "proposal_provenance_status" context with
+             | Some (`String value) -> Some value
+             | _ -> None)
+        | None -> fail "model-visible status omitted request_context");
+       let fetch_started, resolve_fetch_started = Eio.Promise.create () in
+       let release_fetch, resolve_release_fetch = Eio.Promise.create () in
+       Tool_misc.with_web_fetch_http_get_for_test
+         (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
+            ignore (Eio.Promise.try_resolve resolve_fetch_started ());
+            Eio.Promise.await release_fetch;
+            Ok (Some 200, "cancelled fixture response"))
+       @@ fun () ->
+       let cancelled_proposal =
          match
            Proposal.create
              ~descriptors:(Surface.descriptors capability_surface)
-             ~objective:"Read the current time asynchronously"
+             ~objective:"Fetch one URL until the operator cancels it"
              ~execution:Proposal.Async
              ~capability_surface_sha256:(Surface.digest capability_surface)
-             ~ordinary_tool_references:[ time_reference ]
-             ~plan_json:Yojson.Safe.Util.(plan_output |> member "plan")
+             ~ordinary_tool_references:[ web_fetch_reference ]
+             ~plan_json:
+               (`Assoc
+                 [ ( "nodes"
+                   , `List
+                       [ `Assoc
+                           [ "id", `String "blocked-fetch"
+                           ; "tool", `String "WebFetch"
+                           ; ( "input"
+                             , `Assoc
+                                 [ "kind", `String "literal"
+                                 ; ( "value"
+                                   , `Assoc
+                                       [ ( "url"
+                                         , `String
+                                             "https://example.com/blocked" )
+                                       ] )
+                                 ] )
+                           ] ] )
+                 ])
          with
          | Ok proposal -> proposal
          | Error error ->
-           failf "async proposal fixture rejected: %s"
+           failf "cancel proposal fixture rejected: %s"
              (Proposal.error_to_yojson error |> Yojson.Safe.to_string)
        in
-       (match Store.save config async_proposal with
+       (match Store.save config cancelled_proposal with
         | Ok Store.Stored | Ok Store.Already_present -> ()
         | Error error ->
-          failf "async proposal fixture did not persist: %s"
+          failf "cancel proposal fixture did not persist: %s"
             (Store.error_to_yojson error |> Yojson.Safe.to_string));
-       let async_request =
-         `Assoc
-           [ "assembler_run_id", `String "assembler-run-not-retained"
-           ; ( "proposal_id"
-             , `String
-                 (Proposal.id async_proposal
-                  |> Proposal.Proposal_id.to_string) )
-           ; "approval_tools", `List [ `String "keeper_time_now" ]
-           ]
+       let cancelled_proposal_id =
+         Proposal.id cancelled_proposal |> Proposal.Proposal_id.to_string
        in
-       (match
-          Agent_core.Tool.execute
-            ~invocation:(invocation "assembler-proposal-async")
-            proposal_tool
-            async_request
-        with
-        | Ok _ -> fail "unsupported async proposal reported success"
-        | Error error ->
-          let payload =
-            Yojson.Safe.from_string error.message
-            |> Yojson.Safe.Util.member "masc.payload"
-          in
-          check (option string) "async refusal is typed"
-            (Some "not_supported")
-            (match field "error" payload with
+       let cancelled_submission =
+         invoke
+           proposal_tool
+           "assembler-async-cancel-submit"
+           (`Assoc
+             [ "assembler_run_id", `String "assembler-cancel-not-retained"
+             ; "proposal_id", `String cancelled_proposal_id
+             ; "approval_tools", `List [ `String "WebFetch" ]
+             ])
+       in
+       let cancelled_request_id =
+         match field "request_id" cancelled_submission with
+         | Some (`String value) -> value
+         | _ -> fail "cancel proposal submission omitted request_id"
+       in
+       Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+         Eio.Promise.await fetch_started);
+       let cancel_tool =
+         find_agent_core_tool bundle.tools Catalog.cancel_tool_name
+       in
+       let cancellation =
+         invoke
+           cancel_tool
+           "assembler-async-cancel"
+           (`Assoc [ "request_id", `String cancelled_request_id ])
+       in
+       check (option string) "cancel Tool accepts the exact request"
+         (Some "cancelling")
+         (match field "status" cancellation with
+          | Some (`String value) -> Some value
+          | _ -> None);
+       let cancelled_entry =
+         Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+           let rec loop () =
+             match
+               Async.poll
+                 ~base_path:config.base_path
+                 ~caller:meta.name
+                 cancelled_request_id
+             with
+             | Async.Found
+                 ({ status = Async.Cancelled _; _ } as entry) -> entry
+             | Async.Found
+                 { status = (Async.Queued | Async.Running | Async.Cancelling _); _ }
+               ->
+               Eio.Fiber.yield ();
+               loop ()
+             | Async.Found { status; _ } ->
+               failf "cancelled proposal reached %s"
+                 (Async.status_to_string status)
+             | Async.Absent -> fail "cancelled proposal disappeared"
+             | Async.Unreadable detail ->
+               failf "cancelled proposal became unreadable: %s" detail
+             | Async.Rejected _ -> fail "cancelled proposal ownership rejected"
+           in
+           loop ())
+       in
+       Eio.Promise.resolve resolve_release_fetch ();
+       (match cancelled_entry.Async.request_context with
+        | Some fields ->
+          let context = `Assoc fields in
+          check (option string) "cancelled terminal retains Assembler run"
+            (Some "assembler-cancel-not-retained")
+            (match field "assembler_run_id" context with
              | Some (`String value) -> Some value
              | _ -> None);
-          check (option string) "evicted producer remains non-blocking provenance"
-            (Some "not_retained")
-            (match field "proposal_provenance_status" payload with
+          check (option string) "cancelled terminal retains proposal"
+            (Some cancelled_proposal_id)
+            (match field "proposal_id" context with
              | Some (`String value) -> Some value
-             | _ -> None));
-       check int "non-executed async proposal emitted no additional rows" 7
-         (Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:8 ()
-          |> List.length);
-       check int "proposal execution does not recall the Assembler" 1
+             | _ -> None);
+          check (option string) "cancelled terminal retains provenance"
+            (Some "not_retained")
+            (match field "proposal_provenance_status" context with
+             | Some (`String value) -> Some value
+             | _ -> None)
+        | None -> fail "cancelled terminal omitted request context");
+       Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+         let rec await_switch_release () =
+           if Async.For_testing.active_switch_count () = 0
+           then ()
+           else (
+             Eio.Fiber.yield ();
+             await_switch_release ())
+         in
+         await_switch_release ());
+       check int "cancelled worker releases its request switch" 0
+         (Async.For_testing.active_switch_count ());
+       let cancelled_status =
+         invoke
+           status_tool
+           "assembler-async-cancel-status"
+           (`Assoc [ "request_id", `String cancelled_request_id ])
+       in
+       check (option string) "status reports durable cancellation"
+         (Some "cancelled")
+         (match field "status" cancelled_status with
+          | Some (`String value) -> Some value
+          | _ -> None);
+       let cancellation_summaries =
+         Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:8 ()
+         |> List.filter (fun row ->
+           Safe_ops.json_string_opt "record_kind" row
+           = Some "composition_run"
+           && Safe_ops.json_string_opt "proposal_id" row
+              = Some cancelled_proposal_id)
+       in
+       check int "cancelled proposal records one summary" 1
+         (List.length cancellation_summaries);
+       check int "async execution does not recall the Assembler" 1
          (Fixture.post_count accepted))
 ;;
 
@@ -1239,6 +1595,10 @@ let () =
             "model-visible Tool stores a proposal without Tool execution"
             `Quick
             test_model_visible_tool_produces_proposal_without_tool_execution
+        ; test_case
+            "model-visible async proposal uses the durable broker"
+            `Quick
+            test_model_visible_async_proposal_uses_durable_broker
         ; test_case
             "compatibility path requires the frozen surface"
             `Quick

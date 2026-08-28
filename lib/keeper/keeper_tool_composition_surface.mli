@@ -1,6 +1,6 @@
 (** Materialize validated catalog entries as first-class Agent-Core tools,
-    plus the always-present [keeper_plan_execute] tool that runs one
-    model-defined inline plan through the same executor. *)
+    plus the always-present plan/proposal execution and durable async control
+    tools. *)
 
 (** Model-visible name of the model-defined plan tool. Registered even when no
     composition catalog exists. *)

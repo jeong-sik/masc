@@ -7926,10 +7926,15 @@ let main () =
   (* Reads the palette rather than taking a colour, so every caller sends
      whatever is in force at the moment it asks -- picking a scheme, dropping
      one, and the first paint all go through the same answer. *)
-  let sync_theme_background () =
-    Frame_presenter.sync_background ~write:(output_string stdout)
+  let sync_theme_page () =
+    Frame_presenter.sync_page ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout)
-      (Option.map Masc_tui_terminal_palette.background
+      (Option.map
+         (fun palette ->
+           { Frame_presenter.foreground =
+               Masc_tui_terminal_palette.foreground palette
+           ; background = Masc_tui_terminal_palette.background palette
+           })
          (Masc_tui_terminal_palette.current ()))
   in
   (* Live preview, the way a theme picker is expected to work: moving the
@@ -7949,7 +7954,7 @@ let main () =
       if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
       then begin
         state.theme_choice <- Some entry.Masc_tui_theme_choice.name;
-        sync_theme_background ()
+        sync_theme_page ()
       end
   in
   (* Esc, and leaving the pane. Restoring goes through the same two calls a
@@ -7964,7 +7969,7 @@ let main () =
        | Some name -> ignore (Masc_tui_theme_choice.apply name : bool)
        | None -> Masc_tui_theme_choice.follow_terminal ());
       state.theme_choice <- previous;
-      sync_theme_background ()
+      sync_theme_page ()
   in
   (* Shadowed on purpose: every surface change in this loop goes through here,
      and a preview must not survive one. Wrapping is what keeps the three call
@@ -7980,7 +7985,7 @@ let main () =
   (* A scheme named in runtime.toml was applied at boot, before this existed.
      Sending it here is what makes a saved choice survive a restart with its
      background rather than only its ink. *)
-  sync_theme_background ();
+  sync_theme_page ();
   output_string stdout mouse_tracking_enable;
   output_string stdout bracketed_paste_enable;
   (* Only terminals with an extended profile receive this opt-in. Apple
@@ -9788,7 +9793,7 @@ and is loaded on demand through keeper_skill.
                    scheme picks dark text because it expects a light page, so
                    leaving the terminal's own background is what made "light
                    theme is still black". *)
-                sync_theme_background ()
+                sync_theme_page ()
               end)
        | Some "c" when state.view = Tools -> handle_skill_create ~composition:false ()
        | Some "C" when state.view = Tools -> handle_skill_create ~composition:true ()
@@ -11936,7 +11941,7 @@ and is loaded on demand through keeper_skill.
            state.theme_choice <- None;
            state.theme_before_preview <- None;
            (* Withdrawing the choice withdraws the background with it. *)
-           sync_theme_background ()
+           sync_theme_page ()
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_librarian_input_read ()

@@ -305,6 +305,9 @@ module Glyph : sig
 end
 
 val set_lift_enabled : bool -> unit
+val lift_is_enabled : unit -> bool
+(** The current lift stance, for the surface that has to *say* it (the theme
+    screen's state column reads this; #31218 called it before it existed). *)
 (** Whether a colour the scheme leaves under the readable floor is raised
     until it clears. On by default, which is what masc drew before the setting
     existed.

@@ -1600,6 +1600,16 @@ let add_routes ~sw ~clock router =
                     reference)
                  reqd))
          request reqd)
+  |> Http.Router.get "/api/v1/async-requests" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Response.json_value
+             ~compress:true
+             ~request:req
+             (Server_async_request_observability.project
+                ~base_path:(Mcp_server.workspace_config state).base_path)
+             reqd)
+         request reqd)
   |> Http.Router.post "/api/v1/skills/editor/create" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->

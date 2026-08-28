@@ -144,11 +144,7 @@ let run_command_with_status ?turn_sandbox_factory
        anywhere else is the silent-substitution failure of #31178. *)
     | Backend_unimplemented profile ->
       Error
-        (Printf.sprintf
-           "sandbox_profile=%s has no runtime in this build; refusing to run \
-            %s elsewhere"
-           (Keeper_types_profile_sandbox.sandbox_profile_to_string profile)
-           head_program)
+        (Keeper_types_profile_sandbox.backend_unimplemented_message profile)
     | No_factory | Local_profile ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
       | Error err ->

@@ -117,3 +117,76 @@ let image_present ~image ~timeout_sec =
           `container image` before starting a microvm keeper."
          image)
 ;;
+
+(* ── Turn-container argv ─────────────────────────────────────────────
+
+   The turn model mirrors the Docker lane: one detached guest per turn
+   holding [tail -f /dev/null], commands delivered by [exec], the
+   container gone on [stop] because it was started with [--rm]. Every
+   flag below was accepted by a live container 1.3.0 run on 2026-08-28;
+   [exec] propagated exit codes (observed rc=7) and stdin
+   ([bash -l -s] echoed piped input).
+
+   Deliberately absent against the Docker turn argv, stated so a reader
+   does not infer parity: seccomp / --security-opt / --pids-limit
+   (container rejects them; the guest kernel is the boundary), the
+   secret and GitHub identity projections, the config and
+   workspace-state mounts, and the /etc/passwd identity mounts
+   ([--user uid:gid] is passed directly). A microvm turn sees its
+   playground and nothing else. *)
+
+let turn_start_argv
+      ~container_name
+      ~label_args
+      ~uid
+      ~gid
+      ~memory
+      ~host_root
+      ~container_root
+      ~network_args
+      ~image
+  =
+  command_argv ()
+  @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
+  @ label_args
+  @ [ "--user"; Printf.sprintf "%d:%d" uid gid ]
+  @ [ "--cap-drop"; "ALL"; "--read-only" ]
+  @ [ "--memory"; memory ]
+  @ [ "--volume"; host_root ^ ":" ^ container_root ]
+  @ [ "--workdir"; container_root ]
+  @ network_args
+  @ [ image; "tail"; "-f"; "/dev/null" ]
+;;
+
+(* [~command_argv] shadows the CLI-prefix function of the same name, so
+   the prefix is captured under another binding first. *)
+let cli_prefix = command_argv
+
+let exec_argv ~container_name ~uid ~gid ~container_cwd ~stdin ~command_argv =
+  cli_prefix ()
+  @ [ "exec" ]
+  @ (if stdin then [ "-i" ] else [])
+  @ [ "--user"; Printf.sprintf "%d:%d" uid gid; "-w"; container_cwd ]
+  @ (container_name :: command_argv)
+;;
+
+let stop_argv ~container_name = command_argv () @ [ "stop"; container_name ]
+
+(** [container inspect] answers JSON; state lives at [.[0].status.state]
+    ("running" observed live). A missing container exits 1, which the
+    caller maps to absent before parsing. *)
+let running_of_inspect_json raw =
+  match Yojson.Safe.from_string raw with
+  | `List (`Assoc fields :: _) ->
+    (match List.assoc_opt "status" fields with
+     | Some (`Assoc status) ->
+       (match List.assoc_opt "state" status with
+        | Some (`String state) -> Ok (String.equal state "running")
+        | Some _ | None -> Error "container inspect: status.state missing")
+     | Some _ | None -> Error "container inspect: status missing")
+  | _ -> Error "container inspect: unparseable JSON"
+  | exception Yojson.Json_error _ ->
+    Error "container inspect: unparseable JSON"
+;;
+
+let inspect_argv ~container_name = command_argv () @ [ "inspect"; container_name ]

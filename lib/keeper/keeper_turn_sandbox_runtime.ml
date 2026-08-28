@@ -344,10 +344,42 @@ let run_argv_pipeline_with_status_split
       stages)
 ;;
 
-let inspect_container_exists ?timeout_sec container_name =
+let is_microvm (t : t) =
+  t.meta.sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
+;;
+
+(* Shared exec prefix: [<cli> exec [-i] --user u:g -w cwd [env...]].
+   The microvm lane runs Apple's [container] and omits the sandbox env
+   args: they name config and workspace-state mounts the guest does not
+   have, and an env pointing at absent paths is worse than none. *)
+let exec_prefix (t : t) ~container_cwd ~stdin =
+  let cli =
+    if is_microvm t
+    then Keeper_sandbox_microvm.command_argv ()
+    else Keeper_sandbox_runtime.docker_command_argv ()
+  in
+  let env_args =
+    if is_microvm t
+    then []
+    else
+      Keeper_sandbox_runtime.docker_sandbox_env_args
+        ~base_path:t.config.base_path
+        ~container_root:t.container_root
+  in
+  cli
+  @ [ "exec" ]
+  @ (if stdin then [ "-i" ] else [])
+  @ [ "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
+  @ env_args
+;;
+
+let inspect_container_exists ?timeout_sec ~microvm container_name =
   let inspect_argv =
-    Keeper_sandbox_runtime.docker_command_argv ()
-    @ [ "inspect"; "--format"; "{{.Id}}"; container_name ]
+    if microvm
+    then Keeper_sandbox_microvm.inspect_argv ~container_name
+    else
+      Keeper_sandbox_runtime.docker_command_argv ()
+      @ [ "inspect"; "--format"; "{{.Id}}"; container_name ]
   in
   let inspect_st, inspect_out =
     run_argv_with_status ?timeout_sec inspect_argv
@@ -357,10 +389,30 @@ let inspect_container_exists ?timeout_sec container_name =
   | _ -> Error inspect_out
 ;;
 
-let inspect_container_running ?timeout_sec container_name =
+(* [container] has no [--format] template; state comes back as JSON and a
+   missing container as a non-zero exit, which maps to absent. *)
+let probe_microvm_container_state ?timeout_sec container_name =
+  let st, out =
+    run_argv_with_status
+      ?timeout_sec
+      (Keeper_sandbox_microvm.inspect_argv ~container_name)
+  in
+  match st with
+  | Unix.WEXITED 0 ->
+    (match Keeper_sandbox_microvm.running_of_inspect_json out with
+     | Ok true -> Ok Keeper_sandbox_runtime.Docker_container_running
+     | Ok false -> Ok Keeper_sandbox_runtime.Docker_container_stopped
+     | Error _ as err -> err)
+  | _ -> Ok Keeper_sandbox_runtime.Docker_container_absent
+;;
+
+let inspect_container_running ?timeout_sec ~microvm container_name =
   match
-    Keeper_sandbox_runtime.probe_container_state_optional
-      ~container_name ?timeout_sec ()
+    (if microvm
+     then probe_microvm_container_state ?timeout_sec container_name
+     else
+       Keeper_sandbox_runtime.probe_container_state_optional
+         ~container_name ?timeout_sec ())
   with
   | Ok Keeper_sandbox_runtime.Docker_container_running -> Ok ()
   | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
@@ -380,10 +432,13 @@ let failed_exec_recovery ?timeout_sec (t : t) =
   | Not_started -> Restart_failed_exec
   | Running { container_name } ->
     (match
-       Keeper_sandbox_runtime.probe_container_state_optional
-         ~container_name
-         ?timeout_sec
-         ()
+       (if is_microvm t
+        then probe_microvm_container_state ?timeout_sec container_name
+        else
+          Keeper_sandbox_runtime.probe_container_state_optional
+            ~container_name
+            ?timeout_sec
+            ())
      with
      | Ok Keeper_sandbox_runtime.Docker_container_running -> Preserve_failed_exec
      | Ok Keeper_sandbox_runtime.Docker_container_stopped
@@ -399,12 +454,90 @@ let failed_exec_state_probe_error ~status ~output detail =
     detail
 ;;
 
+let resolve_image (t : t) =
+  match t.meta.sandbox_image with
+  | Some img when String.trim img <> "" -> img
+  | _ -> Env_config_sandbox.Runtime.docker_image ()
+;;
+
+(* A microvm turn container mounts the playground and nothing else: no
+   secret projection, no GitHub identity, no config or workspace-state
+   mounts, no seccomp/pids/security-opt (container rejects those; the
+   guest kernel is the boundary). Keepers needing the projections stay
+   on Docker until the guest grows them. Stale-container reaping is the
+   Docker sweep's; a leaked microvm guest is collected by hand until a
+   sweep lands ([container list --format json] carries the same labels). *)
+let start_microvm_container ?timeout_sec (t : t) =
+  let image = resolve_image t in
+  if String.trim image = ""
+  then Error "keeper sandbox docker image is not configured"
+  else (
+    let image_timeout =
+      match timeout_sec with
+      | Some sec -> sec
+      | None -> Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
+    in
+    match Keeper_sandbox_microvm.image_present ~image ~timeout_sec:image_timeout with
+    | Error _ as err -> err
+    | Ok () ->
+      let container_name = container_name_of t in
+      let dns =
+        match Env_config_sandbox.Runtime.microvm_dns () with
+        | "" -> None
+        | server -> Some server
+      in
+      let argv =
+        Keeper_sandbox_microvm.turn_start_argv
+          ~container_name
+          ~label_args:
+            (Keeper_sandbox_runtime.docker_label_args
+               ~base_path:t.config.base_path
+               ~keeper_name:t.meta.name
+               ~container_kind:Keeper_sandbox_runtime.turn_container_kind
+               ~network_label:
+                 (Keeper_types_profile_sandbox.network_mode_to_string
+                    t.network_mode)
+               ~turn_id:t.turn_id
+               ())
+          ~uid:t.uid
+          ~gid:t.gid
+          ~memory:(Env_config_sandbox.Hardening.memory ())
+          ~host_root:t.host_root
+          ~container_root:t.container_root
+          ~network_args:(Keeper_sandbox_microvm.network_args ~dns t.network_mode)
+          ~image
+      in
+      let st, out = run_argv_with_status ?timeout_sec argv in
+      match st with
+      | Unix.WEXITED 0 ->
+        (match inspect_container_exists ?timeout_sec ~microvm:true container_name with
+         | Ok () ->
+           set_state t (Running { container_name });
+           Ok container_name
+         | Error inspect_out ->
+           let (_ : Unix.process_status * string) =
+             run_argv_with_status
+               ?timeout_sec
+               (Keeper_sandbox_microvm.stop_argv ~container_name)
+           in
+           Error
+             (Printf.sprintf
+                "microvm_start_failed: container ran but inspect cannot see \
+                 %s: %s"
+                container_name
+                inspect_out))
+      | _ ->
+        Error
+          (Printf.sprintf
+             "microvm_start_failed: %s"
+             (Keeper_sandbox_runtime.docker_failure_output_for_log out)))
+;;
+
 let start_container ?timeout_sec (t : t) =
-  let image =
-    match t.meta.sandbox_image with
-    | Some img when String.trim img <> "" -> img
-    | _ -> Env_config_sandbox.Runtime.docker_image ()
-  in
+  if is_microvm t
+  then start_microvm_container ?timeout_sec t
+  else
+  let image = resolve_image t in
   if String.trim image = ""
   then Error "keeper sandbox docker image is not configured"
   else (
@@ -568,6 +701,7 @@ let start_container ?timeout_sec (t : t) =
             (match
                inspect_container_exists
                  ?timeout_sec
+                 ~microvm:false
                  container_name
              with
              | Ok () ->
@@ -629,7 +763,7 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
     then Ok container_name
     else (
       match
-        inspect_container_running ?timeout_sec container_name
+        inspect_container_running ?timeout_sec ~microvm:(is_microvm t) container_name
       with
       | Ok () -> Ok container_name
       | Error _ ->
@@ -745,14 +879,7 @@ let run_exec_with_status_split_once
         command_argv
     in
     let argv =
-      Keeper_sandbox_runtime.docker_command_argv ()
-      @ [ "exec"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
-      @ Keeper_sandbox_runtime.docker_sandbox_env_args
-          ~base_path:t.config.base_path
-          ~container_root:t.container_root
-      @ (match stdin_content with
-         | Some _ -> [ "-i" ]
-         | None -> [])
+      exec_prefix t ~container_cwd ~stdin:(Option.is_some stdin_content)
       @ (container_name :: command_argv)
     in
     let has_output_callback =
@@ -882,11 +1009,7 @@ let rewrite_command_argv (t : t) command_argv =
 ;;
 
 let docker_exec_pipeline_argv (t : t) ~container_name ~container_cwd command_argv =
-  Keeper_sandbox_runtime.docker_command_argv ()
-  @ [ "exec"; "-i"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
-  @ Keeper_sandbox_runtime.docker_sandbox_env_args
-      ~base_path:t.config.base_path
-      ~container_root:t.container_root
+  exec_prefix t ~container_cwd ~stdin:true
   @ (container_name :: rewrite_command_argv t command_argv)
 ;;
 
@@ -1007,18 +1130,7 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
   in
   let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
   let docker_exec_argv ~container_name =
-    Keeper_sandbox_runtime.docker_command_argv ()
-    @
-    [ "exec"
-    ; "-i"
-    ; "--user"
-    ; Printf.sprintf "%d:%d" t.uid t.gid
-    ; "-w"
-    ; container_cwd
-    ]
-    @ Keeper_sandbox_runtime.docker_sandbox_env_args
-        ~base_path:t.config.base_path
-        ~container_root:t.container_root
+    exec_prefix t ~container_cwd ~stdin:true
     @ [ container_name; "bash"; "-l"; "-s" ]
   in
   match ensure_started t ~timeout_sec with
@@ -1061,7 +1173,10 @@ let cleanup (t : t) =
       Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ()
     in
     let rm_argv =
-      Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ]
+      if is_microvm t
+      then Keeper_sandbox_microvm.stop_argv ~container_name
+      else
+        Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ]
     in
     let status_label st =
       match st with

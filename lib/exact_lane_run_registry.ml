@@ -50,8 +50,9 @@ type run =
   }
 
 (* [lane_key] is exhaustive for the wire spelling. [all_lanes] is separately
-   covered by replay and OCaml-to-Dashboard parity tests, because a list cannot
-   be made exhaustive by the type checker. Keep the two adjacent. *)
+   pinned to an independent constructor oracle in test_exact_lane_run_registry;
+   replay then exercises the exported enumeration. Keep these definitions
+   adjacent. *)
 let all_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Compaction; Assembler ]
 
 let lane_key = function

@@ -10,8 +10,9 @@ type lane =
 
 val all_lanes : lane list
 (** Every registry lane, for consumers that enumerate the wire vocabulary
-    (the standalone-lane projection and the TUI decoder). Replay and
-    language-boundary parity tests require every [lane_key] here. *)
+    (the standalone-lane projection and the TUI decoder). An independent
+    constructor oracle pins this enumeration; replay exercises every exported
+    lane, and language-boundary parity tests pin the wire keys. *)
 
 val lane_key : lane -> string
 (** The lane's wire identifier — the spelling the standalone-lane projection

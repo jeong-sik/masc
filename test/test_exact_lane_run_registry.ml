@@ -485,6 +485,22 @@ let test_exact_history_is_not_pruned_across_lanes () =
   remove_if_exists path
 ;;
 
+let test_all_lanes_matches_the_independent_constructor_oracle () =
+  let expected =
+    [ R.Librarian
+    ; R.Hitl_auto_judge
+    ; R.Board_attention
+    ; R.Compaction
+    ; R.Assembler
+    ]
+  in
+  check
+    (list string)
+    "all_lanes is the complete ordered constructor enumeration"
+    (List.map R.lane_key expected)
+    (List.map R.lane_key R.all_lanes)
+;;
+
 let test_failed_durable_registration_is_not_published_in_memory () =
   let directory = Filename.temp_dir "exact-lane-runs-dir-" "" in
   let registry = R.create ~path:directory () in
@@ -721,6 +737,8 @@ let () =
             test_store_version_pins_the_registration_shape
         ; test_case "exact history is not cross-lane pruned" `Quick
             test_exact_history_is_not_pruned_across_lanes
+        ; test_case "all lanes matches independent constructor oracle" `Quick
+            test_all_lanes_matches_the_independent_constructor_oracle
         ; test_case "retention is derived from the monitor page size" `Quick
             test_retention_is_derived_from_the_monitor_page_size
         ; test_case "completed runs are bounded" `Quick

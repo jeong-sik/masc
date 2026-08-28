@@ -234,12 +234,24 @@ let test_unavailable_status_is_omitted () =
        ())
 
 let test_ansi_korean_hint_truncates_by_cells () =
+  (* Ten cells fit the first item whole (with the ellipsis marking the cut);
+     the second drops entirely — measured in cells through the SGR bytes. *)
   let line =
     Masc_tui_footer.line ~dim:"\x1b[2m" ~reset:"\x1b[0m" ~max_cells:10
       ~port:8935 ~hints:"\x1b[1m확인\x1b[0m  Tab:다음" ()
   in
   check_at_most_cells "ANSI and Korean stay within ten cells" 10 line;
-  check_bool "cell-safe truncation is explicit" true (contains ~needle:"~" line)
+  check_bool "the first item survives whole" true (contains ~needle:"확인" line);
+  check_bool "the dropped tail is marked" true
+    (contains ~needle:"\xe2\x80\xa6" line);
+  (* When not even one item fits, the last resort is still the explicit
+     cell-safe cut — never an overflowing row. *)
+  let hopeless =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:4 ~port:8935
+      ~hints:"가나다라마바" ()
+  in
+  check_at_most_cells "four cells hold" 4 hopeless;
+  check_bool "and the cut is explicit" true (contains ~needle:"~" hopeless)
 
 (* A workspace disagreement used to replace the whole screen and swallow every
    key but r. The reads it protects are refused where they happen, so the
@@ -296,6 +308,26 @@ let test_answering_names_the_first_keeper () =
        ~status:[ Masc_tui_footer.Keeper_answering { names = []; lead_elapsed_s = Some 3 } ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ())
+
+let test_narrow_width_drops_whole_hint_items () =
+  (* The board-list footer at 60 cells: statuses all dropped, the hint list
+     still too wide. Items must drop from the back with an ellipsis — no
+     half-word cell cut. *)
+  let hints =
+    "j/k:move  right/Enter:read  s:sort  Y:copy link  v/V:vote  w:write  \
+     r:refresh  Tab:next"
+  in
+  let narrow =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:60 ~port:8935 ~hints ()
+  in
+  check_at_most_cells "60 cells" 60 narrow;
+  check_bool "leading items survive whole" true
+    (contains ~needle:"j/k:move" narrow
+     && contains ~needle:"right/Enter:read" narrow);
+  check_bool "the cut is marked, not implied" true
+    (contains ~needle:"\xe2\x80\xa6" narrow);
+  check_bool "no half item survives the cut" false
+    (contains ~needle:"Tab:nex" narrow && not (contains ~needle:"Tab:next" narrow))
 
 let test_answering_carries_the_lead_elapsed_time () =
   check_string "the lead keeper's runtime rides the badge"
@@ -453,6 +485,8 @@ let tests =
           test_answered_glow_reads_by_name
       ; Alcotest.test_case "answering carries the lead elapsed time" `Quick
           test_answering_carries_the_lead_elapsed_time
+      ; Alcotest.test_case "narrow width drops whole hint items" `Quick
+          test_narrow_width_drops_whole_hint_items
       ; Alcotest.test_case "worktree server warning survives narrow widths"
           `Quick test_worktree_server_warning_survives_narrow_widths
       ; Alcotest.test_case "build mismatch names the older side" `Quick

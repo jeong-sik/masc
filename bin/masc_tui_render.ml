@@ -2903,7 +2903,8 @@ let render_schedule_list (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf " MASC Schedules  %s  %s"
+  let header = Printf.sprintf "%s  %s  %s"
+    (screen_title " MASC Schedules")
     timestamp
     (connection_badge state) in
 
@@ -3632,8 +3633,8 @@ let render_keeper_list (state : state) =
       now.Unix.tm_sec
   in
   let heading =
-    Printf.sprintf " %sMASC Keepers (%d)%s" Ansi.bold (List.length state.keepers)
-      Ansi.reset
+    screen_title
+      (Printf.sprintf " MASC Keepers (%d)" (List.length state.keepers))
     ^ (match state.search with
        | Some query ->
            Printf.sprintf "  %s/%s%s\xe2\x96\x8c%s" Ansi.cyan
@@ -8940,12 +8941,15 @@ let render_acting (state : state) =
           (Terminal_text.single_line reason)
   in
   let header =
-    Printf.sprintf " MASC Acting (%d of %d held, %s)  %s  %s" shown held
-      (Acting.filter_label state.acting_filter) timestamp
+    Printf.sprintf "%s  %s  %s"
+      (screen_title
+         (Printf.sprintf " MASC Acting (%d of %d held, %s)" shown held
+            (Acting.filter_label state.acting_filter)))
+      timestamp
       (connection_badge state)
   in
   box_top buf cols;
-  box_line_styled buf cols ~style:Ansi.bold header;
+  box_line buf cols header;
   box_divider buf cols;
   let dropped =
     if state.acting_dropped = 0 then ""
@@ -10730,10 +10734,11 @@ let render_help (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   framed_top buf cols;
-  framed_line buf cols (screen_title " Help" ^ "  " ^ Ansi.dim
-    ^ "Esc or ? to close \xc2\xb7 h:hints "
-    ^ (if state.hints_visible then "off" else "on")
-    ^ " (persist: [tui] hints_visible in runtime.toml)" ^ Ansi.reset);
+  framed_line buf cols
+    (screen_title " Help" ^ "  " ^ Ansi.dim
+    ^ "hints "
+    ^ (if state.hints_visible then "on" else "off")
+    ^ " \xc2\xb7 persist: [tui] hints_visible in runtime.toml" ^ Ansi.reset);
   framed_divider buf cols;
   let lines = help_lines state in
   let rendered_rows = Masc_tui_help.sheet ~cols lines in
@@ -10747,7 +10752,8 @@ let render_help (state : state) =
   |> List.iter (fun line -> framed_line buf cols line);
   framed_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:scroll  h:hints  Esc:close");
   finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds
@@ -10800,8 +10806,7 @@ let render_answering (state : state) =
   framed_line
     buf
     cols
-    (screen_title " Answering" ^ "  " ^ Ansi.dim ^ "Esc or @ to close"
-   ^ Ansi.reset);
+    (screen_title " Answering");
   framed_divider buf cols;
   let lines = answering_lines state in
   let content_height =
@@ -10891,7 +10896,7 @@ let render_agenda (state : state) =
   framed_line
     buf
     cols
-    (screen_title " Agenda" ^ "  " ^ Ansi.dim ^ "Esc or ; to close" ^ Ansi.reset);
+    (screen_title " Agenda");
   framed_divider buf cols;
   let lines =
     Agenda.overlay

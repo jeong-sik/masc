@@ -2,15 +2,15 @@ type skill_kind =
   | Instruction
   | Composition of Keeper_tool_composition_catalog.entry
 
-type skill_exposure =
-  | Model_visible
-  | Operator_only
+type catalog_status =
+  | Effective
+  | Shadowed
 
 type valid_skill =
   { reference : Skill_reference.t
   ; description : string
   ; kind : skill_kind
-  ; exposure : skill_exposure
+  ; catalog_status : catalog_status
   ; conformance : Agent_core.Skill_document.conformance
   ; diagnostics : Keeper_skill_catalog.error list
   }
@@ -38,13 +38,13 @@ type t =
   ; items : skill_inventory_item list
   }
 
-let exposure_of_entry snapshot (entry : Skill_catalog_snapshot.entry) =
+let catalog_status_of_entry snapshot (entry : Skill_catalog_snapshot.entry) =
   if
     Skill_catalog_snapshot.effective_entries snapshot
     |> List.exists (fun (effective : Skill_catalog_snapshot.entry) ->
       Skill_reference.equal_identity effective.identity entry.identity)
-  then Model_visible
-  else Operator_only
+  then Effective
+  else Shadowed
 ;;
 
 let kind_of_surface = function
@@ -57,7 +57,7 @@ let valid_of_projection snapshot entry skill diagnostics =
     { reference = Skill_catalog_snapshot.entry_reference entry
     ; description = skill.Keeper_skill_catalog.description
     ; kind = kind_of_surface skill.surface
-    ; exposure = exposure_of_entry snapshot entry
+    ; catalog_status = catalog_status_of_entry snapshot entry
     ; conformance = skill.conformance
     ; diagnostics
     }

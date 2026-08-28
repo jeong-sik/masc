@@ -225,8 +225,12 @@ let test_argv_frame_stream_and_exit () =
      check string "request cwd" "/srv/masc/playground/keeper-a" request.cwd;
      check string "raw stdin" "stdin\x00bytes" stdin;
      check (list (pair string string))
-       "allowlisted typed env only; ambient GH_TOKEN absent"
-       [ "LANG", "C" ] request.env)
+       "injected identity env first, then allowlisted caller env; ambient GH_TOKEN absent"
+       [ "GH_CONFIG_DIR", "/srv/masc/playground/keeper-a/.config/gh"
+       ; "GIT_TERMINAL_PROMPT", "0"
+       ; "LANG", "C"
+       ]
+       request.env)
 ;;
 
 let test_nonallowlisted_env_fails_before_spawn () =

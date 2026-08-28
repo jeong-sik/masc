@@ -678,7 +678,20 @@ let process_task_once
               ~on_commit
               ~evaluator_runtime:(Some evaluator_runtime))))
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Cancel.Cancelled _ as exn ->
+    (* Mirror the four exact lanes: a cancelled review completes its
+       observation row before the cancellation continues, so it neither
+       stays Running in memory nor vanishes on the next replay (lane audit
+       W6 — a cancelled verifier run used to leave no trace at all). The
+       task itself stays awaiting_verification; the boot sweep re-reviews
+       it. *)
+    Eio.Cancel.protect (fun () ->
+      complete
+        ( ()
+        , Verification_run_registry.Review_cancelled
+            { detail = "review fiber cancelled: " ^ Printexc.to_string exn }
+        ));
+    raise exn
   | exn ->
     let detail = Printexc.to_string exn in
     complete

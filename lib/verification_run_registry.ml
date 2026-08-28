@@ -15,6 +15,7 @@ type outcome =
       }
   | Commit_failed of { detail : string }
   | Raised of { detail : string }
+  | Review_cancelled of { detail : string }
 
 type tool_observation =
   { tool_name : string
@@ -112,6 +113,7 @@ let outcome_label = function
   | Not_reviewed _ -> "not_reviewed"
   | Commit_failed _ -> "commit_failed"
   | Raised _ -> "raised"
+  | Review_cancelled _ -> "review_cancelled"
 ;;
 
 module Payload = struct
@@ -178,7 +180,9 @@ module Payload = struct
   let outcome_fields = function
     | Approved -> []
     | Rejected { reason } -> [ "reason", `String reason ]
-    | Commit_failed { detail } | Raised { detail } ->
+    | Commit_failed { detail }
+    | Raised { detail }
+    | Review_cancelled { detail } ->
       [ "detail", `String detail ]
     | Infrastructure_unavailable { stage; detail } ->
       [ "stage", `String (infrastructure_stage_to_string stage)
@@ -212,7 +216,7 @@ module Payload = struct
       | "approved" -> Ok []
       | "rejected" -> Ok [ "reason" ]
       | "infrastructure_unavailable" -> Ok [ "stage"; "detail" ]
-      | "commit_failed" | "raised" -> Ok [ "detail" ]
+      | "commit_failed" | "raised" | "review_cancelled" -> Ok [ "detail" ]
       | "not_reviewed" -> Ok [ "gate"; "detail" ]
       | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
     in
@@ -261,6 +265,9 @@ module Payload = struct
       | "raised" ->
         let* detail = Run_registry_core.Json.string_field "detail" fields in
         Ok (Raised { detail })
+      | "review_cancelled" ->
+        let* detail = Run_registry_core.Json.string_field "detail" fields in
+        Ok (Review_cancelled { detail })
       | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
     in
     Ok { outcome; evaluator_runtime; elapsed_s; tools }
@@ -372,7 +379,9 @@ let status_label = function
 let outcome_detail_fields = function
   | Approved -> []
   | Rejected { reason } -> [ "reason", `String reason ]
-  | Commit_failed { detail } | Raised { detail } ->
+  | Commit_failed { detail }
+  | Raised { detail }
+  | Review_cancelled { detail } ->
     [ "detail", `String detail ]
   | Infrastructure_unavailable { stage; detail } ->
     [ "stage", `String (Payload.infrastructure_stage_to_string stage)

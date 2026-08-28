@@ -66,6 +66,8 @@ let all_outcomes : (string * E.outcome) list =
     , E.Not_reviewed { gate = "evaluator_unavailable"; detail = "no runtime" } )
   ; "commit_failed", E.Commit_failed { detail = "verification id mismatch" }
   ; "raised", E.Raised { detail = "Failure(\"boom\")" }
+  ; ( "review_cancelled"
+    , E.Review_cancelled { detail = "review fiber cancelled: shutdown" } )
   ]
 ;;
 

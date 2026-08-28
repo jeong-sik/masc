@@ -123,6 +123,7 @@ let terminal_of_verification_outcome = function
   | Verification_run_registry.Not_reviewed _ -> Failed
   | Verification_run_registry.Approved
   | Verification_run_registry.Rejected _ -> Succeeded
+  | Verification_run_registry.Review_cancelled _ -> Cancelled
 ;;
 
 let observed_verification_run (run : Verification_run_registry.run) =
@@ -146,6 +147,7 @@ let terminal_of_goal_verification_outcome = function
   | Goal_verification_run_registry.Deferred _ -> Failed
   | Goal_verification_run_registry.Reviewed
   | Goal_verification_run_registry.Committed -> Succeeded
+  | Goal_verification_run_registry.Review_cancelled _ -> Cancelled
 ;;
 
 let observed_goal_verification_run (run : Goal_verification_run_registry.run) =

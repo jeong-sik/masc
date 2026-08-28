@@ -6,6 +6,7 @@ type outcome =
   | Deferred of
       { detail : string }
   | Raised of { detail : string }
+  | Review_cancelled of { detail : string }
 
 type run_status =
   | Running
@@ -41,6 +42,7 @@ let outcome_label = function
   | Committed -> "committed"
   | Deferred _ -> "deferred"
   | Raised _ -> "raised"
+  | Review_cancelled _ -> "review_cancelled"
 ;;
 
 module Payload = struct
@@ -96,6 +98,7 @@ module Payload = struct
       | Committed -> []
       | Deferred { detail } -> [ "detail", `String detail ]
       | Raised { detail } -> [ "detail", `String detail ]
+      | Review_cancelled { detail } -> [ "detail", `String detail ]
     in
     `Assoc
       ([ "outcome", `String (outcome_label completion.outcome)
@@ -159,6 +162,9 @@ module Payload = struct
       | "raised" ->
         let* detail = Run_registry_core.Json.string_field "detail" fields in
         Ok (Raised { detail })
+      | "review_cancelled" ->
+        let* detail = Run_registry_core.Json.string_field "detail" fields in
+        Ok (Review_cancelled { detail })
       | label -> Error (Printf.sprintf "unknown Goal review outcome %S" label)
     in
     Ok { outcome; evaluator_runtime; elapsed_s; tools }
@@ -241,6 +247,7 @@ let run_to_yojson run =
         | Committed -> []
         | Deferred { detail } -> [ "detail", `String detail ]
         | Raised { detail } -> [ "detail", `String detail ]
+        | Review_cancelled { detail } -> [ "detail", `String detail ]
       in
       [ "elapsed_s", `Float elapsed_s
       ; ( "tools"

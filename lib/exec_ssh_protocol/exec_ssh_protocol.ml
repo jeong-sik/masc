@@ -66,22 +66,32 @@ let json_of_request (r : request) : Yojson.Safe.t =
     ; "stdin_len", `Intlit (Int64.to_string r.stdin_len)
     ]
 
-let encode_request (r : request) ~stdin : string =
-  let json = Yojson.Safe.to_string (json_of_request r) in
-  let json_len = String.length json in
+let encode_request (r : request) ~stdin : (string, string) result =
   let stdin_bytes = String.length stdin in
-  let frame = Bytes.create (8 + json_len + stdin_bytes) in
-  (* 8-byte big-endian length: json_len + stdin_len *)
-  let rec put i v =
-    if i >= 0 then begin
-      Bytes.set frame i (Char.chr (Int64.to_int (Int64.logand v 0xffL)));
-      put (i - 1) (Int64.shift_right_logical v 8)
+  match classify_float r.timeout_sec with
+  | FP_nan | FP_infinite ->
+    transport_error "request timeout_sec is not finite (%F)" r.timeout_sec
+  | _ ->
+    if r.stdin_len <> Int64.of_int stdin_bytes then
+      transport_error
+        "request stdin_len (%Ld) does not match the stdin payload (%d bytes)"
+        r.stdin_len stdin_bytes
+    else begin
+      let json = Yojson.Safe.to_string (json_of_request r) in
+      let json_len = String.length json in
+      let frame = Bytes.create (8 + json_len + stdin_bytes) in
+      (* 8-byte big-endian length: json_len + stdin_len *)
+      let rec put i v =
+        if i >= 0 then begin
+          Bytes.set frame i (Char.chr (Int64.to_int (Int64.logand v 0xffL)));
+          put (i - 1) (Int64.shift_right_logical v 8)
+        end
+      in
+      put 7 (Int64.of_int (json_len + stdin_bytes));
+      Bytes.blit_string json 0 frame 8 json_len;
+      Bytes.blit_string stdin 0 frame (8 + json_len) stdin_bytes;
+      Ok (Bytes.unsafe_to_string frame)
     end
-  in
-  put 7 (Int64.of_int (json_len + stdin_bytes));
-  Bytes.blit_string json 0 frame 8 json_len;
-  Bytes.blit_string stdin 0 frame (8 + json_len) stdin_bytes;
-  Bytes.unsafe_to_string frame
 
 (* Byte index just past the end of the JSON value starting at [start],
    or [None] if the value is unterminated.  Tracks string state (with
@@ -212,10 +222,14 @@ let request_of_json (json : Yojson.Safe.t) : (request, string) result =
   let* cwd = b64_decode ~what:"cwd" cwd_json in
   let* timeout_sec = member ~what "timeout_sec" fields >>= expect_float ~what "timeout_sec" in
   let* stdin_len = member ~what "stdin_len" fields >>= expect_int64 ~what "stdin_len" in
-  if Int64.compare stdin_len 0L < 0 then
-    transport_error "request stdin_len is negative (%Ld)" stdin_len
-  else
-    Ok { v; argv; env; cwd; timeout_sec; stdin_len }
+  (match classify_float timeout_sec with
+   | FP_nan | FP_infinite ->
+     transport_error "request timeout_sec is not finite (%F)" timeout_sec
+   | _ ->
+     if Int64.compare stdin_len 0L < 0 then
+       transport_error "request stdin_len is negative (%Ld)" stdin_len
+     else
+       Ok { v; argv; env; cwd; timeout_sec; stdin_len })
 
 let decode_request (frame : string) : (request * string, string) result =
   let n = String.length frame in

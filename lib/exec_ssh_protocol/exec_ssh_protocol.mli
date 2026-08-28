@@ -72,15 +72,16 @@ type request =
     round-trip losslessly.  [stdin] is NOT base64: it travels as raw
     bytes after the JSON, delimited by the length prefix. *)
 
-val encode_request : request -> stdin:string -> string
+val encode_request : request -> stdin:string -> (string, string) result
 (** [encode_request req ~stdin] renders one complete frame
     (length prefix + JSON + raw stdin).
 
-    The caller MUST set [req.stdin_len] to the byte length of [stdin];
-    the value is emitted into the JSON verbatim.  An inconsistent pair
-    produces a frame that {!decode_request} rejects with
-    [remote_ssh_transport_error] — the inconsistency surfaces loudly at
-    the peer, never as a silently truncated read. *)
+    Fails with [remote_ssh_transport_error] when:
+    - [req.timeout_sec] is not finite ([nan]/[infinity] do not survive
+      JSON — caught here instead of raising);
+    - [req.stdin_len] differs from the byte length of [stdin] — the
+      caller inconsistency is rejected at the source rather than
+      producing a frame the peer would reject as a truncated read. *)
 
 val decode_request : string -> (request * string, string) result
 (** [decode_request frame] parses exactly one frame: [frame] must be
@@ -93,10 +94,16 @@ val decode_request : string -> (request * string, string) result
       fields, negative [stdin_len], or declared [stdin_len] not equal
       to the number of bytes actually present after the JSON →
       [remote_ssh_transport_error];
+    - non-finite [timeout_sec] on the wire (e.g. [1e999], [nan]) →
+      [remote_ssh_transport_error] — a timer must never receive
+      [infinity];
     - [v <> 1] → [remote_ssh_version_error].
 
     The [stdin_len] check happens BEFORE the payload is handed back, so
-    a truncated frame can never be mistaken for a valid request. *)
+    a truncated frame can never be mistaken for a valid request.
+
+    Duplicate JSON keys are first-wins ([List.assoc_opt]); benign, and
+    identical on both peers since both use this module. *)
 
 (** {1 Result trailer}
 
@@ -135,10 +142,22 @@ val parse_trailer : string -> (trailer, string) result
     Last-match semantics: the payload may itself have emitted
     [\x1e]-delimited junk earlier in the stream (stderr is not
     guaranteed UTF-8), so ONLY the final [\x1e ... \x1e] pair in [tail]
-    is considered.  Earlier pairs are never inspected: a valid-looking
-    earlier pair must not poison the real trailer, and — conversely —
-    if the real trailer was cut by tail truncation, the result is a
-    transport error rather than a misidentified payload artifact.
+    is considered; earlier pairs are never inspected, so an earlier
+    malformed pair cannot poison a well-formed final trailer.
+
+    Honest limit of that rule: a transport error is produced only when
+    the surviving final pair is absent or malformed.  If the real
+    trailer was cut by tail truncation and an EARLIER well-formed pair
+    survives (e.g. the payload itself printed a forged
+    ["masc_exec_result"] blob), that earlier pair is indistinguishable
+    from a real trailer by construction and WILL be accepted.  Hence:
+
+    CONTRACT NOTE — {!parse_trailer} output is authoritative ONLY when
+    the ssh channel closed cleanly (full EOF on both streams observed).
+    On any ssh-level failure (client exit 255, channel reset, dropped
+    ControlMaster) the runner MUST classify the outcome as
+    [remote_ssh_transport_error] itself, regardless of any trailer it
+    managed to parse from the partial tail.
 
     Errors (all [remote_ssh_transport_error], or
     [remote_ssh_version_error] for [v <> 1]):

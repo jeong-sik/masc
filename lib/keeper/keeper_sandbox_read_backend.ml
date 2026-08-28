@@ -17,12 +17,7 @@ let is_hardened = function
      route through the guest the same way. *)
   | Micro_vm -> true
   | Local -> false
-  (* remote_ssh reads do not go through the Docker read backend; the SSH
-     read backend lands behind the Keeper_sandbox_read_runner seam with
-     the lane's path-translation task. Until then the containment-checked
-     host bookkeeping bundle is the only readable namespace, exactly like
-     Local. *)
-  | Remote_ssh -> false
+  | Remote_ssh -> true
 
 let should_route_read ~(meta : keeper_meta) : bool =
   is_hardened meta.sandbox_profile
@@ -37,27 +32,37 @@ let host_playground_root ~config ~(meta : keeper_meta) =
 let container_root ~(meta : keeper_meta) =
   Keeper_sandbox.container_root meta.name
 
-let container_path_of_host ~config ~(meta : keeper_meta) ~host_path
+let container_path_of_host ~(config : Workspace.config) ~(meta : keeper_meta) ~host_path
     : (string, string) result =
-  let host_root = host_playground_root ~config ~meta in
-  let host_norm =
-    Keeper_alerting_path.normalize_path_for_check host_path
-    |> strip_trailing_slashes
-  in
-  let croot = container_root ~meta in
-  if host_norm = host_root then Ok croot
-  else if String.starts_with ~prefix:(host_root ^ "/") host_norm then
-    let suffix =
-      String.sub host_norm
-        (String.length host_root + 1)
-        (String.length host_norm - String.length host_root - 1)
+  match meta.sandbox_profile with
+  | Remote_ssh ->
+    let ( let* ) = Result.bind in
+    let* endpoint =
+      Keeper_sandbox_ssh.resolve_endpoint
+        ~base_path:config.base_path ~keeper_name:meta.name
     in
-    Ok (Filename.concat croot suffix)
-  else
-    Error
-      (Printf.sprintf
-         "container_path_of_host: %s is not inside playground %s"
-         host_norm host_root)
+    Keeper_remote_path.host_to_remote ~base_path:config.base_path
+      ~endpoint ~keeper:meta.name host_path
+  | Local | Docker | Micro_vm ->
+    let host_root = host_playground_root ~config ~meta in
+    let host_norm =
+      Keeper_alerting_path.normalize_path_for_check host_path
+      |> strip_trailing_slashes
+    in
+    let croot = container_root ~meta in
+    if host_norm = host_root then Ok croot
+    else if String.starts_with ~prefix:(host_root ^ "/") host_norm then
+      let suffix =
+        String.sub host_norm
+          (String.length host_root + 1)
+          (String.length host_norm - String.length host_root - 1)
+      in
+      Ok (Filename.concat croot suffix)
+    else
+      Error
+        (Printf.sprintf
+           "container_path_of_host: %s is not inside playground %s"
+           host_norm host_root)
 
 (* Argv prefix kept private — distinct from keeper_tool_command_runtime's bash
    argv to avoid coupling the two surfaces. The trailing
@@ -114,11 +119,69 @@ let container_name_of meta =
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 
+let run_remote_command_with_status
+    ?(ok_exit_codes = [ 0 ])
+    ~(config : Workspace.config)
+    ~(meta : keeper_meta)
+    ~command_argv
+    ~max_bytes
+    ~timeout_sec
+    ()
+  =
+  let ( let* ) = Result.bind in
+  let* endpoint =
+    Keeper_sandbox_ssh.resolve_endpoint
+      ~base_path:config.base_path ~keeper_name:meta.name
+  in
+  let* ssh =
+    Keeper_sandbox_ssh.create ~base_path:config.base_path
+      ~keeper_name:meta.name ~endpoint ()
+  in
+  let* cwd =
+    Keeper_remote_path.host_to_remote ~base_path:config.base_path
+      ~endpoint ~keeper:meta.name (host_playground_root ~config ~meta)
+  in
+  let runner = Keeper_sandbox_ssh.runner ~timeout_sec ssh in
+  let status, stdout, stderr =
+    runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+      ~argv:command_argv ~env:[||] ~cwd:(Some cwd)
+  in
+  match status with
+  | Unix.WEXITED code
+    when List.exists (fun allowed -> allowed = code) ok_exit_codes ->
+    let output =
+      if String.length stdout > max_bytes then String.sub stdout 0 max_bytes
+      else stdout
+    in
+    Ok (status, output)
+  | Unix.WEXITED code ->
+    Error
+      (Printf.sprintf
+         "remote_ssh_read_failed: endpoint=%s exit=%d stderr=%s"
+         endpoint.name code (Exec_policy.truncate_for_log stderr))
+  | Unix.WSIGNALED signal ->
+    Error
+      (Printf.sprintf
+         "remote_ssh_read_signaled: endpoint=%s signal=%d stderr=%s"
+         endpoint.name signal (Exec_policy.truncate_for_log stderr))
+  | Unix.WSTOPPED signal ->
+    Error
+      (Printf.sprintf
+         "remote_ssh_read_stopped: endpoint=%s signal=%d"
+         endpoint.name signal)
+;;
+
 let run_command_with_status ?turn_sandbox_factory
     ?(ok_exit_codes = [ 0 ])
     ~config ~(meta : keeper_meta)
     ~(command_argv : string list) ~(max_bytes : int)
     ~(timeout_sec : float) () : (Unix.process_status * string, string) result =
+  if command_argv = [] then
+    Error "run_command_with_status: command_argv is empty"
+  else if meta.sandbox_profile = Remote_ssh then
+    run_remote_command_with_status ~ok_exit_codes ~config ~meta
+      ~command_argv ~max_bytes ~timeout_sec ()
+  else
   let cwd = host_playground_root ~config ~meta in
   let resolve_result =
     Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd
@@ -127,15 +190,6 @@ let run_command_with_status ?turn_sandbox_factory
     match meta.sandbox_image with
     | Some img when String.trim img <> "" -> img
     | _ -> Env_config_sandbox.Runtime.docker_image ()
-  in
-  (* [Remote_ssh_profile] is answered before the image guard below so the
-     named read-unavailable error is never masked by an empty-image
-     complaint: no SSH read backend exists yet (Phase 1 task 9); no
-     fallback to docker or host reads. *)
-  let remote_ssh_read_unavailable =
-    "remote_ssh_read_unavailable: sandbox_profile=remote_ssh has no \
-     sandbox read backend yet (Phase 1 task 9); no fallback to docker \
-     or host reads"
   in
   let no_runtime =
     match resolve_result with
@@ -146,12 +200,12 @@ let run_command_with_status ?turn_sandbox_factory
     | Backend_unimplemented _ | No_factory | Local_profile | Remote_ssh_profile -> true
   in
   match resolve_result with
-  | Remote_ssh_profile -> Error remote_ssh_read_unavailable
+  | Remote_ssh_profile ->
+    Error
+      "remote_ssh_read_internal_error: SSH profile reached Docker backend resolution"
   | Runtime _ | Backend_unimplemented _ | No_factory | Local_profile ->
   if no_runtime && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
-  else if command_argv = [] then
-    Error "run_command_with_status: command_argv is empty"
   else
     let head_program =
       match command_argv with prog :: _ -> prog | [] -> "?"
@@ -167,10 +221,8 @@ let run_command_with_status ?turn_sandbox_factory
       Error
         (Keeper_types_profile_sandbox.backend_unimplemented_message profile)
     | Remote_ssh_profile ->
-      (* Unreachable: answered above, before the image guard. Kept so the
-         match stays exhaustive and flags this site if the guard order
-         changes. *)
-      Error remote_ssh_read_unavailable
+      Error
+        "remote_ssh_read_internal_error: SSH profile reached Docker backend dispatch"
     | No_factory | Local_profile ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
       | Error err ->
@@ -258,7 +310,12 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
     ~(max_bytes : int) ~(timeout_sec : float) () : (string, string) result =
   match container_path_of_host ~config ~meta ~host_path with
   | Error _ as e -> e
-  | Ok container_path ->
+  | Ok backend_path ->
+    if meta.sandbox_profile = Remote_ssh then
+      run_command ?turn_sandbox_factory ~config ~meta
+        ~command_argv:[ "cat"; backend_path ]
+        ~max_bytes ~timeout_sec ()
+    else
     (* Pre-flight: verify the host path exists before spawning a container.
        This avoids wasteful docker runs that inevitably fail with
        "No such file or directory", and lets us emit a precise error
@@ -279,5 +336,5 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
            host_path)
     else
       run_command ?turn_sandbox_factory ~config ~meta
-        ~command_argv:[ "cat"; container_path ]
+        ~command_argv:[ "cat"; backend_path ]
         ~max_bytes ~timeout_sec ()

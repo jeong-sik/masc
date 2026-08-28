@@ -66,6 +66,11 @@ let stub_main () =
     write_all Unix.stderr
       (trailer ~shim_error:"remote_ssh_path_jail_violation: outside root" ());
     exit 1
+  | "path-output" ->
+    let remote = "/srv/masc/playground/keeper-a/src/main.ml" in
+    write_all Unix.stdout ("out=" ^ remote);
+    write_all Unix.stderr ("err=" ^ remote ^ trailer ~exit:0 ());
+    exit 0
   | "malformed" ->
     write_all Unix.stderr "remote-err\x1ebad\x1e";
     exit 0
@@ -127,7 +132,10 @@ let with_eio f =
 ;;
 
 let make_runner ~base_path ~ssh_bin =
-  match Keeper_sandbox_ssh.create ~ssh_bin ~base_path ~endpoint () with
+  match
+    Keeper_sandbox_ssh.create ~ssh_bin ~base_path ~keeper_name:"keeper-a"
+      ~endpoint ()
+  with
   | Ok state -> state, Keeper_sandbox_ssh.runner ~timeout_sec:2.0 state
   | Error error -> fail error
 ;;
@@ -234,6 +242,30 @@ let test_shim_error () =
     (String.starts_with ~prefix:"remote_ssh_path_jail_violation:" stderr)
 ;;
 
+let test_remote_paths_rewritten_in_streams () =
+  with_eio @@ fun ~clock:_ ->
+  let base_path = temp_dir () in
+  let ssh_bin, _ = make_stub ~dir:base_path ~mode:"path-output" in
+  let _, runner = make_runner ~base_path ~ssh_bin in
+  let stdout_chunks = Buffer.create 64 and stderr_chunks = Buffer.create 64 in
+  let status, stdout, stderr =
+    run_request runner
+      ~on_stdout_chunk:(Buffer.add_string stdout_chunks)
+      ~on_stderr_chunk:(Buffer.add_string stderr_chunks)
+      ()
+  in
+  let host =
+    Filename.concat
+      (Keeper_alerting_path.normalize_path_for_check base_path)
+      ".masc/playground/keeper-a/src/main.ml"
+  in
+  check status_testable "exit" (Unix.WEXITED 0) status;
+  check string "captured stdout" ("out=" ^ host) stdout;
+  check string "captured stderr" ("err=" ^ host) stderr;
+  check string "streamed stdout" stdout (Buffer.contents stdout_chunks);
+  check string "streamed stderr" stderr (Buffer.contents stderr_chunks)
+;;
+
 exception Cancel_blocked_ssh
 
 let test_cancellation_kills_local_ssh () =
@@ -323,6 +355,8 @@ let () =
           ; test_case "signal + remote timeout" `Quick test_signal_and_remote_timeout
           ; test_case "transport failures" `Quick test_transport_failures
           ; test_case "shim error" `Quick test_shim_error
+          ; test_case "remote paths rewritten in streams" `Quick
+              test_remote_paths_rewritten_in_streams
           ; test_case "cancellation reaps local ssh" `Quick
               test_cancellation_kills_local_ssh
           ; test_case "Shell IR target resolves endpoint" `Quick

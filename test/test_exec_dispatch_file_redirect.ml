@@ -181,6 +181,42 @@ let test_unopenable_target_does_not_claim_the_command_ran () =
       (Astring.String.is_infix ~affix:"out.txt" result.stderr))
 ;;
 
+let test_ssh_redirect_is_named_and_never_opens_host_file () =
+  with_runtime (fun () ->
+    let out = path "ssh-must-not-open.txt" in
+    remove_if_present out;
+    let runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_
+        ~env:_ ~cwd:_ =
+      Unix.WEXITED 0, "remote", ""
+    in
+    let endpoint : E.Sandbox_target.ssh_endpoint =
+      { name = "fixture"
+      ; host = "fixture.invalid"
+      ; user = "masc"
+      ; port = 22
+      ; identity_file = "/key"
+      ; known_hosts_file = "/known-hosts"
+      ; remote_root = "/srv/masc/playground"
+      ; connect_timeout_sec = 1
+      ; env_allowlist = []
+      }
+    in
+    let sandbox = E.Sandbox_target.ssh ~endpoint ~runner () in
+    let s =
+      simple ~sandbox
+        ~redirects:
+          [ E.Redirect_scope.File
+              { fd = 1; target = target out; mode = E.Redirect_scope.Write }
+          ]
+        "printf" [ "hello" ]
+    in
+    let result = dispatch s in
+    Alcotest.(check bool) "command did not report success" false (exited_zero result);
+    Alcotest.(check bool) "named remote redirect error" true
+      (Astring.String.is_infix ~affix:"remote_ssh_redirect_unavailable" result.stderr);
+    Alcotest.(check bool) "host file was not opened" false (Sys.file_exists out))
+;;
+
 (* A relative target resolves against the command's cwd. Without one, the
    child runs at the filesystem root while this process sits somewhere else,
    so the same string names two different files. *)
@@ -424,6 +460,10 @@ let () =
             "unopenable_target_does_not_claim_the_command_ran"
             `Quick
             test_unopenable_target_does_not_claim_the_command_ran
+        ; Alcotest.test_case
+            "ssh_redirect_is_named_and_never_opens_host_file"
+            `Quick
+            test_ssh_redirect_is_named_and_never_opens_host_file
         ] )
     ]
 ;;

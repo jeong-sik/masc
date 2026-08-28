@@ -12,6 +12,7 @@ val resolve_endpoint :
 val create :
   ?ssh_bin:string ->
   base_path:string ->
+  keeper_name:string ->
   endpoint:Exec_ssh_endpoint.t ->
   unit ->
   (t, string) result
@@ -32,3 +33,7 @@ val runner :
 (** Construct a Shell IR runner. The local wall-clock budget includes the
     endpoint connect timeout and a bounded drain grace in addition to the
     remote payload timeout. *)
+
+module For_testing : sig
+  val set_ssh_bin_override : string option -> unit
+end

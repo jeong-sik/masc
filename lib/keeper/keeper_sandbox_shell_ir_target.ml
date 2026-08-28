@@ -162,7 +162,10 @@ let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin () =
       (target_error ~class_:Tool_result.Policy_rejection
          ~fields:[ "requested_sandbox", `String "remote_ssh" ] message)
   | Ok endpoint ->
-    (match Keeper_sandbox_ssh.create ?ssh_bin ~base_path ~endpoint () with
+    (match
+       Keeper_sandbox_ssh.create ?ssh_bin ~base_path ~keeper_name:meta.name
+         ~endpoint ()
+     with
      | Error message ->
        Error
          (target_error ~class_:Tool_result.Dependency_unavailable

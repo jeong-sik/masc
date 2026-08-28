@@ -121,6 +121,14 @@ let test_docker_second_keeper_routes () =
   Alcotest.(check bool) "docker second keeper also routes" true
     (Keeper_sandbox_read_backend.should_route_read ~meta)
 
+let test_remote_ssh_keeper_routes () =
+  let meta =
+    make_meta ~name:"remote" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+  in
+  Alcotest.(check bool) "remote SSH keeper routes through backend"
+    true
+    (Keeper_sandbox_read_backend.should_route_read ~meta)
+
 (* ── container_path_of_host pure mapping ─────────────────────────── *)
 
 let setup_config name =
@@ -145,6 +153,18 @@ let with_fake_docker script f =
   Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
   with_env "MASC_TEST_FAKE_DOCKER_PATH" docker_path @@ fun () ->
   with_env "PATH" path f
+
+let with_fake_ssh script f =
+  let dir = temp_dir () in
+  let ssh_path = Filename.concat dir "ssh" in
+  write_file ssh_path script;
+  Unix.chmod ssh_path 0o755;
+  Masc.Keeper_sandbox_ssh.For_testing.set_ssh_bin_override (Some ssh_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_sandbox_ssh.For_testing.set_ssh_bin_override None;
+      cleanup_dir dir)
+    f
 
 let fake_docker_log_path () =
   Filename.concat
@@ -308,10 +328,9 @@ let test_run_command_empty_image_errors () =
          in
          loop 0)
 
-let test_run_command_remote_ssh_named_error_before_image_guard () =
-  (* A remote_ssh keeper with an empty sandbox_image must see the named
-     read-unavailable error, not the empty-image complaint: the
-     Remote_ssh_profile arm is hoisted above the image guard. *)
+let test_run_command_remote_ssh_endpoint_error_before_image_guard () =
+  (* A remote_ssh keeper with no endpoint declaration must see the named
+     endpoint error, not the Docker empty-image complaint. *)
   let base, config, meta = setup_config "remote-ssh" in
   let meta =
     { meta with
@@ -330,10 +349,10 @@ let test_run_command_remote_ssh_named_error_before_image_guard () =
       ~turn_sandbox_factory:factory ~config ~meta
       ~command_argv:[ "ls"; "/" ] ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
-  | Ok _ -> Alcotest.fail "expected remote_ssh_read_unavailable"
+  | Ok _ -> Alcotest.fail "expected remote_ssh_endpoint_missing"
   | Error msg ->
       Alcotest.(check bool) "named read error, not image guard" true
-        (let needle = "remote_ssh_read_unavailable" in
+        (let needle = "remote_ssh_endpoint_missing" in
          let nlen = String.length needle in
          let mlen = String.length msg in
          let rec loop i =
@@ -342,6 +361,54 @@ let test_run_command_remote_ssh_named_error_before_image_guard () =
            else loop (i + 1)
          in
          loop 0)
+
+let fake_ssh_success_script =
+  {|#!/bin/sh
+cat >/dev/null 2>/dev/null &
+printf 'remote-file-content'
+printf '\036{"masc_exec_result":{"v":1,"exit":0,"signal":null,"timed_out":false,"shim_error":null}}\036' >&2
+exit 0
+|}
+
+let test_remote_ssh_read_skips_host_existence_preflight () =
+  let base, config, meta = setup_config "remote-reader" in
+  let meta =
+    { meta with
+      sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
+    }
+  in
+  let keepers_dir = Filename.concat base ".masc/config/keepers" in
+  ensure_dir keepers_dir;
+  write_file (Filename.concat keepers_dir "remote-reader.toml")
+    {|[keeper]
+instructions = "remote read test"
+sandbox_profile = "remote_ssh"
+remote_endpoint = "fixture"
+|};
+  write_file (Filename.concat base ".masc/runtime.toml")
+    {|[exec.ssh.endpoints.fixture]
+host = "fixture.invalid"
+user = "masc"
+remote_root = "/srv/masc/playground"
+connect_timeout_sec = 1
+max_concurrent_sessions = 2
+|};
+  let missing_host_path =
+    Filename.concat
+      (Keeper_sandbox.host_root_abs_of_meta ~config meta)
+      "remote-only.txt"
+  in
+  Alcotest.(check bool) "host path intentionally absent" false
+    (Sys.file_exists missing_host_path);
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_fake_ssh fake_ssh_success_script @@ fun () ->
+  match
+    Keeper_sandbox_read_backend.read_file ~config ~meta
+      ~host_path:missing_host_path ~max_bytes:4096 ~timeout_sec:2.0 ()
+  with
+  | Error error -> Alcotest.fail error
+  | Ok content ->
+    Alcotest.(check string) "remote content" "remote-file-content" content
 
 let fake_docker_exit_1_script =
   "#!/bin/sh\n\
@@ -2186,6 +2253,8 @@ let run_tests ~clock () =
             test_docker_keeper_routes;
           Alcotest.test_case "docker second keeper also routes" `Quick
             test_docker_second_keeper_routes;
+          Alcotest.test_case "remote SSH keeper routes" `Quick
+            test_remote_ssh_keeper_routes;
         ] );
       ( "container_path_of_host",
         [
@@ -2224,6 +2293,8 @@ let run_tests ~clock () =
             test_read_missing_file_preflight_errors;
           Alcotest.test_case "directory read names a real listing tool" `Quick
             test_read_directory_names_a_real_listing_tool;
+          Alcotest.test_case "remote read skips host existence preflight" `Quick
+            test_remote_ssh_read_skips_host_existence_preflight;
         ] );
       ( "run_command",
         [
@@ -2231,8 +2302,8 @@ let run_tests ~clock () =
             test_run_command_empty_argv_errors;
           Alcotest.test_case "empty image configuration errors" `Quick
             test_run_command_empty_image_errors;
-          Alcotest.test_case "remote_ssh named error precedes image guard" `Quick
-            test_run_command_remote_ssh_named_error_before_image_guard;
+          Alcotest.test_case "remote_ssh endpoint error precedes image guard" `Quick
+            test_run_command_remote_ssh_endpoint_error_before_image_guard;
           Alcotest.test_case "nonzero exit errors by default" `Quick
             test_run_command_nonzero_exit_errors_by_default;
           Alcotest.test_case "configured nonzero exit is allowed" `Quick

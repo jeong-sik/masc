@@ -91,27 +91,3 @@ let failure_reason_to_string = function
   | Operator_interrupt -> "operator_interrupt"
 ;;
 
-(** #10584: cohort key for grouping failures by variant, ignoring
-    parameters (e.g. failure count, timeout seconds).  Lives next to
-    [failure_reason_to_string] in the source-of-truth module so any
-    new variant added to [failure_reason] forces a same-PR update of
-    BOTH conversion arms — the consumer in keeper_supervisor (and
-    any other dashboard / metrics call site) just delegates here.
-    This is Option B from #10584: avoid the recurring-P0 pattern
-    where consumer-side exhaustive matches catch up to upstream
-    variant additions only after the warn-error build trip. *)
-let failure_reason_cohort_key = function
-  | Some (Heartbeat_consecutive_failures _) -> "heartbeat_failures"
-  | Some (Turn_consecutive_failures _) -> "turn_failures"
-  | Some (Stale_termination_storm _) -> "stale_termination_storm"
-  | Some (Provider_runtime_error _) -> "provider_runtime_error"
-  | Some (Fiber_unresolved Graceful_shutdown) -> "fiber_unresolved_graceful"
-  | Some (Fiber_unresolved Cancelled_by_parent) -> "fiber_unresolved_cancelled"
-  | Some (Fiber_unresolved Unexpected) -> "fiber_unresolved"
-  (* Graceful shutdown and parent cancellation stay distinct from an unexpected
-     unresolved fiber for dashboard and metric observation. *)
-  | Some (Exception _) -> "exception"
-  | Some Turn_overflow_failure -> "turn_overflow_failure"
-  | Some Operator_interrupt -> "operator_interrupt"
-  | None -> "unknown"
-;;

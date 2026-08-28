@@ -17,8 +17,6 @@ type t =
   | Stale_termination_storm
   (** [Keeper_registry.Stale_termination_storm]: cohort window
           escalation threshold reached. *)
-  | Heartbeat_failures (** [Keeper_registry.Heartbeat_consecutive_failures]. *)
-  | Turn_failures (** [Keeper_registry.Turn_consecutive_failures]. *)
   | Provider_runtime_error of string
   (** [Keeper_registry.Provider_runtime_error]: payload is the
           original [code] field. *)

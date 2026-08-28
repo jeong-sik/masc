@@ -13,8 +13,6 @@ type agent_core_timeout =
 type t =
   | Healthy
   | Stale_termination_storm
-  | Heartbeat_failures
-  | Turn_failures
   | Provider_runtime_error of string
   | Fiber_unresolved
   | Turn_overflow_failure
@@ -28,8 +26,6 @@ type t =
 let to_wire = function
   | Healthy -> "healthy"
   | Stale_termination_storm -> "stale_termination_storm"
-  | Heartbeat_failures -> "heartbeat_failures"
-  | Turn_failures -> "turn_failures"
   | Provider_runtime_error code -> code
   | Fiber_unresolved -> "fiber_unresolved"
   | Turn_overflow_failure -> "turn_overflow_failure"
@@ -41,8 +37,6 @@ let to_wire = function
 let of_wire_exact = function
   | "healthy" -> Some Healthy
   | "stale_termination_storm" -> Some Stale_termination_storm
-  | "heartbeat_failures" -> Some Heartbeat_failures
-  | "turn_failures" -> Some Turn_failures
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "turn_overflow_failure" -> Some Turn_overflow_failure
   | "operator_interrupt" -> Some Operator_interrupt

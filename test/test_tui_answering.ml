@@ -253,9 +253,52 @@ let test_the_overlay_wears_the_same_mark () =
        running_line.text)
 ;;
 
+(* The span a surface hands over already measured. A Gate row drew
+   "41989s waiting" -- five figures of seconds where the code comment beside
+   it said the operator weighs the number. These pin the reading an operator
+   can weigh, and pin it here so the two callers cannot drift into two
+   spellings of the same span. *)
+let test_a_long_wait_reads_in_hours () =
+  Alcotest.(check string)
+    "41989 seconds is eleven hours and thirty-nine minutes" "11h39m"
+    (Masc_tui_answering.duration_text 41989.);
+  Alcotest.(check string)
+    "under a minute stays in seconds" "42s"
+    (Masc_tui_answering.duration_text 42.);
+  Alcotest.(check string)
+    "minutes carry their seconds" "2m14s"
+    (Masc_tui_answering.duration_text 134.)
+;;
+
+(* Clock skew between the server and this terminal can hand over a negative
+   span. Counting up from the future would read as a wait that has not
+   started; zero reads as one that just did. *)
+let test_a_negative_span_clamps () =
+  Alcotest.(check string)
+    "a span from the future reads as none" "0s"
+    (Masc_tui_answering.duration_text (-5.))
+;;
+
+(* [elapsed_text] is the same answer for a caller that knows the start rather
+   than the span. One spelling, two ways in. *)
+let test_elapsed_and_duration_agree () =
+  Alcotest.(check string)
+    "start-plus-now and the span read the same"
+    (Masc_tui_answering.duration_text 41989.)
+    (Masc_tui_answering.elapsed_text ~now:41989. 0.)
+;;
+
 let () =
   Alcotest.run "tui_answering"
-    [ ( "running mark"
+    [ ( "duration"
+      , [ Alcotest.test_case "a long wait reads in hours" `Quick
+            test_a_long_wait_reads_in_hours
+        ; Alcotest.test_case "a negative span clamps" `Quick
+            test_a_negative_span_clamps
+        ; Alcotest.test_case "elapsed and duration agree" `Quick
+            test_elapsed_and_duration_agree
+        ] )
+    ; ( "running mark"
       , [ Alcotest.test_case "the mark moves" `Quick
             test_the_running_mark_moves
         ; Alcotest.test_case "not animating falls back to the still mark"

@@ -61,16 +61,27 @@ let lane_word = function
   | Tui_decode.Turn_lane_maintenance -> "maintenance"
 ;;
 
-(* "2m14s" reads at a glance; a bare second count stops meaning anything
-   past a minute. Negative deltas (clock skew between server and terminal)
-   clamp to zero rather than counting up from the future. *)
-let elapsed_text ~now started_at =
-  let seconds = int_of_float (Float.max 0. (now -. started_at)) in
+(* "2m14s" reads at a glance; a bare second count stops meaning anything past
+   a minute. 41989s is a real reading a surface drew, and no operator weighs
+   it -- it is eleven hours and thirty-nine minutes, which is a different
+   sentence.
+
+   Two callers, one spelling. Some know when a thing started and some are
+   handed the span already measured; splitting on that rather than letting
+   the second one invent its own format is what keeps "11h39m" from becoming
+   "11:39" one surface over.
+
+   Negative spans (clock skew between server and terminal) clamp to zero
+   rather than counting up from the future. *)
+let duration_text seconds =
+  let seconds = int_of_float (Float.max 0. seconds) in
   if seconds < 60 then Printf.sprintf "%ds" seconds
   else if seconds < 3600 then
     Printf.sprintf "%dm%02ds" (seconds / 60) (seconds mod 60)
   else Printf.sprintf "%dh%02dm" (seconds / 3600) (seconds mod 3600 / 60)
 ;;
+
+let elapsed_text ~now started_at = duration_text (now -. started_at)
 
 let is_running (row : Tui_decode.keeper_turn_row) =
   match row.ktr_state with

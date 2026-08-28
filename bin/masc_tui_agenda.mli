@@ -103,3 +103,17 @@ val overlay :
   now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> line list
 (** Every wake still coming, earliest first, then everyone blocked on the
     operator. Not just the one the strip names. *)
+
+val short_who : string -> string
+(** A wake target with its kind prefix removed: ["keeper:edgar.a.poe"] reads
+    back as ["edgar.a.poe"].
+
+    Every row a wake surface draws has the same kind, so the prefix
+    distinguishes nothing and costs seven cells of a line that has to fit a
+    name. That is not only waste: on a narrow column the seven cells are
+    taken out of the name, and the name is the whole reason the cell exists.
+    Two schedules for two different keepers both drew ["keeper:~"] before the
+    Schedules list called this.
+
+    Exported because a second surface needs the same answer, and two
+    surfaces spelling the same rule twice is how they come to disagree. *)

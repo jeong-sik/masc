@@ -4082,6 +4082,77 @@ let test_decode_gate_identity_row_reads_its_target () =
       | rows ->
           Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
+let test_decode_gate_rows_distinguish_operator_phases () =
+  let phase ~summary_status ~disposition =
+    let row =
+      `Assoc
+        [ "id", `String "appr-phase"
+        ; "keeper_name", `String "phase-keeper"
+        ; "tool_name", `String "tool_execute"
+        ; "input_preview", `String "gh auth status"
+        ; "waiting_s", `Int 42
+        ; "input", `Assoc []
+        ; "summary_status", summary_status
+        ; "summary_attempt_disposition", disposition
+        ]
+    in
+    match
+      Tui_decode.decode_gate_snapshot
+        (gate_snapshot_json ~queue:(`List [ row ]) ())
+    with
+    | Ok { gs_pending = [ pending ]; _ } -> pending.gp_phase
+    | Ok snapshot ->
+      Alcotest.failf
+        "expected one pending phase row, got %d"
+        (List.length snapshot.gs_pending)
+    | Error detail -> Alcotest.fail detail
+  in
+  let available judgment =
+    `Assoc
+      [ "status", `String "available"
+      ; ( "summary"
+        , `Assoc [ "judgment", `String judgment ] )
+      ]
+  in
+  let disposition code = `Assoc [ "code", `String code ] in
+  Alcotest.check
+    Alcotest.bool
+    "ready work is queued"
+    true
+    (phase
+       ~summary_status:(`String "not_requested")
+       ~disposition:(disposition "ready")
+     = Tui_decode.Gate_queued);
+  Alcotest.check
+    Alcotest.bool
+    "in-flight work is judging"
+    true
+    (phase
+       ~summary_status:(`String "pending")
+       ~disposition:(disposition "in_flight")
+     = Tui_decode.Gate_judging);
+  Alcotest.check
+    Alcotest.bool
+    "require_human is a terminal handoff"
+    true
+    (phase
+       ~summary_status:(available "require_human")
+       ~disposition:(disposition "settled")
+     = Tui_decode.Gate_human_required);
+  Alcotest.check
+    Alcotest.bool
+    "failed Auto Judge work is blocked"
+    true
+    (phase
+       ~summary_status:
+         (`Assoc
+            [ "status", `String "failed"
+            ; "reason", `String "exact attempt quarantined"
+            ])
+       ~disposition:(disposition "settled")
+     = Tui_decode.Gate_blocked)
+;;
+
 let execute_gate_row ~preview ~input =
   `Assoc
     [ ("id", `String "appr-1");
@@ -4875,6 +4946,8 @@ let () =
       [
         Alcotest.test_case "an identity row reads its target" `Quick
           test_decode_gate_identity_row_reads_its_target;
+        Alcotest.test_case "rows distinguish Auto Judge phases" `Quick
+          test_decode_gate_rows_distinguish_operator_phases;
         Alcotest.test_case "an execute row leads with the command" `Quick
           test_decode_execute_gate_row_leads_with_the_command;
         Alcotest.test_case "an execute row shows the script line" `Quick

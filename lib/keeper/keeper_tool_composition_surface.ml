@@ -1226,7 +1226,15 @@ type skill_input_error =
    The exactness did not move: it is the same list the catalogue was printed
    from, so a key resolves to the one revision that turn is holding. What
    moved is who carries the hash -- the server, which already had it, instead
-   of the model, which had to copy it correctly. *)
+   of the model, which had to copy it correctly.
+
+   Not [Skill_catalog_snapshot.find_exact] or [find_effective_by_name], which
+   ask the same shape of question against different lists. Those search the
+   snapshot; this searches the Skills this turn handed the tool. The
+   difference is the whole safety argument: a key the turn did not offer must
+   resolve to nothing, and a snapshot lookup would find it. The lists narrow
+   snapshot -> effective -> this turn's, and a resolver belongs to the list
+   its caller is allowed to reach. *)
 let reference_of_key (instruction_skills : instruction_skill list) key =
   List.find_map
     (fun (skill : instruction_skill) ->

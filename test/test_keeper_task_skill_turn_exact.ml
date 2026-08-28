@@ -557,6 +557,53 @@ let test_exact_reference_consumer_rejects_name_fallback () =
     (String_util.contains_substring absent_output "EXACT_BODY")
 ;;
 
+(* The resolver searches the Skills this turn handed the tool, not the
+   snapshot. It is the whole safety argument for taking a key instead of a
+   reference: a key the turn did not offer has to resolve to nothing, and a
+   snapshot lookup would find it.
+
+   Two Skills exist; one is given to the tool. Asking for the other by its
+   real, correct key must fail. If someone swaps the resolver for
+   [Skill_catalog_snapshot.find_exact] this is the test that notices. *)
+let test_the_resolver_cannot_reach_past_this_turn () =
+  let config = config (source_row ~id:"only" ~path:"skills") in
+  let snapshot =
+    snapshot config
+      [ [ "offered", document ~name:"offered" ~description:"d" "OFFERED_BODY"
+        ; "withheld", document ~name:"withheld" ~description:"d" "WITHHELD_BODY"
+        ]
+      ]
+  in
+  let source_id =
+    match config.sources with
+    | [ source ] -> source.id
+    | _ -> fail "expected one source"
+  in
+  let offered =
+    exact_reference snapshot ~source_id ~package_id:"offered" ~name:"offered"
+  in
+  let withheld =
+    exact_reference snapshot ~source_id ~package_id:"withheld" ~name:"withheld"
+  in
+  let tool =
+    Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
+      ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+      ~instruction_skills:[ instruction_skill offered (resolve_one snapshot offered).skill ]
+      ()
+  in
+  let offered_output =
+    run_skill_tool tool (`Assoc [ "skill", `String (Reference.key offered) ])
+  in
+  check bool "the offered Skill reads" true
+    (String_util.contains_substring offered_output "OFFERED_BODY");
+  (* Its key is correct and it is in the snapshot. It is not in this turn. *)
+  let withheld_output =
+    run_skill_tool tool (`Assoc [ "skill", `String (Reference.key withheld) ])
+  in
+  check bool "a Skill this turn did not offer stays unreachable" false
+    (String_util.contains_substring withheld_output "WITHHELD_BODY")
+;;
+
 (* The key has to be one-to-one with the identity, because the model is
    offered a set of them and the server matches one back.
 
@@ -901,6 +948,8 @@ let () =
             test_the_catalogue_costs_a_key_not_a_reference
         ; Alcotest.test_case "the key cannot fold two identities together"
             `Quick test_the_key_cannot_fold_two_identities_together
+        ; Alcotest.test_case "the resolver cannot reach past this turn" `Quick
+            test_the_resolver_cannot_reach_past_this_turn
         ; test_case "resource read is exact and deferred" `Quick
             test_resource_is_read_only_when_exact_file_is_requested
         ; test_case "revision mismatch remains typed" `Quick

@@ -9906,7 +9906,7 @@ let render_themes (state : state) =
   let cursor = max 0 (min state.theme_cursor (List.length entries - 1)) in
   let scroll = max 0 (cursor - content_height + 1) in
   box_line_styled buf cols ~style:Ansi.dim
-    (Printf.sprintf "  %-24s %-9s %-10s %s" "theme" "page" "lifted" "")
+    (Printf.sprintf "  %-26s %-18s %-9s %-10s" "theme" "colours" "page" "lifted")
   ;
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
@@ -9916,14 +9916,35 @@ let render_themes (state : state) =
           | Some name -> String.equal name entry.name
           | None -> false
         in
+        (* The scheme drawn in its own colours. A name and the word "dark"
+           say almost nothing about whether a reader will like a palette; two
+           dozen cells of it say most of what they need. Each block is painted
+           as background so the colour fills the cell rather than being a
+           glyph's worth of it. *)
+        let swatch =
+          entry.Theme_choice.swatch
+          |> List.map (fun rgb ->
+               Printf.sprintf "\027[48;2;%d;%d;%dm  \027[49m"
+                 (Masc_tui_terminal_palette.red rgb)
+                 (Masc_tui_terminal_palette.green rgb)
+                 (Masc_tui_terminal_palette.blue rgb))
+          |> String.concat ""
+        in
+        (* Built in two halves with the swatch spliced between them, never
+           through a width specifier. OCaml pads by bytes, and a swatch is
+           mostly escape bytes -- run it through [%-24s] and the padding is
+           computed against the escapes, which then get cut mid-sequence and
+           printed as "49m". *)
         let row =
-          Printf.sprintf "  %s %-24s %-9s %-10s"
+          Printf.sprintf "  %s %-24s "
             (if picked then chosen_mark else " ")
             (Terminal_text.single_line entry.name)
-            (if entry.light then "light" else "dark")
-            (match entry.lifted with
-             | 0 -> "none"
-             | count -> Printf.sprintf "%d of %d" count entry.measured)
+          ^ swatch
+          ^ Printf.sprintf "  %-9s %-10s"
+              (if entry.light then "light" else "dark")
+              (match entry.lifted with
+               | 0 -> "none"
+               | count -> Printf.sprintf "%d of %d" count entry.measured)
         in
         if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
         else box_line buf cols row

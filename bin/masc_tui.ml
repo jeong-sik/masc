@@ -7790,6 +7790,11 @@ let main () =
        state.theme_choice <- Some name
    | Some _ | None -> ());
 
+  (* Same file, same moment. Absent reads as on, which is what masc drew
+     before the key existed -- a reader who never set it sees no change. *)
+  Masc_tui_theme.set_lift_enabled
+    (Option.value (Masc_tui_config.lift_colours ~base_path) ~default:true);
+
   (* Same file, same moment: the box a table draws is a look, and a look that
      survives a restart is the point of storing it. *)
   set_table_frame
@@ -7927,6 +7932,51 @@ let main () =
       (Option.map Masc_tui_terminal_palette.background
          (Masc_tui_terminal_palette.current ()))
   in
+  (* Live preview, the way a theme picker is expected to work: moving the
+     cursor draws in that scheme so the reader judges it on the screen they
+     actually use, Enter keeps it, Esc puts back whatever was in force before
+     they walked in.
+
+     The scheme in force is remembered on the first preview rather than on
+     entering the pane: entering and leaving without moving should cost
+     nothing, and there is no "they might" to record. *)
+  let preview_theme_under_cursor () =
+    if state.theme_before_preview = None
+    then state.theme_before_preview <- Some state.theme_choice;
+    match List.nth_opt (Masc_tui_theme_choice.entries ()) state.theme_cursor with
+    | None -> ()
+    | Some entry ->
+      if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
+      then begin
+        state.theme_choice <- Some entry.Masc_tui_theme_choice.name;
+        sync_theme_background ()
+      end
+  in
+  (* Esc, and leaving the pane. Restoring goes through the same two calls a
+     pick does, so a preview cannot leave the screen and the background
+     disagreeing. *)
+  let cancel_theme_preview () =
+    match state.theme_before_preview with
+    | None -> ()
+    | Some previous ->
+      state.theme_before_preview <- None;
+      (match previous with
+       | Some name -> ignore (Masc_tui_theme_choice.apply name : bool)
+       | None -> Masc_tui_theme_choice.follow_terminal ());
+      state.theme_choice <- previous;
+      sync_theme_background ()
+  in
+  (* Shadowed on purpose: every surface change in this loop goes through here,
+     and a preview must not survive one. Wrapping is what keeps the three call
+     sites from each having to remember. *)
+  let goto_surface state ~mailbox destination =
+    (match state.view with
+     | Config when state.config_pane = Config_themes && destination <> Config ->
+       cancel_theme_preview ()
+     | _ -> ());
+    goto_surface state ~mailbox destination
+  in
+
   (* A scheme named in runtime.toml was applied at boot, before this existed.
      Sending it here is what makes a saved choice survive a restart with its
      background rather than only its ink. *)
@@ -9732,6 +9782,8 @@ and is loaded on demand through keeper_skill.
               if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
               then begin
                 state.theme_choice <- Some entry.Masc_tui_theme_choice.name;
+                (* Committed: there is nothing to go back to any more. *)
+                state.theme_before_preview <- None;
                 (* The ink changed; the page has to change with it. A light
                    scheme picks dark text because it expects a light page, so
                    leaving the terminal's own background is what made "light
@@ -10346,7 +10398,15 @@ and is loaded on demand through keeper_skill.
              ~backwards:(key = Some "shift-tab")
        | Some "esc" ->
            (* Esc goes back *)
+           (* A running preview is the innermost thing Esc can go back from:
+              the reader is looking at a scheme they have not picked, and the
+              way out is the one they walked in with. Without this the preview
+              is not a preview -- moving the cursor would be a decision. *)
            (match state.view with
+            | Config
+              when state.config_pane = Config_themes
+                   && state.theme_before_preview <> None ->
+                cancel_theme_preview ()
             | Code ->
                 if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
@@ -10691,7 +10751,8 @@ and is loaded on demand through keeper_skill.
                 state.keeper_calls_scroll <- state.keeper_calls_scroll + 1
             | Config when state.config_pane = Config_themes ->
                 let last = List.length (Masc_tui_theme_choice.entries ()) - 1 in
-                state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1)
+                state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1);
+                preview_theme_under_cursor ()
             | Config when state.config_pane = Config_prompts ->
                 let count =
                   match state.prompts_snapshot with
@@ -10991,7 +11052,8 @@ and is loaded on demand through keeper_skill.
                 if state.keeper_calls_scroll > 0 then
                   state.keeper_calls_scroll <- state.keeper_calls_scroll - 1
             | Config when state.config_pane = Config_themes ->
-                state.theme_cursor <- max 0 (state.theme_cursor - 1)
+                state.theme_cursor <- max 0 (state.theme_cursor - 1);
+                preview_theme_under_cursor ()
             | Config when state.config_pane = Config_prompts ->
                 let next = max 0 (state.prompts_cursor - 1) in
                 if next <> state.prompts_cursor then begin
@@ -11872,6 +11934,7 @@ and is loaded on demand through keeper_skill.
               choice, which is where masc started. *)
            Masc_tui_theme_choice.follow_terminal ();
            state.theme_choice <- None;
+           state.theme_before_preview <- None;
            (* Withdrawing the choice withdraws the background with it. *)
            sync_theme_background ()
        | Some "i" | Some "I"
@@ -11900,6 +11963,9 @@ and is loaded on demand through keeper_skill.
            (* Cycling into a pane is entering it. Without this the params pane
               draws whatever the last load left, which for a first visit is an
               empty list -- and empty reads as "nothing registered". *)
+           (* Leaving the themes pane ends the preview the same way Esc does.
+              A scheme the reader never picked must not follow them out. *)
+           cancel_theme_preview ();
            (match state.config_pane with
             | Config_prompts ->
               if state.prompts_snapshot = None

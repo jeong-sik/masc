@@ -31,6 +31,28 @@ let cases =
         check_opt "none" None (theme_of ""))
   ]
 
+(* Whether masc lifts colours a scheme leaves under the readable floor,
+   [tui].lift_colours. Absence reads as on, which is what masc drew before the
+   key existed -- a reader who never set it must see no change.
+
+   Off has to read through as off rather than as absent, because off is a
+   choice: it is what every other terminal UI does, and what a reader on a
+   high-contrast scheme is asking for. *)
+let lift_of s = Config.lift_colours_of_doc (doc_of s)
+let check_lift = Alcotest.(check (option bool))
+
+let lift_cases =
+  [ Alcotest.test_case "reads [tui] lift_colours" `Quick (fun () ->
+        check_lift "true" (Some true)
+          (lift_of "[tui]\nlift_colours = true\n"))
+  ; Alcotest.test_case "off reads through as off, not as absent" `Quick
+      (fun () ->
+        check_lift "false" (Some false)
+          (lift_of "[tui]\nlift_colours = false\n"))
+  ; Alcotest.test_case "absent stays absent" `Quick (fun () ->
+        check_lift "none" None (lift_of "[tui]\ntheme = \"nord\"\n"))
+  ]
+
 (* The box a table draws, [tui].table_frame. Absence has to read as "no" the
    same way an absent theme reads as "follow the terminal": the frame is paid
    for out of the columns, and a reader who never asked for it should not lose
@@ -100,5 +122,6 @@ let () =
   Alcotest.run "tui_config"
     [ ("theme_of_doc", cases)
     ; ("table_frame_of_doc", frame_cases)
+    ; ( "lift_colours", lift_cases )
     ; ("theme_io", io_cases)
     ]

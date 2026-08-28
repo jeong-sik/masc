@@ -303,3 +303,16 @@ module Glyph : sig
   val priority : int -> string
   (** ["!!!"] / ["!!"] / ["!"] / [""] for priorities 1, 2, 3, and lower. *)
 end
+
+val set_lift_enabled : bool -> unit
+val lift_is_enabled : unit -> bool
+(** Whether a colour the scheme leaves under the readable floor is raised
+    until it clears. On by default, which is what masc drew before the setting
+    existed.
+
+    Off sends the scheme's colour as it is. That is what ratatui, tcell and
+    lipgloss do -- emit the code, let the terminal decide -- and it is what a
+    reader on a high-contrast scheme wants, since for them the lift moves a
+    colour their theme placed deliberately. The cost is that masc says some
+    things with colour alone, and a scheme that leaves those dim stops saying
+    them. Whose call that is, is the reason this is a setting. *)

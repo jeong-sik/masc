@@ -1326,6 +1326,11 @@ type state = {
      did before there was a choice to make. *)
   mutable theme_choice: string option;
   mutable theme_cursor: int;
+  (* What was in force when the reader entered the themes pane, so Esc can put
+     it back. [None] inside [Some] is a real answer -- they were following the
+     terminal -- which is why this is an option of an option: the outer one
+     says whether a preview is running at all. *)
+  mutable theme_before_preview: string option option;
   mutable prompts_snapshot: Tui_decode.prompts_snapshot option;
   mutable prompts_error: string option;
   mutable prompts_cursor: int;
@@ -2030,6 +2035,7 @@ let create_state
   config_pane = Config_runtime;
   theme_choice = None;
   theme_cursor = 0;
+  theme_before_preview = None;
   prompts_snapshot = None;
   prompts_error = None;
   prompts_cursor = 0;

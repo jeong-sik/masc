@@ -358,6 +358,22 @@ let abort_replacement reservation =
 ;;
 let rejected_slots registry = registry.rejected_slots
 
+(* Keeper assignments whose target left the frozen catalog. These do not
+   reject a lane slot — the assignment just silently stops resolving and the
+   keeper falls through to the default runtime — which is exactly why they
+   need their own report: on 2026-08-28 three keepers ran on retired targets
+   for days with no log line naming them, only measured fallback traffic. *)
+let catalog_absent_assignments resolver_snapshot ~(assignments :
+    (string * string) list) : (string * string) list =
+  List.filter_map
+    (fun (keeper_name, target_ref) ->
+       match Exact_output.admit_target_ref resolver_snapshot target_ref with
+       | Error (Exact_output.Target_not_in_catalog _) -> Some (keeper_name, target_ref)
+       | Error (Exact_output.Target_ref_rejected _)
+       | Ok _ -> None)
+    assignments
+;;
+
 let resolve_lane registry ~lane_id =
   match
     List.find_opt

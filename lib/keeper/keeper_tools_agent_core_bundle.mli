@@ -4,7 +4,7 @@
     alias-registered (public name) tools that translate input to
     internal payloads. The cleanup thunk releases per-turn sandbox
     runtimes (Docker case). *)
-val make_tool_bundle
+val make_tool_bundle_for_capability_surface
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:
@@ -14,44 +14,16 @@ val make_tool_bundle
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:Keeper_gate_causal_context.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
-  -> ?skill_catalog:Keeper_skill_catalog.t
-       (** Exact global and Task-selected Skills projected for this turn.
-           Composition skills materialize as [keeper_compose_<name>] tools;
-           instruction skills share [keeper_skill]. An absent or empty catalog
-           adds nothing. *)
   -> ?identity_tools:Keeper_identity_tools.offered_tool list
-       (** What the work services this Keeper is attached to offer, from
-           {!Keeper_identity_tools.for_turn}. Passed in rather than read
-           here: the caller is the part that also has to tell the tool-name
-           projection about them, and computing them in two places is how
-           the two would come to disagree. Absent or empty adds nothing.
-           Placed behind the durable Gate by this bundle
-           ({!Keeper_identity_gate.agent_tool}): a row the provider marked
-           read-only runs unasked, everything else defers to the approvals
-           queue on the external-services lane. *)
   -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
-       (** Turn-local approval state. Composition plans are recorded here
-           while their tools are materialized. *)
   -> ?skill_activation_context:Keeper_skill_activation_recorder.t
-       (** Immutable trace, turn, snapshot, and Task facts captured before the
-           tool closures are built. *)
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
+  -> capability_surface:Keeper_capability_surface.t
   -> unit
   -> Keeper_tools_agent_core.tool_bundle
-
-(** Convenience over [make_tool_bundle] returning only [.tools]. *)
-val make_tools
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> publication_recovery:
-       Keeper_publication_recovery_availability.turn_context
-  -> ctx_snapshot:Keeper_types.working_context
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> ?skill_catalog:Keeper_skill_catalog.t
-  -> ?skill_activation_context:Keeper_skill_activation_recorder.t
-  -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
-  -> unit
-  -> Agent_core.Tool.t list
+(** Build a bundle from the immutable Tool and Skill authority frozen by the
+    turn caller. Named compositions and [keeper_plan_execute] receive its exact
+    descriptor list, so neither can widen the configured Tool Group surface. *)
 
 module For_testing : sig
   val make_tool_bundle

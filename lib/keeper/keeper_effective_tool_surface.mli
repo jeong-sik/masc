@@ -1,7 +1,7 @@
-(** Read-only projection of the exact dynamic tool surface prepared for one
-    Keeper turn.  This module consumes the same descriptor, SKILL.md, runtime,
-    and native-posture authorities as the turn path; it does not infer a
-    Keeper surface from the global MCP registry. *)
+(** Read-only projection of the Keeper surface implied by current metadata,
+    profile, Task, Skill snapshot, runtime, and native posture. It uses the
+    same immutable constructor as a turn but does not claim that a past or
+    active turn executed this recomputed value. *)
 
 type tool_origin =
   | Descriptor of { group : string }
@@ -25,8 +25,14 @@ type skill_load_reason =
   | Keeper_profile
   | Task of { task_id : string }
 
+type projection_basis =
+  | Computed_current
+(** Provenance of this projection. A future frozen-turn ledger projection must
+    add a distinct constructor instead of relabeling current state. *)
+
 type t =
-  { keeper_name : string
+  { projection_basis : projection_basis
+  ; keeper_name : string
   ; runtime_id : string
   ; official_client_kind : string
   ; tool_delivery : tool_delivery

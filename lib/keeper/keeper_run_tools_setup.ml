@@ -262,13 +262,17 @@ let prepare_agent_setup
               (Keeper_skill_catalog.error_to_string diagnostic))
          selected.diagnostic)
     task_skill_selection.selected;
-  let turn_skill_projection =
-    Keeper_skill_catalog.project_turn
-      ~names:skill_names
-      ~global:global_skill_catalog
-      ~task:(Keeper_task_skill_turn.skills task_skill_selection)
+  let capability_surface =
+    Keeper_capability_surface.create
+      ~tool_groups:meta.tool_groups
+      ~skill_names
+      ~global_skill_catalog
+      ~task_skills:(Keeper_task_skill_turn.skills task_skill_selection)
   in
-  let skill_catalog = turn_skill_projection.catalog in
+  let turn_skill_projection =
+    Keeper_capability_surface.skill_projection capability_surface
+  in
+  let skill_catalog = Keeper_capability_surface.skill_catalog capability_surface in
   List.iter
     (fun unavailable ->
        Log.Keeper.warn
@@ -337,6 +341,9 @@ let prepare_agent_setup
              ])
         "An attached service names a tool this turn cannot offer")
     identity_offering.Keeper_identity_tools.unusable;
+  let turn_model_visible_descriptors =
+    Keeper_capability_surface.descriptors capability_surface
+  in
   let
     { Keeper_tools_agent_core.tools = keeper_tools
     ; cleanup = keeper_tools_cleanup
@@ -344,15 +351,15 @@ let prepare_agent_setup
     ; gate_replay_delivery
     }
     =
-    Keeper_tools_agent_core_bundle.make_tool_bundle
+    Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
       ~config
       ~meta
       ~publication_recovery
       ~ctx_snapshot
+      ~capability_surface
       ?continuation_channel
       ~gate_context
       ?hitl_resolution
-      ~skill_catalog
       ~identity_tools:identity_offering.Keeper_identity_tools.offered
       ?composition_plan_index
       ~skill_activation_context
@@ -426,7 +433,7 @@ let prepare_agent_setup
   in
   let tools = keeper_tools in
   let registered_descriptors = Keeper_tool_descriptor.all_descriptors () in
-  let model_visible_descriptors =
+  let globally_model_visible_descriptors =
     Keeper_tool_descriptor.model_visible_descriptors ()
   in
   let transport_alias_count =
@@ -471,7 +478,7 @@ let prepare_agent_setup
   in
   let unexplained_exclusion_count =
     List.length registered_descriptors
-    - List.length model_visible_descriptors
+    - List.length globally_model_visible_descriptors
     - transport_alias_count
     - operator_only_count
     - invalid_schema_count
@@ -486,7 +493,7 @@ let prepare_agent_setup
            (fun (offered : Keeper_identity_tools.offered_tool) ->
               offered.Keeper_identity_tools.schema.name)
            identity_offering.Keeper_identity_tools.offered)
-      ~model_visible_descriptors
+      ~model_visible_descriptors:turn_model_visible_descriptors
       ()
   in
   let actual_model_names = List.sort_uniq String.compare all_tool_names in

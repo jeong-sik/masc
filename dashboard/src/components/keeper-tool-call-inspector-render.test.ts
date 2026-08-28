@@ -658,9 +658,11 @@ describe('KeeperToolCallInspector render', () => {
           success: true,
           duration_ms: 4,
           disposition: 'completed',
-          assembler_run_id: 'exact-assembler-run-42',
-          proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          proposal_provenance_status: 'retained_match',
+          proposal_execution: {
+            assembler_run_id: 'exact-assembler-run-42',
+            proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            provenance_status: 'retained_match',
+          },
         },
       ],
     })
@@ -675,8 +677,14 @@ describe('KeeperToolCallInspector render', () => {
     const badge = container.querySelector('[data-testid="proposal-execution-badge"]')
     expect(badge?.textContent).toContain('proposal aaaaaaaaaaaa · retained_match')
     expect(badge?.getAttribute('title')).toContain('exact-assembler-run-42')
+    expect(badge?.getAttribute('title')).toContain(
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    )
     const row = container.querySelector('[data-proposal-id]')
     expect(row?.getAttribute('data-assembler-run')).toBe('exact-assembler-run-42')
+    expect(row?.getAttribute('data-proposal-id')).toBe(
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    )
     expect(row?.getAttribute('data-proposal-provenance')).toBe('retained_match')
 
     const rowToggle = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement | null
@@ -686,6 +694,9 @@ describe('KeeperToolCallInspector render', () => {
     })
     await flushUi()
     expect(container.textContent).toContain('assembler exact-assembler-run-42')
+    expect(container.textContent).toContain(
+      'proposal aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    )
     expect(container.textContent).toContain('proposal provenance retained_match')
   })
 

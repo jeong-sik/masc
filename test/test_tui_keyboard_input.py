@@ -5528,6 +5528,89 @@ def keeper_calls_interaction() -> Interaction:
     return interact
 
 
+def keeper_calls_constrained_fixture() -> SequencedHttpResponse:
+    status, payload = keeper_calls_fixture()
+    assert status == 200 and isinstance(payload, dict)
+    entries = list(cast(list[dict[str, object]], payload["entries"]))
+    entries.append(
+        {
+            "ts": 1787535020.0,
+            "keeper": "beta",
+            "tool": "Read",
+            "input": '{"file_path": "foreign.ml"}',
+            "success": True,
+            "duration_ms": 1.0,
+        }
+    )
+    stale_payload = dict(payload)
+    stale_payload.update({"count": 3, "health": "stale", "entries": entries})
+    return SequencedHttpResponse(
+        [
+            (200, stale_payload),
+            (503, {"error": "fixture keeper-call refresh failed"}),
+        ]
+    )
+
+
+def keeper_calls_constrained_interaction() -> Interaction:
+    """Proposal identity stays atomic under the supported short stale pane."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"t",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 calls",
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"r",
+            b"fixture keeper-call refresh failed",
+        )
+        pane = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=15,
+            columns=100,
+            needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 calls (2)",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        plain = CSI_RE.sub(b"", pane)
+        for needle, what in (
+            (b"exact-assembler-run-42", "the Assembler producer run"),
+            (b"a" * 64, "the full proposal identity"),
+            (b"retained_match", "the provenance verdict"),
+            (b"fixture keeper-call refresh failed", "the retained refresh failure"),
+            (b"named another keeper", "the foreign-row mismatch"),
+        ):
+            if needle not in plain:
+                raise AssertionError(
+                    f"Constrained Keeper Calls did not draw {what}: {pane!r}"
+                )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b",
+            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+        )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
     """A surface that has not been read says so; only a read that came back
     empty says the queue is empty.
@@ -8466,6 +8549,15 @@ def run_keyboard_regression(executable: str) -> None:
         interact=keeper_calls_interaction(),
         http_fixtures={
             "/api/v1/keepers/alpha/tool-calls?limit=100": keeper_calls_fixture(),
+        },
+    )
+    constrained_keeper_calls = keeper_calls_constrained_fixture()
+    run_terminal_scenario(
+        executable,
+        description="Keeper proposal identity in constrained stale call log",
+        interact=keeper_calls_constrained_interaction(),
+        http_fixtures={
+            "/api/v1/keepers/alpha/tool-calls?limit=100": constrained_keeper_calls,
         },
     )
     verification_gate = GatedHttpResponse((200, {"requests": [], "total": 0}))

@@ -139,6 +139,53 @@ export interface SkillEvidenceResponse {
 
 export interface WritableSkillSource { source_id: string }
 
+export interface AsyncRequestRow {
+  request_id: string
+  keeper_name: string
+  submitted_by: string
+  status: string
+  submitted_at: number
+  elapsed_sec?: number
+  completed_at?: number
+  ok?: boolean
+  result?: unknown
+  worker_ownership: 'runtime_owned' | 'disk_only_ownership_unknown'
+}
+
+export interface AsyncStartupRecovery {
+  lost: number
+  finalized: number
+  cleaned: number
+  staging_files_inspected: number
+  staging_files_deleted: number
+  staging_files_preserved: number
+  unreadable: number
+  failed: number
+  store_errors: readonly Record<string, unknown>[]
+  record_errors: readonly Record<string, unknown>[]
+}
+
+export type AsyncRequestObservation =
+  | {
+      schema: 'masc.async-request-observation/v1'
+      status: 'ready'
+      summary: {
+        active: number
+        runtime_owned: number
+        ownership_unknown: number
+        record_errors: number
+      }
+      requests: readonly AsyncRequestRow[]
+      record_errors: readonly Record<string, unknown>[]
+      startup_recovery: AsyncStartupRecovery | null
+    }
+  | {
+      schema: 'masc.async-request-observation/v1'
+      status: 'unavailable'
+      error: Record<string, unknown>
+      startup_recovery: AsyncStartupRecovery | null
+    }
+
 interface SkillSurfaceBase {
   reference: SkillReference
   diagnostics?: readonly string[]
@@ -271,6 +318,55 @@ const SkillEvidenceResponseSchema = Schema.Struct({
     unavailable: Schema.Array(Schema.String),
   }),
 })
+
+const AsyncStartupRecoverySchema = Schema.Struct({
+  lost: NonNegativeSafeIntegerSchema,
+  finalized: NonNegativeSafeIntegerSchema,
+  cleaned: NonNegativeSafeIntegerSchema,
+  staging_files_inspected: NonNegativeSafeIntegerSchema,
+  staging_files_deleted: NonNegativeSafeIntegerSchema,
+  staging_files_preserved: NonNegativeSafeIntegerSchema,
+  unreadable: NonNegativeSafeIntegerSchema,
+  failed: NonNegativeSafeIntegerSchema,
+  store_errors: Schema.Array(UnknownRecordSchema),
+  record_errors: Schema.Array(UnknownRecordSchema),
+})
+
+const AsyncRequestObservationSchema = Schema.Union(
+  Schema.Struct({
+    schema: Schema.Literal('masc.async-request-observation/v1'),
+    status: Schema.Literal('ready'),
+    summary: Schema.Struct({
+      active: NonNegativeSafeIntegerSchema,
+      runtime_owned: NonNegativeSafeIntegerSchema,
+      ownership_unknown: NonNegativeSafeIntegerSchema,
+      record_errors: NonNegativeSafeIntegerSchema,
+    }),
+    requests: Schema.Array(Schema.Struct({
+      request_id: Schema.NonEmptyString,
+      keeper_name: Schema.NonEmptyString,
+      submitted_by: Schema.NonEmptyString,
+      status: Schema.NonEmptyString,
+      submitted_at: Schema.Number,
+      elapsed_sec: Schema.optional(Schema.Number),
+      completed_at: Schema.optional(Schema.Number),
+      ok: Schema.optional(Schema.Boolean),
+      result: Schema.optional(Schema.Unknown),
+      worker_ownership: Schema.Literal(
+        'runtime_owned',
+        'disk_only_ownership_unknown',
+      ),
+    })),
+    record_errors: Schema.Array(UnknownRecordSchema),
+    startup_recovery: Schema.NullOr(AsyncStartupRecoverySchema),
+  }),
+  Schema.Struct({
+    schema: Schema.Literal('masc.async-request-observation/v1'),
+    status: Schema.Literal('unavailable'),
+    error: UnknownRecordSchema,
+    startup_recovery: Schema.NullOr(AsyncStartupRecoverySchema),
+  }),
+)
 
 const SkillProfileSchema = Schema.Struct({
   reference: SkillReferenceSchema,
@@ -504,6 +600,28 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
 export async function fetchSkillEvidence(reference: SkillReference): Promise<SkillEvidenceResponse> {
   const raw = await post<unknown>('/api/v1/skills/evidence', { reference })
   return decodeSkillEvidenceResponse(raw)
+}
+
+export function decodeAsyncRequestObservation(raw: unknown): AsyncRequestObservation {
+  const decoded = decodeWithSchema(
+    AsyncRequestObservationSchema,
+    raw,
+    'invalid_response',
+  )
+  if (decoded.status === 'ready') {
+    const { active, runtime_owned: owned, ownership_unknown: unknown } = decoded.summary
+    if (active !== decoded.requests.length || active !== owned + unknown) {
+      contractError('invalid_response', 'async request summary disagrees with request rows')
+    }
+  }
+  return decoded
+}
+
+export async function fetchAsyncRequestObservation(
+  opts: GetOptions = {},
+): Promise<AsyncRequestObservation> {
+  const raw = await get<unknown>('/api/v1/async-requests', opts)
+  return decodeAsyncRequestObservation(raw)
 }
 
 export async function fetchWritableSkillSources(): Promise<readonly WritableSkillSource[]> {

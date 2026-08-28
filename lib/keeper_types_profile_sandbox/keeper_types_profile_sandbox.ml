@@ -23,8 +23,9 @@ type sandbox_profile =
         {e 4.2}). Transport-only: the Docker container knobs are not
         reproduced, [network_mode = "none"] is rejected at config load
         ([remote_ssh_no_network_mode]), and the only accepted network
-        mode is [Network_inherit] (the default). The runner lands in
-        Phase 1 task 6; every dispatch arm fails closed until then. *)
+        mode is [Network_inherit] (the default). Execute and read dispatch
+        run over the SSH runner; the Docker-shaped arms refuse this profile
+        rather than falling back to a host route. *)
 
 module Sandbox_profile_tla = struct
   type t = sandbox_profile =

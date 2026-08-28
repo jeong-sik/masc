@@ -89,8 +89,8 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
     Error
       (target_error
          "remote_ssh_dispatch_unavailable: typed Shell IR Docker dispatch does \
-          not apply to sandbox_profile=remote_ssh; SSH runner not wired yet \
-          (Phase 1 task 6)")
+          not apply to sandbox_profile=remote_ssh; that profile dispatches \
+          through the SSH runner instead")
   | Runtime runtime ->
     let image = docker_image meta in
     (match

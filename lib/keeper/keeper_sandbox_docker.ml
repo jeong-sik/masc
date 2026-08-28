@@ -243,13 +243,13 @@ let ensure_shell_image_available ~(meta : keeper_meta) ~image ~timeout_sec =
      | Error detail -> Error ("microvm_shell_failed: " ^ detail))
   (* Fail closed: a remote_ssh keeper has no host-side shell image store,
      and falling through to the docker daemon check would be the silent
-     substitution the profile exists to rule out. The SSH runner lands in
-     Phase 1 task 6; dispatch refuses this profile upstream until then. *)
+     substitution the profile exists to rule out. A remote_ssh keeper
+     dispatches through the SSH runner, never through here. *)
   | Keeper_types_profile_sandbox.Remote_ssh ->
     Error
       "remote_ssh_dispatch_unavailable: sandbox_profile=remote_ssh has no \
-       host-side shell image; SSH runner not wired yet (Phase 1 task 6); \
-       no fallback to docker or host image stores"
+       host-side shell image; the remote endpoint carries its own, and \
+       there is no fallback to docker or host image stores"
   | Keeper_types_profile_sandbox.Local | Keeper_types_profile_sandbox.Docker ->
   match
     Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class

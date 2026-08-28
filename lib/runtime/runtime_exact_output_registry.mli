@@ -97,6 +97,16 @@ val current : unit -> (t, publication_error) result
 
 val rejected_slots : t -> rejected_slot list
 
+val catalog_absent_assignments :
+  Agent_core.Exact_output.resolver_snapshot ->
+  assignments:(string * string) list ->
+  (string * string) list
+(** Keeper assignments (from [[runtime.assignments]]) whose target is absent
+    from the frozen model catalog. Unlike a rejected lane slot this changes
+    no admission — the assignment silently stops resolving and the keeper
+    falls back to the default runtime — so callers must report it rather than
+    let it degrade quietly. Pure. *)
+
 val resolve_lane : t -> lane_id:string -> (resolved_lane, lane_resolution_error) result
 (** Acquire one lane exclusively from the immutable admitted handles retained
     by the supplied registry. This does not resolve credentials or

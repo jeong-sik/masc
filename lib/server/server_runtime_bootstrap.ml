@@ -254,6 +254,7 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
 ;;
 
 let warn_rejected_exact_output_slots registry =
+  let rejected = Runtime_exact_output_registry.rejected_slots registry in
   List.iter
     (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
        Log.Server.warn
@@ -262,7 +263,46 @@ let warn_rejected_exact_output_slots registry =
          slot.position
          slot.slot_id
          slot.target_ref)
-    (Runtime_exact_output_registry.rejected_slots registry)
+    rejected;
+  (* One consolidated line at ERROR, because per-slot WARNs at "remaining
+     slots stay active" read as tolerable degradation and get discounted:
+     four lanes carried retired targets for days on 2026-08-28 while the
+     warnings repeated unread. The count and lane list make the standing
+     config debt visible once per publish. *)
+  (match rejected with
+   | [] -> ()
+   | rejected ->
+     let lanes =
+       rejected
+       |> List.map (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+              slot.lane_id)
+       |> List.sort_uniq String.compare
+     in
+     Log.Server.error
+       "exact_output: %d retired target ref(s) ignored across %d lane(s) (%s) — the catalog moved on and runtime.toml has not; delete or replace them"
+       (List.length rejected)
+       (List.length lanes)
+       (String.concat ", " lanes))
+;;
+
+let warn_catalog_absent_keeper_assignments resolver_snapshot =
+  let absent =
+    Runtime_exact_output_registry.catalog_absent_assignments
+      resolver_snapshot
+      ~assignments:(Runtime.keeper_assignments ())
+  in
+  (* An assignment whose target left the catalog does not fail anything —
+     the keeper silently falls back to the default runtime — so without this
+     line nothing names it. Three keepers ran that way for days
+     (2026-08-28). *)
+  (match absent with
+   | [] -> ()
+   | absent ->
+     Log.Server.error
+       "runtime: %d keeper assignment(s) target absent-from-catalog runtime(s): %s — these keepers silently run on the default runtime; update [runtime.assignments]"
+       (List.length absent)
+       (String.concat ", "
+          (List.map (fun (keeper, target) -> keeper ^ " -> " ^ target) absent)))
 ;;
 
 let warn_rejected_exact_output_bindings resolver_snapshot =
@@ -345,6 +385,7 @@ let configure_exact_output_registry ?config_root () =
             ("exact-output resolver-and-lane registry: " ^ detail))
      | Ok registry ->
        warn_rejected_exact_output_slots registry;
+       warn_catalog_absent_keeper_assignments resolver_snapshot;
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry published%s"
          catalog_description;

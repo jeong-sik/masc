@@ -64,11 +64,6 @@ describe('resolveUnifiedStatus', () => {
     expect(r.description).toBe('컨텍스트 압축 중')
   })
 
-  it('resolves handoff transitional', () => {
-    const r = resolveUnifiedStatus('handoff', null, null)
-    expect(r.description).toBe('핸드오프 진행 중')
-  })
-
   it('falls back to agent status when keeper is null', () => {
     const r = resolveUnifiedStatus(null, 'running', null)
     expect(r.canonical).toBe('running')

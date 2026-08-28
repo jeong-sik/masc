@@ -183,7 +183,7 @@ describe('taskLineageStage', () => {
     expect(taskLineageStage('claimed').key).toBe('claimed')
     expect(taskLineageStage('claim').key).toBe('claimed')
     expect(taskLineageStage('in_progress').key).toBe('started')
-    expect(taskLineageStage('handoff').key).toBe('handoff')
+    expect(taskLineageStage('handoff')).toMatchObject({ key: 'handoff', lbl: '핸드오프' })
     expect(taskLineageStage('submit_for_verification').key).toBe('submitted')
     expect(taskLineageStage('awaiting_verification').key).toBe('submitted')
     expect(taskLineageStage('approved').key).toBe('approved')

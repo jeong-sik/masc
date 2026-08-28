@@ -382,8 +382,9 @@ let test_registry_preserves_admitted_slots_without_resolving_credentials () =
           ; "credential-invalid"
           ; "credential-read-failed"
           ]
+      ; cli_slot_ids = []
       }
-    ; { id = "credential-constrained"; slot_ids = credential_constrained }
+    ; { id = "credential-constrained"; slot_ids = credential_constrained ; cli_slot_ids = [] }
     ]
   in
   let registry =
@@ -411,6 +412,60 @@ let test_registry_preserves_admitted_slots_without_resolving_credentials () =
     registry
 ;;
 
+let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
+  let snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement
+         { source = "cli-slot-carry"; contents = replacement_catalog })
+  in
+  let cli = [ "antigravity_subscription.gemini-3-7-flash-high" ] in
+  (match
+     Registry.publish
+       ~lanes:[ { id = "mixed"; slot_ids = [ replacement_target ]; cli_slot_ids = cli } ]
+       snapshot
+   with
+   | Error error ->
+     Alcotest.failf
+       "cli-suffixed lane must publish: %s"
+       (Registry.publication_error_to_string error)
+   | Ok registry ->
+     (match Registry.resolve_lane registry ~lane_id:"mixed" with
+      | Ok { selected_slots; cli_slots } ->
+        Alcotest.(check (list string))
+          "catalog slots admit unchanged"
+          [ replacement_target ]
+          (List.map
+             (fun (slot : Registry.selected_slot) -> slot.slot_id)
+             selected_slots);
+        Alcotest.(check (list string)) "cli slots carried verbatim" cli cli_slots
+      | Error error ->
+        Alcotest.failf
+          "cli-suffixed lane must resolve: %s"
+          (Registry.lane_resolution_error_to_string error)));
+  match
+    Registry.publish
+      ~lanes:
+        [ { id = "cli-only"; slot_ids = [ "not-in-frozen-catalog" ]; cli_slot_ids = cli } ]
+      snapshot
+  with
+  | Error error ->
+    Alcotest.failf
+      "cli-only lane must publish: %s"
+      (Registry.publication_error_to_string error)
+  | Ok registry ->
+    (match Registry.resolve_lane registry ~lane_id:"cli-only" with
+     | Ok { selected_slots = []; cli_slots } ->
+       Alcotest.(check (list string))
+         "every catalog slot dropped, the cli suffix keeps the lane alive"
+         cli
+         cli_slots
+     | Ok _ -> Alcotest.fail "no catalog slot may admit in the cli-only lane"
+     | Error error ->
+       Alcotest.failf
+         "cli-only lane must resolve, not degrade: %s"
+         (Registry.lane_resolution_error_to_string error))
+;;
+
 let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
   let snapshot =
     load_control_snapshot
@@ -424,7 +479,7 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
   let optional_registry =
     match
       Registry.publish
-        ~lanes:[ { id = optional_lane; slot_ids = [ unknown_target ] } ]
+        ~lanes:[ { id = optional_lane; slot_ids = [ unknown_target ]; cli_slot_ids = [] } ]
         snapshot
     with
     | Ok registry -> registry
@@ -453,7 +508,7 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
     match
       Registry.publish
         ~required_lane_ids:[ required_lane ]
-        ~lanes:[ { id = required_lane; slot_ids = [ replacement_target ] } ]
+        ~lanes:[ { id = required_lane; slot_ids = [ replacement_target ]; cli_slot_ids = [] } ]
         snapshot
     with
     | Ok registry -> registry
@@ -466,7 +521,7 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
   (match
      Registry.publish
        ~required_lane_ids:[ required_lane ]
-       ~lanes:[ { id = required_lane; slot_ids = [ unknown_target ] } ]
+       ~lanes:[ { id = required_lane; slot_ids = [ unknown_target ]; cli_slot_ids = [] } ]
        snapshot
    with
    | Error (Registry.Required_lane_unavailable { lane_id }) ->
@@ -678,7 +733,7 @@ let test_published_registry_value_is_generation_stable () =
   let publish slot_ids =
     match
       Runtime.publish_exact_output_registry
-        ~lanes:[ Runtime_schema.{ id = lane_id; slot_ids } ]
+        ~lanes:[ Runtime_schema.{ id = lane_id; slot_ids; cli_slot_ids = [] } ]
         resolver_snapshot
     with
     | Ok registry -> registry
@@ -885,5 +940,9 @@ let () =
             "repo config and deployment overlay admit the Board attention seed lane"
             `Quick
             test_repo_seed_board_attention_lane_admits
+        ; Alcotest.test_case
+            "cli slots survive resolution and keep a lane alive"
+            `Quick
+            test_cli_slots_survive_resolution_and_keep_a_lane_alive
         ] ) ]
 ;;

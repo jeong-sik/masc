@@ -1,6 +1,7 @@
 type lane_configuration =
   | Configured of
       { admitted_slots : string list
+      ; cli_slots : string list
       ; dropped_slots : string list
       ; admission_error : string option
       }
@@ -261,19 +262,19 @@ let lane_json
   let configuration = resolve_lane spec.lane_id in
   let configured, config_state, admitted_slots, admission_error =
     match configuration with
-    | Configured { admitted_slots; dropped_slots; admission_error } ->
+    | Configured { admitted_slots; cli_slots; dropped_slots; admission_error } ->
       Some true,
-      (if admitted_slots = [] then "degraded" else "ready"),
-      (admitted_slots, dropped_slots),
+      (if admitted_slots = [] && cli_slots = [] then "degraded" else "ready"),
+      (admitted_slots, cli_slots, dropped_slots),
       admission_error
-    | Unconfigured error -> Some false, "unconfigured", ([], []), Some error
-    | Registry_unavailable error -> None, "unavailable", ([], []), Some error
+    | Unconfigured error -> Some false, "unconfigured", ([], [], []), Some error
+    | Registry_unavailable error -> None, "unavailable", ([], [], []), Some error
   in
-  let admitted_slots, dropped_slots = admitted_slots in
+  let admitted_slots, cli_slots, dropped_slots = admitted_slots in
   let status =
     match configuration with
     | Registry_unavailable _ | Unconfigured _ -> "unavailable"
-    | Configured { admitted_slots = []; _ } -> "degraded"
+    | Configured { admitted_slots = []; cli_slots = []; _ } -> "degraded"
     | Configured _ when running_count > 0 -> "running"
     | Configured _ when runs = [] -> "no_retained_observation"
     | Configured _ ->
@@ -293,6 +294,7 @@ let lane_json
     ; "configured", (match configured with None -> `Null | Some value -> `Bool value)
     ; "configuration_state", `String config_state
     ; "admitted_slots", `List (List.map (fun slot -> `String slot) admitted_slots)
+    ; "cli_slots", `List (List.map (fun slot -> `String slot) cli_slots)
     ; "dropped_slots", `List (List.map (fun slot -> `String slot) dropped_slots)
     ; "admission_error", json_string_opt admission_error
     ; "status", `String status
@@ -359,12 +361,13 @@ let live_lane_configuration registry lane_id =
             else None)
   in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-  | Ok { selected_slots } ->
+  | Ok { selected_slots; cli_slots } ->
     Configured
       { admitted_slots =
           List.map
             (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
             selected_slots
+      ; cli_slots
       ; dropped_slots
       ; admission_error = None
       }
@@ -375,6 +378,7 @@ let live_lane_configuration registry lane_id =
   | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
     Configured
       { admitted_slots = []
+      ; cli_slots = []
       ; dropped_slots
       ; admission_error =
           Some

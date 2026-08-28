@@ -283,7 +283,7 @@ let require_replacement_base_changed label = function
 ;;
 
 let transaction_lanes lane_id : Runtime_schema.exact_output_lane_decl list =
-  [ { id = lane_id; slot_ids = [ replacement_target ] } ]
+  [ { id = lane_id; slot_ids = [ replacement_target ]; cli_slot_ids = [] } ]
 ;;
 
 let require_transaction_lane label ~lane_id registry =

@@ -181,7 +181,7 @@ let catalog_generation_fingerprint snapshot =
 ;;
 
 let publish_registry ~lane_id ~slot_ids resolver_snapshot =
-  let lane : Runtime_schema.exact_output_lane_decl = { id = lane_id; slot_ids } in
+  let lane : Runtime_schema.exact_output_lane_decl = { id = lane_id; slot_ids; cli_slot_ids = [] } in
   match Runtime_exact_output_registry.publish ~lanes:[ lane ] resolver_snapshot with
   | Ok registry -> registry
   | Error error ->
@@ -193,7 +193,7 @@ let publish_registry ~lane_id ~slot_ids resolver_snapshot =
 let publish_runtime_lane ?connect_timeout_s ~source ~base_url () =
   let slot_ids = [ "compaction-exact-fixture" ] in
   let lanes : Runtime_schema.exact_output_lane_decl list =
-    [ { id = "compaction_exact"; slot_ids } ]
+    [ { id = "compaction_exact"; slot_ids; cli_slot_ids = [] } ]
   in
   let fixtures = List.map (fun id -> { id; base_url }) slot_ids in
   let connect_timeouts =

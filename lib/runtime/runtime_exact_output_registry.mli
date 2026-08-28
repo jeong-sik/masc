@@ -47,7 +47,15 @@ type selected_slot =
   }
 
 type resolved_lane =
-  { selected_slots : selected_slot list }
+  { selected_slots : selected_slot list
+  ; cli_slots : string list
+        (** Official-client runtime ids the lane walks as one-shot fallbacks
+            after every catalog slot is exhausted, in declaration order.
+            Carried verbatim from [cli_slots]; whether an id resolves to a
+            live official-client runtime is answered at execution with a
+            typed error, and a lane with only cli slots is still resolvable
+            (RFC cli-runtimes-as-lane-slots). *)
+  }
 
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }

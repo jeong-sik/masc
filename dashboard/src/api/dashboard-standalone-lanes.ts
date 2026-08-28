@@ -35,6 +35,7 @@ export interface StandaloneLaneSnapshotRow {
   configured: boolean | null
   configurationState: StandaloneLaneConfigurationState
   admittedSlots: string[]
+  cliSlots: string[]
   droppedSlots: string[]
   admissionError: string | null
   status: StandaloneLaneStatus
@@ -119,6 +120,7 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
     fail(`${context}.configuration_state is unknown`)
   }
   if (!Array.isArray(raw.admitted_slots)) fail(`${context}.admitted_slots must be an array`)
+  if (!Array.isArray(raw.cli_slots)) fail(`${context}.cli_slots must be an array`)
   if (!Array.isArray(raw.dropped_slots)) fail(`${context}.dropped_slots must be an array`)
   if (!Array.isArray(raw.selected_slots)) fail(`${context}.selected_slots must be an array`)
   if (typeof raw.required !== 'boolean') fail(`${context}.required must be a boolean`)
@@ -136,6 +138,7 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
     configured: raw.configured as boolean | null,
     configurationState: configurationState as StandaloneLaneConfigurationState,
     admittedSlots: raw.admitted_slots.map((slot, slotIndex) => string(slot, `${context}.admitted_slots[${slotIndex}]`)),
+    cliSlots: raw.cli_slots.map((slot, slotIndex) => string(slot, `${context}.cli_slots[${slotIndex}]`)),
     droppedSlots: raw.dropped_slots.map((slot, slotIndex) => string(slot, `${context}.dropped_slots[${slotIndex}]`)),
     admissionError: nullableString(raw.admission_error, `${context}.admission_error`),
     status: status as StandaloneLaneStatus,

@@ -280,6 +280,7 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_status = Tui_decode.Standalone_idle
   ; sl_configuration_state = "ready"
   ; sl_admitted_slots = []
+  ; sl_cli_slots = []
   ; sl_dropped_slots = []
   ; sl_admission_error = None
   ; sl_retained_run_count = 0

@@ -217,10 +217,13 @@ describe('existing Skill editor contract', () => {
 const coverage = {
   composition_scope: 'exact_reference_latest_completed' as const,
   composition_records_read: 0,
+  composition_unavailable: [],
   coverage_complete: false as const,
-  activation_scope: 'current_keeper_sessions' as const,
+  activation_scope: 'complete_retained_trace_snapshot' as const,
+  activation_sessions_inspected: 2,
   activation_ledgers_loaded: 2,
-  unavailable: [],
+  activation_gaps: [],
+  activation_owner_gap_count: 0,
 }
 
 const compositionNode = {
@@ -282,29 +285,39 @@ describe('skill evidence contract', () => {
 
   it('keeps instruction activation and composition result in one exact envelope', () => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v4',
+      schema: 'masc.skill-evidence/v5',
       status: 'observed',
       reference,
       activation: {
-        keeper: 'rondo',
-        activation: {
-          activated_at: '2026-08-28T03:00:00Z',
-          skill_tool_use_id: 'skill-call-1',
-          delivery: null,
-          actions: [],
+        selection: 'most_recent_observed',
+        evidence: {
+          trace_id: 'trace-proof',
+          owner: {
+            status: 'known',
+            claims: [{ keeper: 'rondo', source: 'current_meta' }],
+            gaps: [],
+          },
+          activation: {
+            identity: reference.identity,
+            content_revision: reference.content_revision,
+            activated_at: '2026-08-28T03:00:00Z',
+            skill_tool_use_id: 'skill-call-1',
+            delivery: null,
+            actions: [],
+          },
         },
       },
       composition: compositionEvidence,
       coverage: { ...coverage, composition_records_read: 1 },
     })
 
-    expect(decoded.activation?.keeper).toBe('rondo')
+    expect(decoded.activation?.selection).toBe('most_recent_observed')
     expect(decoded.composition?.executor_settlements).toHaveLength(1)
   })
 
   it('rejects async evidence without its durable request identity', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v4',
+      schema: 'masc.skill-evidence/v5',
       status: 'observed',
       reference,
       activation: null,
@@ -319,7 +332,7 @@ describe('skill evidence contract', () => {
 
   it('rejects impossible node batch and truncation invariants', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v4',
+      schema: 'masc.skill-evidence/v5',
       status: 'observed',
       reference,
       activation: null,
@@ -337,7 +350,7 @@ describe('skill evidence contract', () => {
 
   it('rejects observed status without any observed evidence', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v4',
+      schema: 'masc.skill-evidence/v5',
       status: 'observed',
       reference,
       activation: null,
@@ -348,18 +361,19 @@ describe('skill evidence contract', () => {
 
   it('keeps partial ledger coverage visible when nothing was observed', () => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v4',
-      status: 'not_observed_in_current_coverage',
+      schema: 'masc.skill-evidence/v5',
+      status: 'not_observed_in_retained_coverage',
       reference,
       activation: null,
       composition: null,
       coverage: {
         ...coverage,
-        unavailable: ['sangsu: ledger_unreadable'],
+        activation_scope: 'incomplete_retained_trace_snapshot',
+        activation_gaps: [{ code: 'ledger_unreadable' }],
       },
     })
 
-    expect(decoded.coverage.unavailable).toEqual(['sangsu: ledger_unreadable'])
+    expect(decoded.coverage.activation_gaps).toEqual([{ code: 'ledger_unreadable' }])
   })
 
   it.each([
@@ -367,13 +381,13 @@ describe('skill evidence contract', () => {
     'unavailable',
   ] as const)('accepts the declared composition scope %s', (composition_scope) => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v4',
-      status: 'not_observed_in_current_coverage',
+      schema: 'masc.skill-evidence/v5',
+      status: 'not_observed_in_retained_coverage',
       reference,
       activation: null,
       composition: null,
       coverage: composition_scope === 'unavailable'
-        ? { ...coverage, composition_scope, unavailable: ['index unreadable'] }
+        ? { ...coverage, composition_scope, composition_unavailable: ['index unreadable'] }
         : { ...coverage, composition_scope },
     })
 

@@ -2032,12 +2032,20 @@ let materialize_runtime_config_text ~config_path content =
 ;;
 
 let runtime_config_commit_order = ref Int64.zero
+let runtime_config_commit_order_mu = Stdlib.Mutex.create ()
 
 let committed_receipt ~observation ~durability =
-  runtime_config_commit_order := Int64.succ !runtime_config_commit_order;
+  let order =
+    (* Process-global publication order spans every runtime.toml authority.
+       The file lock is path-scoped, so distinct config paths can commit on
+       different domains and must synchronize this shared sequence here. *)
+    Stdlib.Mutex.protect runtime_config_commit_order_mu (fun () ->
+      runtime_config_commit_order := Int64.succ !runtime_config_commit_order;
+      !runtime_config_commit_order)
+  in
   { observation
   ; durability
-  ; order = Config_commit_order !runtime_config_commit_order
+  ; order = Config_commit_order order
   ; lock_warnings = []
   }
 ;;

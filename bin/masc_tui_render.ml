@@ -235,6 +235,8 @@ let chat_markdown_cache_capacity = 128
 (* Newest events the Skill Timeline section draws. The full count still
    prints in the heading; the cap keeps one busy ledger from pushing the
    usage and catalog sections off the first screen. *)
+let skill_timeline_display_cap = 15
+
 type chat_markdown_identity = {
   cmi_style : Message_layout.style;
   cmi_keeper_name : string;
@@ -853,10 +855,9 @@ let agenda_line agenda ~cols =
    partway up the screen; now it would push the composer up with it, and the
    row an operator reaches for would move per surface. *)
 let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
-  (* The strip's rows come off the body here and off the scroll bound in
-     [scrolled_surface], both from [Agenda.rows_taken] on the same projection.
-     Two readers of one number: the row the frame draws is the row the
-     keypress stops short of. *)
+  (* [surface_body_rows] removes the strip before either the frame or the
+     typed scroll layout receives its body budget. Two readers of that one
+     budget: the row the frame draws is the row the keypress stops short of. *)
   let agenda_rows = Masc_tui_types.agenda_chrome_rows state in
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows:rows in
   let drawn = frame_lines buf in
@@ -8650,39 +8651,14 @@ let tools_pane_strip (state : state) =
   ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
 ;;
 
-let render_tools (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
+let tools_display_lines (state : state) =
   let registered_tools =
     match state.tools_inventory with
     | None -> []
     | Some s -> s.Masc.Tui_decode.ts_tools
   in
-  let registered_rows = Tool_tree.rows registered_tools in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
-  let header =
-    (* The strip replaces the old subtitle. "effective Keeper + registered
-       catalog" named two of the five sections and the header is where a
-       reader looks for what a surface holds. *)
-    Printf.sprintf "%s  %s  %s  %s"
-      (screen_title " MASC Tools") (tools_pane_strip state) timestamp
-      (connection_badge state)
-  in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-  (match state.tools_error with
-   | None -> ()
-   | Some detail ->
-       box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
   let effective_lines =
+    lazy begin
     match state.tools_inventory with
     | None -> [ (Theme.warn ()), " Effective Keeper Surface — not loaded" ]
     | Some { Masc.Tui_decode.ts_effective = None; _ } ->
@@ -9116,8 +9092,10 @@ let render_tools (state : state) =
                   left_out)
         @ [ Ansi.bold, Printf.sprintf "   %-34s %s" "Tool" "Origin" ]
         @ tool_lines
+    end
   in
   let activation_lines =
+    lazy begin
     match state.tools_inventory with
     | None -> [ Theme.warn (), " Skill Activations — not loaded" ]
     | Some { Masc.Tui_decode.ts_skill_activations = None; _ } ->
@@ -9318,10 +9296,7 @@ let render_tools (state : state) =
           in
           let total = List.length events in
           let capped =
-            List.filteri
-              (fun index _ ->
-                 index < Masc_tui_types.skill_timeline_display_cap)
-              events
+            List.filteri (fun index _ -> index < skill_timeline_display_cap) events
           in
           [ Ansi.bold,
             Printf.sprintf " Skill Timeline — %d event%s (newest first)"
@@ -9367,8 +9342,11 @@ let render_tools (state : state) =
         @ timeline_lines
         @ scoped_lines
         @ receipt_lines
+    end
   in
   let catalog_lines =
+    lazy begin
+    let registered_rows = Tool_tree.rows registered_tools in
     let heading =
       [ Ansi.bold,
         Printf.sprintf " Registered Catalog — %d tools"
@@ -9410,8 +9388,10 @@ let render_tools (state : state) =
                   (if tool.tl_direct_call then "yes" else "no")
                   (Terminal_text.single_line surfaces) ))
         registered_rows
+    end
   in
   let usage_matrix_lines =
+    lazy begin
     match state.skills_catalog with
     | None ->
         [ Ansi.dim, " Skill Usage — loading workspace catalog…" ]
@@ -9452,6 +9432,7 @@ let render_tools (state : state) =
             used
         in
         heading @ rows
+    end
   in
   (* One section at a time. These used to be concatenated, and the first of
      them is one row per tool -- ninety-five of them on this workspace -- so
@@ -9460,15 +9441,61 @@ let render_tools (state : state) =
      nothing saying so. *)
   let display_lines =
     match state.tools_pane with
-    | Masc_tui_types.Tools_surface -> effective_lines
+    | Masc_tui_types.Tools_surface -> Lazy.force effective_lines
     | Masc_tui_types.Tools_async -> async_request_observation_lines state
-    | Masc_tui_types.Tools_activations -> activation_lines
-    | Masc_tui_types.Tools_usage -> usage_matrix_lines
-    | Masc_tui_types.Tools_catalog -> catalog_lines
+    | Masc_tui_types.Tools_activations -> Lazy.force activation_lines
+    | Masc_tui_types.Tools_usage -> Lazy.force usage_matrix_lines
+    | Masc_tui_types.Tools_catalog -> Lazy.force catalog_lines
   in
-  let chrome_rows = if Option.is_some state.tools_error then 7 else 5 in
-  let content_height = max 1 (rows - chrome_rows) in
-  let drawable = List.length display_lines in
+  display_lines
+;;
+
+let tools_scrolled_for_lines state display_lines =
+  { sc_count = List.length display_lines
+  ; sc_chrome = if Option.is_some state.tools_error then 7 else 5
+  ; sc_overflow_takes_row = true
+  ; sc_preview_keep = None
+  }
+;;
+
+let tools_scrolled state =
+  tools_scrolled_for_lines state (tools_display_lines state)
+;;
+
+let render_tools (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    (* The strip replaces the old subtitle. "effective Keeper + registered
+       catalog" named two of the five sections and the header is where a
+       reader looks for what a surface holds. *)
+    Printf.sprintf "%s  %s  %s  %s"
+      (screen_title " MASC Tools") (tools_pane_strip state) timestamp
+      (connection_badge state)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  (match state.tools_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:(Theme.bad ())
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let display_lines = tools_display_lines state in
+  let layout = tools_scrolled_for_lines state display_lines in
+  let drawable = layout.sc_count in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+      ~count:drawable ~preview_keep:layout.sc_preview_keep
+      ~overflow_takes_row:layout.sc_overflow_takes_row
+  in
   let max_scroll = max 0 (drawable - content_height) in
   let scroll = max 0 (min state.tools_scroll max_scroll) in
   for i = 0 to content_height - 1 do

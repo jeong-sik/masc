@@ -25,7 +25,7 @@ import capture_keeper_skill_tui_proof as tui_capture
 SCHEMA = "masc.keeper-skill-proof-verification/v1"
 JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v2"
 PROOF_SCHEMA = "masc.keeper-skill-use-proof.v2"
-TUI_SCHEMA = "masc.keeper-skill-tui-proof.v3"
+TUI_SCHEMA = "masc.keeper-skill-tui-proof.v4"
 BUILD_SCHEMA = "masc.tui-build-evidence/v1"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -874,7 +874,38 @@ def verify_bundle(
         dashboard_name: dashboard_identity,
     }
 
+    require(
+        set(tui)
+        == {
+            "schema",
+            "captured_at",
+            "source",
+            "proof",
+            "server",
+            "selection",
+            "producer_artifacts",
+            "terminal",
+            "observations",
+            "frames",
+        },
+        "TUI proof field set differs",
+    )
     tui_source = object_field(tui, "source", "TUI proof")
+    require(
+        set(tui_source)
+        == {
+            "expected_sha",
+            "capture_head",
+            "capture_tree",
+            "executable_path",
+            "executable_bytes",
+            "executable_sha256",
+            "build_evidence_sha256",
+            "build_evidence_schema",
+            "tracked_checkout_clean",
+        },
+        "TUI capture source field set differs",
+    )
     require(
         tui_source.get("expected_sha") == join_source.get("head")
         and tui_source.get("capture_head") == join_source.get("head")
@@ -898,6 +929,20 @@ def verify_bundle(
     )
     tui_proof = object_field(tui, "proof", "TUI proof")
     require(
+        set(tui_proof)
+        == {
+            "manifest",
+            "manifest_sha256",
+            "keeper",
+            "session_id",
+            "ledger_revision",
+            "skill_tool_use_id",
+            "action_markers",
+            "captured_action_marker",
+        },
+        "TUI repeated proof field set differs",
+    )
+    require(
         tui_proof.get("manifest_sha256") == digest(proof_raw), "TUI proof SHA differs"
     )
     require(
@@ -920,7 +965,74 @@ def verify_bundle(
         == proof_artifacts_with_dashboard,
         "TUI producer artifact index differs",
     )
+    terminal = object_field(tui, "terminal", "TUI proof")
+    require(
+        set(terminal)
+        == {"requested", "frontend", "backend_before", "backend_after", "ttyd"},
+        "TUI terminal attestation field set differs",
+    )
+    requested = object_field(terminal, "requested", "TUI terminal")
+    frontend = object_field(terminal, "frontend", "TUI terminal")
+    require(
+        set(requested) == {"cols", "rows"} and set(frontend) == {"cols", "rows"},
+        "TUI terminal size field set differs",
+    )
+    requested_size = (
+        integer_field(requested, "cols", "TUI requested terminal size"),
+        integer_field(requested, "rows", "TUI requested terminal size"),
+    )
+    require(
+        requested_size[0] > 0 and requested_size[1] > 0,
+        "TUI requested terminal size is not positive",
+    )
+    require(
+        (
+            integer_field(frontend, "cols", "TUI frontend terminal size"),
+            integer_field(frontend, "rows", "TUI frontend terminal size"),
+        )
+        == requested_size,
+        "TUI frontend terminal size differs from the request",
+    )
+    for boundary in ("backend_before", "backend_after"):
+        backend = object_field(terminal, boundary, "TUI terminal")
+        require(
+            set(backend) == {"child_pid", "device", "cols", "rows"},
+            f"TUI {boundary} PTY field set differs",
+        )
+        require(
+            integer_field(backend, "child_pid", f"TUI {boundary} PTY") > 0
+            and string_field(backend, "device", f"TUI {boundary} PTY").startswith(
+                "/dev/"
+            ),
+            f"TUI {boundary} PTY identity is invalid",
+        )
+        require(
+            (
+                integer_field(backend, "cols", f"TUI {boundary} PTY"),
+                integer_field(backend, "rows", f"TUI {boundary} PTY"),
+            )
+            == requested_size,
+            f"TUI {boundary} PTY size differs from the request",
+        )
+    require(
+        terminal["backend_before"] == terminal["backend_after"],
+        "TUI backend PTY identity changed during capture",
+    )
+    ttyd = object_field(terminal, "ttyd", "TUI terminal")
+    require(
+        set(ttyd) == {"path", "bytes", "sha256", "version"}
+        and Path(string_field(ttyd, "path", "TUI ttyd identity")).is_absolute()
+        and integer_field(ttyd, "bytes", "TUI ttyd identity") > 0
+        and SHA256_RE.fullmatch(string_field(ttyd, "sha256", "TUI ttyd identity"))
+        is not None
+        and string_field(ttyd, "version", "TUI ttyd identity") != "",
+        "TUI ttyd identity is invalid",
+    )
     selection = object_field(tui, "selection", "TUI proof")
+    require(
+        set(selection) == {"visited_keepers", "visited_tools_panes"},
+        "TUI selection field set differs",
+    )
     visited_keepers = list_field(selection, "visited_keepers", "TUI selection")
     visited_tools_panes = list_field(selection, "visited_tools_panes", "TUI selection")
     require(

@@ -19,6 +19,8 @@ type t =
     }
   | Task_missing_title  (** [/task] with nothing after it on the line. *)
   | Help  (** [/help] — draw the command list into the pane. *)
+  | Open_settings
+      (** [/settings] — open the type-aware Runtime parameters pane. *)
   | Switch_keeper of string
       (** [/keeper <name>] — point this pane at another keeper. *)
   | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)

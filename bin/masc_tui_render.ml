@@ -9602,7 +9602,7 @@ let render_runtime_params (state : state) =
   (match state.runtime_params_notice with
    | None ->
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  Live overrides · persisted in .masc/runtime_params.json · server validates type/range"
+       "  Enter edits by type · E is advanced JSON · overrides persist in .masc/runtime_params.json"
    | Some (ok, detail) ->
      box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
        ("  " ^ Terminal_text.single_line detail));
@@ -9638,12 +9638,6 @@ let render_runtime_params (state : state) =
   let count = List.length state.runtime_params in
   let cursor = max 0 (min state.runtime_params_cursor (count - 1)) in
   let first = if cursor < content_height then 0 else cursor - content_height + 1 in
-  let display_json text =
-    match Yojson.Safe.from_string text with
-    | `String value -> value
-    | _ -> text
-    | exception Yojson.Json_error _ -> text
-  in
   (match state.runtime_params_error with
    | Some detail ->
      box_line buf cols ((Theme.bad ()) ^ "설정을 읽지 못했습니다: " ^ Ansi.reset
@@ -9669,10 +9663,15 @@ let render_runtime_params (state : state) =
              Printf.sprintf "  %s %-43s %-16s%s"
                (if row.rpr_has_override then "●" else "○")
                (Terminal_text.single_line row.rpr_key)
-               (Terminal_text.single_line (display_json row.rpr_current_json))
+               (Terminal_text.single_line
+                  (runtime_param_value_text ~value_type:row.rpr_value_type
+                     row.rpr_current_json))
                (if row.rpr_has_override
                 then Printf.sprintf "  default %s"
-                       (Terminal_text.single_line (display_json row.rpr_default_json))
+                       (Terminal_text.single_line
+                          (runtime_param_value_text
+                             ~value_type:row.rpr_value_type
+                             row.rpr_default_json))
                 else "")
            in
            if first + index = cursor then box_line_selected buf cols line
@@ -9683,20 +9682,53 @@ let render_runtime_params (state : state) =
      end);
   (match state.runtime_param_edit with
    | None -> ()
-   | Some (key, draft) ->
+   | Some edit ->
+     let friendly_bool =
+       edit.rpe_mode = Friendly_value
+       && List.mem (runtime_param_type_name edit.rpe_value_type)
+            [ "bool"; "boolean" ]
+     in
+     let field_label =
+       match edit.rpe_mode with
+       | Advanced_json -> "JSON>"
+       | Friendly_value when friendly_bool -> "choice>"
+       | Friendly_value -> "value>"
+     in
+     let draft = Terminal_text.single_line edit.rpe_draft in
+     let draft =
+       if edit.rpe_replace_on_type && not friendly_bool
+       then Theme.selection ^ draft ^ Ansi.reset
+       else draft
+     in
      box_divider buf cols;
      box_line buf cols
-       (Printf.sprintf "  %svalue>%s %s" Ansi.bold Ansi.reset
-          (fit_width (Terminal_text.single_line draft) (max 1 (cols - 12))));
+       (Printf.sprintf "  %s%s%s %s" Ansi.bold field_label Ansi.reset
+          (fit_width draft (max 1 (cols - 12))));
      box_line_styled buf cols ~style:(Theme.recede ())
-       (Printf.sprintf "  editing %s · JSON value · Enter apply · Ctrl-U clear · Esc cancel"
-          (Terminal_text.single_line key)));
+       (Printf.sprintf "  editing %s · %s"
+          (Terminal_text.single_line edit.rpe_key)
+          (match edit.rpe_mode with
+           | Advanced_json -> "advanced JSON · Enter apply · Esc cancel"
+           | Friendly_value when friendly_bool ->
+             "Left/Right/Space toggle · Enter apply · Esc cancel"
+           | Friendly_value ->
+             "type to replace · Enter apply · Esc cancel")));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (if editing then "type JSON  Enter:apply  Ctrl-U:clear  Esc:cancel"
-          else "j/k:select  Enter/e:edit  x:default  p:next  r:reload"));
+         (match state.runtime_param_edit with
+          | Some edit
+            when edit.rpe_mode = Friendly_value
+                 && List.mem (runtime_param_type_name edit.rpe_value_type)
+                      [ "bool"; "boolean" ] ->
+            "Left/Right/Space:toggle  Enter:apply  Esc:cancel"
+          | Some { rpe_mode = Friendly_value; _ } ->
+            "type:value  Enter:apply  Ctrl-U:clear  Esc:cancel"
+          | Some { rpe_mode = Advanced_json; _ } ->
+            "type JSON  Enter:apply  Ctrl-U:clear  Esc:cancel"
+          | None ->
+            "j/k:select  Enter/e:edit  E:advanced JSON  x:default  p:next"));
   finish_surface state ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
 ;;
 

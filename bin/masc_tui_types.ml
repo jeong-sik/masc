@@ -1135,6 +1135,94 @@ type config_pane =
   | Config_prompts
   | Config_themes
 
+type runtime_param_edit_mode = Friendly_value | Advanced_json
+
+type runtime_param_edit =
+  { rpe_key : string
+  ; rpe_value_type : string
+  ; rpe_draft : string
+  ; rpe_replace_on_type : bool
+  ; rpe_mode : runtime_param_edit_mode
+  }
+
+let runtime_param_type_name value_type =
+  String.lowercase_ascii (String.trim value_type)
+
+let runtime_param_value_text ~value_type json_text =
+  let parsed =
+    try Some (Yojson.Safe.from_string json_text) with
+    | Yojson.Json_error _ -> None
+  in
+  match runtime_param_type_name value_type, parsed with
+  | ("bool" | "boolean"), Some (`Bool true) -> "on"
+  | ("bool" | "boolean"), Some (`Bool false) -> "off"
+  | "string", Some (`String value) -> value
+  | _, Some (`String value) -> value
+  | _, Some _ | _, None -> json_text
+
+let runtime_param_friendly_text (row : Tui_decode.runtime_param_row) =
+  runtime_param_value_text ~value_type:row.rpr_value_type row.rpr_current_json
+
+let runtime_param_edit_of_row ~advanced (row : Tui_decode.runtime_param_row) =
+  { rpe_key = row.rpr_key
+  ; rpe_value_type = row.rpr_value_type
+  ; rpe_draft =
+      (if advanced then row.rpr_current_json else runtime_param_friendly_text row)
+  ; rpe_replace_on_type = true
+  ; rpe_mode = (if advanced then Advanced_json else Friendly_value)
+  }
+
+let runtime_param_edit_append edit text =
+  { edit with
+    rpe_draft =
+      (if edit.rpe_replace_on_type then text else edit.rpe_draft ^ text)
+  ; rpe_replace_on_type = false
+  }
+
+let runtime_param_edit_backspace edit =
+  { edit with
+    rpe_draft =
+      (if edit.rpe_replace_on_type then ""
+       else Masc_tui_message_layout.drop_last_utf8_scalar edit.rpe_draft)
+  ; rpe_replace_on_type = false
+  }
+
+let runtime_param_edit_clear edit =
+  { edit with rpe_draft = ""; rpe_replace_on_type = false }
+
+let runtime_param_edit_toggle_bool edit =
+  let next =
+    match String.lowercase_ascii (String.trim edit.rpe_draft) with
+    | "on" | "true" | "yes" | "1" -> "off"
+    | _ -> "on"
+  in
+  { edit with rpe_draft = next; rpe_replace_on_type = false }
+
+let runtime_param_edit_value edit =
+  let parse_json () =
+    try Ok (Yojson.Safe.from_string edit.rpe_draft) with
+    | Yojson.Json_error detail -> Error ("Invalid JSON value: " ^ detail)
+  in
+  match edit.rpe_mode with
+  | Advanced_json -> parse_json ()
+  | Friendly_value ->
+    (match runtime_param_type_name edit.rpe_value_type with
+     | "bool" | "boolean" ->
+       (match String.lowercase_ascii (String.trim edit.rpe_draft) with
+        | "on" | "true" | "yes" | "1" -> Ok (`Bool true)
+        | "off" | "false" | "no" | "0" -> Ok (`Bool false)
+        | _ -> Error "Choose on or off")
+     | "int" | "integer" ->
+       (match int_of_string_opt (String.trim edit.rpe_draft) with
+        | Some value -> Ok (`Int value)
+        | None -> Error "Enter a whole number")
+     | "float" | "number" ->
+       (match float_of_string_opt (String.trim edit.rpe_draft) with
+        | Some value when Float.is_finite value -> Ok (`Float value)
+        | Some _ | None -> Error "Enter a number")
+     | "string" -> Ok (`String edit.rpe_draft)
+     | _ -> parse_json ())
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -1392,10 +1480,10 @@ type state = {
   mutable runtime_params_error: string option;
   mutable runtime_params_loading: bool;
   (* The Runtime params pane is an operator surface, not a passive dump.
-     Selection and the in-progress JSON value live separately from the shared
+     Selection and the in-progress typed value live separately from the shared
      Config scroll used by runtime.toml/prompt bodies. *)
   mutable runtime_params_cursor: int;
-  mutable runtime_param_edit: (string * string) option;
+  mutable runtime_param_edit: runtime_param_edit option;
   mutable runtime_params_notice: (bool * string) option;
   mutable keeper_gate_judges: (string * string) list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
@@ -2757,6 +2845,7 @@ let approval_items (state : state) =
    a chat the roster can open. *)
 type palette_action =
   | Palette_goto of surface
+  | Palette_config of config_pane
   | Palette_chat of string
   | Palette_task of string
   | Palette_board_post of string
@@ -2848,9 +2937,10 @@ let workspace_entries_count_label total =
   else Printf.sprintf " (%d)" total
 
 let palette_entries (state : state) =
-  List.map
-    (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
-    surface_ring
+  [ "settings", Palette_config Config_params ]
+  @ List.map
+      (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
+      surface_ring
   @ List.map
       (fun (keeper : keeper) ->
         ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))

@@ -69,6 +69,12 @@ let test_the_palette_lists_tasks_and_posts () =
       ; bp_kind = None
       } ];
   let labels = List.map fst (palette_entries state) in
+  check_bool "settings is a direct entry" true
+    (List.exists
+       (function
+         | "settings", Palette_config Config_params -> true
+         | _ -> false)
+       (palette_entries state));
   check_bool "a task is an entry" true
     (List.exists
        (fun l -> palette_contains ~needle:"task-532" l)
@@ -89,6 +95,54 @@ let test_the_palette_lists_tasks_and_posts () =
          | _, Palette_board_post id -> String.equal id "p-1"
          | _ -> false)
        (palette_entries state))
+;;
+
+let runtime_row ~value_type ~current =
+  { Tui_decode.rpr_key = "test.setting"
+  ; rpr_current_json = current
+  ; rpr_default_json = current
+  ; rpr_has_override = false
+  ; rpr_description = "test setting"
+  ; rpr_value_type = value_type
+  ; rpr_min_json = None
+  ; rpr_max_json = None
+  }
+
+let test_friendly_runtime_param_editing () =
+  let number =
+    runtime_param_edit_of_row ~advanced:false
+      (runtime_row ~value_type:"float" ~current:"300.0")
+  in
+  Alcotest.(check string) "friendly number has no JSON ceremony" "300.0"
+    number.rpe_draft;
+  let number = runtime_param_edit_append number "4" in
+  Alcotest.(check string) "first key replaces the selected current value" "4"
+    number.rpe_draft;
+  (match runtime_param_edit_value number with
+   | Ok (`Float value) ->
+     Alcotest.(check (float 0.0001)) "number keeps its declared type" 4.0 value
+   | Ok _ -> Alcotest.fail "number edit produced the wrong JSON type"
+   | Error detail -> Alcotest.fail detail);
+  let boolean =
+    runtime_param_edit_of_row ~advanced:false
+      (runtime_row ~value_type:"bool" ~current:"true")
+  in
+  Alcotest.(check string) "bool speaks operator language" "on"
+    boolean.rpe_draft;
+  Alcotest.(check string) "bool list value uses the same language" "off"
+    (runtime_param_value_text ~value_type:"bool" "false");
+  let boolean = runtime_param_edit_toggle_bool boolean in
+  Alcotest.(check string) "one key toggles" "off" boolean.rpe_draft;
+  (match runtime_param_edit_value boolean with
+   | Ok (`Bool value) -> Alcotest.(check bool) "toggle submits a bool" false value
+   | Ok _ -> Alcotest.fail "bool edit produced the wrong JSON type"
+   | Error detail -> Alcotest.fail detail);
+  let advanced =
+    runtime_param_edit_of_row ~advanced:true
+      (runtime_row ~value_type:"float" ~current:"300.0")
+  in
+  Alcotest.(check bool) "advanced stays explicit" true
+    (advanced.rpe_mode = Advanced_json)
 ;;
 
 let check_names = Alcotest.(check (list string))
@@ -193,6 +247,8 @@ let () =
             test_the_palette_lists_tasks_and_posts
         ; Alcotest.test_case "the cursor line's names are the candidates"
             `Quick test_the_cursor_lines_names_are_the_candidates
+        ; Alcotest.test_case "friendly runtime parameter editing" `Quick
+            test_friendly_runtime_param_editing
         ] )
     ]
 ;;

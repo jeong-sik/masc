@@ -226,7 +226,9 @@ let for_surface = function
            theme choice.  The pane strip says which meaning each key has. *)
       ; b Navigate "p" "runtime.toml / params / prompts / themes"
       ; b Act "e" "edit"
-          ~help:"params edit inline; runtime.toml uses preview; prompts save an override"
+          ~help:"params use a type-aware field; runtime.toml previews; prompts save an override"
+      ; b Act "E" "advanced JSON"
+          ~help:"on params only: edit the exact JSON value"
       ; b Act "Enter" "edit / use"
           ~help:"edit the selected param; on themes, use that colour scheme"
       ; b Act "x" "default / clear"

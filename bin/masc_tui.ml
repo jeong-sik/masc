@@ -4399,6 +4399,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       notice ~role:Message_status
         (String.concat "\n" Masc_tui_command.help_lines)
+  | Masc_tui_command.Open_settings ->
+      Buffer.clear state.msg_input;
+      state.config_pane <- Config_params;
+      state.config_scroll <- 0;
+      state.runtime_params_cursor <- 0;
+      state.runtime_param_edit <- None;
+      state.runtime_params_notice <- None;
+      goto_surface state ~mailbox Config
   | Masc_tui_command.Switch_keeper_missing_name ->
       notice ~role:Message_error "/keeper needs a name on the same line"
   | Masc_tui_command.Switch_keeper name -> (
@@ -6114,6 +6122,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            set_msg_scroll state 0
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
+       | Masc_tui_command.Open_settings
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Toggle_memory
        | Masc_tui_command.Inspect_context
@@ -8285,33 +8294,35 @@ let main () =
   let selected_runtime_param () =
     List.nth_opt state.runtime_params state.runtime_params_cursor
   in
-  let handle_runtime_param_edit_open () =
+  let handle_runtime_param_edit_open ~advanced () =
     match selected_runtime_param () with
     | None ->
       state.runtime_params_notice <- Some (false, "No runtime parameter is selected")
     | Some row ->
-      state.runtime_param_edit <- Some (row.Tui_decode.rpr_key, row.rpr_current_json);
+      state.runtime_param_edit <-
+        Some (Masc_tui_types.runtime_param_edit_of_row ~advanced row);
       state.runtime_params_notice <- None
   in
   let handle_runtime_param_edit_apply () =
     match state.runtime_param_edit with
     | None -> ()
-    | Some (key, draft) -> (
-      match Yojson.Safe.from_string draft with
-      | exception Yojson.Json_error detail ->
-        state.runtime_params_notice <-
-          Some (false, "Invalid JSON value: " ^ detail)
-      | value -> (
+    | Some edit -> (
+      match Masc_tui_types.runtime_param_edit_value edit with
+      | Error detail -> state.runtime_params_notice <- Some (false, detail)
+      | Ok value -> (
         match
           Masc_tui_http.post_runtime_param_set ~host:server_peer_host
-            ~port:state.port ~key ~value
+            ~port:state.port ~key:edit.rpe_key ~value
         with
         | Error detail ->
           state.runtime_params_notice <- Some (false, "Set failed: " ^ detail)
         | Ok _ ->
           state.runtime_param_edit <- None;
           state.runtime_params_notice <-
-            Some (true, Printf.sprintf "Set %s = %s" key (Yojson.Safe.to_string value));
+            Some
+              ( true
+              , Printf.sprintf "Set %s = %s" edit.rpe_key
+                  (Yojson.Safe.to_string value) );
           launch_runtime_params_load state ~mailbox:async_messages))
   in
   let handle_runtime_param_clear () =
@@ -8765,6 +8776,21 @@ and is loaded on demand through keeper_skill.
         Frame_presenter.last_frame_is_compact frame_presenter
       in
       (match input with
+       (* A pasted setting value belongs to the inline field, not the global
+          chat composer.  The first paste replaces the selected current value;
+          later pastes append, matching typed input. *)
+       | Some (Pasted paste)
+         when Option.is_some state.runtime_param_edit
+              && not compact_viewport ->
+           let text =
+             Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text
+           in
+           Option.iter
+             (fun edit ->
+               state.runtime_param_edit <-
+                 Some (Masc_tui_types.runtime_param_edit_append edit text);
+               state.runtime_params_notice <- None)
+             state.runtime_param_edit
        (* A paste while the Identity tab is taking text belongs to the field
           taking it. A client secret is exactly the thing an operator pastes,
           and the default path puts it in a chat draft -- a credential in a
@@ -8888,28 +8914,38 @@ and is loaded on demand through keeper_skill.
       (match key with
        | Some _ when composer_claimed -> ()
        (* Inline Runtime_params editing is modal: printable keys, including q,
-          belong to the JSON value.  The server remains the type/range
-          authority when Enter submits it. *)
+          belong to the value.  Friendly mode turns the registry's declared
+          type into a bool/number/string control; capital E is the explicit
+          raw-JSON escape hatch.  The server remains the final authority. *)
        | Some k when Option.is_some state.runtime_param_edit ->
            (match state.runtime_param_edit with
             | None -> ()
-            | Some (param_key, draft) ->
-              let set value = state.runtime_param_edit <- Some (param_key, value) in
+            | Some edit ->
+              let set value = state.runtime_param_edit <- Some value in
               (match k with
                | "esc" ->
                  state.runtime_param_edit <- None;
-                 state.runtime_params_notice <- Some (true, param_key ^ ": edit cancelled")
+                 state.runtime_params_notice <-
+                   Some (true, edit.rpe_key ^ ": edit cancelled")
                | "\r" | "\n" | "enter" -> handle_runtime_param_edit_apply ()
                | "\127" | "\b" | "backspace" ->
-                 set (Masc_tui_message_layout.drop_last_utf8_scalar draft);
+                 set (Masc_tui_types.runtime_param_edit_backspace edit);
                  state.runtime_params_notice <- None
                | s when String.length s = 1 && Char.code s.[0] = 21 ->
-                 set "";
+                 set (Masc_tui_types.runtime_param_edit_clear edit);
+                 state.runtime_params_notice <- None
+               | "left" | "right" | " "
+                 when edit.rpe_mode = Masc_tui_types.Friendly_value
+                      && List.mem
+                           (Masc_tui_types.runtime_param_type_name
+                              edit.rpe_value_type)
+                           [ "bool"; "boolean" ] ->
+                 set (Masc_tui_types.runtime_param_edit_toggle_bool edit);
                  state.runtime_params_notice <- None
                | s
                  when (String.length s = 1 && Char.code s.[0] >= 32)
                       || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-                 set (draft ^ s);
+                 set (Masc_tui_types.runtime_param_edit_append edit s);
                  state.runtime_params_notice <- None
                | _ -> ()))
        | Some _
@@ -9238,6 +9274,13 @@ and is loaded on demand through keeper_skill.
                 (match chosen with
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
                      goto_surface state ~mailbox:async_messages destination
+                 | Some (_, Masc_tui_types.Palette_config pane) ->
+                     state.config_pane <- pane;
+                     state.config_scroll <- 0;
+                     state.runtime_params_cursor <- 0;
+                     state.runtime_param_edit <- None;
+                     state.runtime_params_notice <- None;
+                     goto_surface state ~mailbox:async_messages Config
                  | Some (_, Masc_tui_types.Palette_chat keeper_name) ->
                      open_message_for_keeper
                        ~return_to:Keeper_chat_return_list state keeper_name;
@@ -9621,7 +9664,7 @@ and is loaded on demand through keeper_skill.
        | Some "\r" when state.view = Tools -> handle_skill_run ()
        | Some ("\r" | "\n" | "enter")
          when state.view = Config && state.config_pane = Config_params ->
-           handle_runtime_param_edit_open ()
+           handle_runtime_param_edit_open ~advanced:false ()
        | Some ("\r" | "\n" | "enter")
          when state.view = Config && state.config_pane = Config_themes ->
            (* Applying is the whole action: the palette's generation bumps and
@@ -11878,6 +11921,9 @@ and is loaded on demand through keeper_skill.
             | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs
             -> ())
+       | Some "E"
+         when state.view = Config && state.config_pane = Config_params ->
+           handle_runtime_param_edit_open ~advanced:true ()
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the
@@ -11890,7 +11936,8 @@ and is loaded on demand through keeper_skill.
                 (match state.config_pane with
                  | Config_prompts -> handle_prompt_edit ()
                  | Config_runtime -> handle_runtime_config_edit ()
-                 | Config_params -> handle_runtime_param_edit_open ()
+                 | Config_params ->
+                   handle_runtime_param_edit_open ~advanced:false ()
                  | Config_themes -> ())
             | Tools -> handle_skill_edit ()
             | Approvals ->

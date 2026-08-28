@@ -6,6 +6,7 @@ type t =
     }
   | Task_missing_title
   | Help
+  | Open_settings
   | Switch_keeper of string
   | Switch_keeper_missing_name
   | Interrupt_turn
@@ -39,6 +40,10 @@ let catalog =
   ; { word = "keeper"
     ; args = "<name>"
     ; summary = "switch this pane to another keeper"
+    }
+  ; { word = "settings"
+    ; args = ""
+    ; summary = "open type-aware runtime settings"
     }
   ; { word = "interrupt"
     ; args = ""
@@ -116,6 +121,7 @@ let parse text =
     | "task", "" -> Task_missing_title
     | "task", title -> Task_for_keeper { title; body }
     | "help", _ -> Help
+    | "settings", _ -> Open_settings
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
     | "interrupt", _ -> Interrupt_turn
@@ -203,17 +209,21 @@ let hint_spans = function
       word_spans ~typed entry
       @ (if String.equal entry.args "" then []
          else [ Detail (" " ^ entry.args) ])
+  | Candidates { typed = ""; entries } ->
+      (* The bare slash is already the shared prefix.  Draw it once, then all
+         command words: this keeps the complete discovery list inside an
+         80-column composer after /settings joined the catalog. *)
+      [ Typed "/"
+      ; Untyped (String.concat " " (List.map (fun entry -> entry.word) entries))
+      ]
   | Candidates { typed; entries } ->
       (* Names only. Every usage spelled out runs past a 120-column pane on
          the bare slash, and the commands that fell off the end were the ones
          an operator who typed [/] had not thought of yet.
 
-         One space between them, not two: at ten commands the two-space form
-         reached 88 columns and no longer fit the 80-column row the bare slash
-         has to survive on. Every name starts with [/], so the boundary reads
-         without the second space, and dropping it buys back nine columns —
-         enough that the eleventh command costs a real decision rather than
-         silently pushing a name off the end. *)
+         One space between them, not two.  The bare slash has its own compact
+         branch above; once a prefix is typed, the shorter candidate list can
+         afford to repeat each slash. *)
       List.concat
         (List.mapi
            (fun index entry ->

@@ -546,6 +546,16 @@ let start_microvm_container ?timeout_sec (t : t) =
              ~container_root:t.container_root
              ~network_args:
                (Keeper_sandbox_microvm.network_args ~dns t.network_mode)
+             (* Config only, for now. The secret projection and the GitHub
+                identity both hand back a [cleanup] that the Docker lane runs
+                under [Eio_guard] at turn end; a keeper-lifetime guest outlives
+                that scope, so wiring them here without moving cleanup to guest
+                teardown would delete the credential files out from under a
+                running guest. Config has no cleanup and is safe to pass now. *)
+             ~mount_args:
+               (Keeper_sandbox_runtime.docker_config_mount_args
+                  ~base_path:t.config.base_path
+                  ~container_root:t.container_root)
              ~image
          in
          let st, out = run_argv_with_status ?timeout_sec argv in

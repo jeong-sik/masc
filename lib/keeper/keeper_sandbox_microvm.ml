@@ -130,10 +130,16 @@ let image_present ~image ~timeout_sec =
    Deliberately absent against the Docker turn argv, stated so a reader
    does not infer parity: seccomp / --security-opt / --pids-limit
    (container rejects them; the guest kernel is the boundary), the
-   secret and GitHub identity projections, the config and
    workspace-state mounts, and the /etc/passwd identity mounts
-   ([--user uid:gid] is passed directly). A microvm turn sees its
-   playground and nothing else. *)
+   ([--user uid:gid] is passed directly).
+
+   [mount_args] carries what the caller projects -- config, GitHub
+   identity, secret files and --env-file. These were absent because they
+   had not been wired, not because container refuses them: measured
+   2026-08-28 against masc-keeper-sandbox:local, a guest reads through
+   [-v host:container:ro] and takes [--env-file], both in Docker's own
+   spelling. A keeper that pushes to GitHub or reads a connector credential
+   needs them, and edgar.a.poe on microvm had neither. *)
 
 let turn_start_argv
       ~container_name
@@ -145,6 +151,7 @@ let turn_start_argv
       ~host_root
       ~container_root
       ~network_args
+      ~mount_args
       ~image
   =
   command_argv ()
@@ -157,6 +164,7 @@ let turn_start_argv
      | Some count -> [ "--cpus"; count ]
      | None -> [])
   @ [ "--volume"; host_root ^ ":" ^ container_root ]
+  @ mount_args
   @ [ "--workdir"; container_root ]
   @ network_args
   @ [ image; "tail"; "-f"; "/dev/null" ]

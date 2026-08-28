@@ -147,4 +147,6 @@ val teardown_keeper_sandbox :
     the persistent Docker containers, if any. Turn cleanup deliberately
     leaves both running (the guest boot and the container start are paid
     once per keeper, not per turn); this is the remove path, run at keeper
-    shutdown finalization. A missing container is a successful teardown. *)
+    shutdown finalization. A missing container is a successful teardown.
+    The MicroVM identity snapshot is released only after its guest has
+    stopped and been deleted. *)

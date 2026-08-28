@@ -320,6 +320,17 @@ let test_live_turn_runtime_cat () =
     let oc = open_out (Filename.concat host_root "probe.txt") in
     output_string oc "hello-from-microvm\n";
     close_out oc;
+    let prepare_identity runtime =
+      match
+        Masc.Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files
+          ~timeout_sec:60.0
+          runtime
+      with
+      | Ok (path :: _) -> path
+      | Ok [] -> Alcotest.fail "guest identity preparation returned no snapshot path"
+      | Error message ->
+        Alcotest.failf "guest GitHub identity preparation failed: %s" message
+    in
     let cat runtime =
       match
         Masc.Keeper_turn_sandbox_runtime.run_command_with_status
@@ -343,6 +354,7 @@ let test_live_turn_runtime_cat () =
           out
       | Error message -> Alcotest.failf "guest cat errored: %s" message
     in
+    let final_snapshot_dir = ref None in
     Fun.protect
       ~finally:(fun () ->
         match
@@ -356,14 +368,23 @@ let test_live_turn_runtime_cat () =
            Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ()
          in
          let boot_started = Unix.gettimeofday () in
+         let first_secret = prepare_identity turn1 in
+         let first_snapshot_dir = Filename.dirname first_secret in
          cat turn1;
          let booted_in = Unix.gettimeofday () -. boot_started in
          Masc.Keeper_turn_sandbox_runtime.cleanup turn1;
+         if not (Sys.file_exists first_snapshot_dir)
+         then Alcotest.fail "turn cleanup removed the running guest's identity";
          (* Turn 2 must adopt the surviving guest, not boot a second one. *)
          let turn2 =
            Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ()
          in
          let reuse_started = Unix.gettimeofday () in
+         let second_secret = prepare_identity turn2 in
+         Alcotest.(check string)
+           "the adopted guest keeps the same identity snapshot"
+           first_secret
+           second_secret;
          cat turn2;
          let reused_in = Unix.gettimeofday () -. reuse_started in
          Masc.Keeper_turn_sandbox_runtime.cleanup turn2;
@@ -375,7 +396,42 @@ let test_live_turn_runtime_cat () =
              "turn 2 (%.1fs) was not faster than turn 1 (%.1fs); the guest \
               was rebooted instead of adopted"
              reused_in
-             booted_in);
+             booted_in;
+         (* A central login change replaces both the guest and its immutable
+            snapshot. The next turn must not keep using the old token or try
+            Docker's rm command against an Apple container guest. *)
+         mkdir_p (Masc.Workspace.keepers_runtime_dir config);
+         let identity_dir =
+           match
+             Masc.Keeper_github_identity.ensure_config_dir
+               ~config
+               ~keeper_name:meta.name
+           with
+           | Ok path -> path
+           | Error message -> Alcotest.failf "cannot prepare test identity: %s" message
+         in
+         let hosts_path = Filename.concat identity_dir "hosts.yml" in
+         let oc = open_out hosts_path in
+         output_string oc "github.com:\n  oauth_token: fake-test-token\n";
+         close_out oc;
+         Unix.chmod hosts_path 0o600;
+         let turn3 =
+           Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ()
+         in
+         let third_secret = prepare_identity turn3 in
+         let third_snapshot_dir = Filename.dirname third_secret in
+         final_snapshot_dir := Some third_snapshot_dir;
+         if String.equal first_secret third_secret
+         then Alcotest.fail "identity refresh reused the superseded snapshot";
+         if Sys.file_exists first_snapshot_dir
+         then Alcotest.fail "identity refresh left the superseded snapshot on disk";
+         cat turn3;
+         Masc.Keeper_turn_sandbox_runtime.cleanup turn3);
+    Option.iter
+      (fun snapshot_dir ->
+         if Sys.file_exists snapshot_dir
+         then Alcotest.fail "guest teardown left its identity snapshot on disk")
+      !final_snapshot_dir;
     (* After teardown the stable name must be gone. *)
     (match
        Masc.Keeper_turn_sandbox_runtime.teardown_keeper_sandbox ~config ~meta ()

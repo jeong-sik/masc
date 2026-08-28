@@ -322,6 +322,11 @@ function entryScopeLabel(entry: ToolCallEntry): string {
     entry.composition_run_id ? `run ${entry.composition_run_id}` : null,
     entry.composition_node_id ? `node ${entry.composition_node_id}` : null,
     entry.composition_execution ? `execution ${entry.composition_execution}` : null,
+    entry.assembler_run_id ? `assembler ${entry.assembler_run_id}` : null,
+    entry.proposal_id ? `proposal ${entry.proposal_id}` : null,
+    entry.proposal_provenance_status
+      ? `proposal provenance ${entry.proposal_provenance_status}`
+      : null,
     entry.parent_tool_use_id !== undefined
       ? `parent_tool_use_id ${entry.parent_tool_use_id === '' ? '(blank)' : entry.parent_tool_use_id}`
       : null,
@@ -743,6 +748,9 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
       data-composition-node=${entry.composition_node_id}
       data-composition-run=${entry.composition_run_id}
       data-composition-execution=${entry.composition_execution}
+      data-assembler-run=${entry.assembler_run_id}
+      data-proposal-id=${entry.proposal_id}
+      data-proposal-provenance=${entry.proposal_provenance_status}
       data-tool-call-disposition=${entry.disposition}
       class="border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors v2-monitoring-row"
     >
@@ -760,6 +768,13 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
             class="max-w-40 truncate rounded-[var(--r-1)] border border-[var(--color-accent-border)] bg-[var(--color-accent-muted)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-accent-fg)]"
             title=${`${entry.composition_tool ?? 'composition'} / ${entry.composition_node_id} / ${entry.composition_execution ?? 'unknown'}`}
           >↳ ${entry.composition_node_id} · ${entry.composition_execution ?? 'unknown'}</span>
+        ` : null}
+        ${entry.assembler_run_id && entry.proposal_id && entry.proposal_provenance_status ? html`
+          <span
+            data-testid="proposal-execution-badge"
+            class="max-w-52 truncate rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-fg-secondary)]"
+            title=${`assembler ${entry.assembler_run_id} / proposal ${entry.proposal_id} / ${entry.proposal_provenance_status}`}
+          >proposal ${entry.proposal_id.slice(0, 12)} · ${entry.proposal_provenance_status}</span>
         ` : null}
         <span class=${`font-mono flex-shrink-0 w-16 text-right ${entry.duration_ms != null ? durationColor(entry.duration_ms) : 'text-[var(--color-fg-disabled)]'}`}>
           ${entry.duration_ms != null ? formatMsCompact(entry.duration_ms) : NO_DURATION_LABEL}

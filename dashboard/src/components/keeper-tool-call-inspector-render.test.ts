@@ -642,6 +642,53 @@ describe('KeeperToolCallInspector render', () => {
     expect(container.textContent).toContain('prompt 464ce7b3280c')
   })
 
+  it('shows the exact Assembler proposal identity on collapsed and expanded rows', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 1,
+      source: 'tool_call_io',
+      health: 'ok',
+      entries: [
+        {
+          ts: 1_777_100_000,
+          keeper: 'analyst',
+          tool: 'keeper_proposal_execute',
+          input: {},
+          output: 'done',
+          success: true,
+          duration_ms: 4,
+          disposition: 'completed',
+          assembler_run_id: 'exact-assembler-run-42',
+          proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          proposal_provenance_status: 'retained_match',
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const badge = container.querySelector('[data-testid="proposal-execution-badge"]')
+    expect(badge?.textContent).toContain('proposal aaaaaaaaaaaa · retained_match')
+    expect(badge?.getAttribute('title')).toContain('exact-assembler-run-42')
+    const row = container.querySelector('[data-proposal-id]')
+    expect(row?.getAttribute('data-assembler-run')).toBe('exact-assembler-run-42')
+    expect(row?.getAttribute('data-proposal-provenance')).toBe('retained_match')
+
+    const rowToggle = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement | null
+    await act(async () => {
+      rowToggle?.click()
+      await Promise.resolve()
+    })
+    await flushUi()
+    expect(container.textContent).toContain('assembler exact-assembler-run-42')
+    expect(container.textContent).toContain('proposal provenance retained_match')
+  })
+
   it('nests composition children under the composite parent row', async () => {
     const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
       keeper: 'analyst',

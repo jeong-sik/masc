@@ -3,15 +3,22 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
+  classifySkillEditorError,
   createSkill,
   fetchAsyncRequestObservation,
   fetchSkills,
   fetchSkillEvidence,
   fetchWritableSkillSources,
+  previewSkillSource,
+  readSkillSource,
+  saveSkillSource,
   type SkillEvidenceResponse,
+  type SkillEditorLoaded,
+  type SkillEditorPreview,
   type AsyncRequestObservation,
   type SkillIdentity,
   type SkillProfile,
+  type SkillReference,
   type SkillSnapshotConfig,
   type SkillSnapshotEntry,
   type SkillSurface,
@@ -287,6 +294,262 @@ function AsyncRequestObservationView({
   `
 }
 
+interface SkillSourceEditorProps {
+  reference: SkillReference
+  onPublished: (message: string) => void | Promise<void>
+}
+
+const REVISION_CONFLICT_GUIDANCE = 'This Skill changed after you loaded it. Copy this draft, reload the Skills workspace, then reapply it to the latest revision before saving.'
+
+function editorPreviewSummary(preview: SkillEditorPreview): string {
+  const profile = preview.profile
+  return `${profile.kind} · ${profile.execution} · ${profile.plan.node_count} nodes · revision ${preview.reference.content_revision.slice(0, 12)}`
+}
+
+export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorProps) {
+  const referenceIdentity = referenceKey(reference.identity, reference.content_revision)
+  const open = useSignal(false)
+  const loaded = useSignal<SkillEditorLoaded | null>(null)
+  const draft = useSignal('')
+  const preview = useSignal<SkillEditorPreview | null>(null)
+  const previewedSource = useSignal<string | null>(null)
+  const busy = useSignal<'load' | 'preview' | 'save' | null>(null)
+  const status = useSignal<string | null>(null)
+  const conflict = useSignal(false)
+  const reloadRequired = useSignal(false)
+  const requestGeneration = useSignal(0)
+  const activeReferenceIdentity = useSignal(referenceIdentity)
+
+  useEffect(() => {
+    if (activeReferenceIdentity.value !== referenceIdentity) {
+      activeReferenceIdentity.value = referenceIdentity
+      requestGeneration.value += 1
+      open.value = false
+      loaded.value = null
+      draft.value = ''
+      preview.value = null
+      previewedSource.value = null
+      busy.value = null
+      status.value = null
+      conflict.value = false
+      reloadRequired.value = false
+    }
+    return () => {
+      requestGeneration.value += 1
+    }
+  }, [referenceIdentity])
+
+  const nextRequestGeneration = (): number => {
+    requestGeneration.value += 1
+    return requestGeneration.value
+  }
+
+  const requestIsCurrent = (
+    generation: number,
+    requestedReference: SkillReference,
+    requestedSource?: string,
+  ): boolean => {
+    const currentReference = loaded.value?.reference
+    return generation === requestGeneration.value
+      && currentReference !== undefined
+      && referenceKey(currentReference.identity, currentReference.content_revision)
+        === referenceKey(requestedReference.identity, requestedReference.content_revision)
+      && referenceIdentity
+        === referenceKey(requestedReference.identity, requestedReference.content_revision)
+      && (requestedSource === undefined || draft.value === requestedSource)
+  }
+
+  const load = async () => {
+    const generation = nextRequestGeneration()
+    const requestedReference = reference
+    open.value = true
+    busy.value = 'load'
+    status.value = null
+    conflict.value = false
+    reloadRequired.value = false
+    try {
+      const result = await readSkillSource(requestedReference)
+      if (generation !== requestGeneration.value) return
+      loaded.value = result
+      draft.value = result.source_text
+      preview.value = null
+      previewedSource.value = null
+    } catch (cause) {
+      if (generation !== requestGeneration.value) return
+      loaded.value = null
+      if (classifySkillEditorError(cause) === 'revision_conflict') {
+        conflict.value = true
+        status.value = REVISION_CONFLICT_GUIDANCE
+      } else {
+        status.value = cause instanceof Error ? cause.message : String(cause)
+      }
+    } finally {
+      if (generation === requestGeneration.value) busy.value = null
+    }
+  }
+
+  if (!open.value) {
+    return html`
+      <button class="ss-btn" type="button" data-testid="skill-edit-open" onClick=${load}>
+        Edit source
+      </button>
+    `
+  }
+
+  const canWrite = loaded.value?.access === 'read_write'
+  const previewIsCurrent = preview.value !== null && previewedSource.value === draft.value
+  return html`
+    <div class="mt-3 grid gap-2 rounded border border-[var(--color-border)] p-3" data-testid="skill-source-editor">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <strong>Source editor</strong>
+        <button
+          class="ss-btn"
+          type="button"
+          disabled=${busy.value === 'save'}
+          onClick=${() => {
+            requestGeneration.value += 1
+            busy.value = null
+            open.value = false
+          }}
+        >Close</button>
+      </div>
+      ${busy.value === 'load'
+        ? html`<div class="ss-muted">Loading exact source revision…</div>`
+        : loaded.value
+          ? html`
+              <div class="ss-muted mono text-3xs">
+                snapshot ${loaded.value.snapshot_revision.slice(0, 12)} · revision ${loaded.value.reference.content_revision.slice(0, 12)} · ${loaded.value.access}
+              </div>
+              <textarea
+                class="ss-input min-h-64 font-mono text-xs"
+                data-testid="skill-source-draft"
+                value=${draft.value}
+                readOnly=${!canWrite || busy.value === 'save'}
+                onInput=${(event: Event) => {
+                  if (busy.value === 'save') return
+                  draft.value = (event.currentTarget as HTMLTextAreaElement).value
+                  preview.value = null
+                  previewedSource.value = null
+                  conflict.value = false
+                  status.value = null
+                }}
+              />
+              ${canWrite
+                ? html`
+                    <div class="flex flex-wrap items-center gap-2">
+                      <button
+                        class="ss-btn"
+                        type="button"
+                        disabled=${busy.value !== null || reloadRequired.value}
+                        onClick=${async () => {
+                          const requestedReference = loaded.value?.reference
+                          if (!requestedReference) return
+                          const requestedSource = draft.value
+                          const generation = nextRequestGeneration()
+                          busy.value = 'preview'
+                          status.value = null
+                          conflict.value = false
+                          try {
+                            const result = await previewSkillSource(
+                              requestedReference,
+                              requestedSource,
+                            )
+                            if (!requestIsCurrent(generation, requestedReference, requestedSource)) {
+                              return
+                            }
+                            preview.value = result
+                            previewedSource.value = requestedSource
+                            status.value = 'Preview valid'
+                          } catch (cause) {
+                            if (!requestIsCurrent(generation, requestedReference, requestedSource)) {
+                              return
+                            }
+                            preview.value = null
+                            previewedSource.value = null
+                            if (classifySkillEditorError(cause) === 'revision_conflict') {
+                              conflict.value = true
+                              status.value = REVISION_CONFLICT_GUIDANCE
+                            } else {
+                              status.value = cause instanceof Error ? cause.message : String(cause)
+                            }
+                          } finally {
+                            if (generation === requestGeneration.value) busy.value = null
+                          }
+                        }}
+                      >${busy.value === 'preview' ? 'Previewing…' : 'Preview'}</button>
+                      <button
+                        class="ss-btn"
+                        type="button"
+                        data-testid="skill-source-save"
+                        disabled=${busy.value !== null || !previewIsCurrent || reloadRequired.value}
+                        onClick=${async () => {
+                          const requestedReference = loaded.value?.reference
+                          if (!requestedReference) return
+                          const requestedSource = draft.value
+                          const generation = nextRequestGeneration()
+                          busy.value = 'save'
+                          status.value = null
+                          conflict.value = false
+                          try {
+                            const receipt = await saveSkillSource(
+                              requestedReference,
+                              requestedSource,
+                            )
+                            if (!requestIsCurrent(generation, requestedReference, requestedSource)) {
+                              return
+                            }
+                            if (receipt.status === 'saved_but_unpublished') {
+                              reloadRequired.value = true
+                              status.value = `Saved to disk but not published: ${receipt.reason}. Reload the Skills workspace after publication recovers.`
+                            } else {
+                              await onPublished(
+                                receipt.status === 'unchanged'
+                                  ? 'Skill source was unchanged.'
+                                  : `Skill saved and published at ${receipt.preview.reference.content_revision.slice(0, 12)}.`,
+                              )
+                              if (requestIsCurrent(generation, requestedReference, requestedSource)) {
+                                open.value = false
+                              }
+                            }
+                          } catch (cause) {
+                            if (!requestIsCurrent(generation, requestedReference, requestedSource)) {
+                              return
+                            }
+                            if (classifySkillEditorError(cause) === 'revision_conflict') {
+                              conflict.value = true
+                              status.value = REVISION_CONFLICT_GUIDANCE
+                            } else {
+                              status.value = cause instanceof Error ? cause.message : String(cause)
+                            }
+                          } finally {
+                            if (generation === requestGeneration.value) busy.value = null
+                          }
+                        }}
+                      >${busy.value === 'save' ? 'Saving…' : 'Save'}</button>
+                      <span class="ss-muted">Preview the current draft before saving.</span>
+                    </div>
+                  `
+                : html`<div class="text-[var(--color-status-warn)]">This Skill source is read-only.</div>`}
+              ${preview.value ? html`
+                <div class="rounded border border-[var(--color-border-subtle)] p-2" data-testid="skill-source-preview">
+                  <div>${editorPreviewSummary(preview.value)}</div>
+                  ${preview.value.diagnostics.length > 0
+                    ? html`<div class="mt-1 text-[var(--color-status-warn)]">${preview.value.diagnostics.join(' · ')}</div>`
+                    : html`<div class="ss-muted">No diagnostics</div>`}
+                </div>
+              ` : null}
+            `
+          : null}
+      ${status.value ? html`
+        <div
+          class=${conflict.value ? 'text-[var(--color-status-warn)]' : 'ss-muted'}
+          data-testid=${conflict.value ? 'skill-source-conflict' : 'skill-source-status'}
+        >${status.value}</div>
+      ` : null}
+    </div>
+  `
+}
+
 function skillTemplate(kind: 'instruction' | 'composition', name: string, description: string, body: string): string {
   const frontmatter = `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\n`
   if (kind === 'instruction') return `${frontmatter}# ${name}\n\n${body}\n`
@@ -310,6 +573,7 @@ export function SkillsPanel() {
   const writableSources = useSignal<readonly { source_id: string }[]>([])
   const createSource = useSignal('')
   const createStatus = useSignal<string | null>(null)
+  const editorNotice = useSignal<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -417,6 +681,11 @@ export function SkillsPanel() {
           <div class="flex items-center gap-2"><button class="ss-btn" type="submit" disabled=${!createSource.value}>Create + publish</button><span class="ss-muted">${createStatus.value}</span></div>
         </form>
       ` : null}
+      ${editorNotice.value ? html`
+        <div class="mb-3 text-[var(--color-status-good)]" data-testid="skill-editor-notice">
+          ${editorNotice.value}
+        </div>
+      ` : null}
       <${AsyncRequestObservationView} observation=${asyncObservation.value} error=${asyncObservationError.value} />
       <div class="ss-muted" data-testid="skills-revision">
         snapshot ${res.snapshot.snapshot_revision.slice(0, 12)} · catalog ${res.snapshot.catalog_revision.slice(0, 12)}
@@ -465,6 +734,19 @@ export function SkillsPanel() {
                       <${SkillEvidenceView} result=${evidence.value[rowKey] ?? null} />
                     </div>
                   </div>
+                  ${row.surface ? html`
+                    <${SkillSourceEditor}
+                      reference=${row.surface.reference}
+                      onPublished=${async (message: string) => {
+                        editorNotice.value = message
+                        try {
+                          response.value = await fetchSkills()
+                        } catch (cause) {
+                          editorNotice.value = `${message} Catalog refresh failed: ${cause instanceof Error ? cause.message : String(cause)}`
+                        }
+                      }}
+                    />
+                  ` : null}
                 </td></tr>
               ` : null}
             `

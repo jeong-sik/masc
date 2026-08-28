@@ -454,7 +454,30 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.parent_tool_use_id).toBe('outer-7')
   })
 
-  it('rejects a partial proposal execution identity atomically', async () => {
+  it.each([
+    [
+      'partial tuple',
+      {
+        proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+    ],
+    [
+      'unknown provenance status',
+      {
+        assembler_run_id: 'exact-assembler-run-42',
+        proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        proposal_provenance_status: 'retained_guess',
+      },
+    ],
+    [
+      'wrong field type',
+      {
+        assembler_run_id: 42,
+        proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        proposal_provenance_status: 'retained_match',
+      },
+    ],
+  ])('rejects an invalid proposal execution identity atomically: %s', async (_label, proposalFields) => {
     const fetchMock = vi.fn(() => Promise.resolve(
       new Response(JSON.stringify({
         keeper: 'keeper-alpha',
@@ -469,7 +492,7 @@ describe('keeper tool telemetry fetchers', () => {
             output: 'ok',
             success: true,
             duration_ms: 5,
-            proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            ...proposalFields,
           },
         ],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),

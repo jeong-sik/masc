@@ -5464,6 +5464,7 @@ def keeper_calls_fixture() -> HttpResponse:
                     "keeper": "alpha",
                     "tool": "Read",
                     "input": '{"file_path": "lib/a.ml"}',
+                    "output": "sentinel-digest-31506",
                     "success": True,
                     "duration_ms": 28.4,
                     "turn": 2143,
@@ -5519,6 +5520,7 @@ def keeper_calls_interaction() -> Interaction:
             (b"exact-assembler-run-42", "the Assembler producer run"),
             (b"aaaaaaaaaaaa", "the proposal identity"),
             (b"retained_match", "the provenance verdict"),
+            (b"sentinel-digest-31506", "the returned proposal output"),
         ):
             if needle not in pane:
                 raise AssertionError(f"Keeper Calls did not draw {what}: {pane!r}")
@@ -5592,6 +5594,7 @@ def keeper_calls_constrained_interaction() -> Interaction:
             (b"exact-assembler-run-42", "the Assembler producer run"),
             (b"a" * 64, "the full proposal identity"),
             (b"retained_match", "the provenance verdict"),
+            (b"sentinel-digest-31506", "the returned proposal output"),
             (b"fixture keeper-call refresh failed", "the retained refresh failure"),
             (b"named another keeper", "the foreign-row mismatch"),
         ):
@@ -5599,6 +5602,14 @@ def keeper_calls_constrained_interaction() -> Interaction:
                 raise AssertionError(
                     f"Constrained Keeper Calls did not draw {what}: {pane!r}"
                 )
+        send_and_wait(process, master_fd, output, b"j", b"tool_execute")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"k",
+            b"sentinel-digest-31506",
+        )
         send_and_wait(
             process,
             master_fd,

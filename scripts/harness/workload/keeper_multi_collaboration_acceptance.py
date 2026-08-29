@@ -152,6 +152,14 @@ if rw26_fibonacci_leading_one_count(10) != 3:
     raise AssertionError("rw26 oracle drifted: F(1..10) must contain 3 leading-1 values")
 
 
+# An external process sweep on this machine SIGTERMs masc servers every
+# 8-40 minutes (issue #31711); a supervised server restarts in well under a
+# minute. A refused connection never reached the server, so replaying it is
+# safe for mutations too; the -32002 "starting up" JSON-RPC error is the
+# same boot window seen after the socket returns.
+TRANSPORT_RETRY_INTERVAL_SEC = 10.0
+TRANSPORT_RETRY_ATTEMPTS = 30
+
 def goal_verifier_convergence_timeout(request_timeout: float) -> float:
     return (2.0 * request_timeout) + (2.0 * GOAL_VERIFIER_RETRY_INTERVAL_SEC)
 
@@ -371,6 +379,7 @@ class McpClient:
         params: dict[str, Any],
         *,
         _retry_on_stale_session: bool = True,
+        _transport_retries: int = TRANSPORT_RETRY_ATTEMPTS,
     ) -> dict[str, Any]:
         request_id = self._next_id()
         payload = json.dumps(
@@ -429,11 +438,32 @@ class McpClient:
                 )
             raise AcceptanceError(f"MCP HTTP {error.code}: {detail[:1000]}") from error
         except urllib.error.URLError as error:
+            refused = isinstance(getattr(error, "reason", None), ConnectionRefusedError)
+            if refused and _transport_retries > 0:
+                time.sleep(TRANSPORT_RETRY_INTERVAL_SEC)
+                return self.request(
+                    method,
+                    params,
+                    _retry_on_stale_session=_retry_on_stale_session,
+                    _transport_retries=_transport_retries - 1,
+                )
             raise AcceptanceError(f"MCP transport failed: {error}") from error
         value = self._decode_response(body, request_id)
         if value.get("error") is not None:
+            error_value = value["error"]
+            starting_up = (
+                isinstance(error_value, dict) and error_value.get("code") == -32002
+            )
+            if starting_up and _transport_retries > 0:
+                time.sleep(TRANSPORT_RETRY_INTERVAL_SEC)
+                return self.request(
+                    method,
+                    params,
+                    _retry_on_stale_session=_retry_on_stale_session,
+                    _transport_retries=_transport_retries - 1,
+                )
             raise AcceptanceError(
-                f"MCP {method} JSON-RPC error: {json.dumps(value['error'], ensure_ascii=False)}"
+                f"MCP {method} JSON-RPC error: {json.dumps(error_value, ensure_ascii=False)}"
             )
         return value
 

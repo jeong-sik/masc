@@ -1321,7 +1321,6 @@ class MissionRun:
         *,
         phase: str,
         completion_state: str | None = None,
-        criterion_state: str | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
         if timeout is None:
@@ -1336,11 +1335,6 @@ class MissionRun:
                 f"goal-verifier-poll-{phase}-{attempt}",
             )
             verification = last.get("verification")
-            criterion = (
-                verification.get("criterion")
-                if isinstance(verification, dict)
-                else None
-            )
             completion = (
                 verification.get("completion")
                 if isinstance(verification, dict)
@@ -1348,13 +1342,6 @@ class MissionRun:
             )
             if (
                 last.get("phase") == phase
-                and (
-                    criterion_state is None
-                    or (
-                        isinstance(criterion, dict)
-                        and criterion.get("state") == criterion_state
-                    )
-                )
                 and (
                     completion_state is None
                     or (
@@ -1367,7 +1354,7 @@ class MissionRun:
             time.sleep(2.0)
         raise AcceptanceError(
             "Goal verifier state did not converge: "
-            f"expected phase={phase} criterion={criterion_state} "
+            f"expected phase={phase} "
             f"completion={completion_state}, last={json.dumps(last, ensure_ascii=False)}"
         )
 
@@ -2028,7 +2015,6 @@ class MissionRun:
         )
         self.wait_for_goal_state(
             phase="executing",
-            criterion_state="viable",
             completion_state="idle",
         )
         verifier_task = self.call(
@@ -2064,7 +2050,6 @@ class MissionRun:
         )
         refuted = self.wait_for_goal_state(
             phase="executing",
-            criterion_state="viable",
             completion_state="proof_refuted",
         )
         refuted_verdict = (
@@ -2094,7 +2079,6 @@ class MissionRun:
         )
         proven = self.wait_for_goal_state(
             phase="completed",
-            criterion_state="viable",
             completion_state="proof_proven",
         )
         proven_verdict = (

@@ -250,6 +250,22 @@ let pad_to width text =
   let length = String.length text in
   if length >= width then text else text ^ String.make (width - length) ' '
 
+(* The longest registered tool name is 48 bytes
+   (masc_operator_board_attention_quarantine_requeue), so a 64-byte cap
+   carries every real name intact. A name past it is not spelling: on
+   2026-08-29 glm-5-turbo degenerated and wrote loop counters into the name
+   field ("Execute1" + the digits 1..1000, kilobytes long), and [name_width]
+   then padded every row in the block to that length. Head and tail are both
+   kept for the same reason [compact_request_id] keeps both: the prefix
+   names the tool the model meant, the suffix carries the degenerate tail
+   ("...e+0061"). *)
+let tool_name_display_cap = 64
+
+let display_tool_name name =
+  let length = String.length name in
+  if length <= tool_name_display_cap then name
+  else String.sub name 0 48 ^ ".." ^ String.sub name (length - 14) 14
+
 (* One formatter for rows drawn live and rows read back from the transcript.
    The names are padded to a common column so a block of calls lines up, which
    is only meaningful within one block -- hence the width is computed per
@@ -264,7 +280,7 @@ let render_activity_rows (activities : tool_activity list) =
        does not reach inside the lambda. *)
     List.fold_left
       (fun widest (activity : tool_activity) ->
-        max widest (String.length activity.tool_name))
+        max widest (String.length (display_tool_name activity.tool_name)))
       0 activities
   in
   let with_trailer text = function
@@ -278,13 +294,15 @@ let render_activity_rows (activities : tool_activity list) =
       | None ->
           safe_line
             (with_trailer
-               (Printf.sprintf "%s %s" marker activity.tool_name)
+               (Printf.sprintf "%s %s" marker
+                  (display_tool_name activity.tool_name))
                activity.duration)
       | Some subject ->
           safe_line
             (with_trailer
                (Printf.sprintf "%s %s %s" marker
-                  (pad_to name_width activity.tool_name) subject)
+                  (pad_to name_width (display_tool_name activity.tool_name))
+                  subject)
                activity.duration))
     activities
 
@@ -352,7 +370,7 @@ let canonical_tool_name (activity : tool_activity) =
         Masc.Keeper_tool_descriptor.public_name_for_internal activity.tool_name
       with
       | Some public_name -> public_name
-      | None -> safe_line activity.tool_name)
+      | None -> safe_line (display_tool_name activity.tool_name))
 
 let compact_tool_parts (activities : tool_activity list) =
   let add counts activity =

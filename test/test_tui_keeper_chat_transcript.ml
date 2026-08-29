@@ -797,6 +797,75 @@ let test_compact_summary_counts_registered_public_names () =
 let full_tool_rows block =
   (Transcript.project_tool_block Transcript.Full block).Transcript.rows
 
+(* 2026-08-29, keeper edgar.a.poe on glm-5-turbo: a degenerate generation
+   wrote loop counters into the tool NAME field — "Execute1" followed by the
+   digits 1..1000, kilobytes long. The call is denied either way; the display
+   only has to stay readable. Registered names (the longest is 48 bytes) pass
+   through whole. *)
+let degenerate_name =
+  "Execute1" ^ String.concat "" (List.init 200 (fun i -> string_of_int (i + 1)))
+
+let test_full_rows_cap_a_degenerate_tool_name () =
+  let name_length = String.length degenerate_name in
+  let rows =
+    full_tool_rows
+      (Transcript.tool_block
+         [ activity ~name:degenerate_name ~outcome:Transcript.Returned
+         ; activity ~name:"read_file" ~outcome:Transcript.Returned
+         ])
+  in
+  (* "150151152" sits past byte 189 of the concatenated digits, far beyond
+     the 64-byte window, so its absence is the truncation itself. *)
+  List.iter
+    (fun row ->
+      check bool "a degenerate name cannot widen every row" true
+        (String.length row < 120);
+      check bool "the middle of the degenerate name is cut away" true
+        (not (contains ~needle:"150151152" row)))
+    rows;
+  (match rows with
+   | [ degenerate; _ ] ->
+       check bool "the head the model meant survives" true
+         (contains ~needle:"Execute1" degenerate);
+       check bool "the degenerate tail survives as the suffix" true
+         (contains ~needle:(String.sub degenerate_name (name_length - 14) 14)
+            degenerate);
+       check bool "head and tail are joined by the cut marker" true
+         (contains ~needle:".." degenerate)
+   | rows -> failf "expected two rows, got %d" (List.length rows))
+
+let test_compact_mix_caps_a_degenerate_tool_name () =
+  (* A fold needs two calls; a single call keeps its own row in both modes. *)
+  let projection =
+    Transcript.tool_block
+      [ activity ~name:degenerate_name ~outcome:Transcript.Returned
+      ; activity ~name:"read_file" ~outcome:Transcript.Returned
+      ]
+    |> Transcript.project_tool_block Transcript.Compact
+  in
+  (match projection.Transcript.rows with
+   | [ summary ] ->
+       check bool "the compact mix carries the truncated name" true
+         (contains ~needle:"Execute1" summary);
+       check bool "the middle of the degenerate name is cut away" true
+         (not (contains ~needle:"150151152" summary));
+       check bool "the summary row stays on one line of a pane" true
+         (String.length summary < 200)
+   | rows -> failf "expected one compact row, got %d" (List.length rows))
+
+let test_a_registered_length_name_passes_through_whole () =
+  let longest = "masc_operator_board_attention_quarantine_requeue" in
+  let rows =
+    full_tool_rows
+      (Transcript.tool_block
+         [ activity ~name:longest ~outcome:Transcript.Returned ])
+  in
+  (match rows with
+   | [ row ] ->
+       check bool "a 48-byte registered name is not truncated" true
+         (contains ~needle:longest row)
+   | rows -> failf "expected one row, got %d" (List.length rows))
+
 (* The shape a reader follows a long turn by: thinking, then the call, then
    more thinking, then the reply — not three pooled blocks. This is the order
    the live pane draws. *)
@@ -967,6 +1036,12 @@ let () =
             test_a_declined_interrupt_carries_the_reason
         ; test_case "tool rows mark how far each call got" `Quick
             test_tool_rows_mark_how_far_each_call_got
+        ; test_case "full rows cap a degenerate tool name" `Quick
+            test_full_rows_cap_a_degenerate_tool_name
+        ; test_case "the compact mix caps a degenerate tool name" `Quick
+            test_compact_mix_caps_a_degenerate_tool_name
+        ; test_case "a registered-length name passes through whole" `Quick
+            test_a_registered_length_name_passes_through_whole
         ; test_case "the progress row carries the turn age" `Quick
             test_progress_row_carries_the_turn_age
         ] )

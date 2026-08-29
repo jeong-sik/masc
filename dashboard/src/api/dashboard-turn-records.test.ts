@@ -8,7 +8,7 @@ vi.mock('./core', () => ({
 }))
 vi.mock('./dev-token', () => ({ ensureDevToken }))
 
-import { fetchKeeperTurnRecords } from './dashboard-turn-records'
+import { TURN_PROMPT_BLOCK_IDS, fetchKeeperTurnRecords } from './dashboard-turn-records'
 
 function entry(overrides: Record<string, unknown> = {}) {
   return {
@@ -404,6 +404,23 @@ describe('keeper turn record final input composition', () => {
       { component: 'prompt.keeper_instructions', bytes: 1200 },
       { component: 'tool_schemas', bytes: 64000 },
       { component: 'message_tool_result', bytes: 2800 },
+    ])
+  })
+
+  // The decoder switch and TURN_PROMPT_BLOCK_IDS are two copies of the same
+  // list, and they drifted: 'operator_note' shipped in the constant and in the
+  // OCaml producer (prompt_block_id.ml:24) but never reached the switch, so a
+  // turn carrying an operator note failed decodeTurnInputComponents and was
+  // rejected whole. Walk the constant so the next block added cannot repeat it.
+  it.each([...TURN_PROMPT_BLOCK_IDS])('decodes the %s prompt component', async (block) => {
+    getMock.mockResolvedValue(payload(entry({
+      input_components: [{ component: `prompt.${block}`, bytes: 1 }],
+    })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record.input_components).toEqual([
+      { component: `prompt.${block}`, bytes: 1 },
     ])
   })
 

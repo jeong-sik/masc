@@ -360,6 +360,7 @@ function decodeTurnInputComponentId(raw: unknown): TurnInputComponentId | null {
     case 'prompt.dynamic_context':
     case 'prompt.temporal_summary':
     case 'prompt.memory_os_recall':
+    case 'prompt.operator_note':
     case 'tool_schemas':
     case 'message_user':
     case 'message_system':

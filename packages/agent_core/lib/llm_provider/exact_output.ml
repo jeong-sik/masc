@@ -1731,6 +1731,29 @@ let execution_failure_may_advance (error : execution_error) =
        until the refusal kind survived classification the lane could not reach
        it — a 429 arrived here as [Completion_failed] and ended the flow. *)
     receipt_dispatch_count error.receipt = 1
+  | Provider_response_refused { refusal = Authorization_refused; _ }, Response_received
+    ->
+    (* The argument the comment below asks for, made for this one refusal.
+       [Retry.classify_error] maps 403 without reading provider prose, and
+       names the three things it can mean: a disabled account, a missing
+       entitlement, or an exhausted subscription allowance. All three describe
+       the credential this binding presented, never the request it carried —
+       the same shape as the quota above, which the lane already advances on.
+       The successor presents a different credential, so replaying the
+       identical request there is exactly what the ordered lane is for.
+
+       Measured 2026-08-30: a subscription's weekly window closed and every
+       model behind it answered 403, so the four exact lanes holding it lost
+       their second slot. A lane whose first slot had just lost to a 429
+       advanced onto that 403 and stopped there, and a third candidate written
+       into the config could not be reached at all — the operator's comment
+       recording that dead end sat in runtime.toml above a slot list it could
+       not fix.
+
+       Authentication (401) and payment (402) are arguably the same shape.
+       Neither is promoted here: each needs its own evidence, and this change
+       carries evidence for 403 only. *)
+    receipt_dispatch_count error.receipt = 1
   | Invalid_json_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The response arrived and terminated, but this binding routed the whole
@@ -1751,7 +1774,6 @@ let execution_failure_may_advance (error : execution_error) =
             ( Overloaded
             | Server_error
             | Auth_failed
-            | Authorization_refused
             | Payment_required
             | Invalid_request
             | Not_found
@@ -1763,7 +1785,8 @@ let execution_failure_may_advance (error : execution_error) =
         }
     , (Not_started | Before_dispatch | Dispatch_started | Response_received | Terminal) )
   | Completion_failed, (Not_started | Dispatch_started | Response_received | Terminal)
-  | ( Provider_response_refused { refusal = Request_body_refused | Rate_limited; _ }
+  | ( Provider_response_refused
+        { refusal = Request_body_refused | Rate_limited | Authorization_refused; _ }
     , (Not_started | Before_dispatch | Dispatch_started | Terminal) )
   | Invalid_json_output, (Not_started | Before_dispatch | Dispatch_started)
   | ( ( Attempt_already_started

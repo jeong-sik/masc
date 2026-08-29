@@ -3650,6 +3650,24 @@ let test_rate_limited_429_refusal_advances_once_to_successor () =
       | _ -> fail "HTTP 429 lost its typed rate-limit cause")
 ;;
 
+(* A 403 says the credential this binding presented is not authorized —
+   a disabled account, a missing entitlement, or a spent subscription
+   allowance. None of those describe the request, so the successor, which
+   presents its own credential, gets to serve it. Measured 2026-08-30: a
+   weekly subscription window closed, every model behind it answered 403, and
+   the lanes holding it stopped on that slot with later candidates unreachable. *)
+let test_authorization_refused_403_advances_once_to_successor () =
+  assert_typed_capacity_refusal_advances_once
+    ~label:"authorization-refused"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 403
+      , {|{"error":{"message":"You've reached your weekly (7-day) usage limit."}}|} )
+    ~assert_cause:(function
+      | EO.Provider_response_refused
+          { http_status = 403; refusal = EO.Authorization_refused } -> ()
+      | _ -> fail "HTTP 403 lost its typed authorization cause")
+;;
+
 let test_generic_400_remains_terminal_without_advance () =
   let (result, advances, evidence), posts =
     with_server ~status:`Bad_request ~response:{|{"error":"generic request rejection"}|}
@@ -4342,6 +4360,10 @@ let () =
             "HTTP 429 rate limit advances with one dispatch per candidate"
             `Quick
             test_rate_limited_429_refusal_advances_once_to_successor
+        ; test_case
+            "HTTP 403 authorization refusal advances with one dispatch per candidate"
+            `Quick
+            test_authorization_refused_403_advances_once_to_successor
         ; test_case
             "generic 400 remains terminal"
             `Quick

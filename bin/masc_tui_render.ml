@@ -1822,15 +1822,26 @@ let render_approvals (state : state) =
         Printf.sprintf ", %d hidden from %s" snapshot.aps_hidden_count
           (Terminal_text.single_line_or ~default:"?" snapshot.aps_actor_filter)
   in
+  (* A failed held-calls poll keeps the previous rows on screen: the handler
+     in [masc_tui.ml] replaces [keeper_tool_approvals] only on [Ok], so the
+     count beside the title can describe a list the server no longer holds.
+     The empty branch below already refuses to let an unreadable queue wear
+     the face of an empty one; a stale list is the same lie with rows on it,
+     and it is the one an operator decides against. *)
+  let held_note =
+    match state.keeper_tool_approvals_error with
+    | Some _ -> ", held calls stale"
+    | None -> ""
+  in
   let action_inflight =
     Masc_tui_operator_projection.Flow.action_inflight state.approval_flow
   in
   let action_badge = if action_inflight then "  [submitting]" else "" in
   let header =
     Printf.sprintf
-      "%s (%d%s)  %s  %s%s"
+      "%s (%d%s%s)  %s  %s%s"
       (screen_title " MASC Approvals")
-      count queue_note timestamp
+      count queue_note held_note timestamp
       (connection_badge state) action_badge
   in
 

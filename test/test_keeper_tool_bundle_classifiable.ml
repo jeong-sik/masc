@@ -356,13 +356,20 @@ let with_bundle f =
     (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools)
 ;;
 
-let test_narrow_surface_controls_production_bundle () =
-  with_bundle_tools  @@ fun _config _meta _skill_snapshot _composition_plan_index _surface tools ->
+(* The bundle is the model-visible surface, whole. It used to be narrowable
+   per Keeper through declared tool groups, and this asserted that a Tool
+   outside the declared groups did not reach the bundle; #31728 removed the
+   declaration because no Keeper ever wrote one, so there is no outside left
+   for a Tool to be in. *)
+let test_the_bundle_is_the_model_visible_surface () =
+  with_bundle_tools
+  @@ fun _config _meta _skill_snapshot _composition_plan_index _surface tools ->
   let names =
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools
   in
   check bool "board Tool remains executable" true (List.mem "masc_board_list" names);
-  check bool "off-surface Read is absent" false (List.mem "Read" names)
+  check bool "Read is in the bundle, like every model-visible Tool" true
+    (List.mem "Read" names)
 ;;
 
 (* The handler is the tool. Reading only its schema would let a tool that
@@ -453,8 +460,8 @@ let test_tools_list_reads_the_supplied_capability_surface () =
   match read with
   | None -> fail "complete inventory omitted Read"
   | Some descriptor ->
-    check string "metadata did not widen the frozen Tool surface"
-      "outside_tool_surface"
+    check string "a model-visible Tool is active in the frozen surface"
+      "active"
       Yojson.Safe.Util.(descriptor |> member "availability" |> to_string);
     let search_tool =
       match
@@ -480,11 +487,11 @@ let test_tools_list_reads_the_supplied_capability_surface () =
       (Keeper_capability_surface.digest capability_surface)
       Yojson.Safe.Util.(search |> member "surface_digest" |> to_string);
     let matches = Yojson.Safe.Util.(search |> member "matches" |> to_list) in
-    check bool "search includes an outside Tool candidate" true
+    check bool "search answers from the frozen surface" true
       (List.exists
          (fun row ->
             String.equal
-              "outside_tool_surface"
+              "active"
               Yojson.Safe.Util.(
                 row
                 |> member "candidate"
@@ -806,8 +813,8 @@ let () =
         ; test_case "names are unique" `Quick test_bundle_names_are_unique
         ; test_case "matches the expected projection" `Quick
             test_bundle_matches_expected_projection
-        ; test_case "narrow surface controls production bundle" `Quick
-            test_narrow_surface_controls_production_bundle
+        ; test_case "the bundle is the model-visible surface" `Quick
+            test_the_bundle_is_the_model_visible_surface
         ; test_case "tools list reads supplied capability surface" `Quick
             test_tools_list_reads_the_supplied_capability_surface
         ; test_case "the skill tool serves the body" `Quick

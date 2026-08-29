@@ -9,7 +9,6 @@ type t
 
 type capability_availability =
   | Active
-  | Outside_tool_surface
   | Outside_skill_surface
   | Not_model_invocable
   | Invalid_definition

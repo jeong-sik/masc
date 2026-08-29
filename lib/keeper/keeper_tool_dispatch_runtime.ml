@@ -46,10 +46,14 @@ let frozen_surface_admission_error_to_execution error =
       ([ "ok", `Bool false
        ; "error", `String "tool_outside_frozen_capability_surface"
        ; "tool", `String requested_tool
-       ; ( "availability"
-         , `String
-             (Keeper_capability_surface.capability_availability_to_string
-                Keeper_capability_surface.Outside_tool_surface) )
+         (* Spelled here rather than taken from
+            [Keeper_capability_surface.capability_availability], which
+            describes a row in the frozen inventory. This is the opposite
+            situation -- the name the model called is in no row at all. The
+            two read the same because that type used to carry an
+            [Outside_tool_surface] constructor, which #31728 made unreachable
+            and this purge removed. *)
+       ; "availability", `String "outside_tool_surface"
        ]
        @ detail_fields)
   in

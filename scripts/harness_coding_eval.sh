@@ -303,9 +303,9 @@ append_row() {
 }
 
 # Build one evidence row. passed is derived here exactly the way the report
-# CLI re-derives it (status=ok && verify_exit=0); the CLI refuses a row where
-# the two stories diverge, so a bug in either side surfaces as a loud decode
-# error instead of a silently wrong number.
+# CLI re-derives it (status=ok && verify_exit=0 && regression stayed green);
+# the CLI refuses a row where the two stories diverge, so a bug in either side
+# surfaces as a loud decode error instead of a silently wrong number.
 evidence_row() {
   jq -cn \
     --arg case_id "$1" \
@@ -322,6 +322,7 @@ evidence_row() {
     --argjson output_tokens "${12}" \
     --argjson cost_usd "${13}" \
     --argjson error "${14}" \
+    --argjson regression_exit "${15}" \
     '{
       case_id: $case_id,
       run_index: $run_index,
@@ -330,7 +331,9 @@ evidence_row() {
       model: $model,
       status: $status,
       verify_exit: $verify_exit,
-      passed: ($status == "ok" and $verify_exit == 0),
+      regression_exit: $regression_exit,
+      passed: ($status == "ok" and $verify_exit == 0
+               and ($regression_exit == null or $regression_exit == 0)),
       duration_ms: $duration_ms,
       recorded_at: $recorded_at,
       tool_calls: $tool_calls,
@@ -365,7 +368,7 @@ run_one() {
   local case_dir="$3"
   local repeat_index="$4"
 
-  local case_id timeout_sec verify_rel prompt test_files
+  local case_id timeout_sec verify_rel prompt test_files regression_rel
   case_id="$(jq -r '.id' "${case_dir}/case.json")"
   timeout_sec="$(jq -r '.timeout_sec' "${case_dir}/case.json")"
   verify_rel="$(jq -r '.verify' "${case_dir}/case.json")"
@@ -374,6 +377,8 @@ run_one() {
   # grading. Defaults to check.sh when the key is absent — the corpus
   # convention Coding_eval_case also defaults to.
   test_files="$(jq -r '(.test_files // ["check.sh"])[]' "${case_dir}/case.json")"
+  # Optional PASS_TO_PASS regression script (case-relative). Empty when absent.
+  regression_rel="$(jq -r '.regression // empty' "${case_dir}/case.json")"
 
   local run_id run_dir workspace evidence_path
   run_id="$(printf '%s-%s-%s-r%d' "${provider}" "${model}" "${case_id}" "${repeat_index}" \
@@ -405,7 +410,7 @@ run_one() {
   local start_epoch end_epoch duration_ms recorded_at
   start_epoch="$(date +%s)"
 
-  local finish_status="ok" error_text="" verify_exit_json="null"
+  local finish_status="ok" error_text="" verify_exit_json="null" regression_exit_json="null"
   local tool_calls_json='[]' input_tokens_json="null" output_tokens_json="null"
   local cost_usd_json="null"
 
@@ -532,6 +537,19 @@ run_one() {
     local verify_code=$?
     set -e
     verify_exit_json="${verify_code}"
+
+    # PASS_TO_PASS: a declared regression guard runs against the same graded
+    # workspace and must stay green. A run that turns verify green while
+    # breaking it does not pass. The script is case-level (hidden from the
+    # candidate) like verify itself.
+    if [[ -n "${regression_rel}" ]]; then
+      set +e
+      bash "${case_dir}/${regression_rel}" "${workspace}" \
+        >"${run_dir}/regression.log" 2>&1
+      local regression_code=$?
+      set -e
+      regression_exit_json="${regression_code}"
+    fi
   fi
 
   tool_calls_json="$(keeper_tool_call_names "${keeper_name}")"
@@ -546,9 +564,10 @@ run_one() {
     "${case_id}" "${repeat_index}" "${run_id}" "${provider}" "${model}" \
     "${finish_status}" "${verify_exit_json}" "${duration_ms}" "${recorded_at}" \
     "${tool_calls_json}" "${input_tokens_json}" "${output_tokens_json}" \
-    "${cost_usd_json}" "$(json_string_or_null "${error_text}")")"
+    "${cost_usd_json}" "$(json_string_or_null "${error_text}")" \
+    "${regression_exit_json}")"
   append_row "${row}" "${evidence_path}"
-  echo "[coding-eval] ${run_id}: status=${finish_status} verify_exit=${verify_exit_json}" >&2
+  echo "[coding-eval] ${run_id}: status=${finish_status} verify_exit=${verify_exit_json} regression_exit=${regression_exit_json}" >&2
 }
 
 main() {

@@ -129,7 +129,11 @@ let test_case_json_rejects_undeclared_keys () =
     check bool "error names the key" true (string_contains message "extra")
 ;;
 
-let row_json ~run_index ~status ~verify_exit ~passed =
+let row_json ?(regression_exit = None) ~run_index ~status ~verify_exit ~passed () =
+  let int_or_null = function
+    | Some code -> `Int code
+    | None -> `Null
+  in
   `Assoc
     [ "case_id", `String "l1-calc-add"
     ; "run_index", `Int run_index
@@ -137,10 +141,8 @@ let row_json ~run_index ~status ~verify_exit ~passed =
     ; "provider", `String "ollama"
     ; "model", `String "test-model"
     ; "status", `String status
-    ; ( "verify_exit"
-      , match verify_exit with
-        | Some code -> `Int code
-        | None -> `Null )
+    ; "verify_exit", int_or_null verify_exit
+    ; "regression_exit", int_or_null regression_exit
     ; "passed", `Bool passed
     ; "duration_ms", `Int 1200
     ; "recorded_at", `Float 1700000000.0
@@ -168,8 +170,8 @@ let test_report_pipeline_on_fixed_rows () =
   let runs_path = Filename.concat dir "runs.jsonl" in
   write_jsonl
     runs_path
-    [ row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 0) ~passed:true
-    ; row_json ~run_index:2 ~status:"ok" ~verify_exit:(Some 1) ~passed:false
+    [ row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 0) ~passed:true ()
+    ; row_json ~run_index:2 ~status:"ok" ~verify_exit:(Some 1) ~passed:false ()
     ];
   let rows =
     match Coding_eval_report.rows_of_jsonl_file runs_path with
@@ -198,7 +200,7 @@ let test_report_pipeline_on_fixed_rows () =
 let test_row_disagreeing_with_its_verdict_is_refused () =
   match
     Coding_eval_report.row_of_json
-      (row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 1) ~passed:true)
+      (row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 1) ~passed:true ())
   with
   | Ok _ -> Alcotest.fail "expected the inconsistent row to be refused"
   | Error message ->
@@ -278,6 +280,45 @@ let test_solution_may_not_ship_the_oracle () =
     check bool "error names the oracle" true (string_contains message "check.sh")
 ;;
 
+let test_case_json_accepts_regression () =
+  let json = `Assoc (base_case_fields @ [ "regression", `String "regress.sh" ]) in
+  match Coding_eval_case.of_json json with
+  | Ok case ->
+    check (option string) "regression parsed" (Some "regress.sh") case.regression
+  | Error message -> Alcotest.failf "expected regression to parse, got: %s" message
+;;
+
+(* A regression guard that went red makes the run not-passed even when verify is
+   green; a row claiming otherwise is refused, and one telling the consistent
+   story decodes. *)
+let test_regression_failure_gates_passed () =
+  (match
+     Coding_eval_report.row_of_json
+       (row_json
+          ~run_index:1
+          ~status:"ok"
+          ~verify_exit:(Some 0)
+          ~regression_exit:(Some 1)
+          ~passed:true
+          ())
+   with
+   | Ok _ -> Alcotest.fail "expected a green-verify red-regression pass to be refused"
+   | Error message ->
+     check bool "error names regression" true (string_contains message "regression_exit"));
+  match
+    Coding_eval_report.row_of_json
+      (row_json
+         ~run_index:1
+         ~status:"ok"
+         ~verify_exit:(Some 0)
+         ~regression_exit:(Some 1)
+         ~passed:false
+         ())
+  with
+  | Ok row -> check bool "regression failure is not a pass" false row.passed
+  | Error message -> Alcotest.failf "consistent regression row should decode: %s" message
+;;
+
 let () =
   run
     "coding_eval_cases"
@@ -303,6 +344,10 @@ let () =
             "solution may not ship the oracle"
             `Quick
             test_solution_may_not_ship_the_oracle
+        ; test_case
+            "case.json accepts a regression guard"
+            `Quick
+            test_case_json_accepts_regression
         ] )
     ; ( "report"
       , [ test_case "fixed rows pipeline" `Quick test_report_pipeline_on_fixed_rows
@@ -310,6 +355,10 @@ let () =
             "inconsistent row refused"
             `Quick
             test_row_disagreeing_with_its_verdict_is_refused
+        ; test_case
+            "regression failure gates passed"
+            `Quick
+            test_regression_failure_gates_passed
         ] )
     ]
 ;;

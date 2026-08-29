@@ -40,6 +40,7 @@ type row = {
   model : string;
   status : run_status;
   verify_exit : int option;
+  regression_exit : int option;
   passed : bool;
   duration_ms : int;
   recorded_at : float;
@@ -58,6 +59,7 @@ let row_keys =
   ; "model"
   ; "status"
   ; "verify_exit"
+  ; "regression_exit"
   ; "passed"
   ; "duration_ms"
   ; "recorded_at"
@@ -133,6 +135,7 @@ let row_of_json json =
              status_raw)
     in
     let* verify_exit = opt_int "verify_exit" in
+    let* regression_exit = opt_int "regression_exit" in
     let* passed =
       match List.assoc_opt "passed" fields with
       | Some (`Bool value) -> Ok value
@@ -163,20 +166,32 @@ let row_of_json json =
     let* output_tokens = opt_int "output_tokens" in
     let* cost_usd = opt_float "cost_usd" in
     let* error = opt_str "error" in
-    let derived_passed = status = Run_ok && verify_exit = Some 0 in
+    (* A run passes only when verify is green AND, if the case declares a
+       PASS_TO_PASS regression guard, that guard stayed green too. A case with
+       no regression declared leaves [regression_exit] absent, which cannot
+       fail the run. *)
+    let regression_ok =
+      match regression_exit with
+      | None -> true
+      | Some code -> code = 0
+    in
+    let derived_passed = status = Run_ok && verify_exit = Some 0 && regression_ok in
     let* () =
       if Bool.equal derived_passed passed
       then Ok ()
       else
         Error
           (Printf.sprintf
-             "row %s r%d: passed=%b disagrees with status=%s verify_exit=%s — the \
-              runner and the row must tell one story"
+             "row %s r%d: passed=%b disagrees with status=%s verify_exit=%s \
+              regression_exit=%s — the runner and the row must tell one story"
              case_id
              run_index
              passed
              (run_status_to_string status)
              (match verify_exit with
+              | Some code -> string_of_int code
+              | None -> "null")
+             (match regression_exit with
               | Some code -> string_of_int code
               | None -> "null"))
     in
@@ -188,6 +203,7 @@ let row_of_json json =
       ; model
       ; status
       ; verify_exit
+      ; regression_exit
       ; passed
       ; duration_ms
       ; recorded_at

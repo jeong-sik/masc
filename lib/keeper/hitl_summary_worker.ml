@@ -1154,7 +1154,7 @@ let try_cli_slots
       | Error error ->
         Error (Keeper_approval_queue.exact_attempt_error_to_string error)
     in
-    let rec walk ~bound ~last_cli_failure = function
+    let rec walk ~bound ~released_entry_binding ~last_cli_failure = function
       | [] ->
         (match bound, last_cli_failure with
          | Some identity, Some failure ->
@@ -1172,16 +1172,41 @@ let try_cli_slots
              identity
              (quarantine_cause_of_failure failure);
            Cli_settled
-         | _, None | None, _ ->
-           (* No cli slot ever reached a binding of its own (every bind was
-              refused): the pre-cli state is what remains, so the caller's
-              ordinary settlement still applies. *)
-           record_outcome "exact_cli_walk_fell_back";
-           Cli_fell_back)
+         | Some identity, None ->
+           (* Unreachable by construction: [bound] becomes [Some] only for a
+              cli identity whose run already recorded a failure, and a
+              success returns before the walk recurses. Treat it as the
+              exhausted case with an execution cause rather than hiding it
+              under a wildcard. *)
+           record_outcome "exact_cli_slots_exhausted";
+           quarantine_identity ~queue_ops entry identity Exact_flow_execution_failed;
+           Cli_settled
+         | None, (Some _ | None) ->
+           if released_entry_binding
+           then (
+             (* The walk released the caller's exhausted binding and then no
+                cli slot managed to bind: the pre-cli state is gone, so the
+                caller's quarantine (which requires that binding) would be
+                rejected. Settle the entry here instead. *)
+             record_outcome "exact_cli_released_without_binding";
+             settle_current_or_signal
+               ~queue_ops
+               entry
+               ~reason:
+                 "HITL cli lane-slot walk released the exhausted binding but \
+                  no cli slot bound"
+               ~cause:Exact_flow_execution_failed;
+             Cli_settled)
+           else (
+             (* Nothing was released and nothing bound: the pre-cli state is
+                intact and the caller's ordinary settlement still applies. *)
+             record_outcome "exact_cli_walk_fell_back";
+             Cli_fell_back))
       | runtime_id :: rest ->
         (* Rebind discipline: whatever is bound (the exhausted HTTP candidate
            or the previous cli slot) is released before the next identity
            binds — the same release-then-bind step the HTTP walk performs. *)
+        let released_entry_binding = released_entry_binding || Option.is_some bound in
         (match
            match bound with
            | None -> Ok ()
@@ -1190,6 +1215,10 @@ let try_cli_slots
          | Error detail ->
            record_outcome "exact_cli_release_unconfirmed";
            log_exact_error entry "cli slot release" detail;
+           (* The release did not confirm, so the caller's binding may or may
+              not remain; the caller's own settlement copes with either (its
+              quarantine raises a typed rejection at worst on a state it can
+              no longer see). Nothing cli-owned exists yet. *)
            Cli_fell_back
          | Ok () ->
            let identity =
@@ -1214,7 +1243,7 @@ let try_cli_slots
                 (Keeper_approval_queue.exact_attempt_error_to_string error);
               (* This slot never bound; the previous binding was already
                  released, so continue the walk with nothing bound. *)
-              walk ~bound:None ~last_cli_failure rest
+              walk ~bound:None ~released_entry_binding ~last_cli_failure rest
             | Ok { write_outcome = Fsync_completed; _ } ->
               queue_ops.after_bind ();
               (match
@@ -1232,7 +1261,11 @@ let try_cli_slots
                    entry
                    "cli slot execution"
                    (Keeper_lane_cli_oneshot.failure_to_string failure);
-                 walk ~bound:(Some identity) ~last_cli_failure:(Some failure) rest
+                 walk
+                   ~bound:(Some identity)
+                   ~released_entry_binding
+                   ~last_cli_failure:(Some failure)
+                   rest
                | Ok output ->
                  (match
                     parse_summary
@@ -1244,6 +1277,7 @@ let try_cli_slots
                     log_exact_error entry "cli domain validation" detail;
                     walk
                       ~bound:(Some identity)
+                      ~released_entry_binding
                       ~last_cli_failure:
                         (Some
                            (Keeper_lane_cli_oneshot.Invalid_json_output
@@ -1282,7 +1316,7 @@ let try_cli_slots
                          Exact_terminal_persistence_failure;
                        Cli_settled)))))
     in
-    walk ~bound ~last_cli_failure:None slots
+    walk ~bound ~released_entry_binding:false ~last_cli_failure:None slots
 ;;
 
 let execute_prepared_flow_with_queue_ops_current

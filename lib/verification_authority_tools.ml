@@ -56,7 +56,7 @@ let rec resolve_tools = function
 let create ~config ~producer =
   let open Result.Syntax in
   let* producer_scope =
-    match Keeper_meta_store.read_meta config producer with
+    match Keeper_meta_store.read_effective_meta config producer with
     | Error message ->
       Error (Printf.sprintf "producer %s meta unreadable: %s" producer message)
     | Ok None -> Ok Workspace_producer

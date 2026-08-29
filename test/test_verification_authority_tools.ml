@@ -43,7 +43,7 @@ let ensure_producer config name =
 ;;
 
 (* A workspace holding one producer keeper, and the surface bound to it. *)
-let with_surface f =
+let with_surface ?(sandbox_profile = "local") f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -53,6 +53,17 @@ let with_surface f =
   Eio.Switch.on_release sw (fun () -> rm_rf dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let profile_path =
+    Keeper_sandbox_config.keeper_toml_path
+      ~base_path:config.base_path
+      ~agent_name:producer
+  in
+  Fs_compat.mkdir_p (Filename.dirname profile_path);
+  Out_channel.with_open_text profile_path (fun channel ->
+    Printf.fprintf
+      channel
+      "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = %S\n"
+      sandbox_profile);
   ensure_producer config producer;
   match VAT.create ~config ~producer with
   | Error reason -> Alcotest.failf "surface creation failed: %s" reason
@@ -164,6 +175,27 @@ let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () 
         "the refusal names the missing argument"
         true
         (Astring.String.is_infix ~affix:required detail))
+;;
+
+(* The persisted runtime snapshot deliberately omits TOML-owned policy fields.
+   The verifier must reapply the current profile before choosing the producer
+   root, or a Docker keeper's evidence is looked up in the local playground. *)
+let test_keeper_surface_uses_the_effective_sandbox_root () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let playground = producer_playground config producer in
+    let name = "docker-evidence.json" in
+    Out_channel.with_open_text (Filename.concat playground name) (fun channel ->
+      output_string channel "{\"lane\":\"docker\"}\n");
+    match VAT.root_layout surface with
+    | Error detail ->
+      Alcotest.failf "Docker producer root was not inspected: %s" detail
+    | Ok layout ->
+      Alcotest.(check bool)
+        "inspects the Docker-scoped producer root"
+        true
+        (List.exists
+           (Astring.String.is_infix ~affix:name)
+           layout))
 ;;
 
 (* A search requires an explicit non-empty pattern. *)
@@ -495,6 +527,8 @@ let () =
             `Quick test_search_refuses_a_call_without_its_required_pattern
         ; Alcotest.test_case "workspace producer gets owned read surface" `Quick
             test_workspace_producer_gets_owned_read_surface
+        ; Alcotest.test_case "keeper surface uses effective sandbox root" `Quick
+            test_keeper_surface_uses_the_effective_sandbox_root
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick

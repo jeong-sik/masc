@@ -105,6 +105,14 @@ val to_json : t -> Yojson.Safe.t
     manually constructed value violates the v10 contract. *)
 val to_json_result : t -> (Yojson.Safe.t, Error.t) result
 
+(** [drop_unencodable_json cp] is the recovery copy for a checkpoint whose
+    encoding is refused: every json payload that cannot be canonically
+    encoded is removed (a required payload field becomes an empty object),
+    the text around it stays. Returns [None] when the checkpoint already
+    encodes or when nothing droppable explains the refusal. The codec still
+    rejects the original — see {!to_json_result}. *)
+val drop_unencodable_json : t -> t option
+
 (** Deserialize only the exact current v10 checkpoint schema. Every other
     version is rejected. *)
 val of_json : Yojson.Safe.t -> (t, Error.t) result

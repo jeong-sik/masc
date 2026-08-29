@@ -143,6 +143,70 @@ let test_structurally_invalid_checkpoint_is_refused_at_the_store () =
     check bool "no checkpoint file was created" false (Sys.file_exists path)
 ;;
 
+(* #31677: a provider-authored tool_use input with a duplicate object key
+   survives parsing (Yojson keeps both entries) and then refuses canonical
+   encoding at the sink. Before the recovery copy, that refusal repeated at
+   the same stage of every later turn — one degenerate generation bricked
+   the keeper until restart. *)
+let checkpoint_with_unencodable_tool_use ~session_id =
+  let messages =
+    [ Agent_core.Types.
+        { role = User
+        ; content = [ Text "run it" ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+    ; Agent_core.Types.
+        { role = Assistant
+        ; content =
+            [ ToolUse
+                { id = "call-1"
+                ; name = "Execute"
+                ; input = `Assoc [ ("cmd", `String "a"); ("cmd", `String "b") ]
+                }
+            ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+    ]
+  in
+  { (make_checkpoint ~session_id ~turn_count:1 ~marker:"poisoned") with
+    Agent_core.Checkpoint.messages
+  }
+;;
+
+let test_unencodable_payload_is_recovered_at_the_sink () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "sink-recovery" in
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  match
+    Keeper_checkpoint_store.save_agent_core_classified
+      ~session_dir
+      (checkpoint_with_unencodable_tool_use ~session_id:sid)
+  with
+  | Error message -> fail ("the sink should have stored the recovery copy: " ^ message)
+  | Ok _ ->
+    check bool "the recovery copy was written" true (Sys.file_exists path);
+    let bytes = Fs_compat.load_file path in
+    (match Agent_core.Checkpoint.of_string bytes with
+     | Ok loaded ->
+       (* The call itself survives; only the unencodable args became empty. *)
+       (match loaded.Agent_core.Checkpoint.messages with
+        | _ :: { Agent_core.Types.content = [ ToolUse { id; input; _ } ]; _ } :: _ ->
+          check string "the tool call id survives" "call-1" id;
+          check bool "the duplicate-key input became an empty object" true
+            (input = `Assoc [])
+        | messages -> failf "expected the poisoned assistant message, got %d" (List.length messages))
+     | Error error ->
+       fail ("the stored recovery copy must decode: " ^ Agent_core.Error.to_string error))
+;;
+
 let test_valid_checkpoint_still_saves () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1083,5 +1147,7 @@ let () =
             test_structurally_invalid_checkpoint_is_refused_at_the_store;
           test_case "a valid checkpoint still saves" `Quick
             test_valid_checkpoint_still_saves;
+          test_case "an unencodable payload is recovered at the sink" `Quick
+            test_unencodable_payload_is_recovered_at_the_sink;
         ] );
     ]

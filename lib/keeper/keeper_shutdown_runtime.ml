@@ -573,6 +573,33 @@ let recover_operation
      | Superseded _ -> Ok recovered)
 ;;
 
+(* Recovery has just confirmed the admission transition for a settled
+   operation. Reclaim its record so the next boot does not walk the same
+   settled operation again; [delete_terminal] keeps a
+   [Finalized { meta_removed = true }] retirement fence untouched. A reclaim
+   failure only means the record survives until the next boot, so it never
+   fails the recovery. *)
+let reclaim_settled_record ~config (recovered : Keeper_shutdown_types.t) =
+  match
+    Keeper_shutdown_store.delete_terminal
+      ~config
+      ~keeper_name:recovered.keeper_name
+      ~operation_id:recovered.operation_id
+  with
+  | Ok Keeper_shutdown_store.Terminal_deleted ->
+    Log.Keeper.info
+      "reclaimed settled shutdown record keeper=%s operation=%s"
+      recovered.keeper_name
+      (Operation_id.to_string recovered.operation_id)
+  | Ok Keeper_shutdown_store.Terminal_retained -> ()
+  | Error error ->
+    Log.Keeper.warn
+      "settled shutdown record reclaim failed keeper=%s operation=%s error=%s"
+      recovered.keeper_name
+      (Operation_id.to_string recovered.operation_id)
+      (Keeper_shutdown_store.error_to_string error)
+;;
+
 let recover_operation_with_corrupt_owner_fence
     ~config
     ~corrupt_owner_fence
@@ -601,6 +628,7 @@ let recover_operation_with_corrupt_owner_fence
        with
        | Ok Keeper_owner.Shutdown_transition_applied
        | Ok Keeper_owner.Shutdown_transition_already_applied ->
+         reclaim_settled_record ~config recovered;
          Ok recovered
        | Ok (Keeper_owner.Shutdown_transition_reserved_by_other existing) ->
          Error
@@ -625,6 +653,7 @@ let recover_operation_with_corrupt_owner_fence
             with
             | Keeper_shutdown_intake_fence.Transition_applied
             | Keeper_shutdown_intake_fence.Transition_already_applied ->
+              reclaim_settled_record ~config recovered;
               Ok recovered
             | Keeper_shutdown_intake_fence.Transition_reserved_by_other existing ->
               Error

@@ -69,6 +69,23 @@ val replace :
   Keeper_shutdown_types.t ->
   (unit, error) result
 
+type terminal_delete_outcome =
+  | Terminal_deleted
+  | Terminal_retained
+
+val delete_terminal :
+  config:Workspace.config ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  (terminal_delete_outcome, error) result
+(** Reclaim one settled operation record that no consumer still reads:
+    [Superseded _], or [Finalized] with [meta_removed = false]. A [Finalized]
+    record with [meta_removed = true] is the retirement fence
+    [authorize_durable_intake_owner] reads for a removed Keeper, so it is
+    kept and reported as [Terminal_retained], as is every phase that still
+    requires an admission fence. A record that is already absent reports
+    [Terminal_deleted]. *)
+
 (** Bind the exact admission-owned operation identity and durable revision
     eligible for an explicit operator metadata update. Only [Blocked] with
     [Operator_stop_retain_meta], or an idempotent prior metadata supersession,

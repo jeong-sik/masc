@@ -100,6 +100,23 @@ let finalized_after_removal_evidence name =
   }
 ;;
 
+(* Evidence for a finalization that kept the Keeper's metadata and session:
+   the [Operator_stop_retain_meta] shape. Such a record serves no retirement
+   fence, so boot recovery reclaims it. *)
+let finalized_retained_evidence name =
+  { cleanup =
+      { settled_task_ids = []
+      ; pending_confirms_removed = 0
+      ; meta_snapshot_digest = removed_keeper_digest name
+      }
+  ; meta_removed = false
+  ; session_removed = false
+  ; registry_unregistered = true
+  ; accumulator_dropped = true
+  ; completion = Completion_not_requested
+  }
+;;
+
 let make_operation ~keeper_name ~phase ~cleanup_intent =
   { schema_version
   ; revision = 1
@@ -219,7 +236,99 @@ let test_finalized_operation_settles_when_keeper_removed () =
           { reason = Operator_stop_remove_meta; remove_session = true }
     in
     persist_exn ~config operation;
-    check_settled "finalized" ~config operation)
+    check_settled "finalized" ~config operation;
+    (* The [meta_removed = true] record is the retirement fence
+       [authorize_durable_intake_owner] reads for the removed Keeper, so
+       settlement must keep it on disk. *)
+    match
+      Keeper_shutdown_store.path
+        ~config
+        ~keeper_name:name
+        operation.operation_id
+    with
+    | Ok record_path ->
+      check
+        bool
+        "removal retirement record is retained"
+        true
+        (Sys.file_exists record_path)
+    | Error error ->
+      failf "path: %s" (Keeper_shutdown_store.error_to_string error))
+;;
+
+(* A finalization that retained metadata leaves nothing for any reader: the
+   fence is released and there is no retirement to enforce. Boot recovery
+   must reclaim the record instead of walking it again at every boot — the
+   live fleet accumulated one such record per clean shutdown. *)
+let test_settled_retain_meta_record_reclaimed () =
+  with_workspace (fun ~config ->
+    let name = "retained-finalized" in
+    create_owner_meta_exn ~config name;
+    let operation =
+      make_operation
+        ~keeper_name:name
+        ~phase:(Finalized (finalized_retained_evidence name))
+        ~cleanup_intent:
+          { reason = Operator_stop_retain_meta; remove_session = false }
+    in
+    persist_exn ~config operation;
+    check_settled "retain-meta finalized" ~config operation;
+    match
+      Keeper_shutdown_store.path
+        ~config
+        ~keeper_name:name
+        operation.operation_id
+    with
+    | Ok record_path ->
+      check
+        bool
+        "settled retain-meta record is reclaimed"
+        false
+        (Sys.file_exists record_path)
+    | Error error ->
+      failf "path: %s" (Keeper_shutdown_store.error_to_string error))
+;;
+
+(* [delete_terminal] is the only writer allowed to remove records, and it
+   must refuse everything that still requires an admission fence. *)
+let test_delete_terminal_refuses_fenced_record () =
+  with_workspace (fun ~config ->
+    let name = "fenced-blocked" in
+    let operation =
+      make_operation
+        ~keeper_name:name
+        ~phase:(Blocked { stage = Lane_join; detail = "boot interrupted" })
+        ~cleanup_intent:
+          { reason = Operator_stop_retain_meta; remove_session = false }
+    in
+    persist_exn ~config operation;
+    (match
+       Keeper_shutdown_store.delete_terminal
+         ~config
+         ~keeper_name:name
+         ~operation_id:operation.operation_id
+     with
+     | Ok Keeper_shutdown_store.Terminal_retained -> ()
+     | Ok Keeper_shutdown_store.Terminal_deleted ->
+       fail "fence-holding record was deleted"
+     | Error error ->
+       failf
+         "delete_terminal: %s"
+         (Keeper_shutdown_store.error_to_string error));
+    match
+      Keeper_shutdown_store.path
+        ~config
+        ~keeper_name:name
+        operation.operation_id
+    with
+    | Ok record_path ->
+      check
+        bool
+        "fence-holding record stays on disk"
+        true
+        (Sys.file_exists record_path)
+    | Error error ->
+      failf "path: %s" (Keeper_shutdown_store.error_to_string error))
 ;;
 
 (* A retain-meta supersession cannot use owner absence as removal evidence.
@@ -665,6 +774,14 @@ let () =
             "finalized operation settles when keeper removed"
             `Quick
             test_finalized_operation_settles_when_keeper_removed
+        ; Alcotest.test_case
+            "settled retain-meta record is reclaimed"
+            `Quick
+            test_settled_retain_meta_record_reclaimed
+        ; Alcotest.test_case
+            "delete_terminal refuses a fence-holding record"
+            `Quick
+            test_delete_terminal_refuses_fenced_record
         ; Alcotest.test_case
             "blocked ownerless cleanup keeps admission fenced"
             `Quick

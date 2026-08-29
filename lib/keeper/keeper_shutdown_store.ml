@@ -843,6 +843,61 @@ let persist_new ~config operation =
            |> Result.map_error (fun detail -> Io_error detail)))
 ;;
 
+type terminal_delete_outcome =
+  | Terminal_deleted
+  | Terminal_retained
+
+(* A [Finalized { meta_removed = true }] record is load-bearing after its
+   Keeper is gone: [authorize_durable_intake_owner] reads it as the
+   retirement fence that keeps durable intake closed for the removed
+   incarnation. Every other settled phase is inert once its admission
+   transition is released, and keeping it only makes boot recovery walk the
+   same settled operation forever. *)
+let reclaimable_terminal_phase (operation : Keeper_shutdown_types.t) =
+  match operation.phase with
+  | Keeper_shutdown_types.Superseded _ -> true
+  | Keeper_shutdown_types.Finalized { meta_removed = false; _ } -> true
+  | Keeper_shutdown_types.Finalized { meta_removed = true; _ }
+  | Keeper_shutdown_types.Prepared
+  | Keeper_shutdown_types.Joining_lanes
+  | Keeper_shutdown_types.Joined_idle
+  | Keeper_shutdown_types.Finalizing_tasks _
+  | Keeper_shutdown_types.Cleanup_ready _
+  | Keeper_shutdown_types.Reconciliation_required _
+  | Keeper_shutdown_types.Blocked _ -> false
+;;
+
+let delete_terminal ~config ~keeper_name ~operation_id =
+  let* operation_path = path ~config ~keeper_name operation_id in
+  with_keeper_inventory_lock
+    ~access:Write
+    ~config
+    ~keeper_name
+    (fun () ->
+       with_operation_lock ~access:Write operation_path (fun () ->
+         if not (Fs_compat.file_exists operation_path)
+         then Ok Terminal_deleted
+         else
+           match
+             load_path_unlocked ~operation_path ~keeper_name ~operation_id
+           with
+           | Error error -> Error error
+           | Ok operation ->
+             if reclaimable_terminal_phase operation
+             then (
+               match
+                 Keeper_fs.remove_file_durable
+                   ~ownership_root:config.Workspace.base_path
+                   operation_path
+               with
+               | Ok () -> Ok Terminal_deleted
+               | Error error ->
+                 Error
+                   (Io_error
+                      (Keeper_fs.durable_remove_error_to_string error)))
+             else Ok Terminal_retained))
+;;
+
 let replace ~config ~expected_revision operation =
   let* () = validate_operation operation in
   let* operation_path = path_for_operation ~config operation in

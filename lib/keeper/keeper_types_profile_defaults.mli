@@ -28,7 +28,6 @@ type keeper_profile_defaults = {
      no-layer default; a non-empty list is admitted only for Yolo keepers
      (a loaded layer can carry skills/hooks that execute outside the MASC
      approval gate). *)
-  claude_setting_sources : Runtime_native_tools.claude_setting_source list option;
   (* RFC-0389: per-keeper model tool surface. [None] inherits the default
      (every model-visible tool). A [Some (Declared _)] narrows the surface to
      the declared groups; [Core_group] and [Meta_group] are always retained. *)

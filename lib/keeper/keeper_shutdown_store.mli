@@ -80,11 +80,10 @@ val delete_terminal :
   (terminal_delete_outcome, error) result
 (** Reclaim one settled operation record that no consumer still reads:
     [Superseded _], or [Finalized] whose completion receipt is not pending.
-    Retirement now lives in [Keeper_retirement_store], so a
-    [meta_removed = true] record is reclaimable too. A record whose phase
-    still requires an admission fence — [Completion_pending] included — is
-    kept and reported as [Terminal_retained]. A record that is already
-    absent reports [Terminal_deleted]. *)
+    A record whose phase still requires an admission fence —
+    [Completion_pending] included — is kept and reported as
+    [Terminal_retained]. A record that is already absent reports
+    [Terminal_deleted]. *)
 
 (** Bind the exact admission-owned operation identity and durable revision
     eligible for an explicit operator metadata update. Only [Blocked] with

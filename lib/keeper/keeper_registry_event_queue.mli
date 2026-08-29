@@ -251,10 +251,10 @@ val project_accepted_transfer_durable_result :
     ACK. *)
 
 type hitl_resolution_enqueue_error =
-  | Hitl_recipient_retired of Keeper_shutdown_types.Operation_id.t
-      (** The addressed Keeper was removed by a finalized shutdown, so the
-          resolution wake can never be consumed. Callers settle the durable
-          delivery instead of replaying a permanent failure at every boot. *)
+  | Hitl_recipient_absent
+      (** No Keeper exists with the addressed name, so the resolution wake
+          can never be consumed. Callers settle the durable delivery instead
+          of replaying a permanent failure at every boot. *)
   | Hitl_enqueue_failed of string
 
 val hitl_resolution_enqueue_error_to_string :
@@ -270,8 +270,8 @@ val enqueue_hitl_resolution_durable_result :
 (** Build and durably enqueue the canonical [Hitl_resolved] stimulus. This is
     the single construction boundary shared by the server composition root and
     nonblocking-approval tests; callers may signal a live fiber only after this
-    function returns [Ok ()]. A retired recipient is reported as
-    [Hitl_recipient_retired] so callers can settle the obligation instead of
+    function returns [Ok ()]. An absent recipient is reported as
+    [Hitl_recipient_absent] so callers can settle the obligation instead of
     treating it as a transient delivery failure. *)
 
 (** Read-only snapshot of the keeper's queue. If the keeper is not registered,

@@ -722,31 +722,11 @@ let complete_cleanup
                  (Keeper_approval_queue.summary_owner_retirement_error_to_string
                     error))))
   in
-  let record_retirement () =
-    (* The retirement fact is what keeps durable intake closed for the
-       removed incarnation (Keeper_retirement_store); it must be durable
-       before the operation can finalize. Both this write and
-       [remove_meta_file] are idempotent, so a finalize replayed across a
-       crash converges. While the write is missing the operation itself
-       still fences intake, so a failure here blocks instead of leaking. *)
-    match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
-    | Retain_operator_pause -> Ok ()
-    | Remove_meta ->
-      Keeper_retirement_store.record
-        ~config
-        ~keeper_name:operation.keeper_name
-        { Keeper_retirement_store.trace_id = operation.trace_id
-        ; operation_id = operation.operation_id
-        }
-  in
   let finish registry_unregistered =
     match remove_meta_file ~config operation cleanup with
     | Error detail -> block ~config operation Meta_remove detail
     | Ok () ->
-      (match record_retirement () with
-       | Error detail -> block ~config operation Retirement_record detail
-       | Ok () ->
-      match remove_session_dir ~config operation with
+      (match remove_session_dir ~config operation with
        | Error detail -> block ~config operation Session_remove detail
        | Ok () ->
          let meta_removed =

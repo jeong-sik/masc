@@ -8207,6 +8207,9 @@ let apply_raw_mode new_term =
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
     ~request_full_repaint ~suspend ~new_term =
   at_exit cleanup;
+  (* After [cleanup] registers, so the summary is written once the terminal is
+     back and cannot land in the middle of a restored screen. *)
+  at_exit Masc_tui_frame_timing.report;
   (* SIGINT is the only one of these a person sends by hand mid-sentence, so
      it asks the loop rather than ending the process. The rest still mean the
      session is over. *)
@@ -13066,7 +13069,10 @@ and is loaded on demand through keeper_skill.
           drawn now would clear the rows it occupies and leave the rest. *)
        | Render_schedule.Render when Option.is_some state.image_open -> ()
        | Render_schedule.Render ->
-           let frame, clamped, approval = render state in
+           let frame, clamped, approval =
+             Masc_tui_frame_timing.time Masc_tui_frame_timing.Build (fun () ->
+               render state)
+           in
            (* The frame is what the operator will act on next, so the scroll it
               had to clamp is the scroll the next keypress moves from. Applied
               here rather than inside the drawing: a surface whose row count
@@ -13077,7 +13083,8 @@ and is loaded on demand through keeper_skill.
              Terminal_title.present terminal_title ~write:(output_string stdout)
                ~flush:(fun () -> flush stdout)
                (terminal_title_snapshot state);
-           present_frame frame approval
+           Masc_tui_frame_timing.time Masc_tui_frame_timing.Present (fun () ->
+             present_frame frame approval)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

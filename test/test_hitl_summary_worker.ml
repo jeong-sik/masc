@@ -689,12 +689,21 @@ let test_json_syntax_request_is_prompt_only_and_carries_canonical_domain_schema 
             ~source:"hitl-json-syntax-contract"
             [ { id = "hitl-json-syntax-contract"; base_url = server.base_url } ]);
        let entry = pending_entry ~base_path () in
-       Worker.For_testing.execute_prepared_flow
-         ~net
-         ~clock
-         ~on_summary:(fun _ -> ())
-         (prepare_exn entry)
-       |> require_executed;
+       (* The sink is what carries the branch to the run registry. Running the
+          real flow inside one proves the worker's own [record_outcome] calls
+          reach it -- a direct call to the codec would not. *)
+       let observed_branch = ref None in
+       Worker.For_testing.with_outcome_sink observed_branch (fun () ->
+         Worker.For_testing.execute_prepared_flow
+           ~net
+           ~clock
+           ~on_summary:(fun _ -> ())
+           (prepare_exn entry)
+         |> require_executed);
+       check bool
+         "the flow recorded which branch it took"
+         true
+         (!observed_branch <> None);
        let request_body =
          match F.request_bodies server with
          | [ body ] -> Yojson.Safe.from_string body
@@ -2291,7 +2300,9 @@ let summary_fixture () : QT.hitl_context_summary =
 
 let test_observed_summary_earns_succeeded () =
   let outcome, output =
-    Worker.For_testing.run_outcome_of_observed_summary (Some (summary_fixture ()))
+    Worker.For_testing.run_outcome_of_observed_summary
+      ~last_outcome:None
+      (Some (summary_fixture ()))
   in
   (match outcome with
    | Masc.Exact_lane_run_registry.Succeeded -> ()
@@ -2301,11 +2312,47 @@ let test_observed_summary_earns_succeeded () =
   Alcotest.(check bool) "output carries the summary" true (output <> `Null)
 ;;
 
+(* The point of the whole sink: a flow that ends without a summary tells the
+   run registry which branch it was on, instead of every failure arriving as
+   one indistinguishable code. *)
+let test_missing_summary_reports_the_last_branch () =
+  List.iter
+    (fun (outcome_variant, expected_code) ->
+       match
+         Worker.For_testing.run_outcome_of_observed_summary
+           ~last_outcome:(Some outcome_variant)
+           None
+       with
+       | Masc.Exact_lane_run_registry.Failed { code; detail }, _ ->
+         Alcotest.(check string) "code is the branch" expected_code code;
+         Alcotest.(check bool)
+           "detail names the branch too"
+           true
+           (let n = String.length expected_code in
+            let rec scan i =
+              i + n <= String.length detail
+              && (String.sub detail i n = expected_code || scan (i + 1))
+            in
+            scan 0)
+       | Masc.Exact_lane_run_registry.Succeeded, _ ->
+         Alcotest.fail "a run with no summary was recorded as Succeeded"
+       | Masc.Exact_lane_run_registry.Cancelled, _ ->
+         Alcotest.fail "expected Failed, got Cancelled")
+    Worker.
+      [ Candidates_exhausted, "exact_candidates_exhausted"
+      ; Execution_failed, "exact_execution_failed"
+      ; Provenance_mismatch, "exact_provenance_mismatch"
+      ; Cli_slots_exhausted, "exact_cli_slots_exhausted"
+      ]
+;;
+
 let test_missing_summary_earns_failed () =
-  let outcome, output = Worker.For_testing.run_outcome_of_observed_summary None in
+  let outcome, output =
+    Worker.For_testing.run_outcome_of_observed_summary ~last_outcome:None None
+  in
   (match outcome with
    | Masc.Exact_lane_run_registry.Failed { code; detail } ->
-     Alcotest.(check string) "code names the missing summary" "no_summary_produced" code;
+     Alcotest.(check string) "code names the absent branch" "no_branch_recorded" code;
      Alcotest.(check bool) "detail is not empty" true (String.trim detail <> "")
    | Masc.Exact_lane_run_registry.Succeeded ->
      Alcotest.fail "a run that produced no summary was recorded as Succeeded"
@@ -2857,6 +2904,10 @@ let () =
             "a missing summary earns Failed"
             `Quick
             test_missing_summary_earns_failed
+        ; test_case
+            "a missing summary reports the branch it died on"
+            `Quick
+            test_missing_summary_reports_the_last_branch
         ] )
     ]
 ;;

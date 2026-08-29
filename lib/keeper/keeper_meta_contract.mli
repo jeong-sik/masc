@@ -8,7 +8,7 @@
 
     Internal: ~3 helpers stay private —
     [blocker_class_of_serialized_string] (deserializer used
-    only by JSON parsing), [map_compaction_rt] /
+    only by JSON parsing),
     [map_proactive_rt]
     (nested-record updaters that callers reach via the higher-level
     {!map_runtime} / {!map_usage}).  All consumed only via the runtime
@@ -37,13 +37,6 @@ type proactive_cycle_outcome =
 
 (** {1 Runtime state types} *)
 
-
-type compaction_runtime = {
-  count : int;
-  last_ts : float;
-  last_before_tokens : int;
-  last_after_tokens : int;
-}
 
 type proactive_runtime = {
   count_total : int;
@@ -205,7 +198,6 @@ val runtime_attempt_record_to_json :
 
 type agent_runtime_state = {
   usage : usage_metrics;
-  compaction_rt : compaction_runtime;
   proactive_rt : proactive_runtime;
   trace_id : Keeper_id.Trace_id.t;
   trace_history : string list;
@@ -350,9 +342,4 @@ val reset_runtime_state : keeper_meta -> keeper_meta
     m] — used by keeper restart to clear cumulative counters
     while preserving identity / policy fields. *)
 
-val map_compaction_rt :
-  (compaction_runtime -> compaction_runtime) ->
-  keeper_meta ->
-  keeper_meta
-(** Nested update of [m.runtime.compaction_rt]. *)
 

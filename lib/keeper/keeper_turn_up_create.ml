@@ -146,12 +146,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
             last_usage_reported_at = None;
             last_latency_ms = 0;
           };
-          compaction_rt = {
-            count = 0;
-            last_ts = 0.0;
-            last_before_tokens = 0;
-            last_after_tokens = 0;
-          };
           proactive_rt = {
             count_total = 0;
             last_ts = 0.0;

@@ -334,10 +334,6 @@ let decode_current_meta fields =
   let* last_output_tokens = int_field fields "last_output_tokens" in
   let* last_total_tokens = int_field fields "last_total_tokens" in
   let* last_latency_ms = int_field fields "last_latency_ms" in
-  let* compaction_count = int_field fields "compaction_count" in
-  let* last_compaction_ts = float_field fields "last_compaction_ts" in
-  let* last_compaction_before_tokens = int_field fields "last_compaction_before_tokens" in
-  let* last_compaction_after_tokens = int_field fields "last_compaction_after_tokens" in
   let* proactive_count_total = int_field fields "proactive_count_total" in
   let* last_proactive_ts = float_field fields "last_proactive_ts" in
   let* proactive_visible_count_total = int_field fields "proactive_visible_count_total" in
@@ -383,13 +379,6 @@ let decode_current_meta fields =
       ; last_latency_ms
       }
     in
-    let compaction_rt : compaction_runtime =
-      { count = compaction_count
-      ; last_ts = last_compaction_ts
-      ; last_before_tokens = last_compaction_before_tokens
-      ; last_after_tokens = last_compaction_after_tokens
-      }
-    in
     let proactive_rt : proactive_runtime =
       { count_total = proactive_count_total
       ; last_ts = last_proactive_ts
@@ -403,7 +392,6 @@ let decode_current_meta fields =
     in
     let runtime : agent_runtime_state =
       { usage
-      ; compaction_rt
       ; proactive_rt
       ; trace_id
       ; trace_history

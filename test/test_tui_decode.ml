@@ -94,7 +94,6 @@ let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
        ; ("total_tokens", `Int 120)
        ; ("total_cost_usd", `Float 0.42)
        ; ("last_turn_ts", `Float last_turn_ts)
-       ; ("compaction_count", `Int 1)
        ; ("last_proactive_outcome", `String "tool_use")
        ; ("created_at", `String "2026-08-20T01:02:03Z")
        ; ("updated_at", `String "2026-08-21T04:05:06Z")
@@ -122,7 +121,6 @@ let test_decode_keeper_projects_current_schema () =
       Alcotest.(check int) "total tokens" 120 keeper.k_total_tokens;
       Alcotest.(check (float 0.0001)) "total cost" 0.42
         keeper.k_total_cost_usd;
-      Alcotest.(check int) "compactions" 1 keeper.k_compaction_count;
       Alcotest.(check string) "last outcome" "tool_use"
         keeper.k_last_proactive_outcome;
       Alcotest.(check string) "created at" "2026-08-20T01:02:03Z"

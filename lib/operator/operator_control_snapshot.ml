@@ -292,7 +292,6 @@ let keepers_json
                         [ meta.runtime.usage.last_turn_ts
                         ; meta.runtime.proactive_rt.last_ts
                         ; meta.runtime.last_handoff_ts
-                        ; meta.runtime.compaction_rt.last_ts
                         ; created_ts
                         ]
                     in

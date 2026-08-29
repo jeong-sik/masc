@@ -37,10 +37,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; Last_output_tokens, `Int rt.usage.last_output_tokens
     ; Last_total_tokens, `Int rt.usage.last_total_tokens
     ; Last_latency_ms, `Int rt.usage.last_latency_ms
-    ; Compaction_count, `Int rt.compaction_rt.count
-    ; Last_compaction_ts, `Float rt.compaction_rt.last_ts
-    ; Last_compaction_before_tokens, `Int rt.compaction_rt.last_before_tokens
-    ; Last_compaction_after_tokens, `Int rt.compaction_rt.last_after_tokens
     ; Proactive_count_total, `Int rt.proactive_rt.count_total
     ; Last_proactive_ts, `Float rt.proactive_rt.last_ts
     ; Proactive_visible_count_total, `Int rt.proactive_rt.visible_count_total

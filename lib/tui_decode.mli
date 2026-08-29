@@ -30,7 +30,6 @@ type keeper = {
   k_total_tokens : int;
   k_total_cost_usd : float;
   k_last_turn_ts : string;
-  k_compaction_count : int;
   k_last_proactive_outcome : string;
   k_created_at : string;
   k_updated_at : string;

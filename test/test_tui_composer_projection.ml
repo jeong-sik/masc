@@ -13,7 +13,6 @@ let keeper : Tui_types.keeper =
   ; k_total_tokens = 0
   ; k_total_cost_usd = 0.0
   ; k_last_turn_ts = ""
-  ; k_compaction_count = 0
   ; k_last_proactive_outcome = "never"
   ; k_created_at = "2026-08-25T00:00:00Z"
   ; k_updated_at = "2026-08-25T00:00:00Z"

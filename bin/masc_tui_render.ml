@@ -5246,7 +5246,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     add_row "Total Tokens:" (string_of_int k.k_total_tokens);
     add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);
     add_row "Last Turn:" (Terminal_text.short_timestamp k.k_last_turn_ts);
-    add_row "Compactions:" (string_of_int k.k_compaction_count);
     add_empty ();
 
     (* Recent activity, folded from the metrics rows already read for this

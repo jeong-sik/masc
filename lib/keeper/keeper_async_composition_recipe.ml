@@ -3,41 +3,8 @@ module Plan_request = Keeper_tool_plan_request
 module Tool_contract = Agent_core.Tool_contract
 module Schedule = Agent_core.Execution_tool_schedule
 
-module Assembler_run_id = struct
-  type t = string
-
-  type error = Empty
-
-  let of_string = function
-    | "" -> Error Empty
-    | value -> Ok value
-  ;;
-
-  let to_string value = value
-  let equal = String.equal
-end
-
-module Proposal_id = struct
-  type t = string
-
-  type error = Not_lowercase_sha256
-
-  let of_string value =
-    if String_util.is_lowercase_sha256_hex value
-    then Ok value
-    else Error Not_lowercase_sha256
-  ;;
-
-  let to_string value = value
-  let equal = String.equal
-end
-
 type origin =
   | Skill_composition of Skill_reference.t
-  | Assembler_proposal of
-      { assembler_run_id : Assembler_run_id.t
-      ; proposal_id : Proposal_id.t
-      }
 
 module Accepted_surface_digest = struct
   type t = string
@@ -97,8 +64,6 @@ type decode_error =
   | Invalid_composition_run_id of Plan.Composition_run_id.error
   | Invalid_origin_kind of string
   | Invalid_skill_reference of Skill_reference.decode_error
-  | Invalid_assembler_run_id
-  | Invalid_proposal_id of string
   | Invalid_accepted_surface_digest of string
   | Negative_invocation_turn of int
   | Invalid_schedule of string
@@ -169,13 +134,6 @@ let origin_to_yojson = function
     `Assoc
       [ "kind", `String "skill_composition"
       ; "skill_reference", Skill_reference.to_yojson reference
-      ]
-  | Assembler_proposal { assembler_run_id; proposal_id } ->
-    `Assoc
-      [ "kind", `String "assembler_proposal"
-      ; ( "assembler_run_id"
-        , `String (Assembler_run_id.to_string assembler_run_id) )
-      ; "proposal_id", `String (Proposal_id.to_string proposal_id)
       ]
 ;;
 
@@ -284,25 +242,6 @@ let origin_of_yojson json =
       |> Result.map_error (fun error -> Invalid_skill_reference error)
     in
     Ok (Skill_composition reference)
-  | "assembler_proposal" ->
-    let* () =
-      reject_unknown
-        Origin
-        ~allowed:[ "kind"; "assembler_run_id"; "proposal_id" ]
-        fields
-    in
-    let* assembler_run_id_value = required_string Origin "assembler_run_id" fields in
-    let* assembler_run_id =
-      Assembler_run_id.of_string assembler_run_id_value
-      |> Result.map_error (fun Assembler_run_id.Empty -> Invalid_assembler_run_id)
-    in
-    let* proposal_id_value = required_string Origin "proposal_id" fields in
-    let* proposal_id =
-      Proposal_id.of_string proposal_id_value
-      |> Result.map_error (fun Proposal_id.Not_lowercase_sha256 ->
-        Invalid_proposal_id proposal_id_value)
-    in
-    Ok (Assembler_proposal { assembler_run_id; proposal_id })
   | value -> Error (Invalid_origin_kind value)
 ;;
 

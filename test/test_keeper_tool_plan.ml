@@ -1121,8 +1121,7 @@ let test_async_recipe_round_trips_full_accepted_values () =
     (plan_signature (Recipe.plan decoded));
   (match Recipe.origin decoded with
    | Recipe.Skill_composition decoded_reference ->
-     check bool "exact skill reference" true (Skill_reference.equal reference decoded_reference)
-   | Recipe.Assembler_proposal _ -> fail "skill origin changed branch");
+     check bool "exact skill reference" true (Skill_reference.equal reference decoded_reference));
   let invocation = Recipe.invocation decoded in
   check string
     "invocation tool use id"
@@ -1188,33 +1187,6 @@ let test_async_recipe_rejects_an_unbound_plan () =
   | Error (Recipe.Create_non_canonical_json _) ->
     fail "unbound plan returned a canonical JSON error"
   | Ok _ -> fail "recipe admitted an unbound plan"
-;;
-
-let test_async_recipe_round_trips_assembler_origin () =
-  let assembler_run_id =
-    Recipe.Assembler_run_id.of_string "assembler-run-1" |> Result.get_ok
-  in
-  let proposal_id =
-    Recipe.Proposal_id.of_string (String.make 64 'a') |> Result.get_ok
-  in
-  let decoded =
-    Recipe.Assembler_proposal { assembler_run_id; proposal_id }
-    |> encoded_recipe
-    |> decode_recipe
-    |> Result.get_ok
-  in
-  match Recipe.origin decoded with
-  | Recipe.Skill_composition _ -> fail "assembler origin changed branch"
-  | Recipe.Assembler_proposal
-      { assembler_run_id = decoded_run_id; proposal_id = decoded_proposal_id } ->
-    check string
-      "assembler run id"
-      "assembler-run-1"
-      (Recipe.Assembler_run_id.to_string decoded_run_id);
-    check bool
-      "proposal id"
-      true
-      (Recipe.Proposal_id.equal proposal_id decoded_proposal_id)
 ;;
 
 let add_field name value = function
@@ -1867,10 +1839,6 @@ let () =
             "full accepted values round-trip"
             `Quick
             test_async_recipe_round_trips_full_accepted_values
-        ; test_case
-            "assembler origin round-trip"
-            `Quick
-            test_async_recipe_round_trips_assembler_origin
         ; test_case
             "unbound plans are rejected"
             `Quick

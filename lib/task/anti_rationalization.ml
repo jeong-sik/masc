@@ -222,19 +222,16 @@ let report_review_verdict_schema : Masc_domain.tool_schema =
                     ; (* Issue #8436: derived from Variant SSOT. Hand-rolled enum
              risks dropping a constructor on extension. *)
                       "enum", `List (List.map (fun s -> `String s) valid_verdict_strings)
-                    ; ( "description"
-                      , `String
-                          "APPROVE if notes describe real work, REJECT if vague or \
-                           avoidant" )
+                    ; "description", `String "APPROVE or REJECT."
                     ] )
+              (* What to say on each verdict lives in config/prompts/
+                 verification.md, not here — model-facing prose belongs in the
+                 prompt files (RFC prompts-and-tool-definitions-outside-ocaml),
+                 and the ratchet on this file enforces that. *)
               ; ( "reason"
                 , `Assoc
                     [ "type", `String "string"
-                    ; ( "description"
-                      , `String
-                          "Brief explanation of the verdict. For REJECT, what is \
-                           missing or unsupported. For APPROVE, what you checked and \
-                           what it showed. Required for REJECT; recorded for both." )
+                    ; "description", `String "Why this verdict. Required for REJECT."
                     ] )
               ] )
         ; "required", `List [ `String "verdict" ]

@@ -327,44 +327,40 @@ let process_pending_work_inner
                | Task.Anti_rationalization.Reject reason
                | Task.Anti_rationalization.Approve reason -> reason
              in
-             (match evidence with
-              | evidence when String.trim evidence <> "" ->
-                let decision =
-                  match review_verdict with
-                  | Task.Anti_rationalization.Approve _ ->
-                    Workspace_goals.Proof_proven
-                  | Task.Anti_rationalization.Reject reason ->
-                    Workspace_goals.Proof_refuted { reason }
-                in
-                persist_reviewed ();
-                (match
-                   commit_gate_verdict
-                     config
-                     ~goal_id:work.goal_id
-                     ~verification_run_id
-                     ~decision
-                     ~evidence
-                 with
-                 | Ok () ->
-                   Log.Misc.info
-                     "goal verifier committed goal_id=%s verdict=%s"
-                     work.goal_id
-                     (Task.Anti_rationalization.verdict_constructor_name
-                        review_verdict);
-                   Committed
-                 | Error detail ->
-                   (* A refused commit (stale verifier answer, a phase that
-                      moved under the review) consumes nothing: the pending
-                      row stays durable and the next pulse re-reads it. *)
-                   defer
-                     ~goal_id:work.goal_id
-                     ~reason:detail)
-              | _ ->
-                defer
-                  ~goal_id:work.goal_id
-                  ~reason:
-                    "verdict without a stated reason is not a judgment; the \
-                     pending row stays durable")))
+             if String.equal (String.trim evidence) ""
+             then
+               defer
+                 ~goal_id:work.goal_id
+                 ~reason:
+                   "verdict without a stated reason is not a judgment; the \
+                    pending row stays durable"
+             else (
+               let decision =
+                 match review_verdict with
+                 | Task.Anti_rationalization.Approve _ -> Workspace_goals.Proof_proven
+                 | Task.Anti_rationalization.Reject reason ->
+                   Workspace_goals.Proof_refuted { reason }
+               in
+               persist_reviewed ();
+               match
+                 commit_gate_verdict
+                   config
+                   ~goal_id:work.goal_id
+                   ~verification_run_id
+                   ~decision
+                   ~evidence
+               with
+               | Ok () ->
+                 Log.Misc.info
+                   "goal verifier committed goal_id=%s verdict=%s"
+                   work.goal_id
+                   (Task.Anti_rationalization.verdict_constructor_name review_verdict);
+                 Committed
+               | Error detail ->
+                 (* A refused commit (stale verifier answer, a phase that moved
+                    under the review) consumes nothing: the pending row stays
+                    durable and the next pulse re-reads it. *)
+                 defer ~goal_id:work.goal_id ~reason:detail)))
      | Goal_phase.Executing ->
        (* The crash window of persist-before-model-call: the durable request
           exists but the phase write never landed. Reviewing now would produce

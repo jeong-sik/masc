@@ -38,6 +38,10 @@ Call report_review_verdict exactly once:
   the available, non-truncated typed snapshot.
 - verdict: REJECT when the evidence is unavailable, incomplete, vague, avoidant,
   or does not address the task.
-- reason: omit it for APPROVE; for REJECT provide a concise, specific explanation.
+- reason: always give one, concise and specific. For REJECT, what is missing or
+  unsupported. For APPROVE, which evidence you opened and what it showed — name
+  the artifact or the command output you read, not that the notes sounded right.
+  An approval without a reason is recorded as a bare token and tells the next
+  reader nothing about what was actually checked.
 
 Do not return the verdict as response text. A missing tool call is an invalid verdict and leaves the Task nonterminal.

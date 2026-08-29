@@ -566,7 +566,11 @@ let run () =
              exit 0)))
 
 let probe =
-  Exec_ssh_protocol.{ name = "masc-exec-shim"; version = "1.0.0"; capabilities = [] }
+  Exec_ssh_protocol.
+    { name = "masc-exec-shim"
+    ; version = Printf.sprintf "%d.0.0" protocol_version
+    ; capabilities = []
+    }
 
 let main () =
   (* OCaml does NOT ignore SIGPIPE by default; an undelivered SIGPIPE would

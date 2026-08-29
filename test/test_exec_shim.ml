@@ -327,14 +327,16 @@ let test_drain_fd () =
 
 let test_probe_identity () =
   let p = Exec_shim.probe in
+  let protocol_version = string_of_int Exec_ssh_protocol.protocol_version in
   check string "name" "masc-exec-shim" p.Exec_ssh_protocol.name;
-  check string "version" "1.0.0" p.Exec_ssh_protocol.version;
+  check string "version" (protocol_version ^ ".0.0") p.Exec_ssh_protocol.version;
   check (list string) "capabilities" [] p.Exec_ssh_protocol.capabilities;
   match Exec_ssh_protocol.parse_probe (Exec_ssh_protocol.render_probe p) with
   | Error e -> fail e
   | Ok p' ->
-    check bool "major compatible with protocol v1" true
-      (Exec_ssh_protocol.probe_major_compatible ~want:"1" p'.Exec_ssh_protocol.version)
+    check bool "major compatible with the wire protocol" true
+      (Exec_ssh_protocol.probe_major_compatible ~want:protocol_version
+         p'.Exec_ssh_protocol.version)
 
 let () =
   run "exec shim"

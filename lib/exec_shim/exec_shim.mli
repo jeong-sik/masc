@@ -213,7 +213,9 @@ val drain_fd : Unix.file_descr -> Buffer.t -> drain_result
 (** {1 Entry points} *)
 
 val probe : Exec_ssh_protocol.probe
-(** [{ name = "masc-exec-shim"; version = "1.0.0"; capabilities = [] }]. *)
+(** The shim identity.  Its semantic-version major is derived from
+    {!Exec_ssh_protocol.protocol_version}, which is the compatibility value
+    checked by the SSH runner. *)
 
 val run : unit -> unit
 (** Reads one request frame from stdin, executes it under supervision,

@@ -170,7 +170,7 @@ let run_named_with_masc_tools
     ?net
     ()
   : (Runtime_agent.run_result, Agent_core.Error.t) result =
-  let agent_core_tools = List.map (fun (td : Masc_domain.tool_schema) ->
+  let bridged_tools = List.map (fun (td : Masc_domain.tool_schema) ->
     Tool_bridge.agent_core_tool_of_masc
       ~base_path
       ~name:td.name ~description:td.description
@@ -184,7 +184,8 @@ let run_named_with_masc_tools
       ~goal
       ~base_path
       ~system_prompt
-      ~tools:agent_core_tools
+      ~tools:bridged_tools
+      ~agent_core_tools:bridged_tools
       ?temperature
       ?stream_idle_timeout_s
       ?hooks

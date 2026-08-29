@@ -299,6 +299,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ~base_path
                            ~goal
                            ~tools
+                           ~agent_core_tools:tools
                            ~initial_messages
                            ?context
                            ?event_bus

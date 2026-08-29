@@ -671,6 +671,7 @@ let test_prior_checkpoint_appends_current_goal_once () =
          ~runtime_id:"primary.test_model"
          ~keeper_name:"prior-checkpoint-current-goal"
          ~base_path:(Filename.get_temp_dir_name ())
+         ~agent_core_tools:[]
          ~goal:current_goal
          ~session_id:prior_checkpoint.session_id
          ~agent_core_checkpoint:prior_checkpoint
@@ -735,6 +736,7 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
         ~runtime_id:"resilient"
         ~keeper_name:"deferred-request-cap"
         ~base_path:(Filename.get_temp_dir_name ())
+        ~agent_core_tools:[]
         ~goal:"prove final provider request admission"
         ~deferred_runtime_lane
         ~provider_config_transform:(fun provider_config ->
@@ -836,6 +838,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
          ~runtime_id:"resilient"
          ~keeper_name:"media-degrade-keeper"
          ~base_path:(Filename.get_temp_dir_name ())
+         ~agent_core_tools:[]
          ~goal:"inspect the image"
          ~goal_blocks:[ image ]
          ~runtime_manifest_context:context
@@ -900,6 +903,7 @@ let run_checkpoint_lane_turn ~history_messages ~on_manifests =
         ~runtime_id:"checkpoint_lane"
         ~keeper_name:"checkpoint-runtime-compat-keeper"
         ~base_path:(Filename.get_temp_dir_name ())
+        ~agent_core_tools:[]
         ~goal:"continue the AGENT_CORE turn"
         ~initial_messages:history_messages
         ~agent_core_checkpoint:checkpoint
@@ -1668,6 +1672,7 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
              ~runtime_id:"quota_lane"
              ~keeper_name:"deferred-frozen-quota-order"
              ~base_path:(Filename.get_temp_dir_name ())
+             ~agent_core_tools:[]
              ~goal:"preserve the pre-dispatch runtime binding"
              ~deferred_runtime_lane:frozen
              ~provider_config_transform:(fun provider_config ->

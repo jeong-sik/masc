@@ -51,27 +51,6 @@ let test_an_unclassifiable_tool_is_asked_about () =
     "no descriptor declares what this tool does"
     (because ~composition_plan_index:None ~tool_name:"not-a-real-tool" ~input:no_input)
 
-let test_every_group_is_classified () =
-  (* The groups are a closed type and the policy matches all of them, so this
-     passes by construction today. It is here to fail loudly if that match is
-     ever loosened to a catch-all: a new family of tools must not inherit
-     "runs without asking" by saying nothing. *)
-  let groups =
-    [ Masc.Keeper_tool_group.Execute_group
-    ; Masc.Keeper_tool_group.Search_files_group
-    ; Masc.Keeper_tool_group.Filesystem_group
-    ; Masc.Keeper_tool_group.Board_group
-    ; Masc.Keeper_tool_group.Voice_group
-    ; Masc.Keeper_tool_group.Workspace_group
-    ; Masc.Keeper_tool_group.Surface_group
-    ; Masc.Keeper_tool_group.Memory_group
-    ; Masc.Keeper_tool_group.Meta_group
-    ; Masc.Keeper_tool_group.Core_group
-    ]
-  in
-  check int "every group in the closed type is named here" 10
-    (List.length groups)
-
 let test_the_question_names_the_call () =
   (* Same argument the chat surfaces already show for a tool call, so the
      prompt and the row above it agree on what the call is. *)
@@ -214,8 +193,6 @@ let () =
     ; ( "unknowns"
       , [ test_case "an unclassifiable tool is asked about" `Quick
             test_an_unclassifiable_tool_is_asked_about
-        ; test_case "every group is classified" `Quick
-            test_every_group_is_classified
         ] )
     ; ( "compositions"
       , [ test_case "a plan of reads runs unasked" `Quick

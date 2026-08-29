@@ -35,16 +35,11 @@ type keeper_model_projection =
   | Transport_alias of { projected_by : string }
 
 (** Typed display group for Keeper capability discovery. *)
-type keeper_tool_group = Keeper_tool_group.t
 
 (** Per-Keeper model tool surface (RFC-0389). [All] is the current behavior:
     every model-visible descriptor. [Declared] narrows the surface to the
     declared groups; [Core_group] and [Meta_group] are always retained so a
     Keeper can always introspect its own surface. *)
-type tool_surface =
-  | All
-  | Declared of { groups : keeper_tool_group list }
-
 (** Provenance of the descriptor input schema. A missing canonical cluster
     schema excludes that descriptor from model projection and is reported by
     the schema injection boundary. *)
@@ -163,7 +158,6 @@ type t =
   { id : string
   ; capability_id : string
   ; keeper_model_projection : keeper_model_projection
-  ; keeper_tool_group : keeper_tool_group
   ; input_schema_source : input_schema_source
   ; public_name : string
   ; internal_name : string
@@ -191,12 +185,7 @@ type t =
 val executor_to_string : executor -> string
 val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
-val keeper_tool_group_to_string : keeper_tool_group -> string
 
-(** Convert raw TOML group names to a [tool_surface].
-    [None] or empty list → [All] (inherit, no narrowing).
-    Unknown names are logged and silently excluded (fail-open). *)
-val tool_groups_to_surface : string list option -> tool_surface
 
 val runtime_handler_to_string : runtime_handler -> string
 val tool_kind_to_string : tool_kind -> string
@@ -240,21 +229,19 @@ val model_schema_errors : t -> string list
     schema. Operator-only controls, exact transport aliases, and
     missing/structurally invalid schemas are excluded. *)
 val model_visible_descriptors : unit -> t list
+val model_visible_schemas : unit -> Masc_domain.tool_schema list
 
 (** RFC-0389: the model-visible descriptors narrowed to [surface]. [All]
     returns every model-visible descriptor (pre-feature behaviour); [Declared]
     keeps only the declared groups plus the always-retained Core/Meta. This is
     the descriptor-level projection [make_tool_bundle] consumes so a declared
     Keeper's actual turn payload narrows. *)
-val model_visible_descriptors_for_surface : surface:tool_surface -> t list
 
 (** Exact schema projection admitted by the Keeper model surface.
 
     [All] returns every model-visible descriptor (the current behavior).
     [Declared { groups }] narrows the surface to the declared groups, always
     retaining [Core_group] and [Meta_group] (RFC-0389). *)
-val model_visible_schemas :
-  surface:tool_surface -> Masc_domain.tool_schema list
 
 (** The sole active Keeper model name. Empty only for an exact
     [Operator_only], [Transport_alias], or a descriptor without a resolved

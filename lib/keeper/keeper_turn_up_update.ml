@@ -315,7 +315,6 @@ let profile_update_command (meta : keeper_meta) =
     ; telemetry_feedback_window_hours = meta.telemetry_feedback_window_hours
     ; always_allow = meta.always_allow
     ; agent_core_env = meta.agent_core_env
-    ; tool_groups = meta.tool_groups
     ; updated_at = meta.updated_at
     }
 ;;
@@ -468,8 +467,6 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     max_context_override =
       (if p.max_context_override_present then p.max_context_override_opt
        else old.max_context_override);
-    tool_groups =
-      (if p.tool_groups_present then p.tool_groups_opt else old.tool_groups);
     updated_at = now_iso ();
   } in
   match

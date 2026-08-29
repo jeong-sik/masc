@@ -4573,13 +4573,12 @@ let composition_invocation ~completion =
     ~completion
 ;;
 
-let frozen_capability_surface ~tool_groups =
+let frozen_capability_surface () =
   let snapshot =
     Skill_catalog_snapshot.config_unreadable
       ~detail:"dispatch boundary test has no Skill sources"
   in
   Masc.Keeper_capability_surface.create
-    ~tool_groups:(Some tool_groups)
     ~skill_names:None
     ~global_skill_catalog:Masc.Keeper_skill_catalog.empty
     ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot)
@@ -4587,7 +4586,7 @@ let frozen_capability_surface ~tool_groups =
 ;;
 
 let test_frozen_surface_lists_and_searches_operator_only_tool () =
-  let capability_surface = frozen_capability_surface ~tool_groups:[] in
+  let capability_surface = frozen_capability_surface () in
   let list_result =
     Masc.Keeper_tool_in_process_runtime.handle_tools_list
       ~capability_surface
@@ -4670,7 +4669,7 @@ let check_frozen_surface_rejection label (result : KET.executed_tool_result) =
 let test_frozen_surface_direct_dispatch_rejects_excluded_global_tool () =
   with_exec_fixture "frozen-surface-direct-excluded"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
-  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let capability_surface = frozen_capability_surface () in
   let result =
     KET.execute_keeper_tool_call_for_capability_surface_with_outcome
       ~capability_surface
@@ -4703,7 +4702,7 @@ let test_frozen_surface_direct_dispatch_rejects_excluded_global_tool () =
 let test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor () =
   with_exec_fixture "frozen-surface-direct-included"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
-  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let capability_surface = frozen_capability_surface () in
   let descriptor = composition_descriptor "keeper_time_now" in
   let result =
     KET.execute_keeper_tool_descriptor_for_capability_surface_with_outcome
@@ -4736,7 +4735,7 @@ let test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor () =
 let test_frozen_surface_rejects_same_id_counterfeit_descriptor () =
   with_exec_fixture "frozen-surface-counterfeit-descriptor"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
-  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let capability_surface = frozen_capability_surface () in
   let canonical = composition_descriptor "keeper_time_now" in
   let counterfeit =
     { canonical with description = canonical.description ^ " (counterfeit)" }
@@ -4765,7 +4764,7 @@ let test_frozen_surface_production_bundle_executes_public_read () =
   let expected_content = "canonical frozen bundle content\n" in
   mkdir_p playground;
   write_file (Filename.concat playground relative_path) expected_content;
-  let capability_surface = frozen_capability_surface ~tool_groups:[] in
+  let capability_surface = frozen_capability_surface () in
   let bundle =
     Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
       ~config
@@ -4803,7 +4802,7 @@ let test_frozen_surface_production_bundle_executes_public_read () =
 let test_frozen_surface_name_dispatch_rejects_non_exposed_alias () =
   with_exec_fixture "frozen-surface-name-alias"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
-  let capability_surface = frozen_capability_surface ~tool_groups:[] in
+  let capability_surface = frozen_capability_surface () in
   check bool
     "Read descriptor is active in the fixture"
     true
@@ -4828,7 +4827,7 @@ let test_frozen_surface_name_dispatch_rejects_non_exposed_alias () =
 let test_frozen_surface_nested_plan_rejects_excluded_descriptor () =
   with_exec_fixture "frozen-surface-nested-plan-excluded"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
-  let capability_surface = frozen_capability_surface ~tool_groups:[ "board" ] in
+  let capability_surface = frozen_capability_surface () in
   let descriptor = composition_descriptor "Read" in
   let node =
     Masc.Keeper_tool_plan.node

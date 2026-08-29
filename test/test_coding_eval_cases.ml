@@ -129,7 +129,11 @@ let test_case_json_rejects_undeclared_keys () =
     check bool "error names the key" true (string_contains message "extra")
 ;;
 
-let row_json ~run_index ~status ~verify_exit ~passed =
+let row_json ?(regression_exit = None) ~run_index ~status ~verify_exit ~passed () =
+  let int_or_null = function
+    | Some code -> `Int code
+    | None -> `Null
+  in
   `Assoc
     [ "case_id", `String "l1-calc-add"
     ; "run_index", `Int run_index
@@ -137,10 +141,8 @@ let row_json ~run_index ~status ~verify_exit ~passed =
     ; "provider", `String "ollama"
     ; "model", `String "test-model"
     ; "status", `String status
-    ; ( "verify_exit"
-      , match verify_exit with
-        | Some code -> `Int code
-        | None -> `Null )
+    ; "verify_exit", int_or_null verify_exit
+    ; "regression_exit", int_or_null regression_exit
     ; "passed", `Bool passed
     ; "duration_ms", `Int 1200
     ; "recorded_at", `Float 1700000000.0
@@ -168,8 +170,8 @@ let test_report_pipeline_on_fixed_rows () =
   let runs_path = Filename.concat dir "runs.jsonl" in
   write_jsonl
     runs_path
-    [ row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 0) ~passed:true
-    ; row_json ~run_index:2 ~status:"ok" ~verify_exit:(Some 1) ~passed:false
+    [ row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 0) ~passed:true ()
+    ; row_json ~run_index:2 ~status:"ok" ~verify_exit:(Some 1) ~passed:false ()
     ];
   let rows =
     match Coding_eval_report.rows_of_jsonl_file runs_path with
@@ -198,11 +200,123 @@ let test_report_pipeline_on_fixed_rows () =
 let test_row_disagreeing_with_its_verdict_is_refused () =
   match
     Coding_eval_report.row_of_json
-      (row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 1) ~passed:true)
+      (row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 1) ~passed:true ())
   with
   | Ok _ -> Alcotest.fail "expected the inconsistent row to be refused"
   | Error message ->
     check bool "error says the row disagrees" true (string_contains message "disagrees")
+;;
+
+let base_case_fields =
+  [ "id", `String "x"
+  ; "level", `String "L1"
+  ; "lang", `String "python"
+  ; "timeout_sec", `Int 60
+  ; "verify", `String "verify.sh"
+  ; "prompt", `String "p"
+  ; "description", `String "d"
+  ]
+;;
+
+let test_test_files_defaults_to_check_sh () =
+  match Coding_eval_case.of_json (`Assoc base_case_fields) with
+  | Ok case ->
+    check (list string) "default protected oracle" [ "check.sh" ] case.test_files
+  | Error message -> Alcotest.failf "expected the default test_files, got: %s" message
+;;
+
+let test_test_files_rejects_traversal () =
+  let json =
+    `Assoc (base_case_fields @ [ "test_files", `List [ `String "../evil.sh" ] ])
+  in
+  match Coding_eval_case.of_json json with
+  | Ok _ -> Alcotest.fail "expected the .. path to be rejected"
+  | Error message ->
+    check bool "error names the traversal" true (string_contains message "..")
+;;
+
+let write_text_file path contents =
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel contents)
+;;
+
+(* The anti-gaming contract: a solution overlay may not ship its own copy of a
+   protected test oracle, because the graded run restores that file from the
+   case's canonical workspace. If the solution could carry [check.sh], a
+   candidate could be graded against a test it authored. *)
+let test_solution_may_not_ship_the_oracle () =
+  let root = temp_dir "coding_eval_oracle_" in
+  let case_id = "oracle-fixture" in
+  let dir = Filename.concat root case_id in
+  Sys.mkdir dir 0o755;
+  Sys.mkdir (Filename.concat dir "workspace") 0o755;
+  Sys.mkdir (Filename.concat dir "solution") 0o755;
+  write_text_file
+    (Filename.concat dir "case.json")
+    (Yojson.Safe.to_string
+       (`Assoc
+           [ "id", `String case_id
+           ; "level", `String "L1"
+           ; "lang", `String "bash"
+           ; "timeout_sec", `Int 60
+           ; "verify", `String "verify.sh"
+           ; "prompt", `String "p"
+           ; "description", `String "d"
+           ]));
+  write_text_file
+    (Filename.concat dir "verify.sh")
+    "#!/usr/bin/env bash\nbash \"$1/check.sh\"\n";
+  write_text_file
+    (Filename.concat (Filename.concat dir "workspace") "check.sh")
+    "exit 1\n";
+  write_text_file
+    (Filename.concat (Filename.concat dir "solution") "check.sh")
+    "exit 0\n";
+  match Coding_eval_case.load_case ~dir with
+  | Ok _ -> Alcotest.fail "expected the solution-shipped oracle to be rejected"
+  | Error message ->
+    check bool "error names the oracle" true (string_contains message "check.sh")
+;;
+
+let test_case_json_accepts_regression () =
+  let json = `Assoc (base_case_fields @ [ "regression", `String "regress.sh" ]) in
+  match Coding_eval_case.of_json json with
+  | Ok case ->
+    check (option string) "regression parsed" (Some "regress.sh") case.regression
+  | Error message -> Alcotest.failf "expected regression to parse, got: %s" message
+;;
+
+(* A regression guard that went red makes the run not-passed even when verify is
+   green; a row claiming otherwise is refused, and one telling the consistent
+   story decodes. *)
+let test_regression_failure_gates_passed () =
+  (match
+     Coding_eval_report.row_of_json
+       (row_json
+          ~run_index:1
+          ~status:"ok"
+          ~verify_exit:(Some 0)
+          ~regression_exit:(Some 1)
+          ~passed:true
+          ())
+   with
+   | Ok _ -> Alcotest.fail "expected a green-verify red-regression pass to be refused"
+   | Error message ->
+     check bool "error names regression" true (string_contains message "regression_exit"));
+  match
+    Coding_eval_report.row_of_json
+      (row_json
+         ~run_index:1
+         ~status:"ok"
+         ~verify_exit:(Some 0)
+         ~regression_exit:(Some 1)
+         ~passed:false
+         ())
+  with
+  | Ok row -> check bool "regression failure is not a pass" false row.passed
+  | Error message -> Alcotest.failf "consistent regression row should decode: %s" message
 ;;
 
 let () =
@@ -218,6 +332,22 @@ let () =
             "case.json rejects undeclared keys"
             `Quick
             test_case_json_rejects_undeclared_keys
+        ; test_case
+            "test_files defaults to check.sh"
+            `Quick
+            test_test_files_defaults_to_check_sh
+        ; test_case
+            "test_files rejects path traversal"
+            `Quick
+            test_test_files_rejects_traversal
+        ; test_case
+            "solution may not ship the oracle"
+            `Quick
+            test_solution_may_not_ship_the_oracle
+        ; test_case
+            "case.json accepts a regression guard"
+            `Quick
+            test_case_json_accepts_regression
         ] )
     ; ( "report"
       , [ test_case "fixed rows pipeline" `Quick test_report_pipeline_on_fixed_rows
@@ -225,6 +355,10 @@ let () =
             "inconsistent row refused"
             `Quick
             test_row_disagreeing_with_its_verdict_is_refused
+        ; test_case
+            "regression failure gates passed"
+            `Quick
+            test_regression_failure_gates_passed
         ] )
     ]
 ;;

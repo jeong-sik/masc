@@ -32,10 +32,33 @@ type t = {
   verify : string;
   prompt : string;
   description : string;
+  (* The protected test oracle: files the harness restores from the case's
+     canonical [workspace/] before running verify, so a run is graded against
+     the original test rather than whatever the agent left in its workspace
+     (SWE-bench keeps test files fixed for the same reason). Defaults to
+     ["check.sh"] when the key is absent, which is the corpus convention. *)
+  test_files : string list;
+  (* Optional PASS_TO_PASS guard: a case-relative script that must exit 0 both
+     on the pristine workspace and after the candidate. It catches a run that
+     makes verify green while breaking behaviour that already worked -- the
+     regression axis SWE-bench measures with its PASS_TO_PASS test set. Absent
+     means the case declares nothing to preserve. *)
+  regression : string option;
 }
 
+let default_test_files = [ "check.sh" ]
+
 let declared_keys =
-  [ "id"; "level"; "lang"; "timeout_sec"; "verify"; "prompt"; "description" ]
+  [ "id"
+  ; "level"
+  ; "lang"
+  ; "timeout_sec"
+  ; "verify"
+  ; "prompt"
+  ; "description"
+  ; "test_files"
+  ; "regression"
+  ]
 ;;
 
 let of_json json =
@@ -87,7 +110,53 @@ let of_json json =
     in
     let* prompt = str "prompt" in
     let* description = str "description" in
-    Ok { id; level; lang; timeout_sec; verify; prompt; description }
+    let* test_files =
+      match List.assoc_opt "test_files" fields with
+      | None -> Ok default_test_files
+      | Some (`List items) ->
+        let rec collect acc = function
+          | [] -> Ok (List.rev acc)
+          | `String value :: rest when String.trim value <> "" ->
+            if Filename.is_relative value
+               && not (List.mem ".." (String.split_on_char '/' value))
+            then collect (value :: acc) rest
+            else
+              Error
+                (Printf.sprintf
+                   "test_files entry %S must be a workspace-relative path \
+                    without .."
+                   value)
+          | _ -> Error "test_files entries must be non-empty strings"
+        in
+        (match collect [] items with
+         | Ok [] ->
+           Error
+             "test_files must not be empty (omit the key for the default \
+              [\"check.sh\"])"
+         | other -> other)
+      | Some _ -> Error "test_files must be an array of strings"
+    in
+    let* regression =
+      match List.assoc_opt "regression" fields with
+      | None | Some `Null -> Ok None
+      | Some (`String value) when String.trim value <> "" ->
+        if Filename.is_relative value
+           && not (List.mem ".." (String.split_on_char '/' value))
+        then Ok (Some value)
+        else Error "regression must be a case-relative path without .."
+      | Some _ -> Error "regression must be a non-empty string or null"
+    in
+    Ok
+      { id
+      ; level
+      ; lang
+      ; timeout_sec
+      ; verify
+      ; prompt
+      ; description
+      ; test_files
+      ; regression
+      }
   | _ -> Error "case.json must be a JSON object"
 ;;
 
@@ -116,9 +185,41 @@ let load_case ~dir =
     then Ok ()
     else Error (Printf.sprintf "%s missing: %s" what path)
   in
-  let* () = must_exist "workspace directory" (Filename.concat dir "workspace") in
-  let* () = must_exist "solution overlay" (Filename.concat dir "solution") in
+  let workspace_dir = Filename.concat dir "workspace" in
+  let solution_dir = Filename.concat dir "solution" in
+  let* () = must_exist "workspace directory" workspace_dir in
+  let* () = must_exist "solution overlay" solution_dir in
   let* () = must_exist "verify script" (Filename.concat dir case.verify) in
+  let* () =
+    match case.regression with
+    | None -> Ok ()
+    | Some regression ->
+      must_exist "regression script" (Filename.concat dir regression)
+  in
+  (* Each protected test oracle must exist in the canonical workspace (so the
+     harness has a pristine copy to restore), and the solution overlay must not
+     contain it -- a solution that ships its own test file would let the graded
+     oracle be the candidate's, not the case author's. *)
+  let* () =
+    List.fold_left
+      (fun acc test_file ->
+         let* () = acc in
+         let* () =
+           must_exist
+             (Printf.sprintf "protected test oracle %s" test_file)
+             (Filename.concat workspace_dir test_file)
+         in
+         if Sys.file_exists (Filename.concat solution_dir test_file)
+         then
+           Error
+             (Printf.sprintf
+                "solution overlay must not contain the protected test oracle \
+                 %s (the graded test is the case's, not the candidate's)"
+                test_file)
+         else Ok ())
+      (Ok ())
+      case.test_files
+  in
   Ok case
 ;;
 

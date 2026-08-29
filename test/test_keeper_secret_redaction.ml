@@ -249,6 +249,7 @@ let test_stream_redacts_github_hosts_scalar_across_chunks () =
   write_file hosts ("github.com:\n  oauth_token: " ^ token ^ "\n");
   let state =
     R.snapshot_with_additional_secret_files
+      ~redact_identity_scalars:true
       ~additional_secret_files:[ hosts ]
       ~base_path:base
       ~keeper_name:"github-stream"
@@ -259,6 +260,58 @@ let test_stream_redacts_github_hosts_scalar_across_chunks () =
   Alcotest.(check string) "partial token is withheld" "" first;
   not_contains "streamed GitHub token is hidden" second token;
   contains "streamed GitHub token marker present" second "[REDACTED]"
+
+(* 2026-08-29: scalar mining masked a GitHub account name (public in every
+   repo URL) as [REDACTED] throughout chat text. The identity half is now a
+   switch; the credential half never turns off. *)
+let test_identity_scalar_toggle_leaves_credentials_masked () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let account = "anyang-keepers" in
+  let token = "gho_toggle-still-masked-token" in
+  let hosts = Filename.concat base "hosts.yml" in
+  write_file hosts
+    ("github.com:\n  user: " ^ account ^ "\n  oauth_token: " ^ token ^ "\n");
+  let redact ~identity text =
+    R.redact_text
+      (R.snapshot_with_additional_secret_files
+         ~redact_identity_scalars:identity
+         ~additional_secret_files:[ hosts ]
+         ~base_path:base
+         ~keeper_name:"github-toggle")
+      text
+  in
+  let url = "https://github.com/" ^ account ^ "/practice/branches" in
+  contains "identity on masks the account name"
+    (redact ~identity:true url) "[REDACTED]";
+  Alcotest.(check string)
+    "identity off shows the account name"
+    url
+    (redact ~identity:false url);
+  not_contains "the token stays masked with identity on"
+    (redact ~identity:true ("token=" ^ token)) token;
+  not_contains "the token stays masked with identity off"
+    (redact ~identity:false ("token=" ^ token)) token
+
+let test_credential_shaped_keys_always_mine_their_scalar () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let secret_value = "a-very-opaque-credential" in
+  let hosts = Filename.concat base "creds.yml" in
+  write_file hosts
+    ("service:\n  api_token: " ^ secret_value ^ "\n  user: plain-login\n");
+  let redaction =
+    R.snapshot_with_additional_secret_files
+      ~redact_identity_scalars:false
+      ~additional_secret_files:[ hosts ]
+      ~base_path:base
+      ~keeper_name:"github-toggle"
+  in
+  not_contains "a credential-shaped key mines even with identity off"
+    (R.redact_text redaction ("value=" ^ secret_value))
+    secret_value
 
 let test_stream_emits_bounded_unterminated_output () =
   let input = String.make 200_000 'x' in
@@ -343,6 +396,10 @@ let () =
             test_execute_output_redacts_github_hosts_scalar;
           Alcotest.test_case "redacts streamed GitHub scalar across chunks" `Quick
             test_stream_redacts_github_hosts_scalar_across_chunks;
+          Alcotest.test_case "identity toggle leaves credentials masked" `Quick
+            test_identity_scalar_toggle_leaves_credentials_masked;
+          Alcotest.test_case "credential-shaped keys always mine their scalar" `Quick
+            test_credential_shaped_keys_always_mine_their_scalar;
           Alcotest.test_case "bounds unterminated stream buffering" `Quick
             test_stream_emits_bounded_unterminated_output;
           Alcotest.test_case "streams carriage-return progress" `Quick

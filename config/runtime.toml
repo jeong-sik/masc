@@ -180,6 +180,195 @@ endpoint = "http://localhost:11434"
 [providers.ollama.healthcheck]
 path = "/api/tags"
 
+# ── Self-hosted OpenAI-compatible servers ───────────────────────────────────
+# llama.cpp, vLLM and MLX all speak /v1/chat/completions, so they need no new
+# protocol — only an honest capability row each, because the three disagree on
+# exactly the features a keeper turn depends on.
+#
+# All three ship commented out, for the same reason the official-client examples
+# below do: none of these servers exists on a fresh install. `enabled = false`
+# is not an option here — the setup wizard walks every declared provider and
+# refuses one whose bindings are all disabled ("has no concrete runtime
+# binding"). Uncomment a stack once its server is up, point `endpoint` at it,
+# and set `api-name` to whatever it reports at /v1/models. The
+# self-hosted-server-templates gate in test_runtime_config_validity uncomments
+# this block on every run, so these rows are parsed even while they sit here.
+#
+# llama.cpp llama-server. Probed 2026-08-29 against build 10180 (Homebrew)
+# serving Qwen3.6-35B-A3B-UD-Q4_K_XL:
+#
+#   tools                        two calls in one turn (Seoul + Tokyo)
+#   tool_choice {name}           honoured
+#   tool_choice "required"       NOT honoured — answered in prose, no call
+#   response_format json_schema  honoured exactly: asked for verdict+score,
+#                                got {"verdict":"Excellent","score":5}
+#   reasoning_content            populated under --reasoning-format deepseek
+#   chat_template_kwargs         {"enable_thinking":false} left reasoning empty
+#   seed 7 twice                 same answer both times, with top_k and min_p
+#   image_url                    HTTP 500 "image input is not supported" —
+#                                needs --mmproj, so this row keeps it off
+#
+# --jinja is on by default in this build, so tool calling needs no extra flag.
+# The structured-output result is the interesting one: llama.cpp constrains
+# generation with a real grammar, which ollama.com's cloud wire does not.
+# [providers.llama_server]
+# display-name = "llama.cpp llama-server"
+# protocol = "openai-compatible-http"
+# endpoint = "http://127.0.0.1:8080/v1"
+#
+# [providers.llama_server.healthcheck]
+# path = "/models"
+#
+# vLLM. Declared from the official docs, not probed — vLLM does not run on
+# Apple silicon, so nothing here was measured on this machine.
+#
+#   tool_choice                  auto | none | required | named function.
+#                                "auto" needs --enable-auto-tool-choice and
+#                                --tool-call-parser; "required" and named both
+#                                go through the structured-outputs backend
+#                                (docs.vllm.ai/en/latest/features/tool_calling/)
+#   parallel tool calls          parser- and model-dependent, so this row
+#                                leaves it off rather than claim it
+#   reasoning                    field is `reasoning` — renamed from
+#                                `reasoning_content` — behind --reasoning-parser
+#                                (docs.vllm.ai/.../features/reasoning_outputs/)
+#   thinking control             chat_template_kwargs {"enable_thinking": bool}
+#                                or reasoning_effort low|medium|high|none
+#   structured output            response_format json_schema; the guided_* body
+#                                fields were removed in v0.12.0
+#
+# The overlay's runpod_mtp row serves vLLM too and its reasoning-streaming
+# declaration still names the older field, `reasoning_content`. Check the
+# version actually being served before copying either value.
+# [providers.vllm]
+# display-name = "vLLM OpenAI Server"
+# protocol = "openai-compatible-http"
+# endpoint = "http://127.0.0.1:8000/v1"
+#
+# [providers.vllm.healthcheck]
+# path = "/models"
+#
+# MLX (mlx_lm.server). Declared from the upstream server docs, not probed.
+# Its profile is the narrowest of the three and the reason these cannot share
+# one row: the server accepts tools, seed, top_k, min_p and repetition_penalty,
+# and detects reasoning between the tokenizer's think tokens — but it supports
+# neither `tool_choice` nor response_format JSON-schema validation. Both stay
+# false so the exact-output lanes never pick it as a judge.
+#
+# Upstream default is 127.0.0.1:8080, which collides with llama-server's
+# default; the port here is moved so both templates can be enabled at once.
+# [providers.mlx_server]
+# display-name = "MLX mlx_lm.server"
+# protocol = "openai-compatible-http"
+# endpoint = "http://127.0.0.1:8081/v1"
+#
+# [providers.mlx_server.healthcheck]
+# path = "/models"
+#
+# One row per stack, matching the three disabled providers above. api-name is
+# what the server answers to at /v1/models: llama-server reports its --alias,
+# vLLM and MLX report the model path they were started with. Change it to yours
+# before enabling — a mismatched name reaches the wire verbatim.
+#
+# The build measured 2026-08-29. max-context is what llama-server was started
+# with (-c); it is a launch flag, not a property of the weights, so raise or
+# lower this row to match the server rather than the model card.
+# [models.llama-server-local]
+# api-name = "qwen3.6-35b-a3b"
+# max-context = 262144
+# tools-support = true
+# thinking-support = true
+# streaming = true
+#
+# [models.llama-server-local.capabilities]
+# supports-tool-choice = true
+# supports-named-tool-choice = true
+# Measured false: with tool_choice "required" the model answered in prose.
+# supports-required-tool-choice = false
+# supports-parallel-tool-calls = true
+# supports-extended-thinking = true
+# supports-reasoning-budget = false
+# thinking-control-format = "chat-template-kwargs"
+# reasoning-streaming-format = "delta:reasoning_content"
+# supports-response-format-json = true
+# supports-structured-output = true
+# Turn these on together with --mmproj on the server, not before.
+# supports-image-input = false
+# supports-multimodal-inputs = false
+# supports-system-prompt = true
+# supports-seed = true
+# supports-top-k = true
+# supports-min-p = true
+#
+# [llama_server.llama-server-local]
+# max-concurrent = 1
+#
+# vLLM serves one model per process, so api-name is the --model it was started
+# with. Parallel tool calls stay off because vLLM's own docs make them parser-
+# and model-dependent rather than a property of the server.
+# [models.vllm-served-model]
+# api-name = "Qwen/Qwen3.6-35B-A3B"
+# max-context = 262144
+# tools-support = true
+# thinking-support = true
+# streaming = true
+#
+# [models.vllm-served-model.capabilities]
+# supports-tool-choice = true
+# supports-named-tool-choice = true
+# supports-required-tool-choice = true
+# supports-parallel-tool-calls = false
+# supports-extended-thinking = true
+# supports-reasoning-budget = false
+# thinking-control-format = "chat-template-kwargs"
+# Current vLLM renamed this field to `reasoning`; older builds still send
+# `reasoning_content`. Match the version actually being served.
+# reasoning-streaming-format = "delta:reasoning"
+# supports-response-format-json = true
+# supports-structured-output = true
+# supports-image-input = false
+# supports-multimodal-inputs = false
+# supports-system-prompt = true
+# supports-seed = true
+# supports-top-k = true
+# supports-min-p = true
+#
+# [vllm.vllm-served-model]
+# max-concurrent = 1
+#
+# MLX. thinking-support is off because the server has no request-side control
+# over it — it only splits out whatever the tokenizer's think tokens produced —
+# and a runtime that declares thinking makes the seed request enable_thinking,
+# which this wire cannot encode.
+# [models.mlx-served-model]
+# api-name = "mlx-community/Qwen3.8-27B-4bit"
+# max-context = 262144
+# tools-support = true
+# thinking-support = false
+# streaming = true
+#
+# [models.mlx-served-model.capabilities]
+# The server takes no tool_choice, so it cannot be forced onto a tool, and it
+# validates no JSON schema. Both stay false to keep it out of exact-output lanes.
+# supports-tool-choice = false
+# supports-named-tool-choice = false
+# supports-required-tool-choice = false
+# supports-parallel-tool-calls = false
+# supports-extended-thinking = false
+# supports-reasoning-budget = false
+# thinking-control-format = "none"
+# supports-response-format-json = false
+# supports-structured-output = false
+# supports-image-input = false
+# supports-multimodal-inputs = false
+# supports-system-prompt = true
+# supports-seed = true
+# supports-top-k = true
+# supports-min-p = true
+#
+# [mlx_server.mlx-served-model]
+# max-concurrent = 1
+
 # Official Claude Code subscription runtime example. This stays commented so
 # a fresh install does not claim the local CLI is installed or logged in.
 # There is deliberately no credentials table: Claude Code owns its stored
@@ -203,6 +392,70 @@ path = "/api/tags"
 # supports-image-input = true
 #
 # [claude_code.claude-code-sonnet]
+#
+# Thinking depth on an official client is a model-level `reasoning-effort`, not
+# a capability: the CLI owns the wire, so MASC selects a level rather than
+# encoding a control. One model row per level is the whole mechanism — bind
+# claude-opus-5 three times at low/high/max and assign keepers to the level the
+# work deserves. Claude Code rejects "none" and "minimal"; Codex takes both.
+#
+# [models.claude-code-opus-high]
+# api-name = "claude-opus-5"
+# max-context = 1000000
+# tools-support = true
+# streaming = true
+# reasoning-effort = "high"
+# turn-timeout-s = 600.0
+#
+# [claude_code.claude-code-opus-high]
+
+# Codex ChatGPT subscription runtime example, same shape and same reason for
+# staying commented. Codex reads images from its turn/start input list, so the
+# image capability key means the same thing here as it does above.
+# [providers.codex_subscription]
+# display-name = "Codex ChatGPT Subscription"
+# protocol = "codex-app-server"
+# command = "codex"
+# is-non-interactive = true
+#
+# [models.codex-gpt-5-6]
+# api-name = "gpt-5.6-sol"
+# max-context = 272000
+# tools-support = true
+# streaming = true
+# reasoning-effort = "low"
+#
+# [codex_subscription.codex-gpt-5-6]
+
+# Antigravity CLI runtime example. Unlike the other two official clients this
+# one does need a credentials table, and it is a file reference rather than an
+# environment variable: the CLI writes an OAuth token to disk and MASC points at
+# it. `timeout-s` is required on the provider — the CLI gives no progress signal
+# to time a turn against, so the bound has to be declared rather than inferred.
+# [providers.antigravity_subscription]
+# display-name = "Antigravity Google Subscription"
+# protocol = "antigravity-cli"
+# command = "agy"
+# is-non-interactive = true
+# timeout-s = 180.0
+#
+# Write the path out in full. Nothing in the runtime expands "~", so a
+# tilde reaches the filesystem literally and the token read fails.
+# [providers.antigravity_subscription.credentials]
+# type = "file"
+# path = "/home/you/.gemini/antigravity-cli/antigravity-oauth-token"
+#
+# The effort level is part of the model name on this CLI, not a separate knob:
+# `agy --model gemini-3.7-flash-high` is one model to Antigravity. Probed
+# 2026-08-29, all answering in 7-9s: gemini-3.7-flash-high, gemini-3.6-flash-high,
+# gemini-3.1-pro-high, claude-opus-4-6-thinking, claude-sonnet-4-6.
+# [models.antigravity-gemini-3-7-flash-high]
+# api-name = "gemini-3.7-flash-high"
+# max-context = 1000000
+# tools-support = true
+# streaming = true
+#
+# [antigravity_subscription.antigravity-gemini-3-7-flash-high]
 
 [models.deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
@@ -921,6 +1174,7 @@ max-concurrent = 1
 
 [ollama.gemma4-e2b-it-qat]
 max-concurrent = 1
+
 
 # ── Runtime lanes (ordered failover) ─────────────────────────────────
 # A lane is an ordered list of runtime candidates. When a keeper is assigned

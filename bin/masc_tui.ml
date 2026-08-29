@@ -1408,6 +1408,7 @@ type async_msg =
   | Schedule_cancel_done of (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
   | Verification_verdict_done of (string * bool, string) result
+  | Harness_label_done of (string, string) result
   | Keeper_calls_loaded of
       string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of
@@ -7324,6 +7325,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error err ->
           state.verification_verdict_armed <- None;
           state.verification_verdict_error <- Some err)
+  | Harness_label_done result -> (
+      match result with
+      | Ok message -> add_event state "system" ("Harness: " ^ message)
+      | Error err -> add_event state "error" ("Harness label: " ^ err))
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
@@ -8743,6 +8748,94 @@ let main () =
                               add_event state "error"
                                 "note: line_start and line_end must be \
                                  integers")))))
+  in
+  (* The verdict row under the Harness cursor, when the list has one. *)
+  let harness_cursor_verdict () =
+    Option.bind state.harness (fun snapshot ->
+        List.nth_opt snapshot.Masc.Tui_decode.hs_verdicts state.harness_cursor)
+  in
+  (* Operator label on a harness verdict. [y] records the machine's side as
+     the human's; [n] records the opposite side and takes its reason through
+     $EDITOR, because the reason is the text the divergence teaches the judge
+     as a few-shot example. The machine's side is read off the closed
+     verdict serialization ("approve" | "reject:<reason>"), compared whole,
+     never by substring. *)
+  let harness_machine_approved (row : Masc.Tui_decode.harness_verdict) =
+    String.equal row.Masc.Tui_decode.hv_verdict "approve"
+  in
+  let start_harness_label ~notes_hash ~(verdict : [ `Approve | `Reject ])
+      ~reason ~described =
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        match
+          Masc_tui_http.post_harness_label ~host ~port ~notes_hash ~verdict
+            ~reason
+        with
+        | Error err -> Error err
+        | Ok _json -> Ok described
+      in
+      enqueue_async async_messages (Harness_label_done result)
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork ~sw run
+    | None -> run ()
+  in
+  let handle_harness_agree () =
+    match harness_cursor_verdict () with
+    | None -> ()
+    | Some row ->
+        let approved = harness_machine_approved row in
+        start_harness_label ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
+          ~verdict:(if approved then `Approve else `Reject)
+          ~reason:""
+          ~described:
+            (Printf.sprintf "labelled %s: the %s stands"
+               row.Masc.Tui_decode.hv_task_id
+               (if approved then "approve" else "reject"))
+  in
+  let handle_harness_overrule () =
+    match harness_cursor_verdict () with
+    | None -> ()
+    | Some row -> (
+        match Masc_tui_editor.editor_command () with
+        | None ->
+            add_event state "error"
+              "no $EDITOR set; export EDITOR to overrule here"
+        | Some _ -> (
+            let stem = "{\n  \"reason\": \"\"\n}\n" in
+            match
+              Masc_tui_editor.roundtrip ~restore:restore_terminal
+                ~reenter:reenter_terminal stem
+            with
+            | None -> add_event state "system" "overrule cancelled"
+            | Some body -> (
+                match Yojson.Safe.from_string body with
+                | exception Yojson.Json_error e ->
+                    add_event state "error" ("overrule: body is not JSON: " ^ e)
+                | json ->
+                    let reason =
+                      match json with
+                      | `Assoc fields -> (
+                          match List.assoc_opt "reason" fields with
+                          | Some (`String s) -> String.trim s
+                          | Some _ | None -> "")
+                      | _ -> ""
+                    in
+                    if String.equal reason "" then
+                      add_event state "system"
+                        "overrule cancelled (empty reason)"
+                    else
+                      let approved = harness_machine_approved row in
+                      start_harness_label
+                        ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
+                        ~verdict:(if approved then `Reject else `Approve)
+                        ~reason
+                        ~described:
+                          (Printf.sprintf "overruled %s: %s was wrong"
+                             row.Masc.Tui_decode.hv_task_id
+                             (if approved then "the approve" else "the reject")))))
   in
   (* Verification reject: the reason is required, and $EDITOR is the form we
      already have. The editor is the confirmation step -- a non-zero exit or
@@ -10837,10 +10930,12 @@ and is loaded on demand through keeper_skill.
        | Some "y" ->
            (match state.view with
             | Approvals -> answer_presented_approval Confirm
+            | Harness -> handle_harness_agree ()
             | _ -> ())
        | Some "n" | Some "N" ->
            (match state.view with
             | Approvals -> answer_presented_approval Deny
+            | Harness -> handle_harness_overrule ()
             | _ -> ())
        | Some "home" when state.view = Tools -> state.tools_scroll <- 0
        | Some "end" when state.view = Tools ->

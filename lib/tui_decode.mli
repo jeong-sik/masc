@@ -551,6 +551,7 @@ type harness_verdict = {
   hv_verdict : string;
   hv_evaluator : string;
   hv_fallback_reason : string option;
+  hv_notes_hash : string;  (** joins an operator label to this verdict *)
       (** Why the named evaluator did not run, when something else did. A
           verdict reached by a fallback is not the verdict that was asked for,
           and the surface says so rather than showing them alike. *)

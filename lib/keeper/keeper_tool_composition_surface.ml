@@ -2,12 +2,7 @@ module Catalog = Keeper_tool_composition_catalog
 module Executor = Keeper_tool_plan_executor
 module Activation_ledger = Keeper_skill_activation_ledger
 
-let plan_execute_tool_name = Catalog.plan_execute_tool_name
-let proposal_execute_tool_name = Catalog.proposal_execute_tool_name
 let composition_run_summary_tool_name = "keeper_composition_run_summary"
-
-let plan_execute_tool_kind = Keeper_tool_descriptor.Batch_plan_tool
-let proposal_execute_tool_kind = Keeper_tool_descriptor.Batch_plan_tool
 
 (* Composition tools are materialized Agent_core tools outside the Keeper
    descriptor registry, so their tool kind is observable through their own
@@ -20,36 +15,6 @@ let tool_kind_field kind =
 let with_tool_kind_field kind = function
   | `Assoc fields -> `Assoc (tool_kind_field kind :: fields)
   | json -> json
-;;
-
-(* What it buys, then how to say it. Measured over 2026-08-21..23: this tool
-   sat in all 87 tool surfaces of 368 turns and was chosen zero times, while
-   [keeper_compose_mission-snapshot] -- 254 bytes that open "Read clock,
-   board, and tool state concurrently, then search durable memory with the
-   exact clock output" -- was chosen eight. The old text opened with the DAG
-   and spent its length on template grammar, so a reader learned how to write
-   a plan without learning when one is worth writing.
-
-   The grammar stays, shorter. It cannot leave: [input] is typed
-   `{"type":"object"}` in the schema, so the template shapes live in this
-   string and nowhere else. *)
-let plan_execute_description =
-  String.concat
-    ""
-    [ "Take one result from a tool and hand it to the next without spending a "
-    ; "turn on the round trip. Nodes with no dependency between them run at "
-    ; "the same time. Reach for this when a later call needs an earlier "
-    ; "call's output; when the calls are independent, issue them as separate "
-    ; "tool calls in one turn instead -- that already runs them concurrently "
-    ; "and costs nothing to write. Order comes from \"after\" and from output "
-    ; "references. Only a tool that declares a composable JSON output can feed "
-    ; "a downstream node; terminal tools are rejected. Example -- search "
-    ; "memory for whatever the clock just returned: "
-    ; "{\"nodes\":[{\"id\":\"clock\",\"tool\":\"keeper_time_now\"},"
-    ; "{\"id\":\"memory\",\"tool\":\"keeper_memory_search\",\"after\":[\"clock\"],"
-    ; "\"input\":{\"kind\":\"object\",\"fields\":[{\"name\":\"query\","
-    ; "\"value\":{\"kind\":\"output\",\"node\":\"clock\",\"pointer\":\"/now_iso\"}}]}}]}"
-    ]
 ;;
 
 let request_id_of_validated_input = function
@@ -135,8 +100,6 @@ let carried_references_text (instruction_skills : instruction_skill list) =
 
 type 'evidence schema_tool_origin =
   | Declared_composition of 'evidence
-  | Plan_execute
-  | Proposal_execute
   | Async_status
   | Async_cancel
 
@@ -154,25 +117,8 @@ let schema_tool_rows ?(skill_compositions = []) () =
          Declared_composition evidence, schema_tool_of_entry entry)
       skill_compositions
   in
-  let plan_execute_tool =
-    ( Plan_execute
-    , schema_tool
-        ~name:plan_execute_tool_name
-        ~description:plan_execute_description
-        ~input_schema:Keeper_tool_plan_request.input_schema )
-  in
-  let proposal_execute_tool =
-    ( Proposal_execute
-    , schema_tool
-        ~name:proposal_execute_tool_name
-        ~description:Tool_schemas_composition_control.proposal_execute_schema.description
-        ~input_schema:
-          Tool_schemas_composition_control.proposal_execute_schema.input_schema )
-  in
   composition_tools
-  @ [ plan_execute_tool
-    ; proposal_execute_tool
-    ; ( Async_status
+  @ [ ( Async_status
       , schema_tool
           ~name:Catalog.status_tool_name
           ~description:Tool_schemas_composition_control.status_schema.description
@@ -225,9 +171,6 @@ let node_result_to_json (result : Executor.node_result) =
 
 let observe_node_result
       ~composition_tool
-      ~assembler_run_id
-      ~proposal_id
-      ~proposal_provenance
       ~composition_execution
       ~composition_tool_kind
       ~composition_run_id
@@ -265,9 +208,6 @@ let observe_node_result
       ~result_bytes:result.result_bytes
       ?truncated_to:result.truncated_to
       ~composition_tool
-      ?assembler_run_id
-      ?proposal_id
-      ?proposal_provenance
       ~composition_run_id:
         (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
       ~composition_node_id:(Keeper_tool_plan.Node_id.to_string result.node_id)
@@ -289,31 +229,6 @@ let observe_node_result
       ();
     if not !committed
     then failwith "composition telemetry commit callback was not delivered";
-    let proposal_id_field =
-      match proposal_id with
-      | Some value ->
-        [ ( "proposal_id"
-          , `String (Keeper_plan_proposal.Proposal_id.to_string value) )
-        ]
-      | None -> []
-    in
-    let proposal_provenance_fields =
-      (match assembler_run_id with
-       | Some value ->
-         [ ( "assembler_run_id"
-           , `String
-               (Keeper_plan_proposal_execution_request.Assembler_run_id.to_string
-                  value) )
-         ]
-       | None -> [])
-      @
-      match proposal_provenance with
-      | Some value ->
-        [ ( "proposal_provenance_status"
-          , `String (Keeper_plan_proposal_provenance.status_to_string value) )
-        ]
-      | None -> []
-    in
     let fields =
       [ "type", `String "keeper_tool_call_evidence_committed"
       ; "name", `String meta.name
@@ -349,8 +264,6 @@ let observe_node_result
       ; "ts_unix", `Float (Time_compat.now ())
       ; "tool_use_id", `String result.tool_use_id
       ]
-      @ proposal_id_field
-      @ proposal_provenance_fields
     in
     Sse.broadcast (`Assoc fields)
   in
@@ -370,9 +283,6 @@ let observe_node_result
 
 let observe_composition_run_summary
       ~composition_tool
-      ~assembler_run_id
-      ~proposal_id
-      ~proposal_provenance
       ?skill_reference
       ~composition_execution
       ~composition_tool_kind
@@ -414,9 +324,6 @@ let observe_composition_run_summary
       ~execution_mode:schedule.execution_mode
       ?typed_result
       ~composition_tool
-      ?assembler_run_id
-      ?proposal_id
-      ?proposal_provenance
       ?skill_reference
       ~composition_run_id:
         (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
@@ -452,9 +359,6 @@ let observe_composition_run_summary
 let observe_async_run_settlement
       ~composition_tool
       ?skill_reference
-      ?assembler_run_id
-      ?proposal_id
-      ?proposal_provenance
       ~composition_tool_kind
       ~composition_run_id
       ~parent_invocation
@@ -494,9 +398,6 @@ let observe_async_run_settlement
            in
            observe_composition_run_summary
              ~composition_tool
-             ~assembler_run_id
-             ~proposal_id
-             ~proposal_provenance
              ?skill_reference
              ~composition_execution:Catalog.Async
              ~composition_tool_kind
@@ -504,17 +405,7 @@ let observe_async_run_settlement
              ~parent_invocation
              ~meta
              ~turn_context
-             ~input:
-               (`Assoc
-                 (("request_id", `String entry.request_id)
-                  :: Option.to_list
-                       (Option.map
-                          (fun proposal_id ->
-                             ( "proposal_id"
-                             , `String
-                                 (Keeper_plan_proposal.Proposal_id.to_string
-                                    proposal_id) ))
-                          proposal_id)))
+             ~input:(`Assoc [ "request_id", `String entry.request_id ])
              ~output_text
              ~success
              ~duration_ms
@@ -676,15 +567,11 @@ let cause_to_json = function
       ]
 ;;
 
-let failure_data ?proposal_id ~tool_name ~tool_kind (failure : Executor.failure) =
+let failure_data ~tool_name ~tool_kind (failure : Executor.failure) =
   `Assoc
     (("composition_tool", `String tool_name)
      :: tool_kind_field tool_kind
-     :: Option.to_list
-          (Option.map
-             (fun proposal_id -> "proposal_id", `String proposal_id)
-             proposal_id)
-     @ [ "settled", `List (List.map node_result_to_json failure.settled)
+     :: [ "settled", `List (List.map node_result_to_json failure.settled)
        ; "cause", cause_to_json failure.cause
        ; ( "effect_disposition"
          , `String
@@ -705,7 +592,7 @@ let failure_class (failure : Executor.failure) =
     Tool_result.Runtime_failure
 ;;
 
-let result_of_execution ?proposal_id ~tool_name ~tool_kind ~start_time = function
+let result_of_execution ~tool_name ~tool_kind ~start_time = function
   | Ok settled ->
     Tool_result.make_ok
       ~tool_name
@@ -714,16 +601,12 @@ let result_of_execution ?proposal_id ~tool_name ~tool_kind ~start_time = functio
         (`Assoc
             (("composition_tool", `String tool_name)
              :: tool_kind_field tool_kind
-             :: Option.to_list
-                  (Option.map
-                     (fun proposal_id -> "proposal_id", `String proposal_id)
-                     proposal_id)
-             @ [ "actions", `List (List.map node_result_to_json settled) ]))
+             :: [ "actions", `List (List.map node_result_to_json settled) ]))
       ()
   | Error
       ({ Executor.cause = Executor.Tool_did_not_complete result; _ } as failure :
         Executor.failure) ->
-    let data = failure_data ?proposal_id ~tool_name ~tool_kind failure in
+    let data = failure_data ~tool_name ~tool_kind failure in
     (match result.result with
      | Tool_result.Deferred payload ->
        Tool_result.make_deferred
@@ -748,7 +631,7 @@ let result_of_execution ?proposal_id ~tool_name ~tool_kind ~start_time = functio
          ~data
          "composition executor reported a completed result as incomplete")
   | Error failure ->
-    let data = failure_data ?proposal_id ~tool_name ~tool_kind failure in
+    let data = failure_data ~tool_name ~tool_kind failure in
     Tool_result.make_err
       ~tool_name
       ~class_:Tool_result.Runtime_failure
@@ -846,9 +729,6 @@ let async_worker_result
       ~composition_execution
       ~tool_kind
       ?skill_reference
-      ?assembler_run_id
-      ?proposal_id
-      ?proposal_provenance
       ~plan
       ~tool_name
       ~request_id
@@ -889,9 +769,6 @@ let async_worker_result
          (fun turn_context ->
             observe_node_result
               ~composition_tool:tool_name
-              ~assembler_run_id
-              ~proposal_id
-              ~proposal_provenance
               ~composition_execution
               ~composition_tool_kind:tool_kind
               ~composition_run_id
@@ -902,12 +779,8 @@ let async_worker_result
     ?clock
       ()
   in
-  let proposal_id_text =
-    Option.map Keeper_plan_proposal.Proposal_id.to_string proposal_id
-  in
   let result =
     result_of_execution
-      ?proposal_id:proposal_id_text
       ~tool_name
       ~tool_kind
       ~start_time
@@ -927,21 +800,7 @@ let async_worker_result
          ~execution
          ~result)
     skill_reference;
-  match assembler_run_id, proposal_id, proposal_provenance with
-  | Some assembler_run_id, Some proposal_id, Some proposal_provenance ->
-    Keeper_plan_proposal_provenance.attach_to_result
-      ~assembler_run_id
-      ~proposal_id
-      proposal_provenance
-      result
-  | None, None, None -> result
-  | _ ->
-    Tool_result.make_err
-      ~tool_name
-      ~class_:Tool_result.Runtime_failure
-      ~start_time
-      ~data:(`Assoc [ "error", `String "incomplete_async_proposal_identity" ])
-      "async proposal identity must be complete or absent"
+  result
 ;;
 
 let result_from_json ~tool_name ~start_time ~class_ ~ok data =
@@ -958,9 +817,6 @@ let result_from_json ~tool_name ~start_time ~class_ ~ok data =
 
 let async_submission_result
       ?skill_reference
-      ?assembler_run_id
-      ?proposal_id
-      ?proposal_provenance
       ~plan
       ~tool_name
       ~tool_kind
@@ -976,38 +832,10 @@ let async_submission_result
   =
   let start_time = Time_compat.now () in
   let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
-  let proposal_fields =
-    Option.to_list
-      (Option.map
-         (fun assembler_run_id ->
-            ( "assembler_run_id"
-            , `String
-                (Keeper_plan_proposal_execution_request.Assembler_run_id.to_string
-                   assembler_run_id) ))
-         assembler_run_id)
-    @ Option.to_list
-        (Option.map
-           (fun proposal_id ->
-              ( "proposal_id"
-              , `String (Keeper_plan_proposal.Proposal_id.to_string proposal_id) ))
-           proposal_id)
-    @ Option.to_list
-        (Option.map
-           (fun provenance ->
-              ( "proposal_provenance_status"
-              , `String
-                  (Keeper_plan_proposal_provenance.status_to_string provenance) ))
-           proposal_provenance)
-  in
-  let with_proposal_fields = function
-    | `Assoc fields -> `Assoc (fields @ proposal_fields)
-    | json -> json
-  in
   let request_context_fields =
-    proposal_fields
-    @ [ ( "composition_run_id"
-        , `String
-            (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) ) ]
+    [ ( "composition_run_id"
+      , `String
+          (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) ) ]
     @ Option.to_list
         (Option.map
            (fun reference -> "skill_reference", Skill_reference.to_yojson reference)
@@ -1022,7 +850,6 @@ let async_submission_result
   | Error error ->
     let data =
       with_tool_kind_field tool_kind (Keeper_msg_async.submit_error_to_json error)
-      |> with_proposal_fields
     in
     result_from_json
       ~tool_name
@@ -1048,9 +875,6 @@ let async_submission_result
            observe_async_run_settlement
              ~composition_tool:tool_name
              ?skill_reference
-             ?assembler_run_id
-             ?proposal_id
-             ?proposal_provenance
              ~composition_tool_kind:tool_kind
              ~composition_run_id
              ~parent_invocation
@@ -1066,9 +890,6 @@ let async_submission_result
              ~composition_execution:Catalog.Async
              ~tool_kind
              ?skill_reference
-             ?assembler_run_id
-             ?proposal_id
-             ?proposal_provenance
              ~plan
              ~tool_name
              ~request_id
@@ -1090,7 +911,6 @@ let async_submission_result
          with_tool_kind_field
            tool_kind
            (Keeper_msg_async.submit_error_to_json error)
-         |> with_proposal_fields
        in
        result_from_json
          ~tool_name
@@ -1110,8 +930,7 @@ let async_submission_result
                    (Keeper_tool_plan.Composition_run_id.to_string
                       composition_run_id) )
             :: tool_kind_field tool_kind
-            :: proposal_fields
-            @ [ "execution", `String "async"
+            :: [ "execution", `String "async"
               ; "request_id", `String request_id
            (* Says the wake exists. Without it the only way to learn the
               result is to poll keeper_composition_status, which is the habit
@@ -1143,8 +962,7 @@ let async_submission_result
                    (Keeper_tool_plan.Composition_run_id.to_string
                       composition_run_id) )
             :: tool_kind_field tool_kind
-            :: proposal_fields
-            @ [ "execution", `String "async"
+            :: [ "execution", `String "async"
               ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
               ])
        in
@@ -1869,9 +1687,6 @@ let make_tools_with_authority
                       (fun turn_context ->
                          observe_node_result
                            ~composition_tool:tool_name
-                           ~assembler_run_id:None
-                           ~proposal_id:None
-                           ~proposal_provenance:None
                            ~composition_execution:entry.execution
                            ~composition_tool_kind:(Catalog.tool_kind entry)
                            ~composition_run_id
@@ -1962,9 +1777,6 @@ let make_tools_with_authority
                ~result;
              observe_composition_run_summary
                ~composition_tool:tool_name
-               ~assembler_run_id:None
-               ~proposal_id:None
-               ~proposal_provenance:None
                ~skill_reference:skill.reference
                ~composition_execution:Catalog.Inline
                ~composition_tool_kind:(Catalog.tool_kind entry)
@@ -1979,519 +1791,6 @@ let make_tools_with_authority
                ~typed_result:result
                ();
              result))))))
-  in
-  let plan_execute_tool =
-    let tool_name = plan_execute_tool_name in
-    Tool_bridge.agent_core_tool_of_masc_with_execution_env
-      ~descriptor:
-        (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
-      ~base_path:config.base_path
-      ?on_externalization_error
-      ~name:tool_name
-      ~description:plan_execute_description
-      ~input_schema:Keeper_tool_plan_request.input_schema
-      (fun execution_env input ->
-        let start_time = Time_compat.now () in
-        match
-          Tool_input_validation.validate_args
-            ~schema:Keeper_tool_plan_request.input_schema
-            ~name:tool_name
-            ~args:input
-            ()
-        with
-        | Error rejection -> rejection
-        | Ok _ ->
-          (match Agent_core.Tool.Execution_env.invocation execution_env with
-           | None ->
-             Tool_result.runtime_err
-               ~tool_name
-               ~start_time
-               "composition execution requires Agent-Core invocation identity"
-           | Some parent_invocation ->
-             (match Keeper_tool_plan_request.plan_of_json ~descriptors input with
-              | Error error ->
-                let data =
-                  `Assoc
-                    [ "composition_tool", `String tool_name
-                    ; tool_kind_field plan_execute_tool_kind
-                    ; "error", Keeper_tool_plan_request.error_to_json error
-                    ; ( "composable_tools"
-                      , Json_util.json_string_list
-                          (Keeper_tool_plan_request.composable_tool_names
-                             ~descriptors) )
-                    ]
-                in
-                Tool_result.make_err
-                  ~tool_name
-                  ~class_:Tool_result.Policy_rejection
-                  ~start_time
-                  ~data
-                  ~metadata:data
-                  (Keeper_tool_plan_request.error_message error)
-              | Ok plan ->
-                (match Executor.outer_completion plan with
-                 | Agent_core.Tool_contract.Terminal_after_success _ ->
-                   Tool_result.make_err
-                     ~tool_name
-                     ~class_:Tool_result.Policy_rejection
-                     ~start_time
-                     "a model-defined plan cannot contain a terminal tool; call the terminal tool as its own action"
-                 | Agent_core.Tool_contract.Continue_after_success ->
-                   let turn_context =
-                     Option.map
-                       (fun cell ->
-                          Keeper_tool_call_log_context.get_turn_context_record
-                            ~cell
-                            ())
-                       turn_ctx_cell
-                   in
-                   let run_id = Keeper_tool_plan.Run_id.fresh () in
-                   let composition_run_id =
-                     Keeper_tool_plan.Composition_run_id.fresh ()
-                   in
-                   let execution =
-                     execute_keeper_plan
-                       ~capability_authority
-                       ~plan
-                       ~run_id
-                       ~composition_run_id
-                       ~parent_invocation
-                       ~config
-                       ~meta
-                       ~publication_recovery
-                       ~ctx_snapshot
-                       ?turn_sandbox_factory
-                       ?clock
-                       ?continuation_channel
-                       ?gate_context
-                       ?gate_grant
-                       ?record_gate_result
-                       ?on_completed
-                       ?on_deferred
-                       ?on_external_effect_deferred
-                       ?on_failed
-                       ?observe_node_result:
-                         (Option.map
-                            (fun turn_context ->
-                               observe_node_result
-                                 ~composition_tool:tool_name
-                                 ~assembler_run_id:None
-                                 ~proposal_id:None
-                                 ~proposal_provenance:None
-                                 ~composition_execution:Catalog.Inline
-                                 ~composition_tool_kind:plan_execute_tool_kind
-                                 ~composition_run_id
-                                 ~parent_invocation
-                                 ~meta
-                                 ~turn_context)
-                            turn_context)
-                       ()
-                   in
-                   (match execution with
-                    | Error
-                        ({ Executor.effect_disposition =
-                             ( Tool_result.Proven_post_effect
-                             | Tool_result.Effect_outcome_unknown )
-                         ; _
-                         } as failure) ->
-                      Option.iter
-                        (fun mark_failed ->
-                           let diagnostic =
-                             failure_data
-                               ~tool_name
-                               ~tool_kind:plan_execute_tool_kind
-                               failure
-                             |> Yojson.Safe.to_string
-                           in
-                           mark_failed
-                             { Keeper_tools_agent_core.failure_class =
-                                 failure_class failure
-                             ; effect_disposition = failure.effect_disposition
-                             ; diagnostic
-                             })
-                        on_failed
-                    | Ok _
-                    | Error
-                        { Executor.effect_disposition =
-                            Tool_result.Proven_pre_effect
-                        ; _
-                        } ->
-                      ());
-                   let result =
-                     result_of_execution
-                       ~tool_name
-                       ~tool_kind:plan_execute_tool_kind
-                       ~start_time
-                       execution
-                   in
-                   (match
-                      Tool_bridge.attach_artifact_manifest
-                        ~base_path:config.base_path
-                        result
-                    with
-                    | Ok result -> result
-                    | Error { message; _ } ->
-                      let diagnostic =
-                        "composition result manifest persistence failed: "
-                        ^ message
-                      in
-                      Option.iter
-                        (fun mark_failed ->
-                           mark_failed
-                             { Keeper_tools_agent_core.failure_class =
-                                 Tool_result.Runtime_failure
-                             ; effect_disposition =
-                                 Tool_result.Effect_outcome_unknown
-                             ; diagnostic
-                             })
-                        on_failed;
-                      Tool_result.make_err
-                        ~tool_name
-                        ~class_:Tool_result.Runtime_failure
-                        ~start_time
-                        "composition result manifest persistence failed")))))
-  in
-  let proposal_execute_tool =
-    let module Execution_request = Keeper_plan_proposal_execution_request in
-    let module Proposal = Keeper_plan_proposal in
-    let module Provenance = Keeper_plan_proposal_provenance in
-    let module Store = Keeper_plan_proposal_store in
-    let tool_name = proposal_execute_tool_name in
-    let tool_kind = proposal_execute_tool_kind in
-    let reject ~start_time ~class_ data =
-      Tool_result.make_err
-        ~tool_name
-        ~class_
-        ~start_time
-        ~data
-        ~metadata:data
-        (Yojson.Safe.to_string data)
-    in
-    let provenance_fields ~assembler_run_id ~proposal_id provenance =
-      [ ( "assembler_run_id"
-        , `String
-            (Execution_request.Assembler_run_id.to_string assembler_run_id) )
-      ; "proposal_id", `String (Proposal.Proposal_id.to_string proposal_id)
-      ; ( "proposal_provenance_status"
-        , `String (Provenance.status_to_string provenance) )
-      ]
-    in
-    let execute_loaded
-          ~start_time
-          ~parent_invocation
-          ~input
-          ~assembler_run_id
-          ~proposal_provenance
-          proposal
-      =
-      let plan = Proposal.plan proposal in
-      let proposal_id = Proposal.id proposal in
-      match Executor.outer_completion plan with
-      | Agent_core.Tool_contract.Terminal_after_success _ ->
-        reject
-          ~start_time
-          ~class_:Tool_result.Policy_rejection
-          (`Assoc
-            ([ "error", `String "proposal_contains_terminal_tool" ]
-             @ provenance_fields
-                 ~assembler_run_id
-                 ~proposal_id
-                 proposal_provenance))
-      | Agent_core.Tool_contract.Continue_after_success ->
-        let turn_context =
-          Option.map
-            (fun cell ->
-               Keeper_tool_call_log_context.get_turn_context_record
-                 ~cell
-                 ())
-            turn_ctx_cell
-        in
-        let run_id = Keeper_tool_plan.Run_id.fresh () in
-        let composition_run_id =
-          Keeper_tool_plan.Composition_run_id.fresh ()
-        in
-        let execution =
-          execute_keeper_plan
-            ~capability_authority
-            ~plan
-            ~run_id
-            ~composition_run_id
-            ~parent_invocation
-            ~config
-            ~meta
-            ~publication_recovery
-            ~ctx_snapshot
-            ?turn_sandbox_factory
-            ?clock
-            ?continuation_channel
-            ?gate_context
-            ?gate_grant
-            ?record_gate_result
-            ?on_completed
-            ?on_deferred
-            ?on_external_effect_deferred
-            ?on_failed
-            ?observe_node_result:
-              (Option.map
-                 (fun turn_context ->
-                    observe_node_result
-                      ~composition_tool:tool_name
-                      ~assembler_run_id:(Some assembler_run_id)
-                      ~proposal_id:(Some proposal_id)
-                      ~proposal_provenance:(Some proposal_provenance)
-                      ~composition_execution:Catalog.Inline
-                      ~composition_tool_kind:tool_kind
-                      ~composition_run_id
-                      ~parent_invocation
-                      ~meta
-                      ~turn_context)
-                 turn_context)
-            ()
-        in
-        (match execution with
-         | Error
-             ({ Executor.effect_disposition =
-                  ( Tool_result.Proven_post_effect
-                  | Tool_result.Effect_outcome_unknown )
-              ; _
-              } as failure) ->
-           Option.iter
-             (fun mark_failed ->
-                mark_failed
-                  { Keeper_tools_agent_core.failure_class =
-                      failure_class failure
-                  ; effect_disposition = failure.effect_disposition
-                  ; diagnostic =
-                      (failure_data ~tool_name ~tool_kind failure
-                       |> Yojson.Safe.to_string)
-                  })
-             on_failed
-         | Ok _
-         | Error
-             { Executor.effect_disposition = Tool_result.Proven_pre_effect
-             ; _
-             } ->
-           ());
-        let result =
-          result_of_execution ~tool_name ~tool_kind ~start_time execution
-          |> Provenance.attach_to_result
-               ~assembler_run_id
-               ~proposal_id
-               proposal_provenance
-        in
-        let result =
-          match
-            Tool_bridge.attach_artifact_manifest
-              ~base_path:config.base_path
-              result
-          with
-          | Ok result -> result
-          | Error { message; _ } ->
-            Option.iter
-              (fun mark_failed ->
-                 mark_failed
-                   { Keeper_tools_agent_core.failure_class =
-                       Tool_result.Runtime_failure
-                   ; effect_disposition = Tool_result.Effect_outcome_unknown
-                   ; diagnostic =
-                       "composition result manifest persistence failed: "
-                       ^ message
-                   })
-              on_failed;
-            Tool_result.make_err
-              ~tool_name
-              ~class_:Tool_result.Runtime_failure
-              ~start_time
-              "composition result manifest persistence failed"
-          |> Provenance.attach_to_result
-               ~assembler_run_id
-               ~proposal_id
-               proposal_provenance
-        in
-        observe_composition_run_summary
-          ~composition_tool:tool_name
-          ~assembler_run_id:(Some assembler_run_id)
-          ~proposal_id:(Some proposal_id)
-          ~proposal_provenance:(Some proposal_provenance)
-          ~composition_execution:Catalog.Inline
-          ~composition_tool_kind:tool_kind
-          ~composition_run_id
-          ~parent_invocation
-          ~meta
-          ~turn_context
-          ~input
-          ~output_text:(Tool_result.message result)
-          ~success:(Tool_result.is_success result)
-          ~duration_ms:(Tool_result.duration_ms result)
-          ~typed_result:result
-          ();
-        result
-    in
-    Tool_bridge.agent_core_tool_of_masc_with_execution_env
-      ~descriptor:
-        (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
-      ~base_path:config.base_path
-      ?on_externalization_error
-      ~name:tool_name
-      ~description:
-        Tool_schemas_composition_control.proposal_execute_schema.description
-      ~input_schema:
-        Tool_schemas_composition_control.proposal_execute_schema.input_schema
-      (fun execution_env input ->
-         let start_time = Time_compat.now () in
-         match
-           Tool_input_validation.validate_args
-             ~schema:
-               Tool_schemas_composition_control.proposal_execute_schema.input_schema
-             ~name:tool_name
-             ~args:input
-             ()
-         with
-         | Error rejection -> rejection
-         | Ok _ ->
-           (match Agent_core.Tool.Execution_env.invocation execution_env with
-            | None ->
-              Tool_result.runtime_err
-                ~tool_name
-                ~start_time
-                "proposal execution requires Agent-Core invocation identity"
-            | Some parent_invocation ->
-              (match Execution_request.of_yojson input with
-               | Error error ->
-                 reject
-                   ~start_time
-                   ~class_:Tool_result.Policy_rejection
-                   (`Assoc
-                     [ "error", `String "proposal_execution_request_rejected"
-                     ; "detail", Execution_request.error_to_yojson error
-                     ])
-               | Ok request ->
-                 let assembler_run_id =
-                   Execution_request.assembler_run_id request
-                 in
-                 let proposal_id = Execution_request.proposal_id request in
-                 let proposal_provenance =
-                   Provenance.verify
-                     ~registry:(Exact_lane_run_registry.global ())
-                     ~assembler_run_id
-                     ~proposal_id
-                 in
-                 (match proposal_provenance with
-                  | Provenance.Retained_contradiction _ ->
-                    reject
-                      ~start_time
-                      ~class_:Tool_result.Policy_rejection
-                      (`Assoc
-                        ([ "error", `String "proposal_provenance_contradiction"
-                         ; "provenance", Provenance.to_yojson proposal_provenance
-                         ]
-                         @ provenance_fields
-                             ~assembler_run_id
-                             ~proposal_id
-                             proposal_provenance))
-                  | ( Provenance.Retained_match
-                    | Provenance.Retained_unconfirmed
-                    | Provenance.Not_retained ) ->
-                 (match capability_authority with
-                  | Keeper_tool_runtime.Compatibility_meta ->
-                    reject
-                      ~start_time
-                      ~class_:Tool_result.Policy_rejection
-                      (`Assoc
-                        ([ "error", `String "frozen_surface_required"
-                         ; "tool", `String tool_name
-                         ]
-                         @ provenance_fields
-                             ~assembler_run_id
-                             ~proposal_id
-                             proposal_provenance))
-                  | Keeper_tool_runtime.Frozen_surface _ ->
-                    (match
-                       Store.load
-                         ~descriptors
-                         config
-                         proposal_id
-                     with
-                     | Error error ->
-                       reject
-                         ~start_time
-                         ~class_:Tool_result.Workflow_rejection
-                         (`Assoc
-                           ([ "error", `String "proposal_load_failed"
-                            ; "detail", Store.error_to_yojson error
-                            ]
-                            @ provenance_fields
-                                ~assembler_run_id
-                                ~proposal_id
-                                proposal_provenance))
-                     | Ok proposal ->
-                       let stored_approval_tools =
-                         Proposal.plan proposal
-                         |> Keeper_tool_plan.nodes
-                         |> List.map
-                              (fun (node : Keeper_tool_plan.node) ->
-                                 node.tool_name)
-                       in
-                       if
-                         not
-                           (List.equal
-                              String.equal
-                              (Execution_request.approval_tools request)
-                              stored_approval_tools)
-                       then
-                         reject
-                           ~start_time
-                           ~class_:Tool_result.Policy_rejection
-                           (`Assoc
-                             ([ ( "error"
-                                , `String
-                                    "proposal_approval_tools_mismatch" )
-                              ; ( "expected_approval_tools"
-                                , Json_util.json_string_list
-                                    stored_approval_tools )
-                              ]
-                              @ provenance_fields
-                                  ~assembler_run_id
-                                  ~proposal_id
-                                  proposal_provenance))
-                       else
-                         (match Proposal.execution proposal with
-                          | Proposal.Async ->
-                            let turn_context =
-                              Option.map
-                                (fun cell ->
-                                   Keeper_tool_call_log_context.get_turn_context_record
-                                     ~cell
-                                     ())
-                                turn_ctx_cell
-                            in
-                            async_submission_result
-                              ~assembler_run_id
-                              ~proposal_id
-                              ~proposal_provenance
-                              ~plan:(Proposal.plan proposal)
-                              ~tool_name
-                              ~tool_kind
-                              ~parent_invocation
-                              ~config
-                              ~meta
-                              ~capability_authority
-                              ~publication_recovery
-                              ~ctx_snapshot
-                              ~turn_context
-                              ?clock
-                              ()
-                          | Proposal.Inline ->
-                            execute_loaded
-                              ~start_time
-                              ~parent_invocation
-                              ~input
-                              ~assembler_run_id
-                              ~proposal_provenance
-                              proposal)))))))
-  in
-  let composition_tools =
-    composition_tools @ [ plan_execute_tool; proposal_execute_tool ]
   in
   (* A keeper with no instruction skills gets no tool: an empty [Available]
      list would ask the model to reach for something that answers nothing. *)

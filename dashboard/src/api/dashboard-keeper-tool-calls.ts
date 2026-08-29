@@ -19,17 +19,6 @@ export type ToolCallOutputBlob = {
 
 export type ToolCallDisposition = 'completed' | 'deferred' | 'failed'
 export type ToolCallCompositionExecution = 'inline' | 'async'
-export type ToolCallProposalProvenanceStatus =
-  | 'retained_match'
-  | 'retained_unconfirmed'
-  | 'not_retained'
-  | 'retained_contradiction'
-
-export type ToolCallProposalExecution = {
-  assembler_run_id: string
-  proposal_id: string
-  provenance_status: ToolCallProposalProvenanceStatus
-}
 
 // Recorded execution evidence — written per row by lib/keeper_tool_call_log.ml.
 // The jsonl row is the wire truth: nested nullable fields persist as explicit
@@ -134,7 +123,6 @@ export type ToolCallEntry = {
   composition_tool?: string
   composition_run_id?: string
   composition_node_id?: string
-  proposal_execution?: ToolCallProposalExecution
   composition_execution?: ToolCallCompositionExecution
   parent_tool_use_id?: string
   // Goal id(s) this call was attributed to (conditional on the row carrying
@@ -260,43 +248,11 @@ function decodeRouteEvidence(raw: unknown): ToolCallRouteEvidence | undefined {
   }
 }
 
-function decodeProposalExecution(
-  raw: Record<string, unknown>,
-): ToolCallProposalExecution | undefined | null {
-  const assemblerRunId = raw.assembler_run_id
-  const proposalId = raw.proposal_id
-  const provenanceStatus = raw.proposal_provenance_status
-  if (
-    assemblerRunId === undefined
-    && proposalId === undefined
-    && provenanceStatus === undefined
-  ) return undefined
-  if (
-    typeof assemblerRunId !== 'string'
-    || assemblerRunId.length === 0
-    || typeof proposalId !== 'string'
-    || proposalId.length === 0
-    || (
-      provenanceStatus !== 'retained_match'
-      && provenanceStatus !== 'retained_unconfirmed'
-      && provenanceStatus !== 'not_retained'
-      && provenanceStatus !== 'retained_contradiction'
-    )
-  ) return null
-  return {
-    assembler_run_id: assemblerRunId,
-    proposal_id: proposalId,
-    provenance_status: provenanceStatus,
-  }
-}
-
 function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
   if (!isRecord(raw)) return null
   const keeper = asString(raw.keeper)
   const tool = asString(raw.tool)
   if (!keeper || !tool) return null
-  const proposalExecution = decodeProposalExecution(raw)
-  if (proposalExecution === null) return null
   return {
     ts: asNumber(raw.ts, 0),
     keeper,
@@ -334,7 +290,6 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     composition_tool: asString(raw.composition_tool),
     composition_run_id: asString(raw.composition_run_id),
     composition_node_id: asString(raw.composition_node_id),
-    proposal_execution: proposalExecution,
     composition_execution:
       raw.composition_execution === 'inline' || raw.composition_execution === 'async'
         ? raw.composition_execution
@@ -358,7 +313,6 @@ function decodeToolCallsResponse(raw: unknown): ToolCallsResponse | null {
   const keeper = asString(raw.keeper)
   if (!keeper) return null
   const rawEntries = asRecordArray(raw.entries)
-  if (rawEntries.some(entry => decodeProposalExecution(entry) === null)) return null
   return {
     ...decodeTelemetryFreshnessMetadata(raw),
     keeper,

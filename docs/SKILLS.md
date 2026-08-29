@@ -142,8 +142,6 @@ name = "query"
 - async 합성도 파라미터를 선언할 수 있다 — 인자는 제출 시점에 plan 에 바인딩되고,
   broker 는 crash 후 worker closure 를 재생하지 않으므로 바인딩된 plan 은 어떤 async
   run 과도 정확히 같은 수명을 가진다. 정적 read-only 제약은 그대로다.
-- 모델이 즉석에서 짜는 `keeper_plan_execute` plan 에는 `param` 이 없다 — 즉석 호출은
-  값을 `literal` 로 직접 쓰면 된다.
 
 ## 4. 오류는 턴을 막는다
 

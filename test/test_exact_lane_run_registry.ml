@@ -536,7 +536,6 @@ let test_all_lanes_matches_the_independent_constructor_oracle () =
     ; R.Hitl_auto_judge
     ; R.Board_attention
     ; R.Compaction
-    ; R.Assembler
     ]
   in
   check

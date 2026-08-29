@@ -419,9 +419,6 @@ describe('keeper tool telemetry fetchers', () => {
             composition_tool: 'keeper_research_pipeline',
             composition_run_id: 'run-42',
             composition_node_id: 'fetch_sources',
-            assembler_run_id: 'exact-assembler-run-42',
-            proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-            proposal_provenance_status: 'retained_match',
             composition_execution: 'async',
             parent_tool_use_id: 'outer-7',
             goal_ids: ['g-1', 'g-2'],
@@ -445,63 +442,8 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.composition_tool).toBe('keeper_research_pipeline')
     expect(entry?.composition_run_id).toBe('run-42')
     expect(entry?.composition_node_id).toBe('fetch_sources')
-    expect(entry?.proposal_execution).toEqual({
-      assembler_run_id: 'exact-assembler-run-42',
-      proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      provenance_status: 'retained_match',
-    })
     expect(entry?.composition_execution).toBe('async')
     expect(entry?.parent_tool_use_id).toBe('outer-7')
-  })
-
-  it.each([
-    [
-      'partial tuple',
-      {
-        proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      },
-    ],
-    [
-      'unknown provenance status',
-      {
-        assembler_run_id: 'exact-assembler-run-42',
-        proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        proposal_provenance_status: 'retained_guess',
-      },
-    ],
-    [
-      'wrong field type',
-      {
-        assembler_run_id: 42,
-        proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        proposal_provenance_status: 'retained_match',
-      },
-    ],
-  ])('rejects an invalid proposal execution identity atomically: %s', async (_label, proposalFields) => {
-    const fetchMock = vi.fn(() => Promise.resolve(
-      new Response(JSON.stringify({
-        keeper: 'keeper-alpha',
-        count: 1,
-        source: 'tool_call_io',
-        entries: [
-          {
-            ts: 1,
-            keeper: 'keeper-alpha',
-            tool: 'keeper_proposal_execute',
-            input: {},
-            output: 'ok',
-            success: true,
-            duration_ms: 5,
-            ...proposalFields,
-          },
-        ],
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(fetchKeeperToolCalls('keeper-alpha')).rejects.toThrow(
-      '유효하지 않은 keeper tool call payload',
-    )
   })
 
   it('decodes recorded execution evidence (runtime contract, action radius, route evidence)', async () => {

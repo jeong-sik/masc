@@ -5,7 +5,6 @@
     instead of string literals. *)
 
 let keeper = "keeper"
-let assembler = "assembler"
 let judge_board = "judge.board"
 let judge_effect = "judge.effect"
 let verification = "verification"

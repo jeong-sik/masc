@@ -8,7 +8,6 @@ type tool_origin =
   | Instruction_skill
   | Composition_skill of
       { provenance : Keeper_skill_catalog.provenance option }
-  | Composition_plan
   | Composition_control
 
 type tool =

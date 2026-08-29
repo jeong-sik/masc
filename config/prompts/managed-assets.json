@@ -2,7 +2,6 @@
   "managed_by": "MASC",
   "schema": "masc.prompt-managed-assets.v1",
   "paths": [
-    "assembler.md",
     "goal_verification.lookup.md",
     "goal_verification.proof.md",
     "judge.board.md",

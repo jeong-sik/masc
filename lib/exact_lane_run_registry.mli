@@ -6,7 +6,6 @@ type lane =
   | Hitl_auto_judge
   | Board_attention
   | Compaction
-  | Assembler
 
 val all_lanes : lane list
 (** Every registry lane, for consumers that enumerate the wire vocabulary

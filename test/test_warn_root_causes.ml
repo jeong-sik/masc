@@ -186,11 +186,8 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
         ~finally:bundle.cleanup
         (fun () ->
           let expected_names =
-            (* keeper_plan_execute is registered by the composition surface
-               unconditionally, next to the descriptor projection. *)
-            Keeper_tool_composition_surface.plan_execute_tool_name
-            :: (Keeper_tool_descriptor.model_visible_descriptors ()
-                |> List.concat_map Keeper_tool_descriptor.keeper_model_names)
+            Keeper_tool_descriptor.model_visible_descriptors ()
+            |> List.concat_map Keeper_tool_descriptor.keeper_model_names
             |> List.sort_uniq String.compare
           in
           let actual_names =
@@ -208,28 +205,6 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
           List.iter
             (fun (tool : Agent_core.Tool.t) ->
                let name = tool.schema.name in
-               if
-                 String.equal
-                   name
-                   Keeper_tool_composition_surface.plan_execute_tool_name
-               then (
-                 (* Surface-owned, not descriptor-owned: assert its contract
-                    directly — serial, non-terminal, explicit descriptor. *)
-                 check bool
-                   (name ^ " has an explicit Agent Core descriptor")
-                   true
-                   (Option.is_some (Agent_core.Tool.descriptor tool));
-                 check bool
-                   (name ^ " executes serially")
-                   true
-                   (Agent_core.Tool.execution_mode tool ~input:`Null
-                    = Agent_core.Tool_contract.Serial);
-                 check bool
-                   (name ^ " continues after success")
-                   true
-                   (Agent_core.Tool.completion tool
-                    = Agent_core.Tool_contract.Continue_after_success))
-               else
                let descriptor =
                  match
                    Keeper_tool_descriptor_resolution.descriptor_for_tool_name name

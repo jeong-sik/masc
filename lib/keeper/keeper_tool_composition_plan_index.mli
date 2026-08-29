@@ -18,11 +18,7 @@
     The index is owned by that turn's approval gate. It must not be shared:
     concurrent turns can materialize the same composition name from different
     workspace snapshots, and a process-global last writer would then decide
-    the first turn using the second turn's plan.
-
-    [keeper_plan_execute] is deliberately absent. Its plan arrives in the tool
-    input rather than from a catalog, so its caller reads the nodes from there
-    and never consults this index. *)
+    the first turn using the second turn's plan. *)
 
 type t
 

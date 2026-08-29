@@ -199,8 +199,8 @@ let test_conflicting_partition_request_context_is_unreadable () =
         ~base_path
         ~sw
         ~request_context:
-          [ "proposal_id", `String "proposal-a"
-          ; "assembler_run_id", `String "assembler-run"
+          [ "mission_id", `String "mission-a"
+          ; "origin_run_id", `String "origin-run"
           ]
     in
     let terminal_path =
@@ -212,8 +212,8 @@ let test_conflicting_partition_request_context_is_unreadable () =
       Yojson.Safe.from_file terminal_path
       |> rewrite_request_context
            (`Assoc
-              [ "proposal_id", `String "proposal-a"
-              ; "assembler_run_id", `String "assembler-run"
+              [ "origin_run_id", `String "origin-run"
+              ; "mission_id", `String "mission-a"
               ])
     in
     Fs_compat.mkdir_p (Filename.dirname active_path);
@@ -225,8 +225,8 @@ let test_conflicting_partition_request_context_is_unreadable () =
       Yojson.Safe.from_file terminal_path
       |> rewrite_request_context
            (`Assoc
-              [ "assembler_run_id", `String "assembler-run"
-              ; "proposal_id", `String "proposal-b"
+              [ "origin_run_id", `String "origin-run"
+              ; "mission_id", `String "mission-b"
               ])
     in
     Yojson.Safe.to_file active_path conflicting;
@@ -252,8 +252,8 @@ let test_duplicate_request_context_is_rejected_at_submit_and_decode () =
     (match
        Async.submit
          ~request_context:
-           [ "proposal_id", `String "proposal-a"
-           ; "proposal_id", `String "proposal-b"
+           [ "mission_id", `String "mission-a"
+           ; "mission_id", `String "mission-b"
            ]
          ~background_sw:sw
          ~base_path
@@ -275,7 +275,7 @@ let test_duplicate_request_context_is_rejected_at_submit_and_decode () =
       completed_request
         ~base_path
         ~sw
-        ~request_context:[ "proposal_id", `String "proposal-a" ]
+        ~request_context:[ "mission_id", `String "mission-a" ]
     in
     let terminal_path =
       Async.For_testing.terminal_record_path ~base_path ~request_id
@@ -283,8 +283,8 @@ let test_duplicate_request_context_is_rejected_at_submit_and_decode () =
     in
     let duplicate_context =
       `Assoc
-        [ "proposal_id", `String "proposal-a"
-        ; "proposal_id", `String "proposal-b"
+        [ "mission_id", `String "mission-a"
+        ; "mission_id", `String "mission-b"
         ]
     in
     Yojson.Safe.from_file terminal_path

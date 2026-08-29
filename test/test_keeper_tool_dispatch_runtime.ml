@@ -5432,7 +5432,7 @@ let test_composition_catalog_materializes_and_executes_first_class_tool () =
          | _ -> fail "composition did not expose its single settled action"))
 ;;
 
-let test_composition_and_plan_share_closed_turn_descriptor_set () =
+let test_compositions_share_closed_turn_descriptor_set () =
   with_exec_fixture "composition-closed-turn-descriptors"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let clock_descriptor = composition_descriptor "keeper_time_now" in
@@ -5525,20 +5525,7 @@ let test_composition_and_plan_share_closed_turn_descriptor_set () =
          ~expected_error_kind:"instantiated_plan_rejected"
          async_tools
          "keeper_compose_off-surface-memory-async"
-         (`Assoc []);
-       assert_deterministic_refusal
-         ~expected_error_kind:"plan_rejected"
-         inline_tools
-         Masc.Keeper_tool_composition_surface.plan_execute_tool_name
-         (`Assoc
-            [ ( "nodes"
-              , `List
-                  [ `Assoc
-                      [ "id", `String "search"
-                      ; "tool", `String "keeper_memory_search"
-                      ]
-                  ] )
-            ]))
+         (`Assoc []))
 ;;
 
 let test_composition_feeds_typed_shell_ir_output_to_later_tool () =
@@ -7439,8 +7426,8 @@ let () =
         test_composition_runtime_uses_canonical_descriptor;
       test_case "catalog composition is a first-class executable tool" `Quick
         test_composition_catalog_materializes_and_executes_first_class_tool;
-      test_case "composition and plan share the closed turn descriptor set" `Quick
-        test_composition_and_plan_share_closed_turn_descriptor_set;
+      test_case "compositions share the closed turn descriptor set" `Quick
+        test_compositions_share_closed_turn_descriptor_set;
       test_case "composition feeds typed Shell IR output to later tool" `Quick
         test_composition_feeds_typed_shell_ir_output_to_later_tool;
       test_case "composition externalizes oversized Shell IR output" `Quick

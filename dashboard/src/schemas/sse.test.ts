@@ -831,9 +831,6 @@ describe('parseSSEMessage', () => {
       composition_tool: 'keeper_compose_mission-snapshot',
       composition_run_id: '019d1234-5678-7abc-8def-0123456789ab',
       composition_node_id: 'clock',
-      assembler_run_id: 'exact-assembler-run-42',
-      proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      proposal_provenance_status: 'retained_match',
       composition_execution: 'inline',
       parent_tool_use_id: '',
       tool_use_id: 'nested-call',
@@ -852,47 +849,10 @@ describe('parseSSEMessage', () => {
       type: 'keeper_tool_call_evidence_committed',
       name: 'analyst',
       composition_node_id: 'clock',
-      assembler_run_id: 'exact-assembler-run-42',
-      proposal_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      proposal_provenance_status: 'retained_match',
       parent_tool_use_id: '',
       tool_use_id: 'nested-call',
     })
     expect(warnSpy).not.toHaveBeenCalled()
-    warnSpy.mockRestore()
-  })
-
-  it('rejects partial or invalid proposal provenance at the websocket boundary', () => {
-    const base = {
-      type: 'keeper_tool_call_evidence_committed',
-      name: 'analyst',
-      tool_name: 'keeper_time_now',
-      composition_tool: 'keeper_proposal_execute',
-      composition_run_id: '019d1234-5678-7abc-8def-0123456789ab',
-      composition_node_id: 'clock',
-      composition_execution: 'inline',
-      parent_tool_use_id: 'outer-call',
-      tool_use_id: 'nested-call',
-      turn: 7,
-      planned_index: 0,
-      batch_index: 0,
-      batch_size: 1,
-      execution_mode: 'serial',
-      disposition: 'completed',
-      duration_ms: 1,
-      ts_unix: 1_786_588_800,
-    }
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(parseSSEMessage({ ...base, proposal_id: 'proposal-only' })).toBeNull()
-    expect(parseSSEMessage({
-      ...base,
-      assembler_run_id: 'run',
-      proposal_id: 'proposal',
-      proposal_provenance_status: 'guessed',
-    })).toBeNull()
-    // Both payloads are rejected. Drift logging is rate-limited by event type,
-    // so the second malformed event does not emit another warning.
-    expect(warnSpy).toHaveBeenCalledOnce()
     warnSpy.mockRestore()
   })
 

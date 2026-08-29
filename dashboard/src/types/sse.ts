@@ -193,13 +193,6 @@ export interface SSEEvent {
   composition_tool?: string
   composition_run_id?: string
   composition_node_id?: string
-  assembler_run_id?: string
-  proposal_id?: string
-  proposal_provenance_status?:
-    | 'retained_match'
-    | 'retained_unconfirmed'
-    | 'not_retained'
-    | 'retained_contradiction'
   composition_execution?: 'inline' | 'async'
   parent_tool_use_id?: string
   tool_use_id?: string

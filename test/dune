@@ -1758,11 +1758,6 @@
  (modules compaction_exact_output_fixture)
  (libraries masc_test_deps unix))
 
-(test
- (name test_keeper_assembler_exact_flow)
- (modules test_keeper_assembler_exact_flow)
- (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
-
 ; Composition proof for the provider-neutral compaction exact-output lane.
 (test
  (name test_compaction_exact_output_conformance)
@@ -2330,8 +2325,6 @@
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
 (include stanzas/test_keeper_tool_plan_executor.inc)
-(include stanzas/test_keeper_plan_proposal_store.inc)
-(include stanzas/test_keeper_assembler_request.inc)
 (include stanzas/test_keeper_tool_progress_identity.inc)
 
 (include stanzas/test_keeper_fs.inc)

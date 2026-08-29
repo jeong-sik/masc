@@ -66,20 +66,17 @@ type tool_kind =
   | Atomic_tool
   | Composition_tool
   | Async_composition_tool
-  | Batch_plan_tool
 
 let tool_kind_to_string = function
   | Atomic_tool -> "atomic"
   | Composition_tool -> "composition"
   | Async_composition_tool -> "async_composition"
-  | Batch_plan_tool -> "batch_plan"
 ;;
 
 let tool_kind_of_string = function
   | "atomic" -> Ok Atomic_tool
   | "composition" -> Ok Composition_tool
   | "async_composition" -> Ok Async_composition_tool
-  | "batch_plan" -> Ok Batch_plan_tool
   | unknown -> Error ("unknown tool kind: " ^ unknown)
 ;;
 
@@ -122,7 +119,6 @@ type runtime_handler =
   | Tool_time_now
   | Tool_tools_list
   | Tool_capability_search
-  | Tool_assemble_plan
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
@@ -266,7 +262,6 @@ let runtime_handler_to_string = function
   | Tool_time_now -> "tool_time_now"
   | Tool_tools_list -> "tool_tools_list"
   | Tool_capability_search -> "tool_capability_search"
-  | Tool_assemble_plan -> "tool_assemble_plan"
   | Tool_context_status -> "tool_context_status"
   | Tool_artifact_read -> "tool_artifact_read"
   | Tool_memory_search -> "tool_memory_search"
@@ -312,7 +307,6 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_voice_dispatch -> Voice_group
   | Tool_task_dispatch | Tool_masc_task_dispatch | Tool_masc_plan_dispatch ->
     Workspace_group
-  | Tool_assemble_plan
   | Tool_masc_run_dispatch
   | Tool_masc_agent_dispatch
   | Tool_masc_workspace_dispatch
@@ -515,7 +509,6 @@ let descriptor
       | Tool_time_now
       | Tool_tools_list
       | Tool_capability_search
-      | Tool_assemble_plan
       | Tool_context_status
       | Tool_artifact_read
       | Tool_memory_search
@@ -991,12 +984,6 @@ let keeper_capability_search_schema =
   | None -> invalid_arg "missing base tool schema for keeper_capability_search"
 ;;
 
-let keeper_assemble_plan_schema =
-  match find_base_schema_opt "keeper_assemble_plan" with
-  | Some schema -> schema
-  | None -> invalid_arg "missing base tool schema for keeper_assemble_plan"
-;;
-
 (* Declared twice until now: here and in the library shard, whose file is
    config/tools/keeper_library_*.toml. The parameters agreed to a full stop,
    but the tool descriptions did not -- this side said "Search the keeper
@@ -1188,41 +1175,6 @@ let time_now_output_schema =
       ; "now_unix", `Assoc [ "type", `String "number" ]
       ]
     ~required:[ "now_iso"; "now_unix" ]
-;;
-
-let assemble_plan_output_schema =
-  let execution_request =
-    object_output_schema
-      ~properties:
-        [ "assembler_run_id", `Assoc [ "type", `String "string" ]
-        ; "proposal_id", `Assoc [ "type", `String "string" ]
-        ; ( "approval_tools"
-          , `Assoc
-              [ "type", `String "array"
-              ; "items", `Assoc [ "type", `String "string" ]
-              ] )
-        ]
-      ~required:[ "assembler_run_id"; "proposal_id"; "approval_tools" ]
-  in
-  object_output_schema
-    ~properties:
-      [ "ok", `Assoc [ "type", `String "boolean" ]
-      ; "proposal_id", `Assoc [ "type", `String "string" ]
-      ; "proposal_digest", `Assoc [ "type", `String "string" ]
-      ; "run_id", `Assoc [ "type", `String "string" ]
-      ; "selected_slot", `Assoc [ "type", `String "string" ]
-      ; "store_result", `Assoc [ "type", `String "string" ]
-      ; "execution_request", execution_request
-      ]
-    ~required:
-      [ "ok"
-      ; "proposal_id"
-      ; "proposal_digest"
-      ; "run_id"
-      ; "selected_slot"
-      ; "store_result"
-      ; "execution_request"
-      ]
 ;;
 
 (* Producer: Snapshot_protocol.to_yojson via dispatch_board_list
@@ -1995,21 +1947,6 @@ let internal_descriptors : t list =
        ~handler:Tool_capability_search
        ()
      |> with_eval_tags [ "capability_introspection" ])
-  ; (in_process_descriptor_with_schema_source
-       ~capability_identity:Internal_name_identity
-       ~keeper_model_projection:Internal_name
-       ~input_schema_source:Canonical_registry
-       ~id:"keeper.assemble_plan"
-       ~name:"keeper_assemble_plan"
-       ~description:keeper_assemble_plan_schema.description
-       ~input_schema:keeper_assemble_plan_schema.input_schema
-       ~ordinary_execution_mode:Serial
-       ~policy:(policy ~readonly:false ())
-       ~handler:Tool_assemble_plan
-       ()
-     |> with_composable_output
-          (Json_output { schema = assemble_plan_output_schema })
-     |> with_eval_tags [ "assembler"; "composition" ])
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name

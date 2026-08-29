@@ -2,28 +2,28 @@ import { describe, expect, it } from 'vitest'
 import { parseExactLaneRunResponse, parseExactLaneRunsResponse } from './dashboard-exact-lane-runs'
 
 describe('parseExactLaneRunsResponse', () => {
-  it('decodes one completed Assembler exact lane record', () => {
+  it('decodes one completed Auto Judge exact lane record', () => {
     const parsed = parseExactLaneRunsResponse({
       generated_at: '2026-08-06T00:00:00Z',
       count: 1,
       total: 1,
       has_more: false,
       runs: [{
-        run_id: 'exact-assembler-1',
-        lane: 'assembler_exact',
+        run_id: 'exact-auto-judge-1',
+        lane: 'hitl_auto_judge',
         subject_id: null,
         actor: 'keeper-a',
         started_at: 1,
         status: 'succeeded',
         elapsed_s: 0.4,
-        selected_slot: 'assembler-primary',
+        selected_slot: 'auto-judge-primary',
       }],
     })
     expect(parsed.runs[0]).toMatchObject({
-      lane: 'assembler_exact',
+      lane: 'hitl_auto_judge',
       subjectId: null,
       status: 'succeeded',
-      selectedSlot: 'assembler-primary',
+      selectedSlot: 'auto-judge-primary',
     })
   })
 

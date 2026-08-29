@@ -72,15 +72,13 @@ type execution =
     call is itself a multi-call execution unit (RFC-0386). [Atomic_tool] runs
     one capability per call. [Composition_tool] runs one fixed, validated
     catalog plan inline. [Async_composition_tool] covers durable async
-    composition submissions and their status/cancel controls.
-    [Batch_plan_tool] runs one model-defined plan as a dependency DAG. This
+    composition submissions and their status/cancel controls. This
     axis is orthogonal to {!execution}: kind classifies what a call contains,
     execution classifies how that call runs. *)
 type tool_kind =
   | Atomic_tool
   | Composition_tool
   | Async_composition_tool
-  | Batch_plan_tool
 
 (** Descriptor-owned output contract for typed composition. [Opaque_output]
     cannot be referenced by another plan node. [Json_output] carries a schema
@@ -120,7 +118,6 @@ type runtime_handler =
   | Tool_time_now
   | Tool_tools_list
   | Tool_capability_search
-  | Tool_assemble_plan
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search

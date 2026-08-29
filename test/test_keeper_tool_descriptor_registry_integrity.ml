@@ -331,7 +331,6 @@ let descriptions_owned_elsewhere =
   ; "keeper_time_now"
   ; "keeper_tools_list"
   ; "keeper_capability_search"
-  ; "keeper_assemble_plan"
   ]
 ;;
 
@@ -587,7 +586,6 @@ let test_seed_eval_tags_are_registered () =
   in
   check "keeper_tools_list" [ "capability_introspection" ];
   check "keeper_capability_search" [ "capability_introspection" ];
-  check "keeper_assemble_plan" [ "assembler"; "composition" ];
   check "keeper_surface_read" [ "surface_context_read" ];
   check "masc_agent_card" [ "agent_profile_lookup" ];
   check "keeper_time_now" []

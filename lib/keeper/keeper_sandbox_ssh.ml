@@ -562,6 +562,19 @@ let run_probe t =
          t.endpoint.name t.endpoint.host signal)
 ;;
 
+(* [test -d] writes nothing to stderr: it answers by exit code alone. A
+   failure reported as "exit=1 stderr=" therefore says a check failed without
+   saying what it looked at, and the operator cannot act on it. The argv is
+   what was actually run, so it carries the path the check was about.
+
+   Every preflight argv is a fixed shape built in [perform_preflight] --
+   git --version, two test -d, df -Pk, gh auth status -- and carries paths
+   rather than credentials. A future preflight that needs a secret has to
+   keep it out of argv, the same rule the remote runner already follows. *)
+let preflight_argv_for_log argv =
+  Exec_policy.truncate_for_log (String.concat " " argv)
+;;
+
 let run_preflight_command t ~error_code argv =
   let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
   let status, stdout, stderr =
@@ -572,12 +585,14 @@ let run_preflight_command t ~error_code argv =
   | Unix.WEXITED 0 -> Ok stdout
   | Unix.WEXITED code ->
     Error
-      (Printf.sprintf "%s: endpoint %s exit=%d stderr=%s"
-         error_code t.endpoint.name code (Exec_policy.truncate_for_log stderr))
+      (Printf.sprintf "%s: endpoint %s ran [%s] exit=%d stderr=%s"
+         error_code t.endpoint.name (preflight_argv_for_log argv) code
+         (Exec_policy.truncate_for_log stderr))
   | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
     Error
-      (Printf.sprintf "%s: endpoint %s signal=%d stderr=%s"
-         error_code t.endpoint.name signal (Exec_policy.truncate_for_log stderr))
+      (Printf.sprintf "%s: endpoint %s ran [%s] signal=%d stderr=%s"
+         error_code t.endpoint.name (preflight_argv_for_log argv) signal
+         (Exec_policy.truncate_for_log stderr))
 ;;
 
 let whitespace_tokens line =

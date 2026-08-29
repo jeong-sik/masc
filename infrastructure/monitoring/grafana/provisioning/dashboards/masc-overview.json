@@ -553,42 +553,6 @@
     },
     {
       "type": "stat",
-      "title": "Goal Attainment %",
-      "gridPos": {
-        "x": 12,
-        "y": 41,
-        "w": 12,
-        "h": 8
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "P4169E866C3094E38"
-      },
-      "description": "Average goal attainment percentage.",
-      "targets": [
-        {
-          "expr": "last_over_time(avg(masc_goal_attainment_pct)[1h])",
-          "legendFormat": "attainment",
-          "refId": "A",
-          "instant": false,
-          "range": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "color": {
-            "mode": "palette-classic"
-          }
-        }
-      },
-      "options": {
-        "graphMode": "area",
-        "colorMode": "value"
-      }
-    },
-    {
-      "type": "stat",
       "title": "Active Keepers",
       "gridPos": {
         "x": 0,
@@ -606,85 +570,6 @@
           "expr": "count(count by (keeper) (masc_keeper_heartbeat_successes_total))",
           "legendFormat": "keepers",
           "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          }
-        }
-      },
-      "options": {
-        "graphMode": "area",
-        "colorMode": "value"
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Keeper Compactions / min",
-      "gridPos": {
-        "x": 8,
-        "y": 57,
-        "w": 16,
-        "h": 8
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "P4169E866C3094E38"
-      },
-      "description": "Keeper context compaction rate.",
-      "targets": [
-        {
-          "expr": "sum(rate(masc_keeper_compactions_total[5m])) * 60",
-          "legendFormat": "compactions/min",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "cpm",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "pointSize": 0,
-            "showPoints": "never"
-          }
-        }
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        }
-      }
-    },
-    {
-      "type": "stat",
-      "title": "Goal Attainment Measured",
-      "gridPos": {
-        "x": 0,
-        "y": 65,
-        "w": 8,
-        "h": 8
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "P4169E866C3094E38"
-      },
-      "description": "Average measured goal attainment count.",
-      "targets": [
-        {
-          "expr": "last_over_time(avg(masc_goal_attainment_measured)[1h])",
-          "legendFormat": "measured",
-          "refId": "A",
-          "instant": false,
-          "range": true
         }
       ],
       "fieldConfig": {
@@ -724,49 +609,6 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "pointSize": 0,
-            "showPoints": "never"
-          }
-        }
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Board Signal Wakeups / min",
-      "gridPos": {
-        "x": 0,
-        "y": 81,
-        "w": 24,
-        "h": 8
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "P4169E866C3094E38"
-      },
-      "description": "Keeper board signal wakeup rate (capped).",
-      "targets": [
-        {
-          "expr": "sum(rate(masc_keeper_board_signal_wakeup_capped_total[5m])) * 60",
-          "legendFormat": "wakeups/min",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "cpm",
           "color": {
             "mode": "palette-classic"
           },
@@ -1478,55 +1320,9 @@
           "expr": "masc_keeper_transition_audit_queue_depth",
           "legendFormat": "depth",
           "refId": "A"
-        },
-        {
-          "expr": "masc_fd_pressure_active * 100",
-          "legendFormat": "fd pressure x100",
-          "refId": "B"
         }
       ],
       "description": "FSM forensics async drain queue (#20677). Rising depth = drain fiber starved or store append parked."
-    },
-    {
-      "id": 10,
-      "type": "stat",
-      "title": "Watchdog Fires (24h)",
-      "gridPos": {
-        "x": 16,
-        "y": 162,
-        "w": 8,
-        "h": 8
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "P4169E866C3094E38"
-      },
-      "targets": [
-        {
-          "expr": "sum(increase(masc_keeper_attempt_watchdog_fired_total[24h]))",
-          "legendFormat": "fires",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1.0
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "description": "1800s safety-cap fires: definitively stuck provider attempts."
     },
     {
       "id": 11,

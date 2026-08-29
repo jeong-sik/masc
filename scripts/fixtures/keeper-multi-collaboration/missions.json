@@ -305,6 +305,16 @@
       "user_story": "Goal 완료는 독립 verifier가 owner playground의 실제 artifact를 읽은 판정으로만 일어난다. 실패 artifact는 Proof_refuted와 Executing 복귀를 만들고, 같은 Goal의 수정 artifact는 새 run으로 재진입해 Proof_proven과 Completed를 만든다. 최종 ledger run ID, durable evaluator/tool run, 실제 backend Dashboard의 펼친 verification_read_file 행과 screenshot이 같은 Goal/run을 가리켜야 한다.",
       "assertions": ["goal_verifier_refutation_observed", "goal_verifier_reentry_proven", "goal_verifier_dashboard_browser_observed"],
       "evidence": ["observations/goal-verifier-task-refuted.json", "observations/goal-verifier-task-proven.json", "observations/goal-verifier-refuted.json", "observations/goal-verifier-proven.json", "observations/goal-verification-runs.json", "browser/goal-verification-run-proof.json", "browser/goal-verification-run-proof.png"]
+    },
+    {
+      "id": "RW26",
+      "phase": "claim_reproduction",
+      "name": "paper_claim_reproduction",
+      "actors": ["researcher", "builder-a", "reviewer"],
+      "capabilities": ["Keeper", "Board", "Sandbox", "Execute"],
+      "user_story": "사람이 논문의 정량 주장을 제시하면, 완성 주장은 파일이나 말이 아니라 실측 실행 로그로 증명되고, 측정값은 평가자가 독립 계산한 기대값과 정확히 일치하며, 독립 리뷰가 board에서 읽은 측정값만 인용해 판정한다.",
+      "assertions": ["claim_measurement_executed", "claim_verdict_cites_measurement"],
+      "evidence": ["observations/board-post.json", "observations/tool-calls-builder-a.json"]
     }
   ]
 }

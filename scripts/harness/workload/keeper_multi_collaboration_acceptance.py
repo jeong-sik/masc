@@ -50,7 +50,7 @@ SCHEMA = "masc.keeper_multi_collaboration_evidence.v1"
 EXPECTED_MISSION_IDS = (
     "RW01", "RW02", "RW03", "RW04", "RW05", "RW06", "RW07", "RW08",
     "RW09", "RW10", "RW11", "RW12", "RW13", "RW14", "RW15", "RW16",
-    "RW17", "RW18", "RW20", "RW21", "RW22", "RW23",
+    "RW17", "RW18", "RW20", "RW21", "RW22", "RW23", "RW26",
 )
 
 EXPECTED_ROLES = {"coordinator", "builder-a", "builder-b", "reviewer", "researcher"}
@@ -107,6 +107,8 @@ KNOWN_ASSERTIONS = {
     "goal_verifier_refutation_observed",
     "goal_verifier_reentry_proven",
     "goal_verifier_dashboard_browser_observed",
+    "claim_measurement_executed",
+    "claim_verdict_cites_measurement",
 }
 
 # Goal verification is an autonomous durable drain, not one synchronous model
@@ -117,6 +119,37 @@ KNOWN_ASSERTIONS = {
 # request boundary is not turned into a false-negative campaign result.
 GOAL_VERIFIER_RETRY_INTERVAL_SEC = 60.0
 BROWSER_PROOF_TIMEOUT_FLOOR_SEC = 600.0
+
+
+# ── RW26: paper-claim reproduction ──────────────────────────────────
+# The claim under measurement is Benford's law on the Fibonacci sequence —
+# a mathematically proven statement, so the mission needs no external paper
+# fixture and stays fully offline. The evaluator computes the expected count
+# independently below; the keeper prompts carry only the rule, never the
+# answer, exactly like the RW22 qa_cases discipline.
+RW26_FIBONACCI_COUNT = 200
+
+
+def rw26_fibonacci_leading_one_count(n: int) -> int:
+    """Number of F(1)..F(n) (F(1)=F(2)=1) whose leading decimal digit is 1."""
+    if n < 1:
+        raise ValueError("n must be positive")
+    count = 0
+    a, b = 1, 1
+    for _ in range(n):
+        if str(a)[0] == "1":
+            count += 1
+        a, b = b, a + b
+    return count
+
+
+# Deliberately-wrong-input self-check (the RFC's bug-model for a mission
+# whose fixture is a derivation rather than a file): the first ten
+# Fibonacci numbers are 1,1,2,3,5,8,13,21,34,55 — exactly three lead with
+# the digit 1. A drifted implementation fails at import, before any
+# campaign run can quote it as an oracle.
+if rw26_fibonacci_leading_one_count(10) != 3:
+    raise AssertionError("rw26 oracle drifted: F(1..10) must contain 3 leading-1 values")
 
 
 def goal_verifier_convergence_timeout(request_timeout: float) -> float:
@@ -469,8 +502,8 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
     if catalog.get("schema") != "masc.keeper_multi_collaboration_missions.v1":
         raise AcceptanceError("mission catalog schema mismatch")
     missions = catalog.get("missions")
-    if not isinstance(missions, list) or len(missions) != 22:
-        raise AcceptanceError("mission catalog must contain exactly 22 missions")
+    if not isinstance(missions, list) or len(missions) != 23:
+        raise AcceptanceError("mission catalog must contain exactly 23 missions")
     ids = [mission.get("id") for mission in missions]
     if ids != list(EXPECTED_MISSION_IDS):
         raise AcceptanceError(
@@ -1152,6 +1185,12 @@ class MissionRun:
         # result is emitted as "<case>=<value>". The prefix keeps a short
         # result (the length case is a two-digit number) from matching by
         # accident anywhere on the Board.
+        # RW26: the evaluator's independent expectation. The keeper prompts
+        # state only the rule (first N Fibonacci numbers, count the ones whose
+        # decimal form starts with 1); this exact integer never appears in any
+        # prompt, so a matching Board claim can only come from a real run.
+        self.claim_fib_count = RW26_FIBONACCI_COUNT
+        self.claim_expected = rw26_fibonacci_leading_one_count(self.claim_fib_count)
         qa_inputs = tuple(f"{self.marker}-case-{index}" for index in (1, 2, 3))
         self.qa_cases = (
             ("upper", qa_inputs[0], f"upper={qa_inputs[0].upper()}"),
@@ -1778,6 +1817,52 @@ class MissionRun:
                 f"Board post {post_id}에서 POC_REQUEST와 POC_EXECUTED comment를 읽고, "
                 "실행 출력이 요구와 일치하는지 확인한 뒤 POC_REVIEW_CONFIRMS=<POC_EXECUTED의 값 그대로> "
                 "comment를 남기세요. 값을 새로 만들지 말고 board에서 읽은 값만 인용하세요."
+            ),
+        )
+
+    def run_claim_reproduction(self, post_id: str) -> None:
+        # RW26: a person states a published quantitative claim; the system
+        # must come back with a run the person can read. The builder writes
+        # AND executes the measurement so the count lands in a durable
+        # Execute row; the reviewer judges only from what the Board carries.
+        # Nobody's prompt contains the expected integer — the evaluator
+        # computes it independently (rw26_fibonacci_leading_one_count).
+        n = self.claim_fib_count
+        self.run_turn(
+            "researcher",
+            "claim-state",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에 CLAIM_STATED={self.marker}-benford comment를 남기세요. "
+                "주장 내용: 피보나치 수열은 Benford 법칙을 따른다 — "
+                f"F(1)=1, F(2)=1로 시작하는 처음 {n}개의 피보나치 수 가운데 십진 표기의 "
+                "선두 숫자가 1인 수의 개수는 Benford 예측(약 30.1%)에 부합한다. "
+                "이 주장을 실측으로 검증해 달라고 요구하세요."
+            ),
+        )
+        self.run_turn(
+            "builder-a",
+            "claim-measure",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Write(tool_write_file)로 playground의 artifacts/{self.marker}-claim.py에 "
+                f"F(1)=1, F(2)=1로 시작하는 처음 {n}개의 피보나치 수 중 십진 선두 숫자가 1인 "
+                "수의 개수를 정확한 정수 연산으로 세어 'LEADING_ONE_COUNT=<개수>' 한 줄을 "
+                "출력하는 스크립트를 쓰세요. 그 다음 Execute(tool_execute)로 그 스크립트를 "
+                "실제로 실행해 출력을 얻고, Board post "
+                f"{post_id}에 실행 출력에서 읽은 값 그대로 CLAIM_MEASURED=<개수> comment를 "
+                "남기세요. 실행 없이 값을 추정하거나 완료를 주장하지 마세요."
+            ),
+        )
+        self.run_turn(
+            "reviewer",
+            "claim-verdict",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에서 CLAIM_STATED와 CLAIM_MEASURED comment를 읽으세요. "
+                f"측정 개수가 전체 {n}개의 약 30.1%에 부합하는지 한 문장으로 판정한 뒤 "
+                "CLAIM_VERDICT_CITES=<읽은 CLAIM_MEASURED의 = 뒤 값 그대로> comment를 "
+                "남기세요. 값을 새로 계산하거나 추측하지 말고 board에서 읽은 값만 인용하세요."
             ),
         )
 
@@ -3113,6 +3198,34 @@ class MissionRun:
                 "reviewer's own comment quotes the executed output token read "
                 "from the Board",
             ),
+            "claim_measurement_executed": (
+                successful_windowed_tool(
+                    "builder-a", "claim-measure", "tool_write_file"
+                )
+                and windowed_execute_output_contains(
+                    "builder-a",
+                    "claim-measure",
+                    f"LEADING_ONE_COUNT={self.claim_expected}",
+                )
+                and text_contains(
+                    board, f"CLAIM_MEASURED={self.claim_expected}"
+                ),
+                "builder-a wrote the measurement, a durable Execute row "
+                f"carries LEADING_ONE_COUNT={self.claim_expected} (the "
+                "evaluator's independent Fibonacci/Benford count over "
+                f"{self.claim_fib_count} terms — never present in any "
+                "prompt), and the Board claim quotes that execution",
+            ),
+            "claim_verdict_cites_measurement": (
+                text_contains(
+                    board, f"CLAIM_VERDICT_CITES={self.claim_expected}"
+                )
+                and successful_windowed_tool(
+                    "reviewer", "claim-verdict", "masc_board_comment"
+                ),
+                "reviewer's own comment quotes the measured count read from "
+                "the Board, matching the evaluator's independent expectation",
+            ),
             "debate_restatement_faithful": (
                 text_contains(
                     board, f"DEBATE_RESTATE={self.debate_claim_token}"
@@ -3263,6 +3376,7 @@ class MissionRun:
         self.run_contention(post_id)
         self.run_failure_recovery(post_id)
         self.run_poc_delivery(post_id)
+        self.run_claim_reproduction(post_id)
         self.run_debate(post_id)
         self.run_qa_coverage(post_id)
         self.run_goal_verifier_refute_reenter_prove()

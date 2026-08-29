@@ -4997,8 +4997,6 @@ let skill_catalog_of_composition ~name toml =
   in
   let config_text =
     {|[skills]
-activation-lifetime = "session"
-precedence = "earlier-source-wins"
 resource-read-max-bytes = 65536
 [[skills.sources]]
 id = "composition-fixture"

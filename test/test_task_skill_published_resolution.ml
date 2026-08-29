@@ -67,7 +67,7 @@ let source_row id path =
 ;;
 
 let config_text sources =
-  "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = 65536\n"
+  "[skills]\nresource-read-max-bytes = 65536\n"
   ^ sources
 ;;
 

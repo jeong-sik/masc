@@ -5,7 +5,7 @@ module Reference = Skill_reference
 
 let config_text ?(runtime = "one") ?(resource_read_max_bytes = 65536) sources =
   Printf.sprintf
-    "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = %d\n%s\n[runtime]\ndefault = %S\n"
+    "[skills]\nresource-read-max-bytes = %d\n%s\n[runtime]\ndefault = %S\n"
     resource_read_max_bytes
     sources
     runtime
@@ -471,7 +471,7 @@ let test_unreadable_config_still_produces_a_snapshot () =
    source revision they were produced from: an operator reading the catalog
    has to be able to tell which text was refused. *)
 let test_rejected_config_keeps_its_diagnostics () =
-  let bad = "[skills]\nactivation-lifetime = 3\n" in
+  let bad = "[skills]\nresource-read-max-bytes = \"lots\"\n" in
   let diagnostics =
     match Skill_source_config.parse_text bad with
     | Error diagnostics -> diagnostics

@@ -2137,10 +2137,88 @@ type skills_catalog_surface =
   ; scs_flow : skill_flow option
   }
 
+type skill_diagnostic_code =
+  | Skill_missing_frontmatter
+  | Skill_byte_order_mark
+  | Skill_unterminated_frontmatter
+  | Skill_malformed_yaml
+  | Skill_frontmatter_not_mapping
+  | Skill_duplicate_field
+  | Skill_duplicate_metadata_key
+  | Skill_unexpected_frontmatter_field
+  | Skill_missing_name
+  | Skill_missing_description
+  | Skill_invalid_field_type
+  | Skill_invalid_name
+  | Skill_name_mismatch
+  | Skill_description_too_long
+  | Skill_compatibility_empty
+  | Skill_compatibility_too_long
+  | Skill_invalid_metadata_value
+
+type skill_rejection_diagnostic =
+  { srd_code : skill_diagnostic_code
+  ; srd_message : string
+  }
+
+type skill_rejection_reason =
+  | Skill_document_rejected of skill_rejection_diagnostic list
+  | Skill_document_unreadable
+  | Skill_exact_identity_duplicate
+  | Skill_invalid_package_id
+
+type skill_catalog_rejection =
+  { scr_source_id : string
+  ; scr_package_id : string option
+  ; scr_content_revision : string option
+  ; scr_reason : skill_rejection_reason
+  }
+
 type skills_catalog =
   { sc_state : string
   ; sc_surfaces : skills_catalog_surface list
+  ; sc_rejections : skill_catalog_rejection list
   }
+
+let skill_diagnostic_code_to_string = function
+  | Skill_missing_frontmatter -> "missing_frontmatter"
+  | Skill_byte_order_mark -> "byte_order_mark"
+  | Skill_unterminated_frontmatter -> "unterminated_frontmatter"
+  | Skill_malformed_yaml -> "malformed_yaml"
+  | Skill_frontmatter_not_mapping -> "frontmatter_not_mapping"
+  | Skill_duplicate_field -> "duplicate_field"
+  | Skill_duplicate_metadata_key -> "duplicate_metadata_key"
+  | Skill_unexpected_frontmatter_field -> "unexpected_frontmatter_field"
+  | Skill_missing_name -> "missing_name"
+  | Skill_missing_description -> "missing_description"
+  | Skill_invalid_field_type -> "invalid_field_type"
+  | Skill_invalid_name -> "invalid_name"
+  | Skill_name_mismatch -> "name_mismatch"
+  | Skill_description_too_long -> "description_too_long"
+  | Skill_compatibility_empty -> "compatibility_empty"
+  | Skill_compatibility_too_long -> "compatibility_too_long"
+  | Skill_invalid_metadata_value -> "invalid_metadata_value"
+
+let skill_diagnostic_code_of_string = function
+  | "missing_frontmatter" -> Ok Skill_missing_frontmatter
+  | "byte_order_mark" -> Ok Skill_byte_order_mark
+  | "unterminated_frontmatter" -> Ok Skill_unterminated_frontmatter
+  | "malformed_yaml" -> Ok Skill_malformed_yaml
+  | "frontmatter_not_mapping" -> Ok Skill_frontmatter_not_mapping
+  | "duplicate_field" -> Ok Skill_duplicate_field
+  | "duplicate_metadata_key" -> Ok Skill_duplicate_metadata_key
+  | "unexpected_frontmatter_field" -> Ok Skill_unexpected_frontmatter_field
+  | "missing_name" -> Ok Skill_missing_name
+  | "missing_description" -> Ok Skill_missing_description
+  | "invalid_field_type" -> Ok Skill_invalid_field_type
+  | "invalid_name" -> Ok Skill_invalid_name
+  | "name_mismatch" -> Ok Skill_name_mismatch
+  | "description_too_long" -> Ok Skill_description_too_long
+  | "compatibility_empty" -> Ok Skill_compatibility_empty
+  | "compatibility_too_long" -> Ok Skill_compatibility_too_long
+  | "invalid_metadata_value" -> Ok Skill_invalid_metadata_value
+  | unknown ->
+    Error (Printf.sprintf "skill diagnostic code has unknown value %S" unknown)
 
 let decode_skill_usage_row json =
   let* su_keeper = required_string_field json "keeper" in
@@ -2175,13 +2253,55 @@ let decode_skills_catalog_surface json =
   in
   Ok { scs_name; scs_kind; scs_usage; scs_flow }
 
+let decode_skill_rejection_diagnostic json =
+  let* code = required_string_field json "code" in
+  let* srd_code = skill_diagnostic_code_of_string code in
+  let* srd_message = required_string_field json "message" in
+  Ok { srd_code; srd_message }
+
+let decode_skill_catalog_rejection json =
+  let* scr_source_id = required_string_field json "source_id" in
+  let* scr_package_id = optional_string_field json "package_id" in
+  let* scr_content_revision = optional_string_field json "content_revision" in
+  let* reason = required_object_field json "reason" in
+  let* kind = required_string_field reason "kind" in
+  let* scr_reason =
+    match kind with
+    | "document_rejected" ->
+      let* diagnostics_json = required_list_field reason "diagnostics" in
+      let* diagnostics =
+        decode_list
+          "snapshot.rejections.reason.diagnostics"
+          decode_skill_rejection_diagnostic
+          diagnostics_json
+      in
+      Ok (Skill_document_rejected diagnostics)
+    | "document_unreadable" -> Ok Skill_document_unreadable
+    | "exact_identity_duplicate" -> Ok Skill_exact_identity_duplicate
+    | "invalid_package_id" -> Ok Skill_invalid_package_id
+    | unknown ->
+      Error (Printf.sprintf "skill rejection kind has unknown value %S" unknown)
+  in
+  Ok { scr_source_id; scr_package_id; scr_content_revision; scr_reason }
+
 let decode_skills_catalog json =
   let* sc_state = required_string_field json "state" in
   let* surfaces_json = optional_list_field json "surfaces" in
   let* sc_surfaces =
     decode_list "surfaces" decode_skills_catalog_surface surfaces_json
   in
-  Ok { sc_state; sc_surfaces }
+  let* sc_rejections =
+    if String.equal sc_state "ready"
+    then
+      let* snapshot = required_object_field json "snapshot" in
+      let* rejections_json = required_list_field snapshot "rejections" in
+      decode_list
+        "snapshot.rejections"
+        decode_skill_catalog_rejection
+        rejections_json
+    else Ok []
+  in
+  Ok { sc_state; sc_surfaces; sc_rejections }
 
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the

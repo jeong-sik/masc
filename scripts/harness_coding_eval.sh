@@ -438,7 +438,11 @@ run_one() {
     # addresses paths relative to it, so the case workspace lives there —
     # an external absolute directory produced playground-confined
     # cwd_not_directory / File-not-found on every call.
-    workspace="${TARGET_DIR}/.masc/playground/${keeper_name}/workspace"
+    # Docker keepers mount <playgrounds>/docker/<name>/ as their working
+    # root (keeper_sandbox_config.host_root_rel_of_profile) — the profile
+    # segment keeps lanes from finding each other's trees. The profile is
+    # pinned to docker in the keeper TOML above.
+    workspace="${TARGET_DIR}/.masc/playground/docker/${keeper_name}/workspace"
     rm -rf "${workspace}"
     mkdir -p "${workspace}"
     cp -R "${case_dir}/workspace/." "${workspace}"

@@ -1710,6 +1710,13 @@ type state = {
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
   mutable runtime_surface_error: string option;
   mutable runtime_surface_scroll: int;
+  mutable runtime_lane_cursor: int;
+  (* The lane a fallback is being added to, and where the picker sits in the
+     runtime catalogue. Both are cleared when the picker closes: a cursor kept
+     across visits opens the list part-way down for no reason the reader gave. *)
+  mutable runtime_lane_pick: string option;
+  mutable runtime_lane_pick_cursor: int;
+  mutable runtime_lane_error: string option;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
@@ -2316,6 +2323,10 @@ let create_state
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;
+  runtime_lane_cursor = 0;
+  runtime_lane_pick = None;
+  runtime_lane_pick_cursor = 0;
+  runtime_lane_error = None;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;

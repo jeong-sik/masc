@@ -8583,6 +8583,31 @@ let render_runtime (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
+  (match state.runtime_lane_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:(Theme.bad ())
+         ("  lane write refused: " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  (match state.runtime_lane_pick with
+   | None -> ()
+   | Some lane ->
+       box_line_styled buf cols ~style:(Theme.info ())
+         (Printf.sprintf
+            "  adding a failover candidate to %s \xe2\x80\x94 j/k move, Enter append, e cancel"
+            (Terminal_text.single_line lane));
+       (match
+          List.nth_opt state.runtime_catalog state.runtime_lane_pick_cursor
+        with
+        | None -> box_line_styled buf cols ~style:(Theme.recede ())
+                    "  (runtime catalogue unread)"
+        | Some runtime ->
+            box_line buf cols
+              (Printf.sprintf "  > %s   %s / %s"
+                 (Terminal_text.single_line runtime.Masc.Tui_decode.ro_id)
+                 (Terminal_text.single_line runtime.Masc.Tui_decode.ro_provider)
+                 (Terminal_text.single_line runtime.Masc.Tui_decode.ro_model)));
+       box_divider buf cols);
   let chrome_rows = runtime_listing_chrome ~error:state.runtime_surface_error in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
@@ -8707,7 +8732,10 @@ let render_runtime (state : state) =
             scroll_hint
             (match state.runtime_mode with
              | Masc_tui_types.Runtime_lanes -> "all runtimes"
-             | Masc_tui_types.Runtime_all -> "lanes")));
+             | Masc_tui_types.Runtime_all -> "lanes")
+          ^ (match state.runtime_mode with
+             | Masc_tui_types.Runtime_lanes -> "  e:add failover"
+             | Masc_tui_types.Runtime_all -> "")));
   finish_surface state ~surface_key:"runtime" ~rows:terminal_rows ~cols buf
 
 (* Two deliberately separate readings: the selected Keeper's exact turn

@@ -457,6 +457,19 @@ let test_keeper_detail_scroll_normalizes_across_bounds () =
   check int "fully visible content cannot scroll" 0
     (normalize ~line_count:10 ~content_height:15 max_int)
 
+let test_consecutive_identical_events_fold_to_one_row () =
+  let folded =
+    Schedule.collapse_consecutive ~key:Fun.id
+      [ "turn"; "refresh"; "refresh"; "refresh"; "chat"; "refresh" ]
+  in
+  check
+    (list (pair string int))
+    "runs fold to newest-with-count, order preserved"
+    [ ("turn", 1); ("refresh", 3); ("chat", 1); ("refresh", 1) ]
+    folded;
+  check (list (pair string int)) "empty stays empty" []
+    (Schedule.collapse_consecutive ~key:Fun.id [])
+
 let test_overview_event_window_follows_and_preserves_anchor () =
   let project = Schedule.project_overview_event_window in
   let bottom = project ~event_count:6 ~visible_rows:2 max_int in
@@ -626,6 +639,8 @@ let () =
             test_keeper_detail_scroll_normalizes_across_bounds
         ; test_case "overview events follow and preserve manual anchor" `Quick
             test_overview_event_window_follows_and_preserves_anchor
+        ; test_case "consecutive identical events fold to one row" `Quick
+            test_consecutive_identical_events_fold_to_one_row
         ; test_case "keeper columns never exceed their width" `Quick
             test_keeper_columns_never_exceed_their_width
         ; test_case "keeper columns consume the whole width" `Quick

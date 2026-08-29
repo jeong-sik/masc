@@ -19,6 +19,12 @@ val keeper_context_bar_width : inner_width:int -> int
 val normalize_keeper_detail_scroll :
   line_count:int -> content_height:int -> int -> int
 
+val collapse_consecutive : key:('a -> string) -> 'a list -> ('a * int) list
+(** Fold consecutive runs with the same key into (newest element, run length),
+    preserving order. The Overview event log draws a burst of identical lines
+    (six manual refreshes, a broadcast fan-out) as one row with a [×N] tail
+    instead of spending its whole panel repeating itself. *)
+
 type overview_event_window = {
   oew_offset : int;
   oew_first_position : int;

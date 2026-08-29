@@ -398,9 +398,8 @@ module Glyph = struct
 
   let breadcrumb_sep = "\xe2\x96\xb8"
 
-  let priority p =
-    if p <= 1 then "!!!"
-    else if p <= 2 then "!!"
-    else if p <= 3 then "!"
-    else ""
+  (* Only the top priority speaks. The !!!/!!/! ladder made every task list
+     shout — on the live Overview five of eight rows carried a red tail —
+     and a mark on most rows distinguishes nothing. *)
+  let priority p = if p <= 1 then "!" else ""
 end

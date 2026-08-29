@@ -75,6 +75,13 @@ type event = {
   content: string;
 }
 
+(* The one key the Overview event panel folds identical neighbours by; the
+   renderer and both scroll handlers must count the same folded rows or the
+   scroll range and the drawn range drift apart. *)
+let overview_event_collapse_key event =
+  event.event_type ^ "\x00" ^ event.content
+;;
+
 (** Keeper metadata (from Tui_decode) *)
 type keeper = Tui_decode.keeper
 type keeper_runtime = Tui_decode.keeper_runtime

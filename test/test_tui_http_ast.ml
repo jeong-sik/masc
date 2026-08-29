@@ -197,10 +197,12 @@ let test_tui_ansi_status_helpers_use_theme_tokens () =
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"priority_indicator"
        ~callee:"Masc_tui_theme.Glyph.priority");
-  check int "critical priority uses the readable bad token" 1
+  check int "the speaking priority uses the readable bad token" 1
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"priority_indicator" ~callee:"Theme.bad");
-  check int "warning priority uses the readable warn token" 1
+  (* Only the top priority speaks now; a warn-toned middle rank would mean
+     the ladder grew back. *)
+  check int "no warn-toned priority rank" 0
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"priority_indicator" ~callee:"Theme.warn");
   List.iter

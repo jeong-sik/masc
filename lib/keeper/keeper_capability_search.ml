@@ -2,7 +2,6 @@ type 'a document =
   { payload : 'a
   ; name : string
   ; description : string
-  ; category : string
   ; invocation_name : string option
   }
 
@@ -120,9 +119,8 @@ let insert_document db statement ordinal document =
   let* () = bind_int db statement 1 ordinal in
   let* () = bind_text db statement 2 document.name in
   let* () = bind_text db statement 3 document.description in
-  let* () = bind_text db statement 4 document.category in
   let* () =
-    bind_text db statement 5 (Option.value ~default:"" document.invocation_name)
+    bind_text db statement 4 (Option.value ~default:"" document.invocation_name)
   in
   let rc = Sqlite3.step statement in
   if rc = Sqlite3.Rc.DONE
@@ -137,7 +135,7 @@ let insert_document db statement ordinal document =
 let populate db documents =
   with_statement
     db
-    "INSERT INTO capability_search(ordinal, name, description, category, invocation_name) VALUES (?, ?, ?, ?, ?)"
+    "INSERT INTO capability_search(ordinal, name, description, invocation_name) VALUES (?, ?, ?, ?)"
     (fun statement ->
        let rec loop ordinal = function
          | [] -> Ok ()
@@ -202,7 +200,7 @@ let search ~query:text documents =
                  db
                  "create capability index"
                  "CREATE VIRTUAL TABLE capability_search USING \
-                  fts5(ordinal UNINDEXED, name, description, category, invocation_name, tokenize='unicode61')"
+                  fts5(ordinal UNINDEXED, name, description, invocation_name, tokenize='unicode61')"
              with
              | Error _ as error -> error
              | Ok () ->

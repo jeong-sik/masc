@@ -297,11 +297,6 @@ let candidate_description = function
     "Configured Skill is absent from the frozen catalog."
 ;;
 
-let candidate_category = function
-  | Ordinary_tool _ -> "tool"
-  | Skill _ -> "skill"
-;;
-
 let candidate_invocation_name = function
   | Ordinary_tool capability ->
     (match Keeper_tool_descriptor.keeper_model_names capability.descriptor with

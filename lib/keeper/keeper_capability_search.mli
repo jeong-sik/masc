@@ -6,7 +6,6 @@ type 'a document =
   { payload : 'a
   ; name : string
   ; description : string
-  ; category : string
   ; invocation_name : string option
   }
 

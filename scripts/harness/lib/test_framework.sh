@@ -12,6 +12,13 @@
 : "${MCP_TOKEN:=}"
 export MCP_SESSION_ID
 
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "missing required command: $1" >&2
+    exit 1
+  }
+}
+
 _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/harness/jsonrpc_sse.sh
 source "${_HARNESS_DIR}/jsonrpc_sse.sh"
@@ -70,7 +77,11 @@ initialize_mcp_session() {
   if [ -n "$auth_token" ]; then
     auth_header_file="$(_mcp_auth_header_file "$auth_token")" || auth_header_file=""
   fi
-  trap 'rm -f "$headers_file" "$body_file" "$auth_header_file"' RETURN
+  # Self-clearing, same idiom as mcp_jsonrpc.sh: a RETURN trap set in a
+  # function is global trap state, so without the clear it fires again on the
+  # caller's next function return, expanding locals that no longer exist —
+  # an unbound-variable abort under set -u.
+  trap 'rm -f "${headers_file:-}" "${body_file:-}" "${auth_header_file:-}"; trap - RETURN' RETURN
   local -a init_headers=(
     -H 'Content-Type: application/json'
     -H 'Accept: application/json, text/event-stream'

@@ -92,7 +92,7 @@ ensure_cli_built() {
   (
     cd "${ROOT_DIR}"
     if [[ "${CODING_EVAL_SKIP_BUILD:-0}" != "1" || ! -x "${CLI_EXE}" ]]; then
-      scripts/dune-local.sh build ./test/coding_eval_report_cli.exe >/dev/null
+      scripts/dune-local.sh build ./test/coding_eval_report_cli.exe ./bin/main_eio.exe >/dev/null
     fi
   )
 }
@@ -113,6 +113,48 @@ selected_case_dirs() {
   done
 }
 
+# Runtime and model ids must match [A-Za-z0-9._-]+; the raw provider tag
+# (slashes, colons) goes into api-name and the id is its sanitized alias.
+model_alias_of() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'
+}
+
+# The server dispatches only runtimes declared in runtime.toml, so a model
+# asked for on the command line must exist there as a keeper-dispatchable
+# entry (positive max-request-body-bytes). The declaration goes into this
+# invocation's isolated config copy only; the repo config is not touched.
+declare_requested_runtimes() {
+  local runtime_toml="${CONFIG_DIR}/runtime.toml"
+  local entry provider model alias
+  local -a entries
+  IFS=',' read -r -a entries <<< "${MODELS}"
+  for entry in "${entries[@]}"; do
+    provider="${entry%%:*}"
+    model="${entry#*:}"
+    alias="$(model_alias_of "${model}")"
+    if grep -qF "[${provider}.${alias}]" "${runtime_toml}" \
+      || grep -qF "[${provider}.\"${alias}\"]" "${runtime_toml}"; then
+      continue
+    fi
+    if ! grep -qF "[models.${alias}]" "${runtime_toml}" \
+      && ! grep -qF "[models.\"${alias}\"]" "${runtime_toml}"; then
+      printf '\n[models."%s"]\napi-name = "%s"\nmax-context = 32768\ntools-support = true\nstreaming = true\n' \
+        "${alias}" "${model}" >> "${runtime_toml}"
+    fi
+    printf '\n[%s."%s"]\nmax-request-body-bytes = 524288\nmax-concurrent = 1\n' \
+      "${provider}" "${alias}" >> "${runtime_toml}"
+    # The runtime also needs an agent-core catalog row, or the server boots it
+    # disabled ("degraded catalog mode") and quietly routes the keeper to the
+    # default lane — the eval would then measure a different model.
+    local overlay_toml="${CONFIG_DIR}/agent-core-models-overlay.toml"
+    if ! grep -qF "id_prefix = \"${model}\"" "${overlay_toml}"; then
+      printf '\n[[models]]\nid_prefix = "%s"\nprovider_name = "%s"\nbase = "%s"\nmax_context_tokens = 32768\nsupports_tools = true\nsupports_reasoning = false\nsupports_native_streaming = true\n' \
+        "${model}" "${provider}" "${provider}" >> "${overlay_toml}"
+    fi
+    echo "[coding-eval] declared runtime ${provider}.${alias} (api-name ${model}) in the isolated config copy" >&2
+  done
+}
+
 prepare_live_environment() {
   local run_suffix
   run_suffix="$(date +%Y%m%d_%H%M%S)-$$"
@@ -122,6 +164,7 @@ prepare_live_environment() {
   SERVER_LOG="${LIVE_RUN_DIR}/server.log"
   mkdir -p "${TARGET_DIR}" "${CONFIG_DIR}"
   cp -R "${ROOT_DIR}/config/." "${CONFIG_DIR}"
+  declare_requested_runtimes
   if [[ -z "${PORT}" ]]; then
     PORT="$(harness_pick_free_port)"
   fi
@@ -130,7 +173,32 @@ prepare_live_environment() {
 start_live_server() {
   local launch_log="${LIVE_RUN_DIR}/launch.log"
   local bootstrap_log="${LIVE_RUN_DIR}/bootstrap.log"
+
+  # Mint the workspace-local bearer BEFORE the server starts: the login CLI
+  # writes the credential into the base path's auth store for the server to
+  # read at boot, and running it against a base path a live server owns makes
+  # that server yield ownership and shut down (transport/common.sh carries the
+  # same ordering note).
+  local minted_token
+  if ! minted_token="$(harness_mint_admin_token \
+    "${ROOT_DIR}/_build/default/bin/main_eio.exe" "${PORT}" "${TARGET_DIR}" \
+    "coding-eval-harness")"; then
+    echo "coding eval failed: could not mint a harness bearer" >&2
+    exit 1
+  fi
+  MCP_TOKEN="${minted_token}"
+  export MCP_TOKEN
+
   (
+    # The ambient shell may carry tokens for a different live server; the
+    # eval server must not adopt them as its own identity.
+    unset MCP_TOKEN MCP_AUTH_TOKEN MASC_ADMIN_TOKEN MASC_TOKEN
+    # Connector credentials stay out too: an eval server joining the real
+    # Slack/Discord workspaces is an isolation hole, not a feature.
+    unset SLACK_BOT_TOKEN SLACK_APP_TOKEN DISCORD_BOT_TOKEN
+    # No cloud-provider fallback: if the requested local runtime cannot
+    # serve, the eval must fail loudly, not silently measure another model.
+    unset OLLAMA_CLOUD_API_KEY
     export MASC_CONFIG_DIR="${CONFIG_DIR}"
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
@@ -139,12 +207,23 @@ start_live_server() {
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
+    # RFC-0394 turned the local playground fail-closed; the eval harness is
+    # exactly the dev/test caller that knob exists for. Episodes edit files
+    # only inside run workspaces this script creates and owns.
+    export MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
     exec "${ROOT_DIR}/scripts/run-local.sh" \
       --target-dir "${TARGET_DIR}" \
       --port "${PORT}" \
       --bootstrap-only
   ) >"${bootstrap_log}" 2>&1
   (
+    unset MCP_TOKEN MCP_AUTH_TOKEN MASC_ADMIN_TOKEN MASC_TOKEN
+    # Connector credentials stay out too: an eval server joining the real
+    # Slack/Discord workspaces is an isolation hole, not a feature.
+    unset SLACK_BOT_TOKEN SLACK_APP_TOKEN DISCORD_BOT_TOKEN
+    # No cloud-provider fallback: if the requested local runtime cannot
+    # serve, the eval must fail loudly, not silently measure another model.
+    unset OLLAMA_CLOUD_API_KEY
     export MASC_CONFIG_DIR="${CONFIG_DIR}"
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
@@ -153,11 +232,17 @@ start_live_server() {
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
+    # RFC-0394 turned the local playground fail-closed; the eval harness is
+    # exactly the dev/test caller that knob exists for. Episodes edit files
+    # only inside run workspaces this script creates and owns.
+    export MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
     exec "${ROOT_DIR}/scripts/run-local.sh" --target-dir "${TARGET_DIR}" --port "${PORT}"
   ) >"${launch_log}" 2>&1 &
   SERVER_PID="$!"
 
-  if ! harness_wait_for_health "${PORT}" 45; then
+  # Three sequential boots precede readiness (login mini-stack, bootstrap-only,
+  # the server itself), so the health budget is generous on purpose.
+  if ! harness_wait_for_health "${PORT}" 180; then
     harness_print_log_tail "${bootstrap_log}" 120
     harness_print_log_tail "${launch_log}" 120
     harness_print_log_tail "${SERVER_LOG}" 120
@@ -167,7 +252,17 @@ start_live_server() {
 
   MCP_URL="http://127.0.0.1:${PORT}/mcp"
   export MCP_URL
-  if ! initialize_mcp_session; then
+  # /health can answer while the MCP session layer is still in its lazy-init
+  # phase, so a single initialize can land in that window under load.
+  local init_attempt initialized=0
+  for init_attempt in 1 2 3 4 5 6; do
+    if initialize_mcp_session; then
+      initialized=1
+      break
+    fi
+    sleep 5
+  done
+  if [[ "${initialized}" != "1" ]]; then
     harness_print_log_tail "${SERVER_LOG}" 120
     echo "coding eval failed: MCP initialize did not return a session id" >&2
     exit 1
@@ -292,7 +387,7 @@ run_one() {
   cp -R "${case_dir}/workspace/." "${workspace}"
 
   local keeper_name="coding-eval-${run_id}"
-  local runtime_id="${provider}.${model}"
+  local runtime_id="${provider}.$(model_alias_of "${model}")"
   local start_epoch end_epoch duration_ms recorded_at
   start_epoch="$(date +%s)"
 
@@ -329,21 +424,30 @@ run_one() {
       error_text="keeper_msg: $(tool_error_text)"
     else
       request_json="$(tool_result_json)"
-      request_id="$(printf '%s' "${request_json}" | jq -r '.request_id // empty')"
-      if [[ -z "${request_id}" ]]; then
+      printf '%s' "${request_json}" > "${run_dir}/msg-submit.json"
+      # masc_keeper_msg submits an async chat operation; the settle signal is
+      # masc_keeper_delegate_status with the same operation_id (the tool's own
+      # description names this contract). Terminal states are Succeeded /
+      # Failed / Cancelled.
+      local operation_id
+      operation_id="$(printf '%s' "${request_json}" | jq -r '.operation_id // empty')"
+      if [[ -z "${operation_id}" ]]; then
         finish_status="transport_error"
-        error_text="keeper_msg returned no request_id"
+        error_text="keeper_msg returned no operation_id"
       else
-        local poll_deadline result_json msg_payload
+        local poll_deadline result_json op_state
         poll_deadline=$(( start_epoch + timeout_sec ))
         result_json=""
         while [[ "$(date +%s)" -lt "${poll_deadline}" ]]; do
-          if call_mcp_tool 4200 "masc_keeper_msg_result" \
-            "$(jq -cn --arg request_id "${request_id}" '{request_id:$request_id}')" 20; then
-            msg_payload="$(tool_result_payload_json)"
-            case "$(printf '%s' "${msg_payload}" | jq -r '.status // empty')" in
-              done|error)
-                result_json="${msg_payload}"
+          if call_mcp_tool 4200 "masc_keeper_delegate_status" \
+            "$(jq -cn --arg name "${keeper_name}" --arg op "${operation_id}" \
+              '{target:{kind:"keeper", name:$name}, operation_id:$op}')" 20; then
+            local status_payload
+            status_payload="$(tool_result_json)"
+            op_state="$(printf '%s' "${status_payload}" | jq -r '.state // empty')"
+            case "${op_state}" in
+              Succeeded|Failed|Cancelled)
+                result_json="${status_payload}"
                 break
                 ;;
             esac
@@ -354,27 +458,27 @@ run_one() {
           finish_status="timeout"
           error_text="episode did not finish within ${timeout_sec}s"
         else
-          printf '%s' "${result_json}" > "${run_dir}/msg-result.json"
-          input_tokens_json="$(json_number_or_null \
-            "$(printf '%s' "${result_json}" | jq -r '.result.usage.input_tokens // empty')")"
-          output_tokens_json="$(json_number_or_null \
-            "$(printf '%s' "${result_json}" | jq -r '.result.usage.output_tokens // empty')")"
-          cost_usd_json="$(json_number_or_null \
-            "$(printf '%s' "${result_json}" | jq -r '.result.usage.cost_usd // empty')")"
-          if [[ "$(printf '%s' "${result_json}" | jq -r '.status')" == "done" ]] \
-            && [[ "$(printf '%s' "${result_json}" | jq -r '.ok // false')" == "true" ]]; then
-            finish_status="ok"
-          else
-            finish_status="provider_error"
-            error_text="$(printf '%s' "${result_json}" \
-              | jq -r '.error // .result.error // "episode ended in error"')"
-          fi
+          printf '%s' "${result_json}" > "${run_dir}/operation-final.json"
+          case "$(printf '%s' "${result_json}" | jq -r '.state')" in
+            Succeeded)
+              finish_status="ok"
+              ;;
+            *)
+              finish_status="provider_error"
+              error_text="$(printf '%s' "${result_json}" | jq -r \
+                '[.state, (.failure_kind // empty), (.failure_detail // empty)] | map(select(. != "")) | join(": ")')"
+              ;;
+          esac
         fi
       fi
     fi
   fi
 
-  if [[ "${finish_status}" == "ok" ]]; then
+  # verify runs for every episode that had a workspace, timeouts included:
+  # the artifact state is diagnostic even when the episode never settled.
+  # The pass verdict stays status=ok AND verify_exit=0 (an unsettled episode
+  # is not a completed task), and the report CLI enforces that equation.
+  if [[ -d "${workspace}" ]]; then
     set +e
     bash "${case_dir}/${verify_rel}" "${workspace}" \
       >"${run_dir}/verify.log" 2>&1

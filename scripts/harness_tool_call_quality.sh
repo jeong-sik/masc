@@ -61,12 +61,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "missing required command: $1" >&2
-    exit 1
-  }
-}
+# require_cmd lives in scripts/harness/lib/test_framework.sh (sourced above).
 
 trim() {
   local value="${1:-}"

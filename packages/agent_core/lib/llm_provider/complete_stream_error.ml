@@ -43,6 +43,9 @@ let parse_error_raw_excerpt raw =
 
    Failures here are swallowed on purpose: a diagnostic sink must not turn a
    provider error into a second, different error on the way out. *)
+(* Read here rather than through Env_config_core: agent_core depends on
+   masc.config nowhere, and a diagnostic sink is not the reason to reverse
+   that. The env-read ratchet counts this site for that reason. *)
 let dump_refused_frame ~label ~reason raw =
   match Sys.getenv_opt "MASC_WIRE_PARSE_DUMP" with
   | None | Some "" -> ()

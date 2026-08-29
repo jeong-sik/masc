@@ -462,8 +462,12 @@ def main(write: bool = False) -> int:
             if paths:
                 print(f"  {label}: {', '.join(paths)}")
         print(
-            "      Route new reads through Env_config_core. After intentional "
-            "reductions, regenerate the baseline with --write-baseline."
+            "      Route new reads through Env_config_core, then regenerate "
+            "the baseline with --write-baseline.\n"
+            "      A library that depends on masc.config nowhere by design "
+            "cannot: a standalone deployed binary, or a package whose "
+            "boundary the config layer sits outside of. Say so in a comment "
+            "at the read and record the site instead."
         )
         return 1
     print(f"\nPASS: {above_count} direct environment read site(s) match baseline.")

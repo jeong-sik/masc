@@ -6,7 +6,6 @@
     configured hardening requirements without forming a module
     dependency cycle. *)
 
-let test_allow_real_docker_env = "MASC_TEST_ALLOW_REAL_DOCKER"
 
 (* A test that forgets MASC_TEST_FAKE_DOCKER_PATH does not fail; it finds the
    operator's docker on PATH and speaks to the real daemon. On 2026-08-29 that
@@ -20,22 +19,14 @@ let test_allow_real_docker_env = "MASC_TEST_ALLOW_REAL_DOCKER"
    is the most expensive reading available. Refuse instead, and say what to
    set. *)
 let fake_docker_configured () =
-  match Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" with
-  | Some path -> String.trim path <> ""
-  | None -> false
+  Option.is_some (Env_config_core.fake_docker_path_opt ())
 ;;
 
 let refuse_real_daemon_under_test ~what =
   if Env_config_core.running_under_test_executable ()
      && not (fake_docker_configured ())
   then (
-    let allowed =
-      match Sys.getenv_opt test_allow_real_docker_env with
-      | Some v ->
-        let v = String.trim v in
-        String.equal v "1" || String.equal v "true"
-      | None -> false
-    in
+    let allowed = Env_config_core.real_docker_allowed_under_test () in
     if not allowed
     then
       failwith
@@ -49,13 +40,13 @@ let refuse_real_daemon_under_test ~what =
             to use the real daemon on purpose (not recommended)."
            (Filename.basename Sys.executable_name)
            what
-           test_allow_real_docker_env))
+           Env_config_core.test_allow_real_docker_env))
 ;;
 
 let docker_command () =
-  match Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" with
-  | Some path when String.trim path <> "" -> path
-  | _ ->
+  match Env_config_core.fake_docker_path_opt () with
+  | Some path -> path
+  | None ->
     let bin = "docker" in
     (match Sys.getenv_opt "PATH" with
      | None -> bin
@@ -75,9 +66,9 @@ let docker_command () =
 ;;
 
 let docker_command_argv () =
-  match Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" with
-  | Some path when String.trim path <> "" -> [ "/bin/sh"; path ]
-  | _ -> [ docker_command () ]
+  match Env_config_core.fake_docker_path_opt () with
+  | Some path -> [ "/bin/sh"; path ]
+  | None -> [ docker_command () ]
 ;;
 
 let docker_run_pull_never_args () = [ "--pull"; "never" ]

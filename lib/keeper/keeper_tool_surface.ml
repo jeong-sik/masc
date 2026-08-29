@@ -238,108 +238,6 @@ let keeper_reset_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_reset ctx args : tool_result =
   keeper_reset_body ~config:ctx.config args
 
-let manual_compaction_wakeup_observation ~base_path keeper_name =
-  match
-    Keeper_registry.wakeup_running
-      ~intent:Keeper_registry.Compaction_signal
-      ~base_path
-      keeper_name
-  with
-  | Keeper_registry.Signaled -> `Assoc [ "outcome", `String "signaled" ]
-  | Keeper_registry.Deferred_unregistered ->
-    Log.Keeper.info
-      "%s: manual compaction request queued without a registered wake target"
-      keeper_name;
-    `Assoc [ "outcome", `String "deferred_unregistered" ]
-  | Keeper_registry.Deferred_not_running phase ->
-    let phase = Keeper_state_machine.phase_to_string phase in
-    Log.Keeper.info
-      "%s: manual compaction request wake deferred in phase=%s"
-      keeper_name
-      phase;
-    `Assoc
-      [ "outcome", `String "deferred_not_running"; "phase", `String phase ]
-  | Keeper_registry.Deferred_lifecycle denial ->
-    let reason = Keeper_lifecycle_admission.autonomous_denial_to_wire denial in
-    Log.Keeper.info
-      "%s: manual compaction request wake deferred by lifecycle reason=%s"
-      keeper_name
-      reason;
-    `Assoc
-      [ "outcome", `String "deferred_lifecycle"; "reason", `String reason ]
-;;
-
-(** Queue an operator compaction for the target Keeper's owning lane. *)
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_compact_body
-      ?invocation_ref
-      ~(config : Workspace.config)
-      args
-  : tool_result
-  =
-  match resolve_keeper_name_config ~config args with
-  | Error err -> tool_result_error ~class_:Tool_result.Workflow_rejection err
-  | Ok name ->
-    match Keeper_registry.get ~base_path:config.base_path name with
-    | None ->
-      Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
-        ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Not_found))] ();
-      tool_result_error_data ~class_:Tool_result.Workflow_rejection
-        (validation_error_data
-           (Printf.sprintf "keeper %s is not in the registry" name))
-    | Some entry ->
-    if Keeper_state_machine.is_terminal entry.phase then begin
-      Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
-        ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Precondition))] ();
-      tool_result_error_data ~class_:Tool_result.Workflow_rejection
-        (validation_error_data
-           (Printf.sprintf "keeper %s is explicitly stopped" name))
-    end
-    else
-      let stimulus : Keeper_event_queue.stimulus =
-        { post_id = Keeper_event_queue.manual_compaction_post_id
-        ; urgency = Immediate
-        ; arrived_at = Time_compat.now ()
-        ; payload = Manual_compaction_requested
-        }
-      in
-      let queued queue_outcome =
-        tool_result_ok_data
-          (`Assoc
-            [ "name", `String name
-            ; "queued", `Bool true
-            ; "queue_outcome", `String queue_outcome
-            ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
-            ; ( "producer_invocation"
-              , Option.fold
-                  ~none:`Null
-                  ~some:Tool_invocation_ref.to_yojson
-                  invocation_ref )
-            ; ( "wake"
-              , manual_compaction_wakeup_observation
-                  ~base_path:config.base_path
-                  name )
-            ])
-      in
-      (match
-         Keeper_registry_event_queue.enqueue_stimulus_durable_result
-           ~base_path:config.base_path
-           name
-           stimulus
-       with
-       | Stimulus_storage_error detail ->
-         Log.Keeper.error
-           ~keeper_name:name
-           "manual compaction request enqueue failed: %s"
-           detail;
-         tool_result_error ~class_:Tool_result.Runtime_failure
-           (Printf.sprintf "keeper %s: compaction request enqueue failed: %s" name detail)
-       | Stimulus_enqueued -> queued "enqueued"
-       | Stimulus_already_present -> queued "already_present")
-
-let handle_keeper_compact ?invocation_ref ctx args : tool_result =
-  keeper_compact_body ?invocation_ref ~config:ctx.config args
-
 (** Last-resort context clear.
 
     Drops all conversation messages from the keeper's checkpoint file,
@@ -512,11 +410,6 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
          ~tool_name:name
          (handle_keeper_audit ctx args))
   | "masc_keeper_reset" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_reset ctx args))
-  | "masc_keeper_compact" ->
-    Some
-      (tool_result_with_tool_name
-         ~tool_name:name
-         (handle_keeper_compact ?invocation_ref ctx args))
   | "masc_keeper_clear" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
   | "masc_keeper_sandbox_start" ->
     Some
@@ -676,8 +569,6 @@ let () =
               ~config
               ~caller:agent_name
               args))
-    | "masc_keeper_compact" ->
-      Some (tool_result_with_tool_name ~tool_name:name (keeper_compact_body ~config args))
     | "masc_keeper_clear" ->
       run_external_effect (fun () ->
         Some (tool_result_with_tool_name ~tool_name:name (keeper_clear_body ~config args)))

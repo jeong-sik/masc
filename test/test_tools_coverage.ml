@@ -811,17 +811,6 @@ let test_property_types_valid () =
 (* Keeper runtime front door                                     *)
 (* ============================================================ *)
 
-(* A keeper whose context outgrows its provider window cannot shrink it on its
-   own, so an explicit compaction request is the operator's escape hatch. It
-   must therefore be reachable from the MCP front door, not only from the
-   keeper-internal tool surface. *)
-let test_keeper_compact_is_public_mcp () =
-  Alcotest.(check bool)
-    "masc_keeper_compact is on the public MCP surface"
-    true
-    (Tool_catalog.is_public_mcp "masc_keeper_compact")
-;;
-
 (* Pin the deliberate scope boundary: [masc_keeper_clear] wipes transcript
    messages, which is a different operator decision from asking a keeper to
    compact. Opening the escape hatch must not also expose the destructive one. *)
@@ -902,8 +891,6 @@ let () =
       Alcotest.test_case "valid_prop_types" `Quick test_property_types_valid;
     ];
     "keeper_front_door", [
-      Alcotest.test_case "compact_is_public_mcp" `Quick
-        test_keeper_compact_is_public_mcp;
       Alcotest.test_case "clear_stays_internal" `Quick
         test_keeper_clear_stays_internal;
     ];

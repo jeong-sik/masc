@@ -23,6 +23,5 @@ val delegate_list : Masc_domain.tool_schema
 val down : Masc_domain.tool_schema
 val list : Masc_domain.tool_schema
 val reset : Masc_domain.tool_schema
-val compact : Masc_domain.tool_schema
 val msg : Masc_domain.tool_schema
 val clear : Masc_domain.tool_schema

@@ -156,7 +156,7 @@ let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
   let base = temp_dir "microvm_factory_" in
   let config = Masc.Workspace.default_config base in
   let meta = microvm_meta ~name:"vm-runtime-factory" in
-  let factory = Masc.Keeper_sandbox_factory.create ~config ~meta ~turn_id:7 () in
+  let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
   (match
      Masc.Keeper_sandbox_factory.resolve
        factory
@@ -346,14 +346,14 @@ let test_live_turn_runtime_cat () =
     Fun.protect
       ~finally:(fun () ->
         match
-          Masc.Keeper_turn_sandbox_runtime.teardown_keeper_vm ~config ~meta ()
+          Masc.Keeper_turn_sandbox_runtime.teardown_keeper_sandbox ~config ~meta ()
         with
         | Ok () -> ()
         | Error message -> Alcotest.failf "teardown failed: %s" message)
       (fun () ->
          (* Turn 1 pays the boot. *)
          let turn1 =
-           Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:99 ()
+           Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ()
          in
          let boot_started = Unix.gettimeofday () in
          cat turn1;
@@ -361,7 +361,7 @@ let test_live_turn_runtime_cat () =
          Masc.Keeper_turn_sandbox_runtime.cleanup turn1;
          (* Turn 2 must adopt the surviving guest, not boot a second one. *)
          let turn2 =
-           Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:100 ()
+           Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ()
          in
          let reuse_started = Unix.gettimeofday () in
          cat turn2;
@@ -378,7 +378,7 @@ let test_live_turn_runtime_cat () =
              booted_in);
     (* After teardown the stable name must be gone. *)
     (match
-       Masc.Keeper_turn_sandbox_runtime.teardown_keeper_vm ~config ~meta ()
+       Masc.Keeper_turn_sandbox_runtime.teardown_keeper_sandbox ~config ~meta ()
      with
      | Ok () -> ()
      | Error message ->

@@ -29,12 +29,15 @@ let test_nonempty_lines_drops_blank () =
   check (list string) "blank lines dropped"
     [ "abc" ] (R.nonempty_lines raw)
 
-(* The docker template is four fields. A missing [sandbox_ttl_sec] label
-   leaves the fourth field empty, and [float_opt ""] returns [None]. *)
-let test_parse_4field_with_empty_ttl () =
-  let line = "87799\t1777149306.102\ttrue\t" in
+(* The docker template is five fields. A missing [sandbox_ttl_sec] label
+   leaves the fourth field empty, and [float_opt ""] returns [None]; the
+   fifth (container kind) is absent the same way when unlabelled. *)
+let test_parse_5field_with_empty_trailing_fields () =
+  let line = "87799\t1777149306.102\ttrue\t\t" in
   match R.parse_inspect_line line with
-  | Ok (owner_pid, started_at, running, ttl_sec) ->
+  | Ok (owner_pid, started_at, running, ttl_sec, container_kind) ->
+      check (option string) "container_kind=None on empty field"
+        None container_kind;
       check (option int) "owner_pid" (Some 87799) owner_pid;
       check (option (float 0.001)) "started_at"
         (Some 1777149306.102) started_at;
@@ -42,23 +45,25 @@ let test_parse_4field_with_empty_ttl () =
       check (option (float 0.001)) "ttl_sec=None" None ttl_sec
   | Error msg -> failf "expected Ok, got Error: %s" msg
 
-let test_parse_4field_full () =
-  let line = "12345\t1777149000.0\tfalse\t3600.0" in
+let test_parse_5field_full () =
+  let line = "12345\t1777149000.0\tfalse\t3600.0\tpersistent" in
   match R.parse_inspect_line line with
-  | Ok (owner_pid, started_at, running, ttl_sec) ->
+  | Ok (owner_pid, started_at, running, ttl_sec, container_kind) ->
       check (option int) "owner_pid" (Some 12345) owner_pid;
       check (option bool) "running=false" (Some false) running;
       check (option (float 0.001)) "ttl_sec=3600"
         (Some 3600.0) ttl_sec;
+      check (option string) "container_kind=persistent"
+        (Some "persistent") container_kind;
       ignore started_at
   | Error msg -> failf "expected Ok, got Error: %s" msg
 
-let test_parse_3field_rejected () =
-  let line = "999\t1777149999.5\ttrue" in
+let test_parse_4field_rejected () =
+  let line = "999\t1777149999.5\ttrue\t" in
   match R.parse_inspect_line line with
   | Error msg ->
       check bool "error message mentions payload" true (String.length msg > 0)
-  | Ok _ -> fail "expected Error on retired 3-field payload"
+  | Ok _ -> fail "expected Error on retired 4-field payload"
 
 let test_parse_unexpected_arity () =
   match R.parse_inspect_line "only-one-field" with
@@ -74,21 +79,21 @@ let test_parse_rejects_malformed_current_fields () =
        match R.parse_inspect_line line with
        | Error _ -> ()
        | Ok _ -> failf "malformed current payload accepted: %S" line)
-    [ "\t1777149000.0\ttrue\t"
-    ; "owner\t1777149000.0\ttrue\t"
-    ; "12345\t0\ttrue\t"
-    ; "12345\tnan\ttrue\t"
-    ; "12345\t1777149000.0\trunning\t"
-    ; "12345\t1777149000.0\ttrue\t0"
-    ; "12345\t1777149000.0\ttrue\tnan"
+    [ "\t1777149000.0\ttrue\t\tturn"
+    ; "owner\t1777149000.0\ttrue\t\tturn"
+    ; "12345\t0\ttrue\t\tturn"
+    ; "12345\tnan\ttrue\t\tturn"
+    ; "12345\t1777149000.0\trunning\t\tturn"
+    ; "12345\t1777149000.0\ttrue\t0\tturn"
+    ; "12345\t1777149000.0\ttrue\tnan\tturn"
     ]
 
 let test_end_to_end_current_payload () =
-  let raw = "87799\t1777149306.102\ttrue\t\n" in
+  let raw = "87799\t1777149306.102\ttrue\t\tturn\n" in
   match R.nonempty_lines raw with
   | [ line ] ->
       (match R.parse_inspect_line line with
-       | Ok (owner_pid, _, running, ttl_sec) ->
+       | Ok (owner_pid, _, running, ttl_sec, _) ->
            check (option int) "owner_pid" (Some 87799) owner_pid;
            check (option bool) "running" (Some true) running;
            check (option (float 0.001)) "ttl_sec=None"
@@ -109,11 +114,11 @@ let () =
       ]);
     ("parse_inspect_line", [
         test_case "4-field with empty ttl_sec" `Quick
-          test_parse_4field_with_empty_ttl;
+          test_parse_5field_with_empty_trailing_fields;
         test_case "4-field full payload" `Quick
-          test_parse_4field_full;
+          test_parse_5field_full;
         test_case "retired 3-field payload is rejected" `Quick
-          test_parse_3field_rejected;
+          test_parse_4field_rejected;
         test_case "unexpected arity errors out" `Quick
           test_parse_unexpected_arity;
         test_case "malformed current fields are rejected" `Quick

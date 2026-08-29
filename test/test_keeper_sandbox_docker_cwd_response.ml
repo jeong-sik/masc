@@ -144,7 +144,7 @@ let test_typed_execute_response_cwd_uses_container_path () =
   let base = temp_dir "typed_exec_docker_cwd_resp_" in
   let config = Workspace.default_config base in
   let meta = make_docker_meta ~name:"typed-exec-cwd-pin" in
-  let factory = Keeper_sandbox_factory.create ~config ~meta ~turn_id:42 () in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect
     ~finally:(fun () ->
       Keeper_sandbox_factory.cleanup factory;

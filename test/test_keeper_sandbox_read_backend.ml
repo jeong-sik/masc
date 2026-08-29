@@ -517,6 +517,18 @@ exit 2\n"
 let fake_docker_turn_runtime_script =
   "#!/bin/sh\n\
 log_file=\"$(dirname \"$0\")/docker.log\"\n\
+state_dir=$(dirname \"$0\")\n\
+state_inspect_count_file=\"$state_dir/turn-state-inspect.count\"\n\
+read_count() {\n\
+  if [ -f \"$1\" ]; then\n\
+    cat \"$1\"\n\
+  else\n\
+    printf '0'\n\
+  fi\n\
+}\n\
+write_count() {\n\
+  printf '%s' \"$2\" > \"$1\"\n\
+}\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -537,7 +549,29 @@ case \"$1\" in\n\
     printf 'runtime-container\\n'\n\
     exit 0\n\
     ;;\n\
+  start)\n\
+    printf 'started\\n'\n\
+    exit 0\n\
+    ;;\n\
+  ps)\n\
+    # Absent modelling: the state inspect fails and the exact-name inventory\n\
+    # probe must succeed with empty output.\n\
+    exit 0\n\
+    ;;\n\
   inspect)\n\
+    case \"$3\" in\n\
+      *State.Running*)\n\
+        count=$(read_count \"$state_inspect_count_file\")\n\
+        count=$((count + 1))\n\
+        write_count \"$state_inspect_count_file\" \"$count\"\n\
+        if [ \"$count\" = \"1\" ]; then\n\
+          printf 'no such container\\n' >&2\n\
+          exit 1\n\
+        fi\n\
+        printf 'true\\n'\n\
+        exit 0\n\
+        ;;\n\
+    esac\n\
     printf 'runtime-container-id\\n'\n\
     exit 0\n\
     ;;\n\
@@ -564,6 +598,7 @@ let fake_docker_stale_streaming_retry_script =
 log_file=\"$(dirname \"$0\")/docker.log\"\n\
 inspect_count_file=${KEEPER_DOCKER_INSPECT_COUNT:-}\n\
 exec_count_file=${KEEPER_DOCKER_EXEC_COUNT:-}\n\
+state_inspect_count_file=\"$(dirname \"$0\")/stale-state-inspect.count\"\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -602,6 +637,19 @@ case \"$1\" in\n\
     exit 0\n\
     ;;\n\
   inspect)\n\
+    case \"$3\" in\n\
+      *State.Running*)\n\
+        state_count=$(read_count \"$state_inspect_count_file\")\n\
+        state_count=$((state_count + 1))\n\
+        write_count \"$state_inspect_count_file\" \"$state_count\"\n\
+        if [ \"$state_count\" = \"1\" ]; then\n\
+          printf 'no such container\\n' >&2\n\
+          exit 1\n\
+        fi\n\
+        printf 'true\\n'\n\
+        exit 0\n\
+        ;;\n\
+    esac\n\
     count=$(read_count \"$inspect_count_file\")\n\
     count=$((count + 1))\n\
     write_count \"$inspect_count_file\" \"$count\"\n\
@@ -674,19 +722,23 @@ case \"$1\" in\n\
     printf 'runtime-container\\n'\n\
     exit 0\n\
     ;;\n\
+  start)\n\
+    printf 'started\\n'\n\
+    exit 0\n\
+    ;;\n\
   inspect)\n\
     case \"$3\" in\n\
       *State.Running*)\n\
-        count=$(read_count \"$state_inspect_count_file\")\n\
-        count=$((count + 1))\n\
-        write_count \"$state_inspect_count_file\" \"$count\"\n\
-        if [ \"$count\" = \"1\" ]; then\n\
-          printf 'false\\n'\n\
-        else\n\
-          printf 'true\\n'\n\
-        fi\n\
-        exit 0\n\
-        ;;\n\
+    count=$(read_count \"$state_inspect_count_file\")\n\
+    count=$((count + 1))\n\
+    write_count \"$state_inspect_count_file\" \"$count\"\n\
+    if [ \"$count\" = \"1\" ]; then\n\
+      printf 'false\\n'\n\
+    else\n\
+      printf 'true\\n'\n\
+    fi\n\
+    exit 0\n\
+    ;;\n\
     esac\n\
     printf 'runtime-container-id\\n'\n\
     exit 0\n\
@@ -695,11 +747,6 @@ case \"$1\" in\n\
     exec_count=$(read_count \"$exec_count_file\")\n\
     exec_count=$((exec_count + 1))\n\
     write_count \"$exec_count_file\" \"$exec_count\"\n\
-    run_count=$(read_count \"$run_count_file\")\n\
-    if [ \"$exec_count\" = \"2\" ] && [ \"$run_count\" -lt 2 ]; then\n\
-      printf 'synthetic opaque stopped-container exec failure\\n' >&2\n\
-      exit 126\n\
-    fi\n\
     printf 'exec ok\\n'\n\
     exit 0\n\
     ;;\n\
@@ -889,11 +936,11 @@ case \"$1\" in\n\
     for arg in \"$@\"; do last=\"$arg\"; done\n\
     case \"$last\" in\n\
       old-container)\n\
-        printf '999999\\t100.000\\ttrue\\t600\\n'\n\
+        printf '999999\t100.000\ttrue\t600\tturn\n'\n\
         exit 0\n\
         ;;\n\
       fresh-container)\n\
-        printf '%s\\t990.000\\ttrue\\t600\\n' \"${KEEPER_TEST_PID:-1}\"\n\
+        printf '%s\t990.000\ttrue\t600\tturn\n' \"${KEEPER_TEST_PID:-1}\"\n\
         exit 0\n\
         ;;\n\
     esac\n\
@@ -952,7 +999,7 @@ case \"$1\" in\n\
         exit 1\n\
         ;;\n\
       rm-gone)\n\
-        printf '4242\\t100.000\\tfalse\\t600\\n'\n\
+        printf '4242\t100.000\tfalse\t600\tturn\n'\n\
         exit 0\n\
         ;;\n\
     esac\n\
@@ -1748,7 +1795,10 @@ let test_turn_runtime_reuses_single_container () =
   in
   Alcotest.(check int) "docker run happens once" 1 (count "run -d ");
   Alcotest.(check int) "docker exec happens twice" 2 (count "exec ");
-  Alcotest.(check int) "docker rm happens once" 1 (count "rm -f ");
+  (* The container is keeper-lifetime: turn cleanup drops the handle without
+     a docker rm, so the second command adopts the container the first one
+     created and nothing is removed. *)
+  Alcotest.(check int) "docker rm never happens" 0 (count "rm -f ");
   let container_root = Keeper_sandbox.container_root meta.name in
   let container_config_dir =
     Keeper_sandbox_runtime.container_masc_config_dir ~container_root
@@ -1789,7 +1839,7 @@ let test_streaming_exec_validates_cached_container_before_retry () =
   ensure_dir host_config_dir;
   with_env "KEEPER_DOCKER_INSPECT_COUNT" inspect_count_path @@ fun () ->
   with_env "KEEPER_DOCKER_EXEC_COUNT" exec_count_path @@ fun () ->
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -1836,7 +1886,7 @@ let test_streaming_exec_preserves_split_stderr () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -1878,7 +1928,7 @@ let test_streaming_exec_forwards_timeout_to_split_exec () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -1917,7 +1967,7 @@ let test_streaming_pipeline_forwards_timeout_to_split_exec () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -1967,7 +2017,7 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -2019,7 +2069,7 @@ let test_streaming_exec_surfaces_process_failure_once () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -2065,7 +2115,7 @@ let test_streaming_exec_keeps_successful_progress_live () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -2119,7 +2169,7 @@ let test_streaming_exec_keeps_sparse_progress_live () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->

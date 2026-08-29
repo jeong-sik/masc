@@ -622,8 +622,12 @@ let hostnames_of_hosts_yml contents =
    derived from the hosts this identity actually holds, and only when it
    holds any. The file is derived state, deliberately outside the identity
    revision digest: the digest answers "did the login change", and this file
-   is a pure function of it. *)
-let write_git_credential_config ~snapshot =
+   is a pure function of it.
+
+   [dir_mode_after] is the directory mode restored after the write: a locked
+   0500 for turn snapshots, 0700 for the stable config directory
+   ([validate_existing_config_dir] rejects anything else). *)
+let write_git_credential_config ~dir_mode_after ~snapshot =
   match
     Fs_compat.load_owned_regular_file
       ~ownership_root:snapshot
@@ -657,7 +661,7 @@ let write_git_credential_config ~snapshot =
            Unix.chmod target 0o400;
            Ok true
        in
-       Unix.chmod snapshot 0o500;
+       Unix.chmod snapshot dir_mode_after;
        result)
 ;;
 
@@ -687,6 +691,52 @@ let docker_args ~config ~keeper_name ~container_masc_dir =
       ]
 ;;
 
+(* Keeper-lifetime containers cannot mount a per-turn snapshot: turn cleanup
+   deletes the snapshot directory while the container keeps running, and the
+   bind mount would read a vanished path. They mount the stable config
+   directory itself — read-only, so in-container writes stay impossible, but
+   a host login reaches a running container through the mount. The git wiring
+   is the same pure function of hosts.yml the snapshot lane writes; the
+   stable dir's validator inspects only hosts.yml and config.yml, so the
+   added gitconfig does not break it. GIT_CONFIG_GLOBAL always points at
+   that file: a missing file reads as an empty config to git, so the env
+   stays correct across identity changes without recreating the container.
+
+   An unconfigured keeper (no stable dir yet) gets no identity args at all
+   rather than a provisioned empty one: starting a container must not create
+   directories, and a gh with no GH_CONFIG_DIR is unconfigured either way.
+   The cost is explicit — a container created before the first login stays
+   without the mount until the keeper's teardown recreates it. *)
+let docker_args_persistent ~config ~keeper_name ~container_masc_dir =
+  match existing_config_dir ~config ~keeper_name with
+  | Error _ as error -> error
+  | Ok None -> Ok []
+  | Ok (Some host_dir) ->
+    (match write_git_credential_config ~dir_mode_after:0o700 ~snapshot:host_dir with
+     | Error _ as error -> error
+     | Ok _has_git_wiring ->
+       let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
+       Ok
+         [ "--env"
+         ; "GH_CONFIG_DIR=" ^ container_dir
+         ; "-v"
+         ; host_dir ^ ":" ^ container_dir ^ ":ro"
+         ; "--env"
+         ; "GIT_CONFIG_GLOBAL="
+           ^ Filename.concat container_dir git_credential_config_file_name
+         ])
+;;
+
+(* Refresh of the derived gitconfig for the persistent mount, called when a
+   container is adopted: hosts written by logins that happened while no turn
+   was watching get their credential wiring without a container restart. *)
+let refresh_git_credential_config ~config ~keeper_name =
+  match existing_config_dir ~config ~keeper_name with
+  | Error _ as error -> error
+  | Ok None -> Ok false
+  | Ok Some dir -> write_git_credential_config ~dir_mode_after:0o700 ~snapshot:dir
+;;
+
 let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
   match existing_config_dir ~config ~keeper_name with
   | Error _ as error -> error
@@ -714,7 +764,7 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
           cleanup ();
           Error error
         | Ok revision ->
-          (match write_git_credential_config ~snapshot with
+          (match write_git_credential_config ~dir_mode_after:0o500 ~snapshot with
            | Error error ->
              cleanup ();
              Error error

@@ -149,11 +149,13 @@ let sandbox_owner_pid_label_key = "masc.mcp.owner_pid"
 let sandbox_started_at_label_key = "masc.mcp.started_at"
 let sandbox_network_label_key = "masc.mcp.network"
 let sandbox_ttl_sec_label_key = "masc.mcp.ttl_sec"
-let sandbox_turn_id_label_key = "masc.mcp.turn_id"
 
 (* Values of the [masc.mcp.kind] label. A turn container lives for one turn and
-   is torn down with it; a oneshot container lives for one command. *)
+   is torn down with it; a oneshot container lives for one command. A persistent
+   container is keeper-lifetime: adopted across turns and server restarts, and
+   removed only when the keeper itself is removed. *)
 let turn_container_kind = "turn"
+let persistent_container_kind = "persistent"
 
 (* The pid is stamped on a container as [masc.mcp.owner_pid] and supplied again
    by any filter that selects those containers, so both sides must read it from
@@ -190,7 +192,6 @@ include Keeper_sandbox_runtime_setup_mount_failure
 
 let docker_label_args
       ?ttl_sec
-      ?turn_id
       ~base_path
       ~keeper_name
       ~container_kind
@@ -205,9 +206,6 @@ let docker_label_args
   @ label sandbox_owner_pid_label_key (string_of_int (current_owner_pid ()))
   @ label sandbox_started_at_label_key (Printf.sprintf "%.3f" (Unix.gettimeofday ()))
   @ label sandbox_network_label_key (sanitize_label_value network_label)
-  @ (match turn_id with
-     | Some id -> label sandbox_turn_id_label_key (string_of_int id)
-     | None -> [])
   @
   match ttl_sec with
   | Some value when value > 0.0 ->

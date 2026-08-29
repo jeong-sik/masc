@@ -92,7 +92,6 @@ val docker_image_present : image:string -> timeout_sec:float -> (unit, string) r
     sandbox runtime. *)
 val docker_label_args
   :  ?ttl_sec:float
-  -> ?turn_id:int
   -> base_path:string
   -> keeper_name:string
   -> container_kind:string
@@ -110,17 +109,21 @@ val sandbox_keeper_label_key : string
 val sandbox_kind_label_key : string
 
 val turn_container_kind : string
+(** Value of the [masc.mcp.kind] label on a container that lives for one turn. *)
+
+val persistent_container_kind : string
+(** Companion of {!turn_container_kind} for keeper-lifetime containers:
+    adopted across turns and server restarts, removed only when the keeper
+    is. *)
 
 val current_owner_pid : unit -> int
 (** The pid written as [masc.mcp.owner_pid] and the one a filter must supply to
     select those containers again. *)
-(** Value of the [masc.mcp.kind] label on a container that lives for one turn. *)
 
 val sandbox_owner_pid_label_key : string
 val sandbox_started_at_label_key : string
 val sandbox_network_label_key : string
 val sandbox_ttl_sec_label_key : string
-val sandbox_turn_id_label_key : string
 
 (** Value of {!sandbox_component_label_key} ([= "keeper-sandbox"]). *)
 val sandbox_component_label_value : string
@@ -335,7 +338,6 @@ val docker_filter_args
   :  ?keeper_name:string
   -> ?container_kind:string
   -> ?owner_pid:int
-  -> ?turn_id:int
   -> base_path:string
   -> unit
   -> string list
@@ -344,25 +346,18 @@ val docker_filter_args
     equality only, so a caller that needs "all but one value" issues two
     listings and takes the difference. *)
 
-val reap_prior_turn_containers
-  :  base_path:string
-  -> keeper_name:string
-  -> turn_id:int
+val remove_persistent_containers
+  :  keeper_name:string
+  -> base_path:string
   -> timeout_sec:float
   -> unit
-  -> cleanup_result
-(** Remove this keeper's turn containers that belong to an earlier turn of the
-    current process, identified by a [masc.mcp.turn_id] other than [turn_id].
-
-    Turn-end teardown is the primary path. This closes the case where teardown
-    did not run at all: while the owning process is alive, nothing else removes
-    a turn container, because {!cleanup_stale_containers} requires the container
-    stopped, its owner dead, or a ttl label the turn path does not set.
-
-    Containers of the current turn and of other processes are never targets, so
-    calling this before creating a turn container is safe even when a turn holds
-    several. Failures are collected in [errors]; the caller decides whether a
-    failed reap should block the turn. *)
+  -> (unit, string) result
+(** Remove this keeper's persistent ([masc.mcp.kind=persistent]) containers.
+    Called at keeper shutdown finalization -- the one point that knows the
+    keeper is gone for good rather than between turns; everything else adopts
+    what is running. Selected by keeper and kind label across all network
+    modes, so a container wired to a network config the keeper no longer uses
+    is collected too. *)
 
 val cleanup_stale_containers
   :  ?now:float
@@ -433,12 +428,29 @@ val ensure_keeper_sandbox_runtime_optional : ?timeout_sec:float -> unit -> (stri
 (** Internals exposed for unit testing the docker inspect output
     parser (#10488 regression coverage).  The parser result is
     projected onto a tuple
-    [(owner_pid, started_at, running, ttl_sec)] so the test does
-    not need a re-exported record type. *)
+    [(owner_pid, started_at, running, ttl_sec, container_kind)] so the test
+    does not need a re-exported record type. *)
 module For_testing : sig
   val nonempty_lines : string -> string list
 
   val parse_inspect_line
     :  string
-    -> (int option * float option * bool option * float option, string) result
+    -> ( int option
+       * float option
+       * bool option
+       * float option
+       * string option
+       , string )
+       result
+
+  val should_remove_container :
+    now:float ->
+    owner_pid:int option ->
+    started_at:float option ->
+    running:bool option ->
+    ttl_sec:float option ->
+    container_kind:string option ->
+    bool
+  (** {!cleanup_stale_containers}' per-container decision, labelled so the
+     test needs neither the inspected record nor a live docker daemon. *)
 end

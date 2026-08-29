@@ -224,7 +224,7 @@ let with_turn_sandbox_factory ~enabled ~config ~meta f =
   then f None
   else
     let factory =
-      Masc.Keeper_sandbox_factory.create ~config ~meta ~turn_id:1 ()
+      Masc.Keeper_sandbox_factory.create ~config ~meta ()
     in
     Fun.protect
       ~finally:(fun () -> Masc.Keeper_sandbox_factory.cleanup factory)

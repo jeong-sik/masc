@@ -24,7 +24,7 @@ let test_removing_an_absent_guest_succeeds () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        match
-         Runtime.teardown_keeper_vm_by_name
+         Runtime.teardown_keeper_sandbox_by_name
            ~timeout_sec:30.0
            ~config
            ~keeper_name:"microvm-teardown-probe-never-started"

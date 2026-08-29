@@ -18,6 +18,7 @@ type inspected_container =
   ; started_at : float option
   ; running : bool option
   ; ttl_sec : float option
+  ; container_kind : string option
   }
 
 type live_container =
@@ -136,11 +137,11 @@ let strip_leading_slash text =
 
 let parse_inspect_line line =
   (* docker inspect --format emits a trailing empty field as either
-     ["<no value>"] or an empty fourth field when the ttl_sec label is
-     unset. [nonempty_lines] preserves that trailing tab, so every current
-     cleanup payload has exactly four fields. *)
+     ["<no value>"] or an empty final field when a label is unset.
+     [nonempty_lines] preserves that trailing tab, so every current
+     cleanup payload has exactly five fields. *)
   match String.split_on_char '\t' line with
-  | [ owner_pid; started_at; running; ttl_sec ] ->
+  | [ owner_pid; started_at; running; ttl_sec; container_kind ] ->
     let ( let* ) = Result.bind in
     let* owner_pid = required_positive_int ~field:"owner_pid" owner_pid in
     let* started_at = required_positive_float ~field:"started_at" started_at in
@@ -151,6 +152,7 @@ let parse_inspect_line line =
       ; started_at
       ; running
       ; ttl_sec
+      ; container_kind = string_opt container_kind
       }
   | _ ->
     Error
@@ -214,17 +216,25 @@ let should_remove_container ~now (inspected : inspected_container) =
     | Some false -> true
     | Some true | None -> false
   in
-  let owner_dead =
-    match inspected.owner_pid with
-    | Some pid -> not (pid_alive pid)
-    | None -> false
-  in
-  let expired =
-    match inspected.started_at, inspected.ttl_sec with
-    | Some started_at, Some ttl when ttl > 0.0 -> now -. started_at > ttl
-    | (None | Some _), (None | Some _) -> false
-  in
-  stopped || owner_dead || expired
+  (* A persistent container is keeper-lifetime, not owner-process-lifetime:
+     it is adopted across server restarts, so a dead owner pid is its normal
+     state between server generations. Only a stopped container is garbage --
+     its value is the live state, and a stopped one is worth less than the
+     recreation the next turn performs anyway. *)
+  if Option.equal String.equal inspected.container_kind (Some persistent_container_kind)
+  then stopped
+  else (
+    let owner_dead =
+      match inspected.owner_pid with
+      | Some pid -> not (pid_alive pid)
+      | None -> false
+    in
+    let expired =
+      match inspected.started_at, inspected.ttl_sec with
+      | Some started_at, Some ttl when ttl > 0.0 -> now -. started_at > ttl
+      | (None | Some _), (None | Some _) -> false
+    in
+    stopped || owner_dead || expired)
 ;;
 
 let probe_cleanup_container_presence ~container_id ~timeout_sec =
@@ -376,6 +386,8 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
     ^ sandbox_started_at_label_key
     ^ "\" }}\t{{ .State.Running }}\t{{ index .Config.Labels \""
     ^ sandbox_ttl_sec_label_key
+    ^ "\" }}\t{{ index .Config.Labels \""
+    ^ sandbox_kind_label_key
     ^ "\" }}"
   in
   let argv = docker_command_argv () @ [ "inspect"; "--format"; format; container_id ] in
@@ -500,7 +512,7 @@ let cleanup_stale_containers
     }
 ;;
 
-let docker_filter_args ?keeper_name ?container_kind ?owner_pid ?turn_id ~base_path () =
+let docker_filter_args ?keeper_name ?container_kind ?owner_pid ~base_path () =
   let label_filter key value = [ "--filter"; "label=" ^ key ^ "=" ^ value ] in
   label_filter sandbox_component_label_key sandbox_component_label_value
   @ label_filter sandbox_base_path_hash_label_key (base_path_hash base_path)
@@ -515,20 +527,16 @@ let docker_filter_args ?keeper_name ?container_kind ?owner_pid ?turn_id ~base_pa
   @ (match owner_pid with
      | Some pid -> label_filter sandbox_owner_pid_label_key (string_of_int pid)
      | None -> [])
-  @
-  match turn_id with
-  | Some id -> label_filter sandbox_turn_id_label_key (string_of_int id)
-  | None -> []
 ;;
 
 let list_container_ids
-      ?keeper_name ?container_kind ?owner_pid ?turn_id ~base_path ~timeout_sec ()
+      ?keeper_name ?container_kind ?owner_pid ~base_path ~timeout_sec ()
   =
   try
     let argv =
       docker_command_argv ()
       @ [ "ps"; "-aq"; "--no-trunc" ]
-      @ docker_filter_args ?keeper_name ?container_kind ?owner_pid ?turn_id ~base_path ()
+      @ docker_filter_args ?keeper_name ?container_kind ?owner_pid ~base_path ()
     in
     let st, out =
       run_docker_argv_with_status
@@ -551,70 +559,35 @@ let list_container_ids
          (Printexc.to_string exn))
 ;;
 
-(* Collect this keeper's turn containers left behind by earlier turns.
-
-   Teardown at turn end is the primary path (#30604). This is what closes the
-   window that opens when teardown does not run at all: nothing else removes a
-   turn container while its owning process is alive, because the sweep's
-   [should_remove_container] needs the container stopped, its owner dead, or a
-   ttl label the turn path does not set.
-
-   A turn's own containers carry its [masc.mcp.turn_id], so a sibling created
-   earlier in the same turn is never a target — the factory caches one runtime
-   per (playground, network, root, image), so one turn can hold several. Docker
-   label filters express equality only, which is why "mine except this turn's"
-   is two listings and a difference rather than one negated filter.
-
-   The owner_pid filter keeps this inside the current process. Another server's
-   containers are its own to collect, and removing one would cut a live turn
-   elsewhere. *)
-let reap_prior_turn_containers ~base_path ~keeper_name ~turn_id ~timeout_sec () =
-  let owner_pid = current_owner_pid () in
-  let listing ?turn_id () =
+(* The keeper-lifetime Docker containers of one keeper, removed at shutdown
+   finalization -- the only point that knows the keeper is gone for good
+   rather than between turns. Listed by label rather than by name: the
+   network mode is part of the container name, and a container wired to a
+   network config the keeper no longer uses must go with the keeper all the
+   same. *)
+let remove_persistent_containers ~keeper_name ~base_path ~timeout_sec () =
+  match
     list_container_ids
       ~keeper_name
-      ~container_kind:turn_container_kind
-      ~owner_pid
-      ?turn_id
+      ~container_kind:persistent_container_kind
       ~base_path
       ~timeout_sec
       ()
-  in
-  (* The wide listing is taken first, and the [let] bindings are what make that
-     true: OCaml does not specify the evaluation order of a tuple, and the
-     native compiler generally evaluates right to left, so reading both inside
-     one [match] would have taken this turn's listing first.
-
-     Order decides whether a live sibling can be reaped. This function runs at
-     every container creation and a turn can hold several, so a container the
-     current turn creates between the two listings is a real case. Taken wide
-     first, such a container is absent from [every_turn_of_mine] and cannot be
-     a target; taken narrow first, it would appear only in the wide list and
-     would be killed while its turn was still using it. *)
-  let every_turn_of_mine = listing () in
-  let this_turn = listing ~turn_id () in
-  match every_turn_of_mine, this_turn with
-  | Error err, _ | Ok _, Error err ->
-    { scanned = 0; removed = 0; already_absent = 0; errors = [ err ] }
-  | Ok every_turn_of_mine, Ok this_turn ->
-    let targets =
-      List.filter (fun id -> not (List.mem id this_turn)) every_turn_of_mine
-    in
-    let removed, already_absent, errors =
-      List.fold_left
-        (fun (removed, already_absent, errors) container_id ->
+  with
+  | Error _ as err -> err
+  | Ok [] -> Ok ()
+  | Ok ids ->
+    let errors =
+      List.filter_map
+        (fun container_id ->
            match remove_cleanup_container ~container_id ~timeout_sec with
-           | Ok Cleanup_removed -> removed + 1, already_absent, errors
-           | Ok Cleanup_remove_already_absent -> removed, already_absent + 1, errors
-           | Error err -> removed, already_absent, err :: errors)
-        (0, 0, [])
-        targets
+           | Ok Cleanup_removed | Ok Cleanup_remove_already_absent -> None
+           | Error err -> Some err)
+        ids
     in
-    { scanned = List.length targets
-    ; removed
-    ; already_absent
-    ; errors = List.rev errors
-    }
+    (match errors with
+     | [] -> Ok ()
+     | errors -> Error (String.concat "; " errors))
 ;;
 
 let live_inspect_format =
@@ -987,10 +960,23 @@ module For_testing = struct
 
   (* Project the internal [inspected_container] record onto a tuple so
      the test does not need a re-exported type. Order:
-     (owner_pid, started_at, running, ttl_sec). *)
+     (owner_pid, started_at, running, ttl_sec, container_kind). *)
   let parse_inspect_line line =
     parse_inspect_line line
     |> Result.map (fun (ic : inspected_container) ->
-      ic.owner_pid, ic.started_at, ic.running, ic.ttl_sec)
+      ic.owner_pid, ic.started_at, ic.running, ic.ttl_sec, ic.container_kind)
+  ;;
+
+  let should_remove_container
+        ~now
+        ~owner_pid
+        ~started_at
+        ~running
+        ~ttl_sec
+        ~container_kind
+    =
+    should_remove_container
+      ~now
+      { owner_pid; started_at; running; ttl_sec; container_kind }
   ;;
 end

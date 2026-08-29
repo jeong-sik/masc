@@ -44,9 +44,14 @@ val sandbox_owner_pid_label_key : string
 val sandbox_started_at_label_key : string
 val sandbox_network_label_key : string
 val sandbox_ttl_sec_label_key : string
-val sandbox_turn_id_label_key : string
 
 val turn_container_kind : string
+(** Value of the [masc.mcp.kind] label on a one-turn container. *)
+
+val persistent_container_kind : string
+(** Value of the [masc.mcp.kind] label on a keeper-lifetime container:
+    adopted across turns and server restarts, removed only when the keeper
+    is. *)
 
 val current_owner_pid : unit -> int
 (** The pid written as [masc.mcp.owner_pid] and the one a filter must supply to
@@ -85,7 +90,6 @@ val docker_mount_failure_details :
   unit -> [> `Assoc of (string * [> `String of string ]) list ] option
 val docker_label_args :
   ?ttl_sec:float ->
-  ?turn_id:int ->
   base_path:string ->
   keeper_name:string ->
   container_kind:string -> network_label:string -> unit -> string list

@@ -23,7 +23,6 @@ let no_github_identity_snapshots = { current = None; retired = [] }
 type t =
   { config : Workspace.config
   ; meta : keeper_meta
-  ; turn_id : int
   ; raw_host_root : string
   ; host_root : string
   ; container_root : string
@@ -44,12 +43,9 @@ let rec update_github_identity_snapshots t update =
   then update_github_identity_snapshots t update
 ;;
 
-let release_github_identity_snapshot t =
-  let snapshots = Atomic.exchange t.github_identity_snapshots no_github_identity_snapshots in
-  Option.iter (fun snapshot -> snapshot.cleanup ()) snapshots.current;
-  List.iter (fun snapshot -> snapshot.cleanup ()) snapshots.retired
-;;
-
+(* Microvm only: the boot-time identity snapshot a guest holds for its
+   lifetime. The persistent Docker container mounts the stable config
+   directory instead and has no snapshots. *)
 let github_identity_secret_files t =
   let snapshots = Atomic.get t.github_identity_snapshots in
   let snapshots =
@@ -60,27 +56,6 @@ let github_identity_secret_files t =
   List.map (fun snapshot -> Filename.concat snapshot.host_dir "hosts.yml") snapshots
 ;;
 
-module For_testing = struct
-  let create_minimal ~config ~meta ~state =
-    { config
-    ; meta
-    ; turn_id = 0
-    ; raw_host_root = ""
-    ; host_root = ""
-    ; container_root = ""
-    ; uid = 0
-    ; gid = 0
-    ; network_mode = Network_none
-    ; state = Atomic.make state
-    ; github_identity_snapshots = Atomic.make no_github_identity_snapshots
-    }
-  ;;
-
-  let get_state = get_state
-  let set_state = set_state
-end
-
-let turn_id t = t.turn_id
 let host_root t = t.host_root
 let normalize_path path = Keeper_alerting_path.normalize_path_for_check_stripped path
 
@@ -88,7 +63,6 @@ let create
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?(network_mode = Network_none)
-      ~turn_id
       ()
   =
   let raw_host_root =
@@ -97,7 +71,6 @@ let create
   in
   { config
   ; meta
-  ; turn_id
   ; raw_host_root
   ; host_root = raw_host_root |> normalize_path
   ; container_root =
@@ -111,28 +84,53 @@ let create
   }
 ;;
 
-(* Monotonically increasing counter to disambiguate containers created
-   within the same millisecond by the same process.  Without this, 64
-   concurrent keepers starting simultaneously can produce duplicate
-   container names, causing [docker run --name X] to fail with "name
-   already in use". *)
-let container_counter : int Atomic.t = Atomic.make 0
+(* One container per keeper, not per turn: the name is stable, an already
+   running container is adopted instead of created (amortising the container
+   start and the image preflight to once per keeper), and turn cleanup leaves
+   it running. State accumulated inside the container between turns belongs
+   to the same keeper. Teardown is [teardown_keeper_sandbox_by_name], which
+   shutdown finalization runs after the registry unregister succeeds -- the
+   one point that knows the keeper is gone for good rather than between
+   turns.
 
-let container_name_of (t : t) =
+   The network mode is part of the name because it is part of [docker run]:
+   a keeper whose network config changed must not adopt a container wired to
+   the old network. That orphan is collected by the keeper's teardown, which
+   lists by label rather than by name. *)
+let keeper_docker_container_name (t : t) =
   let net_suffix =
     match t.network_mode with
     | Network_none -> "none"
     | Network_inherit -> "inherit"
   in
-  let seq = Atomic.fetch_and_add container_counter 1 in
   Printf.sprintf
-    "masc-keeper-turn-%s-%s-%d-%d-%d"
+    "masc-keeper-docker-%s-%s-%s"
     (Workspace_utils.safe_filename t.meta.name)
     net_suffix
-    (Unix.getpid ())
-    (int_of_float (Unix.gettimeofday () *. 1000.0))
-    seq
+    (String.sub (Keeper_sandbox_runtime.base_path_hash t.config.base_path) 0 8)
 ;;
+
+module For_testing = struct
+  let create_minimal ~config ~meta ~state =
+    { config
+    ; meta
+    ; raw_host_root = ""
+    ; host_root = ""
+    ; container_root = ""
+    ; uid = 0
+    ; gid = 0
+    ; network_mode = Network_none
+    ; state = Atomic.make state
+    ; github_identity_snapshots = Atomic.make no_github_identity_snapshots
+    }
+  ;;
+
+  let get_state = get_state
+  let set_state = set_state
+
+  let keeper_docker_container_name = keeper_docker_container_name
+end
+
 
 let container_path_of_host (t : t) ~host_path =
   let host_norm = normalize_path host_path in
@@ -473,7 +471,7 @@ let resolve_image (t : t) =
    running guest is adopted instead of booted (amortising the 1.3-2.4s VM
    start to once per keeper), and turn cleanup leaves it running. State
    accumulated inside the guest between turns belongs to the same keeper.
-   Teardown is [teardown_keeper_vm], which shutdown finalization runs after
+   Teardown is [teardown_keeper_sandbox], which shutdown finalization runs after
    the registry unregister succeeds -- the one point that knows the keeper is
    gone for good rather than between turns. *)
 let keeper_vm_name (t : t) =
@@ -647,14 +645,24 @@ let start_microvm_container ?timeout_sec (t : t) =
 
 (* Takes the name rather than the meta: shutdown finalization holds
    [operation.keeper_name] and no meta by the time the registry entry is
-   gone, and the guest name is derived from the name alone. *)
-let teardown_keeper_vm_by_name
+   gone, and both teardown targets -- the microvm guest name and the
+   persistent-container label selection -- are derived from the name
+   alone. *)
+let teardown_keeper_sandbox_by_name
       ?timeout_sec
       ~(config : Workspace.config)
       ~(keeper_name : string)
       ()
   =
-  let container_name =
+  let timeout_sec =
+    Option.value
+      timeout_sec
+      ~default:
+        (Env_config_sandbox.Shell_timeout.timeout_sec
+           ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
+           ())
+  in
+  let guest_name =
     Printf.sprintf
       "masc-keeper-vm-%s-%s"
       (Workspace_utils.safe_filename keeper_name)
@@ -662,252 +670,294 @@ let teardown_keeper_vm_by_name
   in
   let stop_st, stop_out =
     run_argv_with_status
-      ?timeout_sec
-      (Keeper_sandbox_microvm.stop_argv ~container_name)
+      ~timeout_sec
+      (Keeper_sandbox_microvm.stop_argv ~container_name:guest_name)
   in
   let (_ : Unix.process_status * string) =
     run_argv_with_status
-      ?timeout_sec
-      (Keeper_sandbox_microvm.delete_force_argv ~container_name)
+      ~timeout_sec
+      (Keeper_sandbox_microvm.delete_force_argv ~container_name:guest_name)
   in
-  match stop_st with
-  | Unix.WEXITED 0 -> Ok ()
-  | _ ->
-    (* A missing guest is a successful teardown; anything else surfaces. *)
-    (match probe_microvm_container_state ?timeout_sec container_name with
-     | Ok Keeper_sandbox_runtime.Docker_container_absent -> Ok ()
-     | Ok _ | Error _ ->
-       Error
-         (Printf.sprintf
-            "microvm_teardown_failed: %s"
-            (Keeper_sandbox_runtime.docker_failure_output_for_log stop_out)))
+  let guest_outcome =
+    match stop_st with
+    | Unix.WEXITED 0 -> Ok ()
+    | _ ->
+      (* A missing guest is a successful teardown; anything else surfaces. *)
+      (match probe_microvm_container_state ~timeout_sec guest_name with
+       | Ok Keeper_sandbox_runtime.Docker_container_absent -> Ok ()
+       | Ok _ | Error _ ->
+         Error
+           (Printf.sprintf
+              "microvm_teardown_failed: %s"
+              (Keeper_sandbox_runtime.docker_failure_output_for_log stop_out)))
+  in
+  let docker_outcome =
+    Keeper_sandbox_runtime.remove_persistent_containers
+      ~keeper_name
+      ~base_path:config.base_path
+      ~timeout_sec
+      ()
+  in
+  (match guest_outcome, docker_outcome with
+   | Ok (), Ok () -> Ok ()
+   | Error guest, Ok () -> Error guest
+   | Ok (), Error docker -> Error docker
+   | Error guest, Error docker -> Error (guest ^ "; " ^ docker))
 ;;
 
-let teardown_keeper_vm ?timeout_sec ~(config : Workspace.config) ~(meta : keeper_meta) () =
-  teardown_keeper_vm_by_name ?timeout_sec ~config ~keeper_name:meta.name ()
+let teardown_keeper_sandbox
+      ?timeout_sec
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ()
+  =
+  teardown_keeper_sandbox_by_name ?timeout_sec ~config ~keeper_name:meta.name ()
 ;;
 
 let start_container ?timeout_sec (t : t) =
   if is_microvm t
   then start_microvm_container ?timeout_sec t
   else
-  let image = resolve_image t in
-  if String.trim image = ""
-  then Error "keeper sandbox docker image is not configured"
-  else (
+  let container_name = keeper_docker_container_name t in
+  let probe_state () =
+    Keeper_sandbox_runtime.probe_container_state_optional
+      ~container_name
+      ?timeout_sec
+      ()
+  in
+  let adopt_running () =
+    (* The mount is the live config directory, so a login that happened while
+       no turn was watching only needs the derived gitconfig rewritten; the
+       env baked at creation keeps pointing at the same file. A malformed
+       identity state is a typed error here exactly as it is at creation. *)
     match
-      Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class_optional
-        ~image
-        ?timeout_sec
-        ()
+      Keeper_github_identity.refresh_git_credential_config
+        ~config:t.config
+        ~keeper_name:t.meta.name
     with
-    | Error failure ->
-      Error (Keeper_sandbox_runtime.image_preflight_start_error failure)
-    | Ok () ->
+    | Error err ->
+      Error
+        ("docker_container_adopt_failed: github_identity_invalid: " ^ err)
+    | Ok _has_git_wiring ->
+      set_state t (Running { container_name });
+      Ok container_name
+  in
+  (* Creation is the only path that needs the image, the runtime hardening
+     args, and the projections; adoption amortises all of it. *)
+  let create () =
+    let image = resolve_image t in
+    if String.trim image = ""
+    then Error "keeper sandbox docker image is not configured"
+    else (
       match
-        Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime_optional
-          ?timeout_sec ()
+        Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class_optional
+          ~image
+          ?timeout_sec
+          ()
       with
-      | Error _ as err -> err
-      | Ok seccomp_args ->
-      let container_name = container_name_of t in
-      let network_args, network_label =
-        Keeper_sandbox_runtime.docker_network_args t.network_mode
-      in
-      (match
-         Keeper_sandbox_runtime.docker_user_identity_mount_args
-           ~host_root:t.host_root
-           ~uid:t.uid
-           ~gid:t.gid
-       with
-       | Error _ as err -> err
-       | Ok identity_mounts ->
-       (match
-          Keeper_secret_projection.docker_args_for_keeper
-            ~base_path:t.config.base_path
-            ~keeper_name:t.meta.name
-            ~container_name
-            ()
+      | Error failure ->
+        Error (Keeper_sandbox_runtime.image_preflight_start_error failure)
+      | Ok () ->
+        match
+          Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime_optional
+            ?timeout_sec ()
         with
-        | Error err -> Error ("docker_container_start_failed: secret_projection: " ^ err)
-        | Ok secret_projection ->
-         let github_identity_result =
-           match (Atomic.get t.github_identity_snapshots).current with
-          | Some snapshot -> Ok (snapshot, false)
-          | None ->
-            (match
-               Keeper_github_identity.docker_args_for_tool
-                 ~config:t.config
-                 ~keeper_name:t.meta.name
-                 ~container_masc_dir:
-                   (Keeper_sandbox_runtime_setup.container_masc_dir
-                      ~container_root:t.container_root)
-             with
-             | Error _ as error -> error
-             | Ok projection ->
-               Ok
-                 ( { args = projection.args
-                   ; host_dir = projection.host_snapshot_dir
-                   ; revision = projection.revision
-                   ; cleanup = projection.cleanup
-                   }
-                 , true ))
-         in
-         (match github_identity_result with
+        | Error _ as err -> err
+        | Ok seccomp_args ->
+        let network_args, network_label =
+          Keeper_sandbox_runtime.docker_network_args t.network_mode
+        in
+        (match
+           Keeper_sandbox_runtime.docker_user_identity_mount_args
+             ~host_root:t.host_root
+             ~uid:t.uid
+             ~gid:t.gid
+         with
+         | Error _ as err -> err
+         | Ok identity_mounts ->
+         (match
+            Keeper_secret_projection.docker_args_for_keeper
+              ~base_path:t.config.base_path
+              ~keeper_name:t.meta.name
+              ~container_name
+              ()
+          with
           | Error err ->
+            Error ("docker_container_start_failed: secret_projection: " ^ err)
+          | Ok secret_projection ->
+           (match
+              Keeper_github_identity.docker_args_persistent
+                ~config:t.config
+                ~keeper_name:t.meta.name
+                ~container_masc_dir:
+                  (Keeper_sandbox_runtime_setup.container_masc_dir
+                     ~container_root:t.container_root)
+            with
+            | Error err ->
+              Eio_guard.protect
+                ~finally:secret_projection.cleanup
+                (fun () ->
+                   Error
+                     ("docker_container_start_failed: github_identity_invalid: "
+                      ^ err))
+            | Ok github_identity_args ->
             Eio_guard.protect
               ~finally:secret_projection.cleanup
               (fun () ->
-                 Error
-                   ("docker_container_start_failed: github_identity_invalid: "
-                    ^ err))
-          | Ok (github_identity, github_identity_is_new) ->
-         let keep_github_identity_snapshot = ref false in
-         Eio_guard.protect
-           ~finally:(fun () ->
-             Fun.protect
-               ~finally:secret_projection.cleanup
-               (fun () ->
-                 if github_identity_is_new && not !keep_github_identity_snapshot
-                 then github_identity.cleanup ()))
-           (fun () ->
-         (* Collect what an earlier turn left running before adding to it. A
-            turn container is removed by turn-end teardown; when that does not
-            run, nothing else takes it while this process lives, so they
-            accumulate one per turn (#30590). This never targets the current
-            turn's own containers, so it is safe here even though one turn can
-            hold several.
-
-            A failed reap is reported and does not block the turn: refusing to
-            start a turn because a previous container could not be removed
-            would turn a resource leak into a stopped keeper. *)
-         let reaped =
-           Keeper_sandbox_runtime.reap_prior_turn_containers
-             ~base_path:t.config.base_path
-             ~keeper_name:t.meta.name
-             ~turn_id:t.turn_id
-             ~timeout_sec:
-               (Env_config_sandbox.Shell_timeout.timeout_sec
-                  ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
-                  ())
-             ()
-         in
-         if reaped.removed > 0 || reaped.errors <> []
-         then
-           Log.Keeper.info
-             "%s: reaped %d container(s) left by earlier turns (scanned=%d, \
-              absent=%d)%s"
-             t.meta.name
-             reaped.removed
-             reaped.scanned
-             reaped.already_absent
-             (match reaped.errors with
-              | [] -> ""
-              | errors -> "; errors: " ^ String.concat "; " errors);
-         let argv =
-           Keeper_sandbox_runtime.docker_command_argv ()
-           @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
-           @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
-           @ Keeper_sandbox_runtime.docker_label_args
-               ~base_path:t.config.base_path
-               ~keeper_name:t.meta.name
-               ~container_kind:Keeper_sandbox_runtime.turn_container_kind
-               ~network_label
-               ~turn_id:t.turn_id
-               ()
-           @ [ "--user"; Printf.sprintf "%d:%d" t.uid t.gid ]
-           @ Keeper_sandbox_runtime.docker_sandbox_env_args
-               ~base_path:t.config.base_path
-               ~container_root:t.container_root
-           @ Keeper_sandbox_runtime.docker_nofile_args ()
-           @ Env_config_sandbox.Hardening.read_only_rootfs_args ()
-           @ [ "--tmpfs"
-             ; Env_config_sandbox.Hardening.tmpfs_mount ()
-             ; "--cap-drop=ALL"
-             ; "--security-opt"
-             ; "no-new-privileges"
-             ]
-           @ seccomp_args
-           @ [ "--pids-limit"
-             ; string_of_int (Env_config_sandbox.Hardening.pids_limit ())
-             ; "--memory"
-             ; Env_config_sandbox.Hardening.memory ()
-             ; "-v"
-             ; t.host_root ^ ":" ^ t.container_root ^ ":rw"
-             ; "--workdir"
-             ; t.container_root
-             ]
-           @ Keeper_sandbox_runtime.docker_config_mount_args
-               ~base_path:t.config.base_path
-               ~container_root:t.container_root
-           @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
-               ~base_path:t.config.base_path
-               ~container_root:t.container_root
-           @ secret_projection.docker_args
-           @ github_identity.args
-           @ identity_mounts
-           @ network_args
-           @ [ image; "tail"; "-f"; "/dev/null" ]
-         in
-         let st, out = run_argv_with_status ?timeout_sec argv in
-         (match st with
-         | Unix.WEXITED 0 ->
-            (match
-               inspect_container_exists
-                 ?timeout_sec
-                 ~microvm:false
-                 container_name
-             with
-             | Ok () ->
-               if github_identity_is_new
-               then
-                 update_github_identity_snapshots t (fun snapshots ->
-                   { snapshots with current = Some github_identity });
-               keep_github_identity_snapshot := true;
-               set_state t (Running { container_name });
-               Ok container_name
-             | Error inspect_out ->
-               (* Inspect failed after a successful `docker run`. Without an
-                  explicit cleanup the container would leak: t.state stays
-                  Not_started, so [cleanup] would skip `docker rm`. Best-effort
-                  remove the just-started container before returning Error. *)
-               let rm_argv =
-                 Keeper_sandbox_runtime.docker_command_argv ()
-                 @ [ "rm"; "-f"; container_name ]
-               in
-               let _rm_st, _rm_out =
-                 run_argv_with_status ?timeout_sec rm_argv
-               in
-               Error
-                 (Printf.sprintf
-                    "docker_container_inspect_failed (existence check): %s"
-                    (Exec_policy.truncate_for_log inspect_out)))
-          | _ ->
-            let status_label =
+              (* No [--rm]: the container outlives the turn, and auto-remove
+                 on stop would destroy state a later turn expects to adopt.
+                 Removal is the keeper's teardown, not the daemon's. *)
+              let argv =
+                Keeper_sandbox_runtime.docker_command_argv ()
+                @ [ "run"; "-d"; "--name"; container_name ]
+                @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
+                @ Keeper_sandbox_runtime.docker_label_args
+                    ~base_path:t.config.base_path
+                    ~keeper_name:t.meta.name
+                    ~container_kind:Keeper_sandbox_runtime.persistent_container_kind
+                    ~network_label
+                    ()
+                @ [ "--user"; Printf.sprintf "%d:%d" t.uid t.gid ]
+                @ Keeper_sandbox_runtime.docker_sandbox_env_args
+                    ~base_path:t.config.base_path
+                    ~container_root:t.container_root
+                @ Keeper_sandbox_runtime.docker_nofile_args ()
+                @ Env_config_sandbox.Hardening.read_only_rootfs_args ()
+                @ [ "--tmpfs"
+                  ; Env_config_sandbox.Hardening.tmpfs_mount ()
+                  ; "--cap-drop=ALL"
+                  ; "--security-opt"
+                  ; "no-new-privileges"
+                  ]
+                @ seccomp_args
+                @ [ "--pids-limit"
+                  ; string_of_int (Env_config_sandbox.Hardening.pids_limit ())
+                  ; "--memory"
+                  ; Env_config_sandbox.Hardening.memory ()
+                  ; "-v"
+                  ; t.host_root ^ ":" ^ t.container_root ^ ":rw"
+                  ; "--workdir"
+                  ; t.container_root
+                  ]
+                @ Keeper_sandbox_runtime.docker_config_mount_args
+                    ~base_path:t.config.base_path
+                    ~container_root:t.container_root
+                @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
+                    ~base_path:t.config.base_path
+                    ~container_root:t.container_root
+                @ secret_projection.docker_args
+                @ github_identity_args
+                @ identity_mounts
+                @ network_args
+                @ [ image; "tail"; "-f"; "/dev/null" ]
+              in
+              let st, out = run_argv_with_status ?timeout_sec argv in
               match st with
-              | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
-              | Unix.WSIGNALED signal -> Printf.sprintf "signal=%d" signal
-              | Unix.WSTOPPED signal -> Printf.sprintf "stopped=%d" signal
-            in
-            let base_path_hash =
-              Keeper_sandbox_runtime.base_path_hash t.config.base_path
-            in
-            let network_label = network_mode_to_string t.network_mode in
-            let mount_context =
-              Keeper_sandbox_runtime.docker_mount_failure_context_suffix
-                ~base_path_hash
-                ~keeper_name:t.meta.name
-                ~image
-                ~status_label
-                ~container_kind:"turn"
-                ~network_label
-                out
-            in
-            Error
-              (Printf.sprintf
-                 "docker_container_start_failed: %s%s"
-                 (Keeper_sandbox_runtime.docker_failure_output_for_log out)
-                 mount_context)))))))
+              | Unix.WEXITED 0 ->
+                (match
+                   inspect_container_exists
+                     ?timeout_sec
+                     ~microvm:false
+                     container_name
+                 with
+                 | Ok () ->
+                   set_state t (Running { container_name });
+                   Ok container_name
+                 | Error inspect_out ->
+                   (* Inspect failed after a successful `docker run`. Without
+                      an explicit cleanup the container would leak: t.state
+                      stays Not_started, so nothing of ours removes it later --
+                      the sweep only takes stopped containers. Best-effort
+                      remove it before returning Error. *)
+                   let rm_argv =
+                     Keeper_sandbox_runtime.docker_command_argv ()
+                     @ [ "rm"; "-f"; container_name ]
+                   in
+                   let _rm_st, _rm_out =
+                     run_argv_with_status ?timeout_sec rm_argv
+                   in
+                   Error
+                     (Printf.sprintf
+                        "docker_container_inspect_failed (existence check): %s"
+                        (Exec_policy.truncate_for_log inspect_out)))
+              | _ ->
+                (match probe_state () with
+                 | Ok Keeper_sandbox_runtime.Docker_container_running ->
+                   (* Another turn or server of this keeper booted the shared
+                      name between the absent probe and this run; the run's
+                      name loss is the winner's, and this call adopts the
+                      winner. *)
+                   adopt_running ()
+                 | _ ->
+                   let status_label =
+                     match st with
+                     | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
+                     | Unix.WSIGNALED signal ->
+                       Printf.sprintf "signal=%d" signal
+                     | Unix.WSTOPPED signal ->
+                       Printf.sprintf "stopped=%d" signal
+                   in
+                   let base_path_hash =
+                     Keeper_sandbox_runtime.base_path_hash t.config.base_path
+                   in
+                   let network_label = network_mode_to_string t.network_mode in
+                   let mount_context =
+                     Keeper_sandbox_runtime.docker_mount_failure_context_suffix
+                       ~base_path_hash
+                       ~keeper_name:t.meta.name
+                       ~image
+                       ~status_label
+                       ~container_kind:
+                         Keeper_sandbox_runtime.persistent_container_kind
+                       ~network_label
+                       out
+                   in
+                   Error
+                     (Printf.sprintf
+                        "docker_container_start_failed: %s%s"
+                        (Keeper_sandbox_runtime.docker_failure_output_for_log out)
+                        mount_context)))))))
+  in
+  match probe_state () with
+  | Ok Keeper_sandbox_runtime.Docker_container_running -> adopt_running ()
+  | Error probe_error ->
+    Error
+      (Printf.sprintf
+         "docker_container_probe_failed: %s"
+         (Exec_policy.truncate_for_log probe_error))
+  | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
+    (* A stopped container keeps its filesystem layer: [docker start] resumes
+       it instead of losing the installed state the persistence exists to
+       keep. A start failure (image evicted from the daemon, mount source
+       vanished) falls through to remove-and-recreate. *)
+    let start_argv =
+      Keeper_sandbox_runtime.docker_command_argv ()
+      @ [ "start"; container_name ]
+    in
+    let start_st, _start_out =
+      run_argv_with_status ?timeout_sec start_argv
+    in
+    if start_st = Unix.WEXITED 0
+    then (
+      match
+        inspect_container_exists ?timeout_sec ~microvm:false container_name
+      with
+      | Ok () -> adopt_running ()
+      | Error inspect_out ->
+        Error
+          (Printf.sprintf
+             "docker_container_start_failed: restarted %s but inspect cannot \
+              see it: %s"
+             container_name
+             (Exec_policy.truncate_for_log inspect_out)))
+    else (
+      let rm_argv =
+        Keeper_sandbox_runtime.docker_command_argv ()
+        @ [ "rm"; "-f"; container_name ]
+      in
+      let _rm_st, _rm_out = run_argv_with_status ?timeout_sec rm_argv in
+      create ())
+  | Ok Keeper_sandbox_runtime.Docker_container_absent -> create ()
 ;;
 
 let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
@@ -975,29 +1025,53 @@ let stop_container_for_github_identity_refresh ?timeout_sec t =
 ;;
 
 let prepare_github_identity_secret_files ?timeout_sec t =
-  let ensure_bound () =
+  if is_microvm t
+  then (
+    (* The guest's identity is its boot-time snapshot, keeper-lifetime by
+       design: only a fresh boot mounts a new one, and a drift from the
+       central revision is handled by dropping the handle so the next boot
+       rebuilds it. *)
+    let ensure_bound () =
+      match ensure_started ?timeout_sec t with
+      | Error _ as error -> error
+      | Ok _container_name ->
+        (match (Atomic.get t.github_identity_snapshots).current with
+         | None -> Error "running container has no GitHub identity snapshot"
+         | Some _ -> Ok (github_identity_secret_files t))
+    in
+    match
+      Keeper_github_identity.current_tool_identity_revision
+        ~config:t.config
+        ~keeper_name:t.meta.name
+    with
+    | Error _ as error -> error
+    | Ok central_revision ->
+      (match (Atomic.get t.github_identity_snapshots).current with
+       | None -> ensure_bound ()
+       | Some snapshot when String.equal snapshot.revision central_revision ->
+         ensure_bound ()
+       | Some _ ->
+         (match stop_container_for_github_identity_refresh ?timeout_sec t with
+          | Error _ as error -> error
+          | Ok () -> ensure_bound ())))
+  else
+    (* The persistent Docker container mounts the stable config directory
+       read-only, so the token that must stay redacted is the stable
+       hosts.yml and binding is [ensure_started] itself -- a central login
+       reaches the running container through the mount, with the derived
+       gitconfig refreshed at adoption. An unconfigured keeper exposes no
+       credential file. *)
     match ensure_started ?timeout_sec t with
     | Error _ as error -> error
     | Ok _container_name ->
-      (match (Atomic.get t.github_identity_snapshots).current with
-       | None -> Error "running container has no GitHub identity snapshot"
-       | Some _ -> Ok (github_identity_secret_files t))
-  in
-  match
-    Keeper_github_identity.current_tool_identity_revision
-      ~config:t.config
-      ~keeper_name:t.meta.name
-  with
-  | Error _ as error -> error
-  | Ok central_revision ->
-    (match (Atomic.get t.github_identity_snapshots).current with
-     | None -> ensure_bound ()
-     | Some snapshot when String.equal snapshot.revision central_revision ->
-       ensure_bound ()
-     | Some _ ->
-       (match stop_container_for_github_identity_refresh ?timeout_sec t with
-        | Error _ as error -> error
-        | Ok () -> ensure_bound ()))
+      (match
+         Keeper_github_identity.existing_config_dir
+           ~config:t.config
+           ~keeper_name:t.meta.name
+       with
+       | Error _ as error -> error
+       | Ok None -> Ok []
+       | Ok (Some dir) -> Ok [ Filename.concat dir "hosts.yml" ])
 ;;
 
 let run_exec_with_status_split_once
@@ -1315,119 +1389,17 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
      | _ -> Ok (st, out))
 ;;
 
-(* Release the identity a keeper-lifetime guest was holding. Turn cleanup
-   skips it -- the guest outlives the turn and has the directory mounted --
-   so this is the release path, called once the guest is gone. *)
-let release_microvm_identity (t : t) = release_github_identity_snapshot t
-
 let cleanup (t : t) =
-  Fun.protect
-    ~finally:(fun () ->
-      (* The snapshot is a temp directory the guest has mounted, and its
-         cleanup deletes it. A docker turn container dies with the turn, so
-         releasing here is right for it. A microvm guest is keeper-lifetime
-         and outlives this scope: releasing would pull the credential files
-         out from under a running guest, which is why the identity was left
-         unwired when the guest lane landed (#31353). The guest's own
-         teardown releases it instead. *)
-      if not (is_microvm t) then release_github_identity_snapshot t)
-    (fun () ->
+  (* Both keeper-lifetime containers -- the microvm guest and the persistent
+     Docker container -- outlive the turn: cleanup only drops the handle, so
+     the next turn (of this server or a later one) adopts what is still
+     running. Removal is the keeper's teardown at shutdown finalization, the
+     one point that knows the keeper is gone for good rather than between
+     turns. A stopped persistent container is collected by the stale sweep,
+     which removes stopped containers of any kind. *)
   match get_state t with
   | Not_started -> ()
   | Running { container_name } ->
     set_state t Not_started;
-    let rm_timeout =
-      Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ()
-    in
-    (* A microvm guest is keeper-lifetime: turn cleanup only drops the
-       handle. [teardown_keeper_vm] is the remove path. *)
-    if is_microvm t
-    then ignore container_name
-    else
-    let rm_argv =
-      Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ]
-    in
-    let status_label st =
-      match st with
-      | Unix.WEXITED n -> Printf.sprintf "exited(%d)" n
-      | Unix.WSIGNALED n -> Printf.sprintf "signaled(%d)" n
-      | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n
-    in
-    let still_exists () =
-      (* Use `docker ps -a` so a stopped-but-still-existing container is not
-         silently reported as "gone". Without `-a`, only running containers
-         appear and a failed `rm -f` would look successful.
-
-         If `docker ps` itself fails (daemon down, permission denied, etc.),
-         we treat the existence question as "unknown" and conservatively
-         report false (i.e. no further escalation). The post-rm log path
-         already records the rm failure; double-logging an unknown-existence
-         WARN would be noisier than useful. *)
-      let check_argv =
-        Keeper_sandbox_runtime.docker_command_argv ()
-        @ [ "ps"; "-a"; "-q"; "--filter"; "name=" ^ container_name ]
-      in
-      let check_st, check_out =
-        run_argv_with_status ~timeout_sec:rm_timeout check_argv
-      in
-      match check_st with
-      | Unix.WEXITED 0 -> String.trim check_out <> ""
-      | _ ->
-        Log.Keeper.debug
-          "%s: docker ps -a probe failed for %s (status=%s, out=%s); treating existence \
-           as unknown"
-          t.meta.name
-          container_name
-          (status_label check_st)
-          (Exec_policy.truncate_for_log check_out);
-        false
-    in
-    let st, out =
-      run_argv_with_status ~timeout_sec:rm_timeout rm_argv
-    in
-    (* First attempt succeeded and container is gone — done. *)
-    (match st with
-     | Unix.WEXITED 0 when not (still_exists ()) -> ()
-     | _ ->
-       (* First attempt failed or container still exists.
-          Retry once — transient daemon issues can resolve within seconds,
-          and a single retry catches the common "docker rm raced with
-          container exit" case without unbounded retries. *)
-       let final_st, final_out =
-         match st with
-         | Unix.WEXITED 0 ->
-           (* rm reported success but container still exists — unlikely
-              but re-probe after a brief yield for daemon state to
-              settle. *)
-           st, out
-         | _ ->
-           Log.Keeper.info
-             "%s: docker rm -f %s failed (status=%s), retrying once"
-             t.meta.name
-             container_name
-             (status_label st);
-           run_argv_with_status ~timeout_sec:rm_timeout rm_argv
-       in
-       let exists_after_final = still_exists () in
-       (match final_st with
-        | Unix.WEXITED 0 when not exists_after_final -> ()
-        | _ ->
-          if exists_after_final
-          then (
-            Log.Keeper.warn
-              "%s: docker rm -f %s failed after retry and container still exists \
-               (status=%s, out=%s)"
-              t.meta.name
-              container_name
-              (status_label final_st)
-              (Exec_policy.truncate_for_log final_out);
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string TurnCleanupFailures)
-              ~labels:[ "keeper", t.meta.name; "site", "docker_rm" ]
-              ())
-          else
-            Log.Keeper.info
-              "%s: docker rm -f %s reported failure but container is gone"
-              t.meta.name
-              container_name)))
+    ignore container_name
 ;;

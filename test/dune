@@ -269,7 +269,6 @@
   test_keeper_fd_pressure_fleet
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
-  test_compaction_llm_summarizer
   test_keeper_runtime_failure_route
   test_keeper_runtime_attempt
   test_keeper_allowed_paths
@@ -377,7 +376,6 @@
   test_keeper_state_machine_tla_correspondence
   test_keeper_lifecycle_hooks
   test_keeper_subprocess_registry
-  test_keeper_overflow_recovery
   test_telemetry_unified
   test_telemetry_unified_source
   test_telemetry_error_occurred_wire_10358
@@ -609,7 +607,6 @@
   test_keeper_fd_pressure_fleet
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
-  test_compaction_llm_summarizer
   test_keeper_runtime_failure_route
   test_keeper_runtime_attempt
   test_keeper_allowed_paths
@@ -718,7 +715,6 @@
   test_keeper_state_machine_tla_correspondence
   test_keeper_lifecycle_hooks
   test_keeper_subprocess_registry
-  test_keeper_overflow_recovery
   test_telemetry_unified
   test_telemetry_unified_source
   test_telemetry_error_occurred_wire_10358
@@ -1758,17 +1754,6 @@
  (modules compaction_exact_output_fixture)
  (libraries masc_test_deps unix))
 
-; Composition proof for the provider-neutral compaction exact-output lane.
-(test
- (name test_compaction_exact_output_conformance)
- (modules test_compaction_exact_output_conformance)
- (libraries
-  alcotest
-  compaction_exact_output_fixture
-  masc_test_deps
-  masc.keeper_checkpoint_ref
-  eio_main
-  unix))
 
 ; Production Board-attention adapter proof over the provider-neutral AGENT_CORE lane.
 (test
@@ -1796,13 +1781,6 @@
  (deps ../config/agent-core-models-overlay.toml ../config/runtime.toml)
  (libraries alcotest masc_server masc_test_deps eio_main unix))
 
-; Production entrypoint coverage for an intentionally absent Eio clock. This
-; must remain a separate process because Eio_context clock installation is
-; process-global and cannot be masked by the existing scoped test helper.
-(test
- (name test_compaction_exact_output_entrypoint_clockless)
- (modules test_compaction_exact_output_entrypoint_clockless)
- (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
 
 ; Warn-log dedup table stays bounded under distinct token-hash-prefix churn.
 
@@ -2075,7 +2053,6 @@
 (include stanzas/test_env_snapshot_reports_applied_default.inc)
 (include stanzas/test_verification_authority_tools.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
-(include stanzas/test_keeper_compaction_persist_gate.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
@@ -2377,7 +2354,6 @@
 
 
 
-(include stanzas/test_keeper_post_turn_wirein_order.inc)
 (include stanzas/test_keeper_request_wire_observation.inc)
 
 (include stanzas/test_keeper_compaction_outcome_counters.inc)
@@ -2980,7 +2956,7 @@
 (test
  (name test_keeper_global_shared_refs_atomic)
  (modules test_keeper_global_shared_refs_atomic)
- (libraries alcotest masc.agent_core masc masc.compaction_trigger))
+ (libraries alcotest masc.agent_core masc))
 
 ; RFC-keeper-vision-delegation-tool §2.6 — analyze_image pure core
 

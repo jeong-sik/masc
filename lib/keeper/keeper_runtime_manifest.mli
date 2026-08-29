@@ -69,10 +69,6 @@ type logical_ordering = {
   logical_seq : int option;
 }
 
-type compaction_outcome =
-  | Checkpoint_committed
-  | Lifecycle_cleanup_failed_without_checkpoint
-
 (** {1 Own-module vals} *)
 
 val source_clock_to_string : source_clock -> string
@@ -80,8 +76,6 @@ val source_clock_of_string : string -> source_clock option
 val source_clock_of_event : event_kind -> source_clock
 
 val schema_version : int
-val compaction_outcome_key : string
-val compaction_outcome_to_string : compaction_outcome -> string
 val clock_refs :
   ?edge_id:string ->
   ?lane:string ->
@@ -120,9 +114,6 @@ val clock_refs_for_context :
 val with_clock_refs : clock_refs:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 
 val with_payload_role : payload_role:payload_role -> Yojson.Safe.t -> Yojson.Safe.t
-
-val with_compaction_outcome :
-  compaction_outcome:compaction_outcome -> Yojson.Safe.t -> Yojson.Safe.t
 
 val make :
   ?ts:string ->

@@ -153,80 +153,6 @@ let test_wake_payload_reader_rejects_malformed_exact_records () =
     0
     (List.length (H.read_wake_payload_events ()))
 
-let test_pre_compact_store_setter_records_event () =
-  reset_after @@ fun () ->
-  with_temp_dir "pre-compact-store" @@ fun dir ->
-  H.set_pre_compact_store_for_testing ~base_dir:dir;
-  let event =
-    H.record_pre_compact
-      ~keeper_name:"keeper-harness"
-      ~checkpoint_bytes:3456
-      ~message_count:12
-      ~strategies:[ "drop-old"; "summarize" ]
-      ~trigger:Compaction_trigger.Manual
-  in
-  check string "keeper" "keeper-harness" event.keeper_name;
-  check int "checkpoint bytes" 3456 event.checkpoint_bytes;
-  check int "message count" 12 event.message_count;
-  check (list string) "strategies" [ "drop-old"; "summarize" ] event.strategies;
-  check string "trigger" "manual" (Compaction_trigger.to_label event.trigger)
-
-let sample_hash = String.concat "" (List.init 8 (fun _ -> "0123abcd"))
-
-let test_label_body_approve_parses () =
-  match
-    Dashboard_harness_health.parse_label_body
-      (Printf.sprintf
-         {|{"notes_hash": "%s", "verdict": "approve", "reason": ""}|}
-         sample_hash)
-  with
-  | Ok { label_notes_hash; label_verdict; label_reason } ->
-      Alcotest.(check string) "hash" sample_hash label_notes_hash;
-      Alcotest.(check bool) "approve side" true
-        (match label_verdict with
-         | Masc.Eval_calibration.Approve_label -> true
-         | Masc.Eval_calibration.Reject_label -> false);
-      Alcotest.(check string) "reason" "" label_reason
-  | Error e -> Alcotest.failf "expected Ok, got: %s" e
-
-let test_label_body_reject_parses () =
-  match
-    Dashboard_harness_health.parse_label_body
-      (Printf.sprintf
-         {|{"notes_hash": "%s", "verdict": "reject", "reason": " evidence was sufficient "}|}
-         sample_hash)
-  with
-  | Ok { label_verdict; label_reason; _ } ->
-      Alcotest.(check bool) "reject side" true
-        (match label_verdict with
-         | Masc.Eval_calibration.Reject_label -> true
-         | Masc.Eval_calibration.Approve_label -> false);
-      Alcotest.(check string) "reason trimmed" "evidence was sufficient"
-        label_reason
-  | Error e -> Alcotest.failf "expected Ok, got: %s" e
-
-let test_label_body_bad_hash_refused () =
-  match
-    Dashboard_harness_health.parse_label_body
-      {|{"notes_hash": "SHOUTY", "verdict": "approve", "reason": ""}|}
-  with
-  | Ok _ -> Alcotest.fail "a malformed hash must be refused"
-  | Error e ->
-      Alcotest.(check bool) "names the hash rule" true
-        (Astring.String.is_infix ~affix:"hex" e)
-
-let test_label_body_unknown_verdict_refused () =
-  match
-    Dashboard_harness_health.parse_label_body
-      (Printf.sprintf
-         {|{"notes_hash": "%s", "verdict": "maybe", "reason": ""}|}
-         sample_hash)
-  with
-  | Ok _ -> Alcotest.fail "an unknown verdict word must be refused"
-  | Error e ->
-      Alcotest.(check bool) "names the vocabulary" true
-        (Astring.String.is_infix ~affix:"approve" e)
-
 let () =
   Eio_main.run @@ fun _env ->
   run
@@ -252,7 +178,5 @@ let () =
             test_reset_rebinds_wake_payload_store;
           test_case "malformed exact records are rejected" `Quick
             test_wake_payload_reader_rejects_malformed_exact_records;
-          test_case "pre-compact setter records event" `Quick
-            test_pre_compact_store_setter_records_event;
         ] );
     ]

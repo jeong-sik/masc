@@ -403,92 +403,28 @@ type capacity_refusal =
       }
   | Provider_request_body_refusal of { status : int }
 
-type capacity_non_compaction =
-  | Serving_evidence_not_yet_valid of
-      { now_unix_s : int
-      ; checked_at_unix_s : int
-      }
-  | Serving_evidence_expired of
-      { now_unix_s : int
-      ; expires_at_unix_s : int
-      }
-  | Token_measurement_unavailable
-
-type capacity_transition =
-  | Not_capacity
-  | Capacity_refusal_classified of Compaction_trigger.t
-  | Capacity_non_compacting of capacity_non_compaction
-
-let capacity_transition_of_error
-    (err : Agent_core.Error.t) : capacity_transition =
+(* Two-axis refusal view over the AGENT_CORE error type. The compaction lane
+   used to sit between these two — the error was first classified into a
+   compaction trigger and this projection read that. With the lane gone the
+   error is matched once, directly. Non-capacity errors and the serving-
+   constraint facts (evidence validity, unmeasurable tokens) stay [None]: they
+   are not a capacity limit and must never be guessed into one. *)
+let capacity_refusal_of_error
+    (err : Agent_core.Error.t) : capacity_refusal option =
   match err with
   | Agent_core.Error.Api (ContextOverflow { limit; _ }) ->
-    Capacity_refusal_classified
-      (Compaction_trigger.Provider_overflow { limit_tokens = limit })
+    Some (Provider_context_window { limit_tokens = limit })
   | Agent_core.Error.Api
       (InvalidRequest
          { reason = Request_body_too_large { actual_bytes; limit_bytes }; _ })
     ->
-    Capacity_refusal_classified
-      (Compaction_trigger.Request_body_over_capacity
-         { actual_bytes; limit_bytes })
+    Some (Serialized_request_body { actual_bytes; limit_bytes })
   | Agent_core.Error.Api
       (InvalidRequest
          { reason = Request_body_refused_by_provider { status }; _ })
     ->
-    Capacity_refusal_classified
-      (Compaction_trigger.Request_body_refused_by_provider { status })
-  | Agent_core.Error.Api
-      (InputCapacity
-         { reason =
-             Serving_constraint_rejected
-               (Llm_provider.Serving_constraint.Boundary_unknown
-                  { input_tokens; accepted_through; rejected_from })
-         ; _
-         })
-    ->
-    Capacity_refusal_classified
-      (Compaction_trigger.Serving_input_capacity
-         (Compaction_trigger.Boundary_unknown
-            { input_tokens; accepted_through; rejected_from }))
-  | Agent_core.Error.Api
-      (InputCapacity
-         { reason =
-             Serving_constraint_rejected
-               (Llm_provider.Serving_constraint.Input_rejected
-                  { input_tokens; accepted_through; rejected_from })
-         ; _
-         })
-    ->
-    Capacity_refusal_classified
-      (Compaction_trigger.Serving_input_capacity
-         (Compaction_trigger.Input_rejected
-            { input_tokens; accepted_through; rejected_from }))
-  | Agent_core.Error.Api
-      (InputCapacity
-         { reason =
-             Serving_constraint_rejected
-               (Llm_provider.Serving_constraint.Evidence_not_yet_valid
-                  { now_unix_s; checked_at_unix_s })
-         ; _
-         })
-    ->
-    Capacity_non_compacting
-      (Serving_evidence_not_yet_valid { now_unix_s; checked_at_unix_s })
-  | Agent_core.Error.Api
-      (InputCapacity
-         { reason =
-             Serving_constraint_rejected
-               (Llm_provider.Serving_constraint.Evidence_expired
-                  { now_unix_s; expires_at_unix_s })
-         ; _
-         })
-    ->
-    Capacity_non_compacting
-      (Serving_evidence_expired { now_unix_s; expires_at_unix_s })
-  | Agent_core.Error.Api
-      (InputCapacity { reason = Token_measurement_unavailable _; _ }) ->
-    Capacity_non_compacting Token_measurement_unavailable
+    Some (Provider_request_body_refusal { status })
+  | Agent_core.Error.Api (InputCapacity _)
   | Agent_core.Error.Api
       (InvalidRequest
          { reason = Json_parse_error | Attempt_rejected | Unknown_invalid_request; _ })
@@ -504,28 +440,6 @@ let capacity_transition_of_error
   | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
-    Not_capacity
-;;
-
-(* The two-axis refusal view is a projection of the canonical transition
-   classifier. This keeps one exhaustive agent-core error match while preserving the
-   narrow token/byte API used by existing lifecycle projections. *)
-let capacity_refusal_of_error
-    (err : Agent_core.Error.t) : capacity_refusal option =
-  match capacity_transition_of_error err with
-  | Capacity_refusal_classified (Compaction_trigger.Provider_overflow { limit_tokens }) ->
-    Some (Provider_context_window { limit_tokens })
-  | Capacity_refusal_classified
-      (Compaction_trigger.Request_body_over_capacity { actual_bytes; limit_bytes })
-    ->
-    Some (Serialized_request_body { actual_bytes; limit_bytes })
-  | Capacity_refusal_classified
-      (Compaction_trigger.Request_body_refused_by_provider { status }) ->
-    Some (Provider_request_body_refusal { status })
-  | Capacity_refusal_classified (Compaction_trigger.Serving_input_capacity _)
-  | Capacity_refusal_classified Compaction_trigger.Manual
-  | Capacity_non_compacting _
-  | Not_capacity ->
     None
 ;;
 

@@ -14,7 +14,6 @@ import {
   verdictTone,
   verdictSummary,
   filterVerdicts,
-  filterPreCompactEvents,
   filterHandoffEvents,
   EmptySignal,
   HeroRailCard,
@@ -25,7 +24,6 @@ import {
 import type {
   HarnessHealthData,
   HarnessVerdictItem,
-  PreCompactEvent,
   HandoffEvent,
 } from './harness-health-state'
 
@@ -48,14 +46,11 @@ function makeData(overrides: Partial<HarnessHealthData['overview']> = {}): Harne
     scope_note: 'test',
     overview: {
       evaluator_status: 'healthy',
-      pre_compact_status: 'idle',
       handoff_status: 'idle',
       last_signal_at: Date.now(),
       evaluator_last_event_at: Date.now(),
-      pre_compact_last_event_at: null,
       handoff_last_event_at: null,
       fallback_ratio: 0,
-      latest_pre_compact_checkpoint_bytes: null,
       latest_handoff_generation: null,
       ...overrides,
     },
@@ -70,7 +65,6 @@ function makeData(overrides: Partial<HarnessHealthData['overview']> = {}): Harne
       agreement_rate: 0,
     },
     recent_verdicts: [],
-    pre_compact: { description: '', recent_events: [], total_recent: 0, status: 'idle', last_event_at: null },
     recent_handoffs: { description: '', recent_events: [], total_recent: 0, status: 'idle', last_event_at: null },
   }
 }
@@ -162,11 +156,6 @@ describe('heroTitle', () => {
     expect(heroTitle(data)).toBe('감시 채널에 주의가 필요합니다.')
   })
 
-  it('returns stale title when any status is stale', () => {
-    const data = makeData({ pre_compact_status: 'stale' })
-    expect(heroTitle(data)).toBe('신호는 있지만 최신성이 떨어집니다.')
-  })
-
   it('returns idle title when all statuses are idle', () => {
     const data = makeData({
       evaluator_status: 'idle',
@@ -225,16 +214,6 @@ describe('railDetail', () => {
     expect(railDetail(data, 'evaluator')).toBe('판정 기록 없음')
   })
 
-  it('returns exact checkpoint bytes for pre_compact', () => {
-    const data = makeData({ latest_pre_compact_checkpoint_bytes: 131072 })
-    expect(railDetail(data, 'pre_compact')).toBe('체크포인트 131,072 B')
-  })
-
-  it('returns no compact for pre_compact with null', () => {
-    const data = makeData()
-    expect(railDetail(data, 'pre_compact')).toBe('최근 압축 없음')
-  })
-
   it('returns generation for handoff', () => {
     const data = makeData({ latest_handoff_generation: 5 })
     expect(railDetail(data, 'handoff')).toBe('5세대')
@@ -255,13 +234,6 @@ describe('railFreshness', () => {
     const ts = Date.now()
     const data = makeData({ evaluator_last_event_at: ts })
     const result = railFreshness(data, 'evaluator')
-    expect(result).not.toBe('기록 없음')
-  })
-
-  it('returns freshness for pre_compact', () => {
-    const ts = Date.now()
-    const data = makeData({ pre_compact_last_event_at: ts })
-    const result = railFreshness(data, 'pre_compact')
     expect(result).not.toBe('기록 없음')
   })
 
@@ -439,72 +411,6 @@ describe('filterVerdicts', () => {
     ]
     expect(filterVerdicts(sparse, 'approve')).toHaveLength(1)
     expect(filterVerdicts(sparse, 'anything-else')).toHaveLength(0)
-  })
-})
-
-// ================================================================
-// filterPreCompactEvents
-// ================================================================
-
-function makePreCompact(overrides: Partial<PreCompactEvent> = {}): PreCompactEvent {
-  return {
-    timestamp: 1_700_000_000_000,
-    keeper_name: 'keeper-alpha',
-    checkpoint_bytes: 4096,
-    message_count: 10,
-    strategies: ['summarize'],
-    trigger: 'manual',
-    ...overrides,
-  }
-}
-
-describe('filterPreCompactEvents', () => {
-  const items: PreCompactEvent[] = [
-    makePreCompact({ keeper_name: 'keeper-alpha', strategies: ['summarize', 'drop_old'] }),
-    makePreCompact({ keeper_name: 'keeper-beta', strategies: ['handoff'] }),
-    makePreCompact({ keeper_name: 'keeper-gamma', strategies: [] }),
-  ]
-
-  it('returns the input reference when query is empty', () => {
-    expect(filterPreCompactEvents(items, '')).toBe(items)
-  })
-
-  it('returns the input reference for whitespace-only query', () => {
-    expect(filterPreCompactEvents(items, '   ')).toBe(items)
-  })
-
-  it('matches by keeper_name (case-insensitive)', () => {
-    const result = filterPreCompactEvents(items, 'ALPHA')
-    expect(result.map(r => r.keeper_name)).toEqual(['keeper-alpha'])
-  })
-
-  it('matches by trigger substring', () => {
-    const result = filterPreCompactEvents(items, 'manual')
-    expect(result).toHaveLength(3)
-  })
-
-  it('matches by strategies entry substring', () => {
-    const result = filterPreCompactEvents(items, 'drop_old')
-    expect(result.map(r => r.keeper_name)).toEqual(['keeper-alpha'])
-  })
-
-  it('matches strategies case-insensitively', () => {
-    const result = filterPreCompactEvents(items, 'HANDOFF')
-    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
-  })
-
-  it('returns empty when no field matches', () => {
-    expect(filterPreCompactEvents(items, 'nonexistent-token')).toHaveLength(0)
-  })
-
-  it('trims query before matching', () => {
-    expect(filterPreCompactEvents(items, '  gamma  ')).toHaveLength(1)
-  })
-
-  it('does not mutate the input array', () => {
-    const copy = items.slice()
-    filterPreCompactEvents(items, 'alpha')
-    expect(items).toEqual(copy)
   })
 })
 

@@ -36,7 +36,6 @@ import {
   GateChart,
   RecentVerdictsList,
   goalsByTaskFromTree,
-  PreCompactList,
   HandoffList,
 } from './harness-health-sections'
 
@@ -67,14 +66,12 @@ const M_IDLE_STROKE = '#5a3028'     // --color-line-2
 const M_IDLE_TEXT = '#6a5848'       // --color-fg-3
 const M_ACTIVE_STROKE = '#c4a265'   // brass accent (active highlight)
 
-type HarnessRailKey = 'evaluator' | 'pre_compact' | 'handoff'
+type HarnessRailKey = 'evaluator' | 'handoff'
 
 function railTitle(rail: HarnessRailKey): string {
   switch (rail) {
     case 'evaluator':
       return '평가 모델'
-    case 'pre_compact':
-      return '압축 전 상태'
     case 'handoff':
       return '세대 교체'
   }
@@ -85,8 +82,6 @@ function railEventAt(data: HarnessHealthData, rail: HarnessRailKey): number | nu
   switch (rail) {
     case 'evaluator':
       return data.overview.evaluator_last_event_at
-    case 'pre_compact':
-      return data.overview.pre_compact_last_event_at
     case 'handoff':
       return data.overview.handoff_last_event_at
   }
@@ -94,7 +89,7 @@ function railEventAt(data: HarnessHealthData, rail: HarnessRailKey): number | nu
 }
 
 function activeRail(data: HarnessHealthData): HarnessRailKey | null {
-  const rails: HarnessRailKey[] = ['evaluator', 'pre_compact', 'handoff']
+  const rails: HarnessRailKey[] = ['evaluator', 'handoff']
   return rails.reduce<HarnessRailKey | null>((current, rail) => {
     if (!current) return railEventAt(data, rail) == null ? null : rail
     const currentTs = railEventAt(data, current) ?? Number.NEGATIVE_INFINITY
@@ -148,12 +143,6 @@ function flowFallbackSummary(data: HarnessHealthData): string {
       railFreshness(data, 'evaluator'),
     ),
     flowSummaryLine(
-      '압축 전 상태',
-      data.overview.pre_compact_status,
-      railDetail(data, 'pre_compact'),
-      railFreshness(data, 'pre_compact'),
-    ),
-    flowSummaryLine(
       '세대 교체',
       data.overview.handoff_status,
       railDetail(data, 'handoff'),
@@ -174,29 +163,23 @@ export function buildHarnessFlowMermaid(data: HarnessHealthData): string {
     `  classDef idleRail fill:${M_IDLE_FILL},stroke:${M_IDLE_STROKE},color:${M_IDLE_TEXT},stroke-dasharray: 3 4;`,
     `  classDef activeRail stroke:${M_ACTIVE_STROKE},stroke-width:3px;`,
     '  taskDone["작업 완료<br/>판정 검증"]',
-    '  keeperTurn["keeper 턴<br/>압축 압력"]',
     '  keeperRollover["keeper 교체<br/>지표 스냅샷"]',
     `  evaluator["${flowNodeLabel('평가 모델', data.overview.evaluator_status, railDetail(data, 'evaluator'), railFreshness(data, 'evaluator'))}"]`,
-    `  preCompact["${flowNodeLabel('압축 전 상태', data.overview.pre_compact_status, railDetail(data, 'pre_compact'), railFreshness(data, 'pre_compact'))}"]`,
     `  handoff["${flowNodeLabel('세대 교체', data.overview.handoff_status, railDetail(data, 'handoff'), railFreshness(data, 'handoff'))}"]`,
     '  readModel["하네스 데이터<br/>/api/v1/dashboard/harness-health"]',
     '  labUi["Lab / 안전 감시<br/>실시간 상태"]',
     '  taskDone -->|"판정 기록"| evaluator',
-    '  keeperTurn -->|"압축 신호"| preCompact',
     '  keeperRollover -->|"교체 신호"| handoff',
     '  evaluator --> readModel',
-    '  preCompact --> readModel',
     '  handoff --> readModel',
     '  readModel --> labUi',
     '  labUi -. "debounced reload" .-> readModel',
     '  class taskDone,keeperTurn,keeperRollover source;',
     `  class evaluator ${flowStatusClass(data.overview.evaluator_status)};`,
-    `  class preCompact ${flowStatusClass(data.overview.pre_compact_status)};`,
     `  class handoff ${flowStatusClass(data.overview.handoff_status)};`,
     '  class readModel,labUi hub;',
   ]
   if (currentRail === 'evaluator') source.push('  class evaluator activeRail;')
-  if (currentRail === 'pre_compact') source.push('  class preCompact activeRail;')
   if (currentRail === 'handoff') source.push('  class handoff activeRail;')
   return source.join('\n')
 }
@@ -212,7 +195,7 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
         <div>
           <div class="text-sm font-medium text-[var(--color-fg-secondary)]">실시간 상태 그래프</div>
           <div class="mt-1 text-sm leading-loose text-[var(--color-fg-muted)]">
-            작업 완료, 컨텍스트 압축, 세대 교체 신호가 하네스로 모이는 구조입니다.
+            작업 완료와 세대 교체 신호가 하네스로 모이는 구조입니다.
           </div>
         </div>
         <div class="text-xs text-[var(--color-fg-disabled)]">
@@ -276,7 +259,7 @@ export function HarnessHealth() {
         <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div class="max-w-3xl">
-              <${SectionCap}>keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다<//>
+              <${SectionCap}>keeper 장기 실행 중 평가와 교체가 정상인지 감시합니다<//>
               <div class="mt-2 text-2xl font-semibold text-[var(--color-fg-secondary)]">${heroTitle(data)}</div>
               <div class="mt-2 text-sm leading-airy text-[var(--color-fg-primary)]">${heroBody(data)}</div>
             </div>
@@ -295,12 +278,6 @@ export function HarnessHealth() {
               status=${data.overview.evaluator_status}
               detail=${railDetail(data, 'evaluator')}
               freshness=${railFreshness(data, 'evaluator')}
-            />
-            <${HeroRailCard}
-              label="압축 전 상태"
-              status=${data.overview.pre_compact_status}
-              detail=${railDetail(data, 'pre_compact')}
-              freshness=${railFreshness(data, 'pre_compact')}
             />
             <${HeroRailCard}
               label="세대 교체"
@@ -406,45 +383,6 @@ export function HarnessHealth() {
         `}
       <//>
 
-      <${SectionCard} label="압축 전 상태" class="section">
-        ${!data ? html`
-          <${EmptySignal} text="압축 전 상태 데이터 없음" />
-        ` : html`
-          <div class="space-y-4">
-            <${RailHeader}
-              title="압축 전 체크포인트"
-              description=${data.pre_compact.description}
-              status=${data.pre_compact.status}
-              lastEventAt=${data.pre_compact.last_event_at}
-            />
-            <${KpiStripView}
-              ariaLabel="압축 전 상태 요약"
-              variant="stacked"
-              cells=${[
-                {
-                  variant: 'stacked',
-                  label: '최근 체크포인트 크기',
-                  value: data.overview.latest_pre_compact_checkpoint_bytes != null
-                    ? `${data.overview.latest_pre_compact_checkpoint_bytes.toLocaleString()} B`
-                    : '-',
-                  caption: `최근 ${data.pre_compact.total_recent}건`,
-                },
-                {
-                  variant: 'stacked',
-                  label: '최근 신호',
-                  value: freshnessLabel(data.pre_compact.last_event_at),
-                },
-                {
-                  variant: 'stacked',
-                  label: '상태',
-                  value: railStatusLabel(data.pre_compact.status),
-                },
-              ] satisfies KpiStripViewData['cells']}
-            />
-            <${PreCompactList} section=${data.pre_compact} />
-          </div>
-        `}
-      <//>
 
       <${SectionCard} label="세대 교체 기록" class="section">
         ${!data ? html`

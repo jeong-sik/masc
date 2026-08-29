@@ -228,58 +228,46 @@ let test_typed_capacity_transition_preserves_axes () =
          ; rejected_from = None
          })
   in
-  (match Budget.capacity_transition_of_error boundary with
-   | Budget.Capacity_refusal_classified
-       (Compaction_trigger.Serving_input_capacity
-          (Compaction_trigger.Boundary_unknown
-             { input_tokens = 524_299
-             ; accepted_through = 524_298
-             ; rejected_from = None
-             })) ->
+  (* A serving-constraint boundary is provider capacity evidence, not a
+     measured token or byte limit. It must stay outside the two refusal
+     axes rather than being folded into one of them. *)
+  (match Budget.capacity_refusal_of_error boundary with
+   | None -> ()
+   | Some _ -> fail "a serving boundary was folded into a capacity refusal");
+  (match
+     Budget.capacity_refusal_of_error
+       (request_body_too_large
+          ~actual_bytes:2_000_000
+          ~limit_bytes:1_048_576)
+   with
+   | Some (Budget.Serialized_request_body
+             { actual_bytes = 2_000_000; limit_bytes = 1_048_576 }) ->
      ()
-   | _ -> fail "typed serving boundary did not become a token-capacity trigger");
+   | _ -> fail "serialized byte provenance was not preserved");
   match
-    Budget.capacity_transition_of_error
-      (request_body_too_large
-         ~actual_bytes:2_000_000
-         ~limit_bytes:1_048_576)
+    Budget.capacity_refusal_of_error
+      (request_body_refused_by_provider ~status:413)
   with
-  | Budget.Capacity_refusal_classified
-      (Compaction_trigger.Request_body_over_capacity
-         { actual_bytes = 2_000_000; limit_bytes = 1_048_576 }) ->
-    ();
-    (match
-       Budget.capacity_transition_of_error
-         (request_body_refused_by_provider ~status:413)
-     with
-     | Budget.Capacity_refusal_classified
-         (Compaction_trigger.Request_body_refused_by_provider { status = 413 }) ->
-       ()
-     | _ -> fail "provider refusal did not become a typed capacity trigger")
-  | _ -> fail "serialized byte provenance was not preserved"
+  | Some (Budget.Provider_request_body_refusal { status = 413 }) -> ()
+  | _ -> fail "provider refusal did not keep its status"
 ;;
 
+(* Serving-evidence validity and unmeasurable tokens are facts about the
+   measurement, not a capacity limit. Neither may be guessed into one. *)
 let test_unusable_capacity_evidence_is_non_compacting () =
   let constraint_ = serving_constraint () in
   (match
-     Budget.capacity_transition_of_error
+     Budget.capacity_refusal_of_error
        (input_capacity
           constraint_
           (Llm_provider.Serving_constraint.Evidence_expired
              { now_unix_s = 200; expires_at_unix_s = 199 }))
    with
-   | Budget.Capacity_non_compacting
-       (Budget.Serving_evidence_expired
-          { now_unix_s = 200; expires_at_unix_s = 199 }) ->
-     ()
-   | _ -> fail "expired serving evidence became compactable");
-  match
-    Budget.capacity_transition_of_error
-      (measurement_unavailable constraint_)
-  with
-  | Budget.Capacity_non_compacting Budget.Token_measurement_unavailable ->
-    ()
-  | _ -> fail "measurement-unavailable became compactable"
+   | None -> ()
+   | Some _ -> fail "expired serving evidence became a capacity refusal");
+  match Budget.capacity_refusal_of_error (measurement_unavailable constraint_) with
+  | None -> ()
+  | Some _ -> fail "measurement-unavailable became a capacity refusal"
 ;;
 
 (* The classifier feeding the cascade path publishes

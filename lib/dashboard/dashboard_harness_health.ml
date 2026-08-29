@@ -23,15 +23,6 @@ type harness_verdict_item =
         hash joins this verdict in {!Eval_calibration.find_divergences}. *)
   }
 
-type pre_compact_event = Keeper_compact_policy.pre_compact_event =
-  { timestamp : float
-  ; keeper_name : string
-  ; checkpoint_bytes : int
-  ; message_count : int
-  ; strategies : string list
-  ; trigger : Compaction_trigger.t
-  }
-
 (** Wake-time payload observation.
 
     Captured once per keeper turn, just before [Keeper_turn_driver.run_named] fires.
@@ -79,9 +70,6 @@ let evaluator_stale_after_s = 12. *. Masc_time_constants.hour
    reviewed edit. *)
 let evaluator_fallback_warning_ratio = 0.8
 
-let pre_compact_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
-let pre_compact_store_mu = Eio.Mutex.create ()
-
 (** Store for wake-time payload observations. Populated lazily on the first
     [record_wake_payload] call. *)
 let wake_payload_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
@@ -100,9 +88,6 @@ let trim_recent (type a) max_items (values : a list) : a list =
   else List.filteri (fun idx _ -> idx < max_items) values
 ;;
 
-let pre_compact_store_base_dir () =
-  Filename.concat (Env_config.base_path ()) "data/harness-pre-compact"
-;;
 
 let wake_payload_store_base_dir () =
   Filename.concat (Env_config.base_path ()) "data/keeper-wake-payload"
@@ -132,12 +117,6 @@ let append_store_json_fail_open ~store_ref ~store_name get_store json =
     Log.Harness.warn "[%s] append failed: %s" store_name (Printexc.to_string exn)
 ;;
 
-let get_pre_compact_store () =
-  get_or_create_store
-    ~store_ref:pre_compact_store_ref
-    ~store_mu:pre_compact_store_mu
-    pre_compact_store_base_dir
-;;
 
 let get_wake_payload_store () =
   get_or_create_store
@@ -146,14 +125,7 @@ let get_wake_payload_store () =
     wake_payload_store_base_dir
 ;;
 
-let reset_runtime_stores_for_testing () =
-  Atomic.set pre_compact_store_ref None;
-  Atomic.set wake_payload_store_ref None
-;;
 
-let set_pre_compact_store_for_testing ~base_dir =
-  Atomic.set pre_compact_store_ref (Some (Dated_jsonl.create ~base_dir ()))
-;;
 
 let set_wake_payload_store_for_testing ~base_dir =
   Atomic.set wake_payload_store_ref (Some (Dated_jsonl.create ~base_dir ()))
@@ -199,8 +171,6 @@ let read_store_records store ?since ?until ~f () =
       ~f)
 ;;
 
-let has_any_records store = Dated_jsonl.read_recent store 1 <> []
-
 let max_timestamp left right =
   match left, right with
   | Some l, Some r -> Some (Float.max l r)
@@ -239,64 +209,8 @@ let verdict_item_of_json json =
       }
 ;;
 
-let pre_compact_record_json (event : pre_compact_event) =
-  `Assoc
-    [ "record_type", `String "pre_compact"
-    ; "timestamp", `Float event.timestamp
-    ; "keeper_name", `String event.keeper_name
-    ; "checkpoint_bytes", `Int event.checkpoint_bytes
-    ; "message_count", `Int event.message_count
-    ; "strategies", `List (List.map (fun value -> `String value) event.strategies)
-    ; "trigger", `String (Compaction_trigger.to_label event.trigger)
-    ; "trigger_detail", Compaction_trigger.to_detail_json event.trigger
-    ]
-;;
 
-let pre_compact_event_json (event : pre_compact_event) =
-  `Assoc
-    [ "timestamp", `Float event.timestamp
-    ; "keeper_name", `String event.keeper_name
-    ; "checkpoint_bytes", `Int event.checkpoint_bytes
-    ; "message_count", `Int event.message_count
-    ; "strategies", `List (List.map (fun value -> `String value) event.strategies)
-    ; "trigger", `String (Compaction_trigger.to_label event.trigger)
-    ; "trigger_detail", Compaction_trigger.to_detail_json event.trigger
-    ]
-;;
 
-let pre_compact_event_of_json json =
-  let reject reason =
-    Log.Harness.warn "[pre_compact] rejected persisted row: %s" reason;
-    None
-  in
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt "record_type" fields with
-     | None -> reject "missing record_type"
-     | Some (`String "pre_compact") ->
-       (match List.assoc_opt "trigger_detail" fields with
-        | None -> reject "missing trigger_detail"
-        | Some detail ->
-          (match Compaction_trigger.of_detail_json detail with
-           | Ok trigger ->
-             Some
-               { timestamp = Safe_ops.json_float ~default:0.0 "timestamp" json
-               ; keeper_name = string_field json "keeper_name"
-               ; checkpoint_bytes = Safe_ops.json_int ~default:0 "checkpoint_bytes" json
-               ; message_count = Safe_ops.json_int ~default:0 "message_count" json
-               ; strategies = Safe_ops.json_string_list "strategies" json
-               ; trigger
-               }
-           | Error error ->
-             reject
-               (Printf.sprintf
-                  "invalid trigger_detail: %s"
-                  (Compaction_trigger.decode_error_to_string error))))
-     | Some (`String record_type) ->
-       reject (Printf.sprintf "unexpected record_type %S" record_type)
-     | Some _ -> reject "record_type must be a string")
-  | _ -> reject "expected an object"
-;;
 
 let role_counts_to_json (counts : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (role, n) -> role, `Int n) counts)
@@ -521,20 +435,6 @@ let read_recent_verdicts_for_agents
     trim_recent limit verdicts)
 ;;
 
-let read_pre_compact_events ?since ?until () =
-  let events : pre_compact_event list =
-    read_store_records
-      (get_pre_compact_store ())
-      ?since
-      ?until
-      ~f:pre_compact_event_of_json
-      ()
-  in
-  List.sort
-    (fun (left : pre_compact_event) (right : pre_compact_event) ->
-       Float.compare right.timestamp left.timestamp)
-    events
-;;
 
 let read_wake_payload_events ?since ?until () =
   let events : wake_payload_event list =
@@ -662,14 +562,6 @@ let empty_reason ~has_any ?since ?until () =
   else Some "no_runtime_activity"
 ;;
 
-let pre_compact_status (latest_event : pre_compact_event option) =
-  match latest_event with
-  | None -> Idle
-  | Some event ->
-    if is_stale ~threshold_s:runtime_stale_after_s event.timestamp
-    then Stale
-    else Healthy
-;;
 
 let handoff_status (latest_event : handoff_event option) =
   match latest_event with
@@ -718,109 +610,11 @@ let latest_by_timestamp timestamp_of items =
     items
 ;;
 
-let pre_compact_timestamp (event : pre_compact_event) = event.timestamp
-let pre_compact_checkpoint_bytes (event : pre_compact_event) =
-  event.checkpoint_bytes
-;;
 let handoff_timestamp (event : handoff_event) = event.timestamp
 let handoff_generation (event : handoff_event) = event.next_generation
 
-let overview_json
-      ~(calibration : Yojson.Safe.t)
-      ~(recent_verdicts : harness_verdict_item list)
-      ~(latest_pre_compact : pre_compact_event option)
-      ~(latest_handoff : handoff_event option)
-  =
-  let verdict_last = latest_timestamp_of_verdicts recent_verdicts in
-  let pre_compact_last = Option.map pre_compact_timestamp latest_pre_compact in
-  let handoff_last = Option.map handoff_timestamp latest_handoff in
-  let fallback_count = Safe_ops.json_int ~default:0 "fallback_count" calibration in
-  let total_verdicts = Safe_ops.json_int ~default:0 "total_verdicts" calibration in
-  let fallback_ratio =
-    if total_verdicts = 0
-    then 0.0
-    else float_of_int fallback_count /. float_of_int total_verdicts
-  in
-  (* Cross-model enforcement ratio: of verdicts that recorded both a
-     generator and an evaluator runtime, what fraction used distinct
-     runtimes? This is the *runtime* rate at which the cross-model
-     review policy (anti_rationalization.mli, #3067) actually fired. *)
-  let verdicts_with_generator =
-    Safe_ops.json_int ~default:0 "verdicts_with_generator_runtime" calibration
-  in
-  let cross_model_match =
-    Safe_ops.json_int ~default:0 "cross_model_match_count" calibration
-  in
-  let cross_model_rate =
-    if verdicts_with_generator = 0
-    then 0.0
-    else float_of_int cross_model_match /. float_of_int verdicts_with_generator
-  in
-  let last_signal_at =
-    max_timestamp verdict_last (max_timestamp pre_compact_last handoff_last)
-  in
-  `Assoc
-    [ ( "evaluator_status"
-      , `String (status_to_string (evaluator_status ~calibration verdict_last)) )
-    ; ( "pre_compact_status"
-      , `String (status_to_string (pre_compact_status latest_pre_compact)) )
-    ; "handoff_status", `String (status_to_string (handoff_status latest_handoff))
-    ; "last_signal_at", Json_util.float_opt_to_json last_signal_at
-    ; "evaluator_last_event_at", Json_util.float_opt_to_json verdict_last
-    ; "pre_compact_last_event_at", Json_util.float_opt_to_json pre_compact_last
-    ; "handoff_last_event_at", Json_util.float_opt_to_json handoff_last
-    ; "fallback_ratio", `Float fallback_ratio
-    ; "cross_model_rate", `Float cross_model_rate
-    ; "cross_model_match_count", `Int cross_model_match
-    ; "verdicts_with_generator_runtime", `Int verdicts_with_generator
-    ; ( "latest_pre_compact_checkpoint_bytes"
-      , Json_util.int_opt_to_json
-          (Option.map pre_compact_checkpoint_bytes latest_pre_compact) )
-    ; ( "latest_handoff_generation"
-      , Json_util.int_opt_to_json (Option.bind latest_handoff handoff_generation) )
-    ]
-;;
 
-let record_pre_compact_at
-      ~timestamp
-      ~keeper_name
-      ~checkpoint_bytes
-      ~message_count
-      ~strategies
-      ~trigger
-  =
-  let event =
-    { timestamp
-    ; keeper_name
-    ; checkpoint_bytes
-    ; message_count
-    ; strategies
-    ; trigger
-    }
-  in
-  append_store_json_fail_open
-    ~store_ref:pre_compact_store_ref
-    ~store_name:"pre_compact"
-    get_pre_compact_store
-    (pre_compact_record_json event);
-  event
-;;
 
-let record_pre_compact
-      ~keeper_name
-      ~checkpoint_bytes
-      ~message_count
-      ~strategies
-      ~trigger
-  =
-  record_pre_compact_at
-    ~timestamp:(Time_compat.now ())
-    ~keeper_name
-    ~checkpoint_bytes
-    ~message_count
-    ~strategies
-    ~trigger
-;;
 
 let record_wake_payload_at
       ~timestamp
@@ -883,32 +677,6 @@ let record_wake_payload
     ~tool_count
 ;;
 
-let recent_pre_compact_json
-      ?since
-      ?until
-      ~has_any
-      ~(latest : pre_compact_event option)
-      ~(events : pre_compact_event list)
-      ()
-  =
-  let status = status_to_string (pre_compact_status latest) in
-  let recent_events = trim_recent max_runtime_events events in
-  `Assoc
-    [ ( "description"
-      , `String
-          "Shows recent context compaction attempts before long-running keeper turns are \
-           condensed." )
-    ; "status", `String status
-    ; ( "last_event_at"
-      , Json_util.float_opt_to_json (Option.map pre_compact_timestamp latest) )
-    ; ( "empty_reason"
-      , match recent_events with
-        | _ :: _ -> `Null
-        | [] -> Json_util.string_opt_to_json (empty_reason ~has_any ?since ?until ()) )
-    ; "recent_events", `List (List.map pre_compact_event_json recent_events)
-    ; "total_recent", `Int (List.length events)
-    ]
-;;
 
 let recent_handoffs_json
       ?since
@@ -936,23 +704,61 @@ let recent_handoffs_json
     ]
 ;;
 
+
+let overview_json
+      ~(calibration : Yojson.Safe.t)
+      ~(recent_verdicts : harness_verdict_item list)
+      ~(latest_handoff : handoff_event option)
+  =
+  let verdict_last = latest_timestamp_of_verdicts recent_verdicts in
+  let handoff_last = Option.map handoff_timestamp latest_handoff in
+  let fallback_count = Safe_ops.json_int ~default:0 "fallback_count" calibration in
+  let total_verdicts = Safe_ops.json_int ~default:0 "total_verdicts" calibration in
+  let fallback_ratio =
+    if total_verdicts = 0
+    then 0.0
+    else float_of_int fallback_count /. float_of_int total_verdicts
+  in
+  (* Cross-model enforcement ratio: of verdicts that recorded both a
+     generator and an evaluator runtime, what fraction used distinct
+     runtimes? This is the *runtime* rate at which the cross-model
+     review policy (anti_rationalization.mli, #3067) actually fired. *)
+  let verdicts_with_generator =
+    Safe_ops.json_int ~default:0 "verdicts_with_generator_runtime" calibration
+  in
+  let cross_model_match =
+    Safe_ops.json_int ~default:0 "cross_model_match_count" calibration
+  in
+  let cross_model_rate =
+    if verdicts_with_generator = 0
+    then 0.0
+    else float_of_int cross_model_match /. float_of_int verdicts_with_generator
+  in
+  let last_signal_at = max_timestamp verdict_last handoff_last in
+  `Assoc
+    [ ( "evaluator_status"
+      , `String (status_to_string (evaluator_status ~calibration verdict_last)) )
+    ; "handoff_status", `String (status_to_string (handoff_status latest_handoff))
+    ; "last_signal_at", Json_util.float_opt_to_json last_signal_at
+    ; "evaluator_last_event_at", Json_util.float_opt_to_json verdict_last
+    ; "handoff_last_event_at", Json_util.float_opt_to_json handoff_last
+    ; "fallback_ratio", `Float fallback_ratio
+    ; "cross_model_rate", `Float cross_model_rate
+    ; "cross_model_match_count", `Int cross_model_match
+    ; "verdicts_with_generator_runtime", `Int verdicts_with_generator
+    ; ( "latest_handoff_generation"
+      , Json_util.int_opt_to_json (Option.bind latest_handoff handoff_generation) )
+    ]
+;;
+
+let reset_runtime_stores_for_testing () =
+  Atomic.set wake_payload_store_ref None
+;;
+
 let json ~(config : Workspace.config) ?since ?until () =
   let calibration = Eval_calibration.calibration_stats ?since ?until () in
   let recent_verdicts = read_recent_verdicts ?since ?until () in
   let has_window = Option.is_some since || Option.is_some until in
-  let pre_compact_store = get_pre_compact_store () in
-  let pre_compact_events = read_pre_compact_events ?since ?until () in
-  let latest_pre_compact : pre_compact_event option =
-    if has_window
-    then
-      Dated_jsonl.read_recent pre_compact_store 1
-      |> List.filter_map pre_compact_event_of_json
-      |> latest_by_timestamp pre_compact_timestamp
-    else latest_by_timestamp pre_compact_timestamp pre_compact_events
-  in
-  let pre_compact_has_any =
-    if has_window then has_any_records pre_compact_store else pre_compact_events <> []
-  in
   let handoff_events = read_handoff_events ?since ?until config in
   let latest_handoff : handoff_event option =
     latest_by_timestamp handoff_timestamp handoff_events
@@ -970,18 +776,9 @@ let json ~(config : Workspace.config) ?since ?until () =
           "The safety harness tracks supporting evaluator and long-running continuity \
            rails, so these signals are not a direct keep/discard judge for generator \
            iterations." )
-    ; ( "overview"
-      , overview_json ~calibration ~recent_verdicts ~latest_pre_compact ~latest_handoff )
+    ; "overview", overview_json ~calibration ~recent_verdicts ~latest_handoff
     ; "calibration", calibration
     ; "recent_verdicts", `List (List.map verdict_item_json recent_verdicts)
-    ; ( "pre_compact"
-      , recent_pre_compact_json
-          ?since
-          ?until
-          ~has_any:pre_compact_has_any
-          ~latest:latest_pre_compact
-          ~events:pre_compact_events
-          () )
     ; ( "recent_handoffs"
       , recent_handoffs_json
           ?since
@@ -1001,21 +798,6 @@ let () =
         ~message_count ~role_counts ~tool_count
     in
     ()
-  );
-
-  Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name ~checkpoint_bytes ~message_count ~strategies ~trigger ->
-    let event = record_pre_compact ~keeper_name ~checkpoint_bytes ~message_count ~strategies ~trigger in
-    let mapped_event : Keeper_compact_policy.pre_compact_event =
-      {
-        timestamp = event.timestamp;
-        keeper_name = event.keeper_name;
-        checkpoint_bytes = event.checkpoint_bytes;
-        message_count = event.message_count;
-        strategies = event.strategies;
-        trigger = event.trigger;
-      }
-    in
-    Some mapped_event
   )
 ;;
 

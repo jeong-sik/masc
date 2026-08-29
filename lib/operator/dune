@@ -70,7 +70,6 @@
   masc.sse_event
   masc.tool_call_quality_benchmark
   masc.keeper_contract
-  masc.compaction_trigger
   masc.bounded_event_dedupe
   masc.tool_catalog_surfaces
   masc.config_dir_resolver

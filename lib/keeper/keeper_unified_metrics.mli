@@ -178,9 +178,6 @@ val append_decision_record :
   unit ->
   unit
 
-val broadcast_compaction :
-  name:string -> Keeper_post_turn.compaction_recovery -> unit
-
 val has_substantive_tool_calls : string list -> bool
 
 val visible_run_validation :

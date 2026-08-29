@@ -17,7 +17,6 @@ import type {
   HarnessHealthData,
   HarnessVerdictItem,
   HarnessSignalSection,
-  PreCompactEvent,
   HandoffEvent,
 } from './harness-health-state'
 import { verdictSummaryText, verdictToneClass, railStatusMessage } from '../lib/keeper-classifiers'
@@ -56,27 +55,6 @@ export function filterVerdicts(
   })
 }
 
-/**
- * Pure filter for pre-compact events.
- *
- * Case-insensitive substring match on `keeper_name`, `trigger`, and any entry
- * of `strategies`. Empty/whitespace query returns the input
- * reference unchanged so `useMemo` keeps referential equality. Input is
- * never mutated.
- */
-export function filterPreCompactEvents(
-  items: readonly PreCompactEvent[],
-  query: string,
-): readonly PreCompactEvent[] {
-  const needle = query.trim().toLowerCase()
-  if (needle === '') return items
-  return items.filter(item => {
-    if (item.keeper_name && item.keeper_name.toLowerCase().includes(needle)) return true
-    if (item.trigger && item.trigger.toLowerCase().includes(needle)) return true
-    if (item.strategies.some(s => s.toLowerCase().includes(needle))) return true
-    return false
-  })
-}
 
 /**
  * Pure filter for handoff events.
@@ -182,7 +160,6 @@ export function verdictSummary(verdict: string): string {
 export function heroTitle(data: HarnessHealthData): string {
   const statuses = [
     data.overview.evaluator_status,
-    data.overview.pre_compact_status,
     data.overview.handoff_status,
   ]
   const msg = railStatusMessage(statuses)
@@ -205,26 +182,19 @@ export function heroBody(data: HarnessHealthData): string {
   return `마지막 안전 신호는 ${freshnessLabel(data.overview.last_signal_at)}에 들어왔습니다.`
 }
 
-export function railDetail(data: HarnessHealthData, rail: 'evaluator' | 'pre_compact' | 'handoff'): string {
+export function railDetail(data: HarnessHealthData, rail: 'evaluator' | 'handoff'): string {
   if (rail === 'evaluator') {
     if (data.calibration.total_verdicts === 0) return '판정 기록 없음'
     return `판정 ${data.calibration.total_verdicts}건`
-  }
-  if (rail === 'pre_compact') {
-    const bytes = data.overview.latest_pre_compact_checkpoint_bytes
-    if (bytes == null) return '최근 압축 없음'
-    return `체크포인트 ${bytes.toLocaleString()} B`
   }
   if (data.overview.latest_handoff_generation == null) return '최근 교체 없음'
   return `${data.overview.latest_handoff_generation}세대`
 }
 
-export function railFreshness(data: HarnessHealthData, rail: 'evaluator' | 'pre_compact' | 'handoff'): string {
+export function railFreshness(data: HarnessHealthData, rail: 'evaluator' | 'handoff'): string {
   switch (rail) {
     case 'evaluator':
       return freshnessLabel(data.overview.evaluator_last_event_at, '기록 없음')
-    case 'pre_compact':
-      return freshnessLabel(data.overview.pre_compact_last_event_at, '기록 없음')
     case 'handoff':
       return freshnessLabel(data.overview.handoff_last_event_at, '기록 없음')
   }
@@ -316,7 +286,7 @@ export function ScopePairing() {
           <${SectionCap}>안전 감시<//>
           <${ItemTitle}>하네스가 답하는 것</${ItemTitle}>
           <div class="text-sm leading-loose text-[var(--color-fg-primary)]">
-            평가 모델이 건강한지, 장기 실행 중 압축이 정상인지, 세대 교체가 안전한지 봅니다.
+            평가 모델이 건강한지, 세대 교체가 안전한지 봅니다.
           </div>
         </div>
       <//>
@@ -474,56 +444,6 @@ export function RecentVerdictsList({
             })()}
             ${item.fallback_reason ? html`
               <div class="mt-2 break-all text-xs text-[var(--color-status-warn)]">${item.fallback_reason}</div>
-            ` : null}
-          <//>
-        `)}
-    </div>
-  `
-}
-
-export function PreCompactList({ section }: { section: HarnessSignalSection<PreCompactEvent> }) {
-  const query = useSignal('')
-  const visibleItems = useMemo(
-    () => filterPreCompactEvents(section.recent_events, query.value),
-    [section.recent_events, query.value],
-  )
-  const isFiltering = query.value.trim() !== ''
-
-  if (section.recent_events.length === 0) {
-    return html`<${EmptySignal} text=${emptyReasonText(section.empty_reason)} />`
-  }
-
-  return html`
-    <div class="space-y-2">
-      <div class="flex justify-end">
-        <${TextInput}
-          type="search"
-          class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
-          value=${query.value}
-          placeholder="keeper / trigger / strategy 필터"
-          ariaLabel="압축 이벤트 필터"
-          onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-        />
-      </div>
-      ${isFiltering && visibleItems.length === 0
-        ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
-        : visibleItems.map(item => html`
-          <${SurfaceCard} variant="compact">
-            <div class="flex items-start justify-between gap-3">
-              <${ItemTitle}>${item.keeper_name}</${ItemTitle}>
-              <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestampKo(item.timestamp)}</div>
-            </div>
-            <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--color-fg-primary)]">
-              <span>체크포인트 ${item.checkpoint_bytes.toLocaleString()} B</span>
-              <span>메시지 ${item.message_count}건</span>
-            </div>
-            <div class="mt-2 text-xs text-[var(--color-fg-muted)]">${item.trigger}</div>
-            ${item.strategies.length > 0 ? html`
-              <div class="mt-2 flex flex-wrap gap-1">
-                ${item.strategies.map(strategy => html`
-                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${strategy}</span>
-                `)}
-              </div>
             ` : null}
           <//>
         `)}

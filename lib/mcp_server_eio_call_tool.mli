@@ -69,7 +69,7 @@ type keeper_runtime_mcp_log_context = {
   task_id : string option;
   sandbox_profile : string option;
   sandbox_root : string option;
-  allowed_paths : string list option;
+  sandbox_roots : string list option;
   network_mode : string option;
   runtime_profile : string option;
 }
@@ -85,7 +85,7 @@ val runtime_mcp_keeper_log_context_of_entry :
 (** Builds a {!keeper_runtime_mcp_log_context} from a
     keeper registry entry.  [arguments] is inspected for
     embedded [agent_name] / [task_id] / [goal_ids] /
-    [allowed_paths] overrides; the entry's
+    [sandbox_roots] overrides; the entry's
     [meta.runtime] supplies the rest. *)
 
 val record_runtime_mcp_keeper_tool_trace :

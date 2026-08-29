@@ -1520,8 +1520,7 @@ export interface KeeperConfig {
   sandbox_profile?: 'local' | 'docker' | 'microvm' | string
   network_mode?: 'none' | 'inherit' | string
   keeper_last_error?: string | null
-  allowed_paths: string[]
-  effective_allowed_paths: string[]
+  sandbox_roots: string[]
   prompt: KeeperConfigPrompt
   execution: KeeperConfigExecution
   proactive: KeeperConfigProactive

@@ -417,7 +417,6 @@ let decode_current_meta fields =
       ; sandbox_profile
       ; sandbox_image = None
       ; network_mode = default_network_mode_for_profile sandbox_profile
-      ; allowed_paths = []
       ; mention_targets = []
       ; proactive = { enabled = default_proactive_enabled }
       ; always_allow = None

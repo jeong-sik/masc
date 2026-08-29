@@ -670,7 +670,7 @@ let make_hooks
              ?task_id:tctx.task_id
              ?sandbox_profile:tctx.sandbox_profile
              ?sandbox_root:tctx.sandbox_root
-             ?allowed_paths:tctx.allowed_paths
+             ?sandbox_roots:tctx.sandbox_roots
              ?network_mode:tctx.network_mode
              ?runtime_profile:tctx.runtime_profile
              ~result_bytes ?truncated_to

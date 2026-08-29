@@ -581,7 +581,7 @@ describe('KeeperToolCallInspector render', () => {
             agent_name: 'keeper-analyst-agent',
             generation: 1,
             sandbox_root: '/sandbox/analyst/',
-            allowed_paths: ['.masc/playground/analyst/'],
+            sandbox_roots: ['.masc/playground/analyst/'],
             network_mode: 'inherit',
             runtime_profile: 'ollama_cloud.example-model',
             path_resolution: { read_implicit_cwd: false, read_explicit_cwd_supported: true },

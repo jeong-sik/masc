@@ -1542,7 +1542,6 @@ let production_keeper_meta ~base_path ~trace_id =
       (`Assoc
          [ "name", `String name
          ; "trace_id", `String trace_id
-         ; "allowed_paths", `List [ `String base_path ]
          ])
   with
   | Ok meta -> meta
@@ -2362,7 +2361,6 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
         (`Assoc
            [ "name", `String keeper_name
            ; "trace_id", `String "trace-official-client-recovery"
-           ; "allowed_paths", `List [ `String base_path ]
            ])
     with
     | Ok meta -> meta

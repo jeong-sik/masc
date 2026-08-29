@@ -893,7 +893,6 @@ let test_keeper_up_accepts_live_traffic_fields () =
       [ "name", `String "alpha"
       ; "instructions", `String "do the thing"
       ; "sandbox_profile", `String "local"
-      ; "allowed_paths", `List [ `String "/tmp" ]
       ; "mention_targets", `List [ `String "alpha" ]
       ; "autoboot_enabled", `Bool true
       ; "proactive_enabled", `Bool true

@@ -48,11 +48,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
     Dashboard_utils.first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
     |> Option.value ~default:true
   in
-  let allowed_paths =
-    match p.allowed_paths_opt with
-    | Some paths -> paths
-    | None -> Option.value ~default:[] p.profile_defaults.allowed_paths
-  in
   let sandbox_profile =
     resolve_sandbox_profile
       ?requested:p.sandbox_profile_opt
@@ -71,7 +66,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
       ~name:p.name
   in
     match
-      validate_sandbox_settings_with_profile ~sandbox_profile ~allowed_paths
+      validate_sandbox_settings_with_profile ~sandbox_profile
     with
     | Error err ->
         Otel_metric_store.inc_counter
@@ -117,7 +112,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         sandbox_profile;
         sandbox_image = None;
         network_mode;
-        allowed_paths;
         mention_targets;
         proactive = {
           enabled = proactive_enabled;

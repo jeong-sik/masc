@@ -596,7 +596,6 @@ let dashboard_config_bool_fields =
 let dashboard_config_string_list_fields =
   [
     "mention_targets";
-    "allowed_paths";
   ]
 
 (* Control field (not persisted): explicit acknowledgement that reducing
@@ -837,22 +836,6 @@ let context_shrink_of_patch ~(meta : Keeper_meta_contract.keeper_meta) fields =
      | Some _ -> None)
   | _ -> None
 
-let prevalidate_config_update
-      (config : Workspace.config)
-      (old : Keeper_meta_contract.keeper_meta)
-      (parsed : Keeper_turn_up_args.parsed_args)
-  =
-  match old.latched_reason with
-  | Some (Keeper_latched_reason.Operator_paused _)
-  | None ->
-    (
-       let allowed_paths =
-         match parsed.allowed_paths_opt with
-         | Some allowed_paths -> allowed_paths
-         | None -> old.allowed_paths
-       in
-       Keeper_turn_up_args.validate_sandbox_settings ~allowed_paths)
-
 let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event =
   Dashboard_cache.invalidate (keeper_config_cache_key config name);
   Dashboard_cache.invalidate (keeper_composite_cache_key config name);
@@ -1022,9 +1005,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                            respond_error reqd
                              (Keeper_types_profile.tool_result_body result)
                        | Ok parsed ->
-                           (match prevalidate_config_update config meta0 parsed with
-                            | Error detail -> respond_error reqd detail
-                            | Ok () ->
+                           (
                            (* Dashboard edits commit a closed Owner profile
                               command, so they cannot overwrite runtime counters.
                               [preserve_prompt_defaults] keeps existing prompt

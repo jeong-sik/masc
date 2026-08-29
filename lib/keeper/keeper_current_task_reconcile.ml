@@ -171,7 +171,7 @@ let sync_current_task_id_from_backlog ~(config : Workspace.config)
             meta. [apply_meta] answers with the committed owner projection,
             which is durable JSON: that file omits the TOML-owned fields on
             purpose ([Keeper_meta_contract.effective_meta_result]), so every
-            one of them -- sandbox_profile, network_mode, allowed_paths,
+            one of them -- sandbox_profile, network_mode,
             instructions -- comes back as the decoder's default. Returning it
             handed the turn a meta that had silently lost its overlay, and a
             keeper whose TOML said docker then dispatched Execute to the host.

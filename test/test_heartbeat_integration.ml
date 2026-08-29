@@ -1727,7 +1727,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       let parsed : Turn_up_args.parsed_args =
         { name = live_name
         ; runtime_id_opt = None
-        ; allowed_paths_opt = None
         ; autoboot_enabled_opt = None
         ; mention_targets_opt = None
         ; max_context_override_opt = None
@@ -1996,7 +1995,6 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
       let parsed : Turn_up_args.parsed_args =
         { name
         ; runtime_id_opt = None
-        ; allowed_paths_opt = None
         ; autoboot_enabled_opt = None
         ; mention_targets_opt = None
         ; max_context_override_opt = None
@@ -2168,7 +2166,6 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       let parsed : Turn_up_args.parsed_args =
         { name
         ; runtime_id_opt = None
-        ; allowed_paths_opt = None
         ; autoboot_enabled_opt = None
         ; mention_targets_opt = None
         ; max_context_override_opt = None

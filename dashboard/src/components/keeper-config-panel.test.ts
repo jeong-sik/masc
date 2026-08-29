@@ -87,8 +87,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     sandbox_profile: 'local',
     network_mode: 'inherit',
     keeper_last_error: null,
-    allowed_paths: ['/tmp/workspace'],
-    effective_allowed_paths: ['/tmp/workspace'],
+    sandbox_roots: ['/tmp/workspace'],
     prompt: {
       instructions: 'Prefer direct remediation',
       system_prompt_blocks: {
@@ -465,8 +464,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     autonomous_wake_prompt: null,
     sandbox_profile: 'local',
     network_mode: 'inherit',
-    allowed_paths: [],
-    effective_allowed_paths: [],
+    sandbox_roots: [],
     prompt: {} as KeeperConfig['prompt'],
     execution: {} as KeeperConfig['execution'],
     proactive: {
@@ -556,12 +554,18 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
 
 describe('rebaseRuntimeDraftOnFreshConfig — conflict rebase', () => {
   const seen = makeKeeperConfigForSandbox({
-    allowed_paths: ['/old/base'],
+    workspace: {
+      mention_targets: ['old-target'],
+      bound_workspace_ids: [],
+    },
     autonomous_wake_prompt: null,
   })
   const fresh = makeKeeperConfigForSandbox({
     // The other writer changed this field; the user never touched it.
-    allowed_paths: ['/remote/writer/change'],
+    workspace: {
+      mention_targets: ['remote-writer-change'],
+      bound_workspace_ids: [],
+    },
     autonomous_wake_prompt: 'remote prompt',
   })
 
@@ -575,7 +579,7 @@ describe('rebaseRuntimeDraftOnFreshConfig — conflict rebase', () => {
     expect(rebased.autonomous_wake_prompt).toBe('user prompt')
     // NOT the stale base value: the untouched field follows the fresh config,
     // so a re-save cannot silently revert the other writer's change.
-    expect(rebased.allowed_paths_text).toBe('/remote/writer/change')
+    expect(rebased.mention_targets_text).toBe('remote-writer-change')
   })
 
   it('preserves a skill-selection mode change', () => {
@@ -656,18 +660,15 @@ describe('buildRuntimePayload — sandbox diffing', () => {
 
   it('normalizes line-based runtime list drafts through one path', () => {
     const c = makeKeeperConfigForSandbox({
-      allowed_paths: ['workspace/masc'],
       workspace: {
         mention_targets: ['sangsu'],
         bound_workspace_ids: [],
       },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
-      allowed_paths_text: 'workspace/masc\n workspace/agentCore \nworkspace/agentCore\n',
       mention_targets_text: 'alpha\n beta \nalpha\n',
     }), c)
 
-    expect(payload.allowed_paths).toEqual(['workspace/masc', 'workspace/agentCore'])
     expect(payload.mention_targets).toEqual(['alpha', 'beta'])
   })
 
@@ -1282,9 +1283,7 @@ describe('KeeperConfigPanel', () => {
     await flush()
     expect(container.querySelector('select[aria-label="sandbox_profile"]')).not.toBeNull()
     expect(container.querySelector('select[aria-label="network_mode"]')).not.toBeNull()
-    expect(container.querySelector('textarea[aria-label="allowed_paths"]')).not.toBeNull()
     expect(container.querySelector('textarea[aria-label="mention_targets"]')).not.toBeNull()
-    expect(container.textContent).toContain('allowed_paths')
     expect(container.textContent).toContain('/tmp/workspace')
 
     const runtimeSave = Array.from(container.querySelectorAll('button')).find(button =>
@@ -2095,7 +2094,7 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     expect(items).toEqual(['tier-group.keeper_unified', 'tier.resilient_breaker'])
   })
 
-  it('access tab edits allowed_paths through the design kcf-paths block with the effective line', async () => {
+  it('access tab shows the sandbox roots as a read-only line', async () => {
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
     await flush()
@@ -2103,9 +2102,7 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     selectKcfTab(container, '권한·샌드박스')
     await flush()
 
-    const textarea = container.querySelector('.kcf-paths textarea.kcf-text') as HTMLTextAreaElement | null
-    expect(textarea).toBeTruthy()
-    expect(textarea?.value).toBe('/tmp/workspace')
+    expect(container.querySelector('.kcf-paths textarea')).toBeNull()
     expect(container.querySelector('.kcf-path-eff')?.textContent).toContain('/tmp/workspace')
   })
 

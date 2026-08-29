@@ -32,7 +32,6 @@ let test_config_writes_are_dropped () =
   let written =
     { meta with
       autoboot_enabled = not meta.autoboot_enabled
-    ; allowed_paths = [ "/tmp/written" ]
     ; mention_targets = [ "someone" ]
     ; always_allow = Some true
     ; max_context_override = Some 4242
@@ -44,7 +43,6 @@ let test_config_writes_are_dropped () =
   in
   let decoded = round_trip written in
   Alcotest.(check bool) "autoboot_enabled is not durable" true decoded.autoboot_enabled;
-  Alcotest.(check (list string)) "allowed_paths is not durable" [] decoded.allowed_paths;
   Alcotest.(check (list string)) "mention_targets is not durable" [] decoded.mention_targets;
   Alcotest.(check bool) "always_allow is not durable" true (decoded.always_allow = None);
   Alcotest.(check bool)

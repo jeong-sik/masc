@@ -33,7 +33,6 @@ let make_meta name =
              agent_name inside the meta. *)
           ("name", `String name);
           ("trace_id", `String ("trace-" ^ name));
-          ("allowed_paths", `List [ `String "*" ]);
         ])
   with
   | Ok meta -> meta

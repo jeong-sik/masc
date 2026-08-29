@@ -339,13 +339,11 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
              (Keeper_types_profile_sandbox.network_mode_to_string
                 m.network_mode) );
          ("keeper_last_error", Json_util.string_opt_to_json keeper_last_error);
-         ( "allowed_paths"
-         , `List (List.map (fun s -> `String s) m.allowed_paths) );
-         ( "effective_allowed_paths"
+         ( "sandbox_roots"
          , `List
              (List.map
                 (fun s -> `String s)
-                (Keeper_alerting_path.effective_allowed_paths ~meta:m)) );
+                (Keeper_alerting_path.sandbox_roots ~meta:m)) );
          ("pipeline_stage", `String pipeline_stage);
          ("lifecycle_phase", Json_util.string_opt_to_json lifecycle_phase);
          ("pipeline_stage_detail", `String pipeline_stage_detail);

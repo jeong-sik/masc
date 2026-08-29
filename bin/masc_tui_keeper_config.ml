@@ -22,7 +22,6 @@ let editable_fields =
   ; Direct ("autoboot_enabled", [ "autoboot_enabled" ])
   ; Direct ("max_context_override", [ "max_context_override" ])
   ; Direct ("autonomous_wake_prompt", [ "autonomous_wake_prompt" ])
-  ; Direct ("allowed_paths", [ "allowed_paths" ])
   ; Direct ("sandbox_profile", [ "sandbox_profile" ])
   ; Direct ("network_mode", [ "network_mode" ])
   ; Direct ("instructions", [ "prompt"; "instructions" ])
@@ -461,8 +460,6 @@ let view_lines ~sanitize json =
         Printf.sprintf "%s / %s"
           (string_value (at [ "sandbox_profile" ]))
           (string_value (at [ "network_mode" ])))
-  ; editable_value_row "Allowed paths"
-      (fun () -> string_list_value (at [ "allowed_paths" ]))
   ; editable_value_row "Mention targets"
       (fun () -> string_list_value (at [ "workspace"; "mention_targets" ]))
   ; editable_value_row "Skills"
@@ -471,8 +468,8 @@ let view_lines ~sanitize json =
   ; section "derived" "read-only"
   ; read_only_value_row "Config revision"
       (fun () -> config_revision_value (at [ "config_revision" ]))
-  ; read_only_value_row "Effective paths"
-      (fun () -> string_list_value (at [ "effective_allowed_paths" ]))
+  ; read_only_value_row "Sandbox roots"
+      (fun () -> string_list_value (at [ "sandbox_roots" ]))
   ; ""
   ; section "provenance" "read-only"
   ; read_only_value_row "Live override"

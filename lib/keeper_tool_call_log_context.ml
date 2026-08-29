@@ -20,7 +20,7 @@ type turn_context =
   ; task_id : string option
   ; sandbox_profile : string option
   ; sandbox_root : string option
-  ; allowed_paths : string list option
+  ; sandbox_roots : string list option
   ; network_mode : string option
   ; runtime_profile : string option
   }
@@ -40,7 +40,7 @@ let empty_turn_context =
   ; task_id = None
   ; sandbox_profile = None
   ; sandbox_root = None
-  ; allowed_paths = None
+  ; sandbox_roots = None
   ; network_mode = None
   ; runtime_profile = None
   }
@@ -66,7 +66,7 @@ let set_turn_context
       ?task_id
       ?sandbox_profile
       ?sandbox_root
-      ?allowed_paths
+      ?sandbox_roots
       ?network_mode
       ?runtime_profile
       ()
@@ -86,7 +86,7 @@ let set_turn_context
      ; task_id
      ; sandbox_profile
      ; sandbox_root
-     ; allowed_paths
+     ; sandbox_roots
      ; network_mode
      ; runtime_profile
      }
@@ -120,7 +120,7 @@ let runtime_observability_contract_json_for_call ~keeper_name ~cell () =
     ?task_id:ctx.task_id
     ?sandbox_profile:ctx.sandbox_profile
     ?sandbox_root:ctx.sandbox_root
-    ?allowed_paths:ctx.allowed_paths
+    ?sandbox_roots:ctx.sandbox_roots
     ?network_mode:ctx.network_mode
     ?runtime_profile:ctx.runtime_profile
     ()

@@ -29,7 +29,7 @@ type turn_context =
   ; task_id : string option
   ; sandbox_profile : string option
   ; sandbox_root : string option
-  ; allowed_paths : string list option
+  ; sandbox_roots : string list option
   ; network_mode : string option
   ; runtime_profile : string option
   }
@@ -56,7 +56,7 @@ val set_turn_context :
   ?task_id:string ->
   ?sandbox_profile:string ->
   ?sandbox_root:string ->
-  ?allowed_paths:string list ->
+  ?sandbox_roots:string list ->
   ?network_mode:string ->
   ?runtime_profile:string ->
   unit ->

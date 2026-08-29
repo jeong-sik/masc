@@ -888,7 +888,7 @@ let assemble_hooks
                     (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile)
                   ~sandbox_root:
                     (Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
-                  ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
+                  ~sandbox_roots:(Keeper_alerting_path.sandbox_roots ~meta)
                   ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode)
                   ~runtime_profile:runtime_id_string
                   ();

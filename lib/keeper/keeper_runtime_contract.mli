@@ -13,7 +13,7 @@ val runtime_contract_json_from_fields :
   ?goal_ids:string list ->
   ?sandbox_profile:string ->
   ?sandbox_root:string ->
-  ?allowed_paths:string list ->
+  ?sandbox_roots:string list ->
   ?network_mode:string ->
   ?runtime_profile:string ->
   unit ->
@@ -31,7 +31,7 @@ val runtime_observability_contract_json_from_fields :
   ?goal_ids:string list ->
   ?sandbox_profile:string ->
   ?sandbox_root:string ->
-  ?allowed_paths:string list ->
+  ?sandbox_roots:string list ->
   ?network_mode:string ->
   ?runtime_profile:string ->
   unit ->

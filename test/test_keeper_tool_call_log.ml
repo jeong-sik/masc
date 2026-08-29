@@ -675,7 +675,7 @@ let test_turn_context_fields_stored () =
       ~task_id:"task-runtime-trust"
       ~sandbox_profile:"docker"
       ~sandbox_root:"/tmp/k-sandbox"
-      ~allowed_paths:["/tmp/k-sandbox"; "/tmp/shared"]
+      ~sandbox_roots:["/tmp/k-sandbox"; "/tmp/shared"]
       ~network_mode:"inherit"
       ~runtime_profile:"tool_use_strict"
       ();
@@ -697,7 +697,7 @@ let test_turn_context_fields_stored () =
       ?task_id:tctx.task_id
       ?sandbox_profile:tctx.sandbox_profile
       ?sandbox_root:tctx.sandbox_root
-      ?allowed_paths:tctx.allowed_paths
+      ?sandbox_roots:tctx.sandbox_roots
       ?network_mode:tctx.network_mode
       ?runtime_profile:tctx.runtime_profile
       ();
@@ -759,10 +759,10 @@ let test_turn_context_fields_stored () =
       (match Yojson.Safe.Util.member "agent_name" runtime_contract with
        | `Null -> true
        | _ -> false);
-    Alcotest.(check (list string)) "runtime_contract allowed_paths"
+    Alcotest.(check (list string)) "runtime_contract sandbox_roots"
       ["/tmp/k-sandbox"; "/tmp/shared"]
       Yojson.Safe.Util.(
-        runtime_contract |> member "allowed_paths" |> to_list |> List.map to_string);
+        runtime_contract |> member "sandbox_roots" |> to_list |> List.map to_string);
     let path_resolution =
       Yojson.Safe.Util.member "path_resolution" runtime_contract
     in

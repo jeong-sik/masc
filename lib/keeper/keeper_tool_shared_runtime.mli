@@ -23,8 +23,7 @@ val missing_file_error_json
     it to the front. Non-assoc values pass through unchanged. *)
 val assoc_override_string : string -> string -> Yojson.Safe.t -> Yojson.Safe.t
 
-(** Re-export of [Keeper_alerting_path.effective_allowed_paths]. *)
-(** Re-export of [Keeper_alerting_path.effective_write_allowed_paths]. *)
+(** Re-export of [Keeper_alerting_path.sandbox_roots]. *)
 (** Sandbox playground root for [meta]; ensures the bundle dirs
     exist as a side effect. *)
 val keeper_playground_root

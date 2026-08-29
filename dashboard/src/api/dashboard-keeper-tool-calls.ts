@@ -40,7 +40,7 @@ export type ToolCallRuntimeContract = {
   keeper_name?: string
   generation?: number
   sandbox_root?: string
-  allowed_paths?: string[]
+  sandbox_roots?: string[]
   path_resolution?: ToolCallPathResolution
   network_mode?: string
   runtime_profile?: string
@@ -207,7 +207,7 @@ function decodeRuntimeContract(raw: unknown): ToolCallRuntimeContract | undefine
     keeper_name: asString(raw.keeper_name),
     generation: asNumber(raw.generation),
     sandbox_root: asString(raw.sandbox_root),
-    allowed_paths: asStringArray(raw.allowed_paths),
+    sandbox_roots: asStringArray(raw.sandbox_roots),
     path_resolution: decodePathResolution(raw.path_resolution),
     network_mode: asString(raw.network_mode),
     runtime_profile: asString(raw.runtime_profile),

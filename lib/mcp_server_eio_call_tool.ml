@@ -187,7 +187,7 @@ type keeper_runtime_mcp_log_context = {
   task_id : string option;
   sandbox_profile : string option;
   sandbox_root : string option;
-  allowed_paths : string list option;
+  sandbox_roots : string list option;
   network_mode : string option;
   runtime_profile : string option;
 }
@@ -227,8 +227,8 @@ let runtime_mcp_keeper_log_context_of_entry
       Some (Keeper_types_profile_sandbox.sandbox_profile_to_string entry.meta.sandbox_profile);
     sandbox_root =
       Some (Keeper_sandbox.host_root_abs_of_meta ~config entry.meta);
-    allowed_paths =
-      Some (Keeper_alerting_path.effective_allowed_paths ~meta:entry.meta);
+    sandbox_roots =
+      Some (Keeper_alerting_path.sandbox_roots ~meta:entry.meta);
     network_mode =
       Some (Keeper_types_profile_sandbox.network_mode_to_string entry.meta.network_mode);
     runtime_profile =
@@ -338,7 +338,7 @@ let record_runtime_mcp_keeper_trajectory
       ?task_id:ctx.task_id
       ?sandbox_profile:ctx.sandbox_profile
       ?sandbox_root:ctx.sandbox_root
-      ?allowed_paths:ctx.allowed_paths
+      ?sandbox_roots:ctx.sandbox_roots
       ?network_mode:ctx.network_mode
       ?runtime_profile:ctx.runtime_profile
       ()
@@ -426,7 +426,7 @@ let record_runtime_mcp_keeper_tool_trace
     ?task_id:ctx.task_id
     ?sandbox_profile:ctx.sandbox_profile
     ?sandbox_root:ctx.sandbox_root
-      ?allowed_paths:ctx.allowed_paths
+      ?sandbox_roots:ctx.sandbox_roots
       ?network_mode:ctx.network_mode
       ?runtime_profile:ctx.runtime_profile
     ~result_bytes:(String.length message)

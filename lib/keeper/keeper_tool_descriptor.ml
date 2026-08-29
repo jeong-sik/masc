@@ -12,7 +12,7 @@ type backend =
 
 type sandbox =
   | No_sandbox
-  | Host_allowed_paths
+  | Host_sandbox_roots
   | Turn_sandbox
   | Docker_profile
   | Backend_selected
@@ -199,7 +199,7 @@ let backend_to_string = function
 
 let sandbox_to_string = function
   | No_sandbox -> "none"
-  | Host_allowed_paths -> "host_allowed_paths"
+  | Host_sandbox_roots -> "host_sandbox_roots"
   | Turn_sandbox -> "turn_sandbox"
   | Docker_profile -> "docker_profile"
   | Backend_selected -> "backend_selected"
@@ -707,7 +707,7 @@ let public_descriptors =
       ~input_schema:execute_schema
       ~policy:
         (policy
-           ~cwd_scope:"keeper_sandbox_or_allowed_path"
+           ~cwd_scope:"keeper_sandbox"
            ())
       ~executor:Shell_ir
       ~backend:Sandbox_process
@@ -740,7 +740,7 @@ let public_descriptors =
         (policy
            ~readonly:true
            ~readonly_of_input:search_files_readonly_of_input
-           ~cwd_scope:"keeper_sandbox_or_allowed_path"
+           ~cwd_scope:"keeper_sandbox"
            ())
       ~executor:Shell_ir
       ~backend:Sandbox_process
@@ -768,7 +768,7 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:true
-           ~cwd_scope:"keeper_sandbox_or_allowed_path"
+           ~cwd_scope:"keeper_sandbox"
            ())
       ~executor:Filesystem
       ~backend:Sandbox_process
@@ -792,7 +792,7 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:false
-           ~cwd_scope:"keeper_sandbox_or_allowed_path"
+           ~cwd_scope:"keeper_sandbox"
            ())
       ~executor:Filesystem
       ~backend:Sandbox_process
@@ -816,7 +816,7 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:false
-           ~cwd_scope:"keeper_sandbox_or_allowed_path"
+           ~cwd_scope:"keeper_sandbox"
            ())
       ~executor:Filesystem
       ~backend:Sandbox_process

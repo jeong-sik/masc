@@ -591,7 +591,7 @@ let log_call
       ?task_id
       ?sandbox_profile
       ?sandbox_root
-      ?allowed_paths
+      ?sandbox_roots
       ?network_mode
       ?runtime_profile
       ?result_bytes
@@ -830,7 +830,7 @@ let log_call
           ?task_id
           ?sandbox_profile
           ?sandbox_root
-          ?allowed_paths
+          ?sandbox_roots
           ?network_mode
           ?runtime_profile
           ()

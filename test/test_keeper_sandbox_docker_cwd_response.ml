@@ -53,7 +53,6 @@ let make_docker_meta ~name : Keeper_meta_contract.keeper_meta =
       [
         ("name", `String name);
         ("trace_id", `String ("trace-" ^ name));
-        ("allowed_paths", `List [ `String "*" ]);
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -112,7 +111,6 @@ let test_container_path_translation_under_sandbox () =
       let local_meta =
         { (make_docker_meta ~name:"local-explicit-path") with
           sandbox_profile = Keeper_types_profile_sandbox.Local
-        ; allowed_paths = [ explicit_cwd ]
         }
       in
       let raw =

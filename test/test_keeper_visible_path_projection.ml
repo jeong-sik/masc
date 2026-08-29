@@ -350,11 +350,10 @@ let test_relative_path_does_not_depend_on_project_root_allowlist () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   let target = Filename.concat playground "scratch/README.md" in
-  let project_root_meta = { meta with allowed_paths = [ "scratch" ] } in
   match
     Keeper_tool_shared_runtime.resolve_keeper_read_path
       ~config
-      ~meta:project_root_meta
+      ~meta
       ~raw_path:"scratch/README.md"
   with
   | Ok path -> Alcotest.(check string) "relative path stays in playground" target path

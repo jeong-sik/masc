@@ -256,9 +256,6 @@ let keeper_meta_overlay_drift_categories
         (current.sandbox_profile <> target.sandbox_profile);
       drift_if "sandbox_image" (current.sandbox_image <> target.sandbox_image);
       drift_if "network_mode" (current.network_mode <> target.network_mode);
-      drift_if "allowed_paths"
-        (Option.is_some defaults.allowed_paths
-         && current.allowed_paths <> target.allowed_paths);
       drift_if "telemetry_feedback_enabled"
         (current.telemetry_feedback_enabled <> target.telemetry_feedback_enabled);
       drift_if "telemetry_feedback_window_hours"
@@ -344,8 +341,6 @@ let ensure_keeper_meta_with_cause config name =
     let target_network_mode =
       apply_default defaults.network_mode
         (Keeper_types_profile.default_network_mode_for_profile target_sandbox_profile) in
-    let target_allowed_paths =
-      apply_default defaults.allowed_paths [] in
 
     (* --- Telemetry Feedback --- *)
     let target_tf_enabled =
@@ -379,7 +374,6 @@ let ensure_keeper_meta_with_cause config name =
         sandbox_profile = target_sandbox_profile;
         sandbox_image = target_sandbox_image;
         network_mode = target_network_mode;
-        allowed_paths = target_allowed_paths;
         telemetry_feedback_enabled = target_tf_enabled;
         telemetry_feedback_window_hours = target_tf_window;
         always_allow = target_always_allow;
@@ -424,7 +418,6 @@ let ensure_keeper_meta_with_cause config name =
              ; sandbox_profile = persisted_updated.sandbox_profile
              ; sandbox_image = persisted_updated.sandbox_image
              ; network_mode = persisted_updated.network_mode
-             ; allowed_paths = persisted_updated.allowed_paths
              ; mention_targets = persisted_updated.mention_targets
              ; proactive_enabled = persisted_updated.proactive.enabled
              ; max_context_override = persisted_updated.max_context_override

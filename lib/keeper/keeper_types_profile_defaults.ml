@@ -10,7 +10,6 @@ type keeper_profile_defaults = {
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
-  allowed_paths : string list option;
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
@@ -59,7 +58,6 @@ let empty_keeper_profile_defaults =
     autoboot_enabled = None;
     mention_targets = [];
     proactive_enabled = None;
-    allowed_paths = None;
     sandbox_profile = None;
     sandbox_image = None;
     network_mode = None;

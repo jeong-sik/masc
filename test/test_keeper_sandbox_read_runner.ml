@@ -7,7 +7,6 @@ let make_meta () =
       ; "trace_id", `String "trace-read-runner"
       (* [sandbox_profile] moved to TOML in 5e151702c4; 28ef484a39 rejects it
          here. The runner reads the profile from config, not from meta. *)
-      ; "allowed_paths", `List [ `String "*" ]
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

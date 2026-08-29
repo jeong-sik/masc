@@ -102,7 +102,6 @@ let make_meta ?(sandbox = Keeper_types_profile_sandbox.Local) name =
     `Assoc
       [
         ("name", `String name);
-        ("allowed_paths", `List [ `String "*" ]);
         ("always_allow", `Bool true);
       ]
   in

@@ -222,7 +222,7 @@ let observe_node_result
       ?task_id:context.task_id
       ?sandbox_profile:context.sandbox_profile
       ?sandbox_root:context.sandbox_root
-      ?allowed_paths:context.allowed_paths
+      ?sandbox_roots:context.sandbox_roots
       ?network_mode:context.network_mode
       ?runtime_profile:context.runtime_profile
       ~on_committed:(fun () -> committed := true)
@@ -338,7 +338,7 @@ let observe_composition_run_summary
       ?task_id:(field (fun context -> context.task_id))
       ?sandbox_profile:(field (fun context -> context.sandbox_profile))
       ?sandbox_root:(field (fun context -> context.sandbox_root))
-      ?allowed_paths:(field (fun context -> context.allowed_paths))
+      ?sandbox_roots:(field (fun context -> context.sandbox_roots))
       ?network_mode:(field (fun context -> context.network_mode))
       ?runtime_profile:(field (fun context -> context.runtime_profile))
       ~result_bytes:(String.length output_text)

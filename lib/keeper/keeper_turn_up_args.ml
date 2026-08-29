@@ -12,7 +12,6 @@ open Keeper_types_profile
 type parsed_args = {
   name : string;
   runtime_id_opt : string option;
-  allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
   mention_targets_opt : string list option;
   max_context_override_opt : int option;
@@ -264,21 +263,19 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
   if not (validate_name name) then
     Error (tool_result_error ~class_:Tool_result.Policy_rejection (invalid_name_error name))
   else
-    let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
     let runtime_id_opt_res = parse_runtime_id_opt args in
     let tools_patch_res = parse_tools_patch args in
     let skills_patch_res = parse_skills_patch args in
     match
-      allowed_paths_opt_res, mention_targets_opt_res,
+      mention_targets_opt_res,
       runtime_id_opt_res, tools_patch_res, skills_patch_res
     with
-    | Error e, _, _, _, _
-    | _, Error e, _, _, _
-    | _, _, Error e, _, _
-    | _, _, _, Error e, _
-    | _, _, _, _, Error e -> Error (tool_result_error ~class_:Tool_result.Policy_rejection e)
-    | Ok allowed_paths_opt, Ok mention_targets_opt,
+    | Error e, _, _, _
+    | _, Error e, _, _
+    | _, _, Error e, _
+    | _, _, _, Error e -> Error (tool_result_error ~class_:Tool_result.Policy_rejection e)
+    | Ok mention_targets_opt,
       Ok runtime_id_opt,
       Ok
         ( tool_groups_present
@@ -401,7 +398,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
     Ok {
       name;
       runtime_id_opt;
-      allowed_paths_opt;
       autoboot_enabled_opt;
       mention_targets_opt;
       max_context_override_opt;
@@ -461,39 +457,5 @@ let resolve_network_mode ~sandbox_profile ~fallback =
   |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
 
 
-let sandbox_allowed_path_has_forbidden_segments path =
-  let has_glob =
-    String.exists (function
-      | '*' | '?' | '[' | ']' -> true
-      | _ -> false)
-      path
-  in
-  has_glob
-  || (path
-      |> String.split_on_char '/'
-      |> List.exists (function
-           | "." | ".." -> true
-           | _ -> false))
-
-let validate_sandbox_settings ~allowed_paths =
-  if allowed_paths = [ "*" ] then
-    Error "allowed_paths=[\"*\"] is not supported; enumerate explicit paths instead"
-  else
-    match
-      List.filter sandbox_allowed_path_has_forbidden_segments allowed_paths
-    with
-    | [] -> Ok ()
-    | rejected ->
-        Error
-          (Printf.sprintf
-             "allowed_paths entries may not contain globs or traversal segments \
-              (rejected: %s)"
-             (String.concat ", " rejected))
-
-(* Gate first, then the path checks: a rejected profile must not be masked by
-   an [allowed_paths] error, and an allowed profile falls through to the
-   unchanged path validation. *)
-let validate_sandbox_settings_with_profile ~sandbox_profile ~allowed_paths =
-  match validate_sandbox_profile_allowed ~profile:sandbox_profile with
-  | Error _ as err -> err
-  | Ok () -> validate_sandbox_settings ~allowed_paths
+let validate_sandbox_settings_with_profile ~sandbox_profile =
+  validate_sandbox_profile_allowed ~profile:sandbox_profile

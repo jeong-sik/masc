@@ -535,14 +535,12 @@ run_live_case() {
     --arg name "${keeper_name}" \
     --arg instructions "${instructions}" \
     --arg runtime_id "${runtime_id}" \
-    --argjson allowed_paths "$(jq -cn --arg path "${WORKSPACE_ROOT}" '[ $path ]')" \
     '{
       name: $name,
       instructions: $instructions,
       runtime_id: $runtime_id,
       autoboot_enabled: false,
       proactive_enabled: false,
-      allowed_paths: $allowed_paths
     }')"
 
   if ! call_mcp_tool 2000 "masc_keeper_up" "${create_args}" 45; then

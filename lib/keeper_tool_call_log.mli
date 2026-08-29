@@ -90,7 +90,7 @@ val set_turn_context :
   ?task_id:string ->
   ?sandbox_profile:string ->
   ?sandbox_root:string ->
-  ?allowed_paths:string list ->
+  ?sandbox_roots:string list ->
   ?network_mode:string ->
   ?runtime_profile:string ->
   unit ->
@@ -219,7 +219,7 @@ val log_call :
   ?task_id:string ->
   ?sandbox_profile:string ->
   ?sandbox_root:string ->
-  ?allowed_paths:string list ->
+  ?sandbox_roots:string list ->
   ?network_mode:string ->
   ?runtime_profile:string ->
   ?result_bytes:int ->

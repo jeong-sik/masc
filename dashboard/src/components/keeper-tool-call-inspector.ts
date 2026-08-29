@@ -702,7 +702,7 @@ function ToolCallEvidenceSection({ entry }: { entry: ToolCallEntry }) {
           ['keeper', contract?.keeper_name],
           ['generation', contract?.generation !== undefined ? String(contract.generation) : undefined],
           ['sandbox root', contract?.sandbox_root],
-          ['allowed paths', joinedOrAbsent(contract?.allowed_paths)],
+          ['sandbox roots', joinedOrAbsent(contract?.sandbox_roots)],
           ['network mode', contract?.network_mode],
           ['runtime profile', contract?.runtime_profile],
           ['path resolution', pathResolutionFlags],

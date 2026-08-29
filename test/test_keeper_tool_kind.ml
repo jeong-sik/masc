@@ -38,7 +38,6 @@ let make_meta () =
       (`Assoc
           [ "name", `String "tool-kind-keeper"
           ; "trace_id", `String "tool-kind-trace"
-          ; "allowed_paths", `List [ `String "*" ]
           ])
   with
   | Ok meta -> meta

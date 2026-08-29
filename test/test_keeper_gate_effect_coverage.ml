@@ -27,7 +27,6 @@ let make_meta ?(always_allow = false) name =
       (`Assoc
          [ "name", `String name
          ; "trace_id", `String ("trace-" ^ name)
-         ; "allowed_paths", `List [ `String "*" ]
          ])
   with
   | Error error -> fail ("meta fixture rejected: " ^ error)

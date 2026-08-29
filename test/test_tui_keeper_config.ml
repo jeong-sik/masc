@@ -16,8 +16,7 @@ let observed =
       "autonomous_wake_prompt": null,
       "sandbox_profile": "docker",
       "network_mode": "none",
-      "allowed_paths": ["repo-a"],
-      "effective_allowed_paths": ["repo-a", ".masc/playground/alpha/"],
+      "sandbox_roots": ["repo-a", ".masc/playground/alpha/"],
       "prompt": {"instructions": "be exact"},
       "execution": {"selected_runtime_id": "codex_subscription.gpt-5.6-sol"},
       "proactive": {"enabled": true},
@@ -44,7 +43,6 @@ let test_editor_starts_from_observed_values () =
     ; "autoboot_enabled"
     ; "max_context_override"
     ; "autonomous_wake_prompt"
-    ; "allowed_paths"
     ; "sandbox_profile"
     ; "network_mode"
     ; "instructions"
@@ -196,12 +194,11 @@ let test_every_row_says_whether_e_reaches_it () =
     ; "Context override", `Editable
     ; "Wake prompt override", `Editable
     ; "Sandbox / network", `Editable
-    ; "Allowed paths", `Editable
     ; "Mention targets", `Editable
     ; "Skills", `Editable
       (* the rows inside the settings block that [e] does not reach *)
     ; "Config revision", `Read_only
-    ; "Effective paths", `Read_only
+    ; "Sandbox roots", `Read_only
     ; "Live override", `Read_only
     ; "Override fields", `Read_only
     ; "Precedence", `Read_only

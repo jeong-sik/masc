@@ -54,7 +54,6 @@ let make_meta ?(name = "keeper-completion-trust") () =
       (`Assoc
         [ ("name", `String name)
         ; ("trace_id", `String "completion-trust-harness-trace")
-        ; ("allowed_paths", `List [ `String "*" ])
         ])
   with
   | Ok meta -> meta

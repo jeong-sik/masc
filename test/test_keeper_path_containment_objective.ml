@@ -34,10 +34,10 @@ let with_roots f =
     (fun () -> f ~base ~outside)
 ;;
 
-let resolve_read ~base ~allowed_paths raw_path =
+let resolve_read ~base ~sandbox_roots raw_path =
   Keeper_alerting_path.resolve_keeper_read_path
     ~config:(Workspace.default_config base)
-    ~allowed_paths
+    ~sandbox_roots
     ~raw_path
 ;;
 
@@ -53,21 +53,21 @@ let expect_path label expected = function
 let test_missing_relative_path_is_not_inferred () =
   with_roots @@ fun ~base ~outside:_ ->
   let raw = "missing/leaf.txt" in
-  resolve_read ~base ~allowed_paths:[] raw
+  resolve_read ~base ~sandbox_roots:[] raw
   |> expect_path "literal candidate returned" (Filename.concat base raw)
 ;;
 
 let test_absolute_path_inside_default_root_is_allowed () =
   with_roots @@ fun ~base ~outside:_ ->
   let target = Filename.concat base "file.txt" in
-  resolve_read ~base ~allowed_paths:[] target
+  resolve_read ~base ~sandbox_roots:[] target
   |> expect_path "absolute path preserved" target
 ;;
 
 let test_explicit_root_outside_base_is_allowed () =
   with_roots @@ fun ~base ~outside ->
   let target = Filename.concat outside "file.txt" in
-  resolve_read ~base ~allowed_paths:[ outside ] target
+  resolve_read ~base ~sandbox_roots:[ outside ] target
   |> expect_path "external explicit root" target
 ;;
 
@@ -76,7 +76,7 @@ let test_symlink_escape_requires_explicit_root () =
   let link = Filename.concat base "external-link" in
   Unix.symlink outside link;
   let target = Filename.concat link "file.txt" in
-  match resolve_read ~base ~allowed_paths:[] target with
+  match resolve_read ~base ~sandbox_roots:[] target with
   | Error (Keeper_path_rejection.Outside_sandbox _) -> ()
   | Error other ->
     failf
@@ -92,7 +92,7 @@ let test_lexical_endpoint_requires_file_entry () =
        match
          Keeper_alerting_path.resolve_keeper_confined_path
            ~config:(Workspace.default_config base)
-           ~allowed_paths:[]
+           ~sandbox_roots:[]
            ~endpoint:Keeper_alerting_path.Lexical_entry
            ~raw_path
        with
@@ -117,7 +117,7 @@ let test_atomic_replace_effect_uses_lexical_symlink_leaf () =
   match
     Keeper_alerting_path.resolve_keeper_confined_path
       ~config:(Workspace.default_config base)
-      ~allowed_paths:[]
+      ~sandbox_roots:[]
       ~endpoint:Keeper_alerting_path.Lexical_entry
       ~raw_path:requested
   with
@@ -184,7 +184,7 @@ let test_missing_parent_effect_is_complete () =
   match
     Keeper_alerting_path.resolve_keeper_confined_path
       ~config:(Workspace.default_config base)
-      ~allowed_paths:[]
+      ~sandbox_roots:[]
       ~endpoint:Keeper_alerting_path.Lexical_entry
       ~raw_path:requested
   with
@@ -245,7 +245,7 @@ let test_dotdot_is_normalized_before_component_projection () =
   match
     Keeper_alerting_path.resolve_keeper_confined_path
       ~config:(Workspace.default_config base)
-      ~allowed_paths:[]
+      ~sandbox_roots:[]
       ~endpoint:Keeper_alerting_path.Lexical_entry
       ~raw_path:requested
   with
@@ -270,7 +270,7 @@ let test_patch_source_uses_endpoint_components () =
   match
     Keeper_alerting_path.resolve_keeper_confined_path
       ~config:(Workspace.default_config base)
-      ~allowed_paths:[]
+      ~sandbox_roots:[]
       ~endpoint:Keeper_alerting_path.Follow_referent
       ~raw_path:requested
   with
@@ -331,7 +331,7 @@ let test_external_root_swap_fails_capability_identity () =
   match
     Keeper_alerting_path.resolve_keeper_confined_path
       ~config:(Workspace.default_config base)
-      ~allowed_paths:[ allowed ]
+      ~sandbox_roots:[ allowed ]
       ~endpoint:Keeper_alerting_path.Follow_referent
       ~raw_path:target
   with
@@ -380,7 +380,7 @@ let test_project_inner_root_uses_project_anchor () =
   match
     Keeper_alerting_path.resolve_keeper_confined_path
       ~config:(Workspace.default_config base)
-      ~allowed_paths:[ sandbox ]
+      ~sandbox_roots:[ sandbox ]
       ~endpoint:Keeper_alerting_path.Follow_referent
       ~raw_path:target
   with

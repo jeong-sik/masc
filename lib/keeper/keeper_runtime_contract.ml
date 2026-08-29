@@ -49,7 +49,7 @@ let path_resolution_contract_json =
     ; ( "read_basis"
       , `String
           "Read file_path resolves against explicit cwd when cwd is provided; otherwise \
-           it is relative to the keeper sandbox/allowed_paths. It does not inherit \
+           it is relative to the keeper sandbox/sandbox_roots. It does not inherit \
            Execute cwd implicitly." )
     ; ( "discover_before_read"
       , `String
@@ -70,7 +70,7 @@ let path_resolution_contract_json =
 
 let runtime_observability_contract_json_from_fields ~keeper_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
-    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
+    ?sandbox_profile ?sandbox_root ?sandbox_roots ?network_mode
     ?runtime_profile () : Yojson.Safe.t =
   `Assoc
     [
@@ -83,7 +83,7 @@ let runtime_observability_contract_json_from_fields ~keeper_name ?trace_id
       ("goal_ids", Json_util.json_string_list (nonempty_list goal_ids));
       ("sandbox_profile", string_opt_json sandbox_profile);
       ("sandbox_root", string_opt_json sandbox_root);
-      ("allowed_paths", Json_util.json_string_list (nonempty_list allowed_paths));
+      ("sandbox_roots", Json_util.json_string_list (nonempty_list sandbox_roots));
       ("path_resolution", path_resolution_contract_json);
       ("network_mode", string_opt_json network_mode);
       ("runtime_profile", string_opt_json runtime_profile);
@@ -91,7 +91,7 @@ let runtime_observability_contract_json_from_fields ~keeper_name ?trace_id
 
 let runtime_contract_json_from_fields ~keeper_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
-    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
+    ?sandbox_profile ?sandbox_root ?sandbox_roots ?network_mode
     ?runtime_profile () : Yojson.Safe.t =
   runtime_observability_contract_json_from_fields
     ~keeper_name
@@ -103,7 +103,7 @@ let runtime_contract_json_from_fields ~keeper_name ?trace_id
     ?goal_ids
     ?sandbox_profile
     ?sandbox_root
-    ?allowed_paths
+    ?sandbox_roots
     ?network_mode
     ?runtime_profile
     ()

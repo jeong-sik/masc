@@ -196,11 +196,11 @@ let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
   ; root_arg = "."
   }
 
-let allowed_root_rel_of_meta ~(meta : Keeper_meta_contract.keeper_meta) : string =
+let sandbox_root_rel_of_meta ~(meta : Keeper_meta_contract.keeper_meta) : string =
   host_root_rel_of_meta ~meta
 
-let allowed_path_roots_of_meta ~(meta : Keeper_meta_contract.keeper_meta) : string list =
-  [ allowed_root_rel_of_meta ~meta ]
+let sandbox_roots_of_meta ~(meta : Keeper_meta_contract.keeper_meta) : string list =
+  [ sandbox_root_rel_of_meta ~meta ]
 
 let keeper_visible_root_abs (t : t) : string =
   match t.container_root with

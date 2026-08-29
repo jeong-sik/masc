@@ -2615,6 +2615,12 @@ type clamped_scroll =
      the stored value kept climbing past the end of the diff, and coming back
      up took one keypress per step taken past it. *)
   | Changes_diff_scroll of int
+  (* Both surfaces worked out the row they could actually draw and then threw
+     it away: the drawing clamped for display while the stored value kept
+     climbing, so coming back up took one keypress per step taken past the
+     end. Same report the diff already makes. *)
+  | Resource_scroll of int
+  | Approval_detail_scroll of int
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
@@ -2632,6 +2638,8 @@ let apply_clamped_scroll (state : state) = function
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Lane_run_detail_scroll value -> state.lane_run_detail_scroll <- value
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
+  | Resource_scroll value -> state.resource_scroll <- value
+  | Approval_detail_scroll value -> state.approval_detail_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives

@@ -173,6 +173,30 @@ let test_message_scroll_accepts_the_rendered_clamp () =
   check int "requested scroll is normalized to the drawn row" 7 state.msg_scroll
 ;;
 
+(* Resources and Approval detail worked the drawable row out and then threw
+   it away: the drawing clamped for display while the stored value kept
+   climbing, so j past the end cost one k per step to undo. Both now report
+   the row they drew, the same way the transcript already does. *)
+let test_resource_scroll_accepts_the_rendered_clamp () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.resource_scroll <- 42;
+  Tui_types.apply_clamped_scroll state (Tui_types.Resource_scroll 5);
+  check int "requested scroll is normalized to the drawn row" 5
+    state.resource_scroll
+;;
+
+let test_approval_detail_scroll_accepts_the_rendered_clamp () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.approval_detail_scroll <- 42;
+  Tui_types.apply_clamped_scroll state (Tui_types.Approval_detail_scroll 3);
+  check int "requested scroll is normalized to the drawn row" 3
+    state.approval_detail_scroll
+;;
+
 (* The header names what is unusual, not what is normal.
 
    Reasoning hidden and tools compact are the quiet defaults: the answer is
@@ -606,6 +630,10 @@ let () =
             test_live_transcripts_are_kept_per_keeper
         ; test_case "message scroll accepts the rendered clamp" `Quick
             test_message_scroll_accepts_the_rendered_clamp
+        ; test_case "resource scroll accepts the rendered clamp" `Quick
+            test_resource_scroll_accepts_the_rendered_clamp
+        ; test_case "approval detail scroll accepts the rendered clamp" `Quick
+            test_approval_detail_scroll_accepts_the_rendered_clamp
         ; test_case "chat visibility defaults and cycles" `Quick
             test_chat_visibility_defaults_and_cycles
         ; test_case "the header names only unusual modes" `Quick

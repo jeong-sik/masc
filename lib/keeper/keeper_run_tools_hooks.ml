@@ -30,6 +30,9 @@ let create_tool_observer_serialization () : tool_observer_serialization =
 
 type agent_setup =
   { tools : Agent_core.Tool.t list
+  ; agent_cell : Agent_core.Agent.t option ref
+        (** The cell the turn's tools captured, so the AGENT_CORE call site
+            fills the one they read rather than a second one of its own. *)
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
@@ -64,6 +67,7 @@ type agent_setup =
 
 type ctx =
   { acc : hook_accumulator
+  ; agent_cell : Agent_core.Agent.t option ref
   ; agent_name : string
   ; all_tool_names : string list
   ; compute_tool_surface :
@@ -1020,6 +1024,7 @@ let assemble_hooks
     in
     Ok
       { tools
+      ; agent_cell = ctx.agent_cell
       ; cleanup = keeper_tools_cleanup
       ; terminal_effect_state
       ; user_message

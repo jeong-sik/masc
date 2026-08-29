@@ -14,7 +14,7 @@ val make_tool_bundle_for_capability_surface
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:Keeper_gate_causal_context.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
-  -> ?identity_tools:Keeper_identity_tools.offered_tool list
+  -> ?identity_surface:Keeper_identity_tool_search.surface
   -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
   -> ?skill_activation_context:Keeper_skill_activation_recorder.t
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell

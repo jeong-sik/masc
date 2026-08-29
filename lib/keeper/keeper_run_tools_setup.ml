@@ -99,7 +99,7 @@ let gate_causal_initial
 
 let expected_model_tool_names
       ~skill_catalog
-      ~identity_tool_names
+      ~identity_index_names
       ~model_visible_descriptors
       ()
   =
@@ -129,11 +129,14 @@ let expected_model_tool_names
          @ composition_names
          @ instruction_names
          @ control_names
-         (* What the work services this Keeper is attached to offer. Named
-            here from the same list the bundle was handed, so the projection
-            check keeps meaning "the surface is what it was built from"
-            rather than being widened into always passing. *)
-         @ identity_tool_names)
+         (* What the work services this Keeper is attached to offer. They
+            reach the model as one index tool rather than as themselves, so
+            the surface carries that one name and the attached names appear
+            only inside its description. Named here from the same list the
+            bundle was handed, so the projection check keeps meaning "the
+            surface is what it was built from" rather than being widened
+            into always passing. *)
+         @ identity_index_names)
 ;;
 
 let prepare_agent_setup
@@ -310,6 +313,10 @@ let prepare_agent_setup
     ; assistant_turn_texts = []
     }
   in
+  (* The agent this turn will run, made here because the tools are made here
+     and one of them widens the callable set while the turn is running. It is
+     the AGENT_CORE call site that fills it, at agent creation. *)
+  let agent_cell : Agent_core.Agent.t option ref = ref None in
   (* What this Keeper is attached to. A disk read of what was written down
      when it attached, not a call to the provider: a turn that had to reach
      Atlassian before it could start would fail whenever Atlassian was slow,
@@ -352,7 +359,11 @@ let prepare_agent_setup
       ?continuation_channel
       ~gate_context
       ?hitl_resolution
-      ~identity_tools:identity_offering.Keeper_identity_tools.offered
+      ~identity_surface:
+        { Keeper_identity_tool_search.offered =
+            identity_offering.Keeper_identity_tools.offered
+        ; agent_cell
+        }
       ?composition_plan_index
       ~skill_activation_context
       ~turn_ctx_cell
@@ -480,11 +491,10 @@ let prepare_agent_setup
   in
   let expected_model_names =
     expected_model_tool_names ~skill_catalog
-      ~identity_tool_names:
-        (List.map
-           (fun (offered : Keeper_identity_tools.offered_tool) ->
-              offered.Keeper_identity_tools.schema.name)
-           identity_offering.Keeper_identity_tools.offered)
+      ~identity_index_names:
+        (match identity_offering.Keeper_identity_tools.offered with
+         | [] -> []
+         | _ :: _ -> [ Keeper_identity_tool_search.tool_name ])
       ~model_visible_descriptors:turn_model_visible_descriptors
       ()
   in
@@ -566,6 +576,7 @@ let prepare_agent_setup
 
   let ctx : Keeper_run_tools_hooks.ctx =
     { acc
+    ; agent_cell
     ; agent_name
     ; all_tool_names
     ; compute_tool_surface

@@ -50,7 +50,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?gate_context
       ?hitl_resolution
       ?(skill_catalog = Keeper_skill_catalog.empty)
-      ?(identity_tools : Keeper_identity_tools.offered_tool list = [])
+      ?(identity_surface : Keeper_identity_tool_search.surface option)
       ?composition_plan_index
       ?skill_activation_context
       ?(allow_unrecorded_skill_surface = false)
@@ -534,20 +534,29 @@ let make_tool_bundle_for_descriptors_with_policy
      only behind the durable Gate. A row whose provider said "read only"
      runs as before, everything else defers to the approvals queue. The
      cycle's one-shot grant threads through so an approved exact call can be
-     spent in the woken cycle. *)
-  let identity_agent_tools =
-    List.map
-      (fun offered ->
-         Keeper_identity_gate.agent_tool
-           ~config
-           ~meta
-           ?continuation_channel
-           ?gate_context:gate_context_provider
-           ?gate_grant
-           offered)
-      identity_tools
+     spent in the woken cycle.
+
+     They reach the model through the index rather than directly: an attached
+     service offers more tools than a request can carry, and the Gate wrapper
+     is the same either way. *)
+  let identity_index_tool =
+    match identity_surface with
+    | None -> []
+    | Some surface ->
+      Keeper_identity_tool_search.make
+        ~keeper_name:meta.Keeper_meta_contract.name
+        ~build:(fun offered ->
+          Keeper_identity_gate.agent_tool
+            ~config
+            ~meta
+            ?continuation_channel
+            ?gate_context:gate_context_provider
+            ?gate_grant
+            offered)
+        surface
+      |> Option.to_list
   in
-  { tools = descriptor_tools @ composition_tools @ identity_agent_tools
+  { tools = descriptor_tools @ composition_tools @ identity_index_tool
   ; cleanup =
       (fun () ->
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
@@ -565,7 +574,7 @@ let make_tool_bundle_for_capability_surface
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
-      ?identity_tools
+      ?identity_surface
       ?composition_plan_index
       ?skill_activation_context
       ?turn_ctx_cell
@@ -582,7 +591,7 @@ let make_tool_bundle_for_capability_surface
     ?gate_context
     ?hitl_resolution
     ~skill_catalog:(Keeper_capability_surface.skill_catalog capability_surface)
-    ?identity_tools
+    ?identity_surface
     ?composition_plan_index
     ?skill_activation_context
     ~allow_unrecorded_skill_surface:false
@@ -603,7 +612,7 @@ let make_tool_bundle_with_policy
       ?gate_context
       ?hitl_resolution
       ?skill_catalog
-      ?identity_tools
+      ?identity_surface
       ?composition_plan_index
       ?skill_activation_context
       ?(allow_unrecorded_skill_surface = false)
@@ -621,7 +630,7 @@ let make_tool_bundle_with_policy
     ?gate_context
     ?hitl_resolution
     ?skill_catalog
-    ?identity_tools
+    ?identity_surface
     ?composition_plan_index
     ?skill_activation_context
     ~allow_unrecorded_skill_surface

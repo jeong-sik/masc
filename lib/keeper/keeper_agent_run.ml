@@ -836,7 +836,10 @@ let run_turn
     let tools = s.Keeper_run_tools.tools in
     let hooks = s.Keeper_run_tools.hooks in
     let acc = s.Keeper_run_tools.acc in
-    let agent_ref : Agent_core.Agent.t option ref = ref None in
+    (* The same cell the turn's tools captured when they were built: an
+       attached tool loaded mid-turn has to reach the agent that is running,
+       and a second cell here would leave that one empty forever. *)
+    let agent_ref = s.Keeper_run_tools.agent_cell in
     let final_agent_core_turn_ordinal_ref =
       s.Keeper_run_tools.final_agent_core_turn_ordinal_ref
     in

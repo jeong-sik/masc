@@ -700,12 +700,6 @@ if [ -z "${MASC_WS_ENABLED+x}" ]; then
 fi
 
 
-# Shared local runtime should keep the streamable-HTTP MCP entry aligned
-# with the bearer token minted during server bootstrap. Set to 0 to opt out.
-if [ -z "${MASC_SYNC_MCP_CONFIG+x}" ]; then
-    export MASC_SYNC_MCP_CONFIG=1
-fi
-
 # Default arguments
 PORT="${MASC_PORT:-8935}"
 PORT_EXPLICIT=0

@@ -41,6 +41,101 @@ let time_descriptor_contract () =
   |> Result.get_ok
 ;;
 
+let replace_descriptor replacement =
+  descriptors ()
+  |> List.map (fun current ->
+    if String.equal current.Descriptor.id replacement.Descriptor.id
+    then replacement
+    else current)
+;;
+
+let test_descriptor_contract_revalidates_unchanged_descriptor () =
+  let contract = time_descriptor_contract () in
+  match Descriptor_contract.revalidate ~descriptors:(descriptors ()) contract with
+  | Ok current ->
+    check string
+      "current descriptor id"
+      current.id
+      (Descriptor_contract.descriptor_id contract)
+  | Error _ -> fail "unchanged descriptor contract drifted"
+;;
+
+let test_descriptor_contract_rejects_removed_descriptor () =
+  let contract = time_descriptor_contract () in
+  let descriptors =
+    descriptors ()
+    |> List.filter (fun descriptor ->
+      not
+        (String.equal
+           descriptor.Descriptor.id
+           (Descriptor_contract.descriptor_id contract)))
+  in
+  match Descriptor_contract.revalidate ~descriptors contract with
+  | Error (Descriptor_contract.Descriptor_removed _) -> ()
+  | Error _ -> fail "removed descriptor returned the wrong drift"
+  | Ok _ -> fail "removed descriptor revalidated"
+;;
+
+let test_descriptor_contract_rejects_name_drift () =
+  let contract = time_descriptor_contract () in
+  let current = descriptor "keeper_time_now" in
+  let changed = { current with Descriptor.internal_name = "keeper_time_now_v2" } in
+  match
+    Descriptor_contract.revalidate ~descriptors:(replace_descriptor changed) contract
+  with
+  | Error (Descriptor_contract.Accepted_tool_name_changed _) -> ()
+  | Error _ -> fail "tool name drift returned the wrong result"
+  | Ok _ -> fail "tool name drift revalidated"
+;;
+
+let test_descriptor_contract_rejects_input_schema_drift () =
+  let contract = time_descriptor_contract () in
+  let current = descriptor "keeper_time_now" in
+  let input_schema =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties", `Assoc [ "zone", `Assoc [ "type", `String "string" ] ]
+      ; "required", `List []
+      ; "additionalProperties", `Bool false
+      ]
+  in
+  let changed = { current with Descriptor.input_schema } in
+  match
+    Descriptor_contract.revalidate ~descriptors:(replace_descriptor changed) contract
+  with
+  | Error (Descriptor_contract.Input_schema_changed _) -> ()
+  | Error _ -> fail "input schema drift returned the wrong result"
+  | Ok _ -> fail "input schema drift revalidated"
+;;
+
+let test_descriptor_contract_rejects_output_drift () =
+  let contract = time_descriptor_contract () in
+  let current = descriptor "keeper_time_now" in
+  let changed =
+    { current with Descriptor.composable_output = Descriptor.Opaque_output }
+  in
+  match
+    Descriptor_contract.revalidate ~descriptors:(replace_descriptor changed) contract
+  with
+  | Error (Descriptor_contract.Composable_output_changed _) -> ()
+  | Error _ -> fail "output contract drift returned the wrong result"
+  | Ok _ -> fail "output contract drift revalidated"
+;;
+
+let test_descriptor_contract_rejects_execution_drift () =
+  let contract = time_descriptor_contract () in
+  let current = descriptor "keeper_time_now" in
+  let changed =
+    { current with Descriptor.execution = Descriptor.Ordinary Descriptor.Serial }
+  in
+  match
+    Descriptor_contract.revalidate ~descriptors:(replace_descriptor changed) contract
+  with
+  | Error (Descriptor_contract.Execution_changed _) -> ()
+  | Error _ -> fail "execution drift returned the wrong result"
+  | Ok _ -> fail "execution drift revalidated"
+;;
+
 let test_descriptor_contract_round_trips () =
   let contract = time_descriptor_contract () in
   let encoded = Descriptor_contract.to_yojson contract in
@@ -1863,6 +1958,30 @@ let () =
     "keeper_tool_plan"
     [ ( "descriptor-contract"
       , [ test_case "round-trip" `Quick test_descriptor_contract_round_trips
+        ; test_case
+            "unchanged revalidation"
+            `Quick
+            test_descriptor_contract_revalidates_unchanged_descriptor
+        ; test_case
+            "removed descriptor drift"
+            `Quick
+            test_descriptor_contract_rejects_removed_descriptor
+        ; test_case
+            "accepted tool name drift"
+            `Quick
+            test_descriptor_contract_rejects_name_drift
+        ; test_case
+            "input schema drift"
+            `Quick
+            test_descriptor_contract_rejects_input_schema_drift
+        ; test_case
+            "composable output drift"
+            `Quick
+            test_descriptor_contract_rejects_output_drift
+        ; test_case
+            "execution drift"
+            `Quick
+            test_descriptor_contract_rejects_execution_drift
         ; test_case
             "non-canonical output schema"
             `Quick

@@ -42,6 +42,51 @@ type decode_error =
   | Composable_output_payload_mismatch
   | Invalid_execution of string
 
+type drift =
+  | Descriptor_removed of
+      { descriptor_id : string
+      ; accepted_tool_name : string
+      }
+  | Ambiguous_descriptor_id of
+      { descriptor_id : string
+      ; accepted_tool_name : string
+      }
+  | Capability_identity_changed of
+      { accepted_tool_name : string
+      ; accepted : string
+      ; current : string
+      }
+  | Accepted_tool_name_changed of
+      { descriptor_id : string
+      ; accepted : string
+      ; current : string list
+      }
+  | Model_projection_changed of
+      { accepted_tool_name : string
+      ; accepted : Descriptor.keeper_model_projection
+      ; current : Descriptor.keeper_model_projection
+      }
+  | Input_schema_changed of
+      { accepted_tool_name : string
+      ; accepted : Yojson.Safe.t
+      ; current : Yojson.Safe.t
+      }
+  | Composable_output_changed of
+      { accepted_tool_name : string
+      ; accepted : Descriptor.composable_output
+      ; current : Descriptor.composable_output
+      }
+  | Execution_changed of
+      { accepted_tool_name : string
+      ; accepted : Descriptor.execution
+      ; current : Descriptor.execution
+      }
+  | Current_schema_non_canonical of
+      { accepted_tool_name : string
+      ; location : schema_location
+      ; error : canonical_json_error
+      }
+
 let ( let* ) = Result.bind
 let normalize = Keeper_chat_operation.canonical_json
 
@@ -213,6 +258,132 @@ let of_yojson json =
       ; execution
       }
   | _ -> Error Expected_object
+;;
+
+let projection_equal left right =
+  match left, right with
+  | Descriptor.Preferred_public_name, Descriptor.Preferred_public_name
+  | Descriptor.Internal_name, Descriptor.Internal_name
+  | Descriptor.Operator_only, Descriptor.Operator_only -> true
+  | ( Descriptor.Transport_alias { projected_by = left }
+    , Descriptor.Transport_alias { projected_by = right } ) -> String.equal left right
+  | _ -> false
+;;
+
+let execution_equal left right =
+  match left, right with
+  | Descriptor.Ordinary left, Descriptor.Ordinary right -> left = right
+  | Descriptor.Direct_terminal, Descriptor.Direct_terminal
+  | Descriptor.Terminal, Descriptor.Terminal -> true
+  | _ -> false
+;;
+
+let output_equal left right =
+  match left, right with
+  | Descriptor.Opaque_output, Descriptor.Opaque_output -> true
+  | Descriptor.Json_output { schema = left }, Descriptor.Json_output { schema = right } ->
+    Yojson.Safe.equal left right
+  | _ -> false
+;;
+
+let current_schema ~accepted_tool_name ~location schema =
+  normalize schema
+  |> Result.map_error (fun error ->
+    Current_schema_non_canonical { accepted_tool_name; location; error })
+;;
+
+let revalidate ~descriptors contract =
+  let matches =
+    List.filter
+      (fun descriptor -> String.equal descriptor.Descriptor.id contract.descriptor_id)
+      descriptors
+  in
+  match matches with
+  | [] ->
+    Error
+      (Descriptor_removed
+         { descriptor_id = contract.descriptor_id
+         ; accepted_tool_name = contract.accepted_tool_name
+         })
+  | _ :: _ :: _ ->
+    Error
+      (Ambiguous_descriptor_id
+         { descriptor_id = contract.descriptor_id
+         ; accepted_tool_name = contract.accepted_tool_name
+         })
+  | [ descriptor ] ->
+    let fail drift = Error drift in
+    if not (String.equal contract.capability_id descriptor.capability_id)
+    then
+      fail
+        (Capability_identity_changed
+           { accepted_tool_name = contract.accepted_tool_name
+           ; accepted = contract.capability_id
+           ; current = descriptor.capability_id
+           })
+    else
+      let current_names = Descriptor.keeper_model_names descriptor in
+      if not (List.exists (String.equal contract.accepted_tool_name) current_names)
+      then
+        fail
+          (Accepted_tool_name_changed
+             { descriptor_id = contract.descriptor_id
+             ; accepted = contract.accepted_tool_name
+             ; current = current_names
+             })
+      else if not (projection_equal contract.model_projection descriptor.keeper_model_projection)
+      then
+        fail
+          (Model_projection_changed
+             { accepted_tool_name = contract.accepted_tool_name
+             ; accepted = contract.model_projection
+             ; current = descriptor.keeper_model_projection
+             })
+      else
+        let* input_schema =
+          current_schema
+            ~accepted_tool_name:contract.accepted_tool_name
+            ~location:Input_schema
+            descriptor.input_schema
+        in
+        if not (Yojson.Safe.equal contract.input_schema input_schema)
+        then
+          fail
+            (Input_schema_changed
+               { accepted_tool_name = contract.accepted_tool_name
+               ; accepted = contract.input_schema
+               ; current = input_schema
+               })
+        else
+          let* output =
+            match descriptor.composable_output with
+            | Descriptor.Opaque_output -> Ok Descriptor.Opaque_output
+            | Descriptor.Json_output { schema } ->
+              let* schema =
+                current_schema
+                  ~accepted_tool_name:contract.accepted_tool_name
+                  ~location:Composable_output_schema
+                  schema
+              in
+              Ok (Descriptor.Json_output { schema })
+          in
+          if not (output_equal contract.composable_output output)
+          then
+            fail
+              (Composable_output_changed
+                 { accepted_tool_name = contract.accepted_tool_name
+                 ; accepted = contract.composable_output
+                 ; current = output
+                 })
+          else if not (execution_equal contract.execution descriptor.execution)
+          then
+            fail
+              (Execution_changed
+                 { accepted_tool_name = contract.accepted_tool_name
+                 ; accepted = contract.execution
+                 ; current = descriptor.execution
+                 })
+          else Ok descriptor
 ;;
 
 let descriptor_id contract = contract.descriptor_id

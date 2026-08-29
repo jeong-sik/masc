@@ -5383,17 +5383,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
              else Ansi.dim ^ label ^ Ansi.reset)
       |> String.concat "  "
     in
-    let tab_hint =
-      match state.detail_tab with
-      | Detail_github -> "[ ]:tab  L:login"
-      | Detail_sandbox -> "[ ]:tab  R:refresh"
-      | Detail_instructions -> "[ ]:tab  e:edit JSON in $EDITOR"
-      (* Arrows first: the digits only reach the first nine rows and the
-         list is a declaration directory that can hold more. *)
-      | Detail_identity ->
-        "[ ]:tab  arrows+enter:connect  A:app  /:filter  R:refresh"
-      | Detail_info | Detail_secrets -> "[ ]:tab"
-    in
+    let tab_hint = Masc_tui_keys.keeper_detail_tab_hint state.detail_tab in
     let title =
       Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s   %s%s%s" Ansi.bold
         (Terminal_text.single_line k.k_name)

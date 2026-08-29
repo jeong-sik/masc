@@ -63,6 +63,17 @@ val footer_hints_lane_notice : string
 (** The Lanes lane-notice footer. The pane is static, so it keeps only the
     way back plus the shared tail. *)
 
+val keeper_detail_tab_bindings :
+  Masc_tui_types.keeper_detail_tab -> binding list
+(** A detail tab's own keys. Separate from {!for_surface} because they are
+    conditional on the tab, not the surface: listing them per surface would
+    advertise them on the tabs where they do nothing. *)
+
+val keeper_detail_tab_hint : Masc_tui_types.keeper_detail_tab -> string
+(** The compact strip beside the tab row, [key:label] joined by two spaces,
+    led by the tab switch. Projects {!keeper_detail_tab_bindings} so the
+    strip and the help sheet cannot name different keys. *)
+
 val help_sections :
   ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list
 (** Sections for the help sheet. [current] puts that surface's own section

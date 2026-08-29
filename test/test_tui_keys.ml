@@ -437,10 +437,89 @@ let test_overview_hit_follows_the_window () =
   check_hit state ~terminal_rows:16 ~row:13 "keeper 1";
   check_hit state ~terminal_rows:16 ~row:14 "none"
 
+(* The detail tabs used to draw a hand-written hint string in the renderer,
+   a second key list this module did not own. The strip must project the
+   table, and the sheet must carry the same keys -- otherwise the two can
+   name different things again, which is how [T] ended up documented
+   nowhere. *)
+let has_substring haystack needle =
+  let hl = String.length haystack and nl = String.length needle in
+  let rec scan i = i + nl <= hl && (String.sub haystack i nl = needle || scan (i + 1)) in
+  nl = 0 || scan 0
+
+let test_detail_tab_hint_projects_the_table () =
+  List.iter
+    (fun tab ->
+       let hint = Masc_tui_keys.keeper_detail_tab_hint tab in
+       Alcotest.(check bool)
+         ("the tab switch leads on " ^ keeper_detail_tab_label tab)
+         true
+         (String.length hint >= 7 && String.sub hint 0 7 = "[ ]:tab");
+       List.iter
+         (fun (binding : Masc_tui_keys.binding) ->
+            Alcotest.(check bool)
+              (binding.Masc_tui_keys.key ^ " reaches the strip")
+              true
+              (has_substring hint
+                 (binding.Masc_tui_keys.key ^ ":" ^ binding.Masc_tui_keys.label)))
+         (Masc_tui_keys.keeper_detail_tab_bindings tab))
+    keeper_detail_tabs
+
+(* The keys each tab's dispatcher arms actually handle, pinned. The earlier
+   pair of assertions only checked that whatever the table held reached the
+   strip and the sheet, so dropping a binding passed both -- the same shape
+   as the drift they were written to close. This list is the contract:
+   changing it is a decision, not a slip. Sources are the guarded arms in
+   masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L on the
+   GitHub tab, e for the settings form). *)
+let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
+  [ Detail_info, []
+  ; Detail_sandbox, [ "R" ]
+  ; Detail_instructions, [ "e" ]
+  ; Detail_secrets, []
+  ; Detail_github, [ "L" ]
+  ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
+  ]
+
+let test_detail_tab_bindings_cover_the_live_keys () =
+  List.iter
+    (fun (tab, expected) ->
+       let actual =
+         List.map
+           (fun (binding : Masc_tui_keys.binding) -> binding.Masc_tui_keys.key)
+           (Masc_tui_keys.keeper_detail_tab_bindings tab)
+       in
+       Alcotest.(check (list string))
+         (keeper_detail_tab_label tab ^ " tab keys")
+         expected actual)
+    live_tab_keys
+
+let test_detail_tab_keys_reach_the_help_sheet () =
+  let sheet = Masc_tui_keys.help_sections ~current:(Keepers Keeper_detail) () in
+  let detail_keys =
+    List.concat_map
+      (fun (title, keys) ->
+         if has_substring title "Keeper detail" then List.map fst keys else [])
+      sheet
+  in
+  List.iter
+    (fun (binding : Masc_tui_keys.binding) ->
+       Alcotest.(check bool)
+         (binding.Masc_tui_keys.key ^ " is documented in the sheet")
+         true
+         (List.exists (String.equal binding.Masc_tui_keys.key) detail_keys))
+    (List.concat_map Masc_tui_keys.keeper_detail_tab_bindings keeper_detail_tabs)
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
-      , [ Alcotest.test_case "every surface answers" `Quick
+      , [ Alcotest.test_case "detail tab bindings cover the live keys" `Quick
+            test_detail_tab_bindings_cover_the_live_keys
+        ; Alcotest.test_case "detail tab strip projects the table" `Quick
+            test_detail_tab_hint_projects_the_table
+        ; Alcotest.test_case "detail tab keys reach the help sheet" `Quick
+            test_detail_tab_keys_reach_the_help_sheet
+        ; Alcotest.test_case "every surface answers" `Quick
             test_every_surface_answers
         ; Alcotest.test_case "no surface repeats a key" `Quick
             test_no_surface_repeats_a_key

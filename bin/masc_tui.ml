@@ -9692,6 +9692,56 @@ and is loaded on demand through keeper_skill.
           | Ok _ -> add_event state "system" (declared_name ^ ": keeper created")
           | Error detail -> add_event state "error" detail))
   in
+  (* Same shape as [handle_keeper_create]: several fields at once go through
+     $EDITOR rather than a modal the TUI does not otherwise have. The stem
+     names every field the route reads, with the two that have no sensible
+     default left empty. *)
+  let handle_repository_add () =
+    match Masc_tui_editor.editor_command () with
+    | None ->
+      add_event state "error"
+        "no $EDITOR set; export EDITOR to add a repository here"
+    | Some _ -> (
+      let stem =
+        String.concat "\n"
+          [ "{";
+            "  \"name\": \"\",";
+            "  \"url\": \"\",";
+            "  \"default_branch\": \"main\",";
+            "  \"auto_sync\": false,";
+            "  \"sync_interval\": 300";
+            "}";
+            "" ]
+      in
+      match
+        Masc_tui_editor.roundtrip ~restore:restore_terminal
+          ~reenter:reenter_terminal stem
+      with
+      | None -> add_event state "system" "add cancelled"
+      | Some declaration -> (
+        let declared field =
+          match Yojson.Safe.from_string declaration with
+          | `Assoc fields -> (
+            match List.assoc_opt field fields with
+            | Some (`String value) -> String.trim value
+            | _ -> "")
+          | _ -> ""
+        in
+        let name = declared "name" in
+        let url = declared "url" in
+        if String.length name = 0 || String.length url = 0 then
+          add_event state "error"
+            "declaration needs non-empty \"name\" and \"url\" strings; nothing was added"
+        else
+          match
+            Masc_tui_http.post_repository_add ~host ~port
+              ~declaration_json:declaration
+          with
+          | Ok _ ->
+            add_event state "system" (name ^ ": repository added");
+            launch_repositories_load state ~mailbox:async_messages
+          | Error detail -> add_event state "error" detail))
+  in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then
       invalidate_frame_for_resize frame_presenter render_schedule
@@ -13216,6 +13266,10 @@ and is loaded on demand through keeper_skill.
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
+            (* The route and its permission already existed; only the TUI had
+               no way to reach them, so Repos could list what was registered
+               and never register anything. *)
+            | Repositories -> handle_repository_add ()
             | Verification ->
                 (* Two presses, like every irreversible action here: the
                    first names the task, the second sends the approval. *)
@@ -13227,7 +13281,7 @@ and is loaded on demand through keeper_skill.
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Planning | Schedules | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
       | _ -> ());
 
       (* Surface navigation asks only for datasets the destination adds. The

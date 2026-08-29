@@ -1017,6 +1017,29 @@ if [ "$DRY_RUN" -eq 0 ]; then
     [ "$reported" = "${VERSION#v}" ] \
       || warn "binary reports $reported, expected ${VERSION#v}"
   else
+    # A prebuilt binary that will not start is almost always a missing system
+    # shared library, and the loader says which one — so surface that instead
+    # of the generic "no --version". Re-run capturing stderr (the smoke check
+    # discarded it), and on Linux list the unresolved libraries by name.
+    # [|| true]: the binary exits non-zero (127 on a missing library) and
+    # [set -e] would otherwise kill the installer before it could explain why.
+    boot_err="$(run_masc_with_install_env "$DEST" --version 2>&1 >/dev/null || true)"
+    case "$boot_err" in
+      *"shared librar"*)
+        printf '%s\n' "$boot_err" >&2
+        missing=""
+        if command -v ldd >/dev/null 2>&1; then
+          missing="$(ldd "$DEST" 2>/dev/null | awk '/not found/{print $1}' | tr '\n' ' ')"
+          [ -n "$missing" ] && warn "missing system libraries: $missing"
+        fi
+        case "$boot_err $missing" in
+          *sqlite3*)
+            warn "install the SQLite runtime, e.g. on Debian/Ubuntu: sudo apt-get install -y libsqlite3-0" ;;
+          *)
+            warn "install the matching system library package, then re-run this installer" ;;
+        esac
+        ;;
+    esac
     die "binary did not respond to --version"
   fi
 fi

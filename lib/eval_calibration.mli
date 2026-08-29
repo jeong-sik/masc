@@ -69,24 +69,6 @@ module For_testing : sig
   val set_store : base_dir:string -> unit
 end
 
-val absolute_workspace_base_path : ?cwd:string -> string -> string
-(** Normalize a workspace base path into the absolute path expected by offline
-    eval runners before they derive verdict-store roots from it. Relative paths
-    resolve from [cwd] when supplied, or from the process cwd otherwise. *)
-
-val resolve_record_verdicts_store :
-  ?cwd:string ->
-  record_verdicts:bool ->
-  verdict_store_dir:string option ->
-  live_store_dir:string option ->
-  unit ->
-  (string option, string) result
-(** Decide where an offline eval's [--record-verdicts] verdicts go, refusing to
-    write the live store or any child path under it after best-effort
-    lexical/realpath normalization. [Ok None] = not recording; [Ok (Some dir)] =
-    isolated store; [Error] = missing/colliding-with-live store dir. Pass [~cwd]
-    in tests to make relative-path normalization deterministic. *)
-
 (** {1 Hashing} *)
 
 val notes_hash : task_title:string -> notes:string -> string
@@ -99,13 +81,10 @@ val record_verdict :
   task_id:string ->
   req:Task.Anti_rationalization.review_request ->
   result:Task.Anti_rationalization.review_result ->
-  ?on_harness_verdict:(Agent_core.Harness.verdict -> unit) ->
   unit ->
   unit
-(** Append a verdict record to the JSONL store.
-    If [~on_harness_verdict] is provided, converts the record to an AGENT_CORE
-    [Harness.verdict] and invokes the callback after persistence.
-    This enables wiring to [Eval.add_verdict] or SSE event publishers. *)
+(** Append a verdict record to the JSONL store. A result without a verdict is
+    a no-op: nobody judged, so there is nothing to remember. *)
 
 val record_human_label :
   notes_hash:string ->
@@ -131,11 +110,6 @@ val format_few_shot_block : calibration_example list -> string
     Returns [""] for an empty list. *)
 
 (** {1 AGENT_CORE Integration} *)
-
-val to_harness_verdict : verdict_record -> Agent_core.Harness.verdict
-(** Convert a MASC verdict record to an AGENT_CORE [Harness.verdict].
-    [Approve] maps to [passed=true, score=1.0];
-    [Reject _] maps to [passed=false, score=0.0] with gate detail. *)
 
 (** {1 Statistics} *)
 

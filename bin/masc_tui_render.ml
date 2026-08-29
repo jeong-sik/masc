@@ -2901,6 +2901,51 @@ let render_planning_list (state : state) =
                | Some a -> "  " ^ a
                | None -> ""
              in
+             (* What is being done about this goal, on the row itself. The
+                detail panel below already resolves the same links, but only
+                for the goal under the cursor: reading which of seventeen
+                goals had work stuck in verification took seventeen moves.
+
+                [state.tasks] drops terminal rows and the goal links ride
+                only on it ([task_of_domain] takes goal_ids as an argument;
+                the domain record does not carry them), so this counts open
+                work, not progress. A "5 of 12 done" would need the server to
+                carry the link on finished rows too.
+
+                One signal, not three: verification is the one that means
+                something is not moving, so it wins the cell when both are
+                present. *)
+             let open_note =
+               let linked =
+                 List.filter
+                   (fun (t : Tui_decode.task) -> List.mem g.pg_id t.goal_ids)
+                   state.tasks
+               in
+               match linked with
+               | [] -> ""
+               | _ ->
+                   let tally predicate =
+                     List.length (List.filter predicate linked)
+                   in
+                   let awaiting =
+                     tally (fun (t : Tui_decode.task) ->
+                         match t.status with
+                         | Masc_domain.AwaitingVerification _ -> true
+                         | _ -> false)
+                   in
+                   let running =
+                     tally (fun (t : Tui_decode.task) ->
+                         match t.status with
+                         | Masc_domain.InProgress _ -> true
+                         | _ -> false)
+                   in
+                   let total = List.length linked in
+                   if awaiting > 0 then
+                     Printf.sprintf "%d open %d ver" total awaiting
+                   else if running > 0 then
+                     Printf.sprintf "%d open %d run" total running
+                   else Printf.sprintf "%d open" total
+             in
              let line =
                Printf.sprintf "  %s[%s]%s %s P%d  %-16s %s%s"
                  status_color
@@ -2908,7 +2953,7 @@ let render_planning_list (state : state) =
                  Ansi.reset
                  (planning_proof_mark g.pg_proof)
                  g.pg_priority
-                 (fit_width (Terminal_text.single_line g.pg_id) 16)
+                 (fit_width open_note 16)
                  (fit_width
                     (Terminal_text.single_line g.pg_title)
                     (cols - 47 - Message_layout.display_width due

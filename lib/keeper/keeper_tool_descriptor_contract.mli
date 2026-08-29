@@ -39,6 +39,51 @@ type decode_error =
   | Composable_output_payload_mismatch
   | Invalid_execution of string
 
+type drift =
+  | Descriptor_removed of
+      { descriptor_id : string
+      ; accepted_tool_name : string
+      }
+  | Ambiguous_descriptor_id of
+      { descriptor_id : string
+      ; accepted_tool_name : string
+      }
+  | Capability_identity_changed of
+      { accepted_tool_name : string
+      ; accepted : string
+      ; current : string
+      }
+  | Accepted_tool_name_changed of
+      { descriptor_id : string
+      ; accepted : string
+      ; current : string list
+      }
+  | Model_projection_changed of
+      { accepted_tool_name : string
+      ; accepted : Keeper_tool_descriptor.keeper_model_projection
+      ; current : Keeper_tool_descriptor.keeper_model_projection
+      }
+  | Input_schema_changed of
+      { accepted_tool_name : string
+      ; accepted : Yojson.Safe.t
+      ; current : Yojson.Safe.t
+      }
+  | Composable_output_changed of
+      { accepted_tool_name : string
+      ; accepted : Keeper_tool_descriptor.composable_output
+      ; current : Keeper_tool_descriptor.composable_output
+      }
+  | Execution_changed of
+      { accepted_tool_name : string
+      ; accepted : Keeper_tool_descriptor.execution
+      ; current : Keeper_tool_descriptor.execution
+      }
+  | Current_schema_non_canonical of
+      { accepted_tool_name : string
+      ; location : schema_location
+      ; error : canonical_json_error
+      }
+
 val create
   :  accepted_tool_name:string
   -> Keeper_tool_descriptor.t
@@ -49,3 +94,11 @@ val of_yojson : Yojson.Safe.t -> (t, decode_error) result
 
 val descriptor_id : t -> string
 val accepted_tool_name : t -> string
+
+val revalidate
+  :  descriptors:Keeper_tool_descriptor.t list
+  -> t
+  -> (Keeper_tool_descriptor.t, drift) result
+(** Resolve by descriptor identity and compare the exact accepted semantics.
+    Success returns the current runtime descriptor; it never reconstructs or
+    persists its opaque execution fields. *)

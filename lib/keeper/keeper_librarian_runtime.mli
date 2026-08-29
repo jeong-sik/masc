@@ -53,7 +53,11 @@ val fitted_messages
     happens, so adding an [extraction_error] case fails to compile until it
     names its journal kind. *)
 val run_best_effort
-  :  base_path:string
+  :  ?cli_runner:Keeper_lane_cli_oneshot.runner
+       (** Injectable effect edge for the cli lane-slot fallback walked after
+           catalog exhaustion (RFC cli-runtimes-as-lane-slots); [None] spawns
+           the real official client. *)
+  -> base_path:string
   -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int option
@@ -61,3 +65,27 @@ val run_best_effort
   -> unit
 (** Execute a Librarian unit already admitted and fenced by the post-turn
     entrypoint. This runtime owns cadence, not the live configuration gate. *)
+
+module For_testing : sig
+  type classified_error
+
+  val classified_error_detail : classified_error -> string
+
+  val execute_exact_output_classified
+    :  ?cli_runner:Keeper_lane_cli_oneshot.runner
+    -> clock:_ Eio.Time.clock
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> base_path:string
+    -> keeper_id:string
+    -> selected_input:Keeper_librarian.input
+    -> messages:Agent_core.Types.message list
+    -> render_at:(int -> (Agent_core.Types.message list, classified_error) result)
+    -> unit
+    -> ( (Keeper_librarian.selection * Yojson.Safe.t) * string * int option
+       , classified_error )
+       result
+  (** The classified exact-output pass, exposed so the cli lane-slot fallback
+      can be driven with an injected runner and no live provider. The string
+      in the success triple is the slot that answered — a catalog slot id or
+      a cli runtime id. *)
+end

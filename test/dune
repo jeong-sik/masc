@@ -1202,6 +1202,18 @@
 ; schema sentence parity with Agent Core, strict JSON parse, ordered walk.
 
 (test
+ (name test_keeper_librarian_cli_lane)
+ (modules test_keeper_librarian_cli_lane)
+ (libraries
+  masc_test_deps
+  compaction_exact_output_fixture
+  masc
+  masc.runtime
+  masc.masc_eio_context
+  agent_core
+  eio_main))
+
+(test
  (name test_keeper_lane_cli_oneshot)
  (modules test_keeper_lane_cli_oneshot)
  (libraries

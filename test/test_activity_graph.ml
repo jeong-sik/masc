@@ -826,6 +826,32 @@ let test_a_new_past_file_rebuilds_the_merge () =
         (Activity_graph.For_testing.past_merged_rebuild_count () > before))
 ;;
 
+
+(* Skipping the filter must not change what comes back. The unfiltered page is
+   the same events, in the same order, as the one a trivially-true [keep]
+   produces. *)
+let test_unfiltered_and_trivially_filtered_pages_agree () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      emit_n config 40;
+      let filtered =
+        Activity_graph.list_events config ~after_seq:0 ~limit:12
+          ~keep:(fun _ -> true) ()
+      in
+      let unfiltered =
+        Activity_graph.json_response config ~after_seq:0 ~limit:12 ()
+        |> Yojson.Safe.Util.member "events"
+        |> Yojson.Safe.Util.to_list
+        |> List.filter_map (fun e ->
+          match Yojson.Safe.Util.member "seq" e with
+          | `Int seq -> Some seq
+          | _ -> None)
+      in
+      check (list int) "same seqs in the same order"
+        (List.map (fun (e : Activity_graph.event) -> e.seq) filtered)
+        unfiltered)
+;;
+
 let test_default_projections_share_unchanged_event_aggregate () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
@@ -1124,6 +1150,8 @@ let () =
             test_append_reuses_the_past_day_merge;
           test_case "a new past file rebuilds the merge" `Quick
             test_a_new_past_file_rebuilds_the_merge;
+          test_case "unfiltered and trivially filtered pages agree" `Quick
+            test_unfiltered_and_trivially_filtered_pages_agree;
           Alcotest.test_case "same-size rewrite invalidates cache" `Quick
             test_same_size_rewrite_invalidates_current_day_cache;
           Alcotest.test_case "truncate-regrow is not append" `Quick

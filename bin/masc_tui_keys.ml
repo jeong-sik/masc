@@ -47,6 +47,7 @@ let keeper_actions =
   ; b Act "p / w" "pause / wake"
   ; b Act "s" "shutdown"
   ; b Act "e" "settings"
+  ; b Act "f" "files" ~help:"file changes this keeper wrote"
   ; b Act "a" "new" ~help:"new keeper"
   ]
 

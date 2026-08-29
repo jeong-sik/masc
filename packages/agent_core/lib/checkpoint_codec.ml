@@ -171,32 +171,29 @@ let result_all items =
   |> Result.map List.rev
 ;;
 
-let rec checkpoint_content_block_to_json block =
+let checkpoint_tool_result_to_json
+      ~tool_use_id
+      ~content
+      ~outcome
+      ~json
+      content_override
+  =
   let wire_json =
-    match block with
-    | ToolResult { content_blocks = Some blocks; _ } ->
-      (match Llm_provider.Api_common.content_block_to_json block with
-       | `Assoc fields ->
-         `Assoc
-           (List.map
-              (fun (name, value) ->
-                 if String.equal name "content"
-                 then name, `List (List.map checkpoint_content_block_to_json blocks)
-                 else name, value)
-              fields)
-       | non_object -> non_object)
-    | ToolResult { content_blocks = None; _ }
-    | Text _
-    | Thinking _
-    | ReasoningDetails _
-    | RedactedThinking _
-    | ToolUse _
-    | Image _
-    | Document _
-    | Audio _ -> Llm_provider.Api_common.content_block_to_json block
+    Llm_provider.Api_common.content_block_to_json
+      (ToolResult
+         { tool_use_id; content; outcome; json; content_blocks = None })
   in
-  match block, wire_json with
-  | ToolResult { outcome; _ }, `Assoc fields ->
+  match wire_json with
+  | `Assoc fields ->
+    let fields =
+      match content_override with
+      | None -> fields
+      | Some content ->
+        List.map
+          (fun (name, value) ->
+             if String.equal name "content" then name, content else name, value)
+          fields
+    in
     let provenance =
       match outcome with
       | Tool_succeeded -> []
@@ -209,20 +206,82 @@ let rec checkpoint_content_block_to_json block =
           | None -> [])
     in
     `Assoc (fields @ provenance)
-  | ( ( Text _
-      | Thinking _
-      | ReasoningDetails _
-      | RedactedThinking _
-      | ToolUse _
-      | Image _
-      | Document _
-      | Audio _ )
-    , _ ) -> wire_json
-  | ToolResult _, non_object ->
+  | non_object ->
     invalid_arg
       (Printf.sprintf
          "Checkpoint ToolResult serializer invariant failed: expected object, got %s"
          (Yojson.Safe.to_string non_object))
+;;
+
+let rec checkpoint_content_block_to_json block =
+  match block with
+  | ToolResult { tool_use_id; content; outcome; json; content_blocks } ->
+    let content_override =
+      Option.map
+        (fun blocks -> `List (List.map checkpoint_content_block_to_json blocks))
+        content_blocks
+    in
+    checkpoint_tool_result_to_json
+      ~tool_use_id
+      ~content
+      ~outcome
+      ~json
+      content_override
+  | Text _
+  | Thinking _
+  | ReasoningDetails _
+  | RedactedThinking _
+  | ToolUse _
+  | Image _
+  | Document _
+  | Audio _ -> Llm_provider.Api_common.content_block_to_json block
+;;
+
+let checkpoint_json_validation_error error =
+  Error.Serialization
+    (JsonParseError { detail = Execution_json.validation_error_to_string error })
+;;
+
+let validate_checkpoint_json ~context json =
+  Execution_json.validate ~context json
+  |> Result.map_error checkpoint_json_validation_error
+;;
+
+let rec checkpoint_content_block_to_json_result ~scope block =
+  match block with
+  | ToolResult { tool_use_id; content; outcome; json; content_blocks } ->
+    let* () =
+      match json with
+      | None -> Ok ()
+      | Some json -> validate_checkpoint_json ~context:(scope ^ ".json") json
+    in
+    let* content_override =
+      match content_blocks with
+      | None -> Ok None
+      | Some blocks ->
+        blocks
+        |> List.mapi (fun index block ->
+          checkpoint_content_block_to_json_result
+            ~scope:(Printf.sprintf "%s.content_blocks[%d]" scope index)
+            block)
+        |> result_all
+        |> Result.map (fun blocks -> Some (`List blocks))
+    in
+    Ok
+      (checkpoint_tool_result_to_json
+         ~tool_use_id
+         ~content
+         ~outcome
+         ~json
+         content_override)
+  | Text _
+  | Thinking _
+  | ReasoningDetails _
+  | RedactedThinking _
+  | ToolUse _
+  | Image _
+  | Document _
+  | Audio _ -> Ok (Llm_provider.Api_common.content_block_to_json block)
 ;;
 
 let unique_optional_field ~field fields =
@@ -417,10 +476,10 @@ let metadata_of_json json =
             }))
 ;;
 
-let message_to_json (msg : Types.message) =
+let message_json (msg : Types.message) content =
   let base_fields =
     [ "role", `String (Types.role_to_string msg.role)
-    ; "content", `List (List.map checkpoint_content_block_to_json msg.content)
+    ; "content", `List content
     ]
   in
   let optional_fields =
@@ -433,6 +492,24 @@ let message_to_json (msg : Types.message) =
     @ if msg.metadata = [] then [] else [ "metadata", `Assoc msg.metadata ]
   in
   `Assoc (base_fields @ optional_fields)
+;;
+
+let message_to_json (msg : Types.message) =
+  message_json msg (List.map checkpoint_content_block_to_json msg.content)
+;;
+
+let message_to_json_result ~message_index (msg : Types.message) =
+  msg.content
+  |> List.mapi (fun block_index block ->
+    checkpoint_content_block_to_json_result
+      ~scope:
+        (Printf.sprintf
+           "Checkpoint v10 message[%d].content[%d]"
+           message_index
+           block_index)
+      block)
+  |> result_all
+  |> Result.map (message_json msg)
 ;;
 
 let message_of_json json =
@@ -465,14 +542,14 @@ let message_of_json json =
     }
 ;;
 
-let checkpoint_to_json cp =
+let checkpoint_json_with_messages cp messages =
   `Assoc
     [ "version", `Int cp.version
     ; "session_id", `String cp.session_id
     ; "agent_name", `String cp.agent_name
     ; "model", model_to_yojson cp.model
     ; "system_prompt", Util.json_of_string_opt cp.system_prompt
-    ; "messages", `List (List.map message_to_json cp.messages)
+    ; "messages", `List messages
     ; "usage", usage_to_json cp.usage
     ; "turn_count", `Int cp.turn_count
     ; "created_at", `Float cp.created_at
@@ -498,51 +575,15 @@ let checkpoint_to_json cp =
     ]
 ;;
 
-let rec validate_cached_tool_result_json ~scope = function
-  | ToolResult { json; content_blocks; _ } ->
-    let* () =
-      match json with
-      | None -> Ok ()
-      | Some json ->
-        Execution_json.validate ~context:(scope ^ ".json") json
-        |> Result.map_error Execution_json.validation_error_to_string
-    in
-    (match content_blocks with
-     | None -> Ok ()
-     | Some blocks ->
-       blocks
-       |> List.mapi (fun index block ->
-         validate_cached_tool_result_json
-           ~scope:(Printf.sprintf "%s.content_blocks[%d]" scope index)
-           block)
-       |> result_all
-       |> Result.map ignore)
-  | ( Text _
-    | Thinking _
-    | ReasoningDetails _
-    | RedactedThinking _
-    | ToolUse _
-    | Image _
-    | Document _
-    | Audio _ ) -> Ok ()
+let checkpoint_to_json cp =
+  checkpoint_json_with_messages cp (List.map message_to_json cp.messages)
 ;;
 
-let validate_cached_tool_result_jsons (cp : Checkpoint_types.t) =
+let checkpoint_to_json_result (cp : Checkpoint_types.t) =
   cp.messages
-  |> List.mapi (fun message_index (message : Types.message) ->
-    message.content
-    |> List.mapi (fun block_index block ->
-      validate_cached_tool_result_json
-        ~scope:
-          (Printf.sprintf
-             "Checkpoint v10 message[%d].content[%d]"
-             message_index
-             block_index)
-        block)
-    |> result_all
-    |> Result.map ignore)
+  |> List.mapi (fun message_index message -> message_to_json_result ~message_index message)
   |> result_all
-  |> Result.map ignore
+  |> Result.map (checkpoint_json_with_messages cp)
 ;;
 
 let decode_current_json json =
@@ -636,33 +677,9 @@ let decode_current_json json =
          (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json: %s" msg }))
 ;;
 
-let validate_json_encoding json =
-  try
-    ignore (Yojson.Safe.to_string json);
-    Ok ()
-  with
-  | Invalid_argument detail | Yojson.Json_error detail ->
-    Error
-      (Error.Serialization
-         (JsonParseError
-            { detail = "Checkpoint v10 is not serializable JSON: " ^ detail }))
-;;
-
 let checkpoint_json_result cp =
-  let* () =
-    validate_cached_tool_result_jsons cp
-    |> Result.map_error (fun detail ->
-      Error.Serialization (JsonParseError { detail }))
-  in
-  let json = checkpoint_to_json cp in
-  let* () =
-    Execution_json.validate ~context:"Checkpoint v10" json
-    |> Result.map_error (fun detail ->
-      Error.Serialization
-        (JsonParseError { detail = Execution_json.validation_error_to_string detail }))
-  in
-  let* () = validate_json_encoding json in
-  let* () = Checkpoint_v10_contract.validate_v10_json json in
+  let* json = checkpoint_to_json_result cp in
+  let* () = validate_checkpoint_json ~context:"Checkpoint v10" json in
   let+ _ = decode_current_json json in
   json
 ;;

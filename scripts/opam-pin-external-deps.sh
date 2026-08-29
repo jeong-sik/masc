@@ -72,7 +72,6 @@ fi
 # --- Pin SHAs (bump these when upstream changes are needed) ---
 readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
 readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
-readonly NEO4J_BOLT_SHA="a1ca30c1247db5c58934e99306fe330419f7b21a"
 
 include_bisect=false
 include_compact_protocol=false
@@ -146,14 +145,6 @@ opam_pin_add ws-direct-gluten "https://github.com/jeong-sik/ws-direct.git#${WS_D
 pinned_pkgs+=("ws-direct-gluten")
 opam_pin_add ws-direct-eio "https://github.com/jeong-sik/ws-direct.git#${WS_DIRECT_SHA}" -n -y
 pinned_pkgs+=("ws-direct-eio")
-opam_pin_add neo4j_packstream "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
-pinned_pkgs+=("neo4j_packstream")
-opam_pin_add neo4j_bolt_common "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
-pinned_pkgs+=("neo4j_bolt_common")
-opam_pin_add neo4j_bolt "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
-pinned_pkgs+=("neo4j_bolt")
-opam_pin_add neo4j_bolt_eio "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
-pinned_pkgs+=("neo4j_bolt_eio")
 
 if $include_bisect; then
   # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.5 by pinning.

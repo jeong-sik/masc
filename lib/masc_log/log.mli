@@ -299,3 +299,4 @@ module Exec_tap : LOGGER
 module Tool_validation : LOGGER
 module Discord : LOGGER
 module Slack : LOGGER
+module Ide : LOGGER

@@ -58,6 +58,7 @@ run_self_test_when_changed() {
 
 blocking_lints() {
   run_lint "Issue taxonomy truth" bash scripts/check-issue-taxonomy-truth.sh
+  run_lint "Logging consistency" bash scripts/ci/check-logging-consistency.sh
   run_lint "Issue taxonomy parser and reconciliation" node scripts/test-issue-taxonomy-core.cjs
   run_self_test_when_changed "OCaml test suite reporter self-test" \
     scripts/ci-run-test-suite.sh \

@@ -478,7 +478,7 @@ let ingest_tool_event
    | Eio.Cancel.Cancelled _ as e ->
      Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
    | exn ->
-     Printf.eprintf "Ide_bridge.ingest_tool_event error: %s\n%!" (Printexc.to_string exn))
+     Log.Ide.error "ingest_tool_event: %s" (Printexc.to_string exn))
 
 let cursor_line_of_input input =
   match int_field "line" input with
@@ -509,8 +509,8 @@ let notify_cursor_changed ~keeper_id =
   try Atomic.get cursor_changed_sink ~keeper_id with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Printf.eprintf
-      "Ide_bridge.cursor_changed_sink error: keeper=%s error=%s\n%!"
+    Log.Ide.error
+      "cursor_changed_sink: keeper=%s error=%s"
       keeper_id
       (Printexc.to_string exn)
 ;;
@@ -602,8 +602,8 @@ let ingest_cursor_event_from_hook
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
-       Printf.eprintf
-         "Ide_bridge.ingest_cursor_event_from_hook error: %s\n%!"
+       Log.Ide.error
+         "ingest_cursor_event_from_hook: %s"
          (Printexc.to_string exn))
   | _ -> ()
 
@@ -661,8 +661,8 @@ let ingest_cursor_event
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
-       Printf.eprintf
-         "Ide_bridge.ingest_cursor_event error: %s\n%!"
+       Log.Ide.error
+         "ingest_cursor_event: %s"
          (Printexc.to_string exn);
        Error "Failed to persist cursor event")
 ;;
@@ -779,8 +779,8 @@ let install_agent_observation_sinks () =
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
-        Printf.eprintf
-          "Ide_bridge.ingest_write_region_event error: %s\n%!"
+        Log.Ide.error
+          "ingest_write_region_event: %s"
           (Printexc.to_string exn);
         Error Agent_observation.Write_region_sink_failed);
   Agent_observation.register_annotation_sink

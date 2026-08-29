@@ -37,7 +37,11 @@ let atomic_tmp_prefix = ".atomic_"
 let atomic_tmp_suffix = ".tmp"
 
 let open_atomic_temp_file ~temp_dir () =
+  (* Open_binary: the durable raw-bytes path promises the caller's exact
+     bytes. stdlib defaults this to [Open_text], which rewrites newlines on
+     platforms that separate the two modes. *)
   Stdlib.Filename.open_temp_file
+    ~mode:[ Open_binary ]
     ~temp_dir
     atomic_tmp_prefix
     atomic_tmp_suffix

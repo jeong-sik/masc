@@ -1,8 +1,7 @@
 // MASC v2 — command palette (⌘K), rebuilt on the design's cmdk-* markup
-// (prototype palette.jsx). The vendored kit stylesheet (ds-dashboard-kit/
-// cmdk.css) styles exactly these classes; the ninja-keys port it replaces
-// could not wear that stylesheet, which is why the design-parity probes read
-// the palette surface at 0%.
+// (prototype palette.jsx). The cmdk-* classes it emits are styled by the
+// loaded v2 stylesheets; the vendored ds-dashboard-kit sheet that once
+// carried them was never imported and has been removed.
 //
 // With a query the palette merges the deep index — goals, tasks, Gate
 // approvals, fusion runs, board posts, connectors — over the live signals

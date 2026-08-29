@@ -124,7 +124,10 @@ let validate_non_blank field value =
   else Ok ()
 ;;
 
-let validate_json = Execution_json.validate
+let validate_json ~context json =
+  Execution_json.validate ~context json
+  |> Result.map_error Execution_json.validation_error_to_string
+;;
 
 let validate_node_kind = function
   | Agent_run { agent_name } -> validate_non_blank "agent_name" agent_name

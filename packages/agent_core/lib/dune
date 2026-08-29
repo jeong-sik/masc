@@ -7,7 +7,6 @@
  (private_modules
   execution_id
   execution_cause
-  execution_json
   execution_provider_response_snapshot
   execution_tool_schedule
   execution_event

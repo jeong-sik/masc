@@ -458,7 +458,6 @@ let keeper_capability_search_json_for_surface ~capability_surface ~query =
            ; name = Keeper_capability_surface.candidate_name candidate
            ; description =
                Keeper_capability_surface.candidate_description candidate
-           ; category = Keeper_capability_surface.candidate_category candidate
            ; invocation_name =
                Keeper_capability_surface.candidate_invocation_name candidate
            })
@@ -472,7 +471,6 @@ let keeper_capability_search_json_for_surface ~capability_surface ~query =
         `Assoc
           [ "bm25", `Float hit.Keeper_capability_search.bm25
           ; "matched_name", `String hit.document.name
-          ; "category", `String hit.document.category
           ; ( "invocation_name"
             , Option.fold
                 ~none:`Null

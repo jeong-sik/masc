@@ -153,7 +153,6 @@ let search_candidates surface query =
         ; name = Masc.Keeper_capability_surface.candidate_name candidate
         ; description =
             Masc.Keeper_capability_surface.candidate_description candidate
-        ; category = Masc.Keeper_capability_surface.candidate_category candidate
         ; invocation_name =
             Masc.Keeper_capability_surface.candidate_invocation_name candidate
         })
@@ -622,7 +621,6 @@ let test_search_returns_every_fts_hit_without_cutoff () =
         { payload = index
         ; name = Printf.sprintf "candidate-%d" index
         ; description = "sharedneedle"
-        ; category = "test"
         ; invocation_name = None
         })
   in

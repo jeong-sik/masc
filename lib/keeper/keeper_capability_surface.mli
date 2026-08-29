@@ -82,5 +82,4 @@ val skill_capability_to_yojson : skill_capability -> Yojson.Safe.t
 val candidate_to_yojson : candidate -> Yojson.Safe.t
 val candidate_name : candidate -> string
 val candidate_description : candidate -> string
-val candidate_category : candidate -> string
 val candidate_invocation_name : candidate -> string option

@@ -10,6 +10,6 @@ name = "query"
 type = "string"
 required = true
 description = """
-FTS5 query over exact capability name, description, category, and invocation \
-name. No substring, regex, stop-word, threshold, top-N, or intent-expansion \
-heuristic is added."""
+FTS5 query over exact capability name, description, and invocation name. No \
+substring, regex, stop-word, threshold, top-N, or intent-expansion heuristic \
+is added."""

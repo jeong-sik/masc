@@ -467,7 +467,12 @@ describe('SkillsPanel rejection observability', () => {
       content_revision: 'revision-broken',
       reason: {
         kind: 'document_rejected',
-        diagnostics: [{ code: 'name_mismatch', message: 'raw names differ' }],
+        diagnostics: [{
+          code: 'name_mismatch',
+          message: 'raw names differ',
+          declared: 'declared-name',
+          directory: 'broken',
+        }],
       },
     }
     editorApiMocks.fetchSkills.mockResolvedValue(

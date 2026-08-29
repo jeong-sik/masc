@@ -201,6 +201,41 @@ let test_independent_frontmatter_diagnostics_accumulate () =
       (List.mem (Skill_document.Unexpected_frontmatter_field "custom") diagnostics)
 ;;
 
+let test_invalid_name_projection_is_payload_bearing_and_not_duplicated () =
+  match
+    Skill_document.decode
+      ~directory_name:"\xcd\x85"
+      "---\nname: \xcd\x85\ndescription: Reject a combining mark.\n---\nBody"
+  with
+  | Skill_document.Loaded _ -> Alcotest.fail "invalid Unicode name was admitted"
+  | Skill_document.Unloadable diagnostics ->
+    let invalid_names =
+      List.filter_map
+        (function
+          | Skill_document.Invalid_name _ as diagnostic -> Some diagnostic
+          | _ -> None)
+        diagnostics
+    in
+    Alcotest.(check int) "one official invalid-name diagnostic" 1
+      (List.length invalid_names);
+    (match invalid_names with
+     | [ diagnostic ] ->
+       let projection = Skill_document.diagnostic_to_yojson diagnostic in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string) "typed code" "invalid_name"
+         (projection |> member "code" |> to_string);
+       Alcotest.(check string) "typed invalid name" "\xcd\x85"
+         (projection |> member "name" |> to_string);
+       Alcotest.check
+         (Alcotest.list (Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal))
+         "typed violations"
+         [ `Assoc [ "kind", `String "name_has_invalid_character" ] ]
+         (projection |> member "violations" |> to_list);
+       Alcotest.(check bool) "human message remains present" true
+         (projection |> member "message" |> to_string |> String.length > 0)
+     | _ -> Alcotest.fail "invalid-name diagnostic count changed")
+;;
+
 let () =
   Alcotest.run
     "skill_document"
@@ -222,5 +257,9 @@ let () =
             "independent diagnostics accumulate"
             `Quick
             test_independent_frontmatter_diagnostics_accumulate
+        ; Alcotest.test_case
+            "invalid-name typed projection"
+            `Quick
+            test_invalid_name_projection_is_payload_bearing_and_not_duplicated
         ] ) ]
 ;;

@@ -369,6 +369,8 @@ let test_public_projection_exposes_document_rejection () =
         ; ( "message"
           , `String
               "SKILL.md name \"declared-name\" does not match directory \"directory-name\"" )
+        ; "declared", `String "declared-name"
+        ; "directory", `String "directory-name"
         ]
     ]
     diagnostics

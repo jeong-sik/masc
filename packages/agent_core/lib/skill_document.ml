@@ -400,35 +400,26 @@ let metadata fields =
 ;;
 
 let runtime_name ~directory_name declared =
-  let directory, directory_violations = analyze_name ~trim:false directory_name in
-  let invalid_name name violations = Invalid_name { name; violations } in
+  let directory, _directory_violations = analyze_name ~trim:false directory_name in
   match declared with
   | Some declared_name ->
     let declared, declared_violations = analyze_name declared_name in
-    (match declared_violations, directory_violations with
-     | [], [] when String.equal declared directory -> Ok (declared, [])
-     | [], [] ->
-       Error
-         [ Name_mismatch
-             { declared = declared_name; directory = directory_name }
-         ]
-     | [], directory_violations ->
-       Error
-         [ Name_mismatch
-             { declared = declared_name; directory = directory_name }
-         ; invalid_name directory_name directory_violations
-         ]
-     | declared_violations, [] ->
-       Error [ invalid_name declared_name declared_violations ]
-     | declared_violations, directory_violations ->
-       Error
-         [ invalid_name declared_name declared_violations
-         ; invalid_name directory_name directory_violations
-         ])
-  | None ->
-    (match directory_violations with
-     | [] -> Error [ Missing_name ]
-     | violations -> Error [ Missing_name; invalid_name directory_name violations ])
+    let diagnostics =
+      (match declared_violations with
+       | [] -> []
+       | violations -> [ Invalid_name { name = declared_name; violations } ])
+      @
+      if String.equal declared directory
+      then []
+      else
+        [ Name_mismatch
+            { declared = declared_name; directory = directory_name }
+        ]
+    in
+    (match diagnostics with
+     | [] -> Ok (declared, [])
+     | diagnostics -> Error diagnostics)
+  | None -> Error [ Missing_name ]
 ;;
 
 let utf8_byte_order_mark = "\xEF\xBB\xBF"
@@ -661,9 +652,71 @@ let diagnostic_code = function
   | Invalid_metadata_value _ -> "invalid_metadata_value"
 ;;
 
+let field_to_yojson = function
+  | Standard field ->
+    `Assoc
+      [ "kind", `String "standard"
+      ; "name", `String (standard_field_to_string field)
+      ]
+  | Extension name ->
+    `Assoc [ "kind", `String "extension"; "name", `String name ]
+;;
+
+let expected_shape_to_yojson = function
+  | String_value -> `String "string"
+  | String_mapping -> `String "string_mapping"
+;;
+
+let name_violation_to_yojson = function
+  | Empty_name -> `Assoc [ "kind", `String "empty_name" ]
+  | Name_too_long { length; maximum } ->
+    `Assoc
+      [ "kind", `String "name_too_long"
+      ; "length", `Int length
+      ; "maximum", `Int maximum
+      ]
+  | Name_not_lowercase -> `Assoc [ "kind", `String "name_not_lowercase" ]
+  | Name_starts_with_hyphen ->
+    `Assoc [ "kind", `String "name_starts_with_hyphen" ]
+  | Name_ends_with_hyphen ->
+    `Assoc [ "kind", `String "name_ends_with_hyphen" ]
+  | Name_has_consecutive_hyphens ->
+    `Assoc [ "kind", `String "name_has_consecutive_hyphens" ]
+  | Name_has_invalid_character ->
+    `Assoc [ "kind", `String "name_has_invalid_character" ]
+;;
+
 let diagnostic_to_yojson diagnostic =
+  let payload =
+    match diagnostic with
+    | Missing_frontmatter
+    | Byte_order_mark
+    | Unterminated_frontmatter
+    | Frontmatter_not_mapping
+    | Missing_name
+    | Missing_description
+    | Compatibility_empty -> []
+    | Malformed_yaml detail -> [ "detail", `String detail ]
+    | Duplicate_field field -> [ "field", field_to_yojson field ]
+    | Duplicate_metadata_key key
+    | Invalid_metadata_value { key } -> [ "key", `String key ]
+    | Unexpected_frontmatter_field field -> [ "field", `String field ]
+    | Invalid_field_type { field; expected } ->
+      [ "field", field_to_yojson field
+      ; "expected", expected_shape_to_yojson expected
+      ]
+    | Invalid_name { name; violations } ->
+      [ "name", `String name
+      ; "violations", `List (List.map name_violation_to_yojson violations)
+      ]
+    | Name_mismatch { declared; directory } ->
+      [ "declared", `String declared; "directory", `String directory ]
+    | Description_too_long { length }
+    | Compatibility_too_long { length } -> [ "length", `Int length ]
+  in
   `Assoc
-    [ "code", `String (diagnostic_code diagnostic)
-    ; "message", `String (diagnostic_to_string diagnostic)
-    ]
+    ([ "code", `String (diagnostic_code diagnostic)
+     ; "message", `String (diagnostic_to_string diagnostic)
+     ]
+     @ payload)
 ;;

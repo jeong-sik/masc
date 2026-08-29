@@ -21,29 +21,48 @@ export interface SkillSnapshotEntry {
   body_bytes: number
 }
 
-export type SkillDocumentDiagnosticCode =
-  | 'missing_frontmatter'
-  | 'byte_order_mark'
-  | 'unterminated_frontmatter'
-  | 'malformed_yaml'
-  | 'frontmatter_not_mapping'
-  | 'duplicate_field'
-  | 'duplicate_metadata_key'
-  | 'unexpected_frontmatter_field'
-  | 'missing_name'
-  | 'missing_description'
-  | 'invalid_field_type'
-  | 'invalid_name'
-  | 'name_mismatch'
-  | 'description_too_long'
-  | 'compatibility_empty'
-  | 'compatibility_too_long'
-  | 'invalid_metadata_value'
+export type SkillDocumentField =
+  | {
+      kind: 'standard'
+      name: 'name' | 'description' | 'license' | 'compatibility' | 'metadata' | 'allowed-tools'
+    }
+  | { kind: 'extension'; name: string }
 
-export interface SkillDocumentDiagnostic {
-  code: SkillDocumentDiagnosticCode
-  message: string
-}
+export type SkillNameViolation =
+  | { kind: 'empty_name' }
+  | { kind: 'name_too_long'; length: number; maximum: number }
+  | { kind: 'name_not_lowercase' }
+  | { kind: 'name_starts_with_hyphen' }
+  | { kind: 'name_ends_with_hyphen' }
+  | { kind: 'name_has_consecutive_hyphens' }
+  | { kind: 'name_has_invalid_character' }
+
+type SkillDiagnostic<Code extends string> = { code: Code; message: string }
+
+export type SkillDocumentDiagnostic =
+  | SkillDiagnostic<'missing_frontmatter'>
+  | SkillDiagnostic<'byte_order_mark'>
+  | SkillDiagnostic<'unterminated_frontmatter'>
+  | (SkillDiagnostic<'malformed_yaml'> & { detail: string })
+  | SkillDiagnostic<'frontmatter_not_mapping'>
+  | (SkillDiagnostic<'duplicate_field'> & { field: SkillDocumentField })
+  | (SkillDiagnostic<'duplicate_metadata_key'> & { key: string })
+  | (SkillDiagnostic<'unexpected_frontmatter_field'> & { field: string })
+  | SkillDiagnostic<'missing_name'>
+  | SkillDiagnostic<'missing_description'>
+  | (SkillDiagnostic<'invalid_field_type'> & {
+      field: SkillDocumentField
+      expected: 'string' | 'string_mapping'
+    })
+  | (SkillDiagnostic<'invalid_name'> & {
+      name: string
+      violations: readonly SkillNameViolation[]
+    })
+  | (SkillDiagnostic<'name_mismatch'> & { declared: string; directory: string })
+  | (SkillDiagnostic<'description_too_long'> & { length: number })
+  | SkillDiagnostic<'compatibility_empty'>
+  | (SkillDiagnostic<'compatibility_too_long'> & { length: number })
+  | (SkillDiagnostic<'invalid_metadata_value'> & { key: string })
 
 export type SkillSnapshotRejectionReason =
   | { kind: 'document_rejected'; diagnostics: readonly SkillDocumentDiagnostic[] }
@@ -792,30 +811,89 @@ const SkillSnapshotEntrySchema = Schema.Struct({
   body_bytes: Schema.NonNegativeInt,
 })
 
-const SkillDocumentDiagnosticCodeSchema = Schema.Literal(
-  'missing_frontmatter',
-  'byte_order_mark',
-  'unterminated_frontmatter',
-  'malformed_yaml',
-  'frontmatter_not_mapping',
-  'duplicate_field',
-  'duplicate_metadata_key',
-  'unexpected_frontmatter_field',
-  'missing_name',
-  'missing_description',
-  'invalid_field_type',
-  'invalid_name',
-  'name_mismatch',
-  'description_too_long',
-  'compatibility_empty',
-  'compatibility_too_long',
-  'invalid_metadata_value',
+const SkillDocumentFieldSchema = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal('standard'),
+    name: Schema.Literal(
+      'name',
+      'description',
+      'license',
+      'compatibility',
+      'metadata',
+      'allowed-tools',
+    ),
+  }),
+  Schema.Struct({ kind: Schema.Literal('extension'), name: Schema.NonEmptyString }),
 )
 
-const SkillDocumentDiagnosticSchema = Schema.Struct({
-  code: SkillDocumentDiagnosticCodeSchema,
+const SkillNameViolationSchema = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal('empty_name') }),
+  Schema.Struct({
+    kind: Schema.Literal('name_too_long'),
+    length: Schema.NonNegativeInt,
+    maximum: Schema.Positive,
+  }),
+  Schema.Struct({ kind: Schema.Literal('name_not_lowercase') }),
+  Schema.Struct({ kind: Schema.Literal('name_starts_with_hyphen') }),
+  Schema.Struct({ kind: Schema.Literal('name_ends_with_hyphen') }),
+  Schema.Struct({ kind: Schema.Literal('name_has_consecutive_hyphens') }),
+  Schema.Struct({ kind: Schema.Literal('name_has_invalid_character') }),
+)
+
+const diagnosticBase = <Code extends string>(code: Code) => ({
+  code: Schema.Literal(code),
   message: Schema.NonEmptyString,
 })
+
+const SkillDocumentDiagnosticSchema = Schema.Union(
+  Schema.Struct(diagnosticBase('missing_frontmatter')),
+  Schema.Struct(diagnosticBase('byte_order_mark')),
+  Schema.Struct(diagnosticBase('unterminated_frontmatter')),
+  Schema.Struct({ ...diagnosticBase('malformed_yaml'), detail: Schema.NonEmptyString }),
+  Schema.Struct(diagnosticBase('frontmatter_not_mapping')),
+  Schema.Struct({
+    ...diagnosticBase('duplicate_field'),
+    field: SkillDocumentFieldSchema,
+  }),
+  Schema.Struct({
+    ...diagnosticBase('duplicate_metadata_key'),
+    key: Schema.NonEmptyString,
+  }),
+  Schema.Struct({
+    ...diagnosticBase('unexpected_frontmatter_field'),
+    field: Schema.NonEmptyString,
+  }),
+  Schema.Struct(diagnosticBase('missing_name')),
+  Schema.Struct(diagnosticBase('missing_description')),
+  Schema.Struct({
+    ...diagnosticBase('invalid_field_type'),
+    field: SkillDocumentFieldSchema,
+    expected: Schema.Literal('string', 'string_mapping'),
+  }),
+  Schema.Struct({
+    ...diagnosticBase('invalid_name'),
+    name: Schema.String,
+    violations: Schema.Array(SkillNameViolationSchema),
+  }),
+  Schema.Struct({
+    ...diagnosticBase('name_mismatch'),
+    declared: Schema.String,
+    directory: Schema.String,
+  }),
+  Schema.Struct({
+    ...diagnosticBase('description_too_long'),
+    length: Schema.NonNegativeInt,
+  }),
+  Schema.Struct(diagnosticBase('compatibility_empty')),
+  Schema.Struct({
+    ...diagnosticBase('compatibility_too_long'),
+    length: Schema.NonNegativeInt,
+  }),
+  Schema.Struct({
+    ...diagnosticBase('invalid_metadata_value'),
+    key: Schema.NonEmptyString,
+  }),
+)
 
 const SkillSnapshotRejectionReasonSchema = Schema.Union(
   Schema.Struct({

@@ -247,6 +247,20 @@ let keeper_stage_timing_ring_size =
             min_value = Some (`Int 10); max_value = Some (`Int 1000) }
     ()
 
+(* Whether identity scalars (a `user:` login in a GitHub hosts.yml) mined
+   from keeper secret files are masked as [REDACTED] in chat text and tool
+   output. Credential-shaped values (tokens, passwords) are always masked;
+   this switch only governs the identity half, so turning it off shows
+   account names without unmasking credentials. *)
+let keeper_chat_redact_identity_scalars =
+  register_bool
+    ~key:"keeper.chat_redact_identity_scalars"
+    ~default:(fun () -> true)
+    ~meta:{ description = "secret 파일의 계정명(user 등) 값도 채팅·도구 출력에서 [REDACTED] 처리 (토큰류는 항상 처리)";
+            value_type = "bool";
+            min_value = None; max_value = None }
+    ()
+
 (* ── surface catalog ─────────────────────────────────────────── *)
 
 type surface = {
@@ -272,6 +286,13 @@ let surfaces =
         "keeper.snapshot_sec";
         "keeper.work_as_hb_enabled";
         "keeper.stage_timing_ring_size";
+      ];
+    };
+    {
+      id = "keeper_chat_redaction";
+      description = "Keeper chat and tool-output secret masking";
+      param_keys = [
+        "keeper.chat_redact_identity_scalars";
       ];
     };
     {

@@ -40,6 +40,12 @@ val keeper_stage_timing_ring_size : int Runtime_params.param
 (** Stage-timing ring buffer size.  Applied on fiber restart only —
     runtime mutation requires keeper restart.  Range \[10, 1000\]. *)
 
+val keeper_chat_redact_identity_scalars : bool Runtime_params.param
+(** Whether identity scalars (a [user:] login in a GitHub hosts.yml) mined
+    from keeper secret files are masked as [REDACTED] in chat text and tool
+    output. Credential-shaped values (tokens, passwords) are always masked;
+    this switch governs only the identity half. *)
+
 (** {1 Dashboard rendering} *)
 
 val dashboard_max_path_length : int Runtime_params.param

@@ -80,7 +80,18 @@ let strip_matching_quotes value =
   then String.sub value 1 (len - 2)
   else value
 
-let add_mapping_scalar_values value acc =
+(* Scalar mining is what catches a bare credential printed without its key
+   line — `gh auth status` shows the token alone. The key half decides what
+   a scalar is: credential-shaped keys always mine, identity keys (a `user:`
+   login) only when [redact_identity_scalars] is set. The default mined
+   every scalar, so a GitHub account name — public in every repo URL — was
+   masked as [REDACTED] throughout chat text (2026-08-29, keeper edgar.a.poe). *)
+let credential_shaped_key key =
+  List.exists
+    (fun marker -> String_util.contains_substring_ci key marker)
+    [ "token"; "secret"; "password"; "passwd"; "credential"; "passphrase" ]
+
+let add_mapping_scalar_values ~(redact_identity_scalars : bool) value acc =
   value
   |> String.split_on_char '\n'
   |> List.fold_left
@@ -88,16 +99,19 @@ let add_mapping_scalar_values value acc =
           match String.index_opt line ':' with
           | None -> acc
           | Some separator ->
+            let key = String.trim (String.sub line 0 separator) in
             let value_start = separator + 1 in
             let scalar =
               String.sub line value_start (String.length line - value_start)
               |> String.trim
               |> strip_matching_quotes
             in
-            add_value scalar acc)
+            if redact_identity_scalars || credential_shaped_key key
+            then add_value scalar acc
+            else acc)
        acc
 
-let values_from_structured_secret_file path acc =
+let values_from_structured_secret_file ~(redact_identity_scalars : bool) path acc =
   match lstat_opt path with
   | Some st when st.Unix.st_kind = Unix.S_REG ->
       (match read_regular_file path st with
@@ -106,7 +120,7 @@ let values_from_structured_secret_file path acc =
            acc
            |> add_value (strip_one_final_newline value)
            |> add_lines value
-           |> add_mapping_scalar_values value)
+           |> add_mapping_scalar_values ~redact_identity_scalars value)
   | _ -> acc
 
 let collect_env_values env_root acc =
@@ -154,6 +168,7 @@ let dedupe values =
        compare (String.length b, b) (String.length a, a))
 
 let snapshot_with_additional_secret_files
+      ~(redact_identity_scalars : bool)
       ~additional_secret_files
       ~base_path
       ~keeper_name
@@ -172,7 +187,8 @@ let snapshot_with_additional_secret_files
     values_from_file (ssh_remote_token_file ~base_path ~keeper_name) values
     |> fun values ->
     List.fold_left
-      (fun acc path -> values_from_structured_secret_file path acc)
+      (fun acc path ->
+         values_from_structured_secret_file ~redact_identity_scalars path acc)
       values
       additional_secret_files
     |> dedupe
@@ -187,6 +203,7 @@ let snapshot_with_additional_secret_files
 
 let snapshot ~base_path ~keeper_name =
   snapshot_with_additional_secret_files
+    ~redact_identity_scalars:true
     ~additional_secret_files:[]
     ~base_path
     ~keeper_name

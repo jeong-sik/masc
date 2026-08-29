@@ -247,6 +247,8 @@ type chat_message = {
    ([Keeper_tool_execute_runtime]); this brings the chat sink to parity. *)
 let redaction_for ~base_dir ~keeper_name =
   Keeper_secret_redaction.snapshot_with_additional_secret_files
+    ~redact_identity_scalars:
+      (Runtime_params.get Runtime_settings.keeper_chat_redact_identity_scalars)
     ~additional_secret_files:
       (Keeper_github_identity.secret_files_of_base_path
          ~base_path:base_dir

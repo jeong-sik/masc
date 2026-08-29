@@ -100,6 +100,8 @@ let execute_secret_redaction
       ~keeper_name
   =
   Keeper_secret_redaction.snapshot_with_additional_secret_files
+    ~redact_identity_scalars:
+      (Runtime_params.get Runtime_settings.keeper_chat_redact_identity_scalars)
     ~additional_secret_files
     ~base_path
     ~keeper_name

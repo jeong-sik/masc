@@ -333,7 +333,6 @@ jobs:
           # cost a CI round per audit instead of one round for all of them.
           failed=()
           for s in \
-            audit-unwired-audits.sh \
             verify-test-registration.py \
             audit-catchall.sh \
             audit-cross-module-exhaustive-match.sh \

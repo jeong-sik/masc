@@ -109,6 +109,32 @@ let test_runtime_cwd_is_resolver_backed_snapshot () =
    runbook stopped before it began.
 
    The test process is itself a direct launch, so this is that case. *)
+(* current () runs on every TUI render frame. When the self-hash was not
+   memoised it read and digested the whole 60 MB executable each time, and the
+   TUI sat at 88% of a core with sha256_do_chunk on top of the sample. *)
+let test_repeated_current_does_not_rehash_the_executable () =
+  let first = Build_identity.current () in
+  let started = Unix.gettimeofday () in
+  let repeats = 200 in
+  for _ = 1 to repeats do
+    ignore (Build_identity.current ())
+  done
+  ;
+  let elapsed = Unix.gettimeofday () -. started in
+  Alcotest.(check bool) "the digest is stable across calls" true
+    (String.equal
+       (Option.value first.Build_identity.executable_sha256 ~default:"")
+       (Option.value
+          (Build_identity.current ()).Build_identity.executable_sha256
+          ~default:""));
+  (* A re-read of this executable costs tens of milliseconds; 200 of them
+     could not finish in a second. The bound is loose on purpose -- it is
+     here to catch a rehash, not to pin a machine's speed. *)
+  Alcotest.(check bool)
+    (Printf.sprintf "%d calls stay cheap (%.3fs)" repeats elapsed)
+    true
+    (elapsed < 1.0)
+
 let test_direct_launch_still_identifies_its_executable () =
   let current = Build_identity.current () in
   let json = Build_identity.to_yojson current in
@@ -746,6 +772,8 @@ let () =
           Alcotest.test_case
             "pick_repo_candidates not sorted alphabetically" `Quick
             test_pick_repo_candidates_not_sorted_alphabetically;
+          Alcotest.test_case "repeated current does not rehash the executable"
+            `Quick test_repeated_current_does_not_rehash_the_executable;
           Alcotest.test_case "direct launch still identifies its executable"
             `Quick test_direct_launch_still_identifies_its_executable;
           Alcotest.test_case "parse commit timestamp output" `Quick

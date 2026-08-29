@@ -879,7 +879,15 @@ let sha256_string value = Digestif.SHA256.(digest_string value |> to_hex)
 
    Failure is absence, not a guess: an unreadable executable leaves the field
    out rather than reporting a hash of nothing. *)
-let self_observed_executable_sha256 path =
+(* Memoised per path, because [current ()] is called on every render frame and
+   the executable does not change under a running process. Hashing a 60 MB
+   binary each frame put the TUI at 88% of a core, all of it in
+   sha256_do_chunk. *)
+let self_observed_cache : (string * string option) option Atomic.t =
+  Atomic.make None
+;;
+
+let self_observed_executable_sha256_uncached path =
   match open_in_bin path with
   | exception Sys_error _ -> None
   | ic ->
@@ -887,6 +895,15 @@ let self_observed_executable_sha256 path =
       match sha256_channel ic with
       | digest -> Some digest
       | exception Sys_error _ -> None)
+;;
+
+let self_observed_executable_sha256 path =
+  match Atomic.get self_observed_cache with
+  | Some (cached_path, digest) when String.equal cached_path path -> digest
+  | _ ->
+    let digest = self_observed_executable_sha256_uncached path in
+    Atomic.set self_observed_cache (Some (path, digest));
+    digest
 ;;
 
 let validate_source_root_identity provenance =

@@ -501,12 +501,6 @@ let () =
 
 (* -- Updater helpers -- *)
 
-let map_runtime (f : agent_runtime_state -> agent_runtime_state) (m : keeper_meta)
-  : keeper_meta
-  =
-  { m with runtime = f m.runtime }
-;;
-
 let map_usage (f : usage_metrics -> usage_metrics) (m : keeper_meta) : keeper_meta =
   { m with runtime = { m.runtime with usage = f m.runtime.usage } }
 ;;

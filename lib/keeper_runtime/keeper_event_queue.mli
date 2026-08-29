@@ -392,10 +392,6 @@ val low_to_normal_aging_threshold_sec : float
     to [Normal]. A reasoned default (matches common recurring-schedule
     cadence in this fleet), not a measured distribution. *)
 
-(** [effective_urgency ~now s] is [s.urgency], except a [Low] stimulus
-    promotes to [Normal] once it has waited at least
-    {!low_to_normal_aging_threshold_sec}. Never promotes into [Immediate]:
-    that tier stays a producer-declared contract (#31597). *)
 
 val effective_urgency_rank : now:float -> stimulus -> int
 (** [urgency_rank (effective_urgency ~now s)]. *)

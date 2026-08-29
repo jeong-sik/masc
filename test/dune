@@ -2957,7 +2957,6 @@
 
 (include stanzas/test_store_unreadable.inc)
 
-(include stanzas/test_keeper_compact_recovery_tool_surface.inc)
 
 (test
  (name test_keeper_visible_path_projection)

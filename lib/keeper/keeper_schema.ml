@@ -35,7 +35,6 @@ let schemas : tool_schema list = [
 
   Keeper_schema_toml.reset;
 
-  Keeper_schema_toml.compact;
 
   Keeper_schema_toml.msg;
 

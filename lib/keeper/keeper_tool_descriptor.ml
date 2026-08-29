@@ -2406,8 +2406,6 @@ let internal_descriptors : t list =
       ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "delegate_list" "masc_keeper_delegate_list"
       ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "compact" "masc_keeper_compact"
-      ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "clear" "masc_keeper_clear"
       ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_start" "masc_keeper_sandbox_start"

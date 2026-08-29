@@ -410,23 +410,6 @@ function ingestRuntimeProjection(
         })
       }
       return
-    case 'agent_core:context_compacted':
-      if (opts?.includeLiveTrace) {
-        const before = asNumber(payload.before_tokens)
-        const after = asNumber(payload.after_tokens)
-        const phase = asString(payload.phase)
-        maybeAppendLiveTrace(agentName, event, {
-          idSuffix: `${phase ?? 'compact'}|${before ?? 'na'}|${after ?? 'na'}`,
-          kind: 'agent_core_context',
-          summary: `compact${before != null && after != null ? ` ${before}→${after}` : ''}`,
-          data: {
-            before_tokens: before ?? null,
-            after_tokens: after ?? null,
-            phase: phase ?? null,
-          },
-        })
-      }
-      return
     case 'agent_core:durable:llm_request':
       recordAgentCoreLlmCall(eventTimestampMs(event))
       if (opts?.includeLiveTrace) {

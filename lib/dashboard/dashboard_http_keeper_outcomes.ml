@@ -3,8 +3,6 @@
     Data sources (all already in-process, zero new schema):
     - [Keeper_transition_audit.recent_completed_turns] (50-entry ring) ->
       turn outcomes classified after [mark_turn_finished].
-    - [Keeper_transition_audit.recent_transitions] (50-entry ring) ->
-      compaction outcomes classified by [selected_event].
     - [registry_entry] crash_log / restart_count / turn_consecutive_failures
       -> resilience counters.
     - [Dashboard_harness_health.read_recent_verdicts] -> AGENT_CORE verdict pass/fail
@@ -20,9 +18,7 @@ let compute_outcomes_rollup
     ~recent_crash_count
     ~(registry_entry : Keeper_registry.registry_entry option) : Yojson.Safe.t =
   let succ_turns = ref 0 in
-  let succ_compactions = ref 0 in
   let fail_turn = ref 0 in
-  let fail_compaction = ref 0 in
   let completed_turns =
     Keeper_transition_audit.recent_completed_turns ~keeper_name ~limit:50
   in
@@ -32,14 +28,6 @@ let compute_outcomes_rollup
       | Keeper_transition_audit.Turn_substantive -> incr succ_turns
       | Keeper_transition_audit.Turn_failed -> incr fail_turn)
     completed_turns;
-  let transitions =
-    Keeper_transition_audit.recent_transitions ~keeper_name ~limit:50
-  in
-  List.iter
-    (fun (tr : Keeper_transition_audit.transition_record) ->
-      match tr.selected_event with
-      | _ -> Log.Dashboard.debug "ignored transition event")
-    transitions;
   let observed_turns = List.length completed_turns in
   let restarts, consecutive_fail =
     match registry_entry with
@@ -98,13 +86,11 @@ let compute_outcomes_rollup
         `Assoc
           [
             ("substantive_turns", `Int !succ_turns);
-            ("compactions_ok", `Int !succ_compactions);
           ] );
       ( "failures",
         `Assoc
           [
             ("turn_failed", `Int !fail_turn);
-            ("compaction_failed", `Int !fail_compaction);
             ("crashes", `Int recent_crash_count);
             ("restarts", `Int restarts);
             ("consecutive_fail_current", `Int consecutive_fail);

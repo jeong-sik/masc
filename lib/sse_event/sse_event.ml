@@ -298,67 +298,6 @@ let handoff_completed
     payload_json
 ;;
 
-(** Emit a [context_compacted] envelope. *)
-let context_compacted
-      ~(ts_unix : float)
-      ~(correlation_id : string)
-      ~(run_id : string)
-      ~(agent_name : string)
-      ~(before_tokens : int)
-      ~(after_tokens : int)
-      ~(phase : string)
-  : Yojson.Safe.t
-  =
-  let payload_json =
-    let p : Sse_event_t.context_compacted_payload =
-      { agent_name; before_tokens; after_tokens; phase }
-    in
-    Yojson.Safe.from_string (Sse_event_j.string_of_context_compacted_payload p)
-  in
-  wrap_envelope
-    { event_type = "context_compacted"
-    ; ts_unix
-    ; correlation_id
-    ; run_id
-    ; caused_by = None
-    ; agent_name = Some agent_name
-    ; task_id = None
-    ; turn = None
-    ; tool_name = None
-    }
-    payload_json
-;;
-
-(** Emit a [context_compact_started] envelope. *)
-let context_compact_started
-      ~(ts_unix : float)
-      ~(correlation_id : string)
-      ~(run_id : string)
-      ~(agent_name : string)
-      ~(trigger : string)
-  : Yojson.Safe.t
-  =
-  let payload_json =
-    let p : Sse_event_t.context_compact_started_payload =
-      { agent_name; trigger }
-    in
-    Yojson.Safe.from_string
-      (Sse_event_j.string_of_context_compact_started_payload p)
-  in
-  wrap_envelope
-    { event_type = "context_compact_started"
-    ; ts_unix
-    ; correlation_id
-    ; run_id
-    ; caused_by = None
-    ; agent_name = Some agent_name
-    ; task_id = None
-    ; turn = None
-    ; tool_name = None
-    }
-    payload_json
-;;
-
 (** Emit a [content_replacement_replaced] envelope.  Envelope
     [agent_name] is None, matching runtime arm at lines 708-717. *)
 let content_replacement_replaced

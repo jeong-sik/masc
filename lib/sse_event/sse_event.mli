@@ -82,24 +82,6 @@ val handoff_completed
   -> elapsed_s:float
   -> Yojson.Safe.t
 
-val context_compacted
-  :  ts_unix:float
-  -> correlation_id:string
-  -> run_id:string
-  -> agent_name:string
-  -> before_tokens:int
-  -> after_tokens:int
-  -> phase:string
-  -> Yojson.Safe.t
-
-val context_compact_started
-  :  ts_unix:float
-  -> correlation_id:string
-  -> run_id:string
-  -> agent_name:string
-  -> trigger:string
-  -> Yojson.Safe.t
-
 val content_replacement_replaced
   :  ts_unix:float
   -> correlation_id:string

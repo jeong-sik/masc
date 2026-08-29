@@ -20,8 +20,6 @@ import {
   readAgentYieldedPayload,
   readContentReplacementKeptPayload,
   readContentReplacementReplacedPayload,
-  readContextCompactStartedPayload,
-  readContextCompactedPayload,
   readHandoffCompletedPayload,
   readHandoffRequestedPayload,
   readSlotSchedulerObservedPayload,
@@ -37,8 +35,6 @@ import {
   type AgentYieldedPayload,
   type ContentReplacementKeptPayload,
   type ContentReplacementReplacedPayload,
-  type ContextCompactStartedPayload,
-  type ContextCompactedPayload,
   type HandoffCompletedPayload,
   type HandoffRequestedPayload,
   type SlotSchedulerObservedPayload,
@@ -83,8 +79,6 @@ export type TypedAgentCorePayload =
   | { kind: 'turn_ready'; payload: TurnReadyPayload }
   | { kind: 'handoff_requested'; payload: HandoffRequestedPayload }
   | { kind: 'handoff_completed'; payload: HandoffCompletedPayload }
-  | { kind: 'context_compacted'; payload: ContextCompactedPayload }
-  | { kind: 'context_compact_started'; payload: ContextCompactStartedPayload }
   | { kind: 'content_replacement_replaced'; payload: ContentReplacementReplacedPayload }
   | { kind: 'content_replacement_kept'; payload: ContentReplacementKeptPayload }
   | { kind: 'slot_scheduler_observed'; payload: SlotSchedulerObservedPayload }
@@ -116,8 +110,6 @@ const READERS: ReaderMap = {
   turn_ready: readTurnReadyPayload,
   handoff_requested: readHandoffRequestedPayload,
   handoff_completed: readHandoffCompletedPayload,
-  context_compacted: readContextCompactedPayload,
-  context_compact_started: readContextCompactStartedPayload,
   content_replacement_replaced: readContentReplacementReplacedPayload,
   content_replacement_kept: readContentReplacementKeptPayload,
   slot_scheduler_observed: readSlotSchedulerObservedPayload,
@@ -174,7 +166,6 @@ export function parseAgentCorePayload(
   }
 
   switch (suffix) {
-    case 'context_compacted':
     case 'agent_started':
     case 'agent_completed':
     case 'agent_yielded':
@@ -187,7 +178,6 @@ export function parseAgentCorePayload(
     case 'turn_ready':
     case 'handoff_requested':
     case 'handoff_completed':
-    case 'context_compact_started':
     case 'content_replacement_replaced':
     case 'content_replacement_kept':
     case 'slot_scheduler_observed': {

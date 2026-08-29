@@ -14,8 +14,6 @@ import {
   writeAgentYieldedPayload,
   writeContentReplacementKeptPayload,
   writeContentReplacementReplacedPayload,
-  writeContextCompactStartedPayload,
-  writeContextCompactedPayload,
   writeHandoffCompletedPayload,
   writeHandoffRequestedPayload,
   writeSlotSchedulerObservedPayload,
@@ -90,19 +88,6 @@ const ALL_PAYLOAD_CASES: TypedAgentCorePayload[] = [
     payload: { from_agent: 'a', to_agent: 'b', elapsed_s: 1 },
   },
   {
-    kind: 'context_compacted',
-    payload: {
-      agent_name: 'a',
-      before_tokens: 10,
-      after_tokens: 5,
-      phase: 'p',
-    },
-  },
-  {
-    kind: 'context_compact_started',
-    payload: { agent_name: 'a', trigger: 'threshold' },
-  },
-  {
     kind: 'content_replacement_replaced',
     payload: {
       tool_use_id: 'tu1',
@@ -153,10 +138,6 @@ function serializePayload(payload: TypedAgentCorePayload): Record<string, unknow
       return writeHandoffRequestedPayload(payload.payload)
     case 'handoff_completed':
       return writeHandoffCompletedPayload(payload.payload)
-    case 'context_compacted':
-      return writeContextCompactedPayload(payload.payload)
-    case 'context_compact_started':
-      return writeContextCompactStartedPayload(payload.payload)
     case 'content_replacement_replaced':
       return writeContentReplacementReplacedPayload(payload.payload)
     case 'content_replacement_kept':
@@ -395,40 +376,6 @@ describe('parseAgentCorePayload', () => {
     expect(data.kind).toBe('handoff_completed')
     if (data.kind !== 'handoff_completed') return
     expect(data.payload.elapsed_s).toBe(0.5)
-  })
-
-  it('parses agent_core:context_compacted to the 4 wire fields and does not surface an unmodeled runtime', () => {
-    // The context_compacted wire format has exactly 4 fields
-    // (lib/sse_event/sse_event.atd context_compacted_payload). A stray runtime
-    // key on the wire must be ignored, not surfaced as a phantom field.
-    const result = parseAgentCorePayload('agent_core:context_compacted', {
-      agent_name: 'alpha',
-      before_tokens: 1000,
-      after_tokens: 800,
-      phase: 'summarize',
-      runtime: 'agent-core-runtime',
-    })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    const { data } = result
-    expect(data.kind).toBe('context_compacted')
-    if (data.kind !== 'context_compacted') return
-    expect(data.payload.before_tokens).toBe(1000)
-    expect(data.payload.after_tokens).toBe(800)
-    expect(data.payload.phase).toBe('summarize')
-    expect('runtime' in data.payload).toBe(false)
-  })
-
-  it('parses agent_core:context_compact_started payload', () => {
-    const result = parseAgentCorePayload('agent_core:context_compact_started', {
-      agent_name: 'alpha',
-      trigger: 'threshold',
-    })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    expect(result.data.kind).toBe('context_compact_started')
-    if (result.data.kind !== 'context_compact_started') return
-    expect(result.data.payload.trigger).toBe('threshold')
   })
 
   it('parses agent_core:content_replacement_replaced payload', () => {

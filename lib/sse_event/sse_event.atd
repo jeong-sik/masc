@@ -46,18 +46,6 @@ type handoff_completed_payload = {
   elapsed_s: float;
 }
 
-type context_compacted_payload = {
-  agent_name: string;
-  before_tokens: int;
-  after_tokens: int;
-  phase: string;
-}
-
-type context_compact_started_payload = {
-  agent_name: string;
-  trigger: string;
-}
-
 type content_replacement_replaced_payload = {
   tool_use_id: string;
   preview: string;

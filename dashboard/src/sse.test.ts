@@ -256,26 +256,4 @@ describe('server-push Agent Core typed-payload handlers', () => {
     })
     expect(lastJournalEntry()?.text).toBe('Handoff requested · alpha→beta · load')
   })
-
-  it('creates a journal entry from a typed agent_core:context_compacted payload', () => {
-    emitEvent({
-      type: 'agent_core:context_compacted',
-      event_type: 'context_compacted',
-      ts_unix: 1_000,
-      correlation_id: 'c1',
-      run_id: 'r1',
-      agent_name: 'alpha',
-      task_id: null,
-      turn: null,
-      tool_name: null,
-      payload: {
-        agent_name: 'alpha',
-        before_tokens: 1000,
-        after_tokens: 800,
-        phase: 'summarize',
-        runtime: 'agent-core-runtime',
-      },
-    })
-    expect(lastJournalEntry()?.text).toBe('Agent Core compact · 1000→800 · summarize')
-  })
 })

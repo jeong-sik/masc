@@ -9,7 +9,7 @@ export const DEFAULT_MASC_ORIGIN = `http://${DEFAULT_MASC_HOST}:${DEFAULT_MASC_P
 
 // --- Agent Core event namespace ---
 // SSE event types emitted by the Agent Core keeper runtime are namespaced with this
-// prefix (e.g. "agent_core:context_compacted"). Single source so the prefix string and
+// prefix (e.g. "agent_core:turn_completed"). Single source so the prefix string and
 // its strip length stay in sync across the parser and ingress guards.
 export const AGENT_CORE_EVENT_PREFIX = 'agent_core:'
 

@@ -4667,6 +4667,115 @@ let test_invalid_keeper_config_revision_name_creates_no_artifact () =
 
 (* ── Test runner ──────────────────────────────────────────── *)
 
+(* keeper_up field-only update must resolve TOML-declared sandbox settings.
+   The persisted meta never carries sandbox_profile/network_mode — the meta
+   decoder pins them to the Local defaults — so an update that omitted
+   sandbox_profile used to fall back to that pin, and the fail-closed
+   playground gate rejected every field-only update on docker/microvm
+   keepers (and a TOML "none" network mode would have read back inherit). *)
+let test_field_only_update_honors_toml_declared_profile () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir "update-toml-profile" in
+  let gate = "MASC_EXEC_ALLOW_LOCAL_PLAYGROUND" in
+  let prev_gate = Sys.getenv_opt gate in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv gate (Option.value prev_gate ~default:"0");
+      cleanup_dir base_dir)
+    (fun () ->
+      (* Production posture: the local playground is off. *)
+      Unix.putenv gate "0";
+      let config = Masc.Workspace.default_config base_dir in
+      let (_ : string) =
+        Masc.Workspace.init config ~agent_name:(Some "tester")
+      in
+      install_owner_inventory_exn ~sw config;
+      let name = "toml-docker-keeper" in
+      let meta = make_meta name in
+      create_owner_meta_exn config meta;
+      let profile_defaults =
+        { Keeper_profile_defaults.empty_keeper_profile_defaults with
+          sandbox_profile = Some Keeper_types_profile.Docker
+        }
+      in
+      let parsed : Turn_up_args.parsed_args =
+        { name
+        ; runtime_id_opt = None
+        ; autoboot_enabled_opt = None
+        ; mention_targets_opt = None
+        ; max_context_override_opt = None
+        ; max_context_override_present = false
+        ; proactive_enabled_opt = None
+        ; sandbox_profile_opt = None
+        ; network_mode_opt = None
+        ; remote_endpoint_opt = None
+        ; remote_endpoint_present = false
+        ; skill_names_opt = None
+        ; skill_names_present = false
+        ; native_tool_posture_opt = None
+        ; native_tool_posture_present = false
+        ; instructions_arg = Some "field-only update"
+        ; profile_defaults
+        ; declarative_manifest_snapshot =
+            Keeper_types_profile.Declarative_manifest_missing
+        ; instructions_opt = profile_defaults.instructions
+        }
+      in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      let result =
+        Turn_up_update.update_keeper
+          ~expected_config_revision:(config_revision_exn config name)
+          ctx
+          parsed
+          meta
+      in
+      check bool
+        "field-only update on a TOML-declared docker keeper succeeds"
+        true
+        (Keeper_types_profile.tool_result_success result);
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           name
+          : Masc.Keeper_keepalive.joined_stop_result);
+      (* Control: without any declared profile the same update still
+         resolves Local and the gate stays closed. *)
+      let bare = "no-declaration-keeper" in
+      let bare_meta = make_meta bare in
+      create_owner_meta_exn config bare_meta;
+      let bare_parsed =
+        { parsed with
+          name = bare
+        ; profile_defaults =
+            Keeper_profile_defaults.empty_keeper_profile_defaults
+        ; instructions_opt = None
+        }
+      in
+      let bare_result =
+        Turn_up_update.update_keeper
+          ~expected_config_revision:(config_revision_exn config bare)
+          ctx
+          bare_parsed
+          bare_meta
+      in
+      check bool
+        "update without any declared profile still fails closed on Local"
+        false
+        (Keeper_types_profile.tool_result_success bare_result))
+;;
+
 let () =
   run "heartbeat_integration" [
     "structured_crash_flow", [
@@ -4712,6 +4821,8 @@ let () =
         test_keeper_shutdown_store_round_trip_and_identity_guard;
       test_case "operator update supersedes exact blocked shutdown" `Quick
         test_operator_update_supersedes_exact_blocked_shutdown;
+      test_case "field-only update honors TOML-declared profile" `Quick
+        test_field_only_update_honors_toml_declared_profile;
       test_case "update rejects lane swap while turn in flight" `Quick
         test_update_keeper_rejects_lane_swap_while_turn_in_flight;
       test_case "cancelled update finishes lane swap" `Quick

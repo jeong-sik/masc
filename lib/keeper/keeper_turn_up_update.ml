@@ -412,7 +412,16 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
   | Ok sandbox_profile ->
   match
     match p.network_mode_opt with
-    | None -> Ok old.network_mode
+    | None ->
+      (* Same non-durable pin as [sandbox_profile] above: the meta decoder
+         fixes [network_mode] to the Local default, so trusting
+         [old.network_mode] would flip a TOML-declared "none" to inherit on
+         any field-only update. TOML declaration first, then the resolved
+         profile's own default. *)
+      Ok
+        (resolve_network_mode
+           ~sandbox_profile
+           ~fallback:p.profile_defaults.network_mode)
     | Some raw ->
       match network_mode_of_string raw with
       | Some nm -> Ok nm

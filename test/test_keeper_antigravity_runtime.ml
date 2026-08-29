@@ -372,6 +372,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~base_path
                       ~goal:"Call masc_probe once"
                       ~tools:[ tool ]
+                      ~agent_core_tools:[ tool ]
                       ~initial_messages:large_history
                       ~hooks
                       ~context:(Agent_core.Context.create ())
@@ -491,6 +492,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         ~base_path
                         ~goal:"Call masc_probe once"
                         ~tools:[ tool ]
+                        ~agent_core_tools:[ tool ]
                         ~initial_messages:large_history
                         ~hooks
                         ~context:(Agent_core.Context.create ())
@@ -680,6 +682,7 @@ let test_blank_success_requires_fresh_conversation () =
                       ~keeper_name:"antigravity-fixture"
                       ~base_path
                       ~goal:"Return a non-empty completion"
+                      ~agent_core_tools:[]
                       ~context:(Agent_core.Context.create ())
                       ~sw
                       ~net:(Eio.Stdenv.net env)

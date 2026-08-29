@@ -1667,6 +1667,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ~base_path
                       ~goal
                       ~tools
+                      ~agent_core_tools:tools
                       ~initial_messages
                       ?model_input_projection
                       ?hooks

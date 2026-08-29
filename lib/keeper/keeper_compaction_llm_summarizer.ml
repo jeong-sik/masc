@@ -408,7 +408,7 @@ let eligible_units_json (sources : eligible_source list) =
              ])
        sources)
 
-let messages_for_plan ~window =
+let plan_prompts ~window =
   let sources = planning_window_sources window in
   let first_index = window.first_source.source_index in
   let last_index = planning_window_last_index window in
@@ -455,6 +455,12 @@ let messages_for_plan ~window =
       (first_index + 1)
       max_keep_from
   in
+  system, user
+
+(* The cli one-shot path reuses the same two texts verbatim: one wording on
+   both transports (RFC cli-runtimes-as-lane-slots). *)
+let messages_for_plan ~window =
+  let system, user = plan_prompts ~window in
   [ message Agent_core.Types.System system; message Agent_core.Types.User user ]
 
 let ( let* ) = Result.bind
@@ -687,6 +693,13 @@ type prepared_lane =
   ; ordered_slot_ids : string list
   ; selected_slots : Runtime_exact_output_registry.selected_slot list
   ; flow_attempt : Exact_output.flow_attempt
+  ; cli_slots : string list
+        (* Official-client runtime ids walked after every catalog slot is
+           exhausted (RFC cli-runtimes-as-lane-slots), carried verbatim from
+           the resolved lane. *)
+  ; base_path : string
+        (* Where a cli one-shot is spawned; prepare_lane already receives it
+           and nothing else on this path retains it. *)
   }
 
 let call_id_to_string call_id = Exact_output.call_id_to_string call_id
@@ -798,7 +811,7 @@ let prepare_lane
        [Keeper_exact_lane_preference.apply]); compaction was the one lane
        that resolved the lane and stopped, so a pin applied on three lanes
        and silently not on the fourth. *)
-    let* { Runtime_exact_output_registry.selected_slots } =
+    let* { Runtime_exact_output_registry.selected_slots; cli_slots } =
       match
         Keeper_exact_lane_preference.apply
           ~base_path
@@ -860,6 +873,8 @@ let prepare_lane
                      selected_slots
                ; selected_slots
                ; flow_attempt
+               ; cli_slots
+               ; base_path
                })))
 ;;
 
@@ -911,8 +926,93 @@ let summarization_failure_detail = function
   | Invalid_plan -> "invalid_plan"
 ;;
 
+(* ── CLI lane-slot fallback (RFC cli-runtimes-as-lane-slots) ─────────
+   Engaged only when the catalog walk reports provider exhaustion (every
+   candidate rejected pre-dispatch, every output semantically rejected, or
+   the last candidate failing post-dispatch with no successor). Compaction
+   has no durable attempt queue — the exact-lane registry is an observation
+   plane — so the walk is Keeper_lane_cli_oneshot.walk verbatim, followed by
+   the same domain validation the HTTP path applies. A cli one-shot has no
+   request body or catalog receipt; the evidence fields keep their meaning
+   by naming the transport explicitly and fingerprinting the rendered
+   prompt, which is that transport's whole input. *)
+
+let cli_evidence ~runtime_id ~call_id ~prompt_sha256 =
+  { slot_id = runtime_id
+  ; call_id
+  ; target_identity_fingerprint = "cli:" ^ runtime_id
+  ; catalog_generation_fingerprint = "cli-oneshot"
+  ; catalog_evidence_sha256 = "cli-oneshot"
+  ; plan_fingerprint = "cli-oneshot:" ^ prompt_sha256
+  ; receipt_request_body_sha256 = prompt_sha256
+  }
+;;
+
+let try_cli_slots ~keeper_name ~cli_runner (prepared : prepared_lane) =
+  match prepared.cli_slots with
+  | [] -> None
+  | cli_slots ->
+    let system_prompt, user = plan_prompts ~window:prepared.window in
+    let prompt_sha256 = Digestif.SHA256.(digest_string user |> to_hex) in
+    let rec walk = function
+      | [] -> None
+      | runtime_id :: rest ->
+        (match
+           Keeper_lane_cli_oneshot.run
+             ?runner:cli_runner
+             ~base_dir:prepared.base_path
+             ~runtime_id
+             ~system_prompt
+             ~requirement:exact_output_requirement
+             ~prompt:user
+             ()
+         with
+         | Error failure ->
+           Log.Keeper.warn
+             ~keeper_name
+             "compaction cli lane-slot failed: %s"
+             (Keeper_lane_cli_oneshot.failure_to_string failure);
+           walk rest
+         | Ok output ->
+           (match plan_of_json ~window:prepared.window output with
+            | Error detail ->
+              Log.Keeper.warn
+                ~keeper_name
+                "compaction cli output violated MASC domain plan slot=%s: %s"
+                runtime_id
+                detail;
+              walk rest
+            | Ok plan ->
+              (match
+                 plan_preserves_exact_future_progress
+                   ~keeper_name
+                   prepared.selected_slots
+                   plan
+               with
+               | Error detail ->
+                 Log.Keeper.warn
+                   ~keeper_name
+                   "compaction cli output blocked future rolling admission slot=%s: %s"
+                   runtime_id
+                   detail;
+                 walk rest
+               | Ok () ->
+                 let call_id =
+                   Random_id.prefixed ~prefix:"cli-compaction-" ~bytes:16
+                 in
+                 Some
+                   ( runtime_id
+                   , { plan
+                     ; exact_execution_evidence =
+                         cli_evidence ~runtime_id ~call_id ~prompt_sha256
+                     } ))))
+    in
+    walk cli_slots
+;;
+
 let execute_prepared_lane_current
       ~keeper_name
+      ?cli_runner
       ~net
       ?clock
       ?before_dispatch_authority
@@ -948,11 +1048,18 @@ let execute_prepared_lane_current
   (* Derived observation only: this mirrors the candidate whose dispatch
      authority passed and never participates in lane selection or ownership. *)
   let authorized_observation = ref None in
+  (* Set only when a cli slot produced the accepted plan: the observation ref
+     above mirrors the last authorized HTTP dispatch, which is the wrong slot
+     to attribute a cli success to. *)
+  let cli_selected = ref None in
   let complete outcome output =
     let selected_slot =
-      Option.map
-        (fun (observation : attempt_observation) -> observation.slot_id)
-        !authorized_observation
+      match !cli_selected with
+      | Some runtime_id -> Some runtime_id
+      | None ->
+        Option.map
+          (fun (observation : attempt_observation) -> observation.slot_id)
+          !authorized_observation
     in
     match
       Exact_lane_run_registry.mark_completed
@@ -1085,11 +1192,22 @@ let execute_prepared_lane_current
         (Exact_output.Flow_execution_terminal
           { cause =
               ( Exact_output.Flow_attempt_start_failed _
-              | Exact_output.Flow_measurement_start_failed _
-              | Exact_output.Flow_candidates_exhausted _ )
+              | Exact_output.Flow_measurement_start_failed _ )
           ; _
           })) ->
     Error Exact_attempt_start_failed
+  | `Flow
+      (Error
+        (Exact_output.Flow_execution_terminal
+          { cause = Exact_output.Flow_candidates_exhausted _; _ })) ->
+    (* Provider exhaustion, split from the infrastructure start failures it
+       used to share an arm with: only exhaustion may fall back to the cli
+       walk (RFC cli-runtimes-as-lane-slots). *)
+    (match try_cli_slots ~keeper_name ~cli_runner prepared_lane with
+     | Some (runtime_id, completed) ->
+       cli_selected := Some runtime_id;
+       Ok completed
+     | None -> Error Exact_attempt_start_failed)
   | `Flow
       (Error
         (Exact_output.Flow_execution_terminal
@@ -1127,14 +1245,22 @@ let execute_prepared_lane_current
        Measured on a live compaction that spent 470 s on glm-coding.glm-5-turbo
        — a slot completing 97% of its work elsewhere — and left four
        identifiers with no way to ask why. *)
-    Error
-      (Exact_execution_terminal
-         (terminal_of_observation
-            ~detail:
-              (Keeper_exact_flow_detail.execution_failure_detail
-                 ~candidate ~cause ~evidence)
-            Keeper_compaction_outcome.Exact_execution_failed
-            observation))
+    (* The last candidate died post-dispatch with no successor — the shape a
+       single-slot lane actually produces on provider failure — so the cli
+       walk gets its turn before the terminal stands. *)
+    (match try_cli_slots ~keeper_name ~cli_runner prepared_lane with
+     | Some (runtime_id, completed) ->
+       cli_selected := Some runtime_id;
+       Ok completed
+     | None ->
+       Error
+         (Exact_execution_terminal
+            (terminal_of_observation
+               ~detail:
+                 (Keeper_exact_flow_detail.execution_failure_detail
+                    ~candidate ~cause ~evidence)
+               Keeper_compaction_outcome.Exact_execution_failed
+               observation)))
   | `Flow
       (Error
         (Exact_output.Flow_semantic_candidates_exhausted
@@ -1157,11 +1283,16 @@ let execute_prepared_lane_current
       observation.slot_id
       observation.call_id
       rejection.rejection;
-    Error
-      (Exact_execution_terminal
-         (terminal_of_observation
-            Keeper_compaction_outcome.Domain_invalid_output
-            observation))
+    (match try_cli_slots ~keeper_name ~cli_runner prepared_lane with
+     | Some (runtime_id, completed) ->
+       cli_selected := Some runtime_id;
+       Ok completed
+     | None ->
+       Error
+         (Exact_execution_terminal
+            (terminal_of_observation
+               Keeper_compaction_outcome.Domain_invalid_output
+               observation)))
   | `Flow (Ok validated) ->
     let flow_success = validated.transport_success in
     Ok
@@ -1200,6 +1331,7 @@ let execute_prepared_lane_current
 
 let execute_prepared_lane
       ~keeper_name
+      ?cli_runner
       ~net
       ?clock
       ?before_dispatch_authority
@@ -1208,6 +1340,7 @@ let execute_prepared_lane
   =
   execute_prepared_lane_current
     ~keeper_name
+    ?cli_runner
     ~net
     ?clock
     ?before_dispatch_authority

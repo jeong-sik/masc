@@ -64,6 +64,7 @@ let persisted_checkpoint_source_exn trace_id =
 
 let execute_prepared_lane
       ~keeper_name
+      ?cli_runner
       ~net
       ?clock
       ?(before_dispatch_authority = fun _ -> Ok ())
@@ -72,6 +73,7 @@ let execute_prepared_lane
   =
   C.execute_prepared_lane
     ~keeper_name
+    ?cli_runner
     ~net
     ?clock
     ~before_dispatch_authority
@@ -1041,6 +1043,213 @@ let test_terminal_carries_the_provider_account () =
     (contains "call_id=call-fixture" with_account)
 ;;
 
+(* ── CLI lane-slot fallback (RFC cli-runtimes-as-lane-slots) ──────── *)
+
+let observation_registry_with_rows () =
+  let path = Filename.temp_file "compaction-cli-obs" ".jsonl" in
+  Sys.remove path;
+  Exact_lane_run_registry.create ~path ()
+;;
+
+let cli_registry_selected_slot registry =
+  match Exact_lane_run_registry.list_runs registry with
+  | [ { status = Exact_lane_run_registry.Completed { selected_slot; _ }; _ } ] ->
+    selected_slot
+  | runs -> Alcotest.failf "expected one completed run, got %d" (List.length runs)
+;;
+
+let test_cli_slot_answers_after_catalog_exhaustion () =
+  run_eio
+  @@ fun ~sw:_ ~net ~clock ->
+  F.with_official_client_runtimes
+  @@ fun () ->
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc compaction cli fallback"
+      [ { id = "cli-unreachable"; base_url = "http://127.0.0.1:1" } ]
+  in
+  let registry =
+    F.publish_registry
+      ~cli_slot_ids:[ F.cli_primary_runtime ]
+      ~lane_id:conformance_lane_id
+      ~slot_ids:[ "cli-unreachable" ]
+      snapshot
+  in
+  let observation_registry = observation_registry_with_rows () in
+  let prepared = prepare_exn ~keeper_name:"keeper-cli-summary" ~registry () in
+  let seen = ref None in
+  let runner ~runtime_id ~system_prompt ~prompt =
+    seen := Some runtime_id;
+    Alcotest.(check bool)
+      "the cli system prompt is the lane's own"
+      true
+      (Astring.String.is_infix ~affix:"hierarchically compact" system_prompt);
+    Alcotest.(check bool)
+      "the cli user prompt carries the window"
+      true
+      (Astring.String.is_infix ~affix:"window_first_unit_index" prompt);
+    Ok (Yojson.Safe.to_string valid_plan_json)
+  in
+  let completed =
+    execute_prepared_lane
+      ~keeper_name:"keeper-cli-summary"
+      ~cli_runner:runner
+      ~net
+      ~clock
+      ~observation_registry
+      prepared
+    |> completed_exn
+  in
+  Alcotest.(check (option string))
+    "the declared cli slot ran"
+    (Some F.cli_primary_runtime)
+    !seen;
+  let plan = C.completed_plan completed in
+  Alcotest.(check (list int))
+    "the cli plan folds the first unit"
+    [ 0 ]
+    (C.summarized_indices plan);
+  let evidence = C.completed_exact_execution_evidence completed in
+  Alcotest.(check string)
+    "evidence names the cli slot"
+    F.cli_primary_runtime
+    (C.exact_execution_evidence_slot_id evidence);
+  Alcotest.(check string)
+    "evidence names the transport, not a catalog"
+    "cli-oneshot"
+    (C.exact_execution_evidence_catalog_generation_fingerprint evidence);
+  Alcotest.(check (option string))
+    "the observation row attributes the run to the cli slot"
+    (Some F.cli_primary_runtime)
+    (cli_registry_selected_slot observation_registry)
+;;
+
+let test_cli_walk_failure_keeps_the_catalog_terminal () =
+  run_eio
+  @@ fun ~sw:_ ~net ~clock ->
+  F.with_official_client_runtimes
+  @@ fun () ->
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc compaction cli exhausted"
+      [ { id = "cli-unreachable"; base_url = "http://127.0.0.1:1" } ]
+  in
+  let registry =
+    F.publish_registry
+      ~cli_slot_ids:[ F.cli_primary_runtime; F.cli_secondary_runtime ]
+      ~lane_id:conformance_lane_id
+      ~slot_ids:[ "cli-unreachable" ]
+      snapshot
+  in
+  let prepared = prepare_exn ~keeper_name:"keeper-cli-exhausted" ~registry () in
+  let attempts = ref [] in
+  let runner ~runtime_id ~system_prompt:_ ~prompt:_ =
+    attempts := !attempts @ [ runtime_id ];
+    Error "subscription window exhausted"
+  in
+  (match
+     execute_prepared_lane
+       ~keeper_name:"keeper-cli-exhausted"
+       ~cli_runner:runner
+       ~net
+       ~clock
+       prepared
+   with
+   | Error (C.Exact_execution_terminal _) -> ()
+   | Error _ ->
+     Alcotest.fail
+       "cli exhaustion must keep the catalog execution terminal, not another class"
+   | Ok _ -> Alcotest.fail "an exhausted cli walk produced a plan");
+  Alcotest.(check (list string))
+    "every declared cli slot was walked in order"
+    [ F.cli_primary_runtime; F.cli_secondary_runtime ]
+    !attempts
+;;
+
+let test_cli_walk_advances_after_domain_invalid_json () =
+  run_eio
+  @@ fun ~sw:_ ~net ~clock ->
+  F.with_official_client_runtimes
+  @@ fun () ->
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc compaction cli domain advance"
+      [ { id = "cli-unreachable"; base_url = "http://127.0.0.1:1" } ]
+  in
+  let registry =
+    F.publish_registry
+      ~cli_slot_ids:[ F.cli_primary_runtime; F.cli_secondary_runtime ]
+      ~lane_id:conformance_lane_id
+      ~slot_ids:[ "cli-unreachable" ]
+      snapshot
+  in
+  let prepared = prepare_exn ~keeper_name:"keeper-cli-domain-advance" ~registry () in
+  let attempts = ref [] in
+  let runner ~runtime_id ~system_prompt:_ ~prompt:_ =
+    attempts := !attempts @ [ runtime_id ];
+    if String.equal runtime_id F.cli_primary_runtime
+    then Ok {|{"summary":"","keep_from_unit_index":1}|}
+    else Ok (Yojson.Safe.to_string valid_plan_json)
+  in
+  let completed =
+    execute_prepared_lane
+      ~keeper_name:"keeper-cli-domain-advance"
+      ~cli_runner:runner
+      ~net
+      ~clock
+      prepared
+    |> completed_exn
+  in
+  Alcotest.(check (list string))
+    "domain-invalid JSON advances to the next cli slot"
+    [ F.cli_primary_runtime; F.cli_secondary_runtime ]
+    !attempts;
+  Alcotest.(check string)
+    "the second cli slot owns the accepted evidence"
+    F.cli_secondary_runtime
+    (C.exact_execution_evidence_slot_id
+       (C.completed_exact_execution_evidence completed))
+;;
+
+let test_semantic_exhaustion_falls_back_to_cli () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  F.with_official_client_runtimes
+  @@ fun () ->
+  let server = F.start_server ~sw ~net ~clock (F.Reply domain_invalid_response) in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc compaction cli semantic"
+      [ { id = "semantic-reject"; base_url = server.base_url } ]
+  in
+  let registry =
+    F.publish_registry
+      ~cli_slot_ids:[ F.cli_primary_runtime ]
+      ~lane_id:conformance_lane_id
+      ~slot_ids:[ "semantic-reject" ]
+      snapshot
+  in
+  let prepared = prepare_exn ~keeper_name:"keeper-cli-semantic" ~registry () in
+  let runner ~runtime_id:_ ~system_prompt:_ ~prompt:_ =
+    Ok (Yojson.Safe.to_string valid_plan_json)
+  in
+  let completed =
+    execute_prepared_lane
+      ~keeper_name:"keeper-cli-semantic"
+      ~cli_runner:runner
+      ~net
+      ~clock
+      prepared
+    |> completed_exn
+  in
+  Alcotest.(check int) "the catalog slot was dispatched once" 1 (F.post_count server);
+  Alcotest.(check string)
+    "the cli slot supplied the accepted plan"
+    F.cli_primary_runtime
+    (C.exact_execution_evidence_slot_id
+       (C.completed_exact_execution_evidence completed))
+;;
+
 let () =
   Alcotest.run
     "compaction exact-flow conformance"
@@ -1117,6 +1326,22 @@ let () =
             "per-keeper preference reorders compaction slots"
             `Quick
             test_per_keeper_preference_reorders_compaction_slots
+        ; Alcotest.test_case
+            "a cli slot answers after catalog exhaustion"
+            `Quick
+            test_cli_slot_answers_after_catalog_exhaustion
+        ; Alcotest.test_case
+            "cli walk failure keeps the catalog terminal"
+            `Quick
+            test_cli_walk_failure_keeps_the_catalog_terminal
+        ; Alcotest.test_case
+            "cli walk advances after domain-invalid JSON"
+            `Quick
+            test_cli_walk_advances_after_domain_invalid_json
+        ; Alcotest.test_case
+            "semantic exhaustion falls back to cli"
+            `Quick
+            test_semantic_exhaustion_falls_back_to_cli
         ] )
       (* The "affinity and non-sharing" group held only cases whose functions
          #25993 removed; its registrations were left behind and the group is now

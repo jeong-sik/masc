@@ -88,13 +88,13 @@ let input_schema =
     ; ( "properties"
       , `Assoc
           [ ( names_param
-            , `Assoc
+            , (* No description: the preamble above already says to pass the
+                 exact names, and the list it refers to is this same tool's
+                 description. Repeating it spends bytes on every provider
+                 request of the turn to say what the model has just read. *)
+              `Assoc
                 [ "type", `String "array"
                 ; "items", `Assoc [ "type", `String "string" ]
-                ; ( "description"
-                  , `String
-                      "Exact tool names, copied from the list in this tool's \
-                       description." )
                 ] )
           ] )
     ; "required", `List [ `String names_param ]

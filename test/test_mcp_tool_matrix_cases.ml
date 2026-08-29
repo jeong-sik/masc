@@ -131,15 +131,7 @@ let must_refuse_names =
   ]
 
 let generic_matrix_excluded_names =
-  [
-    (* Awaiting the fusion MCP execution wiring (#28960, in flight in a
-       parallel session): the endpoint currently answers both with the typed
-       keeper-internal refusal, and the MCP-side binding decision (which
-       fusion runs a non-keeper caller may read) belongs to that change.
-       Remove both entries together with that wiring. *)
-    "masc_fusion";
-    "masc_fusion_status";
-  ]
+  []
 
 let string_starts_with ~prefix s =
   let plen = String.length prefix in

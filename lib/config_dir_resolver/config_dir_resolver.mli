@@ -180,10 +180,6 @@ val repositories_toml_path : base_path:string -> string
 (** [<base_path>/.masc/config/repositories.toml]. Direct derivation from
     [base_path]. *)
 
-val keeper_repo_mappings_toml_path : base_path:string -> string
-(** [<base_path>/.masc/config/keeper_repo_mappings.toml]. Same caveat as
-    [repositories_toml_path]. *)
-
 val config_signature_exists : string -> bool
 (** [config_signature_exists dir] checks whether [dir] looks like a valid
     MASC config directory (has runtime.toml, prompts/, or keepers/). *)

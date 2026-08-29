@@ -354,7 +354,12 @@ val list_pending_dashboard_json_for_workspace :
 val list_pending_entries_for_workspace :
   base_path:string -> (pending_approval list, storage_error) result
 
-val pending_read_errors_for_workspace : base_path:string -> storage_error list
+val list_pending_entries_with_read_errors_for_workspace :
+  base_path:string ->
+  (pending_approval list * storage_error list, storage_error) result
+(** Returns one lock-consistent projection of the readable entries and any
+    per-entry read errors. A non-empty error list means mutations remain
+    blocked even though the readable entries are safe to display. *)
 
 val retire_summary_owner :
   base_path:string ->

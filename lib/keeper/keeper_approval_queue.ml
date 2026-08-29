@@ -3820,27 +3820,27 @@ let pending_entries_in_sequence_order () =
   |> List.sort compare_pending_order
 ;;
 
-let list_pending_entries_for_workspace ~base_path =
+let list_pending_entries_with_read_errors_for_workspace ~base_path =
   with_pending_store_lock (fun () ->
+    let entries () =
+      pending_entries_in_sequence_order ()
+      |> List.filter (fun (entry : pending_approval) ->
+        String.equal entry.audit_base_path base_path)
+    in
     match SMap.find_opt base_path (Atomic.get unavailable_stores) with
     | Some _ when SMap.mem base_path (Atomic.get pending_read_errors) ->
-      pending_entries_in_sequence_order ()
-      |> List.filter (fun (entry : pending_approval) ->
-        String.equal entry.audit_base_path base_path)
-      |> fun entries -> Ok entries
+      Ok
+        ( entries ()
+        , Option.value
+            (SMap.find_opt base_path (Atomic.get pending_read_errors))
+            ~default:[] )
     | Some error -> Error error
-    | None ->
-      pending_entries_in_sequence_order ()
-      |> List.filter (fun (entry : pending_approval) ->
-        String.equal entry.audit_base_path base_path)
-      |> fun entries -> Ok entries)
+    | None -> Ok (entries (), []))
 ;;
 
-let pending_read_errors_for_workspace ~base_path =
-  with_pending_store_lock (fun () ->
-    Option.value
-      (SMap.find_opt base_path (Atomic.get pending_read_errors))
-      ~default:[])
+let list_pending_entries_for_workspace ~base_path =
+  list_pending_entries_with_read_errors_for_workspace ~base_path
+  |> Result.map fst
 ;;
 
 let get_pending_entry_for_workspace ~base_path ~id =

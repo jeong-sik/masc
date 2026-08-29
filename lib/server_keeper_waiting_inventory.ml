@@ -1140,13 +1140,9 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
     | Some name -> [ name ], []
     | None -> keeper_names_or_error_rows config
   in
-  let pending_approval_store_read_errors =
-    Keeper_approval_queue.pending_read_errors_for_workspace
-      ~base_path:config.Workspace.base_path
-  in
   let pending_approvals, pending_approval_state, pending_approval_read_error_rows =
     match read_pending ~base_path:config.Workspace.base_path with
-    | Ok entries ->
+    | Ok (entries, pending_approval_store_read_errors) ->
       ( entries
       , (match pending_approval_store_read_errors with
          | [] -> Keeper_approval_queue.approval_queue_ready_state_json
@@ -1238,19 +1234,24 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
 ;;
 
 let dashboard_json_with_pending_reader ~read_pending config =
-  dashboard_json_with_pending_reader_scoped ~read_pending config
+  dashboard_json_with_pending_reader_scoped
+    ~read_pending:(fun ~base_path ->
+      read_pending ~base_path |> Result.map (fun entries -> entries, []))
+    config
 ;;
 
 let dashboard_json config =
-  dashboard_json_with_pending_reader
-    ~read_pending:Keeper_approval_queue.list_pending_entries_for_workspace
+  dashboard_json_with_pending_reader_scoped
+    ~read_pending:
+      Keeper_approval_queue.list_pending_entries_with_read_errors_for_workspace
     config
 ;;
 
 let dashboard_json_for_keeper config ~keeper_name =
   dashboard_json_with_pending_reader_scoped
     ~keeper_name
-    ~read_pending:Keeper_approval_queue.list_pending_entries_for_workspace
+    ~read_pending:
+      Keeper_approval_queue.list_pending_entries_with_read_errors_for_workspace
     config
 ;;
 

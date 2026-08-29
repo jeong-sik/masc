@@ -3322,14 +3322,18 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
        in
        let report = install_exn ~base_path in
        Alcotest.(check int) "one valid pending entry installed" 1 report.loaded_pending;
-       let entries = require_ok "partial pending list" (AQ.list_pending_entries_for_workspace ~base_path) in
+       let entries, read_errors =
+         require_ok
+           "partial pending list"
+           (AQ.list_pending_entries_with_read_errors_for_workspace ~base_path)
+       in
        (match entries with
         | [ entry ] -> Alcotest.(check string) "valid entry remains visible" approval_id entry.id
         | _ -> Alcotest.fail "expected exactly one readable pending entry");
        Alcotest.(check int)
          "one pending entry read error is exposed"
          1
-         (List.length (AQ.pending_read_errors_for_workspace ~base_path));
+         (List.length read_errors);
        (match
           AQ.submit_pending
             ~keeper_name:"queue-partial-read"

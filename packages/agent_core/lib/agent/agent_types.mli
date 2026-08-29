@@ -170,7 +170,8 @@ type t =
   { mu : Eio.Mutex.t
   ; mutable state : Types.agent_state
   ; mutable lifecycle : lifecycle_snapshot option
-  ; tools : Tool_set.t
+  ; mutable tools : Tool_set.t
+      (** Widened during a turn by {!extend_tools} and never narrowed. *)
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; context : Context.t
   ; options : options
@@ -189,6 +190,11 @@ val default_options : options
 val state : t -> Types.agent_state
 val lifecycle : t -> lifecycle_snapshot option
 val tools : t -> Tool_set.t
+
+val extend_tools : t -> Tool.t list -> unit
+(** Widen the callable tool set mid-turn, under the same mutex as [state].
+    Widening only, and a name already held is ignored — see [Agent.extend_tools]
+    for why neither is a restriction that can be relaxed. *)
 val context : t -> Context.t
 val options : t -> options
 val provider_config : t -> Llm_provider.Provider_config.t option

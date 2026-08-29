@@ -1596,6 +1596,7 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
   `Assoc
     [ ("schema", `String "masc.skill-snapshot/v1")
     ; ("state", `String "ready")
+    ; ("snapshot", `Assoc [ ("rejections", `List []) ])
     ; ( "surfaces",
         `List
           [ `Assoc
@@ -1688,6 +1689,7 @@ let test_decode_skills_catalog_rejects_a_wrong_kind_type () =
     Tui_decode.decode_skills_catalog
       (`Assoc
          [ ("state", `String "ready")
+         ; ("snapshot", `Assoc [ ("rejections", `List []) ])
          ; ("surfaces", `List [ bad_surface ])
          ])
   with
@@ -1695,6 +1697,50 @@ let test_decode_skills_catalog_rejects_a_wrong_kind_type () =
       Alcotest.(check bool) "error names the field" true
         (String.length err > 0)
   | Ok _ -> Alcotest.fail "a surface with a non-string kind must be rejected"
+
+let test_decode_skills_catalog_keeps_invalid_only_rejections () =
+  let payload =
+    `Assoc
+      [ "state", `String "ready"
+      ; "surfaces", `List []
+      ; ( "snapshot"
+        , `Assoc
+            [ ( "rejections"
+              , `List
+                  [ `Assoc
+                      [ "source_id", `String "workspace"
+                      ; "package_id", `String "broken"
+                      ; "content_revision", `String "abcdef0123456789"
+                      ; ( "reason"
+                        , `Assoc
+                            [ "kind", `String "document_rejected"
+                            ; ( "diagnostics"
+                              , `List
+                                  [ `Assoc
+                                      [ "code", `String "name_mismatch"
+                                      ; "message", `String "raw names differ"
+                                      ; "declared", `String "declared"
+                                      ; "directory", `String "broken"
+                                      ]
+                                  ] )
+                            ] )
+                      ]
+                  ] )
+            ] )
+      ]
+  in
+  match Tui_decode.decode_skills_catalog payload with
+  | Error error -> Alcotest.failf "invalid-only catalog rejected: %s" error
+  | Ok { Tui_decode.sc_surfaces = []; sc_rejections = [ rejection ]; _ } ->
+    Alcotest.(check string) "source" "workspace" rejection.scr_source_id;
+    Alcotest.(check (option string)) "package" (Some "broken")
+      rejection.scr_package_id;
+    (match rejection.scr_reason with
+     | Tui_decode.Skill_document_rejected
+         [ { srd_code = Tui_decode.Skill_name_mismatch; srd_message } ] ->
+       Alcotest.(check string) "message" "raw names differ" srd_message
+     | _ -> Alcotest.fail "typed name-mismatch diagnostic was not retained")
+  | Ok _ -> Alcotest.fail "invalid-only rejection was dropped"
 
 (* The server answers a cold cache with its warming placeholder: the same
    envelope, an empty inventory, and a flag saying so. Reading only the list
@@ -5573,6 +5619,8 @@ let () =
           test_decode_skills_catalog_tolerates_empty_usage_and_flow;
         Alcotest.test_case "rejects a non-string kind" `Quick
           test_decode_skills_catalog_rejects_a_wrong_kind_type;
+        Alcotest.test_case "keeps invalid-only typed rejections" `Quick
+          test_decode_skills_catalog_keeps_invalid_only_rejections;
       ] );
     ( "skill_evidence",
       [ Alcotest.test_case "reads exact v5 coverage" `Quick

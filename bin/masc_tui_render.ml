@@ -9489,7 +9489,7 @@ let tools_display_lines (state : state) =
         [ Ansi.dim,
           Printf.sprintf " Skill Usage — catalog %s"
             (Terminal_text.single_line sc_state) ]
-    | Some { Masc.Tui_decode.sc_surfaces; _ } ->
+    | Some { Masc.Tui_decode.sc_surfaces; sc_rejections; _ } ->
         let used =
           List.filter
             (fun (surface : Masc.Tui_decode.skills_catalog_surface) ->
@@ -9521,7 +9521,54 @@ let tools_display_lines (state : state) =
                ; (Ansi.dim, "     " ^ keepers) ])
             used
         in
-        heading @ rows
+        let rejection_rows =
+          match sc_rejections with
+          | [] -> []
+          | rejections ->
+            ( Ansi.bold,
+              Printf.sprintf " Rejected Skill Sources — %d" (List.length rejections) )
+            :: List.concat_map
+                 (fun (rejection : Masc.Tui_decode.skill_catalog_rejection) ->
+                    let source =
+                      rejection.scr_source_id
+                      ^ "/"
+                      ^ Option.value
+                          ~default:"(invalid package)"
+                          rejection.scr_package_id
+                    in
+                    let revision =
+                      rejection.scr_content_revision
+                      |> Option.map short_revision
+                      |> Option.value ~default:"unavailable"
+                    in
+                    let diagnostics =
+                      match rejection.scr_reason with
+                      | Masc.Tui_decode.Skill_document_rejected diagnostics ->
+                        List.map
+                          (fun (diagnostic : Masc.Tui_decode.skill_rejection_diagnostic) ->
+                             ( Theme.warn (),
+                               Printf.sprintf
+                                 "     %s: %s"
+                                 (Masc.Tui_decode.skill_diagnostic_code_to_string
+                                    diagnostic.srd_code)
+                                 (Terminal_text.single_line diagnostic.srd_message) ))
+                          diagnostics
+                      | Skill_document_unreadable ->
+                        [ Theme.warn (), "     document_unreadable" ]
+                      | Skill_exact_identity_duplicate ->
+                        [ Theme.warn (), "     exact_identity_duplicate" ]
+                      | Skill_invalid_package_id ->
+                        [ Theme.warn (), "     invalid_package_id" ]
+                    in
+                    ( Theme.warn (),
+                      Printf.sprintf
+                        "   %s · %s"
+                        (Terminal_text.single_line source)
+                        (Terminal_text.single_line revision) )
+                    :: diagnostics)
+                 rejections
+        in
+        heading @ rows @ rejection_rows
     end
   in
   (* One section at a time. These used to be concatenated, and the first of

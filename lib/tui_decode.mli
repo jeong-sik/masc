@@ -266,10 +266,50 @@ type skills_catalog_surface = {
   scs_flow : skill_flow option;
 }
 
+type skill_diagnostic_code =
+  | Skill_missing_frontmatter
+  | Skill_byte_order_mark
+  | Skill_unterminated_frontmatter
+  | Skill_malformed_yaml
+  | Skill_frontmatter_not_mapping
+  | Skill_duplicate_field
+  | Skill_duplicate_metadata_key
+  | Skill_unexpected_frontmatter_field
+  | Skill_missing_name
+  | Skill_missing_description
+  | Skill_invalid_field_type
+  | Skill_invalid_name
+  | Skill_name_mismatch
+  | Skill_description_too_long
+  | Skill_compatibility_empty
+  | Skill_compatibility_too_long
+  | Skill_invalid_metadata_value
+
+type skill_rejection_diagnostic = {
+  srd_code : skill_diagnostic_code;
+  srd_message : string;
+}
+
+type skill_rejection_reason =
+  | Skill_document_rejected of skill_rejection_diagnostic list
+  | Skill_document_unreadable
+  | Skill_exact_identity_duplicate
+  | Skill_invalid_package_id
+
+type skill_catalog_rejection = {
+  scr_source_id : string;
+  scr_package_id : string option;
+  scr_content_revision : string option;
+  scr_reason : skill_rejection_reason;
+}
+
 type skills_catalog = {
   sc_state : string;
   sc_surfaces : skills_catalog_surface list;
+  sc_rejections : skill_catalog_rejection list;
 }
+
+val skill_diagnostic_code_to_string : skill_diagnostic_code -> string
 
 type effective_skill_load_reason =
   | Skill_catalog_default

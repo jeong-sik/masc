@@ -20,6 +20,63 @@ type github_identity_snapshots =
 
 let no_github_identity_snapshots = { current = None; retired = [] }
 
+(* A microvm guest outlives the turn runtime that booted it. Its credential
+   snapshot therefore cannot be owned by [t]: the next turn constructs a new
+   [t] and adopts the same guest. Keep the one snapshot mounted by each guest
+   under the stable guest name for the lifetime of this server process. *)
+let microvm_identity_snapshots :
+  (string * github_identity_snapshot) list Atomic.t
+  =
+  Atomic.make []
+;;
+
+(* Stable guest names make concurrent turn starts converge on one VM. Keep
+   the name probe, snapshot claim, and VM start/stop in one Eio critical
+   section so a losing starter cannot release a snapshot while the winner is
+   still mounting it. VM execs do not take this lock. *)
+let microvm_lifecycle_mutex = Eio.Mutex.create ()
+
+let with_microvm_lifecycle_lock f =
+  match Eio_context.get_root_switch_opt () with
+  | None -> f ()
+  | Some _ -> Eio.Mutex.use_rw ~protect:true microvm_lifecycle_mutex f
+;;
+
+let microvm_identity_snapshot container_name =
+  Atomic.get microvm_identity_snapshots |> List.assoc_opt container_name
+;;
+
+let rec claim_microvm_identity_snapshot container_name snapshot =
+  let current = Atomic.get microvm_identity_snapshots in
+  match List.assoc_opt container_name current with
+  | Some existing -> `Existing existing
+  | None ->
+    if Atomic.compare_and_set
+         microvm_identity_snapshots
+         current
+         ((container_name, snapshot) :: current)
+    then `Claimed
+    else claim_microvm_identity_snapshot container_name snapshot
+;;
+
+let rec take_microvm_identity_snapshot_if container_name expected =
+  let current = Atomic.get microvm_identity_snapshots in
+  match List.assoc_opt container_name current with
+  | None -> None
+  | Some snapshot when Option.for_all (fun value -> value == snapshot) expected ->
+    let updated = List.remove_assoc container_name current in
+    if Atomic.compare_and_set microvm_identity_snapshots current updated
+    then Some snapshot
+    else take_microvm_identity_snapshot_if container_name expected
+  | Some _ -> None
+;;
+
+let release_registered_microvm_identity ?expected container_name =
+  match take_microvm_identity_snapshot_if container_name expected with
+  | None -> ()
+  | Some snapshot -> snapshot.cleanup ()
+;;
+
 type t =
   { config : Workspace.config
   ; meta : keeper_meta
@@ -41,6 +98,18 @@ let rec update_github_identity_snapshots t update =
   let updated = update current in
   if not (Atomic.compare_and_set t.github_identity_snapshots current updated)
   then update_github_identity_snapshots t update
+;;
+
+let bind_github_identity_snapshot t snapshot =
+  update_github_identity_snapshots t (fun snapshots ->
+    { snapshots with current = Some snapshot })
+;;
+
+let forget_github_identity_snapshots t =
+  let (_ : github_identity_snapshots) =
+    Atomic.exchange t.github_identity_snapshots no_github_identity_snapshots
+  in
+  ()
 ;;
 
 (* Microvm only: the boot-time identity snapshot a guest holds for its
@@ -460,13 +529,10 @@ let resolve_image (t : t) =
   | _ -> Env_config_sandbox.Runtime.docker_image ()
 ;;
 
-(* A microvm turn container mounts the playground and nothing else: no
-   secret projection, no GitHub identity, no config or workspace-state
-   mounts, no seccomp/pids/security-opt (container rejects those; the
-   guest kernel is the boundary). Keepers needing the projections stay
-   on Docker until the guest grows them. Stale-container reaping is the
-   Docker sweep's; a leaked microvm guest is collected by hand until a
-   sweep lands ([container list --format json] carries the same labels). *)
+(* A microvm guest mounts the playground, runtime config, and its immutable
+   GitHub identity snapshot. It still has no generic secret projection or
+   workspace-state mounts, and no seccomp/pids/security-opt flags (container
+   rejects those; the guest kernel is the boundary). *)
 (* One guest per keeper, not per turn: the name is stable, an already
    running guest is adopted instead of booted (amortising the 1.3-2.4s VM
    start to once per keeper), and turn cleanup leaves it running. State
@@ -474,38 +540,94 @@ let resolve_image (t : t) =
    Teardown is [teardown_keeper_sandbox], which shutdown finalization runs after
    the registry unregister succeeds -- the one point that knows the keeper is
    gone for good rather than between turns. *)
-let keeper_vm_name (t : t) =
+let microvm_container_name ~(config : Workspace.config) ~keeper_name =
   Printf.sprintf
     "masc-keeper-vm-%s-%s"
-    (Workspace_utils.safe_filename t.meta.name)
-    (String.sub (Keeper_sandbox_runtime.base_path_hash t.config.base_path) 0 8)
+    (Workspace_utils.safe_filename keeper_name)
+    (String.sub (Keeper_sandbox_runtime.base_path_hash config.base_path) 0 8)
 ;;
 
-let start_microvm_container ?timeout_sec (t : t) =
+let keeper_vm_name (t : t) =
+  microvm_container_name ~config:t.config ~keeper_name:t.meta.name
+;;
+
+let bind_registered_microvm_identity t container_name =
+  match microvm_identity_snapshot container_name with
+  | None -> None
+  | Some snapshot ->
+    bind_github_identity_snapshot t snapshot;
+    Some snapshot
+;;
+
+let stop_and_delete_microvm_container ?timeout_sec container_name =
+  let stop_st, stop_out =
+    run_argv_with_status
+      ?timeout_sec
+      (Keeper_sandbox_microvm.stop_argv ~container_name)
+  in
+  let delete_st, delete_out =
+    run_argv_with_status
+      ?timeout_sec
+      (Keeper_sandbox_microvm.delete_force_argv ~container_name)
+  in
+  (* Both commands can race a guest that is already absent, so their exit
+     codes are only diagnostics. The postcondition is authoritative: do not
+     release the mounted identity snapshot until the guest name is gone. *)
+  match probe_microvm_container_state ?timeout_sec container_name with
+  | Ok Keeper_sandbox_runtime.Docker_container_absent -> Ok ()
+  | Ok Keeper_sandbox_runtime.Docker_container_running
+  | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
+    Error
+      (Printf.sprintf
+         "microvm_teardown_failed: guest remains after stop=%s (%s), delete=%s (%s)"
+         (Keeper_sandbox_exec_failure.status_label stop_st)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log stop_out)
+         (Keeper_sandbox_exec_failure.status_label delete_st)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log delete_out))
+  | Error probe_error ->
+    Error
+      (Printf.sprintf
+         "microvm_teardown_failed: post-delete state unknown: %s; stop=%s (%s), delete=%s (%s)"
+         probe_error
+         (Keeper_sandbox_exec_failure.status_label stop_st)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log stop_out)
+         (Keeper_sandbox_exec_failure.status_label delete_st)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log delete_out))
+;;
+
+let start_microvm_container_unlocked ?timeout_sec (t : t) =
   let image = resolve_image t in
   if String.trim image = ""
   then Error "keeper sandbox docker image is not configured"
   else (
     let container_name = keeper_vm_name t in
-    (* [keep] is the identity the started guest has mounted, if this call
-       built one. Recording it makes the runtime own the temp directory for
-       the guest's lifetime; turn cleanup skips the release for microvm and
-       the guest teardown does it. *)
-    let adopt ?keep () =
-      Option.iter
-        (fun snapshot ->
-           update_github_identity_snapshots t (fun snapshots ->
-             { snapshots with current = Some snapshot }))
-        keep;
+    let adopt snapshot =
+      bind_github_identity_snapshot t snapshot;
       set_state t (Running { container_name });
       Ok container_name
     in
-    match probe_microvm_container_state ?timeout_sec container_name with
-    | Ok Keeper_sandbox_runtime.Docker_container_running -> adopt ()
-    | Error probe_error ->
-      Error (Printf.sprintf "microvm_start_failed: %s" probe_error)
-    | Ok Keeper_sandbox_runtime.Docker_container_stopped
-    | Ok Keeper_sandbox_runtime.Docker_container_absent ->
+    let start_state =
+      match probe_microvm_container_state ?timeout_sec container_name with
+      | Ok Keeper_sandbox_runtime.Docker_container_running ->
+        (match bind_registered_microvm_identity t container_name with
+         | Some snapshot -> `Adopt snapshot
+         | None ->
+           (* A guest from an older server process can still be running, but
+              its temp snapshot capability died with that process. It is not
+              safe to guess the mount or use credentials we cannot redact.
+              Replace the guest with one whose snapshot this process owns. *)
+           (match stop_and_delete_microvm_container ?timeout_sec container_name with
+            | Ok () -> `Boot
+            | Error error -> `Error error))
+      | Error probe_error ->
+        `Error (Printf.sprintf "microvm_start_failed: %s" probe_error)
+      | Ok Keeper_sandbox_runtime.Docker_container_stopped
+      | Ok Keeper_sandbox_runtime.Docker_container_absent -> `Boot
+    in
+    match start_state with
+    | `Adopt snapshot -> adopt snapshot
+    | `Error error -> Error error
+    | `Boot ->
       (* A stopped guest survived [--rm] (host reboot mid-life); clear the
          name before booting. Absent makes this a no-op. *)
       let (_ : Unix.process_status * string) =
@@ -535,23 +657,31 @@ let start_microvm_container ?timeout_sec (t : t) =
            match (Atomic.get t.github_identity_snapshots).current with
            | Some snapshot -> Ok (snapshot, false)
            | None ->
-             (match
-                Keeper_github_identity.docker_args_for_tool
-                  ~config:t.config
-                  ~keeper_name:t.meta.name
-                  ~container_masc_dir:
-                    (Keeper_sandbox_runtime_setup.container_masc_dir
-                       ~container_root:t.container_root)
-              with
-              | Error _ as error -> error
-              | Ok projection ->
-                Ok
-                  ( { args = projection.args
-                    ; host_dir = projection.host_snapshot_dir
-                    ; revision = projection.revision
-                    ; cleanup = projection.cleanup
-                    }
-                  , true ))
+             (match microvm_identity_snapshot container_name with
+              | Some snapshot -> Ok (snapshot, false)
+              | None ->
+                (match
+                   Keeper_github_identity.docker_args_for_tool
+                     ~config:t.config
+                     ~keeper_name:t.meta.name
+                     ~container_masc_dir:
+                       (Keeper_sandbox_runtime_setup.container_masc_dir
+                          ~container_root:t.container_root)
+                 with
+                 | Error _ as error -> error
+                 | Ok projection ->
+                   let snapshot =
+                     { args = projection.args
+                     ; host_dir = projection.host_snapshot_dir
+                     ; revision = projection.revision
+                     ; cleanup = projection.cleanup
+                     }
+                   in
+                   (match claim_microvm_identity_snapshot container_name snapshot with
+                    | `Claimed -> Ok (snapshot, true)
+                    | `Existing existing ->
+                      snapshot.cleanup ();
+                      Ok (existing, false))))
          in
          (match github_identity_result with
           | Error err ->
@@ -608,14 +738,20 @@ let start_microvm_container ?timeout_sec (t : t) =
                inspect_container_exists ?timeout_sec ~microvm:true container_name
              with
              | Ok () ->
-               adopt ?keep:(if github_identity_is_new then Some github_identity else None) ()
+               adopt github_identity
              | Error inspect_out ->
-               let (_ : Unix.process_status * string) =
-                 run_argv_with_status
-                   ?timeout_sec
-                   (Keeper_sandbox_microvm.stop_argv ~container_name)
+               let removed =
+                 match
+                   stop_and_delete_microvm_container ?timeout_sec container_name
+                 with
+                 | Ok () -> true
+                 | Error _ -> false
                in
-               if github_identity_is_new then github_identity.cleanup ();
+               if github_identity_is_new && removed
+               then
+                 release_registered_microvm_identity
+                   ~expected:github_identity
+                   container_name;
                Error
                  (Printf.sprintf
                     "microvm_start_failed: container ran but inspect cannot \
@@ -630,17 +766,41 @@ let start_microvm_container ?timeout_sec (t : t) =
                probe_microvm_container_state ?timeout_sec container_name
              with
              | Ok Keeper_sandbox_runtime.Docker_container_running ->
-               (* The winner's guest already has its own identity mounted;
-                  this call's snapshot was never used, so drop it rather
-                  than leak the temp directory. *)
-               if github_identity_is_new then github_identity.cleanup ();
-               adopt ()
-             | Ok _ | Error _ ->
-               if github_identity_is_new then github_identity.cleanup ();
+               (* The stable-name race adopted the snapshot claimed before
+                  either launch. Both launch argv values therefore point at
+                  the same immutable directory. *)
+               adopt github_identity
+             | Ok Keeper_sandbox_runtime.Docker_container_stopped
+             | Ok Keeper_sandbox_runtime.Docker_container_absent ->
+               let removed =
+                 match
+                   stop_and_delete_microvm_container ?timeout_sec container_name
+                 with
+                 | Ok () -> true
+                 | Error _ -> false
+               in
+               if github_identity_is_new && removed
+               then
+                 release_registered_microvm_identity
+                   ~expected:github_identity
+                   container_name;
+               Error
+                 (Printf.sprintf
+                    "microvm_start_failed: %s"
+                    (Keeper_sandbox_runtime.docker_failure_output_for_log out))
+             | Error _ ->
+               (* The guest state is unknown. Keep the registered snapshot:
+                  deleting it could invalidate a mount on a guest that did
+                  start even though the probe failed. Teardown owns recovery. *)
                Error
                  (Printf.sprintf
                     "microvm_start_failed: %s"
                     (Keeper_sandbox_runtime.docker_failure_output_for_log out)))))))
+;;
+
+let start_microvm_container ?timeout_sec t =
+  with_microvm_lifecycle_lock (fun () ->
+    start_microvm_container_unlocked ?timeout_sec t)
 ;;
 
 (* Takes the name rather than the meta: shutdown finalization holds
@@ -662,34 +822,14 @@ let teardown_keeper_sandbox_by_name
            ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
            ())
   in
-  let guest_name =
-    Printf.sprintf
-      "masc-keeper-vm-%s-%s"
-      (Workspace_utils.safe_filename keeper_name)
-      (String.sub (Keeper_sandbox_runtime.base_path_hash config.base_path) 0 8)
-  in
-  let stop_st, stop_out =
-    run_argv_with_status
-      ~timeout_sec
-      (Keeper_sandbox_microvm.stop_argv ~container_name:guest_name)
-  in
-  let (_ : Unix.process_status * string) =
-    run_argv_with_status
-      ~timeout_sec
-      (Keeper_sandbox_microvm.delete_force_argv ~container_name:guest_name)
-  in
+  let guest_name = microvm_container_name ~config ~keeper_name in
   let guest_outcome =
-    match stop_st with
-    | Unix.WEXITED 0 -> Ok ()
-    | _ ->
-      (* A missing guest is a successful teardown; anything else surfaces. *)
-      (match probe_microvm_container_state ~timeout_sec guest_name with
-       | Ok Keeper_sandbox_runtime.Docker_container_absent -> Ok ()
-       | Ok _ | Error _ ->
-         Error
-           (Printf.sprintf
-              "microvm_teardown_failed: %s"
-              (Keeper_sandbox_runtime.docker_failure_output_for_log stop_out)))
+    with_microvm_lifecycle_lock (fun () ->
+      match stop_and_delete_microvm_container ~timeout_sec guest_name with
+      | Error _ as error -> error
+      | Ok () ->
+        release_registered_microvm_identity guest_name;
+        Ok ())
   in
   let docker_outcome =
     Keeper_sandbox_runtime.remove_persistent_containers
@@ -985,14 +1125,26 @@ let retire_current_github_identity_snapshot t =
 ;;
 
 let stop_container_for_github_identity_refresh ?timeout_sec t =
-  let retire () =
-    set_state t Not_started;
-    retire_current_github_identity_snapshot t;
-    Ok ()
-  in
-  match get_state t with
-  | Not_started -> retire ()
-  | Running { container_name } ->
+  if is_microvm t
+  then
+    with_microvm_lifecycle_lock (fun () ->
+      let container_name = keeper_vm_name t in
+      match stop_and_delete_microvm_container ?timeout_sec container_name with
+      | Error _ as error -> error
+      | Ok () ->
+        release_registered_microvm_identity container_name;
+        forget_github_identity_snapshots t;
+        set_state t Not_started;
+        Ok ())
+  else
+    let retire () =
+      set_state t Not_started;
+      retire_current_github_identity_snapshot t;
+      Ok ()
+    in
+    match get_state t with
+    | Not_started -> retire ()
+    | Running { container_name } ->
     let timeout_sec =
       Option.value
         timeout_sec
@@ -1003,30 +1155,31 @@ let stop_container_for_github_identity_refresh ?timeout_sec t =
       Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ]
     in
     let status, output = run_argv_with_status ~timeout_sec argv in
-    (match status with
-     | Unix.WEXITED 0 -> retire ()
-     | _ ->
-       (match
-          Keeper_sandbox_runtime.probe_container_state_optional
-            ~container_name
-            ~timeout_sec
-            ()
-        with
-        | Ok Keeper_sandbox_runtime.Docker_container_absent -> retire ()
-        | Ok Keeper_sandbox_runtime.Docker_container_running
-        | Ok Keeper_sandbox_runtime.Docker_container_stopped
-        | Error _ ->
-          Error
-            (Printf.sprintf
-               "cannot refresh GitHub identity while turn container %s remains: status=%s output=%s"
-               container_name
-               (Keeper_sandbox_exec_failure.status_label status)
-               (Exec_policy.truncate_for_log output))))
+      (match status with
+       | Unix.WEXITED 0 -> retire ()
+       | _ ->
+         (match
+            Keeper_sandbox_runtime.probe_container_state_optional
+              ~container_name
+              ~timeout_sec
+              ()
+          with
+          | Ok Keeper_sandbox_runtime.Docker_container_absent -> retire ()
+          | Ok Keeper_sandbox_runtime.Docker_container_running
+          | Ok Keeper_sandbox_runtime.Docker_container_stopped
+          | Error _ ->
+            Error
+              (Printf.sprintf
+                 "cannot refresh GitHub identity while turn container %s remains: status=%s output=%s"
+                 container_name
+                 (Keeper_sandbox_exec_failure.status_label status)
+                 (Exec_policy.truncate_for_log output))))
 ;;
 
 let prepare_github_identity_secret_files ?timeout_sec t =
   if is_microvm t
   then (
+    ignore (bind_registered_microvm_identity t (keeper_vm_name t));
     (* The guest's identity is its boot-time snapshot, keeper-lifetime by
        design: only a fresh boot mounts a new one, and a drift from the
        central revision is handled by dropping the handle so the next boot

@@ -7,7 +7,6 @@ type stimulus_kind =
       (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved  (* HITL resolution delivered as an ordinary Keeper wake *)
   | Ask_answered  (* A human answered a question this Keeper asked *)
-  | Manual_compaction
   | Completion_authority_rejected
   | Task_cancelled
   | Workspace_message
@@ -36,7 +35,6 @@ let stimulus_kind_to_string = function
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
   | Ask_answered -> "ask_answered"
-  | Manual_compaction -> "manual_compaction"
   | Completion_authority_rejected -> "completion_authority_rejected"
   | Task_cancelled -> "task_cancelled"
   | Workspace_message -> "workspace_message"
@@ -56,7 +54,6 @@ let stimulus_kind_of_string = function
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
   | "ask_answered" -> Some Ask_answered
-  | "manual_compaction" -> Some Manual_compaction
   | "completion_authority_rejected" -> Some Completion_authority_rejected
   | "task_cancelled" -> Some Task_cancelled
   | "workspace_message" -> Some Workspace_message
@@ -101,7 +98,6 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
   | Keeper_event_queue.Ask_answered _ -> Ask_answered
-  | Keeper_event_queue.Manual_compaction_requested -> Manual_compaction
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Completion_authority_rejected
   | Keeper_event_queue.Task_cancelled _ -> Task_cancelled
@@ -211,7 +207,6 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "hitl_resolved approval=%s decision=%s"
       r.approval_id
       (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
-  | Keeper_event_queue.Manual_compaction_requested -> "manual_compaction_requested"
   | Keeper_event_queue.Completion_authority_rejected rejection ->
     Printf.sprintf
       "completion_authority_rejected task_id=%s verification_id=%s"
@@ -261,7 +256,6 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Ask_answered _
-    | Keeper_event_queue.Manual_compaction_requested
     | Keeper_event_queue.Completion_authority_rejected _ -> None
     | Keeper_event_queue.Task_cancelled _ -> None
     | Keeper_event_queue.Workspace_message _ -> None
@@ -875,7 +869,6 @@ let decode_current_row ~keeper_name row =
       | Board_signal, (Some _ | None)
       | ( Bootstrap | Fusion_completed | Schedule_due
         | Connector_attention | Hitl_resolved | Ask_answered
-        | Manual_compaction
         | Completion_authority_rejected
         | Task_cancelled
         | Workspace_message
@@ -1367,7 +1360,6 @@ let board_stimulus_token metadata stimulus_kind =
     Option.map (fun timestamp -> timestamp, post_id) updated_at
   | Bootstrap | Fusion_completed | Schedule_due
   | Connector_attention | Hitl_resolved | Ask_answered
-  | Manual_compaction
   | Completion_authority_rejected
   | Task_cancelled
   | Workspace_message

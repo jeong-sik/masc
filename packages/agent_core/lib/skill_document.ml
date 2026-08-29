@@ -54,10 +54,6 @@ type diagnostic =
   | Compatibility_too_long of { length : int }
   | Invalid_metadata_value of { key : string }
 
-type conformance =
-  | Conformant
-  | Runtime_compatible of diagnostic list
-
 type extension_value =
   | Null
   | Boolean of bool
@@ -74,15 +70,11 @@ type t =
   ; compatibility : string option
   ; metadata : (string * string) list
   ; metadata_values : (string * extension_value) list
-  ; extensions : (string * extension_value) list
   ; body : string
   }
 
 type load_outcome =
-  | Loaded of
-      { document : t
-      ; conformance : conformance
-      }
+  | Loaded of t
   | Unloadable of diagnostic list
 
 type line =
@@ -166,6 +158,38 @@ let duplicate_fields fields =
 
 let field fields key = List.assoc_opt key fields
 
+let python_whitespace scalar =
+  let code = Uchar.to_int scalar in
+  Uucp.White.is_white_space scalar || (code >= 0x1c && code <= 0x1f)
+;;
+
+let unicode_trim value =
+  let rec loop index first_nonspace last_nonspace_end =
+    if index = String.length value
+    then
+      match first_nonspace with
+      | None -> ""
+      | Some first -> String.sub value first (last_nonspace_end - first)
+    else
+      let decoded = String.get_utf_8_uchar value index in
+      if not (Uchar.utf_decode_is_valid decoded)
+      then value
+      else
+        let next = index + Uchar.utf_decode_length decoded in
+        let scalar = Uchar.utf_decode_uchar decoded in
+        if python_whitespace scalar
+        then loop next first_nonspace last_nonspace_end
+        else
+          let first_nonspace =
+            match first_nonspace with
+            | Some first -> Some first
+            | None -> Some index
+          in
+          loop next first_nonspace next
+  in
+  loop 0 None 0
+;;
+
 let optional_string fields standard_field key =
   match field fields key with
   | None -> Ok None
@@ -179,8 +203,7 @@ let optional_string fields standard_field key =
 let required_description fields =
   match field fields "description" with
   | None | Some `Null -> Error Missing_description
-  | Some (`String value) when String.equal (String.trim value) "" ->
-    Error Missing_description
+  | Some (`String value) when String.equal (unicode_trim value) "" -> Error Missing_description
   | Some (`String value) -> Ok value
   | Some _ ->
     Error
@@ -191,7 +214,7 @@ let required_description fields =
 let declared_name fields =
   match field fields "name" with
   | None | Some `Null -> Ok None
-  | Some (`String value) when String.equal (String.trim value) "" -> Ok None
+  | Some (`String value) when String.equal (unicode_trim value) "" -> Ok None
   | Some (`String value) -> Ok (Some value)
   | Some _ ->
     Error (Invalid_field_type { field = Standard Name; expected = String_value })
@@ -240,10 +263,11 @@ let name_has_invalid_character name =
       then true
       else
         let scalar = Uchar.utf_decode_uchar decoded in
-        if
-          Uchar.equal scalar hyphen
-          || Uucp.Alpha.is_alphabetic scalar
-          || not (Uucp.Num.numeric_type scalar = `None)
+        if Uchar.equal scalar hyphen
+           ||
+           match Uucp.Gc.general_category scalar with
+           | `Lu | `Ll | `Lt | `Lm | `Lo | `Nd | `Nl | `No -> true
+           | _ -> false
         then loop (index + Uchar.utf_decode_length decoded)
         else true
   in
@@ -261,8 +285,9 @@ let name_has_consecutive_hyphens name =
   loop 0
 ;;
 
-let analyze_name name =
-  let normalized = Uunf_string.normalize_utf_8 `NFKC (String.trim name) in
+let analyze_name ?(trim = true) name =
+  let name = if trim then unicode_trim name else name in
+  let normalized = Uunf_string.normalize_utf_8 `NFKC name in
   let scalar_length = utf_8_scalar_length normalized in
   let byte_length = String.length normalized in
   let add_if condition violation violations =
@@ -374,17 +399,8 @@ let metadata fields =
       ] )
 ;;
 
-let extensions fields =
-  List.filter_map
-    (fun (key, value) ->
-       match standard_field_of_key key with
-       | Some _ -> None
-       | None -> Some (key, extension_value_of_yaml value))
-    fields
-;;
-
 let runtime_name ~directory_name declared =
-  let directory, directory_violations = analyze_name directory_name in
+  let directory, directory_violations = analyze_name ~trim:false directory_name in
   let invalid_name name violations = Invalid_name { name; violations } in
   match declared with
   | Some declared_name ->
@@ -392,20 +408,18 @@ let runtime_name ~directory_name declared =
     (match declared_violations, directory_violations with
      | [], [] when String.equal declared directory -> Ok (declared, [])
      | [], [] ->
-       Ok
-         ( directory
-         , [ Name_mismatch
-               { declared = declared_name; directory = directory_name }
-           ] )
+       Error
+         [ Name_mismatch
+             { declared = declared_name; directory = directory_name }
+         ]
      | [], directory_violations ->
-       Ok
-         ( declared
-         , [ Name_mismatch
-               { declared = declared_name; directory = directory_name }
-           ; invalid_name directory_name directory_violations
-           ] )
+       Error
+         [ Name_mismatch
+             { declared = declared_name; directory = directory_name }
+         ; invalid_name directory_name directory_violations
+         ]
      | declared_violations, [] ->
-       Ok (directory, [ invalid_name declared_name declared_violations ])
+       Error [ invalid_name declared_name declared_violations ]
      | declared_violations, directory_violations ->
        Error
          [ invalid_name declared_name declared_violations
@@ -413,7 +427,7 @@ let runtime_name ~directory_name declared =
          ])
   | None ->
     (match directory_violations with
-     | [] -> Ok (directory, [ Missing_name ])
+     | [] -> Error [ Missing_name ]
      | violations -> Error [ Missing_name; invalid_name directory_name violations ])
 ;;
 
@@ -429,84 +443,92 @@ let decode_stripped ~directory_name contents =
        let duplicates = duplicate_fields fields in
        if duplicates <> []
        then Unloadable duplicates
-       else
-         (match declared_name fields, required_description fields with
-          | Error diagnostic, _ | _, Error diagnostic ->
-            Unloadable [ diagnostic ]
-          | Ok declared_name, Ok description ->
-            (match runtime_name ~directory_name declared_name with
-             | Error diagnostics -> Unloadable diagnostics
-             | Ok (name, name_diagnostics) ->
-               let license, license_diagnostics =
-                 match optional_string fields License "license" with
-                 | Ok value -> value, []
-                 | Error diagnostic -> None, [ diagnostic ]
-               in
-               let compatibility, compatibility_diagnostics =
-                 match optional_string fields Compatibility "compatibility" with
-                 | Ok value -> value, []
-                 | Error diagnostic -> None, [ diagnostic ]
-               in
-               let ignored_tool_hint_diagnostics =
-                 match
-                   optional_string
-                     fields
-                     Allowed_tools_syntax_only
-                     "allowed-tools"
-                 with
-                 | Ok _ -> []
-                 | Error diagnostic -> [ diagnostic ]
-               in
-               let metadata, metadata_values, metadata_diagnostics = metadata fields in
-               let extension_values = extensions fields in
-               let extension_diagnostics =
-                 List.map
-                   (fun (key, _) -> Unexpected_frontmatter_field key)
-                   extension_values
-               in
-               let length_diagnostics =
-                 (match utf_8_scalar_length description with
-                  | Some length when length > Spec_limits.description ->
-                    [ Description_too_long { length } ]
-                  | Some _ | None -> [])
-                 @
-                 match compatibility with
-                 | Some value when String.equal value "" -> [ Compatibility_empty ]
-                 | Some value ->
-                   (match utf_8_scalar_length value with
-                    | Some length when length > Spec_limits.compatibility ->
-                      [ Compatibility_too_long { length } ]
-                    | Some _ | None -> [])
-                 | None -> []
-               in
-               let diagnostics =
-                 name_diagnostics
-                 @ license_diagnostics
-                 @ compatibility_diagnostics
-                 @ ignored_tool_hint_diagnostics
-                 @ metadata_diagnostics
-                 @ extension_diagnostics
-                 @ length_diagnostics
-               in
-               let document =
-                 { name
-                 ; declared_name
-                 ; description
-                 ; license
-                 ; compatibility
-                 ; metadata
-                 ; metadata_values
-                 ; extensions = extension_values
-                 ; body
-                 }
-               in
-               Loaded
-                 { document
-                 ; conformance =
-                     (match diagnostics with
-                      | [] -> Conformant
-                      | diagnostics -> Runtime_compatible diagnostics)
-                 }))
+       else (
+         let declared_name_result = declared_name fields in
+         let description_result = required_description fields in
+         let name_result =
+           match declared_name_result with
+           | Error diagnostic -> Error [ diagnostic ]
+           | Ok declared_name -> runtime_name ~directory_name declared_name
+         in
+         let license_result = optional_string fields License "license" in
+         let compatibility_result =
+           optional_string fields Compatibility "compatibility"
+         in
+         let allowed_tools_result =
+           optional_string fields Allowed_tools_syntax_only "allowed-tools"
+         in
+         let metadata, metadata_values, metadata_diagnostics = metadata fields in
+         let result_diagnostics = function
+           | Ok _ -> []
+           | Error diagnostic -> [ diagnostic ]
+         in
+         let name_diagnostics =
+           match name_result with
+           | Ok _ -> []
+           | Error diagnostics -> diagnostics
+         in
+         let extension_diagnostics =
+           List.filter_map
+             (fun (key, _) ->
+                match standard_field_of_key key with
+                | Some _ -> None
+                | None -> Some (Unexpected_frontmatter_field key))
+             fields
+         in
+         let length_diagnostics =
+           (match description_result with
+            | Ok description ->
+              (match utf_8_scalar_length description with
+               | Some length when length > Spec_limits.description ->
+                 [ Description_too_long { length } ]
+               | Some _ | None -> [])
+            | Error _ -> [])
+           @
+           match compatibility_result with
+           | Ok (Some value) when String.equal value "" -> [ Compatibility_empty ]
+           | Ok (Some value) ->
+             (match utf_8_scalar_length value with
+              | Some length when length > Spec_limits.compatibility ->
+                [ Compatibility_too_long { length } ]
+              | Some _ | None -> [])
+           | Ok None | Error _ -> []
+         in
+         let diagnostics =
+           name_diagnostics
+           @ result_diagnostics description_result
+           @ result_diagnostics license_result
+           @ result_diagnostics compatibility_result
+           @ result_diagnostics allowed_tools_result
+           @ metadata_diagnostics
+           @ extension_diagnostics
+           @ length_diagnostics
+         in
+         match
+           diagnostics,
+           name_result,
+           declared_name_result,
+           description_result,
+           license_result,
+           compatibility_result
+         with
+         | ( [],
+             Ok (name, _),
+             Ok declared_name,
+             Ok description,
+             Ok license,
+             Ok compatibility ) ->
+           Loaded
+             { name
+             ; declared_name
+             ; description
+             ; license
+             ; compatibility
+             ; metadata
+             ; metadata_values
+             ; body
+             }
+         | diagnostics, _, _, _, _, _ -> Unloadable diagnostics)
      | Ok _ -> Unloadable [ Frontmatter_not_mapping ])
 ;;
 
@@ -534,22 +556,11 @@ let decode ~directory_name contents =
   match decode_stripped ~directory_name contents, bom_stripped with
   | result, false -> result
   | Unloadable diagnostics, true -> Unloadable (Byte_order_mark :: diagnostics)
-  | Loaded { document; conformance = Conformant }, true ->
-    Loaded { document; conformance = Runtime_compatible [ Byte_order_mark ] }
-  | Loaded { document; conformance = Runtime_compatible diagnostics }, true ->
-    Loaded
-      { document
-      ; conformance = Runtime_compatible (Byte_order_mark :: diagnostics)
-      }
-;;
-
-let conformance_diagnostics = function
-  | Conformant -> []
-  | Runtime_compatible diagnostics -> diagnostics
+  | Loaded _, true -> Unloadable [ Byte_order_mark ]
 ;;
 
 let diagnostics = function
-  | Loaded { conformance; _ } -> conformance_diagnostics conformance
+  | Loaded _ -> []
   | Unloadable diagnostics -> diagnostics
 ;;
 
@@ -630,7 +641,29 @@ let diagnostic_to_string = function
     Printf.sprintf "SKILL.md metadata value for %S must be a string" key
 ;;
 
-let conformance_to_string = function
-  | Conformant -> "conformant"
-  | Runtime_compatible _ -> "runtime_compatible"
+let diagnostic_code = function
+  | Missing_frontmatter -> "missing_frontmatter"
+  | Byte_order_mark -> "byte_order_mark"
+  | Unterminated_frontmatter -> "unterminated_frontmatter"
+  | Malformed_yaml _ -> "malformed_yaml"
+  | Frontmatter_not_mapping -> "frontmatter_not_mapping"
+  | Duplicate_field _ -> "duplicate_field"
+  | Duplicate_metadata_key _ -> "duplicate_metadata_key"
+  | Unexpected_frontmatter_field _ -> "unexpected_frontmatter_field"
+  | Missing_name -> "missing_name"
+  | Missing_description -> "missing_description"
+  | Invalid_field_type _ -> "invalid_field_type"
+  | Invalid_name _ -> "invalid_name"
+  | Name_mismatch _ -> "name_mismatch"
+  | Description_too_long _ -> "description_too_long"
+  | Compatibility_empty -> "compatibility_empty"
+  | Compatibility_too_long _ -> "compatibility_too_long"
+  | Invalid_metadata_value _ -> "invalid_metadata_value"
+;;
+
+let diagnostic_to_yojson diagnostic =
+  `Assoc
+    [ "code", `String (diagnostic_code diagnostic)
+    ; "message", `String (diagnostic_to_string diagnostic)
+    ]
 ;;

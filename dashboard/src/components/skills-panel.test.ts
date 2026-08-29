@@ -3,12 +3,15 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   SkillReference,
+  SkillSnapshotRejection,
   SkillSnapshotEntry,
   SkillSurface,
   SkillSurfaceProfile,
 } from '../api/dashboard-skills'
 
 const editorApiMocks = vi.hoisted(() => ({
+  fetchAsyncRequestObservation: vi.fn(),
+  fetchSkills: vi.fn(),
   previewSkillSource: vi.fn(),
   readSkillSource: vi.fn(),
   saveSkillSource: vi.fn(),
@@ -16,6 +19,8 @@ const editorApiMocks = vi.hoisted(() => ({
 
 vi.mock('../api/dashboard-skills', async importOriginal => ({
   ...await importOriginal<typeof import('../api/dashboard-skills')>(),
+  fetchAsyncRequestObservation: editorApiMocks.fetchAsyncRequestObservation,
+  fetchSkills: editorApiMocks.fetchSkills,
   previewSkillSource: editorApiMocks.previewSkillSource,
   readSkillSource: editorApiMocks.readSkillSource,
   saveSkillSource: editorApiMocks.saveSkillSource,
@@ -29,9 +34,11 @@ import {
   formatBytes,
   kindLabel,
   mergeSkillRows,
+  rejectionDiagnostics,
   resourceReadBoundLabel,
   skillRowKey,
   SkillSourceEditor,
+  SkillsPanel,
   sortSkillRows,
   stateMessage,
   usageLabel,
@@ -49,7 +56,6 @@ function entry(
     package_id?: string
     content_revision?: string
     body_bytes?: number
-    diagnostics?: string[]
   } = {},
 ): SkillSnapshotEntry {
   return {
@@ -60,8 +66,6 @@ function entry(
     },
     content_revision: options.content_revision ?? `revision-${name}`,
     description: `about ${name}`,
-    conformance: 'conformant',
-    diagnostics: options.diagnostics,
     body_bytes: options.body_bytes ?? 100,
   }
 }
@@ -149,19 +153,17 @@ describe('mergeSkillRows', () => {
     expect(rows.map(row => [row.name, row.surface])).toEqual([['work-intake', null]])
   })
 
-  it('merges snapshot and exact surface diagnostics without duplicates', () => {
-    const compatible = entry('compatible', {
-      diagnostics: ['name differs from directory', 'shared diagnostic'],
-    })
+  it('keeps exact surface diagnostics without duplicates', () => {
+    const compatible = entry('compatible')
     const rows = mergeSkillRows(
       [compatible, entry('plain')],
       [{
         ...instructionSurface(compatible),
-        diagnostics: ['shared diagnostic', 'composition fence malformed'],
+        diagnostics: ['composition fence malformed', 'composition fence malformed'],
       }],
     )
     expect(rows.map(row => row.diagnostics)).toEqual([
-      ['name differs from directory', 'shared diagnostic', 'composition fence malformed'],
+      ['composition fence malformed'],
       [],
     ])
   })
@@ -231,6 +233,7 @@ describe('sortSkillRows', () => {
 function readyPayload(
   entries: SkillSnapshotEntry[],
   readySurfaces: SkillSurface[] | undefined,
+  rejections: SkillSnapshotRejection[] = [],
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     schema: 'masc.skill-snapshot/v1',
@@ -244,13 +247,10 @@ function readyPayload(
         resource_read_max_bytes: 65_536,
       },
       sources: [],
-      skills: entries.map(snapshotEntry => ({
-        ...snapshotEntry,
-        diagnostics: snapshotEntry.diagnostics ?? [],
-      })),
+      skills: entries,
       effective_skills: entries.map(snapshotEntry => snapshotEntry.identity),
       shadows: [],
-      rejections: [],
+      rejections,
     },
   }
   if (readySurfaces !== undefined) payload.surfaces = readySurfaces
@@ -360,6 +360,26 @@ describe('decodeSkillsResponse', () => {
 })
 
 describe('labels', () => {
+  it('renders rejection classifications from typed codes', () => {
+    const rejection: SkillSnapshotRejection = {
+      source_index: 0,
+      source_id: 'workspace',
+      package_id: 'broken',
+      content_revision: 'revision-broken',
+      reason: {
+        kind: 'document_rejected',
+        diagnostics: [{ code: 'missing_name', message: 'name is required' }],
+      },
+    }
+    expect(rejectionDiagnostics(rejection)).toEqual([
+      'missing_name: name is required',
+    ])
+    expect(decodeSkillsResponse(readyPayload([], [], [rejection]))).toMatchObject({
+      state: 'ready',
+      snapshot: { rejections: [rejection] },
+    })
+  })
+
   it('renders execution, context and current-user evidence from a profile', () => {
     const profiled: SkillSurface = {
       reference: reference(mission),
@@ -435,6 +455,38 @@ describe('labels', () => {
     expect(resourceReadBoundLabel({ kind: 'unreadable' })).toBe(
       'resource read max unavailable',
     )
+  })
+})
+
+describe('SkillsPanel rejection observability', () => {
+  it('renders typed rejection rows when no valid Skill exists', async () => {
+    const rejection: SkillSnapshotRejection = {
+      source_index: 0,
+      source_id: 'workspace',
+      package_id: 'broken',
+      content_revision: 'revision-broken',
+      reason: {
+        kind: 'document_rejected',
+        diagnostics: [{ code: 'name_mismatch', message: 'raw names differ' }],
+      },
+    }
+    editorApiMocks.fetchSkills.mockResolvedValue(
+      decodeSkillsResponse(readyPayload([], [], [rejection])),
+    )
+    editorApiMocks.fetchAsyncRequestObservation.mockResolvedValue({
+      schema: 'masc.async-request-observation/v1',
+      status: 'unavailable',
+      error: {},
+      startup_recovery: null,
+    })
+
+    const view = render(html`<${SkillsPanel} />`)
+
+    const table = await view.findByTestId('skill-rejections')
+    expect(table.textContent).toContain('workspace/broken')
+    expect(table.textContent).toContain('name_mismatch: raw names differ')
+    expect(view.getByTestId('skills-no-valid')).toBeTruthy()
+    expect(view.queryByText('The published snapshot lists no skills.')).toBeNull()
   })
 })
 

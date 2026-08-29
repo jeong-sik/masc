@@ -60,7 +60,7 @@ let test_snapshot_redacts_env_and_file_values () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
-  let keeper_name = "minjae" in
+  let keeper_name = "acme-sandbox" in
   let root = secret_root_default ~base ~keeper_name in
   let env_secret = "keeper.secret!" in
   let file_secret = "file.secret!" in

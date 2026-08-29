@@ -20,7 +20,6 @@ type valid_skill = private
         (** Global source-precedence result only. Keeper configuration, Task
             selection, runtime delivery, and model visibility are outside this
             inventory and must be derived from a capability surface. *)
-  ; conformance : Agent_core.Skill_document.conformance
   ; diagnostics : Keeper_skill_catalog.error list
         (** Projection diagnostics that leave the frozen document usable.
             For example, a malformed composition remains an instruction Skill

@@ -463,39 +463,6 @@ let test_keeper_scoped_projection_excludes_other_keepers () =
     (Option.is_none (find_keeper json other_keeper))
 ;;
 
-let test_manual_compaction_waiting_row_has_typed_producer () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "manual-compaction-waiting-keeper" in
-  ensure_keeper config keeper_name;
-  let pending =
-    stimulus
-      ~post_id:Keeper_event_queue.manual_compaction_post_id
-      ~arrived_at:120.0
-      Keeper_event_queue.Manual_compaction_requested
-  in
-  Keeper_event_queue_persistence.persist
-    ~base_path:config.Workspace_utils_backend_setup.base_path
-    ~keeper_name
-    (queue_of_list [ pending ]);
-  let json = Server_keeper_waiting_inventory.dashboard_json config in
-  match find_keeper json keeper_name with
-  | None -> fail "manual compaction keeper row missing"
-  | Some keeper ->
-    (match U.(keeper |> member "waiting_on" |> to_list) with
-     | [ row ] ->
-       check string
-         "manual compaction waiting kind"
-         "manual_compaction_requested"
-         (json_string_member "waiting_on" row);
-       check string
-         "manual compaction wake producer"
-         "keeper_compaction_request"
-         (json_string_member "wake_producer" row)
-     | rows ->
-       failf "expected one manual compaction waiting row, got %d" (List.length rows))
-;;
-
 let test_owner_shutdown_row_is_deferred () =
   with_workspace
   @@ fun config ->
@@ -939,8 +906,6 @@ let () =
             test_settled_composition_row_names_what_finished
         ; test_case "event queue rows carry operator-visible payload fields" `Quick
             test_event_queue_pending_rows_carry_operator_visible_fields
-        ; test_case "manual compaction producer is typed" `Quick
-            test_manual_compaction_waiting_row_has_typed_producer
         ; test_case "keeper-scoped projection excludes other keepers" `Quick
             test_keeper_scoped_projection_excludes_other_keepers
         ; test_case "Owner shutdown row is deferred" `Quick

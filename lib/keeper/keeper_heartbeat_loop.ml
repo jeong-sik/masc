@@ -171,7 +171,6 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Ask_answered _
-      | Keeper_event_queue.Manual_compaction_requested
       | Keeper_event_queue.Completion_authority_rejected _
       | Keeper_event_queue.Task_cancelled _
       | Keeper_event_queue.Workspace_message _
@@ -196,7 +195,6 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Fusion_completed _
        | Keeper_event_queue.Bootstrap
        | Keeper_event_queue.Connector_attention _
-       | Keeper_event_queue.Manual_compaction_requested
        | Keeper_event_queue.Completion_authority_rejected _
        | Keeper_event_queue.Task_cancelled _
        | Keeper_event_queue.Workspace_message _
@@ -298,45 +296,8 @@ let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
     { meta; cycle_status = Turn_cycle_crashed; stimuli_acked = false })
 ;;
 
-let manual_compaction_requested_of_stimuli = function
-  | [ { Keeper_event_queue.payload = Manual_compaction_requested; _ } ] -> true
-  | [] | [ _ ] | _ :: _ :: _ -> false
-;;
 
 
-
-
-let rec compaction_outcomes_of_cycle_outcome = function
-  | Cycle.Manual_compaction_applied { receipt; evidence; followup } ->
-    `Manual_committed
-      ( receipt.commit_count
-      , evidence.Keeper_compaction_evidence.before_checkpoint_bytes
-      , evidence.Keeper_compaction_evidence.after_checkpoint_bytes )
-    :: compaction_outcomes_of_cycle_outcome followup
-  | Cycle.Manual_compaction_failed _ -> [ `Failed ]
-  | Cycle.Failed { failure; _ } ->
-    (match failure.Keeper_unified_turn.source_disposition with
-     | Keeper_unified_turn.Follow_failure_route -> [])
-  | Cycle.Completed _
-  | Cycle.Checkpointed _
-  | Cycle.Input_required _
-  | Cycle.Cancelled _
-  | Cycle.Skipped _
-  | Cycle.Manual_compaction_not_applied _ ->
-    []
-;;
-
-let compaction_outcome_label = function
-  | `Manual_committed _ -> "manual_committed"
-  | `Failed -> "failed"
-;;
-
-let record_compaction_outcome_metric ~keeper_name outcome =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string CompactionOutcomes)
-    ~labels:[ "keeper", keeper_name; "outcome", compaction_outcome_label outcome ]
-    ()
-;;
 
 (* The queue records attention that a Keeper must observe, not provider health.
    A source leaves only after a completed turn has observed the admitted batch.
@@ -358,12 +319,8 @@ let batch_disposition_of_cycle_outcome
       { connector_attention_outcome =
           connector_attention_outcome_of_route completion.continuation_route
       }
-  | Some (Cycle.Manual_compaction_applied _) ->
-    Batch_ack_completed { connector_attention_outcome = Attention_ignored }
   | Some
       ( Cycle.Failed _
-      | Cycle.Manual_compaction_failed _
-      | Cycle.Manual_compaction_not_applied _
       | Cycle.Checkpointed _
       | Cycle.Input_required _
       | Cycle.Cancelled _
@@ -500,9 +457,7 @@ let run_keepalive_unified_turn
           | Cycle.Input_required _
           | Cycle.Cancelled _
           | Cycle.Skipped _
-          | Cycle.Manual_compaction_failed _
-          | Cycle.Manual_compaction_not_applied _
-          | Cycle.Manual_compaction_applied _ )
+          )
       | None ->
         record_crashed_cycle_failure
           ~base_path:ctx.config.base_path
@@ -580,9 +535,6 @@ let run_keepalive_unified_turn
        with
        | Ok () -> ()
        | Error message -> failwith message);
-      let manual_compaction_requested =
-        manual_compaction_requested_of_stimuli event_intake.consumed_stimuli
-      in
       (match event_intake.event_queue_intake_error with
        | None -> ()
        | Some error
@@ -808,7 +760,6 @@ let run_keepalive_unified_turn
               ~turn_decision
               ~shared_context
               ~wake
-              ~manual_compaction_requested
               ()
           in
           let run_cycle () = run_fresh_cycle () in
@@ -864,9 +815,7 @@ let run_keepalive_unified_turn
            | Cycle.Input_required _
            | Cycle.Cancelled _
            | Cycle.Skipped _
-           | Cycle.Manual_compaction_applied _
-           | Cycle.Manual_compaction_failed _
-           | Cycle.Manual_compaction_not_applied _ )
+           )
        | None ->
          ());
       (* RFC-0377: every entry admitted into this turn (the primary plus any
@@ -915,48 +864,6 @@ let run_keepalive_unified_turn
            match disposition with
            | Batch_ack_completed _ -> remove_completed_selections ~settlement
            | Batch_no_action -> ());
-      (let compaction_outcomes =
-         match !cycle_outcome_ref with
-         | Some outcome -> compaction_outcomes_of_cycle_outcome outcome
-         | None -> []
-       in
-       List.iter
-         (function
-           | `Failed ->
-             record_compaction_outcome_metric
-               ~keeper_name:meta_after_triage.name
-               `Failed
-           | `Manual_committed (commit_count, before_bytes, after_bytes) as outcome ->
-             record_compaction_outcome_metric
-               ~keeper_name:meta_after_triage.name
-               outcome;
-             (match
-                Keeper_owner_registry.apply_meta
-                  ~base_path:ctx.config.base_path
-                  ~keeper_name:meta_after_triage.name
-                  (Keeper_owner_reducer.Record_compaction_commit
-                     { trace_id = meta_after_triage.runtime.trace_id
-                     ; commit_count
-                     ; at = Unix.gettimeofday () (* NDT-OK: stamps when this commit landed; no branch reads it *)
-                     ; before_bytes
-                     ; after_bytes
-                     ; updated_at = Masc_domain.now_iso ()
-                     })
-              with
-              | Ok (Some _) -> ()
-              | Ok None ->
-                Log.Keeper.warn
-                  "compaction commit owner metadata disappeared keeper=%s"
-                  meta_after_triage.name
-              | Error error ->
-                let message =
-                  Keeper_owner_registry.command_error_to_string error
-                in
-                Log.Keeper.warn
-                  "compaction commit count not persisted keeper=%s: %s"
-                  meta_after_triage.name
-                  message))
-         compaction_outcomes);
       { meta = meta_after_cycle
       ; cycle_status =
           if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed

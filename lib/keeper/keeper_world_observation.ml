@@ -189,7 +189,6 @@ type event_queue_trigger =
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
   | Task_cancellation_stimulus
-  | Manual_compaction_stimulus
   | Workspace_message_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
@@ -202,7 +201,6 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
-  | Manual_compaction_pending
   | Workspace_message_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
@@ -969,7 +967,6 @@ let pending_board_event_of_stimulus
      [Keeper_ask_store], which the keeper reads with masc_ask_status, so
      nothing is injected here and the text lives in one place. *)
   | Keeper_event_queue.Ask_answered _
-  | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Workspace_message _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
        fires via the trigger itself; [Hitl_resolved] carries no observation to
@@ -1507,16 +1504,12 @@ let keeper_cycle_decision
       | Hitl_resolved_pending
       | Completion_authority_rejection_pending
       | Task_cancellation_pending
-      | Manual_compaction_pending
       | Workspace_message_pending
       | Scheduled_autonomous_turn
       | Task_backlog _
       | Never_started -> false)
   in
   let scheduled_due_from_queue = scheduled_due_from_queue <> [] in
-  let manual_compaction_control =
-    List.mem Manual_compaction_stimulus event_queue_triggers
-  in
   let reactive_triggers =
     [ (if Message_scope.has_kind Message_scope.Mention observation.pending_messages
        then Some Mention_pending
@@ -1542,7 +1535,6 @@ let keeper_cycle_decision
                  | Ask_answered_pending
                  | Hitl_resolved_pending
                  | Task_cancellation_pending
-                 | Manual_compaction_pending
                  | Workspace_message_pending
                  | Scheduled_autonomous_turn
                  | Scheduled_automation_due
@@ -1575,13 +1567,6 @@ let keeper_cycle_decision
   in
   if meta.paused
   then blocked Keeper_paused
-  else if manual_compaction_control
-  then
-    { should_run = true
-    ; channel = Reactive
-    ; verdict = Run { reasons = Manual_compaction_pending, [] }
-    ; since_last_scheduled_autonomous = None
-    }
   else (
     let scheduled_autonomous_decision () =
       let since_last_scheduled_autonomous =

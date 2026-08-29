@@ -25,7 +25,7 @@ let skill_exn ~name ~description body =
     Printf.sprintf "---\nname: %s\ndescription: %s\n---\n%s" name description body
   in
   match Skill_document.decode ~directory_name:name source with
-  | Loaded { document; _ } -> document
+  | Loaded document -> document
   | Unloadable diagnostics ->
     Alcotest.fail
       (String.concat "; " (List.map Skill_document.diagnostic_to_string diagnostics))

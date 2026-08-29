@@ -643,6 +643,16 @@ let log_call
         | Some n -> [ "truncated_to", `Int n ]
         | None -> []
       in
+      (* Top level, beside keeper, because that is where every reader looks:
+         the dashboard's turn-actor resolver checks entry.agent_name first and
+         never descends into runtime_contract, and the OCaml readers use
+         json_string_opt "agent_name" on the entry. The parameter was accepted
+         and then dropped, so a caller that passed one had no way to tell. *)
+      let agent_name_field =
+        match agent_name with
+        | Some value when String.trim value <> "" -> [ "agent_name", `String value ]
+        | Some _ | None -> []
+      in
       let lane_field =
         match lane with
         | Some value -> [ "lane", `String value ]
@@ -886,6 +896,7 @@ let log_call
            ; "action_radius", action_radius
            ]
            @ route_evidence_field
+           @ agent_name_field
            @ model_field
            @ runtime_profile_field
            @ turn_kind_field

@@ -4,8 +4,8 @@
 // design's collapsed-by-default `.rtc-head`→`.rtc-detail` disclosure and
 // `.rail-hb` heartbeat line / 컨텍스트 `.ctx-card` with `.ctx-usage` +
 // `.ctx-notobs` / 소유 태스크 `.ctx-list`), styled by the vendored SSOT CSS.
-// Live wiring (Keeper object + tasks store + waiting inventory +
-// masc_keeper_compact) is unchanged; only the DOM/classes changed. Documented
+// Live wiring (Keeper object + tasks store + waiting inventory) is
+// unchanged; only the DOM/classes changed. Documented
 // local divergences: the 처리량 `.tps-card` section was removed as low-signal
 // (#22681), the 컴팩션 스냅샷 button was purged because the backend surface has
 // no writer (#29503), and the last-turn meter stays (design deleted the gauge;
@@ -16,20 +16,13 @@ import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
-import { shellAuthSummary, tasks } from '../../store'
+import { tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
 import {
   keeperBucket,
-  phaseTokenFromKeeper,
   keeperRuntimeLabel,
 } from './keeper-workspace-shared'
-import { callMcpTool } from '../../api/mcp'
-import { showToast } from '../common/toast'
-import { requestConfirm } from '../common/confirm-dialog'
-import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
-import { errorToString } from '../../lib/format-string'
-import { refreshAfterRuntimeAction } from '../keeper-detail-helpers'
 import {
   loadRuntimeCatalog,
   resolveRuntimeCatalogEntry,
@@ -495,14 +488,6 @@ function RuntimeSection({
   `
 }
 
-function compactRequiresForce(keeper: Keeper): boolean {
-  const phase = phaseTokenFromKeeper(keeper)
-  if (phase === 'paused' || phase === 'compacting') return false
-  if (phase === 'running' || phase === 'failing') return true
-  const status = keeper.status.toLowerCase()
-  return status === 'running' || status === 'active' || status === 'busy' || status === 'failing'
-}
-
 function ContextSection({
   keeper,
   onOpenMemory,
@@ -510,7 +495,6 @@ function ContextSection({
   keeper: Keeper
   onOpenMemory: () => void
 }): VNode {
-  const [compacting, setCompacting] = useState(false)
   const pct = contextPercent(keeper)
   const max = contextMax(keeper)
   const baseTokens = keeper.context_tokens ?? keeper.context?.context_tokens ?? null
@@ -528,65 +512,6 @@ function ContextSection({
     keeper.context_metrics_unavailable?.kind === 'not_observed'
       ? keeper.context_metrics_unavailable.reason
       : null
-  const compactAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
-  const canCompact = compactAccess.allowed && !compacting
-  const compactReason = compactAccess.reason ?? '컴팩션 실행 권한이 필요합니다.'
-  const runCompact = () => {
-    if (!compactAccess.allowed) {
-      showToast(compactReason, 'error', 6000)
-      return
-    }
-    void (async () => {
-      const force = compactRequiresForce(keeper)
-      if (force) {
-        const confirmed = await requestConfirm({
-          title: 'Force keeper compact',
-          message: `${keeper.name} is not in an explicit overflow/paused compaction phase. Run masc_keeper_compact with force=true?`,
-          confirmText: 'Force compact',
-          tone: 'warning',
-        })
-        if (!confirmed) return
-      }
-      setCompacting(true)
-      try {
-        const raw = await callMcpTool('masc_keeper_compact', { name: keeper.name, force })
-        const parsed = JSON.parse(raw) as {
-          before_tokens?: number
-          after_tokens?: number
-          phase_after?: string
-          queued?: boolean
-          queue_outcome?: string
-        }
-        const before = formatK(parsed.before_tokens)
-        const after = formatK(parsed.after_tokens)
-        if (before && after) {
-          // Measured before/after present: a compaction actually ran and reduced tokens.
-          showToast(`${keeper.name} compact 완료: ${before} -> ${after}`, 'success')
-        } else if (parsed.queued) {
-          // masc_keeper_compact only ENQUEUES the request; the compaction runs later on the
-          // keeper's owning lane. Queuing is not completion: a queue stuck behind an
-          // unrecovered inflight turn stays pending indefinitely, so rendering it as "완료"
-          // is a false success. Surface the pending state instead.
-          const alreadyQueued = parsed.queue_outcome === 'already_present'
-          showToast(
-            alreadyQueued
-              ? `${keeper.name} compaction 이미 예약됨 — 대기열에서 실행 대기 중`
-              : `${keeper.name} compaction 예약됨 — 대기열에서 실행 대기 중`,
-            'warning',
-          )
-        } else {
-          // Unrecognized response shape: acknowledge receipt without claiming completion.
-          showToast(`${keeper.name} compaction 요청 접수됨 (상태 미확인)`, 'warning')
-        }
-        await refreshAfterRuntimeAction()
-      } catch (err) {
-        showToast(`compact 실패: ${errorToString(err)}`, 'error', 8000)
-      } finally {
-        setCompacting(false)
-      }
-    })()
-  }
-
   // The "윈도우 사용량" label was redundant under the section's "컨텍스트"
   // heading — the percentage and the 사용/전체 line below are self-explanatory.
   const usageHeader = html`
@@ -635,15 +560,6 @@ function ContextSection({
           // observed, and the design says so instead of implying it.
           ? html`<div class="ctx-notobs mono">지금 쓰는 양 <b>알 수 없음</b><span class="ctx-notobs-g">마지막 턴 기준 · 재시작하면 초기화</span></div>`
           : null}
-        <div class="cmp-actions">
-          <button
-            type="button"
-            class=${`cmp-run${compacting ? ' busy' : ''}`}
-            disabled=${!canCompact}
-            title=${compactAccess.allowed ? 'masc_keeper_compact 실행' : compactReason}
-            onClick=${runCompact}
-          >${compacting ? html`<span class="cmp-spin"></span> 컴팩트 실행 중…` : '◉ 지금 컴팩트'}</button>
-        </div>
         <button type="button" class="cmp-open" data-testid="open-memory-inspector" onClick=${onOpenMemory}>
           ◈ 메모리 보기 <span class="cmp-open-sub">핀 · 스토어 · 회상</span>
         </button>

@@ -36,7 +36,6 @@ type wake_producer =
   | Operator_pending_confirm_store
   | Completion_authority
   | Keeper_task_cancellation
-  | Keeper_compaction_request
   | Keeper_workspace_message
   | Keeper_delegate
   | Keeper_composition

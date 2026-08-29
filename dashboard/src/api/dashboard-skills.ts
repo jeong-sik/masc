@@ -18,9 +18,45 @@ export interface SkillSnapshotEntry {
   identity: SkillIdentity
   content_revision: string
   description: string
-  conformance: string
-  diagnostics?: readonly string[]
   body_bytes: number
+}
+
+export type SkillDocumentDiagnosticCode =
+  | 'missing_frontmatter'
+  | 'byte_order_mark'
+  | 'unterminated_frontmatter'
+  | 'malformed_yaml'
+  | 'frontmatter_not_mapping'
+  | 'duplicate_field'
+  | 'duplicate_metadata_key'
+  | 'unexpected_frontmatter_field'
+  | 'missing_name'
+  | 'missing_description'
+  | 'invalid_field_type'
+  | 'invalid_name'
+  | 'name_mismatch'
+  | 'description_too_long'
+  | 'compatibility_empty'
+  | 'compatibility_too_long'
+  | 'invalid_metadata_value'
+
+export interface SkillDocumentDiagnostic {
+  code: SkillDocumentDiagnosticCode
+  message: string
+}
+
+export type SkillSnapshotRejectionReason =
+  | { kind: 'document_rejected'; diagnostics: readonly SkillDocumentDiagnostic[] }
+  | { kind: 'document_unreadable' }
+  | { kind: 'exact_identity_duplicate' }
+  | { kind: 'invalid_package_id' }
+
+export interface SkillSnapshotRejection {
+  source_index: number
+  source_id: string
+  package_id: string | null
+  content_revision: string | null
+  reason: SkillSnapshotRejectionReason
 }
 
 export type SkillSnapshotConfig =
@@ -40,7 +76,7 @@ export interface SkillSnapshot {
   skills: readonly SkillSnapshotEntry[]
   effective_skills: readonly SkillIdentity[]
   shadows: readonly unknown[]
-  rejections: readonly unknown[]
+  rejections: readonly SkillSnapshotRejection[]
 }
 
 export interface SkillReference {
@@ -753,9 +789,50 @@ const SkillSnapshotEntrySchema = Schema.Struct({
   identity: SkillIdentitySchema,
   content_revision: Schema.NonEmptyString,
   description: Schema.NonEmptyString,
-  conformance: Schema.NonEmptyString,
-  diagnostics: Schema.Array(Schema.String),
   body_bytes: Schema.NonNegativeInt,
+})
+
+const SkillDocumentDiagnosticCodeSchema = Schema.Literal(
+  'missing_frontmatter',
+  'byte_order_mark',
+  'unterminated_frontmatter',
+  'malformed_yaml',
+  'frontmatter_not_mapping',
+  'duplicate_field',
+  'duplicate_metadata_key',
+  'unexpected_frontmatter_field',
+  'missing_name',
+  'missing_description',
+  'invalid_field_type',
+  'invalid_name',
+  'name_mismatch',
+  'description_too_long',
+  'compatibility_empty',
+  'compatibility_too_long',
+  'invalid_metadata_value',
+)
+
+const SkillDocumentDiagnosticSchema = Schema.Struct({
+  code: SkillDocumentDiagnosticCodeSchema,
+  message: Schema.NonEmptyString,
+})
+
+const SkillSnapshotRejectionReasonSchema = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal('document_rejected'),
+    diagnostics: Schema.Array(SkillDocumentDiagnosticSchema),
+  }),
+  Schema.Struct({ kind: Schema.Literal('document_unreadable') }),
+  Schema.Struct({ kind: Schema.Literal('exact_identity_duplicate') }),
+  Schema.Struct({ kind: Schema.Literal('invalid_package_id') }),
+)
+
+const SkillSnapshotRejectionSchema = Schema.Struct({
+  source_index: Schema.NonNegativeInt,
+  source_id: Schema.NonEmptyString,
+  package_id: Schema.NullOr(Schema.NonEmptyString),
+  content_revision: Schema.NullOr(Schema.NonEmptyString),
+  reason: SkillSnapshotRejectionReasonSchema,
 })
 
 const SkillSnapshotSchema = Schema.Struct({
@@ -766,7 +843,7 @@ const SkillSnapshotSchema = Schema.Struct({
   skills: Schema.Array(SkillSnapshotEntrySchema),
   effective_skills: Schema.Array(SkillIdentitySchema),
   shadows: Schema.Array(Schema.Unknown),
-  rejections: Schema.Array(Schema.Unknown),
+  rejections: Schema.Array(SkillSnapshotRejectionSchema),
 })
 
 const ReadySkillsResponseSchema = Schema.Struct({

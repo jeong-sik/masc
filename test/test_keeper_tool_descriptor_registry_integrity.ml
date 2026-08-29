@@ -954,6 +954,39 @@ let test_read_public_validation_rejects_line_fields () =
   | None -> Alcotest.fail "Read public descriptor did not resolve"
 ;;
 
+(* masc#31573: the production resolution order (validate, then translate)
+   is what stops an undeclared 'content' key before any effect. The
+   validator unit test and the runtime test each cover their own layer;
+   this one walks the wiring itself. *)
+let test_edit_public_validation_rejects_content () =
+  let input =
+    `Assoc
+      [ "file_path", `String "lib/keeper/keeper_transition_audit.ml"
+      ; "old_string", `String "let x = 1"
+      ; "new_string", `String "let x = 2"
+      ; "content", `String "let clobbered = true"
+      ]
+  in
+  match
+    Resolution.validated_descriptor_and_input_for_tool_call
+      ~tool_name:"Edit"
+      ~input
+  with
+  | Some (Error validation_result) ->
+    let data = Tool_result.data validation_result |> Yojson.Safe.to_string in
+    check_contains
+      "Edit validation reports unsupported content"
+      ~sub:"content"
+      data;
+    check_contains
+      "Edit validation is policy rejection"
+      ~sub:"policy_rejection"
+      data
+  | Some (Ok _) ->
+    Alcotest.fail "Edit public validation unexpectedly accepted a content key"
+  | None -> Alcotest.fail "Edit public descriptor did not resolve"
+;;
+
 let test_read_public_validation_translates_supported_fields () =
   let input =
     `Assoc
@@ -1962,6 +1995,10 @@ let () =
             "Read rejects unsupported line fields before translation"
             `Quick
             test_read_public_validation_rejects_line_fields
+        ; test_case
+            "Edit rejects an undeclared content key before translation"
+            `Quick
+            test_edit_public_validation_rejects_content
         ; test_case
             "translation validation policy is typed for all descriptors"
             `Quick

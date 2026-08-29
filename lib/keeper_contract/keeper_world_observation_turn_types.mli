@@ -24,7 +24,6 @@ type event_queue_trigger =
       (** Another Keeper cancelled a Task this Keeper authored. A distinct
           reactive input: it is not Board activity (no post exists), not
           scheduled work, and not a completion-authority decision. *)
-  | Manual_compaction_stimulus
   | Workspace_message_stimulus
       (** A committed workspace message named this Keeper and was delivered as
           a durable queue entry, so the drain reports it in its own right. *)
@@ -39,7 +38,6 @@ type turn_reason =
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
-  | Manual_compaction_pending
   | Workspace_message_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due

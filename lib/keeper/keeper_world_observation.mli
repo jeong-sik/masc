@@ -225,7 +225,6 @@ type event_queue_trigger =
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
   | Task_cancellation_stimulus
-  | Manual_compaction_stimulus
   | Workspace_message_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
@@ -240,7 +239,6 @@ type turn_reason =
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
-  | Manual_compaction_pending
   | Workspace_message_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due

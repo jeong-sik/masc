@@ -42,21 +42,16 @@ flowchart TD
 
 **파일 → 문서**: `Agent_core.Skill_document.decode`
 (`packages/agent_core/lib/skill_document.ml`)가 SKILL.md의 frontmatter 계약을
-강제한다. 이름 판정 규칙(`runtime_name`, `skill_document.ml:380`):
-
-- frontmatter `name`과 디렉터리 이름이 **둘 다 유효하고 다르면 디렉터리가 이긴다**
-  (`docs/SKILLS.md`가 정한 주인 — task가 스킬을 부를 때 쓰는 이름이 디렉터리라서).
-  `Name_mismatch`는 진단으로 남지만 로드는 된다(RFC #30680이 #30205의 hard-reject를
-  완화). 프론트매터에 `name`이 없으면 `Missing_name` + 디렉터리 이름 사용.
-- 선언 이름이 문법적으로 깨져도 디렉토리 이름이 유효하면 디렉토리 이름으로 로드하고
-  `Invalid_name` 진단을 남긴다. 둘 다 잘못됐을 때만 로드 거부.
+강제한다. frontmatter `name`과 디렉터리 이름은 둘 다 공식 이름 문법을 만족하고 정확히
+같아야 한다. `name` 누락·불일치·문법 오류와 다른 frontmatter 진단은 그 문서를 snapshot
+rejection으로 격리한다. 디렉터리 이름으로 복구하거나 다른 Skill까지 멈추지 않는다.
 
 **문서 → 스킬**: `Keeper_skill_catalog.parse_skill`
 (`lib/keeper/keeper_skill_catalog.ml:83`)가 본문의 composition fence를 본다.
 
 ```mermaid
 flowchart LR
-  D["decode 결과<br/>document + conformance"] --> Q{"fence 개수"}
+  D["strict decode 결과<br/>valid document"] --> Q{"fence 개수"}
   Q -->|"0"| INS["Instruction<br/>surface = Instruction"]
   Q -->|"1"| COM["Composition entry<br/>Keeper_tool_composition_catalog.parse"]
   Q -->|"2+"| ERR2["Error<br/>Multiple_compositions"]
@@ -65,8 +60,8 @@ flowchart LR
   NM -->|"예"| OK["keeper_compose_&lt;name&gt; 로 승격"]
 ```
 
-fence 개수가 유일한 갈림길이다. `masc-composition-tool`과 다른 클라이언트의
-`disable-model-invocation`은 명시적으로 거부한다.
+fence 개수가 유일한 갈림길이다. 알 수 없는 top-level field는 Agent Skills 문서
+admission에서 거부한다.
 Agent Skills의 실험적 선택 필드 `allowed-tools`는 string 문법만 검증하고 즉시 버린다.
 MASC 승인이나 도구 제한으로 해석하지 않으며 AST, registry, prompt, Gate, Keeper
 effective surface, immutable snapshot entry에 값을 남기지 않는다. 원본 `SKILL.md`를

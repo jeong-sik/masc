@@ -79,7 +79,6 @@ type stimulus_payload =
          resolver directly and do not emit this duplicate wake. Mirrors
          [Fusion_completed]: a HITL decision is an async completion the
          waiting keeper must be notified of. *)
-  | Manual_compaction_requested
   | Completion_authority_rejected of completion_authority_rejection
   (* Cancellation is the one terminal outcome with no Board projection. This
      carries the cancellation to the Task's author. *)
@@ -244,8 +243,6 @@ let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approva
 
 let ask_answered_post_id (a : ask_answered) = "keeper-ask:" ^ a.ask_id
 
-let manual_compaction_post_id = "manual-compaction-request"
-
 let completion_authority_rejection_post_id
       (rejection : completion_authority_rejection)
   =
@@ -298,7 +295,6 @@ let identity_payload = function
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Ask_answered _
-    | Manual_compaction_requested
     | Completion_authority_rejected _ | Workspace_message _
     | Delegate_completed _ | Composition_completed _
     ) as payload ->
@@ -399,7 +395,6 @@ let payload_kind_label = function
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
   | Ask_answered _ -> "ask_answered"
-  | Manual_compaction_requested -> "manual_compaction_requested"
   | Completion_authority_rejected _ -> "completion_authority_rejected"
   | Task_cancelled _ -> "task_cancelled"
   | Workspace_message _ -> "workspace_message"
@@ -411,7 +406,6 @@ let is_board_signal = function
   | Bootstrap | Fusion_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Ask_answered _
-  | Manual_compaction_requested
   | Completion_authority_rejected _
   | Task_cancelled _ | Workspace_message _ | Delegate_completed _
   | Composition_completed _ ->
@@ -429,7 +423,7 @@ let connector_attention_channel = function
      ambient conversation traffic and must not wait behind one. *)
   | Ask_answered _
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
-  | Schedule_due _ | Hitl_resolved _ | Manual_compaction_requested
+  | Schedule_due _ | Hitl_resolved _
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
   | Delegate_completed _ | Composition_completed _ ->
     None
@@ -666,8 +660,6 @@ let payload_to_yojson = function
        match r.decision with
        | Hitl_approved -> []
        | Hitl_rejected rationale -> [ "rationale", `String rationale ])
-  | Manual_compaction_requested ->
-    `Assoc [ "kind", `String "manual_compaction_requested" ]
   | Completion_authority_rejected rejection ->
     `Assoc
       [ "kind", `String "completion_authority_rejected"
@@ -931,7 +923,6 @@ let payload_of_yojson json =
     in
     let* channel = continuation_channel_field fields in
     Ok (Hitl_resolved { approval_id; decision; channel })
-  | "manual_compaction_requested" -> Ok Manual_compaction_requested
   | "completion_authority_rejected" ->
     let* () =
       exact_fields
@@ -1165,7 +1156,6 @@ let continuation_channel_of_payload = function
   | Board_signal _
   | Board_attention _
   | Bootstrap
-  | Manual_compaction_requested
   | Completion_authority_rejected _
   | Task_cancelled _
   | Workspace_message _

@@ -18,7 +18,7 @@ let test_summary_reports_what_the_turn_yielded_to () =
   let pending =
     queue_of
       [ stimulus ~post_id:"a" ~arrived_at:940. ~payload:Q.Bootstrap
-      ; stimulus ~post_id:"b" ~arrived_at:990. ~payload:Q.Manual_compaction_requested
+      ; stimulus ~post_id:"b" ~arrived_at:990. ~payload:Q.Bootstrap
       ; stimulus ~post_id:"c" ~arrived_at:995. ~payload:Q.Bootstrap
       ]
   in

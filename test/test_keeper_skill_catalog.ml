@@ -336,21 +336,12 @@ let test_composition_skill_materializes_entry () =
       (contains ~needle:"```toml composition" skill.Skill_catalog.body)
 ;;
 
-(* #30205 rejected a mismatch outright; #30680 relaxed it to keep the skill
-   loadable. What the relaxation must not do is leave the name ambiguous: a
-   task names a skill by its directory (docs/SKILLS.md), so the directory is
-   what the skill answers to and the frontmatter is the one that gave way.
-   Asserting the declared name here read the relaxation backwards, and the PR
-   that wrote it never ran this file. *)
-let test_directory_name_mismatch_is_runtime_compatible () =
-  let skill = parsed ~directory:"another-name" instruction_document in
-  check string "the directory is what a task can name" "another-name" skill.name;
-  match skill.conformance with
-  | Agent_core.Skill_document.Conformant -> fail "name mismatch lost its diagnostic"
-  | Runtime_compatible diagnostics ->
+let test_directory_name_mismatch_is_rejected () =
+  match rejected ~directory:"another-name" instruction_document with
+  | Skill_catalog.Definition_rejected { diagnostics; _ } ->
     check
       bool
-      "turn catalog retains the mismatch diagnostic"
+      "catalog retains the exact mismatch diagnostic"
       true
       (List.exists
          (function
@@ -359,13 +350,19 @@ let test_directory_name_mismatch_is_runtime_compatible () =
              true
            | _ -> false)
          diagnostics)
+  | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
 ;;
 
 let test_missing_required_frontmatter_rejected () =
-  (* [name] is optional in the standard: the directory supplies it. *)
   let no_name = "---\ndescription: something\n---\nbody\n" in
-  let named_by_directory = parsed ~directory:"anything" no_name in
-  check string "name comes from the directory" "anything" named_by_directory.Skill_catalog.name;
+  (match rejected ~directory:"anything" no_name with
+   | Skill_catalog.Definition_rejected { diagnostics; _ } ->
+     check
+       bool
+       "missing name"
+       true
+       (List.mem Agent_core.Skill_document.Missing_name diagnostics)
+   | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error));
   let no_description = "---\nname: quiet\n---\nbody\n" in
   match rejected ~directory:"quiet" no_description with
   | Skill_catalog.Definition_rejected { diagnostics; directory = _ } ->
@@ -662,7 +659,7 @@ let skill_catalog_of documents =
     fail ("valid skill catalog was rejected: " ^ Skill_catalog.error_to_string error)
 ;;
 
-let test_invocation_policy_fields_are_rejected () =
+let test_unknown_policy_fields_are_document_rejections () =
   List.iter
     (fun (key, value) ->
        match
@@ -670,9 +667,14 @@ let test_invocation_policy_fields_are_rejected () =
            ~directory:"manual-clock"
            (composition_document_with_invocation_policy ~key value)
        with
-       | Error (Skill_catalog.Removed_invocation_policy { skill; field }) ->
-         check string "error names the skill" "manual-clock" skill;
-         check string "error names the removed field" key field
+       | Error (Skill_catalog.Definition_rejected { diagnostics; _ }) ->
+         check
+           bool
+           "error names the unknown field"
+           true
+           (List.mem
+              (Agent_core.Skill_document.Unexpected_frontmatter_field key)
+              diagnostics)
        | Error error ->
          fail
            (Printf.sprintf
@@ -766,9 +768,9 @@ let () =
             `Quick
             test_composition_skill_materializes_entry
         ; test_case
-            "directory name mismatch remains runtime-compatible"
+            "directory name mismatch is rejected"
             `Quick
-            test_directory_name_mismatch_is_runtime_compatible
+            test_directory_name_mismatch_is_rejected
         ; test_case
             "missing required frontmatter is rejected"
             `Quick
@@ -820,7 +822,7 @@ let () =
         ; test_case
             "invocation policy fields are rejected"
             `Quick
-            test_invocation_policy_fields_are_rejected
+            test_unknown_policy_fields_are_document_rejections
         ; test_case "allowed-tools has no Keeper policy" `Quick
             test_tool_preapproval_hint_has_no_keeper_policy
         ; test_case

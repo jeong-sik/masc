@@ -331,12 +331,6 @@ let require_expected_revision reference actual =
   else Error (Revision_conflict { actual })
 ;;
 
-let diagnostics_of_conformance = function
-  | Agent_core.Skill_document.Conformant -> []
-  | Runtime_compatible diagnostics ->
-    List.map Agent_core.Skill_document.diagnostic_to_string diagnostics
-;;
-
 let max_source_bytes = 1_048_576
 
 let validate_candidate target reference source_text =
@@ -357,7 +351,7 @@ let validate_candidate target reference source_text =
     Ok
       { profile =
           Keeper_skill_observability.of_skill_with_reference candidate_reference skill
-      ; diagnostics = diagnostics_of_conformance skill.conformance
+      ; diagnostics = []
       }
 ;;
 
@@ -525,7 +519,7 @@ let preview_new ~source_id ~package_id source_text =
       in
       Ok
         { profile = Keeper_skill_observability.of_skill_with_reference reference skill
-        ; diagnostics = diagnostics_of_conformance skill.conformance
+        ; diagnostics = []
         }
 ;;
 

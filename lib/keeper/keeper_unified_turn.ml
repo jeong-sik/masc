@@ -159,82 +159,6 @@ let autonomous_yield_request ~base_path ~keeper_name =
                 { reason = Durable_stimulus_waiting summary })))
 ;;
 
-let is_manual_compaction_payload = function
-  | Keeper_event_queue.Manual_compaction_requested -> true
-  | Keeper_event_queue.Board_signal _
-  | Keeper_event_queue.Board_attention _
-  | Keeper_event_queue.Bootstrap
-  | Keeper_event_queue.Fusion_completed _
-  | Keeper_event_queue.Schedule_due _
-  | Keeper_event_queue.Connector_attention _
-  | Keeper_event_queue.Hitl_resolved _
-  | Keeper_event_queue.Ask_answered _
-  | Keeper_event_queue.Completion_authority_rejected _
-  | Keeper_event_queue.Task_cancelled _
-  | Keeper_event_queue.Workspace_message _
-  | Keeper_event_queue.Delegate_completed _
-  | Keeper_event_queue.Composition_completed _ ->
-    false
-;;
-
-let manual_compaction_preemption_request ~wake ~now pending =
-  let source_can_yield =
-    match wake with
-    | Keeper_registry.Woken (_ :: _ as payloads) ->
-      not (List.exists is_manual_compaction_payload payloads)
-    | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] -> false
-    (* Not reachable: the chat lane admits through
-       [Keeper_turn.run_keeper_invocation_turn_admitted] and never enters
-       [run_keeper_cycle], which is the only producer of the [~wake] threaded
-       here. Enumerated rather than folded into a catch-all so a future chat
-       lane that does reach this point fails the same way an autonomous tick
-       would — by declining to preempt — instead of silently matching a
-       branch written for a different lane. *)
-    | Keeper_registry.Chat_request -> false
-  in
-  if not source_can_yield
-  then None
-  else
-    let stimuli = Keeper_event_queue.to_list pending in
-    match
-      List.find_opt
-        (fun (stimulus : Keeper_event_queue.stimulus) ->
-           is_manual_compaction_payload stimulus.payload)
-        stimuli
-    with
-    | None -> None
-    | Some selected ->
-      let summary = Keeper_agent_run.durable_stimulus_summary ~now pending in
-      Some
-        Keeper_agent_run.
-          { reason =
-              Durable_stimulus_waiting
-                { summary with
-                  head = Some selected
-                ; head_age_sec = Float.max 0. (now -. selected.arrived_at)
-                }
-          }
-;;
-
-let manual_compaction_yield_request ~wake ~base_path ~keeper_name =
-  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
-  | Error _ as error -> error
-  | Ok pending ->
-    let now = Time_compat.now () in
-    let request = manual_compaction_preemption_request ~wake ~now pending in
-    Option.iter
-      (fun (request : Keeper_agent_run.autonomous_yield_request) ->
-         match request.reason with
-         | Keeper_agent_run.Operation_queued -> ()
-         | Keeper_agent_run.Durable_stimulus_waiting summary ->
-           Log.Keeper.info
-             ~keeper_name
-             "autonomous source turn yields to manual compaction: %s"
-             (Keeper_agent_run.durable_stimulus_summary_to_string summary))
-      request;
-    Ok request
-;;
-
 (* #28809: an approved Gate resolution whose one-shot grant is still unspent
    is not an ordinary queued successor — it is the durable continuation of an
    already-deferred external effect, and the in-flight source may itself be
@@ -261,7 +185,6 @@ let hitl_replay_preemption_request ~resolution_deliverable ~now pending =
          (* A held HITL approval is what this looks for; an answered question
             is not one, and resumes through its own wake. *)
          | Keeper_event_queue.Ask_answered _
-         | Keeper_event_queue.Manual_compaction_requested
          | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _
          | Keeper_event_queue.Workspace_message _
@@ -337,31 +260,21 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
   match wake with
   (* A nonempty [Woken] is the event queue input already selected for this
      turn. It may yield for chat delivery. Two successors may preempt at a
-     persisted post-tool boundary: an explicit owner-lane manual compaction,
-     and an approved Gate resolution whose grant is still unspent (#28809 —
-     the source may be the very checkpoint that resolution continues). The
-     selected source remains pending and resumes after the preemptor. Other
-     queued successors still wait for the source terminal. *)
+     persisted post-tool boundary: an approved Gate resolution whose grant is
+     still unspent (#28809 — the source may be the very checkpoint that
+     resolution continues). The selected source remains pending and resumes
+     after the preemptor. Other queued successors still wait for the source
+     terminal. *)
   | Keeper_registry.Woken (_ :: _) ->
     fun () ->
       (match chat_yield_request ~base_path ~keeper_name with
        | Error _ as error -> error
        | Ok (Some _) as request -> request
-       | Ok None ->
-         (match
-            manual_compaction_yield_request
-              ~wake
-              ~base_path
-              ~keeper_name
-          with
-          | Error _ as error -> error
-          | Ok (Some _) as request -> request
-          | Ok None -> hitl_replay_yield_request ~base_path ~keeper_name))
+       | Ok None -> hitl_replay_yield_request ~base_path ~keeper_name)
   | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
     fun () -> autonomous_yield_request ~base_path ~keeper_name
-  (* Not reachable, same reason as in [manual_compaction_preemption_request]:
-     [~wake] here originates in [run_keeper_cycle], which the chat lane does
-     not call. The autonomous yield request is the conservative answer — it
+  (* Not reachable: [~wake] here originates in [run_keeper_cycle], which the
+     chat lane does not call. The autonomous yield request is the conservative answer — it
      asks whether this lane should step aside, and a chat turn that somehow
      arrived here should step aside on the same terms. *)
   | Keeper_registry.Chat_request ->

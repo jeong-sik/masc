@@ -14,21 +14,6 @@ type cycle_outcome =
       { meta : Keeper_meta_contract.keeper_meta
       ; failure : Keeper_unified_turn.turn_failure
       }
-  | Manual_compaction_failed of
-      { meta : Keeper_meta_contract.keeper_meta
-      ; failure : Keeper_manual_compaction.failure
-      }
-  | Manual_compaction_not_applied of
-      { meta : Keeper_meta_contract.keeper_meta
-      ; no_compaction : Keeper_post_turn.no_compaction
-      }
-  | Manual_compaction_applied of
-      { receipt : Keeper_manual_compaction.applied_receipt
-      ; evidence : Keeper_compaction_evidence.t
-        (** Checkpoint size on both sides of the compaction, carried so the
-            owner projection can record what a commit saved (#29109). *)
-      ; followup : cycle_outcome
-      }
 
 val meta : cycle_outcome -> Keeper_meta_contract.keeper_meta
 (** Metadata projection for callers that must continue the heartbeat state
@@ -52,6 +37,5 @@ val run_keeper_cycle
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> shared_context:Agent_core.Context.t
   -> wake:Keeper_registry.wake_reason
-  -> ?manual_compaction_requested:bool
   -> unit
   -> cycle_outcome

@@ -121,108 +121,6 @@ module For_testing = struct
     Atomic.set store_ref (Some (Dated_jsonl.create ~base_dir ()))
 end
 
-(** Resolve where an offline eval tool's [--record-verdicts] verdicts are
-    written. Such a tool drives a real judge and persists verdicts; if those
-    land in the live ledger ([base_path ()] = $MASC_BASE_PATH/data/verdicts)
-    they contaminate production {!calibration_stats} and the dashboard (see
-    docs/design/completion-trust-calibration-wiring.md D3). We therefore refuse
-    a silent default to the live store (an "unknown -> permissive default" is the
-    exact failure mode this guards against) and require an explicit isolated
-    scratch path that is not the live store. [live_store_dir] is the caller's
-    live verdict store ([None] when no live store exists), passed in so tests can
-    supply a deterministic base path.
-
-    - [record_verdicts = false] -> [Ok None] (nothing to record).
-    - no [verdict_store_dir] -> [Error] (no silent fallback to the live store).
-    - [verdict_store_dir] equal to or below [live_store_dir] -> [Error] (would
-      pollute).
-    - otherwise -> [Ok (Some dir)]. *)
-(* Local by design: this guard needs absolute lexical cleanup that composes with
-   existing-prefix realpath for paths that may not exist yet. Env/basepath
-   normalizers deliberately carry broader policy such as HOME expansion. *)
-let lexical_normalize_abs abs =
-  let parts = String.split_on_char '/' abs in
-  let stack = ref [] in
-  List.iter
-    (function
-      | "" | "." -> ()
-      | ".." ->
-        (match !stack with
-         | _ :: rest -> stack := rest
-         | [] -> ())
-      | part -> stack := part :: !stack)
-    parts;
-  "/" ^ String.concat "/" (List.rev !stack)
-;;
-
-let lexical_abs ?cwd raw =
-  let abs =
-    if Filename.is_relative raw then
-      Filename.concat
-        (match cwd with Some d -> d | None -> Config_dir_resolver.current_working_dir ())
-        raw
-    else
-      raw
-  in
-  lexical_normalize_abs abs
-;;
-
-let rec realpath_existing_prefix abs =
-  try Unix.realpath abs with
-  | Unix.Unix_error _ | Invalid_argument _ | Sys_error _ ->
-    let parent = Filename.dirname abs in
-    if String.equal parent abs then abs
-    else
-      let parent_real = realpath_existing_prefix parent in
-      lexical_normalize_abs (Filename.concat parent_real (Filename.basename abs))
-;;
-
-let normalize_for_store_collision ?cwd raw =
-  raw |> lexical_abs ?cwd |> realpath_existing_prefix |> lexical_normalize_abs
-;;
-
-let absolute_workspace_base_path ?cwd raw =
-  raw
-  |> Env_config_core.normalize_masc_base_path_input
-  |> normalize_for_store_collision ?cwd
-;;
-
-let same_or_child_path ~parent child =
-  String.equal child parent
-  || (not (String.equal parent "/")
-      && String.length child > String.length parent
-      && child.[String.length parent] = '/'
-      && String.sub child 0 (String.length parent) = parent)
-;;
-
-let resolve_record_verdicts_store ?cwd ~record_verdicts ~verdict_store_dir
-    ~(live_store_dir : string option) () : (string option, string) result =
-  if not record_verdicts then Ok None
-  else
-    let is_live d =
-      match live_store_dir with
-      | Some l ->
-        let candidate = normalize_for_store_collision ?cwd d in
-        let live = normalize_for_store_collision ?cwd l in
-        same_or_child_path ~parent:live candidate
-      | None -> false
-    in
-    match verdict_store_dir with
-    | None ->
-      Error
-        "--record-verdicts requires --verdict-store-dir DIR (an isolated scratch \
-         path); refusing to write the live verdict store."
-    | Some d when String.trim d = "" ->
-      Error "--verdict-store-dir must not be empty."
-    | Some d when is_live d ->
-      Error
-        (Printf.sprintf
-           "--verdict-store-dir %s is inside the live verdict store; pick an \
-            isolated scratch path so the eval does not contaminate production \
-            calibration."
-           d)
-    | Some d -> Ok (Some d)
-;;
 
 (* ================================================================ *)
 (* Hashing                                                           *)
@@ -266,36 +164,6 @@ let label_record_to_json (r : label_record) : Yojson.Safe.t =
   ]
 
 (* ================================================================ *)
-(* AGENT_CORE Harness.verdict conversion (#3165)                            *)
-(* ================================================================ *)
-
-(** Convert a MASC [verdict_record] to an AGENT_CORE [Harness.verdict].
-    Maps "approve" → passed=true, "reject:*" → passed=false.
-    The gate name is recorded as evidence for traceability. *)
-let to_harness_verdict (r : verdict_record) : Agent_core.Harness.verdict =
-  let passed =
-    match r.verdict with
-    | Task.Anti_rationalization.Approve -> true
-    | Task.Anti_rationalization.Reject _ -> false
-  in
-  let score = if passed then Some 1.0 else Some 0.0 in
-  let evidence = [
-    Printf.sprintf "gate=%s" (Task.Anti_rationalization.gate_to_string r.gate);
-    Printf.sprintf "evaluator=%s" r.evaluator_runtime;
-    Printf.sprintf "task_id=%s" r.task_id;
-  ] in
-  let detail =
-    if passed then
-      None
-    else
-      Some
-        (Printf.sprintf "rejected at %s gate: %s"
-           (Task.Anti_rationalization.gate_to_string r.gate)
-           (verdict_to_string r.verdict))
-  in
-  { Agent_core.Harness.passed; score; evidence; detail }
-
-(* ================================================================ *)
 (* Record writing                                                    *)
 (* ================================================================ *)
 
@@ -303,7 +171,6 @@ let record_verdict
     ~(task_id : string)
     ~(req : Task.Anti_rationalization.review_request)
     ~(result : Task.Anti_rationalization.review_result)
-    ?(on_harness_verdict : (Agent_core.Harness.verdict -> unit) option)
     () : unit =
   match result.verdict with
   | None -> ()
@@ -323,16 +190,7 @@ let record_verdict
       ; timestamp = Unix.gettimeofday ()
       }
     in
-    Dated_jsonl.append (get_store ()) (verdict_record_to_json record);
-    (match on_harness_verdict with
-     | Some cb ->
-       (try cb (to_harness_verdict record) with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Harness.warn
-            "[eval_calibration] on_harness_verdict callback failed: %s"
-            (Printexc.to_string exn))
-     | None -> ())
+    Dated_jsonl.append (get_store ()) (verdict_record_to_json record)
 
 let record_human_label
     ~(notes_hash : string)

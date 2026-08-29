@@ -120,18 +120,88 @@ let test_invalid_candidate_is_never_written () =
   let skill_path, original, reference, refresh =
     setup base_path ~access:"read-write"
   in
-  let invalid = "---\nname: sample\n---\nmissing description\n" in
-  (match Editor.save ~base_path ~reference ~source_text:invalid ~refresh with
-   | Error (Editor.Validation_failed _) -> ()
-   | Error error -> fail ("wrong error: " ^ Editor.error_to_string error)
-   | Ok _ -> fail "invalid Skill was written");
-  let persisted =
-    let channel = open_in_bin skill_path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr channel)
-      (fun () -> really_input_string channel (in_channel_length channel))
+  let too_long = String.make 1025 'x' in
+  let invalid_sources =
+    [ ( "missing name"
+      , "---\ndescription: Missing the required name.\n---\nBody\n" )
+    ; ( "name mismatch"
+      , "---\nname: another-name\ndescription: The names disagree.\n---\nBody\n" )
+    ; ( "description too long"
+      , Printf.sprintf
+          "---\nname: sample\ndescription: %s\n---\nBody\n"
+          too_long )
+    ; ( "unknown top-level field"
+      , "---\nname: sample\ndescription: Reject unknown policy.\ndisable-model-invocation: true\n---\nBody\n" )
+    ; ( "Unicode whitespace-only description"
+      , "---\nname: sample\ndescription: \xc2\xa0\n---\nBody\n" )
+    ]
   in
-  check string "original survives" original persisted
+  List.iter
+    (fun (label, invalid) ->
+       (match Editor.preview ~base_path reference ~source_text:invalid with
+        | Error (Editor.Validation_failed _) -> ()
+        | Error error -> fail (label ^ ": wrong preview error: " ^ Editor.error_to_string error)
+        | Ok _ -> fail (label ^ ": invalid Skill passed preview"));
+       (match Editor.save ~base_path ~reference ~source_text:invalid ~refresh with
+        | Error (Editor.Validation_failed _) -> ()
+        | Error error -> fail (label ^ ": wrong save error: " ^ Editor.error_to_string error)
+        | Ok _ -> fail (label ^ ": invalid Skill was written"));
+       let channel = open_in_bin skill_path in
+       let persisted =
+         Fun.protect
+           ~finally:(fun () -> close_in_noerr channel)
+           (fun () -> really_input_string channel (in_channel_length channel))
+       in
+       check string (label ^ ": original survives") original persisted)
+    invalid_sources
+;;
+
+let test_invalid_new_skill_is_never_created () =
+  with_workspace @@ fun base_path ->
+  let _, _, _, refresh = setup base_path ~access:"read-write" in
+  let source_id =
+    match Skill_source_config.source_id_of_string "workspace" with
+    | Ok value -> value
+    | Error detail -> fail detail
+  in
+  let source_text =
+    "---\nname: different-name\ndescription: The package and name disagree.\n---\nBody\n"
+  in
+  (match
+     Editor.create
+       ~base_path
+       ~source_id
+       ~package_id:"not-created"
+       ~source_text
+       ~refresh
+   with
+   | Error (Editor.Validation_failed _) -> ()
+   | Error error -> fail ("wrong create error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "invalid new Skill was created");
+  check
+    bool
+    "package directory remains absent"
+    false
+    (Sys.file_exists (Filename.concat base_path "skills/not-created"))
+  ;
+  let whitespace_package = "alpha " in
+  (match
+     Editor.create
+       ~base_path
+       ~source_id
+       ~package_id:whitespace_package
+       ~source_text:
+         "---\nname: alpha\ndescription: The raw directory must match.\n---\nBody\n"
+       ~refresh
+   with
+   | Error (Editor.Validation_failed _) -> ()
+   | Error error -> fail ("wrong whitespace create error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "trimmed package directory was created");
+  check
+    bool
+    "whitespace package directory remains absent"
+    false
+    (Sys.file_exists (Filename.concat base_path ("skills/" ^ whitespace_package)))
 ;;
 
 let test_composition_preview_exposes_validated_flow () =
@@ -828,6 +898,8 @@ let () =
     [ ( "editor"
       , [ test_case "load preview and publish" `Quick test_load_preview_and_publish
         ; test_case "invalid candidate is never written" `Quick test_invalid_candidate_is_never_written
+        ; test_case "invalid new Skill is never created" `Quick
+            test_invalid_new_skill_is_never_created
         ; test_case "composition preview exposes validated flow" `Quick
             test_composition_preview_exposes_validated_flow
         ; test_case "external edit conflicts" `Quick test_external_edit_causes_revision_conflict

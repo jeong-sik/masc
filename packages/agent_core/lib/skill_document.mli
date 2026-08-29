@@ -37,10 +37,8 @@ type name_violation =
 type diagnostic =
   | Missing_frontmatter
   | Byte_order_mark
-      (** A UTF-8 byte-order mark preceded the frontmatter. The mark is
-          stripped before parsing, so the document still loads; the deviation
-          stays observable, and content revisions elsewhere keep hashing the
-          raw bytes. *)
+      (** A UTF-8 byte-order mark preceded the frontmatter. Official Agent
+          Skills documents must start with the frontmatter delimiter. *)
   | Unterminated_frontmatter
   | Malformed_yaml of string
   | Frontmatter_not_mapping
@@ -66,10 +64,6 @@ type diagnostic =
   | Compatibility_too_long of { length : int }
   | Invalid_metadata_value of { key : string }
 
-type conformance =
-  | Conformant
-  | Runtime_compatible of diagnostic list
-
 type extension_value =
   | Null
   | Boolean of bool
@@ -88,19 +82,14 @@ type t = private
         (** Unique, specification-conforming string metadata. Ambiguous
             duplicate keys and non-string values are excluded here. *)
   ; metadata_values : (string * extension_value) list
-        (** All metadata values in source order, including client-specific
-            structures and duplicate keys, for diagnostics and projection. *)
-  ; extensions : (string * extension_value) list
-        (** Non-standard top-level fields. Their presence makes the document
-            runtime-compatible rather than strictly conformant. *)
+        (** Valid string metadata values in source order. The richer value type
+            keeps registry projection independent from the YAML library while
+            the decoder rejects non-string and duplicate metadata entries. *)
   ; body : string
   }
 
 type load_outcome =
-  | Loaded of
-      { document : t
-      ; conformance : conformance
-      }
+  | Loaded of t
   | Unloadable of diagnostic list
 
 val canonical_name : string -> (string, name_violation list) result
@@ -108,18 +97,14 @@ val canonical_name : string -> (string, name_violation list) result
     {!decode}. The returned value is the canonical NFKC spelling. *)
 
 val decode : directory_name:string -> string -> load_outcome
-(** Decode one complete [SKILL.md]. Strictly conforming documents have both
-    required fields and satisfy the Agent Skills naming and length rules.
-
-    The runtime-compatible path may use [directory_name] when [name] is
-    absent, or retain a usable non-conforming document with diagnostics. A
-    missing description or structurally unreadable frontmatter is
-    [Unloadable], because the document cannot participate in discovery.
-
-    Unknown top-level fields are retained as extensions and diagnosed as
-    runtime-compatible rather than silently assigned client semantics. *)
+(** Decode one complete [SKILL.md] using the Agent Skills specification as its
+    admission contract. Both required fields, the name-directory equality,
+    length limits, metadata shape, and the closed top-level field set must be
+    valid. Any diagnostic makes the document [Unloadable]. Client-specific
+    data belongs under the specification's [metadata] field. *)
 
 val diagnostics : load_outcome -> diagnostic list
-val conformance_diagnostics : conformance -> diagnostic list
 val diagnostic_to_string : diagnostic -> string
-val conformance_to_string : conformance -> string
+val diagnostic_to_yojson : diagnostic -> Yojson.Safe.t
+(** Closed operator projection with a stable [code] and human-readable
+    [message]. Consumers classify by [code], never by parsing [message]. *)

@@ -64,7 +64,6 @@ type entry = private
   ; source_index : int
   ; directory : string
   ; document : Agent_core.Skill_document.t
-  ; conformance : Agent_core.Skill_document.conformance
   ; content_revision : content_revision
         (** SHA-256 identity of the exact [SKILL.md] bytes. Resource files are
             intentionally outside this revision until resource snapshots are

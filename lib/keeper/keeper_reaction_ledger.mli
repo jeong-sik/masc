@@ -16,7 +16,6 @@ type stimulus_kind =
       (** RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved
   | Ask_answered  (** HITL resolution delivered as an ordinary Keeper wake. *)
-  | Manual_compaction
   | Completion_authority_rejected
       (** System completion authority rejected Keeper evidence. *)
   | Task_cancelled

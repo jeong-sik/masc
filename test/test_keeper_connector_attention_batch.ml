@@ -57,14 +57,7 @@ let enqueue_exn ~base_path keeper_name source =
 (* --- cycle_outcome fixtures for Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome ---
 
    These build the minimum valid [Keeper_heartbeat_loop_cycle.cycle_outcome]
-   payload for each branch under test. [Manual_compaction_failed] /
-   [Manual_compaction_not_applied] / [Manual_compaction_applied] are not
-   fixture-built here: [batch_disposition_of_cycle_outcome]'s arms for them
-   ignore their payload entirely (always Batch_no_action / Batch_ack_completed
-   regardless of failure/receipt detail), and their payload types nest deep
-   unrelated fixtures (checkpoint installation, post-install lifecycle) with
-   no additional signal for what this suite is pinning. Exhaustiveness is the
-   guard for those three arms, not a fixture test. *)
+   payload for each branch under test. *)
 
 let completed_outcome ~addressed meta : Keeper_heartbeat_loop_cycle.cycle_outcome =
   Keeper_heartbeat_loop_cycle.Completed
@@ -265,7 +258,6 @@ let connector_event_ids_of_queue queue =
        | Q.Board_signal _ | Q.Board_attention _ | Q.Bootstrap
        | Q.Fusion_completed _ | Q.Schedule_due _ | Q.Hitl_resolved _
       | Q.Ask_answered _
-       | Q.Manual_compaction_requested
        | Q.Completion_authority_rejected _
        | Q.Task_cancelled _ | Q.Workspace_message _
        | Q.Delegate_completed _ | Q.Composition_completed _ -> None)

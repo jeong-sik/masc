@@ -115,6 +115,28 @@ let test_open_atomic_temp_file_uses_canonical_shape () =
          (Fs_compat.load_file path))
 ;;
 
+let test_open_atomic_temp_file_writes_bytes_verbatim () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  (* CR, LF, NUL, and 0x1a are the bytes a text-mode channel is allowed to
+     rewrite. The durable path promises the caller's exact bytes, so the
+     temp channel is opened binary. *)
+  let payload = "a\r\nb\n\000c\026d" in
+  let path, channel = Fs_compat.open_atomic_temp_file ~temp_dir:base () in
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr channel;
+      if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+       output_string channel payload;
+       close_out channel;
+       let read_back = Fs_compat.load_file path in
+       check int "byte length survives the round trip" (String.length payload)
+         (String.length read_back);
+       check string "bytes survive the round trip" payload read_back)
+;;
+
 let test_save_file_atomic_overwrites_existing () =
   Fs_compat.clear_fs ();
   with_tmp_dir
@@ -585,6 +607,10 @@ let () =
             "temp writer uses canonical shared shape"
             `Quick
             test_open_atomic_temp_file_uses_canonical_shape
+        ; test_case
+            "temp writer keeps bytes verbatim"
+            `Quick
+            test_open_atomic_temp_file_writes_bytes_verbatim
         ] )
     ; ( "inventory"
       , [ test_case

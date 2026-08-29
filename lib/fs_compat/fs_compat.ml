@@ -2884,7 +2884,13 @@ let private_jsonl_remove_rewrite_stage temp_path =
 
 let private_jsonl_replace_locked ~dir path content =
   match private_jsonl_capture Create_rewrite_stage (fun () ->
-    Filename.open_temp_file ~temp_dir:dir ".private_jsonl_" ".stage")
+    (* Open_binary for the same reason as [Atomic_write.open_atomic_temp_file]:
+       the stage file holds the replacement bytes verbatim. *)
+    Filename.open_temp_file
+      ~mode:[ Open_binary ]
+      ~temp_dir:dir
+      ".private_jsonl_"
+      ".stage")
   with
   | Error failure -> Error (Private_jsonl_operation_failed failure)
   | Ok (temp_path, output) ->

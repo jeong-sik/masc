@@ -246,6 +246,31 @@ let test_approval_flow_rejects_stale_results () =
   check bool "current completion clears action" false
     (Projection.Flow.action_inflight finished)
 
+(* The Gate and held-tool resolve paths in the TUI now take the same
+   single-action slot the operator-confirm path takes, so a decision keypress
+   arriving while one is still in flight must be refused here rather than
+   dispatching a second, duplicate resolve. This locks that guard: a second
+   [begin_action] while one is in flight is [`Already_inflight], and only a
+   matching [finish_action] admits the next decision. *)
+let test_second_action_blocked_while_inflight () =
+  let flow, generation =
+    match Projection.Flow.begin_action Projection.Flow.initial with
+    | Ok value -> value
+    | Error `Already_inflight -> fail "first action unexpectedly in flight"
+  in
+  check bool "first action is in flight" true
+    (Projection.Flow.action_inflight flow);
+  (match Projection.Flow.begin_action flow with
+   | Error `Already_inflight -> ()
+   | Ok _ -> fail "second action started while one was in flight");
+  let released, owned = Projection.Flow.finish_action flow generation in
+  check bool "completion owns and releases the slot" true owned;
+  check bool "slot is free after completion" false
+    (Projection.Flow.action_inflight released);
+  match Projection.Flow.begin_action released with
+  | Ok _ -> ()
+  | Error `Already_inflight -> fail "next action refused after slot released"
+
 let test_two_key_gate () =
   let armed =
     match
@@ -322,6 +347,8 @@ let () =
             test_deny_response_fails_closed
         ; test_case "stale request generations" `Quick
             test_approval_flow_rejects_stale_results
+        ; test_case "second action blocked while inflight" `Quick
+            test_second_action_blocked_while_inflight
         ; test_case "two-key safety gate" `Quick test_two_key_gate
         ; test_case "refresh preserves selected token" `Quick
             test_refresh_preserves_selected_token

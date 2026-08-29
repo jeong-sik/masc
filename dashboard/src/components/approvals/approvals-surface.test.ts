@@ -80,7 +80,6 @@ function resolvedApproval(
     turn_id: null,
     task_id: null,
     goal_id: null,
-    goal_ids: [],
     actor: 'operator',
     decision_source: 'human_operator',
     summary_status: { status: 'not_requested' },

@@ -210,7 +210,6 @@ export interface KeeperResolvedApprovalItem {
   turn_id: number | null
   task_id: string | null
   goal_id: string | null
-  goal_ids: string[]
   actor: string | null
   decision_source: GateDecisionSource
   summary_status: HitlSummaryStatus

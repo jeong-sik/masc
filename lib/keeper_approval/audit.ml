@@ -548,7 +548,6 @@ let resolved_audit_fields =
   ; "turn_id"
   ; "task_id"
   ; "goal_id"
-  ; "goal_ids"
   ; "actor"
   ; "decision_source"
   ; "authorization_source"

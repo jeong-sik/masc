@@ -238,6 +238,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0395 | Pinned OpenSSH is the Phase 1 remote execution lane | Draft | - |
 | 0396 | Keeper coding capability: wire a coding-outcome eval from existing parts, the... | Draft | - |
 | 0397 | Librarian wire contract states changes, not the whole roster | Draft | - |
+| 0398 | Edit addresses lines and proves freshness; the substring search goes away | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 부착 서비스 도구를 매 턴 전량 싣는 것을 그만둔다 | Draft | - |

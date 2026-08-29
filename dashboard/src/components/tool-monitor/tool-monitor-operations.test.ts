@@ -118,7 +118,6 @@ function runtimeSample() {
           autoboot_enabled: true,
           pause_kind: 'operator',
           paused_elapsed_sec: 1840,
-          last_blocker: null,
           missing_pause_root_cause: false,
         }],
       },

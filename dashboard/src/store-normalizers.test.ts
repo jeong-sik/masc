@@ -415,10 +415,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
           autoboot_enabled: true,
           pause_kind: 'operator_paused',
           paused_elapsed_sec: 12,
-          last_blocker: {
-            klass: 'fiber_unresolved',
-            detail: 'turn exceeded budget',
-          },
           missing_pause_root_cause: false,
         }],
         read_error_count: 0,
@@ -466,9 +462,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         details: [{
           name: 'analyst',
           pause_kind: 'operator_paused',
-          last_blocker: {
-            klass: 'fiber_unresolved',
-          },
         }],
       },
       keeper_fleet_safety: {

@@ -3,8 +3,8 @@
     Checkpoint persistence deliberately stores the in-flight tool cycle so
     recovery knows which calls were dispatched
     ({!Keeper_transcript_unit.partition}'s [protected_suffix]). Nothing closed
-    it, so provider admission rejected the history on every reload and the lane
-    latched [Transcript_corruption_reset_required] permanently.
+    it, so provider admission rejected the history on every reload and the
+    lane stayed permanently unresumable.
 
     This runs during the [Recovering_requests] boot phase, before keeper loops
     start, so no writer races the compare-and-swap. Shutdown hooks cannot cover
@@ -15,8 +15,7 @@ type keeper_outcome =
       (** No durable metadata, no canonical checkpoint yet, or no open tail. *)
   | Closed of { tool_use_ids : string list }
   | Unparseable of Keeper_transcript_unit.structural_error
-      (** Genuine corruption. The reset-required latch stands — only the open
-          tail is recoverable. *)
+      (** Genuine corruption — only the open tail is recoverable. *)
   | Meta_unavailable of string
   | Checkpoint_unavailable of Keeper_checkpoint_store.checkpoint_ref_load_error
   | Commit_rejected of Keeper_checkpoint_store.checkpoint_cas_error

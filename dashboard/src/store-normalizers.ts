@@ -22,8 +22,6 @@ import type {
   DashboardConfigResolutionItem,
   DashboardFleetPressureHealth,
   DashboardFleetSafetyHealth,
-  DashboardBlockerClassObject,
-  DashboardBlockerInfo,
   DashboardKeeperReactionLedgerHealth,
   DashboardKeeperReactionLedgerPendingKeeper,
   DashboardPausedKeeperDetail,
@@ -497,25 +495,6 @@ function normalizeDashboardDiskObservation(raw: unknown): DashboardRuntimeResolu
   }
 }
 
-function normalizeDashboardBlockerClass(raw: unknown): DashboardBlockerInfo['klass'] {
-  const name = asString(raw)
-  if (name) return name
-  if (!isRecord(raw)) return null
-  const objectName = asString(raw.name)
-  if (!objectName) return null
-  const result: DashboardBlockerClassObject = { name: objectName }
-  if ('reason' in raw) result.reason = raw.reason
-  return result
-}
-
-function normalizeDashboardBlockerInfo(raw: unknown): DashboardBlockerInfo | null {
-  if (!isRecord(raw)) return null
-  const klass = normalizeDashboardBlockerClass(raw.klass)
-  const detail = asString(raw.detail) ?? null
-  if (klass == null && detail == null) return null
-  return { klass, detail }
-}
-
 function normalizeDashboardPausedKeeperDetail(raw: unknown): DashboardPausedKeeperDetail | null {
   if (!isRecord(raw)) return null
   const name = asString(raw.name)
@@ -525,7 +504,6 @@ function normalizeDashboardPausedKeeperDetail(raw: unknown): DashboardPausedKeep
     autoboot_enabled: asBoolean(raw.autoboot_enabled) ?? null,
     pause_kind: asString(raw.pause_kind) ?? null,
     paused_elapsed_sec: asNumber(raw.paused_elapsed_sec) ?? null,
-    last_blocker: normalizeDashboardBlockerInfo(raw.last_blocker),
     missing_pause_root_cause: asBoolean(raw.missing_pause_root_cause) ?? null,
   }
 }

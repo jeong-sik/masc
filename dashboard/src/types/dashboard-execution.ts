@@ -139,24 +139,11 @@ export interface DashboardFleetSafetyHealth {
   keeper_reaction_ledger: DashboardKeeperReactionLedgerHealth | null
 }
 
-export interface DashboardBlockerClassObject {
-  name: string
-  reason?: unknown
-}
-
-export type DashboardBlockerClass = string | DashboardBlockerClassObject
-
-export interface DashboardBlockerInfo {
-  klass: DashboardBlockerClass | null
-  detail: string | null
-}
-
 export interface DashboardPausedKeeperDetail {
   name: string
   autoboot_enabled: boolean | null
   pause_kind: string | null
   paused_elapsed_sec: number | null
-  last_blocker: DashboardBlockerInfo | null
   missing_pause_root_cause: boolean | null
 }
 

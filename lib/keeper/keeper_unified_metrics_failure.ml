@@ -46,19 +46,6 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | None -> reason)
     | None -> reason
   in
-  let failure_counts_for_proactive_backoff =
-    is_scheduled_autonomous_cycle
-    &&
-    match core_error with
-    | Some err -> (
-        match Keeper_turn_driver.classify_masc_internal_error err with
-        | Some
-            (Keeper_turn_driver.Resumable_cli_session _
-            | Keeper_turn_driver.Capacity_backpressure _) ->
-            true
-        | Some _ | None -> false)
-    | None -> false
-  in
   if is_scheduled_autonomous_cycle then
     Otel_metric_store.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
       ~labels:[ ("keeper", meta.name); ("outcome", "error") ]
@@ -102,10 +89,6 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         last_preview =
           if is_scheduled_autonomous_cycle then preview
           else meta.runtime.proactive_rt.last_preview;
-        consecutive_noop_count =
-          (if failure_counts_for_proactive_backoff then
-             meta.runtime.proactive_rt.consecutive_noop_count + 1
-           else meta.runtime.proactive_rt.consecutive_noop_count);
       };
     };
   }

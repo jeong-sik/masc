@@ -31,7 +31,6 @@ type field =
   | Last_proactive_outcome
   | Last_proactive_reason
   | Last_proactive_preview
-  | Consecutive_noop_count
   | Message_scope_ack_id
   | Last_runtime_attempt
   | Paused

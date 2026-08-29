@@ -32,12 +32,6 @@ type proactive_runtime =
   ; last_outcome : proactive_cycle_outcome
   ; last_reason : string
   ; last_preview : string
-  ; consecutive_noop_count : int
-    (** Consecutive autonomous cycles where only observation tools
-          (board_list, context_status, other passive reads) were used with no
-          substantive action.  Resets to 0 on any productive cycle.
-          Used by [effective_scheduled_autonomous_cooldown] for exponential
-          backoff: cooldown *= 2^min(n, 2), capping at 4x. *)
   }
 
 (* ── Structured blocker classification ──────────────────────── *)

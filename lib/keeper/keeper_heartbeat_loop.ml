@@ -586,7 +586,7 @@ let run_keepalive_unified_turn
            last_proactive_ts=0.0] for 45+ min despite
            proactive_enabled=true — the info log alone buried the
            reason across many lines.  Labelled counter lets Grafana
-           split [no_signal] vs [cooldown_pending] vs
+           split [keeper_paused] vs [reactive_disabled] vs
            [scheduled_autonomous_disabled] so the bootstrap problem
            ("need signals to fire, need to fire to generate signals")
            is visible fleet-wide. *)

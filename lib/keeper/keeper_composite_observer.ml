@@ -101,7 +101,6 @@ type snapshot = {
   board_wakeups : int;
   fiber_stop_flag : bool;
   fiber_wakeup_flag : bool;
-  consecutive_noop_count : int;
   idle_seconds : int;
   last_turn_ts : float;
   fsm_guard_violations : int;
@@ -451,8 +450,6 @@ let observe
     board_wakeups = Keeper_registry.StringMap.cardinal entry.board_wakeups;
     fiber_stop_flag = Atomic.get entry.fiber_stop;
     fiber_wakeup_flag = Atomic.get entry.fiber_wakeup;
-    consecutive_noop_count =
-      entry.meta.runtime.proactive_rt.consecutive_noop_count;
     idle_seconds =
       (let last = entry.meta.runtime.proactive_rt.last_ts in
        if last <= 0.0 then 0
@@ -626,7 +623,6 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     "board_wakeups", `Int s.board_wakeups;
     "fiber_stop_flag", `Bool s.fiber_stop_flag;
     "fiber_wakeup_flag", `Bool s.fiber_wakeup_flag;
-    "consecutive_noop_count", `Int s.consecutive_noop_count;
     "idle_seconds", `Int s.idle_seconds;
     "last_turn_ts", `Float s.last_turn_ts;
     "fsm_guard_violations", `Int s.fsm_guard_violations;

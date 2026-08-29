@@ -25,13 +25,12 @@ describe('mission keeper runtime helpers', () => {
       status: 'idle',
       paused: true,
       keepalive_running: true,
-      last_blocker: 'missing social headers',
       last_heartbeat: '2026-04-04T14:43:49Z',
       tool_audit_at: '2026-04-04T14:08:35Z',
     } as Keeper
 
     expect(keeperDisplayStatus(keeper, 'idle')).toBe('paused')
-    expect(keeperRuntimeHint(keeper)).toBe('일시정지 · missing social headers')
+    expect(keeperRuntimeHint(keeper)).toBe('일시정지 · 하트비트만 유지 중')
     expect(keeperRecentHeartbeatLabel(keeper)).toContain('최근 하트비트')
     expect(keeperRecentHeartbeatLabel(keeper)).toContain('16분 전')
     expect(keeperRecentActionLabel(keeper)).toContain('마지막 행동')
@@ -82,7 +81,6 @@ describe('mission keeper runtime helpers', () => {
       keepalive_running: true,
       runtime_blocker_class: 'fiber_unresolved',
       runtime_blocker_summary: 'Provider turn timed out.',
-      last_blocker: 'missing social headers',
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(

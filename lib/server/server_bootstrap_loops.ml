@@ -704,7 +704,7 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
      anything reads a checkpoint. Persistence stores the open cycle on purpose
      so recovery knows which calls were dispatched, but nothing closed it, so
      provider admission rejected the history on every reload and the lane
-     latched Transcript_corruption_reset_required permanently. This must run
+     stayed permanently unresumable. This must run
      here rather than in a shutdown hook: an ungraceful kill runs no hook, and
      keeper loops have not started yet, so no writer races the CAS. *)
   let transcript_tail_started = preparation_stage_started () in

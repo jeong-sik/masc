@@ -730,7 +730,6 @@ describe('AgentRoster live-only cards', () => {
         recent_tool_names: ['keeper_task_claim'],
         latest_tool_call_count: 1,
         tool_audit_at: '2026-04-23T09:58:30Z',
-        last_blocker: 'old blocker that should stay out of the roster',
       } as Keeper,
     ]
     missionSnapshot.value = {

@@ -507,40 +507,6 @@ supports-multimodal-inputs = true
 # Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.
 # Runtime model keys are TOML-safe slugs; api-name preserves the official Cloud model id.
 
-[models.ollama-cloud-deepseek-v3-1-671b]
-api-name = "deepseek-v3.1:671b"
-max-context = 163840
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-deepseek-v3-1-671b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-deepseek-v3-1-671b]
-
-[models.ollama-cloud-deepseek-v3-2]
-api-name = "deepseek-v3.2"
-max-context = 163840
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-deepseek-v3-2.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-deepseek-v3-2]
-
 [models.ollama-cloud-deepseek-v4-flash]
 api-name = "deepseek-v4-flash"
 max-context = 1048576
@@ -629,74 +595,6 @@ supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-deepseek-v4-pro]
 
-[models.ollama-cloud-gemini-3-flash-preview]
-api-name = "gemini-3-flash-preview"
-max-context = 1048576
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-gemini-3-flash-preview.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-gemini-3-flash-preview]
-
-[models.ollama-cloud-gemma3-4b]
-api-name = "gemma3:4b"
-max-context = 131072
-tools-support = false
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-gemma3-4b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-gemma3-4b]
-
-[models.ollama-cloud-gemma3-12b]
-api-name = "gemma3:12b"
-max-context = 131072
-tools-support = false
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-gemma3-12b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-gemma3-12b]
-
-[models.ollama-cloud-gemma3-27b]
-api-name = "gemma3:27b"
-max-context = 131072
-tools-support = false
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-gemma3-27b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-gemma3-27b]
-
 [models.ollama-cloud-gemma4-31b]
 api-name = "gemma4:31b"
 max-context = 262144
@@ -713,40 +611,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-gemma4-31b]
-
-[models.ollama-cloud-glm-4-7]
-api-name = "glm-4.7"
-max-context = 202752
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-glm-4-7.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-glm-4-7]
-
-[models.ollama-cloud-glm-5]
-api-name = "glm-5"
-max-context = 202752
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-glm-5.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-glm-5]
 
 [models.ollama-cloud-glm-5-1]
 api-name = "glm-5.1"
@@ -782,6 +646,54 @@ supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-glm-5-2]
 
+# Zhipu GLM-5.3 through Ollama Cloud. /api/show 2026-08-29:
+# caps=[completion,thinking,tools], context_length=1048576, arch=glm_dsa_moe.
+# The same model also answers on the Z.AI coding plan; this row is the
+# ollama_cloud wire and carries that wire's control truth (see the "none"
+# note the sibling rows share).
+[models.ollama-cloud-glm-5-3]
+api-name = "glm-5.3"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-glm-5-3.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-glm-5-3]
+
+# Zhipu GLM-5.3 Flash. /api/show 2026-08-29:
+# caps=[completion,thinking,tools,vision], context_length=1048576,
+# arch=glm5_next. The vision capability is not registry-only: a 64x64 probe PNG
+# (white 44x20 rectangle on black) came back as "Rectangle ... roughly twice as
+# wide as it is tall" on this wire on 2026-08-29.
+# supports-multimodal-inputs follows every other vision row on this provider,
+# which pairs it with image input. /api/show evidences vision only, so the flag
+# is convention rather than measurement here — it stays a generic document flag
+# with no per-provider file-input contract behind it (#27908).
+[models.ollama-cloud-glm-5-3-flash]
+api-name = "glm-5.3-flash"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-glm-5-3-flash.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-glm-5-3-flash]
+
 [models.ollama-cloud-gpt-oss-20b]
 api-name = "gpt-oss:20b"
 max-context = 131072
@@ -815,23 +727,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-gpt-oss-120b]
-
-[models.ollama-cloud-kimi-k2-5]
-api-name = "kimi-k2.5"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-kimi-k2-5.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-kimi-k2-5]
 
 [models.ollama-cloud-kimi-k2-6]
 api-name = "kimi-k2.6"
@@ -867,39 +762,27 @@ supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-kimi-k2-7-code]
 
-[models.ollama-cloud-minimax-m2-1]
-api-name = "minimax-m2.1"
-max-context = 204800
+# Moonshot Kimi K3 through Ollama Cloud. /api/show 2026-08-29:
+# caps=[vision,thinking,completion,tools], context_length=1048576.
+# The name is provider-qualified because kimi_coding also serves a model called
+# kimi-k3 under a separate subscription, and an unqualified row would make the
+# catalog join ambiguous.
+[models.ollama-cloud-kimi-k3]
+api-name = "kimi-k3"
+max-context = 1048576
 tools-support = true
 thinking-support = true
 streaming = true
 
-[models.ollama-cloud-minimax-m2-1.capabilities]
+[models.ollama-cloud-kimi-k3.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
+supports-image-input = true
+supports-multimodal-inputs = true
 
-[ollama_cloud.ollama-cloud-minimax-m2-1]
-
-[models.ollama-cloud-minimax-m2-5]
-api-name = "minimax-m2.5"
-max-context = 196608
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-minimax-m2-5.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-minimax-m2-5]
+[ollama_cloud.ollama-cloud-kimi-k3]
 
 [models.ollama-cloud-minimax-m2-7]
 api-name = "minimax-m2.7"
@@ -937,59 +820,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-minimax-m3]
-
-[models.ollama-cloud-ministral-3-3b]
-api-name = "ministral-3:3b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-ministral-3-3b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-ministral-3-3b]
-
-[models.ollama-cloud-ministral-3-8b]
-api-name = "ministral-3:8b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-ministral-3-8b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-ministral-3-8b]
-
-[models.ollama-cloud-ministral-3-14b]
-api-name = "ministral-3:14b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-ministral-3-14b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-response-format-json = true
-supports-structured-output = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-ministral-3-14b]
 
 [models.ollama-cloud-mistral-large-3-675b]
 api-name = "mistral-large-3:675b"
@@ -1059,40 +889,6 @@ supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-nemotron-3-ultra]
 
-[models.ollama-cloud-qwen3-coder-480b]
-api-name = "qwen3-coder:480b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-qwen3-coder-480b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-qwen3-coder-480b]
-
-[models.ollama-cloud-qwen3-coder-next]
-api-name = "qwen3-coder-next"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-qwen3-coder-next.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-qwen3-coder-next]
-
 [models.ollama-cloud-qwen3-5-397b]
 api-name = "qwen3.5:397b"
 max-context = 262144
@@ -1118,23 +914,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-qwen3-5-397b]
-
-[models.ollama-cloud-rnj-1-8b]
-api-name = "rnj-1:8b"
-max-context = 32768
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-rnj-1-8b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-rnj-1-8b]
 
 [ollama.gemma4-26b-a4b-qat]
 wizard-default = true
@@ -1209,10 +988,15 @@ staged_judge_group_size = 3
 [fusion.presets.trio]
 panel = [
   "ollama_cloud_native.minimax-m3-native-structured",
-  "ollama_cloud.ollama-cloud-ministral-3-14b",
+  "ollama_cloud.ollama-cloud-deepseek-v4-pro",
 ]
-# Fusion judges request provider-native structured output. Keep this on a
-# runtime whose model resolves through the AGENT_CORE catalog with native schema support.
+# The judge output contract is carried by the prompt and the strict parser, not
+# by the wire: fusion_judge.ml strips the response format before dispatch because
+# ollama.com cloud accepts a json_schema and then ignores it. Re-probed
+# 2026-08-29 on /api/chat — deepseek-v4-pro, kimi-k3 and minimax-m3 all returned
+# keys the schema never named, while local Ollama honoured the same request. So
+# a judge runtime does not need supports-structured-output; pick it for answer
+# quality, and keep the judges on different models so the lenses stay independent.
 judge = "ollama_cloud_native.minimax-m3-native-structured"
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \
@@ -1243,7 +1027,7 @@ web_tools = false
 [fusion.presets.quorum]
 panel = [
   "ollama_cloud_native.minimax-m3-native-structured",
-  "ollama_cloud.ollama-cloud-ministral-3-14b",
+  "ollama_cloud.ollama-cloud-deepseek-v4-pro",
 ]
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \
@@ -1251,7 +1035,7 @@ with your best independent analysis. Do not defer to other models; give your \
 own view.
 """
 # meta judge: 1차 심판들의 종합을 재조정하는 최종 reducer (RFC-0283).
-judge = "ollama_cloud.ollama-cloud-ministral-3-14b"
+judge = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
 judge_system_prompt = """
 You are the meta-judge. You are given several independent judge syntheses of the \
 same panel of model answers, each produced through a different evaluative lens. \
@@ -1278,7 +1062,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 """
 
 [[fusion.presets.quorum.judges]]
-model = "ollama_cloud.ollama-cloud-ministral-3-14b"
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
 label = "coverage"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1306,14 +1090,14 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 [fusion.presets.council]
 panel = [
   "ollama_cloud_native.minimax-m3-native-structured",
-  "ollama_cloud.ollama-cloud-ministral-3-14b",
+  "ollama_cloud.ollama-cloud-deepseek-v4-pro",
 ]
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \
 with your best independent analysis. Do not defer to other models; give your \
 own view.
 """
-judge = "ollama_cloud.ollama-cloud-ministral-3-14b"
+judge = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
 judge_system_prompt = """
 You are the meta-judge. You are given stage syntheses, each produced by a group \
 of judges evaluating the same panel of model answers through different lenses. \
@@ -1335,7 +1119,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 """
 
 [[fusion.presets.council.judges]]
-model = "ollama_cloud.ollama-cloud-ministral-3-14b"
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
 label = "coverage"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1345,7 +1129,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 """
 
 [[fusion.presets.council.judges]]
-model = "ollama_cloud.ollama-cloud-ministral-3-14b"
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
 label = "risk"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1365,7 +1149,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 """
 
 [[fusion.presets.council.judges]]
-model = "ollama_cloud.ollama-cloud-ministral-3-14b"
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
 label = "simplicity"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1375,7 +1159,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 """
 
 [[fusion.presets.council.judges]]
-model = "ollama_cloud.ollama-cloud-ministral-3-14b"
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
 label = "adversarial"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \

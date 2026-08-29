@@ -70,6 +70,13 @@ let redirect_stderr_off_terminal ~base_path =
     let path =
       Filename.concat dir (Printf.sprintf "masc-tui-%d.log" (Unix.getpid ()))
     in
+    (* [O_CREAT] makes the file, not the directory above it. A base path that
+       has never had a log written under it -- a fresh workspace, a test's
+       temporary root -- therefore failed here on ENOENT, and the surface
+       started with its stderr still on the terminal. That is the exact state
+       this function exists to avoid, reached by the one cause it could have
+       removed itself. *)
+    Fs_compat.mkdir_p dir;
     let fd =
       Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o644
     in

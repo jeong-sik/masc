@@ -2391,6 +2391,88 @@ let publish_unreachable_lane_with_cli ~cli_slot_ids ~source =
     (F.resolver_snapshot ~source fixtures)
 ;;
 
+(* Self-review regression (2026-08-29): when the walk releases the exhausted
+   catalog binding and then every cli bind is REJECTED (not a storage
+   failure — that latches the store and the settle correctly signals
+   persistence uncertainty), the pre-cli binding is left released. The
+   caller's quarantine would be rejected on that state, so the walk must
+   settle the entry itself: released -> quarantine is admitted for the
+   execution-failure cause, and the run ends Executed, never raising. *)
+let test_cli_bind_rejection_after_release_settles_the_entry () =
+  run_eio @@ fun ~sw:_ ~net ~clock ->
+  with_temp_dir "hitl-cli-bind-rejected" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       with_cli_runtimes @@ fun () ->
+       publish_unreachable_lane_with_cli
+         ~cli_slot_ids:[ cli_primary; cli_secondary ]
+         ~source:"hitl-cli-bind-rejected";
+       let entry = pending_entry ~base_path () in
+       let cli_bind_rejections = ref 0 in
+       let bind
+             ~id
+             ~input_hash
+             ~sequence
+             ~slot_id
+             ~call_id
+             ~plan_fingerprint
+             ~request_body_sha256
+         =
+         (* Reject exactly the cli binds — their identity carries the
+            cli-oneshot plan fingerprint — as a typed queue rejection, the
+            non-latching refusal class. *)
+         if Astring.String.is_prefix ~affix:"cli-oneshot:" plan_fingerprint
+         then (
+           incr cli_bind_rejections;
+           Error
+             (Q.Exact_attempt_rejected (Q.Exact_attempt_summary_not_pending id)))
+         else
+           Q.bind_summary_exact_attempt
+             ~id
+             ~input_hash
+             ~sequence
+             ~slot_id
+             ~call_id
+             ~plan_fingerprint
+             ~request_body_sha256
+       in
+       let runner ~runtime_id ~system_prompt:_ ~prompt:_ =
+         failf "no cli slot may run without a durable binding (%s)" runtime_id
+       in
+       Worker.For_testing.execute_prepared_flow_with_queue_ops
+         ~queue_ops:(Worker.For_testing.make_exact_queue_ops ~bind ())
+         ~cli_runner:runner
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> fail "a rejected walk delivered a summary")
+         (prepare_exn entry)
+       |> require_executed;
+       check int "both cli binds were rejected" 2 !cli_bind_rejections;
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
+       | Some
+           { exact_attempt =
+               QT.Exact_bound
+                 { slot_id
+                 ; status = QT.Exact_quarantined QT.Exact_flow_execution_failed
+                 ; _
+                 }
+           ; summary_attempt_disposition = QT.Summary_attempt_settled
+           ; _
+           } ->
+         check string
+           "the settled identity is the released catalog slot"
+           "hitl-cli-unreachable"
+           slot_id
+       | _ ->
+         fail
+           "a rejected cli walk must settle the released binding, not leave it \
+            dangling")
+;;
+
 let test_cli_slot_answers_after_catalog_exhaustion () =
   run_eio @@ fun ~sw:_ ~net ~clock ->
   with_temp_dir "hitl-cli-summary" @@ fun base_path ->
@@ -2646,6 +2728,10 @@ let () =
         ] )
     ; ( "cli_lane_slots"
       , [ test_case
+            "cli bind rejection after release settles the entry"
+            `Quick
+            test_cli_bind_rejection_after_release_settles_the_entry
+        ; test_case
             "a cli slot answers after catalog exhaustion"
             `Quick
             test_cli_slot_answers_after_catalog_exhaustion

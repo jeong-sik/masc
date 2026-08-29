@@ -1,0 +1,436 @@
+#!/usr/bin/env bash
+# Coding-outcome eval runner (RFC-0396 W2).
+#
+# For every selected case x model x repeat: boot nothing new per run — one
+# isolated MASC server serves the whole invocation — copy the case workspace
+# fresh, create one keeper, send it the task, wait for the episode to finish,
+# then run the case's verify script. The verify exit code is the entire pass
+# verdict (RFC-0396 D2); this script records evidence and never re-judges.
+#
+# Evidence: one JSON file per run plus an appended runs.jsonl, then
+# test/coding_eval_report_cli.exe turns rows into pass@k / buckets. A run
+# whose evidence file already exists is skipped, so re-invoking with the same
+# --out directory resumes a sharded collection (RFC-0396 D4).
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CASES_DIR="${CODING_EVAL_CASES_DIR:-${ROOT_DIR}/benchmarks/coding/cases}"
+OUT_DIR="${CODING_EVAL_OUT_DIR:-}"
+MODELS="${CODING_EVAL_MODELS:-}"
+CASE_IDS="${CODING_EVAL_CASE_IDS:-}"
+REPEATS="${CODING_EVAL_REPEATS:-2}"
+PASS_AT_K="${CODING_EVAL_K:-1}"
+PORT="${CODING_EVAL_PORT:-}"
+POLL_INTERVAL_SEC="${CODING_EVAL_POLL_INTERVAL_SEC:-2}"
+TIMEOUT_SEC="${CODING_EVAL_MCP_TIMEOUT_SEC:-30}"
+CLI_EXE="${ROOT_DIR}/_build/default/test/coding_eval_report_cli.exe"
+
+SERVER_PID=""
+LIVE_RUN_DIR=""
+TARGET_DIR=""
+CONFIG_DIR=""
+SERVER_LOG=""
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  scripts/harness_coding_eval.sh --models provider:model[,provider:model]
+                                 [--cases DIR] [--case-ids CSV] [--repeats N]
+                                 [--out DIR] [--k N] [--port N]
+
+Runs each selected coding case against each model, records one evidence row
+per run into <out>/runs.jsonl, and summarizes with coding_eval_report_cli.
+Re-running with the same --out skips runs whose evidence already exists.
+EOF
+}
+
+# shellcheck source=scripts/harness/lib/test_framework.sh
+source "${ROOT_DIR}/scripts/harness/lib/test_framework.sh"
+# shellcheck source=scripts/harness/lib/server_bootstrap.sh
+source "${ROOT_DIR}/scripts/harness/lib/server_bootstrap.sh"
+# shellcheck source=scripts/harness/lib/mcp_call.sh
+source "${ROOT_DIR}/scripts/harness/lib/mcp_call.sh"
+
+cleanup() {
+  harness_stop_server "${SERVER_PID}" 10
+}
+trap cleanup EXIT
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cases) CASES_DIR="$2"; shift 2 ;;
+    --out) OUT_DIR="$2"; shift 2 ;;
+    --models) MODELS="$2"; shift 2 ;;
+    --case-ids) CASE_IDS="$2"; shift 2 ;;
+    --repeats) REPEATS="$2"; shift 2 ;;
+    --k) PASS_AT_K="$2"; shift 2 ;;
+    --port) PORT="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+require_cmd jq
+require_cmd curl
+
+if [[ -z "${MODELS}" ]]; then
+  echo "--models is required (example: --models ollama:qwen3-coder)" >&2
+  usage
+  exit 2
+fi
+if [[ ! -d "${CASES_DIR}" ]]; then
+  echo "case corpus not found: ${CASES_DIR}" >&2
+  exit 2
+fi
+if [[ -z "${OUT_DIR}" ]]; then
+  OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/coding-eval.XXXXXX")"
+fi
+mkdir -p "${OUT_DIR}/runs"
+RUNS_JSONL="${OUT_DIR}/runs.jsonl"
+
+ensure_cli_built() {
+  (
+    cd "${ROOT_DIR}"
+    if [[ "${CODING_EVAL_SKIP_BUILD:-0}" != "1" || ! -x "${CLI_EXE}" ]]; then
+      scripts/dune-local.sh build ./test/coding_eval_report_cli.exe >/dev/null
+    fi
+  )
+}
+
+selected_case_dirs() {
+  local dir case_id
+  for dir in "${CASES_DIR}"/*/; do
+    [[ -f "${dir}/case.json" ]] || continue
+    case_id="$(jq -r '.id' "${dir}/case.json")"
+    if [[ -n "${CASE_IDS}" ]]; then
+      case ",${CASE_IDS}," in
+        *",${case_id},"*) printf '%s\n' "${dir%/}" ;;
+        *) ;;
+      esac
+    else
+      printf '%s\n' "${dir%/}"
+    fi
+  done
+}
+
+prepare_live_environment() {
+  local run_suffix
+  run_suffix="$(date +%Y%m%d_%H%M%S)-$$"
+  LIVE_RUN_DIR="${OUT_DIR}/live-${run_suffix}"
+  TARGET_DIR="${LIVE_RUN_DIR}/target"
+  CONFIG_DIR="${LIVE_RUN_DIR}/config"
+  SERVER_LOG="${LIVE_RUN_DIR}/server.log"
+  mkdir -p "${TARGET_DIR}" "${CONFIG_DIR}"
+  cp -R "${ROOT_DIR}/config/." "${CONFIG_DIR}"
+  if [[ -z "${PORT}" ]]; then
+    PORT="$(harness_pick_free_port)"
+  fi
+}
+
+start_live_server() {
+  local launch_log="${LIVE_RUN_DIR}/launch.log"
+  local bootstrap_log="${LIVE_RUN_DIR}/bootstrap.log"
+  (
+    export MASC_CONFIG_DIR="${CONFIG_DIR}"
+    export MASC_LOG_FILE="${SERVER_LOG}"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
+    export MASC_ORCHESTRATOR_ENABLED="0"
+    export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
+    export GRAPHQL_API_KEY=""
+    export GRAPHQL_URL="http://127.0.0.1:9/graphql"
+    export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
+    exec "${ROOT_DIR}/scripts/run-local.sh" \
+      --target-dir "${TARGET_DIR}" \
+      --port "${PORT}" \
+      --bootstrap-only
+  ) >"${bootstrap_log}" 2>&1
+  (
+    export MASC_CONFIG_DIR="${CONFIG_DIR}"
+    export MASC_LOG_FILE="${SERVER_LOG}"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
+    export MASC_ORCHESTRATOR_ENABLED="0"
+    export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
+    export GRAPHQL_API_KEY=""
+    export GRAPHQL_URL="http://127.0.0.1:9/graphql"
+    export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
+    exec "${ROOT_DIR}/scripts/run-local.sh" --target-dir "${TARGET_DIR}" --port "${PORT}"
+  ) >"${launch_log}" 2>&1 &
+  SERVER_PID="$!"
+
+  if ! harness_wait_for_health "${PORT}" 45; then
+    harness_print_log_tail "${bootstrap_log}" 120
+    harness_print_log_tail "${launch_log}" 120
+    harness_print_log_tail "${SERVER_LOG}" 120
+    echo "coding eval failed: server did not become healthy on port ${PORT}" >&2
+    exit 1
+  fi
+
+  MCP_URL="http://127.0.0.1:${PORT}/mcp"
+  export MCP_URL
+  if ! initialize_mcp_session; then
+    harness_print_log_tail "${SERVER_LOG}" 120
+    echo "coding eval failed: MCP initialize did not return a session id" >&2
+    exit 1
+  fi
+}
+
+coding_keeper_instructions() {
+  printf '%s\n' "너는 coding-outcome eval 전용 keeper다. 주어진 워크스페이스 디렉터리 안에서만 파일을 읽고 수정한다. 먼저 검사를 실행해 실패를 눈으로 확인하고, 원인을 고친 뒤, 같은 검사가 통과하는 것을 확인하고 나서 DONE이라고 답한다. 검사 스크립트 자체는 수정하지 않는다."
+}
+
+keeper_tool_call_names() {
+  local keeper_name="$1"
+  local log_dir="${TARGET_DIR}/.masc/tool_calls"
+  if [[ ! -d "${log_dir}" ]]; then
+    printf '[]'
+    return 0
+  fi
+  find "${log_dir}" -type f -name '*.jsonl' | LC_ALL=C sort \
+    | while IFS= read -r path; do
+        cat "${path}"
+      done \
+    | jq -cs --arg keeper "${keeper_name}" '
+        [ .[] | select(.keeper == $keeper) | .tool ] | map(select(type == "string"))
+      '
+}
+
+stop_keeper_best_effort() {
+  local keeper_name="$1"
+  call_mcp_tool 9000 "masc_keeper_down" \
+    "$(jq -cn --arg name "${keeper_name}" '{name:$name}')" 20 >/dev/null 2>&1 || true
+}
+
+append_row() {
+  local row="$1"
+  local evidence_path="$2"
+  printf '%s\n' "${row}" > "${evidence_path}"
+  printf '%s\n' "${row}" >> "${RUNS_JSONL}"
+}
+
+# Build one evidence row. passed is derived here exactly the way the report
+# CLI re-derives it (status=ok && verify_exit=0); the CLI refuses a row where
+# the two stories diverge, so a bug in either side surfaces as a loud decode
+# error instead of a silently wrong number.
+evidence_row() {
+  jq -cn \
+    --arg case_id "$1" \
+    --argjson run_index "$2" \
+    --arg run_id "$3" \
+    --arg provider "$4" \
+    --arg model "$5" \
+    --arg status "$6" \
+    --argjson verify_exit "$7" \
+    --argjson duration_ms "$8" \
+    --argjson recorded_at "$9" \
+    --argjson tool_calls "${10}" \
+    --argjson input_tokens "${11}" \
+    --argjson output_tokens "${12}" \
+    --argjson cost_usd "${13}" \
+    --argjson error "${14}" \
+    '{
+      case_id: $case_id,
+      run_index: $run_index,
+      run_id: $run_id,
+      provider: $provider,
+      model: $model,
+      status: $status,
+      verify_exit: $verify_exit,
+      passed: ($status == "ok" and $verify_exit == 0),
+      duration_ms: $duration_ms,
+      recorded_at: $recorded_at,
+      tool_calls: $tool_calls,
+      input_tokens: $input_tokens,
+      output_tokens: $output_tokens,
+      cost_usd: $cost_usd,
+      error: $error
+    }'
+}
+
+json_string_or_null() {
+  local value="$1"
+  if [[ -z "${value}" ]]; then
+    printf 'null'
+  else
+    jq -cn --arg v "${value}" '$v'
+  fi
+}
+
+json_number_or_null() {
+  local value="$1"
+  if [[ "${value}" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+    printf '%s' "${value}"
+  else
+    printf 'null'
+  fi
+}
+
+run_one() {
+  local provider="$1"
+  local model="$2"
+  local case_dir="$3"
+  local repeat_index="$4"
+
+  local case_id timeout_sec verify_rel prompt
+  case_id="$(jq -r '.id' "${case_dir}/case.json")"
+  timeout_sec="$(jq -r '.timeout_sec' "${case_dir}/case.json")"
+  verify_rel="$(jq -r '.verify' "${case_dir}/case.json")"
+  prompt="$(jq -r '.prompt' "${case_dir}/case.json")"
+
+  local run_id run_dir workspace evidence_path
+  run_id="$(printf '%s-%s-%s-r%d' "${provider}" "${model}" "${case_id}" "${repeat_index}" \
+    | tr -c 'A-Za-z0-9._-' '-')"
+  run_dir="${OUT_DIR}/runs/${run_id}"
+  evidence_path="${run_dir}/evidence.json"
+  if [[ -f "${evidence_path}" ]]; then
+    echo "[coding-eval] skip ${run_id} (evidence exists)" >&2
+    return 0
+  fi
+  mkdir -p "${run_dir}"
+  workspace="${run_dir}/workspace"
+  rm -rf "${workspace}"
+  mkdir -p "${workspace}"
+  cp -R "${case_dir}/workspace/." "${workspace}"
+
+  local keeper_name="coding-eval-${run_id}"
+  local runtime_id="${provider}.${model}"
+  local start_epoch end_epoch duration_ms recorded_at
+  start_epoch="$(date +%s)"
+
+  local finish_status="ok" error_text="" verify_exit_json="null"
+  local tool_calls_json='[]' input_tokens_json="null" output_tokens_json="null"
+  local cost_usd_json="null"
+
+  local create_args
+  create_args="$(jq -cn \
+    --arg name "${keeper_name}" \
+    --arg instructions "$(coding_keeper_instructions)" \
+    --arg runtime_id "${runtime_id}" \
+    --argjson allowed_paths "$(jq -cn --arg path "${workspace}" '[ $path ]')" \
+    '{
+      name: $name,
+      instructions: $instructions,
+      runtime_id: $runtime_id,
+      autoboot_enabled: false,
+      proactive_enabled: false,
+      allowed_paths: $allowed_paths
+    }')"
+
+  if ! call_mcp_tool 4000 "masc_keeper_up" "${create_args}" 45; then
+    finish_status="transport_error"
+    error_text="keeper_up: $(tool_error_text)"
+  else
+    local message request_json request_id
+    message="$(printf '%s\n\nWorkspace directory: %s\nRun the check inside that directory.' \
+      "${prompt}" "${workspace}")"
+    if ! call_mcp_tool 4100 "masc_keeper_msg" \
+      "$(jq -cn --arg name "${keeper_name}" --arg message "${message}" \
+        '{name:$name, message:$message}')" 30; then
+      finish_status="transport_error"
+      error_text="keeper_msg: $(tool_error_text)"
+    else
+      request_json="$(tool_result_json)"
+      request_id="$(printf '%s' "${request_json}" | jq -r '.request_id // empty')"
+      if [[ -z "${request_id}" ]]; then
+        finish_status="transport_error"
+        error_text="keeper_msg returned no request_id"
+      else
+        local poll_deadline result_json msg_payload
+        poll_deadline=$(( start_epoch + timeout_sec ))
+        result_json=""
+        while [[ "$(date +%s)" -lt "${poll_deadline}" ]]; do
+          if call_mcp_tool 4200 "masc_keeper_msg_result" \
+            "$(jq -cn --arg request_id "${request_id}" '{request_id:$request_id}')" 20; then
+            msg_payload="$(tool_result_payload_json)"
+            case "$(printf '%s' "${msg_payload}" | jq -r '.status // empty')" in
+              done|error)
+                result_json="${msg_payload}"
+                break
+                ;;
+            esac
+          fi
+          sleep "${POLL_INTERVAL_SEC}"
+        done
+        if [[ -z "${result_json}" ]]; then
+          finish_status="timeout"
+          error_text="episode did not finish within ${timeout_sec}s"
+        else
+          printf '%s' "${result_json}" > "${run_dir}/msg-result.json"
+          input_tokens_json="$(json_number_or_null \
+            "$(printf '%s' "${result_json}" | jq -r '.result.usage.input_tokens // empty')")"
+          output_tokens_json="$(json_number_or_null \
+            "$(printf '%s' "${result_json}" | jq -r '.result.usage.output_tokens // empty')")"
+          cost_usd_json="$(json_number_or_null \
+            "$(printf '%s' "${result_json}" | jq -r '.result.usage.cost_usd // empty')")"
+          if [[ "$(printf '%s' "${result_json}" | jq -r '.status')" == "done" ]] \
+            && [[ "$(printf '%s' "${result_json}" | jq -r '.ok // false')" == "true" ]]; then
+            finish_status="ok"
+          else
+            finish_status="provider_error"
+            error_text="$(printf '%s' "${result_json}" \
+              | jq -r '.error // .result.error // "episode ended in error"')"
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  if [[ "${finish_status}" == "ok" ]]; then
+    set +e
+    bash "${case_dir}/${verify_rel}" "${workspace}" \
+      >"${run_dir}/verify.log" 2>&1
+    local verify_code=$?
+    set -e
+    verify_exit_json="${verify_code}"
+  fi
+
+  tool_calls_json="$(keeper_tool_call_names "${keeper_name}")"
+  stop_keeper_best_effort "${keeper_name}"
+
+  end_epoch="$(date +%s)"
+  duration_ms=$(( (end_epoch - start_epoch) * 1000 ))
+  recorded_at="${end_epoch}"
+
+  local row
+  row="$(evidence_row \
+    "${case_id}" "${repeat_index}" "${run_id}" "${provider}" "${model}" \
+    "${finish_status}" "${verify_exit_json}" "${duration_ms}" "${recorded_at}" \
+    "${tool_calls_json}" "${input_tokens_json}" "${output_tokens_json}" \
+    "${cost_usd_json}" "$(json_string_or_null "${error_text}")")"
+  append_row "${row}" "${evidence_path}"
+  echo "[coding-eval] ${run_id}: status=${finish_status} verify_exit=${verify_exit_json}" >&2
+}
+
+main() {
+  ensure_cli_built
+  prepare_live_environment
+  start_live_server
+
+  local case_dirs
+  case_dirs="$(selected_case_dirs)"
+  if [[ -z "${case_dirs}" ]]; then
+    echo "no cases selected under ${CASES_DIR}" >&2
+    exit 2
+  fi
+
+  local model_entry provider model case_dir repeat_index
+  IFS=',' read -r -a model_entries <<< "${MODELS}"
+  for model_entry in "${model_entries[@]}"; do
+    provider="${model_entry%%:*}"
+    model="${model_entry#*:}"
+    if [[ -z "${provider}" || -z "${model}" || "${provider}" == "${model_entry}" ]]; then
+      echo "model entries must look like provider:model, got: ${model_entry}" >&2
+      exit 2
+    fi
+    while IFS= read -r case_dir; do
+      for (( repeat_index = 1; repeat_index <= REPEATS; repeat_index++ )); do
+        run_one "${provider}" "${model}" "${case_dir}" "${repeat_index}"
+      done
+    done <<< "${case_dirs}"
+  done
+
+  "${CLI_EXE}" --cases "${CASES_DIR}" --runs "${RUNS_JSONL}" --out "${OUT_DIR}" \
+    --k "${PASS_AT_K}"
+  echo "[coding-eval] report: ${OUT_DIR}/REPORT.md" >&2
+}
+
+main

@@ -44,6 +44,12 @@ type t = {
      regression axis SWE-bench measures with its PASS_TO_PASS test set. Absent
      means the case declares nothing to preserve. *)
   regression : string option;
+  (* Optional build probe: a case-relative script that must exit 0 for the
+     candidate's edit to count as "builds". A red build separates a
+     non-compiling edit (Build_failed) from a compiling-but-wrong one
+     (Wrong_solution) in the failure taxonomy. Absent means verify is the only
+     oracle the case runs. *)
+  build : string option;
 }
 
 let default_test_files = [ "check.sh" ]
@@ -58,6 +64,7 @@ let declared_keys =
   ; "description"
   ; "test_files"
   ; "regression"
+  ; "build"
   ]
 ;;
 
@@ -146,6 +153,16 @@ let of_json json =
         else Error "regression must be a case-relative path without .."
       | Some _ -> Error "regression must be a non-empty string or null"
     in
+    let* build =
+      match List.assoc_opt "build" fields with
+      | None | Some `Null -> Ok None
+      | Some (`String value) when String.trim value <> "" ->
+        if Filename.is_relative value
+           && not (List.mem ".." (String.split_on_char '/' value))
+        then Ok (Some value)
+        else Error "build must be a case-relative path without .."
+      | Some _ -> Error "build must be a non-empty string or null"
+    in
     Ok
       { id
       ; level
@@ -156,6 +173,7 @@ let of_json json =
       ; description
       ; test_files
       ; regression
+      ; build
       }
   | _ -> Error "case.json must be a JSON object"
 ;;
@@ -195,6 +213,11 @@ let load_case ~dir =
     | None -> Ok ()
     | Some regression ->
       must_exist "regression script" (Filename.concat dir regression)
+  in
+  let* () =
+    match case.build with
+    | None -> Ok ()
+    | Some build -> must_exist "build script" (Filename.concat dir build)
   in
   (* Each protected test oracle must exist in the canonical workspace (so the
      harness has a pristine copy to restore), and the solution overlay must not

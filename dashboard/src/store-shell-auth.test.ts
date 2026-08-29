@@ -71,6 +71,40 @@ describe('refreshShell auth failure handling', () => {
     expect(store.shellAuthSummary.value?.token_valid).toBe(false)
   })
 
+  it('does not let a full waiter join a light follow-up', async () => {
+    const shell = (light: boolean) => ({
+      generated_at: light ? '2026-07-11T11:00:01Z' : '2026-07-11T11:00:02Z',
+      status: { project: 'me' },
+      counts: { agents: 0, tasks: 0, keepers: 0, total_runtimes: 0 },
+      auth: { enabled: false, require_token: false, token_present: false, token_valid: false },
+    })
+    let resolveFirst: ((value: Record<string, unknown>) => void) | undefined
+    apiMocks.fetchDashboardShell
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+      .mockImplementation((opts?: { light?: boolean }) =>
+        Promise.resolve(shell(opts?.light === true)))
+
+    const store = await import('./store')
+    const first = store.refreshShell({ force: true })
+    await vi.waitFor(() => expect(apiMocks.fetchDashboardShell).toHaveBeenCalledTimes(1))
+
+    // The light waiter registers first, so it reaches follow-up scheduling
+    // first once the in-flight request resolves.
+    const lightWaiter = store.refreshShell({ force: true, light: true })
+    const fullWaiter = store.refreshShell({ force: true })
+
+    resolveFirst?.(shell(false))
+    await expect(first).resolves.toBe(true)
+    await expect(lightWaiter).resolves.toBe(true)
+    await expect(fullWaiter).resolves.toBe(true)
+
+    const fullFetches = apiMocks.fetchDashboardShell.mock.calls.filter(
+      ([opts]) => (opts as { light?: boolean } | undefined)?.light !== true)
+    // One for the original request, one the full waiter must have fetched for
+    // itself instead of joining the light follow-up.
+    expect(fullFetches.length).toBe(2)
+  })
+
   it('clears canonical actor and auth summary when shell refresh fails', async () => {
     apiMocks.fetchDashboardShell.mockRejectedValue(new Error('network down'))
 

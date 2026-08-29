@@ -58,7 +58,14 @@ let test_parse_targets () =
   check_parse "token order preserved" "targets:beta,alpha" "@beta and @alpha";
   check_parse "email is one token" "none" "send to email@alice.com";
   check_parse "mid-token at is not a target" "none" "mid@alice token";
-  check_parse "bare at is the empty candidate" "targets:" "@ bare at";
+  (* A bare "@" leaves nothing after the prefix. It used to reach callers as
+     an empty candidate that every one of them dropped, and board_audience
+     dropped it through Agent_id.of_string — a validator, which logs what it
+     refuses. A post with an email or a decorative "@" cost a WARN per
+     occurrence for a target that never existed. *)
+  check_parse "bare at addresses no one" "none" "@ bare at";
+  check_parse "a decorative at among words addresses no one" "none"
+    "see @ here and @ there";
   check_parse "trailing punctuation trimmed" "targets:alice" "ok @alice, thanks";
   check_parse "possessive stays distinct" "targets:alpha's" "@alpha's note"
 

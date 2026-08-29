@@ -119,12 +119,21 @@ let parse text =
       tokens
       |> List.filter_map (fun token ->
         (* [tokens_of_text] never yields empty tokens, so the [String.sub]
-           below is safe; a bare ["@"] reaches the caller as the empty
-           candidate. *)
+           below is safe. A bare ["@"] leaves nothing after the prefix, and
+           that empty candidate is not an address: every caller drops it —
+           board_audience folds it away with [Agent_id.of_string]'s Error —
+           but the fold is a validator, and a validator logs what it refuses.
+           A post whose body carries an email or a decorative "@" produced a
+           WARN per occurrence for a candidate no one was ever going to use
+           (208 on 2026-08-29). Not producing it says the same thing without
+           asking the gate a question the parser can answer. *)
         if
           String.starts_with ~prefix:target_prefix token
           && not (String.starts_with ~prefix:broadcast_selector_prefix token)
-        then Some (String.sub token 1 (String.length token - 1))
+        then (
+          match String.sub token 1 (String.length token - 1) with
+          | "" -> None
+          | candidate -> Some candidate)
         else None)
     in
     match targets with

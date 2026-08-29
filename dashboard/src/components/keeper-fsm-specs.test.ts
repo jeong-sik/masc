@@ -8,20 +8,19 @@ import {
 } from './keeper-fsm-specs'
 
 // State alphabets the dashboard renders. These must stay in lockstep with
-// the OCaml runtime: KSM ← keeper_state_machine.ml `type phase` (11 ctors),
-// KTC ← keeper_registry.ml `type turn_phase` (7 ctors), KDP/KCL/KMC ← the
+// the OCaml runtime: KSM ← keeper_state_machine.ml `type phase` (8 ctors),
+// KTC ← keeper_registry.ml `type turn_phase` (6 ctors), KDP/KCL ← the
 // matching keeper_registry.ml sub-FSM types. If you change one of these
 // arrays you almost certainly need a matching change on the OCaml side and
 // in dashboard/src/api/schemas/keeper-composite.ts.
 const KSM_STATES = [
-  'offline', 'running', 'failing', 'compacting',
-      'draining', 'paused', 'stopped', 'crashed',
+  'offline', 'running', 'failing',
+  'draining', 'paused', 'stopped', 'crashed',
   'restarting',
 ]
-const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted']
+const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'finalizing', 'exhausted']
 const KDP_STATES = ['undecided', 'guard_ok', 'tool_policy_selected']
 const KCL_STATES = ['idle', 'selecting', 'trying', 'done', 'exhausted']
-const KMC_STATES = ['accumulating', 'compacting', 'done']
 
 describe('buildCompositeFsmSpec', () => {
   const defaultParams = {
@@ -31,19 +30,19 @@ describe('buildCompositeFsmSpec', () => {
     runtimeState: 'idle',
   }
 
-  it('creates parent nodes for all 5 sub-FSM clusters', () => {
+  it('creates parent nodes for all 4 sub-FSM clusters', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const parentIds = spec.nodes.filter(n => !n.parent).map(n => n.id)
-    expect(parentIds).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC'])
+    expect(parentIds).toEqual(['KSM', 'KTC', 'KDP', 'KCL'])
   })
 
-  it('creates the KSM cluster with all 11 keeper-phase states', () => {
+  it('creates the KSM cluster with all 8 keeper-phase states', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const ids = spec.nodes.filter(n => n.parent === 'KSM').map(n => n.id.split(':')[1])
     expect(ids).toEqual(KSM_STATES)
   })
 
-  it('creates the KTC cluster with all 7 turn-phase states', () => {
+  it('creates the KTC cluster with all 6 turn-phase states', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const ids = spec.nodes.filter(n => n.parent === 'KTC').map(n => n.id.split(':')[1])
     expect(ids).toEqual(KTC_STATES)
@@ -61,18 +60,12 @@ describe('buildCompositeFsmSpec', () => {
     expect(ids).toEqual(KCL_STATES)
   })
 
-  it('creates the KMC cluster with all 3 compaction stages', () => {
-    const spec = buildCompositeFsmSpec(defaultParams)
-    const ids = spec.nodes.filter(n => n.parent === 'KMC').map(n => n.id.split(':')[1])
-    expect(ids).toEqual(KMC_STATES)
-  })
-
-  it('total node count = 5 parents + 27 children = 32', () => {
+  it('total node count = 4 parents + 22 children = 26', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const childCount = KSM_STATES.length + KTC_STATES.length + KDP_STATES.length
-      + KCL_STATES.length + KMC_STATES.length
-    expect(childCount).toBe(27)
-    expect(spec.nodes).toHaveLength(5 + childCount)
+      + KCL_STATES.length
+    expect(childCount).toBe(22)
+    expect(spec.nodes).toHaveLength(4 + childCount)
   })
 
   it('returns empty edges by design (cross-cluster causality lives in the TLA+ spec)', () => {
@@ -99,7 +92,7 @@ describe('buildCompositeFsmSpec', () => {
   })
 
   it('marks the active KSM child as warn for buffer-class phases', () => {
-    for (const phase of ['compacting', 'draining', 'paused', 'restarting']) {
+    for (const phase of ['draining', 'paused', 'restarting']) {
       const spec = buildCompositeFsmSpec({ ...defaultParams, phase })
       expect(spec.nodes.find(n => n.id === `KSM:${phase}`)!.type).toBe('warn')
     }
@@ -113,16 +106,6 @@ describe('buildCompositeFsmSpec', () => {
   it('marks an exhausted runtime as err', () => {
     const spec = buildCompositeFsmSpec({ ...defaultParams, runtimeState: 'exhausted' })
     expect(spec.nodes.find(n => n.id === 'KCL:exhausted')!.type).toBe('err')
-  })
-
-  it('marks the active KMC child with a warn tone', () => {
-    const spec = buildCompositeFsmSpec(defaultParams)
-    expect(spec.nodes.find(n => n.id === 'KMC:accumulating')!.type).toBe('warn')
-  })
-
-  it('marks inactive KMC children as dim', () => {
-    const spec = buildCompositeFsmSpec(defaultParams)
-    expect(spec.nodes.find(n => n.id === 'KMC:compacting')!.type).toBe('dim')
   })
 
   it('does not set activeNodeId (compound graph, no single active node)', () => {
@@ -139,10 +122,10 @@ describe('buildCompositeFsmSpec', () => {
 })
 
 describe('buildTurnFsmSpec', () => {
-  it('exposes the 8 UI turn-FSM states (7 backend turn_phase ctors + awaiting_tool_result)', () => {
+  it('exposes the 7 UI turn-FSM states (6 backend turn_phase ctors + awaiting_tool_result)', () => {
     expect(TURN_FSM_STATES).toEqual([
       'idle', 'prompting', 'routing', 'executing',
-      'awaiting_tool_result', 'compacting', 'finalizing', 'exhausted',
+      'awaiting_tool_result', 'finalizing', 'exhausted',
     ])
   })
 
@@ -163,7 +146,7 @@ describe('buildTurnFsmSpec', () => {
   })
 
   it('normalizes the canonical backend turn phases to themselves', () => {
-    for (const s of ['idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted']) {
+    for (const s of ['idle', 'prompting', 'routing', 'executing', 'finalizing', 'exhausted']) {
       expect(normalizeTurnFsmState(s)).toBe(s)
     }
   })
@@ -212,8 +195,7 @@ describe('buildTurnFsmSpec', () => {
       'idle->prompting',
       'prompting->routing', 'prompting->executing', 'prompting->finalizing', 'prompting->exhausted',
       'routing->prompting', 'routing->executing', 'routing->exhausted',
-      'executing->prompting', 'executing->routing', 'executing->compacting', 'executing->finalizing', 'executing->exhausted',
-      'compacting->prompting', 'compacting->finalizing', 'compacting->exhausted',
+      'executing->prompting', 'executing->routing', 'executing->finalizing', 'executing->exhausted',
       'finalizing->prompting', 'finalizing->routing', 'finalizing->executing', 'finalizing->exhausted',
       'exhausted->prompting', 'exhausted->routing', 'exhausted->executing',
     ])

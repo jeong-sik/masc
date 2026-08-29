@@ -8,13 +8,6 @@ import { flagTooltip, invariantDescription } from './fsm-hub-health-panels'
 describe('flagTooltip', () => {
   // ── known flags with on=true ──
 
-  it('returns compact active tooltip', () => {
-    const result = flagTooltip('compact', true)
-    expect(result).toContain('compact')
-    expect(result).toContain('active')
-    expect(result).toContain('압축')
-  })
-
   it('returns handoff active tooltip', () => {
     const result = flagTooltip('handoff', true)
     expect(result).toContain('handoff')
@@ -23,12 +16,6 @@ describe('flagTooltip', () => {
   })
 
   // ── known flags with on=false ──
-
-  it('returns compact inactive tooltip', () => {
-    const result = flagTooltip('compact', false)
-    expect(result).toContain('inactive')
-    expect(result).toContain('예약된 압축 없음')
-  })
 
   it('returns handoff inactive tooltip', () => {
     const result = flagTooltip('handoff', false)
@@ -53,10 +40,10 @@ describe('flagTooltip', () => {
   // ── format structure ──
 
   it('includes newline between status and description for known flag', () => {
-    const result = flagTooltip('compact', true)
+    const result = flagTooltip('handoff', true)
     const parts = result.split('\n')
     expect(parts).toHaveLength(2)
-    expect(parts[0]).toContain('compact (active)')
+    expect(parts[0]).toContain('handoff (active)')
     expect(parts[1]!.length).toBeGreaterThan(0)
   })
 
@@ -71,22 +58,10 @@ describe('flagTooltip', () => {
 // ================================================================
 
 describe('invariantDescription', () => {
-  it('returns description for phase_turn_alignment', () => {
-    const desc = invariantDescription('phase_turn_alignment')
-    expect(desc).toContain('KSM phase')
-    expect(desc).toContain('Running')
-  })
-
   it('returns description for no_runtime_before_measurement', () => {
     const desc = invariantDescription('no_runtime_before_measurement')
     expect(desc).toContain('Runtime selection')
     expect(desc).toContain('measurement')
-  })
-
-  it('returns description for compaction_atomicity', () => {
-    const desc = invariantDescription('compaction_atomicity')
-    expect(desc).toContain('atomic')
-    expect(desc).toContain('half-compacted')
   })
 
   it('returns description for event_priority_monotone', () => {
@@ -109,9 +84,7 @@ describe('invariantDescription', () => {
 
   it('all known descriptions are non-empty strings', () => {
     const keys = [
-      'phase_turn_alignment',
       'no_runtime_before_measurement',
-      'compaction_atomicity',
       'event_priority_monotone',
     ]
     for (const key of keys) {

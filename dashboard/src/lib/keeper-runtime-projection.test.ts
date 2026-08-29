@@ -180,7 +180,7 @@ describe('deriveKeeperRuntimeProjection', () => {
     expect(projection.heartbeat.stale).toBe(true)
     expect(projection.context.breach).toBe(true)
     expect(projection.fiberAlive.alive).toBe(true)
-    expect(projection.fsmLanes.map(lane => lane.axis)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC'])
+    expect(projection.fsmLanes.map(lane => lane.axis)).toEqual(['KSM', 'KTC', 'KDP', 'KCL'])
     expect(projection.signals.map(signal => signal.kind)).toEqual([
       'operational_state',
       'ksm_phase',

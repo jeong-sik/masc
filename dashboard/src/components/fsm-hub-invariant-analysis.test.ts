@@ -32,9 +32,9 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
 // ================================================================
 
 describe('invariantRows', () => {
-  it('returns 5 rows for all invariants', () => {
+  it('returns 3 rows for all invariants', () => {
     const rows = invariantRows(makeSnapshot())
-    expect(rows).toHaveLength(5)
+    expect(rows).toHaveLength(3)
   })
 
   it('marks all invariants as ok when all true', () => {
@@ -57,9 +57,7 @@ describe('invariantRows', () => {
   it('includes labels for each invariant', () => {
     const rows = invariantRows(makeSnapshot())
     const labels = rows.map(r => r.label)
-    expect(labels).toContain('단계 ⇔ 턴')
     expect(labels).toContain('Runtime 순서')
-    expect(labels).toContain('압축 원자성')
     expect(labels).toContain('이벤트 우선순위')
     expect(labels).toContain('Phase 유도 일치')
   })
@@ -87,7 +85,7 @@ describe('deriveOperationalInsight', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
         invariants: {
-          no_runtime_before_measurement: true,
+          no_runtime_before_measurement: false,
           event_priority_monotone: true,
           phase_derivation_agreement: true,
         },

@@ -87,6 +87,81 @@ let test_agent_accessors () =
   Alcotest.(check bool) "no provider config" true (Option.is_none opts.provider_config)
 ;;
 
+(* A deferred tool surface hands the model an index and supplies the schema
+   when it is asked for, so the callable set has to grow while the turn that
+   asked is still running. The tool-round loop in [Agent.run] captures one
+   [Agent.t] and passes the same value to every round, so growth has to be
+   visible through that value rather than through a rebound copy. *)
+let test_extend_tools_widens_the_callable_set () =
+  Eio_main.run
+  @@ fun env ->
+  let tool name =
+    Tool.create ~name ~description:name ~parameters:[] (fun _ ->
+      Ok { Types.content = name; _meta = None })
+  in
+  let agent =
+    Agent.create
+      ~config:(Types.default_config ~model:"test-model")
+      ~tools:[ tool "index" ]
+      ~net:env#net
+      ()
+  in
+  Alcotest.(check bool)
+    "a tool that was not supplied is not callable"
+    false
+    (Tool_set.mem "loaded" (Agent.tools agent));
+  Agent.extend_tools agent [ tool "loaded" ];
+  Alcotest.(check bool)
+    "the supplied tool is callable through the same agent value"
+    true
+    (Tool_set.mem "loaded" (Agent.tools agent));
+  Alcotest.(check bool)
+    "the tool that was already there stays"
+    true
+    (Tool_set.mem "index" (Agent.tools agent));
+  Alcotest.(check int) "and nothing else appeared" 2 (Tool_set.size (Agent.tools agent))
+;;
+
+(* [Tool_set.merge] is last-occurrence-wins, so merging a name the agent
+   already holds would rebind it to a different closure mid-turn: the model
+   calls what it was shown and is answered by something else. *)
+let test_extend_tools_does_not_rebind_an_existing_name () =
+  Eio_main.run
+  @@ fun env ->
+  let tool name body =
+    Tool.create ~name ~description:name ~parameters:[] (fun _ ->
+      Ok { Types.content = body; _meta = None })
+  in
+  let agent =
+    Agent.create
+      ~config:(Types.default_config ~model:"test-model")
+      ~tools:[ tool "search" "original" ]
+      ~net:env#net
+      ()
+  in
+  Agent.extend_tools agent [ tool "search" "replacement" ];
+  Alcotest.(check int) "no duplicate entry" 1 (Tool_set.size (Agent.tools agent));
+  let ran =
+    match Tool_set.find "search" (Agent.tools agent) with
+    | None -> Alcotest.fail "the tool disappeared"
+    | Some (t : Tool.t) ->
+      (match Tool.execute t (`Assoc []) with
+       | Ok result -> result.Types.content
+       | Error _ -> Alcotest.fail "the tool failed to run")
+  in
+  Alcotest.(check string) "the original definition still answers" "original" ran
+;;
+
+let test_extend_tools_with_nothing_changes_nothing () =
+  Eio_main.run
+  @@ fun env ->
+  let agent =
+    Agent.create ~config:(Types.default_config ~model:"test-model") ~net:env#net ()
+  in
+  Agent.extend_tools agent [];
+  Alcotest.(check int) "still empty" 0 (Tool_set.size (Agent.tools agent))
+;;
+
 let test_version_info () =
   Alcotest.(check string) "version" Agent_core.Version.version Agent_core.version;
   Alcotest.(check string) "name" "agent_core" Agent_core.name
@@ -128,6 +203,12 @@ let () =
     ; ( "agent"
       , [ test_case "create" `Quick test_agent_create
         ; test_case "accessors" `Quick test_agent_accessors
+        ; test_case "extend_tools widens the callable set" `Quick
+            test_extend_tools_widens_the_callable_set
+        ; test_case "extend_tools does not rebind an existing name" `Quick
+            test_extend_tools_does_not_rebind_an_existing_name
+        ; test_case "extend_tools with nothing changes nothing" `Quick
+            test_extend_tools_with_nothing_changes_nothing
         ; test_case "version info" `Quick test_version_info
         ] )
     ; ( "builder"

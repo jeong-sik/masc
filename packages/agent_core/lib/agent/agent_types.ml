@@ -143,7 +143,11 @@ type t =
   { mu : Eio.Mutex.t
   ; mutable state : agent_state
   ; mutable lifecycle : lifecycle_snapshot option
-  ; tools : Tool_set.t
+  ; mutable tools : Tool_set.t
+      (** Widened during a turn by {!extend_tools} and never narrowed. A
+          deferred tool surface hands the model an index and supplies the
+          schema when it is asked for, so the set this agent can call is not
+          known when the turn starts. *)
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; context : Context.t
   ; options : options
@@ -173,6 +177,37 @@ let set_state t s = Eio.Mutex.use_rw ~protect:true t.mu (fun () -> t.state <- s)
     inside a single critical section so no concurrent update is lost. *)
 let update_state t f =
   Eio.Mutex.use_rw ~protect:true t.mu (fun () -> t.state <- f t.state)
+;;
+
+(** Widen the callable tool set, under the same mutex as [state].
+
+    Only widening is offered. A turn that removed a tool would leave any
+    [tool_use] the model had already emitted for it to be dropped by
+    [Agent_tools.admit_tool_use_names], which cuts the call out before history
+    and reports it only as a count — the model would see its call vanish
+    rather than fail. Widening has no such edge: a name that was callable
+    stays callable.
+
+    A name the agent already holds is dropped rather than merged.
+    [Tool_set.merge] is last-occurrence-wins ([Tool_set.of_list]), so merging
+    it would rebind an existing name to a new closure in the middle of a turn
+    — the model would have called the old definition and been answered by the
+    new one. Filtering inside the critical section is what makes that
+    impossible rather than unlikely: [Tool_set.mem] is read against the same
+    set the write publishes. *)
+let extend_tools t added =
+  match added with
+  | [] -> ()
+  | _ :: _ ->
+    Eio.Mutex.use_rw ~protect:true t.mu (fun () ->
+      let fresh =
+        List.filter
+          (fun (tool : Tool.t) -> not (Tool_set.mem tool.schema.name t.tools))
+          added
+      in
+      match fresh with
+      | [] -> ()
+      | _ :: _ -> t.tools <- Tool_set.merge t.tools (Tool_set.of_list fresh))
 ;;
 
 let description t = t.options.description

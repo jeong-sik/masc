@@ -86,6 +86,18 @@ type t
 val state : t -> Types.agent_state
 val lifecycle : t -> lifecycle_snapshot option
 val tools : t -> Tool_set.t
+
+val extend_tools : t -> Tool.t list -> unit
+(** Widen the callable tool set mid-turn. A deferred tool surface hands the
+    model an index and supplies a schema only when it is asked for, so the set
+    the agent can call is not known when the turn starts.
+
+    Widening only. Removing a tool mid-turn would leave a [tool_use] the model
+    already emitted to be dropped by the admission index rather than answered,
+    and a name that was callable stays callable under widening. A name the
+    agent already holds is ignored, so a tool cannot be rebound to a different
+    closure while the turn that may have called it is still running. *)
+
 val context : t -> Context.t
 val options : t -> options
 val provider_config : t -> Llm_provider.Provider_config.t option

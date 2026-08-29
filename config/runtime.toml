@@ -57,8 +57,11 @@ default = "ollama_cloud.deepseek-v4-flash"
 # Set `enabled = false` in either table to keep the catalog example while
 # excluding it from the executable runtime inventory. A disabled runtime cannot
 # remain referenced by [runtime].default, lanes, assignments, or failover lists.
+# 2026-08-29: the deployed exact-output catalog retired the
+# deepseek.deepseek-v4-pro target (live boot ERROR "retired target ref(s)
+# ignored"); the live lanes run glm + kimi since the 2026-08-28 swap.
 [runtime.exact_output_lanes.librarian_exact]
-slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
+slots = ["glm-coding.glm-5-turbo", "kimi_coding.kimi-for-coding"]
 
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
@@ -68,9 +71,11 @@ slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 
 # Verifier/completion-authority judgement lane (RFC-0361 D7(a)). Judgement
 # calls resolve only this lane and fail over in declared slot order, the same
-# frozen-order contract as the other exact-output lanes.
+# frozen-order contract as the other exact-output lanes. Same 2026-08-29
+# retirement as librarian_exact: deepseek.deepseek-v4-pro left the deployed
+# exact-output catalog, so the seed mirrors the live glm + kimi slots.
 [runtime.exact_output_lanes.verifier_exact]
-slots = ["deepseek.deepseek-v4-pro", "glm-coding.glm-5-turbo"]
+slots = ["glm-coding.glm-5-turbo", "kimi_coding.kimi-for-coding"]
 
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
 # docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).
@@ -159,6 +164,15 @@ path = "/models"
 [providers.glm-coding.credentials]
 type = "env"
 key = "ZAI_API_KEY_SB"
+
+[providers.kimi_coding]
+display-name = "Kimi For Coding Subscription"
+protocol = "openai-compatible-http"
+endpoint = "https://api.kimi.com/coding/v1"
+
+[providers.kimi_coding.credentials]
+type = "env"
+key = "KIMI_API_KEY"
 
 [providers.ollama]
 display-name = "Local Ollama"
@@ -382,6 +396,33 @@ supports-structured-output = false
 # So this is not "524288 is the right size". It is: one value fails on
 # ordinary history, the other fails only on an envelope overshoot the retry
 # path now absorbs.
+max-request-body-bytes = 524288
+
+# Kimi For Coding — second slot of the exact-output judgement lanes since the
+# 2026-08-28 swap (json_schema+strict probed live; quota independent of
+# ollama.com).
+[models.kimi-for-coding]
+api-name = "kimi-for-coding"
+max-context = 262144
+max-prompt-bytes = 262144
+tools-support = true
+streaming = true
+# Runtime_inference.resolve_temperature's own comment records that
+# kimi-for-coding rejects any value other than 1.0 at request time ("only 1 is
+# allowed for this model"). Leaving it unset sends the fleet default and every
+# turn fails on that rejection.
+temperature = 1.0
+
+[models.kimi-for-coding.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+supports-structured-output = true
+supports-response-format-json = true
+
+[kimi_coding.kimi-for-coding]
+# 128K-window anchor rule used across this file: max-context 262144 → 524288.
+# Larger than the model max-prompt-bytes (262144) because the body also
+# carries the tool schemas and JSON overhead.
 max-request-body-bytes = 524288
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding retained for explicit

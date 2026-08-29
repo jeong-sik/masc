@@ -354,6 +354,30 @@ reasoning_streaming_format = "delta:reasoning_content"
 # Mirror repair (task-838): exact-only copy of the glm-coding row above.
 reasoning_replay = "latest_user_turn_tool_calls"
 
+# Kimi For Coding — exact-output judgement slot since the 2026-08-28 swap
+# (replacing the retired deepseek.deepseek-v4-pro target; the deployed
+# overlay dropped that target row and the seed follows).
+[[providers]]
+id = "kimi_coding"
+kind = "openai_compat"
+base_url = "https://api.kimi.com/coding/v1"
+request_path = "/chat/completions"
+api_key_env = "KIMI_API_KEY"
+capabilities_base = "openai_chat_extended"
+
+[[models]]
+id_prefix = "kimi-for-coding"
+provider_name = "kimi_coding"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+
 # Opaque exact-output slot bindings. MASC routes only by [id]; AGENT_CORE owns the
 # provider/model join, capability admission, and wire materialization.
 [[targets]]
@@ -367,6 +391,6 @@ provider_ref = "glm-coding-sb-exact"
 model_id = "glm-4.7"
 
 [[targets]]
-id = "deepseek.deepseek-v4-pro"
-provider_ref = "deepseek"
-model_id = "deepseek-v4-pro"
+id = "kimi_coding.kimi-for-coding"
+provider_ref = "kimi_coding"
+model_id = "kimi-for-coding"

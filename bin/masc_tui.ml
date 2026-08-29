@@ -1348,6 +1348,7 @@ type async_msg =
   | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
   | Skills_catalog_loaded of (Masc.Tui_decode.skills_catalog, string) result
   | Tools_async_observation_loaded of (Yojson.Safe.t, string) result
+  | Runtime_lane_slots_written of (unit, string) result
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_assignment list,
@@ -3956,6 +3957,67 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
         (Keeper_chat_interrupt_done (request, Error "Eio switch is unavailable"))
 
 (* Fetch the runtime catalogue and assignments for the picker. *)
+(* Append one runtime to a lane's candidate order. Appending rather than
+   replacing is the whole point: a lane whose two slots share a provider has
+   no failover when that provider is down, and the fix is one more candidate
+   from somewhere else, not a different single one. The server previews the
+   resulting runtime.toml and refuses an unknown id, so this sends and reads
+   the verdict rather than validating here. *)
+(* The picker's list, ordered so the candidate a lane actually needs is at
+   the top. Computed in both the key handler and the renderer from the same
+   snapshot rather than stored: a cached order and a re-read snapshot drift,
+   and the cursor would then point at a different runtime than the one drawn. *)
+let runtime_lane_picker_rows (state : state) =
+  match state.runtime_lane_pick, state.runtime_surface with
+  | Some lane, Some snapshot ->
+      let open Masc.Tui_decode in
+      let already =
+        snapshot.rss_resolved.rrs_lanes
+        |> List.find_opt (fun (l : runtime_resolved_lane) ->
+             String.equal l.rrl_id lane)
+        |> function Some l -> l.rrl_runtime_ids | None -> []
+      in
+      let lane_providers =
+        already
+        |> List.filter_map (fun id ->
+             List.find_opt
+               (fun (r : runtime_option) -> String.equal r.ro_id id)
+               state.runtime_catalog
+             |> Option.map (fun (r : runtime_option) -> r.ro_provider))
+      in
+      ( already
+      , Masc_tui_types.runtimes_for_lane_picker ~lane_providers ~already
+          state.runtime_catalog )
+  | _ -> [], []
+;;
+
+let launch_runtime_lane_append state ~mailbox ~lane ~runtime_id ~existing =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      if List.exists (String.equal runtime_id) existing then
+        Error (runtime_id ^ " is already a candidate on " ^ lane)
+      else
+        try
+          Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
+            ~runtime_ids:(existing @ [ runtime_id ])
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Runtime_lane_slots_written result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Runtime_lane_slots_written (Error "Eio switch is unavailable"))
+;;
+
 let launch_runtime_catalog_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -7818,6 +7880,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.tools_async_observation <- Some observation;
           state.tools_async_observation_error <- None
       | Error detail -> state.tools_async_observation_error <- Some detail)
+  | Runtime_lane_slots_written result ->
+      (match result with
+       | Ok () ->
+           (* The lane order now differs from what this surface drew, and the
+              server is the one that just changed it. Re-read rather than
+              patching the local snapshot: a hand-applied edit and a rejected
+              write look the same on screen. *)
+           state.runtime_lane_error <- None;
+           state.runtime_lane_pick <- None;
+           state.runtime_lane_pick_cursor <- 0;
+           launch_runtime_surface_load state ~mailbox ~force:true
+       | Error detail -> state.runtime_lane_error <- Some detail)
   | Runtime_catalog_loaded result -> (
       match result with
       | Ok (runtimes, assignments) ->
@@ -10361,6 +10435,51 @@ and is loaded on demand through keeper_skill.
                       || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                  set (current ^ s)
                | _ -> ()))
+       | Some "j" | Some "k" | Some "e" | Some "E" | Some "\r"
+         when state.view = Runtime && Option.is_some state.runtime_lane_pick ->
+           (* The picker is open: j/k move it, Enter appends, e closes. *)
+           let already, catalog = runtime_lane_picker_rows state in
+           let count = List.length catalog in
+           (match key with
+            | Some "j" when state.runtime_lane_pick_cursor < count - 1 ->
+                state.runtime_lane_pick_cursor <- state.runtime_lane_pick_cursor + 1
+            | Some "k" when state.runtime_lane_pick_cursor > 0 ->
+                state.runtime_lane_pick_cursor <- state.runtime_lane_pick_cursor - 1
+            | Some "\r" ->
+                (match
+                   ( state.runtime_lane_pick
+                   , List.nth_opt catalog state.runtime_lane_pick_cursor )
+                 with
+                 | Some lane, Some runtime ->
+                     launch_runtime_lane_append state ~mailbox:async_messages
+                       ~lane ~runtime_id:runtime.Masc.Tui_decode.ro_id
+                       ~existing:already
+                 | _ -> ())
+            | Some "e" | Some "E" ->
+                state.runtime_lane_pick <- None;
+                state.runtime_lane_pick_cursor <- 0
+            | _ -> ())
+       | Some "e" | Some "E"
+         when state.view = Runtime
+              && state.runtime_mode = Masc_tui_types.Runtime_lanes ->
+           (* Add a failover candidate to the lane under the cursor. The
+              catalogue is fetched on open so the list is the server's now. *)
+           (* The lane under the row cursor. Rows are lane-by-candidate, so
+              two rows can name one lane; either selects it. *)
+           (match state.runtime_surface with
+            | None -> ()
+            | Some snapshot ->
+                (match
+                   List.nth_opt snapshot.Masc.Tui_decode.rss_candidates
+                     state.runtime_cursor
+                 with
+                 | None -> ()
+                 | Some row ->
+                     state.runtime_lane_pick <-
+                       Some row.Masc.Tui_decode.rcr_lane_id;
+                     state.runtime_lane_pick_cursor <- 0;
+                     state.runtime_lane_error <- None;
+                     launch_runtime_catalog_load state ~mailbox:async_messages))
        | Some "T"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_identity

@@ -348,6 +348,33 @@ type pane_focus =
     "what can this workspace call at all", which the lane view cannot: a
     runtime no lane names is absent from it entirely, and the roster is where
     an operator finds one to assign. Same snapshot, two questions. *)
+(* The order a failover picker should offer runtimes in. What the lane needs
+   is a candidate that fails independently of the ones it already has, so a
+   different provider outranks a faster model from the same one: two slots on
+   one provider go down together, which is the state this picker exists to
+   fix. Blocked runtimes sink rather than disappear — a blocked id is a fact
+   about the workspace an operator may be looking for, and hiding it answers
+   "why is it not in the list" with silence. *)
+let rank_runtime_for_lane ~(lane_providers : string list)
+      ~(already : string list) (runtime : Tui_decode.runtime_option) =
+  let open Tui_decode in
+  ( (if List.exists (String.equal runtime.ro_id) already then 1 else 0)
+  , (if not runtime.ro_dispatchable then 1 else 0)
+  , (if List.exists (String.equal runtime.ro_provider) lane_providers then 1
+     else 0)
+  , runtime.ro_id )
+;;
+
+let runtimes_for_lane_picker ~(lane_providers : string list)
+      ~(already : string list) (catalog : Tui_decode.runtime_option list) =
+  List.stable_sort
+    (fun a b ->
+       compare
+         (rank_runtime_for_lane ~lane_providers ~already a)
+         (rank_runtime_for_lane ~lane_providers ~already b))
+    catalog
+;;
+
 type runtime_mode =
   | Runtime_lanes
   | Runtime_all
@@ -1710,6 +1737,12 @@ type state = {
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
   mutable runtime_surface_error: string option;
   mutable runtime_surface_scroll: int;
+  (* The lane a fallback is being added to, and where the picker sits in the
+     runtime catalogue. Both are cleared when the picker closes: a cursor kept
+     across visits opens the list part-way down for no reason the reader gave. *)
+  mutable runtime_lane_pick: string option;
+  mutable runtime_lane_pick_cursor: int;
+  mutable runtime_lane_error: string option;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
@@ -2316,6 +2349,9 @@ let create_state
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;
+  runtime_lane_pick = None;
+  runtime_lane_pick_cursor = 0;
+  runtime_lane_error = None;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
@@ -2889,9 +2925,15 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
   | Runtime ->
       Some
         { sc_count =
-            (match state.runtime_surface with
-             | None -> 0
-             | Some s -> List.length s.Tui_decode.rss_candidates)
+            (* The two views draw different lists, and the scroll bound is the
+               list being drawn. Reading candidates in both stopped the roster
+               at the slot count and left the runtimes past it unreachable. *)
+            (match state.runtime_surface, state.runtime_mode with
+             | None, _ -> 0
+             | Some s, Runtime_lanes ->
+                 List.length s.Tui_decode.rss_candidates
+             | Some s, Runtime_all ->
+                 List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
         ; sc_chrome = runtime_listing_chrome ~error:state.runtime_surface_error
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = None

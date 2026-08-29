@@ -1,8 +1,0 @@
-(tests
- (name focused_workspace_boundary_tests)
- (modules test_workspace_task_lifecycle)
- (package masc)
- (libraries
-  masc.masc_domain
-  masc.workspace
-  unix))

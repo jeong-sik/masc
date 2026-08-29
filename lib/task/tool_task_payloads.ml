@@ -37,8 +37,6 @@ let build_claim_observation_payload ~(now : float) ~(agent_name : string)
             ("scope_widened", `Bool scope_widened);
             ("claimed_by", `String agent_name);
             ("winner_actor_id", `String agent_name);
-            ("logical_clock", `Null);
-            ("convergence_delay_ms", `Null);
           ] );
     ]
 

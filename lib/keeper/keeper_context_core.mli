@@ -104,31 +104,6 @@ val save_agent_core_checkpoint :
     checkpoint write boundary (Store_only); required so every write path is
     compiler-forced to name the runtime it persists for (N-of-M closure). *)
 
-val save_agent_core_checkpoint_classified :
-  runtime_id:string ->
-  keeper_name:string ->
-  session:session_context ->
-  agent_name:string ->
-  ctx:working_context ->
-  ( Agent_core.Checkpoint.t * Keeper_checkpoint_store.save_agent_core_outcome
-  , string checkpoint_write_error )
-  result
-
-(** Build and conditionally publish the same canonical checkpoint payload as
-    {!save_agent_core_checkpoint_classified}, but only while the durable source still
-    has [expected_source_ref]. Equal-turn content changes are rejected by the
-    checkpoint store's exact byte-identity CAS. *)
-val save_agent_core_checkpoint_if_source :
-  runtime_id:string ->
-  keeper_name:string ->
-  session:session_context ->
-  agent_name:string ->
-  ctx:working_context ->
-  expected_source_ref:Keeper_checkpoint_ref.t ->
-  ( Agent_core.Checkpoint.t * Keeper_checkpoint_store.checkpoint_installation
-  , Keeper_checkpoint_store.checkpoint_cas_error checkpoint_write_error )
-  result
-
 module For_testing : sig
   val save_agent_core_checkpoint_if_source_with_history :
     save_agent_core_history:

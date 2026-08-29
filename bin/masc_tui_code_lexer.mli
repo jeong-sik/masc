@@ -28,7 +28,6 @@ val kind_diff_removed : string
 
 val ocaml_lexer : string -> segment list
 val bash_lexer : string -> segment list
-val json_lexer : string -> segment list
 val c_like_lexer : string -> segment list
 val python_lexer : string -> segment list
 

@@ -1,0 +1,17 @@
+name = "masc_agent_fitness"
+description = """
+Get fitness scores for agents based on completion rate, reliability, and \
+speed metrics."""
+additional_properties = false
+
+[[params]]
+name = "agent_name"
+type = "string"
+description = """
+Optional: Get fitness for specific agent. If omitted, returns all agents."""
+
+[[params]]
+name = "days"
+type = "integer"
+description = "Number of days to analyze (default: 7)"
+default = 7

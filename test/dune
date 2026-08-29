@@ -345,6 +345,7 @@
   test_run_tool_toml_parity
   test_local_runtime_tool_toml_parity
   test_base_tool_toml_parity
+  test_agent_tool_toml_parity
   test_schedule_tool_toml_parity
   test_surface_tool_toml_parity
   test_keeper_artifact_read_request
@@ -683,6 +684,7 @@
   test_run_tool_toml_parity
   test_local_runtime_tool_toml_parity
   test_base_tool_toml_parity
+  test_agent_tool_toml_parity
   test_schedule_tool_toml_parity
   test_surface_tool_toml_parity
   test_keeper_artifact_read_request

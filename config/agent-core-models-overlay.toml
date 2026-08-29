@@ -415,6 +415,24 @@ reasoning_streaming_format = "delta:reasoning_content"
 # Mirror repair (task-838): exact-only copy of the glm-coding row above.
 reasoning_replay = "latest_user_turn_tool_calls"
 
+# GLM-5.3 exact-only copy — primary judgement slot, mirroring the GLM-5-Turbo
+# and glm-4.7 copies above under the same exact provider credential.
+[[models]]
+id_prefix = "glm-5.3"
+provider_name = "glm-coding-sb-exact"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "latest_user_turn_tool_calls"
+
 # Kimi For Coding — exact-output judgement slot since the 2026-08-28 swap
 # (replacing the retired deepseek.deepseek-v4-pro target; the deployed
 # overlay dropped that target row and the seed follows).
@@ -441,6 +459,11 @@ supports_native_streaming = true
 
 # Opaque exact-output slot bindings. MASC routes only by [id]; AGENT_CORE owns the
 # provider/model join, capability admission, and wire materialization.
+[[targets]]
+id = "glm-coding.glm-5-3"
+provider_ref = "glm-coding-sb-exact"
+model_id = "glm-5.3"
+
 [[targets]]
 id = "glm-coding.glm-5-turbo"
 provider_ref = "glm-coding-sb-exact"

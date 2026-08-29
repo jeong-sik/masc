@@ -1387,6 +1387,7 @@
   test_planning_eio
   test_safe_ops
   test_json_util
+  test_webmcp_bridge
   test_process_eio_coverage
   test_with_process_coverage
   test_process_eio_detached
@@ -1528,6 +1529,7 @@
   test_planning_eio
   test_safe_ops
   test_json_util
+  test_webmcp_bridge
   test_process_eio_coverage
   test_with_process_coverage
   test_process_eio_detached
@@ -1630,6 +1632,7 @@
   test_board_core_payload)
  (libraries
  masc_test_deps
+  masc.masc_webmcp
   masc_test_runtime
   masc.embedded_config
   masc.skill_config

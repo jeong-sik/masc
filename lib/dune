@@ -29,6 +29,8 @@
   masc.build_commit
   mirage-crypto
   mirage-crypto-ec
+  mirage-crypto-pk
+  x509
   mirage-crypto-rng
   mirage-crypto-rng.unix
   cstruct

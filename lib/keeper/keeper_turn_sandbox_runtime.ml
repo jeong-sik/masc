@@ -1179,6 +1179,22 @@ let stop_container_for_github_identity_refresh ?timeout_sec t =
 ;;
 
 let prepare_github_identity_secret_files ?timeout_sec t =
+  (* App-identity keepers get a fresh installation token before any lane
+     consumes their hosts file; shared-identity keepers pass through
+     untouched (RFC keeper-github-apps). A stale token whose mint fails is
+     an error — projecting a credential known to be expired is worse. *)
+  match
+    Keeper_github_app_broker.ensure_fresh
+      ~now:(Time_compat.now ())
+      ~http_post:Keeper_github_app_broker.default_http_post
+      ~config:t.config
+      ~keeper_name:t.meta.name
+  with
+  | Error err -> Error ("github_app_token_refresh_failed: " ^ err)
+  | Ok
+      ( Keeper_github_app_broker.No_app_identity
+      | Keeper_github_app_broker.Fresh _
+      | Keeper_github_app_broker.Refreshed _ ) ->
   if is_microvm t
   then (
     ignore (bind_registered_microvm_identity t (keeper_vm_name t));

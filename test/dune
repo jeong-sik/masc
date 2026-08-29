@@ -3478,6 +3478,7 @@
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_replay.inc)
 (include stanzas/test_keeper_gate_readonly.inc)
+(include stanzas/test_keeper_github_app_broker.inc)
 (include stanzas/test_keeper_hitl_resolution_prompt.inc)
 (include stanzas/test_fs_compat_capability_write.inc)
 

@@ -297,7 +297,27 @@ let handle_tool_execute_typed
                        ~fields:extra_fields
                        "local_secret_projection_failed: projection returned no environment")
                 | Some env ->
+                  (* Host-lane twin of the guest-lane refresh in
+                     [Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files]:
+                     an App-identity keeper gets a fresh installation token
+                     before its hosts file is projected. *)
                   (match
+                     Keeper_github_app_broker.ensure_fresh
+                       ~now:(Time_compat.now ())
+                       ~http_post:Keeper_github_app_broker.default_http_post
+                       ~config
+                       ~keeper_name:meta.name
+                   with
+                   | Error err ->
+                     Error
+                       (Keeper_sandbox_shell_ir_target.target_error
+                          ~fields:extra_fields
+                          ("github_app_token_refresh_failed: " ^ err))
+                   | Ok
+                       ( Keeper_github_app_broker.No_app_identity
+                       | Keeper_github_app_broker.Fresh _
+                       | Keeper_github_app_broker.Refreshed _ ) ->
+                  match
                      Keeper_github_identity.runtime_env_for_tool
                        ~config
                        ~keeper_name:meta.name

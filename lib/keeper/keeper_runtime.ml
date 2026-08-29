@@ -479,6 +479,29 @@ let materialized_reload_boot_error ~name ~toml_path (err : boot_meta_error) =
        "materialized declarative keeper %s from %s but failed to reload meta: %s"
        name toml_path err.message)
 
+(* #29610 reads a meta this binary cannot decode as absent and leaves the
+   file in place for the operator — but this boot path then persists a fresh
+   meta over that same file, which is how the 2026-08-29 schema cut zeroed
+   nine keepers' counters with no copy left. Before re-materialising, move
+   the unreadable file aside; parking failure never blocks recovery. *)
+let park_unreadable_meta_before_rematerialization config name =
+  let path = Keeper_types_profile.keeper_meta_path config name in
+  if Fs_compat.file_exists path
+  then (
+    let parked = Printf.sprintf "%s.rejected-%d" path (int_of_float (Unix.time ())) in
+    match Sys.rename path parked with
+    | () ->
+      Log.Keeper.warn
+        "parked unreadable keeper meta %s -> %s (counters preserved for operator recovery)"
+        path
+        parked
+    | exception e ->
+      Log.Keeper.warn
+        "could not park unreadable keeper meta %s before re-materialization: %s"
+        path
+        (Printexc.to_string e))
+;;
+
 let load_or_materialize_boot_meta (ctx : _ context) name
     : (boot_meta_resolution, string) result =
   let result =
@@ -491,6 +514,7 @@ let load_or_materialize_boot_meta (ctx : _ context) name
             Log.Keeper.info
               "bootstrapping declarative keeper %s from %s"
               name toml_path;
+            park_unreadable_meta_before_rematerialization ctx.config name;
             match declarative_materialization_defaults ctx.config name with
             | Error err -> Error err
             | Ok defaults ->

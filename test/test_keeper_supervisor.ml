@@ -548,9 +548,10 @@ let test_declarative_boot_allows_empty_goal_links () =
 
 (* #29610: a persisted meta this binary cannot decode reads as absent. The
    reader says so once at WARN, declarative startup proceeds as for a missing
-   meta, and the TOML declaration re-materialises the keeper: the unreadable
-   file is replaced by the materialized snapshot and the counters it carried
-   are gone. *)
+   meta, and the TOML declaration re-materialises the keeper. The unreadable
+   file is parked as a .rejected-* sibling before the materialized snapshot
+   takes its path: the counters leave service, but the only copy is no longer
+   destroyed (2026-08-29, nine keepers zeroed by a schema cut). *)
 let test_declarative_boot_rematerializes_incompatible_meta () =
   with_config_dir @@ fun config_dir ->
   Eio_main.run @@ fun env ->
@@ -633,11 +634,42 @@ let test_declarative_boot_rematerializes_incompatible_meta () =
       in
       check int "the loss is named once, in the reader's WARN" 1
         (count_exact Log.Warn expected_warn);
-      check int "the reader logs the recovery once the file is readable again" 1
+      (* Parking empties the path before keeper_up rewrites it, so the
+         reader's problem record clears on the not-exists branch and no
+         "parse recovered" INFO follows; the parking WARN is the line that
+         closes the episode. *)
+      let count_prefix level prefix =
+        keeper_entries
+        |> List.filter (fun (entry : Log.Ring.entry) ->
+             entry.level = level
+             && String.starts_with ~prefix entry.message)
+        |> List.length
+      in
+      check int "the parking WARN closes the episode once" 1
+        (count_prefix Log.Warn
+           (Printf.sprintf "parked unreadable keeper meta %s" meta_path));
+      check int "no parse-recovered INFO remains for the emptied path" 0
         (count_exact Log.Info
            (Printf.sprintf "keeper meta parse recovered for %s" meta_path));
       check bool "the materialized snapshot replaces the unreadable file" false
         (String.equal bytes_before (Fs_compat.load_file meta_path));
+      let parked =
+        Sys.readdir (Filename.dirname meta_path)
+        |> Array.to_list
+        |> List.filter (fun f ->
+             String.starts_with
+               ~prefix:(Filename.basename meta_path ^ ".rejected-")
+               f)
+      in
+      check int "the unreadable file is parked exactly once" 1
+        (List.length parked);
+      (match parked with
+       | [ parked_name ] ->
+         check string "the parked file preserves the unreadable bytes"
+           bytes_before
+           (Fs_compat.load_file
+              (Filename.concat (Filename.dirname meta_path) parked_name))
+       | _ -> ());
       (match Keeper_meta_store.read_meta config name with
        | Ok (Some persisted) ->
          let trace_id = Keeper_id.Trace_id.to_string persisted.runtime.trace_id in

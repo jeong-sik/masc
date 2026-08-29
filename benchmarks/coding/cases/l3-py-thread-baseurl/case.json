@@ -1,0 +1,9 @@
+{
+  "id": "l3-py-thread-baseurl",
+  "level": "L3",
+  "lang": "python",
+  "timeout_sec": 1200,
+  "verify": "verify.sh",
+  "prompt": "check.sh fails because endpoint(path) in client.py returns the path unchanged, and base_url() in settings.py is unimplemented. Thread the base URL through: implement settings.base_url() to return \"https://api.example.com\", and make client.endpoint(path) prefix it. Both files must change. Do not modify check.sh. Reply DONE once `bash check.sh` prints PASS.",
+  "description": "Cross-file: implement settings.base_url() and make client.endpoint() use it."
+}

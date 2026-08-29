@@ -1,0 +1,9 @@
+{
+  "id": "l1-py-clamp",
+  "level": "L1",
+  "lang": "python",
+  "timeout_sec": 600,
+  "verify": "verify.sh",
+  "prompt": "check.sh fails because clamp.py's clamp(x, lo, hi) is not implemented. Implement it so the check passes: return x bounded to the inclusive [lo, hi] range. Do not modify check.sh. Reply DONE once `bash check.sh` prints PASS.",
+  "description": "Small feature: implement clamp(x, lo, hi) in clamp.py."
+}

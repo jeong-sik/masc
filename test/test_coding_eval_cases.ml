@@ -319,6 +319,26 @@ let test_regression_failure_gates_passed () =
   | Error message -> Alcotest.failf "consistent regression row should decode: %s" message
 ;;
 
+let test_regressed_bucket () =
+  match
+    Coding_eval_report.row_of_json
+      (row_json
+         ~run_index:1
+         ~status:"ok"
+         ~verify_exit:(Some 0)
+         ~regression_exit:(Some 1)
+         ~passed:false
+         ())
+  with
+  | Error message -> Alcotest.failf "row should decode: %s" message
+  | Ok row ->
+    check
+      bool
+      "green verify + red regression buckets as Regressed"
+      true
+      (Coding_eval_report.bucket_of_row row = Coding_eval_report.Regressed)
+;;
+
 let () =
   run
     "coding_eval_cases"
@@ -359,6 +379,7 @@ let () =
             "regression failure gates passed"
             `Quick
             test_regression_failure_gates_passed
+        ; test_case "regressed bucket" `Quick test_regressed_bucket
         ] )
     ]
 ;;

@@ -280,37 +280,53 @@ let eval_run_of_row (row : row) : Eval_harness.eval_run =
   }
 ;;
 
-(* Coarse outcome buckets for the v0 report. The RFC-0396 D5 taxonomy
-   (edit_miss / wrong_file / ...) needs trajectory analysis and lands with W3;
-   these buckets only restate what a row already says, so the report cannot
-   claim more than the evidence carries. *)
+(* Failure taxonomy for the report. Every typed run signal maps to its own
+   bucket, and the bucket names follow the RFC-0396 D5 vocabulary where the
+   evidence supports it: a wall-clock timeout is [Budget_exceeded], a provider
+   refusal is [Provider_error]. [Regressed] uses the PASS_TO_PASS signal -- the
+   target verify went green but a declared regression broke. The remaining D5
+   buckets (edit_miss / wrong_file / build_fail / gave_up) need trajectory
+   analysis to attribute and stay folded into [Verify_red]; the report never
+   guesses them from status or tool-name strings, so it never claims more than
+   the row carries. *)
 type bucket =
   | Verify_green
   | Verify_red
-  | Bucket_timeout
-  | Bucket_provider_error
-  | Bucket_transport_error
+  | Regressed
+  | Budget_exceeded
+  | Provider_error
+  | Transport_error
 
 let bucket_to_string = function
   | Verify_green -> "verify_green"
   | Verify_red -> "verify_red"
-  | Bucket_timeout -> "timeout"
-  | Bucket_provider_error -> "provider_error"
-  | Bucket_transport_error -> "transport_error"
+  | Regressed -> "regressed"
+  | Budget_exceeded -> "budget_exceeded"
+  | Provider_error -> "provider_error"
+  | Transport_error -> "transport_error"
 ;;
 
 let all_buckets =
-  [ Verify_green; Verify_red; Bucket_timeout; Bucket_provider_error
-  ; Bucket_transport_error
+  [ Verify_green; Verify_red; Regressed; Budget_exceeded; Provider_error
+  ; Transport_error
   ]
 ;;
 
 let bucket_of_row (row : row) =
   match row.status with
-  | Run_ok -> if row.passed then Verify_green else Verify_red
-  | Run_timeout -> Bucket_timeout
-  | Run_provider_error -> Bucket_provider_error
-  | Run_transport_error -> Bucket_transport_error
+  | Run_ok ->
+    if row.passed
+    then Verify_green
+    else (
+      match row.verify_exit, row.regression_exit with
+      (* verify went green but the PASS_TO_PASS regression broke: a distinct,
+         typed failure the taxonomy names on its own rather than lumping with a
+         plain wrong-output run. *)
+      | Some 0, Some code when code <> 0 -> Regressed
+      | _ -> Verify_red)
+  | Run_timeout -> Budget_exceeded
+  | Run_provider_error -> Provider_error
+  | Run_transport_error -> Transport_error
 ;;
 
 type suite_report = {

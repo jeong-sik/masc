@@ -762,9 +762,18 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "runtime_contract keeper"
       (Some "k")
       (Safe_ops.json_string_opt "keeper_name" runtime_contract);
-    Alcotest.(check (option string)) "runtime_contract agent"
+    (* Top level, not inside runtime_contract: that is where the readers look.
+       The dashboard's turn-actor resolver takes entry.agent_name first and
+       never descends into the contract, and no producer has ever put the name
+       there. Asserting the contract slot pinned a field nothing wrote and
+       nothing read. *)
+    Alcotest.(check (option string)) "agent_name field"
       (Some "keeper-k-agent")
-      (Safe_ops.json_string_opt "agent_name" runtime_contract);
+      (Safe_ops.json_string_opt "agent_name" entry);
+    Alcotest.(check bool) "agent_name is not duplicated into runtime_contract" true
+      (match Yojson.Safe.Util.member "agent_name" runtime_contract with
+       | `Null -> true
+       | _ -> false);
     Alcotest.(check (list string)) "runtime_contract allowed_paths"
       ["/tmp/k-sandbox"; "/tmp/shared"]
       Yojson.Safe.Util.(

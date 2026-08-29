@@ -100,7 +100,6 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
 const STAGE_LABELS: Record<string, StageMeta> = {
   idle: { key: 'idle', label: '활동 없음', description: '지금 진행 중인 세부 활동 단계 없음' },
   compacting: { key: 'compacting', label: '압축', description: '컨텍스트 압축 단계를 수행 중입니다.' },
-  handoff: { key: 'handoff', label: '승계', description: '같은 keeper를 새 trace와 새 세대로 이어붙이는 중입니다.' },
   offline: { key: 'offline', label: '오프라인', description: '활동 정보를 확인하지 못했습니다.' },
   failing: { key: 'failing', label: '오류', description: '세부 파이프라인 단계에서 오류를 감지했습니다.' },
   draining: { key: 'draining', label: '종료', description: '활동 종료를 위해 파이프라인을 비우는 중입니다.' },

@@ -20,7 +20,7 @@ interface UnifiedStatusResult {
    *  `statusBadgeTone` (`components/common/status-badge.ts`), whose switch
    *  was written for task states: it answers `warn` for `running`, `ok`
    *  for `active`, and falls to `neutral` for `crashed` / `dead` /
-   *  `compacting` / `handoff` / `draining` / `restarting` /
+   *  `compacting` / `draining` / `restarting` /
    *  `unbooted`. A crashed keeper therefore rendered grey there and red on
    *  the fleet panel.
    *
@@ -34,7 +34,7 @@ interface UnifiedStatusResult {
  *  `statusLabel` is the generic status vocabulary (tasks, connectors,
  *  fusion runs). Where the two keyspaces overlap they
  *  disagree — `compacting` is `컴팩팅` there and `압축 중` in the keeper
- *  SSOT, `handoff` is `핸드오프` vs `인계 중`, `running` is `진행 중` vs
+ *  SSOT, `running` is `진행 중` vs
  *  `실행 중` — so the agent detail header used to disagree with the
  *  keepers page about the same keeper. */
 function unifiedLabel(primary: string, token: KeeperPhaseToken | null): string {
@@ -113,12 +113,12 @@ export function resolveUnifiedStatus(
     }
   }
 
-  // Compacting / handoff — transitional
-  if (primary === 'compacting' || primary === 'handoff') {
+  // Compacting — transitional
+  if (primary === 'compacting') {
     return {
       canonical: primary,
       label: unifiedLabel(primary, token),
-      description: primary === 'compacting' ? '컨텍스트 압축 중' : '핸드오프 진행 중',
+      description: '컨텍스트 압축 중',
       token,
     }
   }

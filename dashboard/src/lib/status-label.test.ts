@@ -38,7 +38,7 @@ describe('statusLabel', () => {
     expect(statusLabel('ended')).toBe('완료')
   })
   it('maps compacting', () => { expect(statusLabel('compacting')).toBe('컴팩팅') })
-  it('maps handoff', () => { expect(statusLabel('handoff')).toBe('핸드오프') })
+  it('maps task-lineage handoff', () => { expect(statusLabel('handoff')).toBe('핸드오프') })
   it('returns 확인 필요 for unknown/empty', () => {
     expect(statusLabel('unknown')).toBe('확인 필요')
     expect(statusLabel('')).toBe('확인 필요')

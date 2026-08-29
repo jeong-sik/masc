@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
 import { ApiRequestError } from '../api/core'
 import {
-  AUTONOMOUS_WAKE_PROMPT_MAX_BYTES,
   buildRuntimePayload,
   configDurabilityWarningMessage,
   coerceNetworkMode,
@@ -19,7 +18,6 @@ import {
   keeperConfigFailureRequiresAuthoritativeReload,
   keeperRuntimeConfigCanWrite,
   keeperRuntimeConfigWriteUnsupportedReason,
-  parseAutonomousWakePromptDraft,
   parseMaxContextOverrideDraft,
   type HookSlotEntry,
   type RuntimeDraft,
@@ -83,7 +81,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     },
     autoboot_enabled: true,
     max_context_override: null,
-    autonomous_wake_prompt: null,
     sandbox_profile: 'local',
     network_mode: 'inherit',
     keeper_last_error: null,
@@ -461,7 +458,6 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     },
     autoboot_enabled: true,
     max_context_override: null,
-    autonomous_wake_prompt: null,
     sandbox_profile: 'local',
     network_mode: 'inherit',
     sandbox_roots: [],
@@ -558,7 +554,6 @@ describe('rebaseRuntimeDraftOnFreshConfig — conflict rebase', () => {
       mention_targets: ['old-target'],
       bound_workspace_ids: [],
     },
-    autonomous_wake_prompt: null,
   })
   const fresh = makeKeeperConfigForSandbox({
     // The other writer changed this field; the user never touched it.
@@ -566,17 +561,16 @@ describe('rebaseRuntimeDraftOnFreshConfig — conflict rebase', () => {
       mention_targets: ['remote-writer-change'],
       bound_workspace_ids: [],
     },
-    autonomous_wake_prompt: 'remote prompt',
   })
 
   it('keeps the user-edited field and adopts remote changes on untouched fields', () => {
     const draft = {
       ...initRuntimeDraftFromConfig(seen),
-      // The user edited only the wake prompt.
-      autonomous_wake_prompt: 'user prompt',
+      // The user edited only the runtime id.
+      runtime_id: 'user-runtime',
     }
     const rebased = rebaseRuntimeDraftOnFreshConfig(draft, seen, fresh)
-    expect(rebased.autonomous_wake_prompt).toBe('user prompt')
+    expect(rebased.runtime_id).toBe('user-runtime')
     // NOT the stale base value: the untouched field follows the fresh config,
     // so a re-save cannot silently revert the other writer's change.
     expect(rebased.mention_targets_text).toBe('remote-writer-change')
@@ -744,51 +738,6 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       skill_selection: { mode: 'all', prior_names_text: 'ocaml-coding' },
     }), selected).skills).toEqual({})
     expect(buildRuntimePayload(draftFrom(selected), selected).skills).toBeUndefined()
-  })
-})
-
-describe('autonomous wake prompt draft', () => {
-  function draftFrom(config: KeeperConfig, overrides: Partial<RuntimeDraft> = {}): RuntimeDraft {
-    return { ...initRuntimeDraftFromConfig(config), ...overrides }
-  }
-
-  it('treats a blank draft as inherit (null) and trims whitespace', () => {
-    expect(parseAutonomousWakePromptDraft('')).toEqual({ ok: true, value: null })
-    expect(parseAutonomousWakePromptDraft('   \n ')).toEqual({ ok: true, value: null })
-    expect(parseAutonomousWakePromptDraft('  진행 상황 요약부터.  '))
-      .toEqual({ ok: true, value: '진행 상황 요약부터.' })
-  })
-
-  it('rejects a draft over the byte bound (bytes, not code points)', () => {
-    const atBound = 'a'.repeat(AUTONOMOUS_WAKE_PROMPT_MAX_BYTES)
-    expect(parseAutonomousWakePromptDraft(atBound)).toEqual({ ok: true, value: atBound })
-    expect(parseAutonomousWakePromptDraft(atBound + 'b')).toMatchObject({ ok: false })
-    // 한글 3B/char: 683 chars = 2049 bytes — over the bound while
-    // string length (683) stays far under it.
-    expect(parseAutonomousWakePromptDraft('가'.repeat(683))).toMatchObject({ ok: false })
-  })
-
-  it('omits the field when unchanged, sends the trimmed value when set', () => {
-    const c = makeKeeperConfigForSandbox({ autonomous_wake_prompt: null })
-    expect(buildRuntimePayload(draftFrom(c), c).autonomous_wake_prompt).toBeUndefined()
-    const payload = buildRuntimePayload(
-      draftFrom(c, { autonomous_wake_prompt: ' 백로그를 확인하고 하나 진행해. ' }),
-      c,
-    )
-    expect(payload.autonomous_wake_prompt).toBe('백로그를 확인하고 하나 진행해.')
-  })
-
-  it('sends null to clear an existing keeper override', () => {
-    const c = makeKeeperConfigForSandbox({ autonomous_wake_prompt: '기존 오버라이드' })
-    const payload = buildRuntimePayload(draftFrom(c, { autonomous_wake_prompt: '' }), c)
-    expect(payload.autonomous_wake_prompt).toBeNull()
-  })
-
-  it('round-trips the config value into the draft', () => {
-    const set = makeKeeperConfigForSandbox({ autonomous_wake_prompt: '오버라이드' })
-    expect(initRuntimeDraftFromConfig(set).autonomous_wake_prompt).toBe('오버라이드')
-    const unset = makeKeeperConfigForSandbox({ autonomous_wake_prompt: null })
-    expect(initRuntimeDraftFromConfig(unset).autonomous_wake_prompt).toBe('')
   })
 })
 

@@ -751,7 +751,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "schema": "masc.keeper_meta.v1",
         "name": name,
         "instructions": "",
-        "autonomous_instructions": None,
         "trace_id": f"trace-{name}",
         "trace_history": [],
         "created_at": "2026-08-22T00:00:00Z",

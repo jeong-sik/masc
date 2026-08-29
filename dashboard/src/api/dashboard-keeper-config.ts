@@ -344,7 +344,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       decodeConfigWarnings(data.config_transaction_warnings),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
     max_context_override: maxContextOverride,
-    autonomous_wake_prompt: asNullableString(data.autonomous_wake_prompt),
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     keeper_last_error: asNullableString(data.keeper_last_error),
@@ -443,8 +442,6 @@ export type KeeperConfigUpdatePayload = {
   mention_targets?: string[]
   autoboot_enabled?: boolean
   max_context_override?: number | null
-  // null clears the keeper override (falls back to fleet autonomous.wake_prompt)
-  autonomous_wake_prompt?: string | null
   // Sandbox
   sandbox_profile?: SandboxProfile
   network_mode?: SandboxNetworkMode

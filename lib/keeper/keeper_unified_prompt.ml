@@ -27,33 +27,11 @@ type turn_prompt_parts = {
    carries this cue and the assistant/tool suffix in normal conversation order;
    the fresh observation frame alone rides [world_state] and stays ephemeral.
 
-   This is the last resort, not the only value: see
-   [effective_autonomous_wake_prompt]. Nothing classifies a turn by matching
+   This is the last resort behind the fleet setting. Nothing classifies a
+   turn by matching
    this string -- autonomy is a typed property of the turn -- and nothing may
    start, because the operator can change it. *)
 let autonomous_wake_marker = Env_config_keeper.KeeperAutonomous.default_wake_prompt
-
-(* keeper profile, else fleet setting, else the literal above.
-
-   The two configured sources are deliberately different in kind. The fleet
-   value answers "how is a keeper woken here", the keeper value answers "what
-   is this keeper always being asked", and a keeper that states neither should
-   read the same as it did before this was configurable. Both are validated at
-   their own parse boundary, so an invalid value never reaches this point --
-   resolution stays total and cannot fail mid-prompt. *)
-let effective_autonomous_wake_prompt
-      ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
-      ()
-  =
-  (* DET-OK: total resolution over two known sources, then a literal. *)
-  let fleet_or_literal () = Env_config_keeper.KeeperAutonomous.wake_prompt () in
-  match profile_defaults with
-  | Some d ->
-    (match d.autonomous_wake_prompt with
-     | Some prompt -> prompt
-     | None -> fleet_or_literal ())
-  | None -> fleet_or_literal ()
-;;
 
 let format_pending_messages
       (messages : Keeper_world_observation_message_scope.pending_message list)
@@ -988,32 +966,16 @@ let autonomous_trigger_lines
                [ Printf.sprintf "- Reasons: %s" (String.concat ", " reasons) ]))
   | _ -> []
 
-let effective_autonomous_instructions
+let effective_instructions
     ~(meta : Keeper_meta_contract.keeper_meta)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
-    ?(channel : Keeper_world_observation.keeper_cycle_channel option)
     ()
   =
-  (* Total deterministic resolution between two known instruction sources
-     (profile default else meta), not a permissive unknown-input default;
-     pre-existing pattern, was the 4th tuple element before RFC-0282. *)
   (* DET-OK: total default between two known sources (RFC-0282). *)
-  let base =
-    match profile_defaults with
-    | Some d -> Option.value d.instructions ~default:meta.instructions
-    | None -> meta.instructions
-  in
-  (* Channel-aware substitution: when the turn is scheduled-autonomous and
-     the keeper has set autonomous_instructions, use that instead of the
-     default instructions. When absent or empty, fall back to [base]. *)
-  match channel with
-  | Some Keeper_world_observation.Scheduled_autonomous -> (
-      match meta.autonomous_instructions with
-      | Some s when String.trim s <> "" -> s
-      | _ -> base)
-  | _ -> base
+  match profile_defaults with
+  | Some d -> Option.value d.instructions ~default:meta.instructions
+  | None -> meta.instructions
 ;;
-
 (* Titles and phases for the Goals that are still open, read from the store
    under the same phase predicate the world observation uses. The phase rides
    along so the Active Goals block can annotate a [Verifying] goal (RFC-0387
@@ -1036,13 +998,10 @@ let active_goal_summaries_of_store ~(config : Workspace.config) =
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
-    ?(channel : Keeper_world_observation.keeper_cycle_channel option)
     ?(active_goal_summaries : goal_summary list option)
     ()
   =
-  let instructions =
-    effective_autonomous_instructions ~meta ?profile_defaults ?channel ()
-  in
+  let instructions = effective_instructions ~meta ?profile_defaults () in
   (* [Keeper_prompt.build_keeper_system_prompt] renders id+title only; the
      phase stays on the [goal_summary] for the Active Goals layer. *)
   let active_goals =
@@ -1122,7 +1081,6 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
       ~meta
       ~config
       ?profile_defaults
-      ?channel:(Option.map (fun (d : Keeper_world_observation.keeper_cycle_decision) -> d.channel) turn_decision)
       ?active_goal_summaries
       ()
   in
@@ -1550,7 +1508,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
      retrieve them; call a tool when you need to look something up or act.\n\n"
     ^ Keeper_context_layers.assemble ?budget_bytes:context_budget_bytes ~content_of ()
   in
-  let user_message = effective_autonomous_wake_prompt ?profile_defaults () in
+  let user_message = Env_config_keeper.KeeperAutonomous.wake_prompt () in
   { system_prompt; world_state; user_message }
 ;;
 

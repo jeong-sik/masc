@@ -8,7 +8,6 @@ type field =
   | Schema
   | Name
   | Instructions
-  | Autonomous_instructions
   | Trace_id
   | Trace_history
   | Last_handoff_ts

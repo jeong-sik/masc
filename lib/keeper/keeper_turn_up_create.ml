@@ -108,7 +108,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         id = None;
         name = p.name;
         instructions;
-        autonomous_instructions = None;
         sandbox_profile;
         sandbox_image = None;
         network_mode;

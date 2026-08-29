@@ -24,35 +24,22 @@ type turn_prompt_parts = {
           every turn. Inject as per-turn [dynamic_context]; never append
           to the persisted message history. *)
   user_message : string;
-      (** Current user-turn input. Operator utterances are durable. For an
-          autonomous continuation this is
-          {!effective_autonomous_wake_prompt}, which is also durable: each
-          cycle is an ordinary next user turn followed by its assistant/tool
-          suffix. HITL resolutions are appended by the turn driver. *)
+      (** Current user-turn input. Operator utterances are durable. An
+          autonomous continuation uses the fleet wake prompt, which is also
+          durable: each cycle is an ordinary next user turn followed by its
+          assistant/tool suffix. HITL resolutions are appended by the turn
+          driver. *)
 }
 
 val autonomous_wake_marker : string
-(** Last-resort input for an autonomous continuation, used when neither the
-    keeper nor the fleet configures one. It is appended to the same checkpoint
+(** Last-resort input for an autonomous continuation, used when the fleet
+    does not configure one. It is appended to the same checkpoint
     as the following assistant/tool suffix. The fresh observation frame lives
     separately in {!turn_prompt_parts.world_state} and is never persisted.
 
     Do not compare a turn's [user_message] against this to decide whether the
     turn was autonomous: operators can change the value, and that classifier
     would then be wrong for exactly the deployments that configured it. *)
-
-val effective_autonomous_wake_prompt :
-  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
-  unit ->
-  string
-(** Resolves the wake prompt: the keeper's [autonomous_wake_prompt], else the
-    fleet [autonomous.wake_prompt] / [MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT], else
-    {!autonomous_wake_marker}. Total -- both configured sources are validated
-    where they are parsed, so this cannot fail while a prompt is being built.
-
-    Changing either source affects turns taken after the change. Earlier turns
-    keep the wording they were woken with, because the checkpoint is history
-    rather than a view. *)
 
 val format_current_task :
   ?skill_surfaces:Keeper_skill_catalog.exact_surface list ->
@@ -77,15 +64,13 @@ val format_current_task_observation
     provenance, and handoff as an autonomous wake without persisting that
     context. Storage error text is not model-facing content. *)
 
-val effective_autonomous_instructions :
+val effective_instructions :
   meta:Keeper_meta_contract.keeper_meta ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
-  ?channel:Keeper_world_observation.keeper_cycle_channel ->
   unit ->
   string
-(** Resolve the instruction body for the current Keeper channel. Scheduled
-    autonomous turns may use [meta.autonomous_instructions]; every other
-    channel uses the profile or Keeper default. *)
+(** Resolve the instruction body: the profile default when the keeper TOML
+    states one, else the persisted keeper instructions. *)
 
 (** What the prompt knows about one active goal: id, title, and the stored
     phase. [summary_phase] is [None] only for an id the store cannot resolve
@@ -111,7 +96,6 @@ val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
-  ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?active_goal_summaries:goal_summary list ->
   unit ->
   string

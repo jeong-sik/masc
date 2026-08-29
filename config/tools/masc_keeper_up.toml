@@ -63,15 +63,6 @@ Optional: absolute context token limit override for this keeper. Use 0 to \
 clear the override."""
 
 [[params]]
-name = "autonomous_wake_prompt"
-type = "string"
-description = """
-Optional: user message this keeper's autonomous turns are woken with, \
-overriding the fleet autonomous.wake_prompt. Non-blank, at most 2048 bytes; \
-it is appended to the durable checkpoint every autonomous turn. Use null to \
-clear."""
-
-[[params]]
 name = "proactive_enabled"
 type = "boolean"
 description = """

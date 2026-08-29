@@ -325,7 +325,6 @@ export type RuntimeDraft = {
   network_mode: SandboxNetworkMode
   proactive_enabled: boolean
   // Keeper-level autonomous wake prompt; '' = inherit fleet (sent as null)
-  autonomous_wake_prompt: string
   skill_selection:
     | { mode: 'all'; prior_names_text: string }
     | { mode: 'names'; names_text: string }
@@ -400,28 +399,6 @@ function proactiveConfigHint(c: KeeperConfig): string {
     return '유휴 시 keeper 자가 기동 · config source evidence invalid'
   }
   return '유휴 시 keeper 자가 기동'
-}
-
-// Mirror of the server contract
-// (Env_config_keeper.KeeperAutonomous.max_wake_prompt_bytes): the value is
-// appended to the durable checkpoint on every autonomous turn.
-export const AUTONOMOUS_WAKE_PROMPT_MAX_BYTES = 2048
-
-export type AutonomousWakePromptDraftResult =
-  | { ok: true; value: string | null }
-  | { ok: false; error: string }
-
-export function parseAutonomousWakePromptDraft(raw: string): AutonomousWakePromptDraftResult {
-  const trimmed = raw.trim()
-  if (trimmed === '') return { ok: true, value: null }
-  const bytes = new TextEncoder().encode(trimmed).length
-  if (bytes > AUTONOMOUS_WAKE_PROMPT_MAX_BYTES) {
-    return {
-      ok: false,
-      error: `깨우기 프롬프트 ${bytes}B — 상한 ${AUTONOMOUS_WAKE_PROMPT_MAX_BYTES}B (매 자율 턴 히스토리에 누적)`,
-    }
-  }
-  return { ok: true, value: trimmed }
 }
 
 type KeeperRuntimeDraftState = {
@@ -520,7 +497,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     mention_targets_text: c.workspace.mention_targets.join('\n'),
     network_mode: coerceNetworkMode(c.network_mode),
     proactive_enabled: proactiveConfigValue(c),
-    autonomous_wake_prompt: c.autonomous_wake_prompt ?? '',
     skill_selection: c.skills.names === null
       ? { mode: 'all', prior_names_text: '' }
       : { mode: 'names', names_text: c.skills.names.join('\n') },
@@ -555,9 +531,6 @@ export function rebaseRuntimeDraftOnFreshConfig(
   if (draft.network_mode !== base.network_mode) rebased.network_mode = draft.network_mode
   if (draft.proactive_enabled !== base.proactive_enabled) {
     rebased.proactive_enabled = draft.proactive_enabled
-  }
-  if (draft.autonomous_wake_prompt !== base.autonomous_wake_prompt) {
-    rebased.autonomous_wake_prompt = draft.autonomous_wake_prompt
   }
   const draftSelection = draft.skill_selection
   const baseSelection = base.skill_selection
@@ -834,19 +807,6 @@ export function keeperConfigControlInventory(
         keeperRuntimeControlItem(
           c,
           tab,
-          'kcf-policy-wake-prompt',
-          'Autonomous wake prompt',
-          `${configApiSource} autonomous_wake_prompt`,
-          'PATCH /api/v1/keepers/:name/config autonomous_wake_prompt',
-          'autonomous_wake_prompt',
-          [
-            'autonomous_wake_prompt',
-            'prompt.unified_user_message_preview',
-          ],
-        ),
-        keeperRuntimeControlItem(
-          c,
-          tab,
           'kcf-policy-skills',
           'Keeper Skills',
           `${configApiSource} skills.names`,
@@ -1007,17 +967,12 @@ export function buildRuntimePayloadResult(
 ): RuntimePayloadBuildResult {
   const maxContextOverride = parseMaxContextOverrideDraft(draft.max_context_override)
   if (!maxContextOverride.ok) return maxContextOverride
-  const wakePrompt = parseAutonomousWakePromptDraft(draft.autonomous_wake_prompt)
-  if (!wakePrompt.ok) return wakePrompt
   const payload: KeeperConfigUpdatePayload = {}
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
   if (maxContextOverride.value !== orig.max_context_override) {
     payload.max_context_override = maxContextOverride.value
-  }
-  if (wakePrompt.value !== (orig.autonomous_wake_prompt ?? null)) {
-    payload.autonomous_wake_prompt = wakePrompt.value
   }
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
@@ -1110,9 +1065,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     max_context_override: result.ok
       ? 'max_context_override' in payload
       : rd.max_context_override !== String(c.max_context_override ?? 0),
-    autonomous_wake_prompt: result.ok
-      ? 'autonomous_wake_prompt' in payload
-      : rd.autonomous_wake_prompt.trim() !== (c.autonomous_wake_prompt ?? ''),
     mention_targets: 'mention_targets' in payload,
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
@@ -2193,23 +2145,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${SetToggle} ariaLabel="프로액티브 활성" on=${rd.proactive_enabled}
           onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)} />
       </${SetRow}>
-      <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.autonomous_wake_prompt ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-sm text-[var(--color-fg-secondary)]">자율 턴 깨우기 프롬프트</span>
-          <span class="text-xs text-[var(--color-fg-muted)]">비우면 함대 기본값 상속 · 매 자율 턴 히스토리에 기록</span>
-        </div>
-        <textarea aria-label="autonomous_wake_prompt" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
-          rows=${3}
-          value=${rd.autonomous_wake_prompt}
-          placeholder=${c.prompt.unified_user_message_preview || 'Continue.'}
-          onInput=${(e: Event) => updateRuntimeDraft('autonomous_wake_prompt', (e.target as HTMLTextAreaElement).value)}
-        ></textarea>
-      </div>
     ` : html`
       <${BoolRow} label="자동 부팅" value=${c.autoboot_enabled} />
       <${BoolRow} label="활성" value=${proactiveConfigValue(c)} />
-      <${ConfigRow} label="자율 턴 깨우기 프롬프트"
-        value=${c.autonomous_wake_prompt ?? `(상속) ${c.prompt.unified_user_message_preview || 'Continue.'}`} />
     `}
 
     <${KcfSec} title="Keeper Skills" desc="Keeper TOML의 [keeper.skills] 선택을 그대로 편집합니다. 이름 비교는 정확히 일치하며, 현재 카탈로그에 없는 이름도 저장 후 관측 화면에 남습니다.">

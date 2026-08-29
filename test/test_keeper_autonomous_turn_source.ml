@@ -465,16 +465,9 @@ let test_absent_session_identity_is_rejected () =
   | Error _ -> ()
 ;;
 
-(* #28413. The wake prompt is the user turn every autonomous cycle is woken
-   with, and it is kept by the durable checkpoint, so it is worth configuring
-   per keeper -- and worth bounding, since its cost recurs on every later turn
-   that replays the history. *)
-
-let wake_prompt_profile prompt =
-  { Keeper_types_profile.empty_keeper_profile_defaults with
-    autonomous_wake_prompt = prompt
-  }
-;;
+(* The wake prompt is the user turn every autonomous cycle is woken with, and
+   it is kept by the durable checkpoint, so it is worth bounding: its cost
+   recurs on every later turn that replays the history. *)
 
 let test_wake_prompt_validation_rejects_blank_and_unbounded () =
   let validate = Env_config_keeper.KeeperAutonomous.validate_wake_prompt in
@@ -502,30 +495,16 @@ let test_wake_prompt_validation_rejects_blank_and_unbounded () =
 (* Ordering matters: the literal case must run before this process sets the
    fleet variable, because OCaml's Unix has no unsetenv to undo it. *)
 let test_wake_prompt_resolution_order () =
-  let resolve ?profile_defaults () =
-    Keeper_unified_prompt.effective_autonomous_wake_prompt ?profile_defaults ()
-  in
+  let resolve () = Env_config_keeper.KeeperAutonomous.wake_prompt () in
   Alcotest.(check string)
-    "no keeper and no fleet value resolves to the literal"
+    "no fleet value resolves to the literal"
     Keeper_unified_prompt.autonomous_wake_marker
     (resolve ());
-  Alcotest.(check string)
-    "a keeper value is used even with no fleet value"
-    "keeper asks"
-    (resolve ~profile_defaults:(wake_prompt_profile (Some "keeper asks")) ());
   Unix.putenv "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT" "fleet asks";
   Alcotest.(check string)
-    "a keeper without its own value inherits the fleet value"
-    "fleet asks"
-    (resolve ~profile_defaults:(wake_prompt_profile None) ());
-  Alcotest.(check string)
-    "no profile at all still inherits the fleet value"
+    "a set fleet value is used"
     "fleet asks"
     (resolve ());
-  Alcotest.(check string)
-    "a keeper value overrides the fleet value"
-    "keeper asks"
-    (resolve ~profile_defaults:(wake_prompt_profile (Some "keeper asks")) ());
   (* A set-but-invalid fleet value must surface, not silently restore the
      default -- otherwise a typo reads as "configuration had no effect". *)
   Unix.putenv "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT" "   ";
@@ -612,7 +591,7 @@ let () =
     ; ( "wake_prompt"
       , [ Alcotest.test_case "rejects blank and over-bound values" `Quick
             test_wake_prompt_validation_rejects_blank_and_unbounded
-        ; Alcotest.test_case "keeper then fleet then literal (#28413)" `Quick
+        ; Alcotest.test_case "fleet value then literal" `Quick
             test_wake_prompt_resolution_order
         ] )
     ]

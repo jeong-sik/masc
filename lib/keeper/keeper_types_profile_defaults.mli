@@ -4,11 +4,6 @@ type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
   instructions : string option;
-  (* Per-keeper autonomous-turn instructions. When non-empty and the turn
-     channel is Scheduled_autonomous, this replaces [instructions] in the
-     system prompt. When absent, autonomous turns fall back to [instructions]
-     — zero behavioral change for keepers that don't set it. *)
-  autonomous_instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
@@ -16,7 +11,6 @@ type keeper_profile_defaults = {
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   remote_endpoint : string option;
-  autonomous_wake_prompt : string option;
   max_context_override : int option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;

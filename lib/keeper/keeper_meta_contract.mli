@@ -214,11 +214,6 @@ type keeper_meta = {
   id : Ids.Keeper_id.t option;
   name : string;
   instructions : string;
-  autonomous_instructions : string option;
-      (** Per-keeper autonomous-turn instructions. When non-empty and the turn
-          channel is Scheduled_autonomous, this replaces [instructions] in the
-          system prompt. When absent, autonomous turns fall back to
-          [instructions] — zero behavioral change for keepers that don't set it. *)
   (* Policy *)
   sandbox_profile : Keeper_types_profile.sandbox_profile;
   sandbox_image : string option;

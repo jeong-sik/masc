@@ -61,13 +61,11 @@ module KeeperAutonomous : sig
 
   val validate_wake_prompt : string -> (string, string) result
   (** Trims, then rejects blank and over-bound values with an operator-facing
-      reason. Shared by [MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT] and the per-keeper
-      [autonomous_wake_prompt], so the two authoring surfaces cannot accept
-      different values. *)
+      reason. Applied where [MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT] is read. *)
 
   val default_wake_prompt : string
-  (** Wording used when neither fleet nor keeper configures one. Single
-      definition; {!Keeper_unified_prompt.autonomous_wake_marker} aliases it. *)
+  (** Wording used when the fleet does not configure one. Single definition;
+      {!Keeper_unified_prompt.autonomous_wake_marker} aliases it. *)
 
   val wake_prompt_opt : unit -> string option
   (** Fleet wake prompt, [None] when unset. Raises

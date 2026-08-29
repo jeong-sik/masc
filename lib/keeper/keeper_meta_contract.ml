@@ -261,7 +261,6 @@ type keeper_meta =
     id : Ids.Keeper_id.t option [@default None]
   ; name : string
   ; instructions : string
-  ; autonomous_instructions : string option
     (** Per-keeper autonomous-turn instructions. When non-empty and the turn
         channel is Scheduled_autonomous, this replaces [instructions] in the
         system prompt. When absent, autonomous turns fall back to
@@ -396,9 +395,6 @@ let effective_meta_of_profile_defaults
             };
           instructions =
             apply_profile_default defaults.instructions meta.instructions;
-          autonomous_instructions =
-            apply_profile_default_opt defaults.autonomous_instructions
-              meta.autonomous_instructions;
           autoboot_enabled =
             apply_profile_default defaults.autoboot_enabled
               meta.autoboot_enabled;

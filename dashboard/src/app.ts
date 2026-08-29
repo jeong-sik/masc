@@ -25,7 +25,7 @@ import {
   devTokenBootstrapNeedsReadinessProbe,
   ensureDevToken,
 } from './api/dev-token'
-import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
+import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_HIGH } from './config/constants'
 import { setContextThresholds } from './config/context-thresholds'
 import { DashboardMain, DashboardHealthStrip, isKeeperDetailDashboardRoute } from './components/dashboard-shell'
 import { RemoteWarningBanner } from './components/auth-status'
@@ -200,7 +200,7 @@ export function App() {
             const thresholds = configApi.parseContextThresholds(data, {
               critical: CONTEXT_RATIO_CRITICAL,
               warn: CONTEXT_RATIO_WARN,
-              compacting: CONTEXT_RATIO_COMPACTING,
+              high: CONTEXT_RATIO_HIGH,
             })
             setContextThresholds(thresholds)
           })

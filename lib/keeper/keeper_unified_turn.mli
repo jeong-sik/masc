@@ -116,11 +116,8 @@ val record_streaming_cancelled_observation
 
 type source_disposition = Follow_failure_route
 (** Every failed turn follows its typed retry/rotate/escalate route — provider
-    capacity failures and an incomplete tool transcript alike. The automatic
-    overflow-compaction recovery that used to branch here was removed (#26546)
-    because it had never produced a committed compaction on record. #26545
-    bounds conversation history only; whole-request provider fit is tracked in
-    #26551. *)
+    capacity failures and an incomplete tool transcript alike. #26545 bounds
+    conversation history; whole-request provider fit is tracked in #26551. *)
 
 type turn_failure =
   { error : Agent_core.Error.t

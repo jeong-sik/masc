@@ -73,12 +73,6 @@ let fallback_checkpoint_id (row : manifest_row) =
       |> Option.map (fun base -> "checkpoint:" ^ base);
     ]
 
-let fallback_compaction_id (row : manifest_row) idx =
-  Printf.sprintf "%s:keeper-%s:compaction-%d"
-    row.Keeper_runtime_manifest.trace_id
-    (turn_label row)
-    idx
-
 let event_started_at (row : manifest_row) =
   match row.Keeper_runtime_manifest.event with
   | Keeper_runtime_manifest.Turn_started
@@ -88,7 +82,6 @@ let event_started_at (row : manifest_row) =
   | Keeper_runtime_manifest.Provider_lane_resolved
   | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Context_injected
-  | Keeper_runtime_manifest.Context_compacted
   | Keeper_runtime_manifest.Event_bus_correlated
   | Keeper_runtime_manifest.Checkpoint_loaded ->
     Some row.Keeper_runtime_manifest.ts
@@ -118,7 +111,6 @@ let event_finished_at (row : manifest_row) =
   | Keeper_runtime_manifest.Provider_lane_resolved
   | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Context_injected
-  | Keeper_runtime_manifest.Context_compacted
   | Keeper_runtime_manifest.Event_bus_correlated
   | Keeper_runtime_manifest.Checkpoint_loaded ->
     None
@@ -155,13 +147,6 @@ let clock_edge_json ~idx ~provider_attempt_index (row : manifest_row) =
   | Keeper_runtime_manifest.Checkpoint_saved ->
     first_string_opt [ clock_string row "checkpoint_id"; fallback_checkpoint_id row ]
     | _ -> clock_string row "checkpoint_id"
-  in
-  let compaction_id =
-    match event with
-    | Keeper_runtime_manifest.Context_compacted
-    | Keeper_runtime_manifest.Event_bus_correlated ->
-      first_string_opt [ clock_string row "compaction_id"; Some (fallback_compaction_id row idx) ]
-    | _ -> clock_string row "compaction_id"
   in
   let event_bus_correlation_id =
     first_string_opt
@@ -231,7 +216,6 @@ let clock_edge_json ~idx ~provider_attempt_index (row : manifest_row) =
       ("provider_attempt_id", Json_util.string_opt_to_json provider_attempt_id);
       ("tool_batch_id", Json_util.string_opt_to_json tool_batch_id);
       ("checkpoint_id", Json_util.string_opt_to_json checkpoint_id);
-      ("compaction_id", Json_util.string_opt_to_json compaction_id);
       ("event_bus_correlation_id", Json_util.string_opt_to_json event_bus_correlation_id);
       ("event_bus_run_id", Json_util.string_opt_to_json event_bus_run_id);
       ("event_bus_event_count", Json_util.int_opt_to_json event_bus_event_count);

@@ -49,7 +49,6 @@ type append_manifest_fn =
   ?keeper_turn_id:int ->
   ?agent_core_turn_count:int ->
   ?checkpoint_path:string ->
-  ?compaction_source:string ->
   site:string ->
   Keeper_runtime_manifest.event_kind ->
   unit

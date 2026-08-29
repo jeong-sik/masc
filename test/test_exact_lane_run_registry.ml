@@ -449,10 +449,8 @@ let test_completed_runs_are_bounded () =
 
 (* Lane audit W8: the retention bound is per lane. Under the old global
    bound the busiest lane (librarian, every few turns per keeper) evicted
-   the quietest lane's entire history, so compaction's
-   retained_run_count = 0 was indistinguishable from "never ran". The three
-   compaction runs here are OLDER than every librarian run and must survive
-   a librarian overflow. *)
+   the quietest lane's entire history. The three Board-attention runs here
+   are OLDER than every librarian run and must survive a librarian overflow. *)
 let test_a_busy_lane_cannot_evict_a_quiet_lanes_history () =
   let registry = R.create () in
   let record ~run_id ~lane ~started_at =
@@ -472,8 +470,8 @@ let test_a_busy_lane_cannot_evict_a_quiet_lanes_history () =
   in
   for index = 1 to 3 do
     record
-      ~run_id:(Printf.sprintf "compaction-%02d" index)
-      ~lane:R.Compaction
+      ~run_id:(Printf.sprintf "board-%02d" index)
+      ~lane:R.Board_attention
       ~started_at:(float_of_int index)
   done;
   for index = 1 to R.max_completed_retained + 8 do
@@ -486,7 +484,7 @@ let test_a_busy_lane_cannot_evict_a_quiet_lanes_history () =
   let count lane =
     List.length (List.filter (fun (run : R.run) -> run.R.lane = lane) runs)
   in
-  check int "the quiet lane's whole history survives" 3 (count R.Compaction);
+  check int "the quiet lane's whole history survives" 3 (count R.Board_attention);
   check int "the busy lane is bounded to its own quota"
     R.max_completed_retained
     (count R.Librarian)
@@ -535,7 +533,6 @@ let test_all_lanes_matches_the_independent_constructor_oracle () =
     [ R.Librarian
     ; R.Hitl_auto_judge
     ; R.Board_attention
-    ; R.Compaction
     ]
   in
   check
@@ -677,7 +674,7 @@ let test_observation_reads_do_not_wait_for_durable_writer () =
            R.register_running
              registry
              ~run_id:"writer-blocked-on-durable-lock"
-             ~lane:R.Compaction
+             ~lane:R.Board_attention
              ~actor:"keeper-a"
              ~started_at:1.0
              ~input:(R.Exact_input `Null));

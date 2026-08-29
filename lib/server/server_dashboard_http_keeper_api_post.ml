@@ -600,10 +600,8 @@ let dashboard_config_string_list_fields =
   ]
 
 (* Control field (not persisted): explicit acknowledgement that reducing
-   [max_context_override] may force a compaction. Stripped before the config is
-   parsed/applied. RFC context: reactive Provider_overflow death-spiral
-   (#25062/#25268) — a silent shrink converts a settings edit into a next-turn
-   overflow. *)
+   [max_context_override] may make the existing conversation exceed the next
+   request budget. Stripped before the config is parsed/applied. *)
 let confirm_context_shrink_field = "confirm_context_shrink"
 let expected_config_revision_field = "expected_config_revision"
 
@@ -998,7 +996,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                              (Printf.sprintf
                                 "reducing max_context_override (%s -> %d) can push \
                                  this keeper's existing context past the new window \
-                                 and force a compaction on its next turn. Re-send \
+                                 and make its next request exceed the window. Re-send \
                                  with %S: true to apply."
                                 previous new_v confirm_context_shrink_field)
                        | _ ->

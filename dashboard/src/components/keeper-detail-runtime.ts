@@ -832,7 +832,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
   const [signalQuery, setSignalQuery] = useState('')
   const mw = keeper.metrics_window
 
-  // Quality/rate metrics only — raw counts (handoffs, compactions, turns)
+  // Quality/rate metrics only — raw counts (handoffs, turns)
   // are authoritative in KpiGrid to avoid duplication.
   const groups: SignalGroup[] = [
     {
@@ -1317,7 +1317,6 @@ export function RuntimeLensSection({
   const lens = trace.runtime_lens
   const lane = lens.axes.provider_lane
   const drift = lens.axes.config_drift
-  const context = lens.axes.context
   const memory = lens.axes.memory
   const clock = lens.turn_clock
   const artifacts = trace.linked_artifacts
@@ -1348,7 +1347,6 @@ export function RuntimeLensSection({
         <${SignalRow} label="source clock" value=${formatSourceClock(lens.axes.source_clock)} />
         <${SignalRow} label="runtime drift" value=${drift.runtime_override ? `${drift.default_runtime_id ?? '-'} -> ${drift.live_runtime_id ?? '-'}` : drift.status} />
         <${SignalRow} label="override fields" value=${formatLensList(drift.override_fields)} />
-        <${SignalRow} label="context compaction" value=${formatRatioPair({ numerator: context.context_compacted_count, denominator: context.context_compact_started_count })} />
         <${SignalRow} label="memory flush" value=${formatIndependentCounters({ leftLabel: 'success', leftValue: memory.memory_flush_success_count, rightLabel: 'error', rightValue: memory.memory_flush_error_count })} />
         <${SignalRow} label="trace id" value=${compactToken(trace.trace_id)} />
         <${SignalRow}

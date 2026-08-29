@@ -3,7 +3,7 @@ const AUTO_REFRESH_EVENT_DEDUPE_MS = 500
 /**
  * Default polling interval for panel-level auto-refresh.
  *
- * Three sibling panels (ide-persistence, keeper-compaction,
+ * Sibling operator panels (ide-persistence,
  * memory-subsystems) all picked 30s independently. Lifting it here
  * makes the shared cadence visible — and if a panel needs a different
  * interval it can pass its own value to `setupVisibleAutoRefresh`

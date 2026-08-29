@@ -21,13 +21,11 @@ export function isObservedStall(
     // is lowercase + snake_case. Prior PascalCase compares never matched —
     // KSM stalled detection silently disabled for every non-terminal phase.
     if (value === 'failing') return observedForSec >= 90
-    if (value === 'compacting') return observedForSec >= 90
     if (value === 'draining') return observedForSec >= 60
     return false
   }
   if (key === 'turn') {
     if (value === 'prompting' || value === 'executing') return observedForSec >= 45
-    if (value === 'compacting') return observedForSec >= 60
     if (value === 'finalizing') return observedForSec >= 30
     return false
   }
@@ -61,9 +59,6 @@ function laneMeaning(
             : { tone: 'ok', meaning: 'keeper 는 살아있고 현재 진행 중인 turn 은 없음' }
         case 'failing':
           return { tone: 'error', meaning: 'parent lifecycle degraded — healthy turn 재개 전 해소 필요' }
-          return { tone: 'warn', meaning: 'context overflow latched — healthy turn 재개 전 해소 필요' }
-        case 'compacting':
-          return { tone: 'warn', meaning: 'post-turn compaction 이 lifecycle 점유 중' }
         case 'draining':
           return { tone: 'warn', meaning: 'keeper 가 in-flight work 를 drain 중 (stop 전)' }
         default:
@@ -77,8 +72,6 @@ function laneMeaning(
           return { tone: 'info', meaning: 'prompt assembly 가 turn input 준비 중' }
         case 'executing':
           return { tone: 'info', meaning: 'turn 이 model/tool execution work 안에 있음' }
-        case 'compacting':
-          return { tone: 'warn', meaning: 'turn finalization 이 compaction 종료 대기 중' }
         case 'finalizing':
           return { tone: 'info', meaning: 'turn 이 결과 seal + 다음 idle snapshot 준비 중' }
         default:

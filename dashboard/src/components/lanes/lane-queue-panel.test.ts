@@ -60,7 +60,6 @@ function compositeSnapshot(name: string, ts: number, overrides: Record<string, u
     turn_phase: 'idle',
     decision: { stage: 'undecided' },
     runtime: { state: 'idle' },
-    compaction: { stage: 'accumulating' },
     is_live: false,
     ...overrides,
   } as unknown as KeeperCompositeSnapshot

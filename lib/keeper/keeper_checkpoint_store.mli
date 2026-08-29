@@ -18,18 +18,6 @@ val list_agent_core_history_files : session_dir:string -> string list
 val agent_core_history_path :
   session_dir:string -> snapshot_id:string -> string
 
-(** Session-scoped context key carrying the keeper generation on a
-    checkpoint. Single definition of the wire literal; every writer and
-    reader (context core, tests) must reference this value so the key
-    cannot drift between sites. *)
-val compaction_commit_count_context_key : string
-
-val compaction_commit_count_of_context :
-  Agent_core.Context.t -> (int, string) result
-(** Read the checkpoint-authoritative compaction commit count. Absence means
-    zero for a checkpoint that has not yet been compacted; malformed or
-    negative values fail closed. *)
-
 (** Compose an AGENT_CORE history archive snapshot id from a checkpoint
     (created_at_ms + keeper_generation suffix). *)
 val agent_core_history_snapshot_id_of_checkpoint :

@@ -10,7 +10,7 @@ open Alcotest
 module Librarian = Masc.Keeper_librarian
 module Runtime = Masc.Keeper_librarian_runtime
 module Memory = Masc.Keeper_memory_os_types
-module Fixture = Compaction_exact_output_fixture
+module Fixture = Exact_output_fixture
 module Ids = Ids
 
 let has_prompt_root root =

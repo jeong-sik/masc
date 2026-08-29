@@ -28,7 +28,6 @@ const FIELD_COLOR: Record<string, string> = {
   KTC: 'text-[var(--indigo)]',
   KDP: 'text-[var(--indigo)]',
   KCL: 'text-[var(--indigo)]',
-  KMC: 'text-[var(--amber-bright)]',
 }
 
 function LegendItem({ dotClass, label }: { dotClass: string; label: string }) {
@@ -53,7 +52,7 @@ const SWIMLANE_LANES: Array<{
 // Wire format is lowercase + snake_case for every lane:
 //   - KSM phase: `phase_to_string` in lib/keeper/keeper_state_machine.ml:21-35
 //     emits 'running' | 'failing' | 'draining' etc.
-//   - KTC/KDP/KCL/KMC: keeper_composite_observer.ml:141-201 lowercase.
+//   - KTC/KDP/KCL: keeper_composite_observer.ml lowercase.
 // Prior PascalCase entries ('Failing', 'Stable')
 // never matched backend emit; swimlane segments for those phases fell
 // through to the default indigo color, losing the alarm/warn/handoff
@@ -61,7 +60,6 @@ const SWIMLANE_LANES: Array<{
 const IDLE_LIKE_VALUES = new Set([
   'idle',
   'undecided',
-  'accumulating',
 ])
 
 const ALARM_VALUES = new Set([
@@ -72,7 +70,6 @@ const ALARM_VALUES = new Set([
 export function swimlaneSegmentColor(value: string): string {
   if (ALARM_VALUES.has(value)) return 'bg-[var(--bad-50)]'
   if (IDLE_LIKE_VALUES.has(value)) return 'bg-[var(--color-bg-panel-alt)]'
-  if (value === 'compacting') return 'bg-[var(--amber-bright-45)]'
   return 'bg-[var(--indigo-45)]'
 }
 
@@ -143,7 +140,7 @@ export function SwimlaneTimeline({
   if (observations.length === 0) {
     return html`
       <${DashedNotice} borderTone="subtle">
-        30초 폴링 사이클에서 관측을 수집중 — 2회 이상 스냅샷이 쌓이면 5개 레인의 시간 흐름이 표시됩니다
+          30초 폴링 사이클에서 관측을 수집중 — 2회 이상 스냅샷이 쌓이면 4개 레인의 시간 흐름이 표시됩니다
       <//>
     `
   }
@@ -305,7 +302,6 @@ export function SwimlaneTimeline({
       ` : null}
       <div class="mt-2 flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
         <${LegendItem} dotClass="bg-[var(--indigo-45)]" label="active" />
-        <${LegendItem} dotClass="bg-[var(--amber-bright-45)]" label="compact" />
         <${LegendItem} dotClass="bg-[var(--purple-50)]" label="handoff" />
         <${LegendItem} dotClass="bg-[var(--bad-50)]" label="alarm" />
         <${LegendItem} dotClass="border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" label="idle" />
@@ -515,7 +511,6 @@ const BAR_COLOR: Record<string, string> = {
   KTC: 'bg-[var(--indigo)]',
   KDP: 'bg-[var(--indigo)]',
   KCL: 'bg-[var(--indigo)]',
-  KMC: 'bg-[var(--amber-bright)]',
 }
 
 export function DwellHistogramPanel({

@@ -81,9 +81,7 @@ describe('isTransientPhase', () => {
   // `fleet-tone.ts`) on the same row. See the `TRANSIENT_KEEPER_PHASES`
   // comment in `monitoring-runtime.ts`.
   it.each([
-    ['Compacting', 'PascalCase KeeperPhase'],
     ['Restarting', 'PascalCase KeeperPhase'],
-    ['compacting', 'lowercase PipelineStage'],
     ['restarting', 'lowercase PipelineStage'],
   ])('returns true for transient phase %s (%s)', (phase) => {
     expect(isTransientPhase(phase)).toBe(true)
@@ -156,8 +154,8 @@ describe('summarizeMonitoringEvidence', () => {
 
   it('suppresses stage when it matches phase equivalent', () => {
     const evidence = summarizeMonitoringEvidence(makeSummary({
-      phase: { key: 'Compacting', label: '압축중', description: 'compressing' },
-      stage: { key: 'compacting', label: '압축', description: 'compressing stage' },
+      phase: { key: 'Restarting', label: '재시작 중', description: 'restarting' },
+      stage: { key: 'restarting', label: '재시작', description: 'restart stage' },
     }))
     expect(evidence.stage).toBeNull()
   })
@@ -293,7 +291,7 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.hint).toBe('오래 응답이 없어 실제 상태 확인이 필요합니다.')
   })
 
-  // The autonomous transient FSM phases (Compacting / Restarting) route to
+  // The autonomous transient FSM phase Restarting routes to
   // the `transient` band.
   // `Draining` is NOT in this set — operator-initiated stop routes to the
   // `paused` band (see `Draining → paused band routing`
@@ -301,7 +299,6 @@ describe('summarizeKeeperMonitoring', () => {
   //
   describe('transient band routing', () => {
     const transientPhases: ReadonlyArray<[string, string]> = [
-      ['compacting', 'lowercase composite.phase'],
       ['restarting', 'lowercase composite.phase'],
     ]
 
@@ -325,7 +322,6 @@ describe('summarizeKeeperMonitoring', () => {
     )
 
     it.each([
-      ['Compacting', 'PascalCase keeper.phase'],
       ['Restarting', 'PascalCase keeper.phase'],
     ] as const)(
       'routes %s (%s) to the transient band',
@@ -341,18 +337,18 @@ describe('summarizeKeeperMonitoring', () => {
     )
 
     // Order matters in `keeperBand`: transient must beat attention so a
-    // mid-compaction blocker check does not repaint the row as red.
-    it('transient beats attention when a live blocker signal fires mid-compaction', () => {
+    // restart blocker check does not repaint the row as red.
+    it('transient beats attention when a live blocker signal fires during restart', () => {
       const summary = summarizeKeeperMonitoring(
         {
           name: 'keeper-transient-blocked',
           status: 'busy',
           phase: 'Running',
-          pipeline_stage: 'compacting',
+          pipeline_stage: 'restarting',
           runtime_blocker_class: 'fiber_unresolved',
           runtime_blocker_summary: 'turn timed out after queue wait',
         } as Keeper,
-        { keeper: 'keeper-transient-blocked', phase: 'compacting' } as unknown as Parameters<
+        { keeper: 'keeper-transient-blocked', phase: 'restarting' } as unknown as Parameters<
           typeof summarizeKeeperMonitoring
         >[1],
       )

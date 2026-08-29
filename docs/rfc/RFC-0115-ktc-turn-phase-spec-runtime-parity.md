@@ -55,8 +55,7 @@ OCaml 본문 주석 (`keeper_registry.ml:169-172`) 가 drift 를 *명시적으�
 3. `GateRejectedRequiresFinalizing`
 4. `SelectingRequiresToolPolicy`
 5. `ExecutingRequiresTrying`
-6. `CompactingRequiresTrying`
-7. `TerminalRuntimeRequiresFinalizing`
+6. `TerminalRuntimeRequiresFinalizing`
 
 `Turn_routing` 에서 runtime_state corruption 발생해도 — `ExecutingRequiresTrying` 가 *`turn_phase = "executing"`* 만 검사 → spec silent.
 

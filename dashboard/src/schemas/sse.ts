@@ -61,8 +61,6 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_heartbeat',
   'keeper_handoff',
   'masc/keeper_handoff',
-  'keeper_compaction',
-  'masc/keeper_compaction',
   'keeper_phase_changed',
   'keeper_composite_changed',
   'keeper_chat_appended',

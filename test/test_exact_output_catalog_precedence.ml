@@ -132,7 +132,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           (List.length errors)
     in
     let require_slots label registry =
-      match Registry.resolve_lane registry ~lane_id:"compaction_exact" with
+      match Registry.resolve_lane registry ~lane_id:"auxiliary_exact" with
       | Error error ->
         Alcotest.failf
           "%s: %s"
@@ -622,7 +622,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   write_file
     runtime_path
     (runtime_toml
-       ~compaction_slots:[ overlay_target; replacement_target ]
+       ~auxiliary_slots:[ overlay_target; replacement_target ]
        replacement_target);
   create_server_state ();
   let degraded_optional_registry =
@@ -630,14 +630,14 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   in
   require_lane_slots
     "unknown optional slot is excluded while admitted fallback remains"
-    ~lane_id:"compaction_exact"
+    ~lane_id:"auxiliary_exact"
     ~expected:[ replacement_target ]
     degraded_optional_registry;
   (match Registry.rejected_slots degraded_optional_registry with
    | [ rejected ] ->
      Alcotest.(check string)
        "rejected lane"
-       "compaction_exact"
+       "auxiliary_exact"
        rejected.lane_id;
      Alcotest.(check int) "rejected position" 1 rejected.position;
      Alcotest.(check string) "rejected slot" overlay_target rejected.slot_id;
@@ -650,7 +650,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   write_file
     runtime_path
     (runtime_toml
-       ~compaction_slots:[ unbound_target; replacement_target ]
+       ~auxiliary_slots:[ unbound_target; replacement_target ]
        replacement_target);
   create_server_state ();
   let unbound_optional_registry =
@@ -658,7 +658,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   in
   require_lane_slots
     "unbound optional target is excluded while admitted fallback remains"
-    ~lane_id:"compaction_exact"
+    ~lane_id:"auxiliary_exact"
     ~expected:[ replacement_target ]
     unbound_optional_registry;
   (match Registry.rejected_slots unbound_optional_registry with

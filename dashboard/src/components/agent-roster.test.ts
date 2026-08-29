@@ -48,12 +48,9 @@ function makeCompositeSnapshot(
     turn_phase: 'idle',
     decision: { stage: 'undecided' },
     runtime: { state: 'idle' },
-    compaction: { stage: 'accumulating' },
     measurement: { captured: false },
     invariants: {
-      phase_turn_alignment: true,
       no_runtime_before_measurement: true,
-      compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },
@@ -123,7 +120,6 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
       turn_phase: 'idle',
       decision: { stage: 'idle' },
       runtime: { state: 'idle' },
-      compaction: { stage: 'idle' },
       measurement: {} as KeeperCompositeSnapshot['measurement'],
       invariants: {} as KeeperCompositeSnapshot['invariants'],
       fsm_guard_violations: 0,
@@ -549,13 +545,6 @@ describe('countRuntimeKinds', () => {
           keepalive_running: true,
         } as Keeper,
         {
-          name: 'compact',
-          status: 'busy',
-          phase: 'Compacting',
-          pipeline_stage: 'compacting',
-          keepalive_running: true,
-        } as Keeper,
-        {
           name: 'paused',
           status: 'paused',
           phase: 'Paused',
@@ -577,10 +566,10 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 1,
-      transientKeepers: 1,
+      transientKeepers: 0,
       offlineKeepers: 1,
-      keeperRows: 4,
-      totalRuntimes: 4,
+      keeperRows: 3,
+      totalRuntimes: 3,
     })
   })
 
@@ -638,24 +627,24 @@ describe('countRuntimeKinds', () => {
     })
   })
 
-  it('uses composite snapshots when counting transient keeper rows', () => {
+  it('uses composite snapshots when counting restarting keeper rows', () => {
     const composite = makeCompositeSnapshot({
-      keeper: 'compact',
-      correlation_id: 'keeper:compact:1',
-      phase: 'compacting',
+      keeper: 'restart',
+      correlation_id: 'keeper:restart:1',
+      phase: 'restarting',
     })
     const result = countRuntimeKinds(
       [],
       [
         {
-          name: 'compact',
+          name: 'restart',
           status: 'active',
           phase: 'Running',
           pipeline_stage: 'idle',
           keepalive_running: true,
         } as Keeper,
       ],
-      new Map([['compact', composite]]),
+      new Map([['restart', composite]]),
     )
 
     expect(result).toEqual({
@@ -1218,10 +1207,6 @@ describe('AgentRoster live-only cards', () => {
         phase: 'Offline', pipeline_stage: 'offline', keepalive_running: false,
       } as Keeper,
       {
-        name: 'compact', status: 'busy',
-        phase: 'Compacting', pipeline_stage: 'compacting', keepalive_running: true,
-      } as Keeper,
-      {
         name: 'drain', status: 'busy',
         phase: 'Draining', pipeline_stage: 'draining', keepalive_running: true,
       } as Keeper,
@@ -1240,7 +1225,7 @@ describe('AgentRoster live-only cards', () => {
     const rows = Array.from(
       container.querySelectorAll('[data-testid="keeper-operations-row"]'),
     ) as HTMLElement[]
-    expect(rows.length).toBe(6)
+    expect(rows.length).toBe(5)
     // every row carries a tone the rail CSS can paint
     // `busy` joins the valid set after the RuntimeBand 5th-value
     // extension; the CSS `[data-tone="busy"]` selectors in fleet.css are now
@@ -1256,13 +1241,11 @@ describe('AgentRoster live-only cards', () => {
     expect(toneByName('rester')).toBe('warn')
     expect(toneByName('gone')).toBe('idle')
     expect(toneByName('drain')).toBe('warn')
-    for (const name of ['compact', 'restart']) {
-      expect(toneByName(name)).toBe('busy')
-    }
+    expect(toneByName('restart')).toBe('busy')
     const text = container.textContent ?? ''
-    expect(text).toContain('전이 중 · 2')
+    expect(text).toContain('전이 중 · 1')
     expect(text).toContain('일시정지 rows 2')
-    expect(text).toContain('전이 rows 2')
+    expect(text).toContain('전이 rows 1')
     expect(text).toContain('transient')
     expect(text).toContain('중지 rows 1')
   })

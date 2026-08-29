@@ -50,7 +50,6 @@ export const FL_TONE_LABEL: Readonly<Record<FleetTone, string>> = {
 export type KeeperPhaseToken =
   | 'running'
   | 'paused'
-  | 'compacting'
   | 'draining'
   | 'restarting'
   | 'failing'
@@ -93,7 +92,6 @@ export const PHASE_TONE: Readonly<Record<KeeperPhaseToken, FleetTone>> =
       running: 'ok',
       paused: 'warn',
       draining: 'warn',
-      compacting: 'busy',
       restarting: 'busy',
       failing: 'bad',
       stopped: 'idle',
@@ -124,7 +122,6 @@ export const PHASE_LABEL_KO: Readonly<Record<KeeperPhaseToken, string>> =
     Object.assign(Object.create(null), {
       running: '실행 중',
       paused: '일시정지',
-      compacting: '압축 중',
       draining: '정리 중',
       restarting: '재시작 중',
       failing: '오류 발생',
@@ -159,7 +156,6 @@ export const PHASE_DESCRIPTION_KO: Readonly<Record<KeeperPhaseToken, string>> =
     Object.assign(Object.create(null), {
       running: 'keeper_state_machine 기준으로 정상 실행 상태입니다.',
       paused: 'keeper가 재개 대기 상태로 멈춰 있습니다.',
-      compacting: '컨텍스트를 정리하는 중입니다.',
       draining: '현재 작업을 마무리하는 중입니다.',
       restarting: '복구를 시도하고 있습니다.',
       failing: '최근 실행에서 오류를 감지했습니다.',

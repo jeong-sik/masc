@@ -108,10 +108,6 @@ describe('journalEventKindLabel', () => {
     expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_handoff' }))).toBe('handoff')
   })
 
-  it('returns "compact" for keeper_compaction eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_compaction' }))).toBe('compact')
-  })
-
   it('returns "phase" for keeper_phase_changed eventType', () => {
     expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_phase_changed' }))).toBe('phase')
   })

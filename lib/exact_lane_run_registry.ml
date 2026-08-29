@@ -2,7 +2,6 @@ type lane =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
-  | Compaction
 
 type outcome =
   | Succeeded
@@ -52,20 +51,18 @@ type run =
    pinned to an independent constructor oracle in test_exact_lane_run_registry;
    replay then exercises the exported enumeration. Keep these definitions
    adjacent. *)
-let all_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Compaction ]
+let all_lanes = [ Librarian; Hitl_auto_judge; Board_attention ]
 
 let lane_key = function
   | Librarian -> "librarian_exact"
   | Hitl_auto_judge -> "hitl_auto_judge"
   | Board_attention -> "board_attention_exact"
-  | Compaction -> "compaction_exact"
 ;;
 
 let lane_of_key = function
   | "librarian_exact" -> Ok Librarian
   | "hitl_auto_judge" -> Ok Hitl_auto_judge
   | "board_attention_exact" -> Ok Board_attention
-  | "compaction_exact" -> Ok Compaction
   | value -> Error (Printf.sprintf "unknown exact lane %S" value)
 ;;
 

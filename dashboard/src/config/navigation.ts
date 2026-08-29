@@ -460,7 +460,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'harness',
       label: 'Safety Harness',
-      description: 'Evaluation model, pre-compaction state, and generation handoff monitoring.',
+      description: 'Evaluation model, pre-handoff state, and generation handoff monitoring.',
       params: { section: 'harness' },
     },
     {

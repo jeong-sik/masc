@@ -62,13 +62,13 @@ describe('presenceConfig', () => {
 
 describe('summarizeAgentPresence', () => {
   it('summarizes mapped status, label, size, and detail', () => {
-    expect(summarizeAgentPresence('busy', 'compacting', 'md')).toEqual({
+    expect(summarizeAgentPresence('busy', 'restarting', 'md')).toEqual({
       rawStatus: 'busy',
       state: 'working',
       label: '작업 중',
       pulse: true,
       size: 'md',
-      detail: 'compacting',
+      detail: 'restarting',
       detailPresent: true,
     })
   })

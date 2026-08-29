@@ -2,7 +2,7 @@ open Masc
 
 module Candidate = Keeper_board_attention_candidate
 module Exact_flow = Keeper_board_attention_exact_flow
-module Fixture = Compaction_exact_output_fixture
+module Fixture = Exact_output_fixture
 module Judgment = Keeper_board_attention_judgment
 module Partition = Keeper_board_attention_partition
 module Worker = Keeper_board_attention_worker

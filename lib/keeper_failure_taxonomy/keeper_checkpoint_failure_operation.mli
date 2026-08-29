@@ -11,6 +11,5 @@ type t =
   | Agent_core_failure (** Agent-core checkpoint error. *)
   | Agent_core_sanitize_save (** Persisting a sanitized AGENT_CORE checkpoint failed. *)
   | Create_initial_save (** Initial checkpoint save during keeper boot create flow. *)
-  | Compaction_save (** Saving a structurally compacted checkpoint failed. *)
 
 val to_label : t -> string

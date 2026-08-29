@@ -64,7 +64,7 @@ export const LANE_QUEUE_LANES: readonly LaneQueueLaneDef[] = [
 const LANE_VALUE_LABELS: Record<string, string> = {
   running: '실행 중', failing: '문제 발생', draining: '정리 중',
   idle: '쉬는 중', prompting: '준비 중', executing: '작업 중', finalizing: '마무리', undecided: '미결정', guard_ok: '점검 통과',
-  tool_policy_selected: '도구 확정', selecting: '경로 선택', trying: '모델 호출 중', done: '완료', exhausted: '가능한 경로 없음', accumulating: '누적 중',
+  tool_policy_selected: '도구 확정', selecting: '경로 선택', trying: '모델 호출 중', done: '완료', exhausted: '가능한 경로 없음',
 }
 
 export function laneValueLabel(value: string): string {
@@ -78,7 +78,7 @@ const LANE_VALUE_TONES: Record<string, LaneSegmentTone> = {
   running: 'info', failing: 'bad', draining: 'warn',
   idle: 'idle', prompting: 'info', executing: 'info', finalizing: 'info',
   undecided: 'idle', guard_ok: 'ok', tool_policy_selected: 'info',
-  selecting: 'info', trying: 'info', done: 'ok', exhausted: 'bad', accumulating: 'idle',
+  selecting: 'info', trying: 'info', done: 'ok', exhausted: 'bad',
 }
 
 export function laneValueTone(value: string): LaneSegmentTone {

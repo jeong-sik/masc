@@ -384,10 +384,6 @@ let configure_exact_output_registry ?config_root () =
          catalog_description;
        warn_optional_exact_output_lane
          registry
-         ~lane_id:"compaction_exact"
-         ~feature:"compaction";
-       warn_optional_exact_output_lane
-         registry
          ~lane_id:"librarian_exact"
          ~feature:"librarian";
        warn_optional_exact_output_lane

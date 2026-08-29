@@ -1,5 +1,5 @@
 module Store = Keeper_checkpoint_store
-module Unit_ = Keeper_compaction_unit
+module Unit_ = Keeper_transcript_unit
 
 type keeper_outcome =
   | Already_dispatchable

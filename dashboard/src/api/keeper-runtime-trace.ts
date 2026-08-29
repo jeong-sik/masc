@@ -25,9 +25,6 @@ export interface KeeperRuntimeTraceEventBusSummary {
   event_bus_correlated_count: number
   correlation_ids: string[]
   run_ids: string[]
-  context_compact_started_count: number
-  context_compacted_count: number
-  last_compaction: unknown | null
 }
 
 export interface KeeperRuntimeTraceMemorySummary {
@@ -152,13 +149,9 @@ export interface KeeperRuntimeLensConfigDriftAxis {
 
 export interface KeeperRuntimeLensContextAxis {
   context_injected_count: number
-  context_compacted_event_count: number
   event_bus_correlated_count: number
-  context_compact_started_count: number
-  context_compacted_count: number
   checkpoint_loaded_count: number
   checkpoint_saved_count: number
-  last_compaction: unknown
 }
 
 export interface KeeperRuntimeLensMemoryAxis extends KeeperRuntimeTraceMemorySummary {}
@@ -227,7 +220,6 @@ export interface KeeperRuntimeLensClockEdge {
   provider_attempt_id: string | null
   tool_batch_id: string | null
   checkpoint_id: string | null
-  compaction_id: string | null
   event_bus_correlation_id: string | null
   event_bus_run_id: string | null
   event_bus_event_count: number | null
@@ -480,9 +472,6 @@ function parseRuntimeTraceEventBus(raw: unknown): KeeperRuntimeTraceEventBusSumm
     event_bus_correlated_count: numberField(obj, 'event_bus_correlated_count'),
     correlation_ids: stringListField(obj, 'correlation_ids'),
     run_ids: stringListField(obj, 'run_ids'),
-    context_compact_started_count: numberField(obj, 'context_compact_started_count'),
-    context_compacted_count: numberField(obj, 'context_compacted_count'),
-    last_compaction: obj.last_compaction ?? null,
   }
 }
 
@@ -617,13 +606,9 @@ function parseRuntimeLensContextAxis(raw: unknown): KeeperRuntimeLensContextAxis
   const obj = isRecord(raw) ? raw : {}
   return {
     context_injected_count: numberField(obj, 'context_injected_count'),
-    context_compacted_event_count: numberField(obj, 'context_compacted_event_count'),
     event_bus_correlated_count: numberField(obj, 'event_bus_correlated_count'),
-    context_compact_started_count: numberField(obj, 'context_compact_started_count'),
-    context_compacted_count: numberField(obj, 'context_compacted_count'),
     checkpoint_loaded_count: numberField(obj, 'checkpoint_loaded_count'),
     checkpoint_saved_count: numberField(obj, 'checkpoint_saved_count'),
-    last_compaction: obj.last_compaction ?? null,
   }
 }
 
@@ -714,7 +699,6 @@ function parseRuntimeLensClockEdge(raw: unknown): KeeperRuntimeLensClockEdge {
     provider_attempt_id: nullableStringField(obj, 'provider_attempt_id'),
     tool_batch_id: nullableStringField(obj, 'tool_batch_id'),
     checkpoint_id: nullableStringField(obj, 'checkpoint_id'),
-    compaction_id: nullableStringField(obj, 'compaction_id'),
     event_bus_correlation_id: nullableStringField(obj, 'event_bus_correlation_id'),
     event_bus_run_id: nullableStringField(obj, 'event_bus_run_id'),
     event_bus_event_count: nullableNumberField(obj, 'event_bus_event_count'),

@@ -37,7 +37,7 @@ describe('AgentPresence a11y', () => {
   })
 
   it('renders accessibly with detail text', async () => {
-    render(html`<${AgentPresence} status="busy" detail="compacting" />`, container)
+    render(html`<${AgentPresence} status="busy" detail="restarting" />`, container)
     expect(await axe(container)).toHaveNoViolations()
   })
 

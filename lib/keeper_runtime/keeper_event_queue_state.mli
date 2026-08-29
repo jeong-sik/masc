@@ -35,7 +35,7 @@ type source_terminal_receipt =
 (** Closed terminal source evidence. Fusion and HITL completion are intrinsically
     represented by their durable event payload. [Turn_completed] records a
     successful admitted turn; [Turn_attempt_terminal] records that one admitted
-    turn ended without durable compaction progress. In both cases the exact
+    turn ended without a successful result. In both cases the exact
     source remains in the transition receipt instead of being discarded by a
     raw ACK. [detail] is diagnostic only and carries no transition authority. *)
 

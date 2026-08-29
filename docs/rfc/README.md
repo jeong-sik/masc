@@ -208,9 +208,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0343 | Repo location SSOT (collapse dual-authority, attribute by git-remote) | Draft | - |
 | 0345 | Streaming idle-timeout fail-safe floor (#25128) | Draft | - |
 | 0348 | Bounded lane acquisition for durable keeper_msg writes (#25398) | Draft | - |
-| 0349 | Restore a reachable compaction admission path | Superseded | - |
 | 0350 | Unbounded request-fiber admission (durable queue + lifecycle-sibling worker +... | Draft | - |
-| 0351 | Memory-first context management and compaction sunset | Draft | - |
 | 0352 | Legacy Goal: RFC-0000 §3.2 ↔ §3.15 자기모순 해소 (결정 요청) | Implemented | - |
 | 0353 | 실패 분류가 모듈 경계에서 소실되는 결함 (결정 요청) | Draft | - |
 | 0356 | Approval owns the effect (replay the approved payload, do not require byte-id... | Draft | - |
@@ -252,7 +250,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |
-| RFC-compaction-deterministic-floor | Compaction must never deadlock: a deterministic structural floor, typed outco... | Draft | - |
 | RFC-connector-ambient-attention-wake | Connector ambient attention wake: drive an idle keeper turn from external-att... | Draft | - |
 | RFC-dashboard-dev-token-configured-role | Loopback dashboard dev-token issues Admin | Draft | - |
 | RFC-event-queue-admit-all-ready | 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 | Draft | - |

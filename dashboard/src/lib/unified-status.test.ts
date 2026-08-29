@@ -59,11 +59,6 @@ describe('resolveUnifiedStatus', () => {
     expect(r.description).toBe('대기 중')
   })
 
-  it('resolves compacting transitional', () => {
-    const r = resolveUnifiedStatus('compacting', null, null)
-    expect(r.description).toBe('컨텍스트 압축 중')
-  })
-
   it('falls back to agent status when keeper is null', () => {
     const r = resolveUnifiedStatus(null, 'running', null)
     expect(r.canonical).toBe('running')

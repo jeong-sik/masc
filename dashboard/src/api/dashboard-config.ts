@@ -59,8 +59,8 @@ function threshold(
 
 export function parseContextThresholds(
   data: DashboardConfig,
-  defaults: { critical: number; warn: number; compacting: number },
-): { critical: number; warn: number; compacting: number } {
+  defaults: { critical: number; warn: number; high: number },
+): { critical: number; warn: number; high: number } {
   return {
     critical: threshold(
       data,
@@ -72,10 +72,10 @@ export function parseContextThresholds(
       'MASC_DASHBOARD_CTX_PREPARING',
       defaults.warn,
     ),
-    compacting: threshold(
+    high: threshold(
       data,
-      'MASC_DASHBOARD_CTX_COMPACTING',
-      defaults.compacting,
+      'MASC_DASHBOARD_CTX_HIGH',
+      defaults.high,
     ),
   }
 }

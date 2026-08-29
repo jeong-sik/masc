@@ -43,8 +43,7 @@ let source_clock_of_event = function
   | Provider_attempt_started
   | Provider_attempt_finished ->
     Provider
-  | Context_injected
-  | Context_compacted ->
+  | Context_injected ->
     Logical
   | _ -> Wall
 
@@ -85,8 +84,8 @@ let int_field_opt key value =
 
 let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
     ?finished_at ?elapsed_ms ?provider_attempt_id ?tool_batch_id ?checkpoint_id
-    ?compaction_id ?compaction_source ?event_bus_correlation_id
-    ?event_bus_run_id ?parent_event_id ?caused_by ?logical_seq () =
+    ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
+    ?logical_seq () =
   `Assoc
     (List.filter_map
        (fun value -> value)
@@ -102,8 +101,6 @@ let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
          string_field_opt "provider_attempt_id" provider_attempt_id;
          string_field_opt "tool_batch_id" tool_batch_id;
          string_field_opt "checkpoint_id" checkpoint_id;
-         string_field_opt "compaction_id" compaction_id;
-         string_field_opt "compaction_source" compaction_source;
          string_field_opt "event_bus_correlation_id" event_bus_correlation_id;
          string_field_opt "event_bus_run_id" event_bus_run_id;
          string_field_opt "parent_event_id" parent_event_id;
@@ -180,7 +177,6 @@ let clock_lane_of_event = function
   | Checkpoint_saved ->
     "agent_core_agent"
   | Context_injected
-  | Context_compacted
   | Event_bus_correlated ->
     "memory_context"
 
@@ -205,13 +201,9 @@ let context_checkpoint_id ctx ?agent_core_turn_count () =
   Printf.sprintf "checkpoint:%s:agent_core-%s" ctx.manifest_trace_id
     (agent_core_turn_label agent_core_turn_count)
 
-let context_compaction_id ctx ~source =
-  Printf.sprintf "%s:keeper-%s:compaction-%s"
-    ctx.manifest_trace_id (turn_label ctx) source
-
 let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
     ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
-    ?logical_seq ?compaction_source () =
+    ?logical_seq () =
   let tool_batch_id =
     match event with
     | Provider_lane_resolved ->
@@ -225,18 +217,10 @@ let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
       Some (context_checkpoint_id ctx ?agent_core_turn_count ())
     | _ -> None
   in
-  let compaction_id =
-    match event with
-    | Context_compacted ->
-      Some (context_compaction_id ctx ~source:(Option.value ~default:"pre_dispatch" compaction_source))
-    | Event_bus_correlated ->
-      Some (context_compaction_id ctx ~source:(Option.value ~default:"event_bus" compaction_source))
-    | _ -> None
-  in
   clock_refs ~edge_id:(context_edge_id ctx event)
     ~lane:(clock_lane_of_event event) ~source_clock:(source_clock_of_event event)
     ?elapsed_ms ?tool_batch_id
-    ?checkpoint_id ?compaction_id ?compaction_source
+    ?checkpoint_id
     ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
     ?logical_seq ()
 
@@ -316,14 +300,12 @@ let decision_public_allowlist =
   StringSet.of_list
     [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
     ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
-    ; "compaction_id"; "event_bus_correlation_id"
+    ; "event_bus_correlation_id"
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
-    ; "compaction_source"; "repair_reason"; "matched_started_ts"
+    ; "repair_reason"; "matched_started_ts"
     ; "matched_started_status"; "error"; "exception_kind"; "latency_ms"
     ; "checkpoint_after_present"; "is_last"
     ; "liveness_mode"; "liveness_budget_source"
-    ; "context_compact_started_count"; "context_compacted_count"
-    ; "last_compaction"
     ; "routing_action"; "routing_reason"; "degraded_runtime_id"
     ; "runtime_execution_built"
     ; "media_dropped_total"; "media_dropped_counts"
@@ -333,7 +315,6 @@ let decision_public_allowlist =
     ; "clock_refs"
     ; "checkpoint_installation_schema"; "checkpoint_installation_state"
     ; "checkpoint_installed_ref"; "checkpoint_installation_auxiliary"
-    ; "compaction_post_install_schema"; "compaction_lifecycle"
     ; "operator_action_required"; "trace_id"; "turn_count"
     ; "sha256"; "kind"; "detail"; "backtrace_present"; "completion_error"
     ; "failure_dispatch"; "failure_dispatch_error"
@@ -349,7 +330,7 @@ let clock_refs_public_allowlist =
   StringSet.of_list
     [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
     ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
-    ; "compaction_id"; "compaction_source"; "event_bus_correlation_id"
+    ; "event_bus_correlation_id"
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
     ]
 

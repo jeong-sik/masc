@@ -60,7 +60,7 @@ val compute_outcomes_rollup :
   Yojson.Safe.t
 (** Aggregates the keeper's last 50 completed turns into
     a JSON rollup of success / failure counters
-    (turns / compactions / handoffs / gate rejections).
+    (turns / handoffs / gate rejections).
     [recent_crash_count] is folded in as an additional
     failure axis; [registry_entry] supplies metadata
     (active model and other runtime metadata) when present. *)

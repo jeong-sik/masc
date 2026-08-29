@@ -14,7 +14,7 @@
     2026-07-20): [world_state] must never be persisted as a conversation
     message. A live audit found 943/945 user messages in one keeper's
     checkpoint were byte-identical world-state frames (59% of payload),
-    which starved compaction and re-fed the model its own observations. *)
+    which exhausted the request window and re-fed the model its own observations. *)
 type turn_prompt_parts = {
   system_prompt : string;
       (** Keeper identity, instructions, and turn intent. Stable across

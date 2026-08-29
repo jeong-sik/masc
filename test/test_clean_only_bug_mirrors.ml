@@ -19,7 +19,6 @@ type derived_phase =
   | Phase_offline
   | Phase_running
   | Phase_failing
-  | Phase_compacting
   | Phase_draining
   | Phase_paused
   | Phase_stopped
@@ -62,7 +61,6 @@ type turn_phase_tc =
   | Tp_idle
   | Tp_prompting
   | Tp_executing
-  | Tp_compacting
   | Tp_finalizing
 
 type decision_stage_tc =

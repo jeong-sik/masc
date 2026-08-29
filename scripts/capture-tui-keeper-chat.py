@@ -96,7 +96,7 @@ def current_keeper_meta() -> dict[str, object]:
         "trace_history": [], "generation": 1,
         "created_at": "2026-08-22T00:00:00Z", "updated_at": "2026-08-22T00:00:00Z",
         "last_proactive_outcome": "never_started", "last_proactive_reason": "",
-        "last_proactive_preview": "", "last_compaction_decision": "",
+        "last_proactive_preview": "",
         "last_autonomous_action_at": "", "message_scope_ack_id": None,
         "last_blocker": None, "last_runtime_attempt": None, "paused": False,
         "latched_reason": None, "current_task_id": None, "keeper_id": None,
@@ -105,8 +105,7 @@ def current_keeper_meta() -> dict[str, object]:
     for key in (
         "total_turns", "total_input_tokens", "total_output_tokens", "total_tokens",
         "last_input_tokens", "last_output_tokens", "last_total_tokens",
-        "last_latency_ms", "compaction_count", "last_compaction_before_tokens",
-        "last_compaction_after_tokens", "proactive_count_total",
+        "last_latency_ms", "proactive_count_total",
         "proactive_visible_count_total", "consecutive_noop_count",
         "autonomous_action_count", "autonomous_turn_count",
         "autonomous_text_turn_count", "autonomous_tool_turn_count",
@@ -114,8 +113,8 @@ def current_keeper_meta() -> dict[str, object]:
     ):
         meta[key] = 0
     for key in (
-        "last_handoff_ts", "total_cost_usd", "last_turn_ts", "last_compaction_ts",
-        "last_proactive_ts", "last_visible_proactive_ts", "last_compaction_check_ts",
+        "last_handoff_ts", "total_cost_usd", "last_turn_ts",
+        "last_proactive_ts", "last_visible_proactive_ts",
     ):
         meta[key] = 0.0
     # fmt: on

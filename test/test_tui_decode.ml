@@ -2681,8 +2681,7 @@ let test_decode_standalone_lane_keeps_the_run_start () =
           ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
           ; standalone_lane_json "librarian_exact" "Librarian"
           ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
-              "compaction_exact" "Compaction"
-          ; standalone_lane_json "verifier_exact" "Verifier"
+              "verifier_exact" "Verifier"
           ]
       ]
   in
@@ -2701,7 +2700,7 @@ let test_decode_standalone_lane_keeps_the_run_start () =
   | Ok snapshot ->
     (match
        ( find "board_attention_exact" snapshot.sls_lanes
-       , find "compaction_exact" snapshot.sls_lanes )
+       , find "verifier_exact" snapshot.sls_lanes )
      with
      | running, never_ran ->
        Alcotest.(check (option (float 0.001)))
@@ -2724,8 +2723,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
           [ `Assoc [ "slot_id", `String "qwen-primary"; "count", `Int 3 ] ]
         "librarian_exact" "Librarian"
     ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
-        "compaction_exact" "Compaction"
-    ; standalone_lane_json "verifier_exact" "Verifier"
+        "verifier_exact" "Verifier"
     ]
   in
   let json =
@@ -2743,19 +2741,17 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
   match Tui_decode.decode_standalone_lanes_snapshot json with
   | Error detail -> Alcotest.failf "decode failed: %s" detail
   | Ok snapshot ->
-      Alcotest.(check int) "all five lanes" 5 (List.length snapshot.sls_lanes);
+      Alcotest.(check int) "all four lanes" 4 (List.length snapshot.sls_lanes);
       let first = List.hd snapshot.sls_lanes in
       Alcotest.(check string) "running status" "running"
         (Tui_decode.standalone_lane_status_to_string first.sl_status);
-      let compaction = List.nth snapshot.sls_lanes 3 in
+      let verifier = List.nth snapshot.sls_lanes 3 in
       Alcotest.(check string)
         "none retained"
         "none retained"
-        (Tui_decode.standalone_lane_status_to_string compaction.sl_status)
+        (Tui_decode.standalone_lane_status_to_string verifier.sl_status)
 
-(* The screen draws these words in a column sized for the longest one. It was
-   sized fourteen and this said twenty-three, so the Compaction row's whole
-   right-hand side sat nine columns clear of every other row. *)
+(* The screen draws these words in a column sized for the longest one. *)
 let test_every_lane_status_word_fits_its_column () =
   List.iter
     (fun status ->
@@ -2976,6 +2972,7 @@ let harness_verdict_json ?(fallback = `Null) () =
     ; ("verdict", `String "approve")
     ; ("evaluator_runtime", `String "glm-coding")
     ; ("fallback_reason", fallback)
+    ; ("notes_hash", `String "sha256:fixture-notes")
     ]
 
 let harness_snapshot_json verdicts =
@@ -4031,7 +4028,7 @@ let lane_run_detail_json ?(output = true) run_id =
     [ ( "run"
       , `Assoc
           ([ "run_id", `String run_id
-           ; "lane", `String "compaction_exact"
+           ; "lane", `String "board_attention_exact"
            ; "actor", `String "omicron"
            ; "started_at", `Float 100.
            ; "status", `String (if output then "succeeded" else "running")
@@ -4055,7 +4052,7 @@ let test_decode_lane_run_detail_carries_prompt_and_output () =
   | Error detail -> Alcotest.fail detail
   | Ok detail ->
       Alcotest.(check string) "run id" "cmp-1" detail.Tui_decode.lrd_run_id;
-      Alcotest.(check string) "lane" "compaction_exact" detail.Tui_decode.lrd_lane;
+      Alcotest.(check string) "lane" "board_attention_exact" detail.Tui_decode.lrd_lane;
       Alcotest.(check (option (float 0.0))) "elapsed" (Some 0.5)
         detail.Tui_decode.lrd_elapsed_s;
       (match detail.Tui_decode.lrd_input_payload with
@@ -4087,7 +4084,7 @@ let test_decode_lane_run_detail_requires_the_payload () =
       [ ( "run"
         , `Assoc
             [ "run_id", `String "cmp-bad"
-            ; "lane", `String "compaction_exact"
+            ; "lane", `String "board_attention_exact"
             ; "actor", `String "omicron"
             ; "started_at", `Float 100.
             ; "status", `String "succeeded"

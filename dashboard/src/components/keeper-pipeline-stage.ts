@@ -9,7 +9,6 @@ import type { PipelineStage } from '../types'
 // Labels are short forms suitable for the roster badge.
 const STAGES: { key: PipelineStage; label: string }[] = [
   { key: 'idle', label: 'idle' },
-  { key: 'compacting', label: 'compact' },
   { key: 'offline', label: 'offline' },
   { key: 'failing', label: 'fail' },
   { key: 'draining', label: 'drain' },

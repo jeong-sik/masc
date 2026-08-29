@@ -52,7 +52,6 @@
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--bg-base) 60%, transparent);
 }
 .p-dot.running    { background: var(--ok); }
-.p-dot.compacting { background: var(--warn); }
 .p-dot.paused     { background: color-mix(in oklab, var(--warn) 55%, var(--text-dim)); }
 .p-dot.dead       { background: var(--bad); }
 .p-dot.ok         { background: var(--ok); }

@@ -823,7 +823,7 @@ function pushTickerEvent(out: FleetTickerEvent[], event: Omit<FleetTickerEvent, 
 // Human-readable keeper status, used in the fleet ticker event text.
 // Labels come from the KEEPER_STATUS_LABEL_KO SSOT
 // (lib/keeper-operational-state.ts), falling back to the fleet-tone
-// PHASE_LABEL_KO for lifecycle phase tokens (compacting, handoff, …)
+// PHASE_LABEL_KO for lifecycle phase tokens (running, handoff, …)
 // that `keeperDisplayStatus` can emit — the dashboard is Korean-only, so
 // the former English pass-through ('Active'/'Busy'/…) is gone.
 function keeperStatusLabel(status?: string | null): string {

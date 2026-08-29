@@ -59,7 +59,7 @@ val build_continuity_briefs :
     returns one {!continuity_context} per keeper, classifying its
     lifecycle / exec-state against the env-cached thresholds
     ([signal_stale_sec] / [signal_quiet_sec] / [signal_live_sec]
-    + [ctx_handoff_imminent] / [ctx_preparing] / [ctx_compacting]).
+    + [ctx_handoff_imminent] / [ctx_preparing] / [ctx_high]).
 
     Threshold values are env-cached at module init — runtime env
     mutation does not affect the classification.  Pinned at the

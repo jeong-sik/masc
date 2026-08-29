@@ -6,7 +6,7 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('offline')).toBe('Offline')
     expect(toKeeperPhase('running')).toBe('Running')
     expect(toKeeperPhase('failing')).toBe('Failing')
-    expect(toKeeperPhase('compacting')).toBe('Compacting')
+    expect(toKeeperPhase('compacting')).toBeNull()
     expect(toKeeperPhase('draining')).toBe('Draining')
     expect(toKeeperPhase('paused')).toBe('Paused')
     expect(toKeeperPhase('stopped')).toBe('Stopped')

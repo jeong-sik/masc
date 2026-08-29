@@ -122,7 +122,7 @@ let a_turn_that_produced_nothing_demotes_everything_before_it () =
 (* [earlier] ends
    with an Assistant that issued a call whose Tool answer has not been
    recorded yet — the checkpoint captured a dangling tool cycle at the turn
-   boundary, exactly the shape [Keeper_compaction_unit]'s [protected_suffix]
+   boundary, exactly the shape [Keeper_transcript_unit]'s [protected_suffix]
    exists to handle elsewhere. On request 1 (before the answer exists)
    [first_atom_at_or_after] returns one value; once the answer lands on
    request 2, it returns a different one. Confirm the drift is real, then

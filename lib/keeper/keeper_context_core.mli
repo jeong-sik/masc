@@ -80,7 +80,7 @@ val persist_message :
   ?source:string -> session_context -> Agent_core.Types.message -> unit
 
 type 'persistence_error checkpoint_write_error =
-  | Tool_history_invalid of Keeper_compaction_unit.structural_error
+  | Tool_history_invalid of Keeper_transcript_unit.structural_error
   | Persistence_error of 'persistence_error
 
 val checkpoint_write_error_to_string

@@ -26,9 +26,6 @@ fi
 # solid edges).  Dashed edges in the .dot file are documented-only and
 # intentionally omitted.
 declare -a INSTRUMENTED_EDGES=(
-  "ksm_to_kcl_routing"
-  "ksm_to_kmc_compact_trigger"
-  "kmc_to_ksm_compact_completed"
   "kcl_to_ktc_exhaustion"
 )
 

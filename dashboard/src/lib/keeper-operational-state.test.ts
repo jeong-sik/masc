@@ -34,7 +34,6 @@ function makeComposite(
     turn_phase: 'idle',
     decision: { stage: 'idle' },
     runtime: { state: 'idle' },
-    compaction: { stage: 'idle' },
     measurement: {} as KeeperCompositeSnapshot['measurement'],
     invariants: {} as KeeperCompositeSnapshot['invariants'],
     fsm_guard_violations: 0,
@@ -321,9 +320,9 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
         status: 'active',
         pipeline_stage: 'idle',
       }),
-      composite: makeComposite({ turn_phase: 'compacting' }),
+      composite: makeComposite({ turn_phase: 'executing' }),
     })
-    expect(state.kind === 'running' && state.turnPhase === 'compacting').toBe(true)
+    expect(state.kind === 'running' && state.turnPhase === 'executing').toBe(true)
   })
 })
 
@@ -429,7 +428,7 @@ interface DeriveInputsLite {
 
 describe('toKeeperPhase — wire-boundary narrow (lowercase + PascalCase)', () => {
   it.each<KeeperPhase>([
-    'Offline', 'Running', 'Failing', 'Compacting',
+    'Offline', 'Running', 'Failing',
     'Draining', 'Paused', 'Stopped', 'Crashed',
     'Restarting',
   ])('accepts PascalCase KeeperPhase %s', (phase) => {
@@ -459,7 +458,7 @@ describe('compositePhaseTone — exhaustive switch over KeeperPhase', () => {
     expect(compositePhaseTone(phase)).toBe('active')
   })
   it.each<KeeperPhase>([
-    'Compacting', 'Draining', 'Paused', 'Restarting',
+    'Draining', 'Paused', 'Restarting',
   ])('phase %s ⇒ warn', (phase) => {
     expect(compositePhaseTone(phase)).toBe('warn')
   })
@@ -606,9 +605,9 @@ describe('KeeperOperationalState remaining Goal-2 axes — RFC-0135 strict close
   it('phase is present on the state and uses composite-preferred phase when lifecycle is not terminal', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({ phase: 'Running', status: 'active' }),
-      composite: makeComposite({ phase: 'compacting' }),
+      composite: makeComposite({ phase: 'restarting' }),
     })
-    expect(state.phase).toBe('Compacting')
+    expect(state.phase).toBe('Restarting')
   })
 
   it('phase keeps terminal lifecycle status authoritative over a stale composite phase', () => {
@@ -675,7 +674,7 @@ describe('deriveKeeperTurnPhase — RFC-0135 PR-14b', () => {
     ).toBe('executing')
   })
   it('falls back to pipeline_stage when composite null', () => {
-    expect(deriveKeeperTurnPhase({ pipeline_stage: 'compacting' } as Keeper, null)).toBe('compacting')
+    expect(deriveKeeperTurnPhase(makeKeeper({ pipeline_stage: 'restarting' }), null)).toBe('restarting')
   })
   it('returns null when both sources empty', () => {
     expect(deriveKeeperTurnPhase({} as Keeper, null)).toBeNull()
@@ -687,9 +686,9 @@ describe('derivePreferredPhase — RFC-0135 PR-14d', () => {
     expect(
       derivePreferredPhase(
         { phase: 'Running' } as Keeper,
-        { phase: 'compacting' } as unknown as KeeperCompositeSnapshot,
+        { phase: 'restarting' } as unknown as KeeperCompositeSnapshot,
       ),
-    ).toBe('Compacting')
+    ).toBe('Restarting')
   })
   it('falls back to keeper.phase when composite empty', () => {
     expect(derivePreferredPhase({ phase: 'Draining' } as Keeper, null)).toBe('Draining')

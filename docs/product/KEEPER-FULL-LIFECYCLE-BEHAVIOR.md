@@ -52,7 +52,7 @@ path. Neither authority belongs in the Keeper roster or Keeper count.
 
 Keeper configuration contains no model or provider policy. Runtime assignment is the only routing SSOT.
 
-Librarian, judgment, board-attention, compaction, and other ordinary LLM
+Librarian, judgment, board-attention, and other ordinary LLM
 sub-lanes accept any general text Runtime in a frozen declared order. Different
 lanes may use different first slots for load distribution. Runtime order is
 never inferred from price, tier, provider name, or error prose.
@@ -218,22 +218,6 @@ runtime toggle, metrics, and maintenance fiber are absent.
 
 **Missing:** typed supersession/tombstone support is separate future work; it
 must not revive periodic full-store consolidation.
-
-### B09. Capacity backstop
-
-**Middle-school explanation:** If context still grows too large, reduce a closed semantic unit without losing an unfinished tool exchange.
-
-**Expected behavior:** a closed tool cycle is atomic input to an LLM. No deterministic oldest-message eviction. Failure keeps the source and Keeper alive.
-
-**Current verdict:** `WIRED_FAILING_LIVE`
-
-**Observed:** no configured Keeper has a recorded compaction (no
-`Context_compacted` runtime-manifest row and a zero `compaction_rt` count for
-every Keeper, #29454) while turn request and recall sizes grow. No live
-checkpoint replacement has been observed.
-
-**Missing:** bounded input, new-delta/backlog selection, Runtime failover,
-checkpoint install, and next-turn proof.
 
 ### B10. Board attention and Schedule
 

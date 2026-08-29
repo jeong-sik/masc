@@ -88,8 +88,6 @@ export function statusLabel(value?: string | null): string {
       return '은퇴'
     case 'spawned':
       return '생성됨'
-    case 'compacting':
-      return '컴팩팅'
     // Task lineage still emits `handoff`; this generic vocabulary is shared
     // beyond the removed Keeper lifecycle phase.
     case 'handoff':

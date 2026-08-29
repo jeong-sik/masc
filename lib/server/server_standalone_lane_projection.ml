@@ -54,10 +54,6 @@ let lane_specs =
     ; label = "Librarian"
     ; required = false
     }
-  ; { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Compaction
-    ; label = "Compaction"
-    ; required = false
-    }
   ; { lane_id = Runtime.verifier_exact_lane_id; label = "Verifier"; required = false }
   ]
 ;;

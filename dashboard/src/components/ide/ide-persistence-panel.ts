@@ -66,7 +66,6 @@ export function persistenceStateFromKeeperPhase(
     case 'failing':
     case 'crashed':
       return 'conflict'
-    case 'compacting':
     case 'handoffing':
     case 'handingoff':
     case 'draining':

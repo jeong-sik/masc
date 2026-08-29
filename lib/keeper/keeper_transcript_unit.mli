@@ -1,4 +1,4 @@
-(** Pure structural partitioning for LLM compaction.
+(** Pure structural partitioning for Keeper transcripts.
 
     Tool protocol cycles remain byte- and constructor-exact units. This module
     inspects only top-level content blocks; nested ToolResult payload blocks are
@@ -80,7 +80,7 @@ val partition
   -> (partition, structural_error) result
 (** With [~quarantine:true] the first structural break freezes the valid
     [closed_prefix] and moves the open cycle plus the offending message and its
-    successors into [protected_suffix] instead of returning [Error]. Compaction
+    successors into [protected_suffix] instead of returning [Error]. Transcript recovery
     callers use this so a single broken tool cycle compacts the valid prefix
     rather than rejecting the whole history. [validate] and persistence callers
     keep the default [false] to reject broken structures. *)

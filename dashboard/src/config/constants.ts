@@ -84,7 +84,7 @@ export const TELEMETRY_AUTO_REFRESH_MS = 30_000
 // Consumers should read from config/context-thresholds.ts, not import these directly.
 export const CONTEXT_RATIO_CRITICAL = 0.85  // handoff-imminent
 export const CONTEXT_RATIO_WARN = 0.70      // preparing
-export const CONTEXT_RATIO_COMPACTING = 0.50 // compacting
+export const CONTEXT_RATIO_HIGH = 0.50
 
 // --- Keeper UI/runtime limits ---
 export const KEEPER_HISTORY_TAIL_MESSAGES = 200

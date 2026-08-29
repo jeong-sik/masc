@@ -18,7 +18,7 @@ module EC = Keeper_error_classify
    [record_failure_observation]). The failure class is deterministic
    (identical request, identical 400), so the bound is not there to absorb
    flakiness; 3 gives a poisoned checkpoint a few cycles in which an
-   intervening compaction or operator context clear can change the request
+   intervening operator context clear can change the request
    before durable accounting resumes. *)
 let max_consecutive_invalid_request_failures = 3
 

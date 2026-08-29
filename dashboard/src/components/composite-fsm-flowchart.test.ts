@@ -26,7 +26,7 @@ describe('buildCompositeFsmMermaid', () => {
   })
 
   it('declares a subgraph per axis', () => {
-    for (const axis of ['KSM', 'KTC', 'KDP', 'KCL', 'KMC']) {
+    for (const axis of ['KSM', 'KTC', 'KDP', 'KCL']) {
       // `subgraph KSM ["..."]` etc.
       expect(src).toMatch(new RegExp(`subgraph ${axis} `))
     }
@@ -39,9 +39,9 @@ describe('buildCompositeFsmMermaid', () => {
     expect(src).toContain('kcl_idle["idle"]')
   })
 
-  it('covers the full KSM state surface (11 phases)', () => {
+  it('covers the full KSM state surface (8 phases)', () => {
     const ksm = [
-      'Offline', 'Running', 'Failing', 'Compacting',
+      'Offline', 'Running', 'Failing',
       'Draining', 'Paused', 'Stopped', 'Crashed',
       'Restarting',
     ]

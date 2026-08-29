@@ -254,7 +254,7 @@ let test_typed_capacity_transition_preserves_axes () =
 
 (* Serving-evidence validity and unmeasurable tokens are facts about the
    measurement, not a capacity limit. Neither may be guessed into one. *)
-let test_unusable_capacity_evidence_is_non_compacting () =
+let test_unusable_capacity_evidence_is_ignored () =
   let constraint_ = serving_constraint () in
   (match
      Budget.capacity_refusal_of_error
@@ -328,9 +328,9 @@ let () =
             `Quick
             test_typed_capacity_transition_preserves_axes
         ; test_case
-            "unusable capacity evidence is non-compacting"
+            "unusable capacity evidence is ignored"
             `Quick
-            test_unusable_capacity_evidence_is_non_compacting
+            test_unusable_capacity_evidence_is_ignored
         ; test_case
             "lane classifier admits only the token axis"
             `Quick

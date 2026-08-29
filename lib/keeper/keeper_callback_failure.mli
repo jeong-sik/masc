@@ -1,7 +1,7 @@
 (** Keeper lifecycle callback failure recorder.
 
     Lifecycle callbacks are non-critical side effects: failure must not
-    abort compaction or handoff, but it must be observable as a metric,
+    abort handoff, but it must be observable as a metric,
     log, and durable telemetry coverage gap. *)
 
 val record :

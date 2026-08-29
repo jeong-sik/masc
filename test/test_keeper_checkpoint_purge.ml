@@ -191,7 +191,7 @@ let test_thinking_only_interstitial_cycle_message_is_dropped () =
   Alcotest.(check int) "unsigned reasoning stripped" 1 report.reasoning_blocks_stripped;
   Alcotest.(check int) "empty interstitial dropped" 1 report.reasoning_messages_dropped;
   Alcotest.(check int) "pairing intact" 3 (List.length purged);
-  match Masc.Keeper_compaction_unit.validate purged with
+  match Masc.Keeper_transcript_unit.validate purged with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "dropping the interstitial broke tool pairing"
 
@@ -212,7 +212,7 @@ let test_tool_result_clear_preserves_pairing () =
       | Types.Tool_succeeded -> ()
       | _ -> Alcotest.fail "typed outcome must survive the clear")
    | _ -> Alcotest.fail "cleared cycle lost its ToolResult block");
-  match Masc.Keeper_compaction_unit.validate purged with
+  match Masc.Keeper_transcript_unit.validate purged with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "cleared cycle no longer validates"
 

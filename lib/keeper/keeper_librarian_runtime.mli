@@ -40,8 +40,7 @@ val fitted_messages
   -> full_messages:Agent_core.Types.message list
   -> render_at:(int -> (Agent_core.Types.message list, extraction_error) result)
   -> (Agent_core.Types.message list * int option, extraction_error) result
-(** Pre-flight size discipline (lane audit W1/W2), mirrored from the
-    compaction lane: the full prompt is kept when it fits every admitted
+(** Pre-flight size discipline (lane audit W1/W2): the full prompt is kept when it fits every admitted
     slot's request-body limit; otherwise the message window binary-searches
     down through [render_at] and the fitted count rides along as [Some k].
     Zero-message overflow is [Exact_input_over_budget]. *)

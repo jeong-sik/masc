@@ -22,21 +22,16 @@ type runtime_manifest_scan =
   ; event_bus_count : int
   ; event_bus_correlation_ids : string list
   ; event_bus_run_ids : string list
-  ; context_compact_started_count : int
-  ; context_compacted_count : int
-  ; last_compaction : Yojson.Safe.t option
   ; latest_provider_lane_decision : Yojson.Safe.t option
   ; latest_provider_lane_row : Keeper_runtime_manifest.t option
   ; latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
   ; payload_role_counts : (string, int) Hashtbl.t
   ; source_clock_counts : (string, int) Hashtbl.t
   ; context_injected_count : int
-  ; context_compacted_event_count : int
   ; provider_started_count : int
   ; provider_finished_count : int
   ; provider_terminal_row : Keeper_runtime_manifest.t option
   ; latest_context_injected_row : Keeper_runtime_manifest.t option
-  ; latest_context_compacted_row : Keeper_runtime_manifest.t option
   ; dag_edges : (string * string) list
   ; scanned_lines : int
   ; scan_line_limit : int

@@ -6,7 +6,7 @@ type keeper_lifecycle =
   | Lc_offline
   | Lc_handoff_imminent
   | Lc_preparing
-  | Lc_compacting
+  | Lc_high
   | Lc_active
   | Lc_idle
 
@@ -14,7 +14,7 @@ let keeper_lifecycle_to_string = function
   | Lc_offline -> "offline"
   | Lc_handoff_imminent -> "handoff-imminent"
   | Lc_preparing -> "preparing"
-  | Lc_compacting -> "compacting"
+  | Lc_high -> "high"
   | Lc_active -> "active"
   | Lc_idle -> "idle"
 
@@ -45,7 +45,7 @@ let signal_live_sec  = Env_config.Dashboard.signal_live_sec
     SSOT: [Env_config.Dashboard] module. *)
 let ctx_handoff_imminent = Env_config.Dashboard.ctx_handoff_imminent
 let ctx_preparing        = Env_config.Dashboard.ctx_preparing
-let ctx_compacting       = Env_config.Dashboard.ctx_compacting
+let ctx_high             = Env_config.Dashboard.ctx_high
 
 (** Keeper action-age threshold (seconds).
     SSOT: [Env_config.Dashboard] module. *)
@@ -291,7 +291,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
       | Some ratio when ratio >= ctx_handoff_imminent ->
           Lc_handoff_imminent
       | Some ratio when ratio >= ctx_preparing -> Lc_preparing
-      | Some ratio when ratio >= ctx_compacting -> Lc_compacting
+      | Some ratio when ratio >= ctx_high -> Lc_high
       | Some _ | None ->
           (* Both outcomes of the signal test were Lc_idle, so the test
              distinguished nothing. last_signal_ts still feeds last_signal_at
@@ -306,7 +306,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
       match lifecycle with
       | Lc_handoff_imminent ->
           (Exec_critical, Tone_bad, "핸드오프 임박")
-      | Lc_preparing | Lc_compacting ->
+      | Lc_preparing | Lc_high ->
           (Exec_warning, Tone_warn, "연속성 압력이 높습니다")
       | Lc_offline | Lc_active | Lc_idle ->
           (* The branch removed here warned whenever the lifetime autonomous

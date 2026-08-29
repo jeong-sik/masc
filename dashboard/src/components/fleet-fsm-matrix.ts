@@ -1,8 +1,8 @@
 /**
  * FleetFsmMatrix (LT-16b)
  *
- * Small-multiples matrix of all registered keepers × 5 orthogonal FSM
- * axes (KSM/KTC/KDP/KCL/KMC). One chip per (keeper, axis) cell showing
+ * Small-multiples matrix of all registered keepers × 4 orthogonal FSM
+ * axes (KSM/KTC/KDP/KCL). One chip per (keeper, axis) cell showing
  * the current state. A top strip summarises the 4 joint invariant
  * counts from KeeperCompositeLifecycle.tla.
  *
@@ -49,10 +49,9 @@ const STALE_RUNTIME_SECONDS = 30 * 60
 export const FLEET_HISTORY_LEN = 30
 
 // Axis order is fixed by the TLA+ joint spec
-// (KeeperCompositeLifecycle.tla): KSM → KTC → KDP → KCL → KMC.
+// (KeeperCompositeLifecycle.tla): KSM → KTC → KDP → KCL.
 // Keep it identical to TRANSITION_FIELDS so an operator scanning
-// left-to-right sees "lifecycle → turn → decision → runtime →
-// runtime" — the natural causal order of a turn.
+// left-to-right sees "lifecycle → turn → decision → runtime".
 const AXES: Array<{ key: LaneKey; label: string; acronym: string }> = [
   { key: 'phase',      label: '생명주기',   acronym: 'KSM' },
   { key: 'turn',       label: '턴',        acronym: 'KTC' },
@@ -70,14 +69,13 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // KSM
   Running:      'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   Failing:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  Compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   Draining:     'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   Paused:       'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   Stopped:      'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   Crashed:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Restarting:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   Offline:      'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
-  // KTC (unique keys — shared keys like idle/exhausted/compacting/donelisten under KCL/KMC below)
+  // KTC (unique keys — shared keys like idle/exhausted/done live under KCL below)
   prompting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   routing:      'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   executing:    'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
@@ -86,14 +84,12 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   undecided:          'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   guard_ok:           'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   tool_policy_selected: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
-  // KCL + KMC + shared keys (idle, exhausted, compacting, done)
+  // KCL + shared keys (idle, exhausted, done)
   idle:         'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   selecting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   trying:       'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   done:         'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   exhausted:    'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  accumulating: 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
-  compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
 }
 
 const DEFAULT_CHIP = 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
@@ -950,7 +946,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
       aria-label="Fleet FSM 통합 상태"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--color-border-default)] p-3">
-        <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">Fleet 통합 (KSM × KTC × KDP × KCL × KMC)</h2>
+        <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">Fleet 통합 (KSM × KTC × KDP × KCL)</h2>
         <span class="text-xs text-[var(--color-fg-muted)]">
           키퍼 ${data.count}명 · ${unixSecondsToDate(data.generated_at).toLocaleTimeString()} 업데이트
         </span>
@@ -1011,7 +1007,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                 <span
                   data-testid="idle-composite-chip"
                   class="rounded-[var(--r-1)] border bg-[var(--ok-10)] px-2 py-0.5 text-xs text-[var(--color-status-ok)] border-[var(--ok-20)]"
-                  title="모든 sub-FSM이 idle인 keeper 수 (turn=idle, decision=undecided, runtime=idle, compaction=accumulating, circuit=clean)"
+                  title="모든 sub-FSM이 idle인 keeper 수 (turn=idle, decision=undecided, runtime=idle, circuit=clean)"
                 >
                   Composite idle: ${idleCompositeCount}
                 </span>

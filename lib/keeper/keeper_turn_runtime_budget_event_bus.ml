@@ -1,8 +1,7 @@
 (** Turn event-bus observation summary.
 
-    AGENT_CORE lifecycle events supply correlation metadata only. MASC-owned
-    compaction state must come from the lane's durable completion path,
-    never from this lossy observation bus. *)
+    AGENT_CORE lifecycle events supply correlation metadata only. Durable
+    Keeper state must never be reconstructed from this lossy observation bus. *)
 
 type turn_event_bus_summary = {
   correlation_id : string option;

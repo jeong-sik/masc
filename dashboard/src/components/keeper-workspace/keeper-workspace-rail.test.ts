@@ -754,12 +754,6 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('점검이 필요합니다')
   })
 
-  it('does not invent an auto-compact threshold from retired gate data', () => {
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
-    expect(container.textContent).not.toContain('compact 72%')
-    expect(container.querySelector('.meter-mark-lbl')).toBeNull()
-  })
-
   it('renders context metrics as missing when only a zero default exists', () => {
     const k = mkKeeper({ context_ratio: 0 })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)

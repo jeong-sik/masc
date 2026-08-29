@@ -124,8 +124,7 @@ describe('InternalAgentsMonitor', () => {
       lanes: [
         lane({ status: 'running', runningCount: 1 }),
         lane({ laneId: 'hitl_auto_judge', label: 'HITL Auto Judge' }),
-        lane({ laneId: 'librarian_exact', label: 'Librarian' }),
-        lane({ laneId: 'compaction_exact', label: 'Compaction', required: false, status: 'no_retained_observation', retainedRunCount: 0, lastStartedAt: null, lastTerminalAt: null, lastOutcome: null, p50ElapsedSeconds: null, selectedSlots: [] }),
+        lane({ laneId: 'librarian_exact', label: 'Librarian', status: 'no_retained_observation', retainedRunCount: 0, lastStartedAt: null, lastTerminalAt: null, lastOutcome: null, p50ElapsedSeconds: null, selectedSlots: [] }),
         lane({ laneId: 'verifier_exact', label: 'Verifier', required: false }),
       ],
     })

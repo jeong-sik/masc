@@ -58,7 +58,7 @@ export interface KeeperRuntimeProjectionRuntimeInput {
 }
 
 export interface KeeperRuntimeProjectionFsmLane {
-  readonly axis: 'KSM' | 'KTC' | 'KDP' | 'KCL' | 'KMC'
+  readonly axis: 'KSM' | 'KTC' | 'KDP' | 'KCL'
   readonly source: string
   readonly value: string
   readonly contributesToAttention: boolean

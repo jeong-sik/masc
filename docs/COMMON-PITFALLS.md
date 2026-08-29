@@ -419,7 +419,7 @@ cd dashboard && pnpm run typecheck  # TypeScript type check
 
 ## 14. Cross-FSM Coupling Discipline (PR #11120/#11127/#11134)
 
-5 sub-FSM(KSM/KTC/KDP/KCL/KMC)이 직접 호출로 결합된 구조 — silent failure가 cross-FSM boundary에서 가장 쉽게 발생함. PR-H/I/J에서 도입된 invariants와 reviewer rule.
+4 sub-FSM(KSM/KTC/KDP/KCL)이 직접 호출로 결합된 구조 — silent failure가 cross-FSM boundary에서 가장 쉽게 발생함. PR-H/I/J에서 도입된 invariants와 reviewer rule.
 
 ### 14.1. Pure Function 불변량
 

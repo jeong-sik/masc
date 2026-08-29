@@ -18,8 +18,8 @@ val context_fields :
     the nested ["context"] object carries provenance ([turn_ref],
     [observed_at], [request_body_bytes]).
 
-    Observation-only: no runtime consumer may derive context-pressure or
-    compaction decisions from these fields; dashboard triage surfaces
+    Observation-only: no runtime consumer may derive request-admission
+    decisions from these fields; dashboard triage surfaces
     (bands, ordering, health counts) render them. It reads only the
     dated-JSONL tail (one strict line), never checkpoints. Absence stays
     typed via [context_metrics_unavailable] with a closed reason set:
@@ -38,8 +38,7 @@ val last_turn_usage_json_of_meta :
     Its timestamp is independent from [last_turn_ts], which also advances on
     failed turns. *)
 (** Provider-reported usage for the latest completed turn. This is not
-    context occupancy and must never feed context pressure or compaction
-    decisions. *)
+    context occupancy and must never feed request admission decisions. *)
 
 val last_turn_usage_json :
   base_path:string ->

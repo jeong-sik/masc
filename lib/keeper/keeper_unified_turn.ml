@@ -688,7 +688,7 @@ let run_keeper_cycle
                     it never enters the persisted AGENT_CORE conversation. Persisting
                     it as a user message re-fed the model its own observations
                     (943/945 identical frames in one live checkpoint, #25193)
-                    and starved compaction. Persisted user content is utterances
+                    and exhausted the request window. Persisted user content is utterances
                     only (wake marker + HITL resolutions). *)
                  { system_prompt; dynamic_context = world_state }
                in
@@ -1188,11 +1188,8 @@ let run_keeper_cycle
                      [Keeper_transcript_tail_recovery] closes the open cycles a
                      process death leaves behind. Capacity failures (context
                      overflow, request-body caps, serving-input rejection) also
-                     route here; the automatic overflow-compaction recovery
-                     that used to branch was removed (#26546) because it never
-                     produced a committed compaction on record. #26545 bounds
-                     conversation history only; whole-request provider fit is
-                     tracked separately in #26551. *)
+                     route here. #26545 bounds conversation history;
+                     whole-request provider fit is tracked separately in #26551. *)
                   let source_disposition = Follow_failure_route in
                   exact_failure_execution :=
                     Some

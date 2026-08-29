@@ -53,8 +53,6 @@ export interface JourneyWaterfallRuntimeEvidence {
   providerAttemptStartedCount: number
   providerAttemptFinishedCount: number
   eventBusCorrelatedCount: number
-  contextCompactedCount: number
-  contextCompactStartedCount: number
   memoryInjectedCount: number
   memoryFlushedCount: number
 }
@@ -202,8 +200,6 @@ export function summarizeRuntimeTrace(
     providerAttemptStartedCount: trace.provider_attempts.started_count,
     providerAttemptFinishedCount: trace.provider_attempts.finished_count,
     eventBusCorrelatedCount: trace.event_bus.event_bus_correlated_count,
-    contextCompactedCount: trace.event_bus.context_compacted_count,
-    contextCompactStartedCount: trace.event_bus.context_compact_started_count,
     memoryInjectedCount: trace.memory.memory_injected_count,
     memoryFlushedCount: trace.memory.memory_flushed_count,
   }

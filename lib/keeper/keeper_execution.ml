@@ -1,8 +1,8 @@
 (** Keeper_execution — keeper tool execution loop, prompting,
-    compaction, and keepalive runtime.
+    checkpointing, and keepalive runtime.
 
     Delegates to sub-modules:
-    - Keeper_context_runtime: checkpoint, compaction, model labels
+    - Keeper_context_runtime: checkpoint and model labels
     - Keeper_prompt: system prompts, mention detection, text processing
 
     Proactive emission and autonomous goal turns are now handled by

@@ -295,8 +295,7 @@ let librarian_output_requirement =
     ~minimum_guarantee:Exact_output.Json_syntax
 ;;
 
-(* Pre-flight size discipline, mirrored from the compaction lane — the one
-   lane that measured its request before sending it. The librarian's input
+(* Pre-flight size discipline for the exact Librarian lane. The librarian's input
    scales linearly with conversation text and previously had no byte bound at
    all (only a 72-message COUNT cap), so an oversized prompt failed at the
    provider, cost a full round-trip, and with a single admitted slot had

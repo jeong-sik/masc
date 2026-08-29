@@ -256,28 +256,6 @@ let publish_registry ?(cli_slot_ids = []) ~lane_id ~slot_ids resolver_snapshot =
       (Runtime_exact_output_registry.publication_error_to_string error)
 ;;
 
-let publish_runtime_lane ?connect_timeout_s ~source ~base_url () =
-  let slot_ids = [ "compaction-exact-fixture" ] in
-  let lanes : Runtime_schema.exact_output_lane_decl list =
-    [ { id = "compaction_exact"; slot_ids; cli_slot_ids = [] } ]
-  in
-  let fixtures = List.map (fun id -> { id; base_url }) slot_ids in
-  let connect_timeouts =
-    Option.fold
-      ~none:[]
-      ~some:(fun timeout -> List.map (fun id -> id, timeout) slot_ids)
-      connect_timeout_s
-  in
-  let resolver_snapshot = resolver_snapshot ~connect_timeouts ~source fixtures in
-  (match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
-   | Ok _ -> ()
-   | Error error ->
-     Alcotest.failf
-       "exact-output runtime fixture did not publish: %s"
-       (Runtime_exact_output_registry.publication_error_to_string error));
-  slot_ids
-;;
-
 let openai_response output =
   let encoded_content =
     output

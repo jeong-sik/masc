@@ -1,7 +1,7 @@
 open Alcotest
 
 module EO = Agent_core.Exact_output
-module F = Compaction_exact_output_fixture
+module F = Exact_output_fixture
 module Gate = Masc.Keeper_gate
 module Q = Masc.Keeper_approval_queue
 module QT = Keeper_approval_queue_rules_types

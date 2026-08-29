@@ -13,9 +13,7 @@ let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
     > 0
   in
   let has_context_delta =
-    scan.context_injected_count > 0
-    || scan.context_compacted_event_count > 0
-    || scan.event_bus_count > 0
+    scan.context_injected_count > 0 || scan.event_bus_count > 0
   in
   let runtime_override =
     Option.value
@@ -270,21 +268,6 @@ let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
               ; severity = "warn"
               ; lane = "provider"
               ; detail = Some "terminal provider row lacks terminal_provider_kind"
-              }
-              :: gaps)
-         | None -> gaps)
-    |> (fun gaps ->
-         match scan.latest_context_compacted_row with
-         | Some row ->
-           let decision = row.Keeper_runtime_manifest.decision in
-           let clock_refs = Json_util.assoc_member_opt "clock_refs" decision in
-           (match Option.bind clock_refs (fun cr -> Json_util.get_string cr "compaction_source") with
-            | Some _ -> gaps
-            | None ->
-              { code = "compaction_source_missing"
-              ; severity = "warn"
-              ; lane = "memory_context"
-              ; detail = Some "context_compacted row lacks compaction_source in clock_refs"
               }
               :: gaps)
          | None -> gaps)

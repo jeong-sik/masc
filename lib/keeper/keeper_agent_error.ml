@@ -80,7 +80,7 @@ let user_message_of_core_error = function
     context_overflow_user_message ~limit
   | Agent_core.Error.Api (Agent_core.Retry.InputCapacity _) ->
     "The runtime flow reported a typed input-capacity failure. MASC did not \
-     infer a compaction or select another runtime; the failure is escalated as \
+     select another runtime; the failure is escalated as \
      a deterministic judgment."
   | Agent_core.Error.Provider
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->

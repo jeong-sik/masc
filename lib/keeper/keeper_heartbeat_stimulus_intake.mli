@@ -2,7 +2,7 @@
 
     Admits every ready Event Layer stimulus from one durable snapshot. Payload
     families share queue order except for explicit owner-lane manual
-    compaction, which preempts alone at a persisted turn boundary, and
+    durable stimulus admission at persisted turn boundaries, and
     Connector attention, which admits only the first ready conversation. An
     unready input remains queued without blocking later ready work. *)
 

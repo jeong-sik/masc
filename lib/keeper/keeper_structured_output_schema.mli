@@ -6,19 +6,6 @@
 val librarian_current_output_schema : Yojson.Safe.t
 (** JSON object the current-memory Librarian must return. *)
 
-(** Wire field names for {!compaction_plan_output_schema}; shared with the
-    compaction-plan codec as the single source of truth. *)
-val compaction_plan_field_unit_index : string
-(** Identity field used only in the typed planning input. *)
-
-val compaction_plan_field_summary : string
-val compaction_plan_field_keep_from_unit_index : string
-
-val compaction_plan_output_schema : Yojson.Safe.t
-(** Constant-size boundary plan: the contiguous supplied prefix below
-    [keep_from_unit_index] becomes one [summary]. The exact suffix and all
-    source units outside the supplied window remain unchanged. *)
-
 val fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)
 

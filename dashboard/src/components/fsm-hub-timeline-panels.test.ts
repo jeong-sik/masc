@@ -21,11 +21,6 @@ describe('swimlaneSegmentColor', () => {
   it('returns idle color for idle-like values', () => {
     expect(swimlaneSegmentColor('idle')).toBe('bg-[var(--color-bg-panel-alt)]')
     expect(swimlaneSegmentColor('undecided')).toBe('bg-[var(--color-bg-panel-alt)]')
-    expect(swimlaneSegmentColor('accumulating')).toBe('bg-[var(--color-bg-panel-alt)]')
-  })
-
-  it('returns warn color for compacting', () => {
-    expect(swimlaneSegmentColor('compacting')).toBe('bg-[var(--amber-bright-45)]')
   })
 
   it('returns default active color for unknown / active values', () => {
@@ -75,8 +70,7 @@ describe('filterTransitionHistory', () => {
     { ts: 1000, field: 'KCL', from: 'idle', to: 'trying' },
     { ts: 1100, field: 'KCL', from: 'trying', to: 'idle' },
     { ts: 1200, field: 'KTC', from: 'Idle', to: 'Running' },
-    { ts: 1300, field: 'KSM', from: 'Stable', to: 'Compacting' },
-    { ts: 1400, field: 'KMC', from: 'accumulating', to: 'Draining' },
+    { ts: 1300, field: 'KSM', from: 'Stable', to: 'Draining' },
     { ts: 1500, field: 'KDP', from: 'guard_ok', to: 'tool_policy_selected' },
   ]
 

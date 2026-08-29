@@ -6,11 +6,11 @@ import { PipelineStageBadge } from './keeper-pipeline-stage'
 describe('PipelineStageBadge', () => {
   it('renders label for known stage', () => {
     const container = document.createElement('div')
-    render(h(PipelineStageBadge, { stage: 'compacting' }), container)
-    expect(container.textContent).toContain('compact')
+    render(h(PipelineStageBadge, { stage: 'restarting' }), container)
+    expect(container.textContent).toContain('restart')
     const badge = container.querySelector('.pipeline-stage-badge')
     expect(badge).not.toBeNull()
-    expect(badge!.classList.contains('stage-compacting')).toBe(true)
+    expect(badge!.classList.contains('stage-restarting')).toBe(true)
   })
 
   it('renders unknown for null stage', () => {

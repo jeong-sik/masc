@@ -26,7 +26,6 @@ const ALL_PHASES: readonly KeeperPhase[] = [
   'Offline',
   'Restarting',
   'Running',
-  'Compacting',
   'Failing',
   'Draining',
   'Paused',
@@ -37,7 +36,7 @@ const ALL_PHASES: readonly KeeperPhase[] = [
 describe('keeper-fsm SSOT closed-sum', () => {
   it('FSM_STATES matches the canonical phase set', () => {
     expect(new Set(FSM_STATES)).toEqual(new Set([
-      'Offline', 'Restarting', 'Running', 'Compacting',
+      'Offline', 'Restarting', 'Running',
       'Failing', 'Draining', 'Paused', 'Stopped',
       'Crashed',
     ]))
@@ -55,7 +54,7 @@ describe('keeper-fsm SSOT closed-sum', () => {
 
   it('PHASE_PULSE: only active/transient phases pulse', () => {
     const expectedPulsing = new Set<KeeperPhase>([
-      'Running', 'Compacting', 'Restarting', 'Failing',
+      'Running', 'Restarting', 'Failing',
     ])
     for (const phase of ALL_PHASES) {
       expect(phasePulse(phase)).toBe(expectedPulsing.has(phase))
@@ -76,7 +75,7 @@ describe('keeper-fsm SSOT closed-sum', () => {
 
   it('phaseStatus buckets: run/pause/off partition (prototype PHASE_STATUS)', () => {
     const expectedRun = new Set<KeeperPhase>([
-      'Running', 'Compacting', 'Restarting', 'Failing',
+      'Running', 'Restarting', 'Failing',
     ])
     const expectedPause = new Set<KeeperPhase>(['Paused', 'Draining'])
     for (const phase of ALL_PHASES) {
@@ -91,7 +90,7 @@ describe('keeper-fsm SSOT closed-sum', () => {
     expect(Array.isArray(actions)).toBe(true)
     // transient / terminal phases expose no actions
     const transientOrTerminal: ReadonlySet<KeeperPhase> = new Set([
-      'Compacting', 'Draining', 'Restarting',
+      'Draining', 'Restarting',
     ])
     if (transientOrTerminal.has(phase)) {
       expect(actions).toHaveLength(0)

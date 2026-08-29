@@ -70,15 +70,14 @@ describe('AgentRuntimeStrip', () => {
 
   it('renders pipeline stage badge', () => {
     mockFindKeeper.mockReturnValue({
-      pipeline_stage: 'compacting',
+      pipeline_stage: 'restarting',
       context_ratio: null,
       generation: null,
     })
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
-    // STAGES short label for `compacting` is `compact`.
-    expect(container.textContent).toContain('compact')
+    expect(container.textContent).toContain('restart')
     expect(container.querySelector('.v2-monitoring-detail')).not.toBeNull()
   })
 

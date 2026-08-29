@@ -329,7 +329,7 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
            ; slot_ids = [ "verifier-b"; "verifier-missing"; "verifier-a" ]
            ; cli_slot_ids = []
            }
-         ; { Runtime_schema.id = "compaction_exact"; slot_ids = [ "verifier-a" ]; cli_slot_ids = [] }
+         ; { Runtime_schema.id = "auxiliary_exact"; slot_ids = [ "verifier-a" ]; cli_slot_ids = [] }
          ]
        snapshot
    with

@@ -10,7 +10,6 @@ type event_kind =
   | Provider_attempt_started
   | Provider_attempt_finished
   | Context_injected
-  | Context_compacted
   | Event_bus_correlated
   | Checkpoint_loaded
   | Checkpoint_saved

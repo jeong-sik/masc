@@ -72,8 +72,8 @@ val keeper_history_summary_json :
 (** [keeper_history_summary_json ~all_keeper_names ~keeper_name
       ~history_path ~filter_fragments] reads the keeper's history
     file and returns
-    [(turns_json, models_json, tools_json, turn_count,
-       compaction_count, handoff_count)].  The 6-tuple shape is
+    [(turns_json, models_json, tools_json, raw_count,
+       fragment_count, filtered_count)]. The 6-tuple shape is
     operator-visible in the dashboard and pinned at the contract
     seam. *)
 

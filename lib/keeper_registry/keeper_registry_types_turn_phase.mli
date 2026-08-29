@@ -59,6 +59,7 @@ module Turn_phase_transition : sig
   val to_tag : ('from, 'to_) t -> string
 end
 
+
 type turn_phase_transition_spec_violation =
   | Idle_to_routing
   | Idle_to_executing
@@ -73,19 +74,17 @@ type turn_phase_transition_spec_violation =
   | Exhausted_to_finalizing
 
 val turn_phase_transition_spec_violation_to_tag
-  :  turn_phase_transition_spec_violation
-  -> string
+  : turn_phase_transition_spec_violation -> string
 
-exception
-  Turn_phase_transition_violation of
-    { where : string
-    ; from : packed_turn_phase
-    ; to_ : packed_turn_phase
-    ; violation : turn_phase_transition_spec_violation
-    }
+exception Turn_phase_transition_violation of
+  { where : string
+  ; from : packed_turn_phase
+  ; to_ : packed_turn_phase
+  ; violation : turn_phase_transition_spec_violation
+  }
 
 val raise_turn_phase_transition_violation
-  :  where:string
+  : where:string
   -> from:packed_turn_phase
   -> to_:packed_turn_phase
   -> violation:turn_phase_transition_spec_violation
@@ -97,6 +96,4 @@ type turn_phase_resolve_outcome =
   | Resolved_turn_violation of turn_phase_transition_spec_violation
 
 val resolve_turn_phase_transition
-  :  from:packed_turn_phase
-  -> target:packed_turn_phase
-  -> turn_phase_resolve_outcome
+  : from:packed_turn_phase -> target:packed_turn_phase -> turn_phase_resolve_outcome

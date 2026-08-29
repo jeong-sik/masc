@@ -70,7 +70,6 @@ let runtime_lens_memory_terminal_status scan =
   then "checkpoint_loaded"
   else if
     scan.context_injected_count > 0
-    || scan.context_compacted_event_count > 0
     || scan.event_bus_count > 0
   then "context"
   else "empty"
@@ -154,7 +153,6 @@ let event_lane = function
   | Keeper_runtime_manifest.Checkpoint_saved ->
     "agent_core_agent"
   | Keeper_runtime_manifest.Context_injected
-  | Keeper_runtime_manifest.Context_compacted
   | Keeper_runtime_manifest.Event_bus_correlated ->
     "memory_context"
 

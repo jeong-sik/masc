@@ -22,7 +22,7 @@ import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 
 /**
  * Pure filter for observed lane summaries shown in the Operator Meaning
- * grid (KTC/KDP/KCL/KMC + phase lanes).
+ * grid (KTC/KDP/KCL + phase lanes).
  *
  * Case-insensitive substring match on `lane.field`, `lane.label`,
  * `lane.value`, and `lane.meaning` in that order so operators can isolate
@@ -159,7 +159,6 @@ export function OperationalMeaningPanel({
 
 const PHASE_BAR_FILL: Record<string, string> = {
   Running: 'var(--emerald)',
-  Compacting: 'var(--amber-bright)',
   Failing: 'var(--color-status-err)',
   Draining: 'var(--color-status-warn)',
   Stable: 'var(--color-fg-muted)',
@@ -223,14 +222,13 @@ function PhaseSparkline({
 /** Human-readable descriptions for sub-FSM states.
  *  Keys match the wire format from `keeper_composite_observer.ml` exactly:
  *    KSM phase via `phase_to_string` (lib/keeper/keeper_state_machine.ml:21-35) — lowercase + snake_case.
- *    KTC/KDP/KCL/KMC via the per-axis to_string fns (lib/keeper/keeper_composite_observer.ml:141-201) — lowercase.
+ *    KTC/KDP/KCL via the per-axis to_string fns — lowercase.
  *  Shown as native title tooltips on hover. */
 const STATE_DESCRIPTIONS: Record<string, string> = {
   // KTC (Turn Cycle)
   idle: '다음 heartbeat cycle 까지 턴 시작 대기 중',
   prompting: '컨텍스트와 도구로 LLM 프롬프트 구성 중',
   executing: 'LLM 이 응답 생성 또는 도구 호출 중',
-  compacting: '컨텍스트를 윈도우 안에 맞도록 압축 중',
   finalizing: '턴 후 정리: checkpoint 저장, 메트릭 발송',
   // KDP (Decision Pipeline)
   undecided: '아직 결정 없음 — 턴 시작 대기 중',
@@ -241,8 +239,6 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   trying: '선택된 provider 로 inference 시도 중',
   done: 'Provider 가 정상 응답함',
   exhausted: 'runtime 의 모든 provider 실패',
-  // KMC (Compaction)
-  accumulating: '메시지 수집 중; 컨텍스트 아직 가득 차지 않음',
   // KSM (Phase) — wire format is lowercase per phase_to_string.
   // 13-state set matches `Keeper_state_machine.phase` ctors.
   offline: '키퍼가 아직 시작되지 않음',

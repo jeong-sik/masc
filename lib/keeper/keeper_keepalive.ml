@@ -1355,4 +1355,3 @@ let stop_keepalive_and_await ~base_path name =
     let terminal = Eio.Promise.await entry.done_p in
     Keeper_joined { lane_exit; terminal }
 ;;
-

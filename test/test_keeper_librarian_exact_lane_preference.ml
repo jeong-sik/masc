@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 
-module Fixture = Compaction_exact_output_fixture
+module Fixture = Exact_output_fixture
 module Librarian = Keeper_librarian
 module Memory = Keeper_memory_os_types
 module Runtime = Keeper_librarian_runtime

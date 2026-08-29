@@ -894,7 +894,6 @@ export interface KeeperStateDiagramResponse {
   current_phase: string
   mermaid: string
   runtime_fsm_mermaid?: string
-  compaction_submachine_mermaid?: string | null
   // Structured data for Cytoscape FSM rendering
   tool_count?: number
   runtime_models?: string[]

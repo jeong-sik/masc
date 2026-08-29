@@ -54,7 +54,7 @@ type usage =
        (Agent_core.Types.api_usage) and this record used to drop them, so a reader
        could not tell whether a large [input_tokens] was mostly cache reads. That
        matters against [context_window] below: the fill percentage it denominates is
-       read as pressure on the compaction ceiling, and cache-heavy turns and
+       read as request-window pressure, and cache-heavy turns and
        genuinely large prompts are different situations with the same numerator.
        [None] when the provider reported no cache usage. *)
   ; scope : Runtime_usage_scope.t
@@ -151,8 +151,8 @@ type t =
     (* RFC-0233 §8 — keeper-resolved effective context budget (tokens) for
        this turn, the denominator the dashboard ctx-fill% uses. [None] on
        the error path; the inspector renders absence rather
-       than the fabricated 200K. This is the keeper compaction ceiling
-       ([max_context]), NOT the provider's per-request num-ctx cap (an
+       than the fabricated 200K. This is the keeper conversation ceiling
+       ([max_context]), not the provider's per-request num-ctx cap (an
        Ollama-only transport detail). *)
   ; price_input_per_million : float option
     (* RFC-0233 §8 — USD per 1M input tokens declared on the runtime

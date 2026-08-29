@@ -429,10 +429,8 @@ let run (ctx : ctx)
              rotation: %s"
             meta.name
             (short_preview (Agent_core.Error.to_string err));
-          (* Automatic overflow-compaction recovery was removed (#26546)
-             after producing no committed compaction. This attempt returns
-             its typed provider error and marks it terminal; no recovery is
-             recorded. Whole-request provider fit remains tracked in #26551. *)
+          (* Return the typed provider error and mark this attempt terminal.
+             Whole-request provider fit remains tracked in #26551. *)
           mark_terminal_error err;
           Error err, turn_state
          | Declared_runtime_lane_exhausted ->

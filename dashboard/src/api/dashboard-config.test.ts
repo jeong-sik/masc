@@ -103,7 +103,7 @@ describe('parseContextThresholds', () => {
     expect(parseContextThresholds(data, {
       critical: 0.9,
       warn: 0.7,
-      compacting: 0.8,
-    })).toEqual({ critical: 0.9, warn: 0.71, compacting: 0.8 })
+      high: 0.8,
+    })).toEqual({ critical: 0.9, warn: 0.71, high: 0.8 })
   })
 })

@@ -1,5 +1,5 @@
-(** Turn event-bus observation summary. Compaction lifecycle belongs to
-    MASC durable lane state, not the lossy AGENT_CORE observation bus. *)
+(** Turn event-bus observation summary. Durable Keeper lifecycle belongs to
+    MASC-owned state, not the lossy AGENT_CORE observation bus. *)
 
 type turn_event_bus_summary = {
   correlation_id : string option;
@@ -17,4 +17,3 @@ val merge_turn_event_bus_summary
   -> turn_event_bus_summary
 
 val add_payload_kind : string list -> string -> string list
-

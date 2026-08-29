@@ -47,10 +47,9 @@ describe('keeperStatusTone', () => {
   })
   it('maps transient phases to busy (working-through, not paused)', () => {
     // Fleet SSOT PHASE_TONE (lib/fleet-tone.ts) classifies the transient
-    // FSM phases (Compacting / Restarting) as `busy` — the
+    // Restarting as `busy` — the
     // blue rail, not the amber pause pill. They are operator-initiated
     // movement, not a stopped runtime.
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'Compacting' }))).toBe('busy')
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Restarting' }))).toBe('busy')
   })
   it('maps operator-initiated Draining to warn (not busy)', () => {
@@ -98,7 +97,6 @@ describe('keeperRuntimeLabel', () => {
 describe('keeperPhaseLabel', () => {
   it('maps the FSM phase to a Korean label (no raw PascalCase enum leak)', () => {
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Running' }))).toBe('실행 중')
-    expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Compacting' }))).toBe('압축 중')
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Failing' }))).toBe('오류 발생')
   })
   it('collapses unknown tokens to the 확인 필요 fallback (no raw wire string leak)', () => {
@@ -137,13 +135,13 @@ describe('keeperFleetTone', () => {
   it('falls back to the canonical status tone when no fleet attention is present', () => {
     expect(keeperFleetTone(mk({ status: 'running', lifecycle_phase: 'Running' }))).toBe('ok')
     expect(keeperFleetTone(mk({ status: 'running', lifecycle_phase: 'Paused', paused: true }))).toBe('warn')
-    expect(keeperFleetTone(mk({ status: 'running', lifecycle_phase: 'Compacting' }))).toBe('busy')
+    expect(keeperFleetTone(mk({ status: 'running', lifecycle_phase: 'Restarting' }))).toBe('busy')
   })
 })
 
 describe('phaseTokenFromKeeper', () => {
   it('lowercases PascalCase lifecycle_phase to the closed token space', () => {
-    expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'Compacting' }))).toBe('compacting')
+    expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'Restarting' }))).toBe('restarting')
     expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'Draining' }))).toBe('draining')
   })
   it('returns unknown for tokens outside the closed sum', () => {

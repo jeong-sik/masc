@@ -18,7 +18,6 @@ type t =
   | Terminal_non_exhaustion
   | Cycle_failed
   | Persistent_escalation
-  | Compaction_checkpoint_load
   | Provider_context_overflow
 
 val to_label : t -> string

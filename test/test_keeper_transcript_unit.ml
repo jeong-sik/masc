@@ -1,4 +1,4 @@
-module U = Masc.Keeper_compaction_unit
+module U = Masc.Keeper_transcript_unit
 module T = Agent_core.Types
 
 let message ?tool_call_id role content : T.message =
@@ -548,7 +548,7 @@ let test_interrupted_tool_cycle_is_closed_and_dispatched () =
 
 
 let () =
-  Alcotest.run "keeper_compaction_unit"
+  Alcotest.run "keeper_transcript_unit"
     [ ( "partition"
       , [ Alcotest.test_case "signed parallel cycle exact" `Quick
             test_signed_parallel_cycle_is_atomic

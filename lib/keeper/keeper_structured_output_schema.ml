@@ -1,7 +1,6 @@
 (** Domain JSON schemas for keeper LLM sub-call parsers and exact-output flows. *)
 
 let string_schema = `Assoc [ "type", `String "string" ]
-let integer_schema = `Assoc [ "type", `String "integer" ]
 
 let string_array_schema =
   `Assoc [ "type", `String "array"; "items", string_schema ]
@@ -54,22 +53,6 @@ let librarian_current_output_schema =
     ; ( Keeper_librarian.wire_field_new_claims
       , `Assoc [ "type", `String "array"; "items", librarian_claim_schema ] )
     ; Keeper_librarian.wire_field_dropped, array_schema librarian_dropped_schema
-    ]
-  in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
-(* Constant-size compaction boundary. The provider sees one contiguous run of
-   typed eligible units and returns one faithful summary plus the first unit
-   that remains exact. *)
-let compaction_plan_field_unit_index = "unit_index"
-let compaction_plan_field_summary = "summary"
-let compaction_plan_field_keep_from_unit_index = "keep_from_unit_index"
-
-let compaction_plan_output_schema =
-  let fields =
-    [ compaction_plan_field_summary, string_schema
-    ; compaction_plan_field_keep_from_unit_index, integer_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields

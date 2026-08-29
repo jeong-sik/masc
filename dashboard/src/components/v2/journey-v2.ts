@@ -89,7 +89,6 @@ const EV_BADGE: Readonly<Record<string, readonly [string, string, string]>> = {
   agent_core_context: ['CTX', 'dim', 'lifecycle'],
   agent_core_event: ['Agent Core', 'info', 'lifecycle'],
   keeper_handoff: ['HAND', 'info', 'lifecycle'],
-  keeper_compaction: ['COMP', 'warn', 'lifecycle'],
   keeper_phase_changed: ['PHASE', 'info', 'lifecycle'],
   broadcast: ['CAST', 'info', 'message'],
   board_post: ['POST', 'info', 'message'],
@@ -226,11 +225,6 @@ function EvidenceStrip({
           ev.providerAttemptFinishedCount === ev.providerAttemptStartedCount ? 'dim' : 'warn',
         ],
         ['event bus 상관', ev.eventBusCorrelatedCount, 'dim'],
-        [
-          'compaction',
-          `${ev.contextCompactedCount} 완료 / ${ev.contextCompactStartedCount} 시작`,
-          ev.contextCompactStartedCount > ev.contextCompactedCount ? 'warn' : 'dim',
-        ],
         ['memory', `주입 ${ev.memoryInjectedCount} · flush ${ev.memoryFlushedCount}`, 'dim'],
       ]
     : [
@@ -247,11 +241,6 @@ function EvidenceStrip({
             : providerTerminal === 'not_observed'
               ? 'dim'
               : 'bad',
-        ],
-        [
-          '압축',
-          ev.contextCompactedCount > 0 ? `${ev.contextCompactedCount}회` : '없음',
-          ev.contextCompactStartedCount > ev.contextCompactedCount ? 'warn' : 'dim',
         ],
         ['기억', `불러옴 ${ev.memoryInjectedCount} · 저장 ${ev.memoryFlushedCount}`, 'dim'],
       ]

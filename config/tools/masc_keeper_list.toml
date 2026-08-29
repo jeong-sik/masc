@@ -16,5 +16,5 @@ so a low limit hides whatever sorts last; check truncated in the response."""
 name = "detailed"
 type = "boolean"
 description = """
-Return keeper summaries (model/context/handoff/compaction) instead of names \
+Return keeper summaries (model/context/handoff) instead of names \
 only."""

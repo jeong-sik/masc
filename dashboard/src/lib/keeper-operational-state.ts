@@ -266,7 +266,6 @@ export function compositePhaseTone(phase: KeeperPhase): 'active' | 'warn' | 'err
     case 'Offline':
     case 'Running':
       return 'active'
-    case 'Compacting':
     case 'Draining':
     case 'Paused':
     case 'Restarting':
@@ -303,17 +302,6 @@ export function isFailingAfterRuntimeExhausted(
   snapshot: { phase: string; runtime: { state: string } },
 ): boolean {
   return snapshot.phase === 'failing' && snapshot.runtime.state === 'exhausted'
-}
-
-/** Composite compaction is owning the current turn — either the KSM
- *  phase has folded to `compacting` or the KMC lane stage is active.
- *  Two sites in `fsm-hub-invariant-analysis` need the same disjunction;
- *  SSOT here so the cross-axis OR stays consistent. Phase wire format
- *  stays lowercase per the open-string composite schema. */
-export function isCompactionActive(
-  snapshot: { phase: string; compaction: { stage: string } },
-): boolean {
-  return snapshot.phase === 'compacting' || snapshot.compaction.stage === 'compacting'
 }
 
 // RFC-0135 PR-14c — display reason SSOT (Goal-2c typed-state expansion).
@@ -444,7 +432,7 @@ export const KEEPER_STATUS_LABEL_KO: Readonly<
 })
 
 /** The monitoring band layer has one extra state the typed operational
- *  sum does not: `transient` (compacting / handoff / draining / restart
+ *  sum does not: `transient` (handoff / draining / restart
  *  mid-transition). Exported here so the band chip, roster group header,
  *  and health pill cannot spell it three ways. */
 export const KEEPER_TRANSIENT_LABEL_KO = '전이 중'

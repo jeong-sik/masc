@@ -131,7 +131,7 @@ const ROSTER_BAND_TONE: Record<RuntimeBand, 'ok' | 'warn' | 'bad' | 'busy' | 'id
 // Legacy `tool_use` / `scheduled_autonomous` / `thinking` removed — the
 // backend never emits them as pipeline_stage.
 function stageBadgeClass(stageKey: string): string {
-  if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--stalled-fg)]'
+  if (stageKey === 'handoff') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--stalled-fg)]'
   if (stageKey === 'failing' || stageKey === 'crashed') return 'border-[var(--err-border)] bg-[var(--bad-soft)] text-[var(--color-status-err)]'
   if (stageKey === 'paused') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--purple)]'
   return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'
@@ -751,7 +751,7 @@ export function countRuntimeKinds(
   agents: number
   keepers: number
   pausedKeepers: number
-  // Transient band rows (Compacting / Restarting)
+  // Transient band rows (Restarting)
   // are now part of the breakdown. Exposed so consumers can reconcile
   // `keepers + pausedKeepers + transientKeepers + offlineKeepers` against
   // `keeperRows` without guessing where the missing rows went.
@@ -936,7 +936,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       // axis — the prototype groups "what is currently moving" above the
       // healthy steady-state rows so the operator's first scan reads as
       // "attention → transient → active → paused → offline" instead of
-      // burying a mid-compaction keeper under the active rows.
+      // burying a restarting keeper under the active rows.
       const order: Record<RuntimeBand, number> = {
         attention: 0,
         transient: 1,

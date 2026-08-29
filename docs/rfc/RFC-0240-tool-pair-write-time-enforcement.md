@@ -18,7 +18,7 @@ related: ["0042", "0044", "0110", "0233"]
 >
 > | 항목 | 결과 |
 > |---|---|
-> | §2.1 타입 파서 | `Keeper_compaction_unit.partition` |
+> | §2.1 타입 파서 | `Keeper_transcript_unit.partition` |
 > | §2.2 저장 경계 | `keeper_context_core.ml:71` — `validate` 로 거부 (#25046) |
 > | §2.2 read-time 수리 삭제 | 완료 (#24482, #24856, #25046) |
 > | §2.4 부팅 tail recovery | `Keeper_transcript_tail_recovery` (#25977) |
@@ -221,7 +221,7 @@ Four keepers never came back. Each died with the identical error:
 ```
 [masc_oas_error] {"kind":"incomplete_tool_transcript",
                   "reason":"unresolved_tool_results",
-                  "detail":"Keeper_compaction_unit.Unresolved_tool_results {
+                  "detail":"Keeper_transcript_unit.Unresolved_tool_results {
                               tool_use_ids = [\"call_u3gtrgo6\"; \"call_y1wnpvff\"]}"}
 ```
 
@@ -377,7 +377,7 @@ continue".
 
 *Added 2026-07-28. Amends §2.1.*
 
-`Keeper_compaction_unit` already provides the parser this RFC asks for,
+`Keeper_transcript_unit` already provides the parser this RFC asks for,
 and it already separates the open tail from the closed history
 (`lib/keeper/keeper_compaction_unit.mli:62-65` **(verified 07-28)**):
 

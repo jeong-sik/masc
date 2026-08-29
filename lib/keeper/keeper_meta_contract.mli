@@ -8,8 +8,7 @@
 
     Internal: ~3 helpers stay private —
     [blocker_class_of_serialized_string] (deserializer used
-    only by JSON parsing),
-    [map_proactive_rt]
+    only by JSON parsing), [map_proactive_rt]
     (nested-record updaters that callers reach via the higher-level
     {!map_runtime} / {!map_usage}).  All consumed only via the runtime
     contract or the JSON pipeline. *)
@@ -341,5 +340,3 @@ val reset_runtime_state : keeper_meta -> keeper_meta
 (** [reset_runtime_state m] is [map_usage (fun _ -> zero_usage)
     m] — used by keeper restart to clear cumulative counters
     while preserving identity / policy fields. *)
-
-

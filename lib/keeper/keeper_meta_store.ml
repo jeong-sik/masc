@@ -392,15 +392,6 @@ let retained_root_entries_read_only_result config =
   | _ -> Error (Printf.sprintf "keeper store is not a directory: %s" dir)
 ;;
 
-let persisted_keeper_names_read_only_result config =
-  retained_root_entries_read_only_result config
-  |> Result.map (fun (_dir, files) ->
-       files
-       |> List.filter_map Keeper_runtime_root_entry.metadata_keeper_name
-       |> List.filter validate_name
-       |> List.sort String.compare)
-;;
-
 let retained_keeper_names_read_only_result config =
   let open Result.Syntax in
   let* dir, entries = retained_root_entries_read_only_result config in

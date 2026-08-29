@@ -330,22 +330,6 @@ val probe_container_state_optional
   -> unit
   -> (docker_container_state, string) result
 
-(** Best-effort cleanup for stale MASC keeper sandbox containers under the
-    same base path. Only containers with the keeper sandbox labels are
-    considered. [already_absent] counts containers that disappeared after the
-    labeled Docker snapshot and before inspect/removal completed. *)
-val docker_filter_args
-  :  ?keeper_name:string
-  -> ?container_kind:string
-  -> ?owner_pid:int
-  -> base_path:string
-  -> unit
-  -> string list
-(** Docker [--filter label=...] arguments selecting keeper sandbox containers.
-    Every supplied field narrows the selection; Docker label filters test
-    equality only, so a caller that needs "all but one value" issues two
-    listings and takes the difference. *)
-
 val remove_persistent_containers
   :  keeper_name:string
   -> base_path:string

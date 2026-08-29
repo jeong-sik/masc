@@ -155,15 +155,6 @@ let get_switch_opt () =
   | Some _ as some_sw -> some_sw
   | None -> get_root_switch_opt ()
 
-let get_net () : (eio_net, string) result =
-  match Atomic.get current_net with
-  | Some net -> Ok net
-  | None ->
-      if Atomic.get net_initialized then
-        Error "Eio net was set but is now None (unexpected state)"
-      else
-        Error "Eio net not initialized - ensure set_net is called during server startup"
-
 let get_clock () : (float Eio.Time.clock_ty Eio.Resource.t, string) result =
   match Atomic.get current_clock with
   | Some clock -> Ok clock

@@ -36,8 +36,6 @@ module StringMap = Set_util.StringMap
 
 (* AGENT_CORE Event_bus — delegated to Event_bus_slots to avoid dependency cycles. *)
 let set_bus bus = Event_bus_slots.set_keeper bus
-let get_bus () = Event_bus_slots.get_keeper ()
-
 (* ── gRPC directive processing ── *)
 
 let keeper_entry_by_identity_opt identity = Keeper_registry_lookup.find_by_name identity

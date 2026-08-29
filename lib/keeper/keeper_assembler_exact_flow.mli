@@ -111,6 +111,5 @@ val execute
     [keeper_plan_execute] or any ordinary Tool dispatcher. *)
 
 val setup_error_to_yojson : setup_error -> Yojson.Safe.t
-val semantic_rejection_to_yojson : semantic_rejection -> Yojson.Safe.t
 val exact_execution_failure_to_yojson : exact_execution_failure -> Yojson.Safe.t
 val execution_error_to_yojson : execution_error -> Yojson.Safe.t

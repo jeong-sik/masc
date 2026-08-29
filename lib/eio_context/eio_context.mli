@@ -71,15 +71,10 @@ val with_test_env :
     so the override does not outlive the test scope. *)
 
 val get_net_opt : unit -> eio_net option
-(** Get the Eio network handle if available. *)
-
 val get_clock_opt : unit -> float Eio.Time.clock_ty Eio.Resource.t option
 (** Get the Eio clock if available. *)
 
 val get_switch_opt : unit -> Eio.Switch.t option
-(** Get the Eio switch if available. *)
-
-val get_net : unit -> (eio_net, string) result
 (** Get the Eio network handle.
     Returns Error if not initialized. *)
 

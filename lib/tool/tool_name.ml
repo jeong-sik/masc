@@ -295,7 +295,3 @@ let of_string s =
 
 let pp fmt t = Format.pp_print_string fmt (to_string t)
 
-let is_masc = function
-  | Masc _ -> true
-;;
-

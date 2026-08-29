@@ -505,25 +505,6 @@ let resolve_against_base_path raw_path =
   else
     raw_path
 
-let sb_path_opt () =
-  match base_path_opt () with
-  | Some root ->
-      let path = Filename.concat root "scripts/sb" in
-      if existing_file path then Some path else None
-  | None -> None
-
-let sb_path_result () =
-  match sb_path_opt () with
-  | Some path -> Ok path
-  | None ->
-      Error
-        "Unable to resolve scripts/sb. Set MASC_BASE_PATH."
-
-let sb_path () =
-  match sb_path_result () with
-  | Ok path -> path
-  | Error msg -> raise (Config_error msg)
-
 (** SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352).
     Referenced by feature_flag_registry catalog, env_config_runtime reader,
     env_config_snapshot entry, and orchestrator bootstrap. *)

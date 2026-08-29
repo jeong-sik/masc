@@ -1772,17 +1772,6 @@ let load_existing_read_only_from_root ~ownership_root ~trace_id =
   read_existing_locked ~ownership_root ~expected_trace_id:trace_id session_dir
 ;;
 
-let load_existing_read_only ~config ~trace_id =
-  let ownership_root = Keeper_fs.session_store_path config in
-  match Unix.realpath ownership_root with
-  | exception Unix.Unix_error (cause, _, _) ->
-    Error (Canonical_root_failed { path = ownership_root; cause })
-  | canonical_root ->
-    load_existing_read_only_from_root
-      ~ownership_root:canonical_root
-      ~trace_id
-;;
-
 let persist_locked
       ~ownership_root
       ~trace_id

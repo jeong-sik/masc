@@ -7,9 +7,6 @@ module StringMap = Set_util.StringMap
 (** Inject the shared Event_bus for keeper snapshot publishing. *)
 val set_bus : Agent_core.Event_bus.t -> unit
 
-(** Retrieve the shared Event_bus, if set. *)
-val get_bus : unit -> Agent_core.Event_bus.t option
-
 val register_grpc_heartbeat_starter : Keeper_keepalive_signal.grpc_heartbeat_starter_fn -> unit
 
 (** Apply one typed runtime directive to a Keeper lane. [Wakeup] only

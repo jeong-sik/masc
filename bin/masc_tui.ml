@@ -3656,7 +3656,8 @@ let goto_surface state ~mailbox (destination : surface) =
        match state.config_pane with
        | Config_prompts -> launch_prompts_load state ~mailbox
        | Config_params -> launch_runtime_params_load state ~mailbox
-       | Config_runtime | Config_themes -> launch_runtime_config_load state ~mailbox)
+       | Config_runtime | Config_models | Config_themes ->
+           launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
    | Overview | Acting | Keepers _ | Board | System_logs -> ());
@@ -12955,7 +12956,8 @@ and is loaded on demand through keeper_skill.
               reader's own colours, which no server has an opinion about. *)
            state.config_pane <-
              (match state.config_pane with
-              | Config_runtime -> Config_params
+              | Config_runtime -> Config_models
+              | Config_models -> Config_params
               | Config_params -> Config_prompts
               | Config_prompts -> Config_themes
               | Config_themes -> Config_runtime);
@@ -12978,6 +12980,12 @@ and is loaded on demand through keeper_skill.
               if state.prompts_snapshot = None
               then launch_prompts_load state ~mailbox:async_messages
             | Config_params -> launch_runtime_params_load state ~mailbox:async_messages
+            (* Same first-visit load as the prompts pane. The models table is
+               a projection of runtime.toml, so entering it without the file
+               would draw "(loading)" with nothing on the way. *)
+            | Config_models ->
+              if state.runtime_config_view = None
+              then launch_runtime_config_load state ~mailbox:async_messages
             | Config_runtime | Config_themes -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
@@ -13087,7 +13095,11 @@ and is loaded on demand through keeper_skill.
                  | Config_runtime -> handle_runtime_config_edit ()
                  | Config_params ->
                    handle_runtime_param_edit_open ~advanced:false ()
-                 | Config_themes -> ())
+                 (* The models pane reads runtime.toml through a table. [e]
+                    opens the file, so it belongs to the pane that shows the
+                    file -- editing a projection would need a writer that
+                    knows which of the two tables a column came from. *)
+                 | Config_models | Config_themes -> ())
             | Tools -> handle_skill_edit ()
             | Approvals ->
                 (* Cycle the external-services Gate lane: what happens to a

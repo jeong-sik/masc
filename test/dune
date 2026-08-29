@@ -3347,6 +3347,11 @@
  (libraries alcotest masc_tui_board_score))
 
 (test
+ (name test_tui_model_runtime_table)
+ (modules test_tui_model_runtime_table)
+ (libraries alcotest masc_tui_model_runtime_table))
+
+(test
  (name test_tui_server_lifecycle)
  (modules test_tui_server_lifecycle)
  (libraries alcotest masc_tui_server_lifecycle masc.masc_process unix))

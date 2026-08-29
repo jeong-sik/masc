@@ -99,7 +99,7 @@ let bounded_claude_probe_config ~fallback_timeout_s
   | None -> { config with timeout_s = Some fallback_timeout_s }
 ;;
 
-let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s
+let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s ~output_schema
   (execution : Runtime_execution.claude_code)
   : Runtime_claude_code.config
   =
@@ -113,6 +113,7 @@ let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s
   ; timeout_s =
       resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
   ; wall_clock_ceiling_s = None
+  ; output_schema
   }
 ;;
 
@@ -131,7 +132,7 @@ let codex_config ~runtime_id ~system_prompt ~override_s
   }
 ;;
 
-let antigravity_config ~base_dir ~runtime_id ~override_s
+let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
   (execution : Runtime_execution.antigravity_cli)
   : Runtime_antigravity.config
   =
@@ -152,10 +153,11 @@ let antigravity_config ~base_dir ~runtime_id ~override_s
   ; timeout_s =
       resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
   ; wall_clock_ceiling_s = None
+  ; output_schema
   }
 ;;
 
-let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ~prompt () =
+let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let ( let* ) = Result.bind in
   (* Both adapters take the system prompt as an option and treat [None] as
      "client default". An empty group prompt is not an instruction, so it
@@ -182,7 +184,8 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ~prompt () =
          "runtime is Agent_core-owned; it belongs on the Async_agent path")
   | Runtime_execution.Claude_code execution ->
     let config =
-      claude_config ~base_dir ~runtime_id ~system_prompt ~override_s:timeout_s execution
+      claude_config ~base_dir ~runtime_id ~system_prompt ~override_s:timeout_s
+        ~output_schema execution
     in
     let probe_config =
       bounded_claude_probe_config
@@ -223,7 +226,9 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ~prompt () =
        Error
          (provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)))
   | Runtime_execution.Antigravity_cli execution ->
-    let config = antigravity_config ~base_dir ~runtime_id ~override_s:timeout_s execution in
+    let config =
+      antigravity_config ~base_dir ~runtime_id ~override_s:timeout_s ~output_schema execution
+    in
     (* [home_dir] is left unset so the client uses the inherited HOME, which is
        where its OAuth token already lives. The keeper path overrides it for
        per-keeper isolation; a panelist has no durable state to isolate. *)

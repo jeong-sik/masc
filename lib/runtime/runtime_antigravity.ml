@@ -26,6 +26,7 @@ type config =
   ; admission_timeout_s : float
   ; timeout_s : float option
   ; wall_clock_ceiling_s : float option
+  ; output_schema : Yojson.Safe.t option
   }
 
 let default_timeout_s = 300.0
@@ -69,6 +70,7 @@ let default_config ~cwd ~model =
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
   ; wall_clock_ceiling_s = None
+  ; output_schema = None
   }
 ;;
 
@@ -386,6 +388,16 @@ let parse_result fields =
   let* status_string = required_string stage "status" result_fields in
   let* status = parse_result_status stage status_string in
   let* response = required_string ~nonempty:false stage "response" result_fields in
+  (* Under --json-schema the CLI validates its answer and re-prompts, and only
+     [structured_output] carries what passed. Measured 2026-08-30: [response]
+     still held a fenced draft containing a key the schema forbids while
+     [structured_output] held the clean object. So where the field is present
+     it is the answer, and the prose beside it is narration. *)
+  let response =
+    match List.assoc_opt "structured_output" result_fields with
+    | None | Some `Null -> response
+    | Some value -> Yojson.Safe.to_string value
+  in
   let* error = optional_string stage "error" result_fields in
   let* num_turns = required_nonnegative_int stage "num_turns" result_fields in
   let* usage = parse_usage stage result_fields in
@@ -525,6 +537,13 @@ let argv config ~conversation_mode =
     | Some value -> values @ [ flag; value ]
   in
   base
+  |> with_optional
+       "--json-schema"
+       (* The flag takes an inline schema string or a path. With
+          --output-format stream-json the CLI applies it to the terminal
+          result event, which is the event this adapter reads, so the
+          existing stream shape needs no change. *)
+       (Option.map Yojson.Safe.to_string config.output_schema)
   |> with_optional "--agent" config.agent
   |> with_optional "--effort" (Option.map effort_to_string config.effort)
   |> (fun values -> if config.sandbox then values @ [ "--sandbox" ] else values)

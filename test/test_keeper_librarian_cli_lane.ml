@@ -131,7 +131,7 @@ let test_cli_slot_answers_after_catalog_exhaustion () =
     ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
     ~source:"librarian cli fallback";
   let seen = ref None in
-  let runner ~runtime_id ~system_prompt:_ ~prompt =
+  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
     seen := Some runtime_id;
     check bool
       "the cli prompt is the fitted librarian prompt"
@@ -168,7 +168,7 @@ let test_domain_invalid_cli_answer_keeps_the_terminal () =
     ~cli_slot_ids:[ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
     ~source:"librarian cli invalid";
   let attempts = ref [] in
-  let runner ~runtime_id ~system_prompt:_ ~prompt:_ =
+  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     attempts := !attempts @ [ runtime_id ];
     Ok "{}" (* valid JSON, invalid selection domain *)
   in

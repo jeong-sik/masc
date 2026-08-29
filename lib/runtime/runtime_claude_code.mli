@@ -41,6 +41,13 @@ type config =
         shared hours-scale default). The idle timeout above resets on every
         received message, so this is the only bound a turn of continuous
         thin progress cannot outlive (#31242). *)
+  ; output_schema : Yojson.Safe.t option
+    (** JSON Schema the CLI enforces on the turn's final answer
+        ([--json-schema]). The mechanism is validation with a re-prompt, not
+        constrained decoding: the client checks its own answer and tries again,
+        and gives up with subtype [error_max_structured_output_retries].
+        [None] leaves the answer unfenced, which is what every caller did
+        before this field existed. *)
   }
 
 val default_timeout_s : float

@@ -249,6 +249,11 @@ let schema_instruction_text (requirement : output_requirement) =
   domain_schema_instruction_text requirement.schema
 ;;
 
+let domain_schema (requirement : output_requirement) =
+  let (Domain_schema schema) = requirement.schema in
+  schema
+;;
+
 let text_json_instruction schema : Types.message =
   { role = Types.User
   ; content = [ Types.Text (domain_schema_instruction_text schema) ]

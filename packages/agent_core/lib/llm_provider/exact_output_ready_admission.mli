@@ -123,6 +123,11 @@ type 'callback_error flow_request_error =
 
 val schema_fingerprint_to_string : schema_fingerprint -> string
 
+val domain_schema : output_requirement -> Yojson.Safe.t
+(** The schema the requirement was built with, unbranded. Same reason as
+    {!schema_instruction_text}: an executor whose transport carries a schema of
+    its own must hand over the caller's, not a local copy that can drift. *)
+
 val schema_instruction_text : output_requirement -> string
 (** The exact sentence appended to the prompt when the wire cannot carry the
     schema ([Off]/[JsonMode]); see [Exact_output.schema_instruction_text]. *)

@@ -408,6 +408,9 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                     | Some 0.0 -> None
                     | Some s -> Some s)
                ; wall_clock_ceiling_s = None
+    (* A capability probe asks what the client can do; it has no domain schema
+       to hold an answer to. *)
+    ; output_schema = None
                }
              in
              (match
@@ -590,6 +593,9 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                           | Some 0.0 -> None
                           | Some s -> Some s)
                      ; wall_clock_ceiling_s = None
+    (* A capability probe asks what the client can do; it has no domain schema
+       to hold an answer to. *)
+    ; output_schema = None
                      }
                    in
                    let started = now () in

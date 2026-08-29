@@ -561,6 +561,11 @@ let masc_goal_list_schema =
 let tool_edit_file_schema =
   find_schema_exn "tool_edit_file" Config.raw_all_tool_schemas
 
+let keeper_model_edit_schema =
+  find_schema_exn
+    "Edit"
+    (Keeper_tool_descriptor.model_visible_schemas ~surface:All)
+
 let keeper_model_board_post_schema =
   find_schema_exn
     "masc_board_post"
@@ -732,6 +737,54 @@ let test_validate_args_masc_board_post_still_rejects_tags () =
       "error names tags"
       true
       (string_contains msg "unsupported field(s): tags")
+
+(* masc#31573: Edit's schema is closed so an undeclared 'content' key is
+   rejected at validation instead of reaching the translator that used to
+   infer a whole-file overwrite from it. *)
+let test_validate_args_edit_rejects_content () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_model_edit_schema
+      ~name:"Edit"
+      ~args:
+        (`Assoc
+          [ "file_path", `String "lib/src.ml"
+          ; "old_string", `String "let x = 1"
+          ; "new_string", `String "let x = 2"
+          ; "content", `String "let clobbered = true"
+          ])
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected content to be rejected, but it passed: %s"
+      (Yojson.Safe.to_string forwarded)
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "error names content"
+      true
+      (string_contains msg "unsupported field(s): content")
+
+let test_validate_args_edit_accepts_patch_args () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_model_edit_schema
+      ~name:"Edit"
+      ~args:
+        (`Assoc
+          [ "file_path", `String "lib/src.ml"
+          ; "old_string", `String "let x = 1"
+          ; "new_string", `String "let x = 2"
+          ; "replace_all", `Bool false
+          ])
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected patch args to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
 
 let test_registered_hook_masc_board_post_accepts_sources_array () =
   let blocked, forwarded =
@@ -2481,6 +2534,10 @@ let () =
         test_validate_args_masc_board_post_accepts_title;
       Alcotest.test_case "direct masc_board_post still rejects tags" `Quick
         test_validate_args_masc_board_post_still_rejects_tags;
+      Alcotest.test_case "direct Edit rejects undeclared content" `Quick
+        test_validate_args_edit_rejects_content;
+      Alcotest.test_case "direct Edit accepts patch args" `Quick
+        test_validate_args_edit_accepts_patch_args;
       Alcotest.test_case "masc_transition rejects to/note aliases" `Quick
         test_registered_hook_transition_rejects_to_and_note;
       Alcotest.test_case "masc_transition canonical action value" `Quick

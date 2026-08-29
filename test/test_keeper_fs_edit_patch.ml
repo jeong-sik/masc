@@ -1304,6 +1304,51 @@ let test_public_edit_file_uses_explicit_repo_path () =
   Alcotest.(check string) "file edited through explicit repo path"
     "let x = 2\n" (Fs_compat.load_file path)
 
+(* masc#31573: an undeclared 'content' key used to flip a public Edit call into
+   mode=overwrite through translator inference, replacing the whole file with
+   content. Edit translation now pins mode=patch, so the same call fails on the
+   patch contract and the file keeps its bytes. *)
+let test_public_edit_with_content_key_never_overwrites () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let repo = seed_single_playground_repo ~config ~meta playground in
+  let path = Filename.concat repo "lib/src.ml" in
+  ensure_dir (Filename.dirname path);
+  Fs_compat.save_file path "let x = 1\n";
+  let raw =
+    public_fs_edit_call
+      ~public:"Edit"
+      ~config
+      ~meta
+      ~publication_recovery
+      (`Assoc
+        [
+          ("file_path", `String "repos/masc/lib/src.ml");
+          ("content", `String "let clobbered = true\n");
+        ])
+  in
+  Alcotest.(check bool) "ok=false" false (parse_ok raw);
+  Alcotest.(check (option string)) "patch contract error"
+    (Some "mode=patch requires non-empty old_string. Good: old_string='let x = 1'.")
+    (parse_error raw);
+  Alcotest.(check string) "file bytes unchanged"
+    "let x = 1\n" (Fs_compat.load_file path)
+
+let test_edit_translation_pins_patch_even_with_content () =
+  let translated =
+    Keeper_tool_descriptor.translate_input
+      ~public:"Edit"
+      (`Assoc
+        [ ("file_path", `String "lib/src.ml"); ("content", `String "body") ])
+  in
+  match translated with
+  | `Assoc fields ->
+    Alcotest.(check (option string)) "mode pinned to patch"
+      (Some "patch")
+      (match List.assoc_opt "mode" fields with
+       | Some (`String s) -> Some s
+       | _ -> None)
+  | _ -> Alcotest.fail "expected translated args to stay an object"
+
 let test_public_write_file_uses_explicit_repo_path () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let repo = seed_single_playground_repo ~config ~meta playground in
@@ -1487,6 +1532,10 @@ let () =
             test_null_mode_is_rejected;
           Alcotest.test_case "public Edit uses explicit repo path" `Quick
             test_public_edit_file_uses_explicit_repo_path;
+          Alcotest.test_case "public Edit content key never overwrites" `Quick
+            test_public_edit_with_content_key_never_overwrites;
+          Alcotest.test_case "Edit translation pins patch mode" `Quick
+            test_edit_translation_pins_patch_even_with_content;
           Alcotest.test_case "public Write uses explicit repo path" `Quick
             test_public_write_file_uses_explicit_repo_path;
           Alcotest.test_case "write_file surfaces missing IDE observation sink" `Quick

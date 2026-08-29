@@ -745,8 +745,6 @@ let test_composition_run_id_is_uuid_v7_identity () =
 module Request = Masc.Keeper_tool_plan_request
 module Catalog = Masc.Keeper_tool_composition_catalog
 module Recipe = Masc.Keeper_async_composition_recipe
-module Proposal = Masc.Keeper_plan_proposal
-module Proposal_request = Masc.Keeper_plan_proposal_execution_request
 
 let parse_request json =
   Request.plan_of_json ~descriptors:(Descriptor.all_descriptors ()) json
@@ -1025,9 +1023,14 @@ let recipe_invocation () =
     ~tool_use_id:"tool-use-parent"
     ~turn:9
     ~schedule
-    ~completion:
-      (Agent_core.Tool_contract.Terminal_after_success
-         Agent_core.Tool_contract.Proven_post_effect)
+    ~completion:Agent_core.Tool_contract.Continue_after_success
+;;
+
+let accepted_surface_digest_string = String.make 64 'b'
+
+let accepted_surface_digest () =
+  Recipe.Accepted_surface_digest.of_string accepted_surface_digest_string
+  |> Result.get_ok
 ;;
 
 let recipe_plan () =
@@ -1046,14 +1049,18 @@ let recipe_with_origin origin =
     Recipe.create
       ~composition_run_id:(Plan.Composition_run_id.fresh ())
       ~origin
-      ~accepted_surface_digest:"observed-surface-at-acceptance"
+      ~accepted_surface_digest:(accepted_surface_digest ())
       ~plan:(recipe_plan ())
       ~invocation:(recipe_invocation ())
       ~accepted_checkpoint:(recipe_checkpoint ())
   with
   | Ok recipe -> recipe
-  | Error (Request.Unsubstituted_param { name }) ->
+  | Error (Recipe.Unbound_plan (Request.Unsubstituted_param { name })) ->
     failf "recipe fixture retained parameter %S" name
+  | Error (Recipe.Create_negative_invocation_turn turn) ->
+    failf "recipe fixture has negative turn %d" turn
+  | Error (Recipe.Create_invalid_invocation_schedule detail) ->
+    failf "recipe fixture has invalid schedule: %s" detail
 ;;
 
 let encoded_recipe origin =
@@ -1100,8 +1107,9 @@ let test_async_recipe_round_trips_full_accepted_values () =
        (Recipe.composition_run_id decoded));
   check string
     "accepted surface observation"
-    "observed-surface-at-acceptance"
-    (Recipe.accepted_surface_digest decoded);
+    accepted_surface_digest_string
+    (Recipe.accepted_surface_digest decoded
+     |> Recipe.Accepted_surface_digest.to_string);
   check
     (list string)
     "bound plan"
@@ -1125,12 +1133,8 @@ let test_async_recipe_round_trips_full_accepted_values () =
    | Agent_core.Tool_contract.Concurrent -> ()
    | Agent_core.Tool_contract.Serial -> fail "invocation execution mode changed");
   (match Agent_core.Tool_contract.Invocation.completion invocation with
-   | Agent_core.Tool_contract.Terminal_after_success
-       Agent_core.Tool_contract.Proven_post_effect -> ()
-   | Agent_core.Tool_contract.Continue_after_success
-   | Agent_core.Tool_contract.Terminal_after_success
-       (Agent_core.Tool_contract.Proven_pre_effect
-       | Agent_core.Tool_contract.Effect_outcome_unknown) ->
+   | Agent_core.Tool_contract.Continue_after_success -> ()
+   | Agent_core.Tool_contract.Terminal_after_success _ ->
      fail "invocation completion changed");
   let checkpoint = Recipe.accepted_checkpoint decoded in
   check string "checkpoint session" "accepted-session" checkpoint.session_id;
@@ -1163,23 +1167,27 @@ let test_async_recipe_rejects_an_unbound_plan () =
     Recipe.create
       ~composition_run_id:(Plan.Composition_run_id.fresh ())
       ~origin:(Recipe.Skill_composition (recipe_skill_reference ()))
-      ~accepted_surface_digest:"observation-only"
+      ~accepted_surface_digest:(accepted_surface_digest ())
       ~plan
       ~invocation:(recipe_invocation ())
       ~accepted_checkpoint:(recipe_checkpoint ())
   with
-  | Error (Request.Unsubstituted_param { name = "query" }) -> ()
-  | Error (Request.Unsubstituted_param { name }) ->
+  | Error (Recipe.Unbound_plan (Request.Unsubstituted_param { name = "query" })) -> ()
+  | Error (Recipe.Unbound_plan (Request.Unsubstituted_param { name })) ->
     failf "recipe rejected the wrong parameter %S" name
+  | Error (Recipe.Create_negative_invocation_turn _) ->
+    fail "unbound plan returned an invocation turn error"
+  | Error (Recipe.Create_invalid_invocation_schedule _) ->
+    fail "unbound plan returned a schedule error"
   | Ok _ -> fail "recipe admitted an unbound plan"
 ;;
 
 let test_async_recipe_round_trips_assembler_origin () =
   let assembler_run_id =
-    Proposal_request.Assembler_run_id.of_string "assembler-run-1" |> Result.get_ok
+    Recipe.Assembler_run_id.of_string "assembler-run-1" |> Result.get_ok
   in
   let proposal_id =
-    Proposal.Proposal_id.of_string (String.make 64 'a') |> Result.get_ok
+    Recipe.Proposal_id.of_string (String.make 64 'a') |> Result.get_ok
   in
   let decoded =
     Recipe.Assembler_proposal { assembler_run_id; proposal_id }
@@ -1194,11 +1202,11 @@ let test_async_recipe_round_trips_assembler_origin () =
     check string
       "assembler run id"
       "assembler-run-1"
-      (Proposal_request.Assembler_run_id.to_string decoded_run_id);
+      (Recipe.Assembler_run_id.to_string decoded_run_id);
     check bool
       "proposal id"
       true
-      (Proposal.Proposal_id.equal proposal_id decoded_proposal_id)
+      (Recipe.Proposal_id.equal proposal_id decoded_proposal_id)
 ;;
 
 let add_field name value = function
@@ -1237,19 +1245,6 @@ let test_async_recipe_decoder_closes_every_owned_object () =
     ; ( "unknown invocation field"
       , update_field "invocation" (add_field "tool_name" (`String "derived")) base
       , Recipe.Unknown_field { object_name = Recipe.Invocation; field = "tool_name" } )
-    ; ( "duplicate schedule field"
-      , update_field
-          "invocation"
-          (update_field "schedule" (add_field "batch_size" (`Int 4)))
-          base
-      , Recipe.Duplicate_field
-          { object_name = Recipe.Schedule; field = "batch_size" } )
-    ; ( "unknown schedule field"
-      , update_field
-          "invocation"
-          (update_field "schedule" (add_field "execution" (`String "derived")))
-          base
-      , Recipe.Unknown_field { object_name = Recipe.Schedule; field = "execution" } )
     ]
   in
   List.iter
@@ -1259,6 +1254,116 @@ let test_async_recipe_decoder_closes_every_owned_object () =
        | Error _ -> failf "%s returned the wrong typed error" label
        | Ok _ -> failf "%s was accepted" label)
     cases
+;;
+
+let update_recipe_schedule update =
+  update_field "invocation" (update_field "schedule" update)
+;;
+
+let replace_field name value = update_field name (fun _ -> value)
+
+let test_async_recipe_uses_canonical_invocation_schedule_validation () =
+  let base = encoded_recipe (Recipe.Skill_composition (recipe_skill_reference ())) in
+  let invalid_schedules =
+    [ "negative planned index", replace_field "planned_index" (`Int (-1))
+    ; "negative batch index", replace_field "batch_index" (`Int (-1))
+    ; "negative batch size", replace_field "batch_size" (`Int (-1))
+    ; "zero batch size", replace_field "batch_size" (`Int 0)
+    ; "duplicate schedule field", add_field "batch_size" (`Int 3)
+    ; "unknown schedule field", add_field "execution" (`String "derived")
+    ]
+  in
+  List.iter
+    (fun (label, update) ->
+       match decode_recipe (update_recipe_schedule update base) with
+       | Error (Recipe.Invalid_schedule _) -> ()
+       | Error _ -> failf "%s returned the wrong typed error" label
+       | Ok _ -> failf "%s was accepted" label)
+    invalid_schedules;
+  let negative_turn =
+    update_field "invocation" (replace_field "turn" (`Int (-1))) base
+  in
+  (match decode_recipe negative_turn with
+   | Error (Recipe.Negative_invocation_turn (-1)) -> ()
+   | Error _ -> fail "negative turn returned the wrong typed error"
+   | Ok _ -> fail "negative invocation turn was accepted");
+  let terminal_completion =
+    Agent_core.Tool_contract.completion_to_yojson
+      (Agent_core.Tool_contract.Terminal_after_success
+         Agent_core.Tool_contract.Proven_post_effect)
+  in
+  let invalid_terminal =
+    update_field
+      "invocation"
+      (replace_field "completion" terminal_completion)
+      base
+  in
+  match decode_recipe invalid_terminal with
+  | Error (Recipe.Invalid_completion_schedule _) -> ()
+  | Error _ -> fail "invalid terminal schedule returned the wrong typed error"
+  | Ok _ -> fail "terminal completion with a concurrent batch was accepted"
+;;
+
+let create_recipe_with_invocation invocation =
+  Recipe.create
+    ~composition_run_id:(Plan.Composition_run_id.fresh ())
+    ~origin:(Recipe.Skill_composition (recipe_skill_reference ()))
+    ~accepted_surface_digest:(accepted_surface_digest ())
+    ~plan:(recipe_plan ())
+    ~invocation
+    ~accepted_checkpoint:(recipe_checkpoint ())
+;;
+
+let test_async_recipe_constructor_validates_invocation () =
+  let schedule = Agent_core.Tool_contract.Invocation.schedule (recipe_invocation ()) in
+  let negative_turn =
+    Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"negative-turn"
+      ~turn:(-1)
+      ~schedule
+      ~completion:Agent_core.Tool_contract.Continue_after_success
+  in
+  (match create_recipe_with_invocation negative_turn with
+   | Error (Recipe.Create_negative_invocation_turn (-1)) -> ()
+   | Error _ -> fail "constructor returned the wrong negative-turn error"
+   | Ok _ -> fail "constructor accepted a negative invocation turn");
+  let invalid_terminal =
+    Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"invalid-terminal"
+      ~turn:1
+      ~schedule
+      ~completion:
+        (Agent_core.Tool_contract.Terminal_after_success
+           Agent_core.Tool_contract.Proven_pre_effect)
+  in
+  match create_recipe_with_invocation invalid_terminal with
+  | Error (Recipe.Create_invalid_invocation_schedule _) -> ()
+  | Error _ -> fail "constructor returned the wrong terminal-schedule error"
+  | Ok _ -> fail "constructor accepted an invalid terminal schedule"
+;;
+
+let test_async_recipe_surface_digest_is_typed_but_observational () =
+  let digest = accepted_surface_digest () in
+  check string
+    "typed digest round-trip"
+    accepted_surface_digest_string
+    (Recipe.Accepted_surface_digest.to_string digest);
+  List.iter
+    (fun invalid ->
+       match Recipe.Accepted_surface_digest.of_string invalid with
+       | Error Recipe.Accepted_surface_digest.Not_lowercase_sha256 -> ()
+       | Ok _ -> failf "invalid accepted surface digest was constructed: %S" invalid)
+    [ ""; String.make 63 'a'; String.make 64 'A'; String.make 64 'z' ];
+  let base = encoded_recipe (Recipe.Skill_composition (recipe_skill_reference ())) in
+  List.iter
+    (fun invalid ->
+       let json = replace_field "accepted_surface_digest" (`String invalid) base in
+       match decode_recipe json with
+       | Error (Recipe.Invalid_accepted_surface_digest value)
+         when String.equal value invalid -> ()
+       | Error _ -> failf "digest %S returned the wrong typed error" invalid
+       | Ok _ -> failf "digest %S was decoded" invalid)
+    [ ""; String.make 64 'A' ]
 ;;
 
 let test_async_recipe_delegates_nested_strict_decoders () =
@@ -1693,6 +1798,18 @@ let () =
             "owned objects reject duplicate and unknown fields"
             `Quick
             test_async_recipe_decoder_closes_every_owned_object
+        ; test_case
+            "canonical invocation schedule validation"
+            `Quick
+            test_async_recipe_uses_canonical_invocation_schedule_validation
+        ; test_case
+            "constructor validates invocation"
+            `Quick
+            test_async_recipe_constructor_validates_invocation
+        ; test_case
+            "surface digest is typed but observational"
+            `Quick
+            test_async_recipe_surface_digest_is_typed_but_observational
         ; test_case
             "nested strict decoders remain authoritative"
             `Quick

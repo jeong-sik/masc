@@ -34,6 +34,7 @@ module Error_domain = Error_domain
 module Hooks = Agent_core_base.Hooks
 module Tracing = Tracing
 module Tool_contract = Agent_core_base.Tool_contract
+module Execution_tool_schedule = Execution_tool_schedule
 module Tool = Agent_core_base.Tool
 module Typed_tool = Typed_tool
 module Mcp = Mcp

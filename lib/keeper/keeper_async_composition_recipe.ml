@@ -1,20 +1,63 @@
 module Plan = Keeper_tool_plan
 module Plan_request = Keeper_tool_plan_request
-module Proposal = Keeper_plan_proposal
-module Proposal_request = Keeper_plan_proposal_execution_request
 module Tool_contract = Agent_core.Tool_contract
+module Schedule = Agent_core.Execution_tool_schedule
+
+module Assembler_run_id = struct
+  type t = string
+
+  type error = Empty
+
+  let of_string = function
+    | "" -> Error Empty
+    | value -> Ok value
+  ;;
+
+  let to_string value = value
+  let equal = String.equal
+end
+
+module Proposal_id = struct
+  type t = string
+
+  type error = Not_lowercase_sha256
+
+  let of_string value =
+    if String_util.is_lowercase_sha256_hex value
+    then Ok value
+    else Error Not_lowercase_sha256
+  ;;
+
+  let to_string value = value
+  let equal = String.equal
+end
 
 type origin =
   | Skill_composition of Skill_reference.t
   | Assembler_proposal of
-      { assembler_run_id : Proposal_request.Assembler_run_id.t
-      ; proposal_id : Proposal.Proposal_id.t
+      { assembler_run_id : Assembler_run_id.t
+      ; proposal_id : Proposal_id.t
       }
+
+module Accepted_surface_digest = struct
+  type t = string
+
+  type error = Not_lowercase_sha256
+
+  let of_string value =
+    if String_util.is_lowercase_sha256_hex value
+    then Ok value
+    else Error Not_lowercase_sha256
+  ;;
+
+  let to_string value = value
+  let equal = String.equal
+end
 
 type t =
   { composition_run_id : Plan.Composition_run_id.t
   ; origin : origin
-  ; accepted_surface_digest : string
+  ; accepted_surface_digest : Accepted_surface_digest.t
   ; plan : Plan.t
   ; invocation : Tool_contract.Invocation.t
   ; accepted_checkpoint : Agent_core.Checkpoint.t
@@ -24,7 +67,6 @@ type object_name =
   | Recipe
   | Origin
   | Invocation
-  | Schedule
 
 type decode_error =
   | Expected_object of object_name
@@ -53,10 +95,18 @@ type decode_error =
   | Invalid_skill_reference of Skill_reference.decode_error
   | Invalid_assembler_run_id
   | Invalid_proposal_id of string
-  | Invalid_execution_mode of string
+  | Invalid_accepted_surface_digest of string
+  | Negative_invocation_turn of int
+  | Invalid_schedule of string
   | Invalid_completion of string
+  | Invalid_completion_schedule of string
   | Invalid_plan of Plan_request.error
   | Invalid_checkpoint of Agent_core.Error.t
+
+type create_error =
+  | Unbound_plan of Plan_request.encode_error
+  | Create_negative_invocation_turn of int
+  | Create_invalid_invocation_schedule of string
 
 let ( let* ) = Result.bind
 
@@ -117,25 +167,16 @@ let origin_to_yojson = function
     `Assoc
       [ "kind", `String "assembler_proposal"
       ; ( "assembler_run_id"
-        , `String (Proposal_request.Assembler_run_id.to_string assembler_run_id) )
-      ; "proposal_id", `String (Proposal.Proposal_id.to_string proposal_id)
+        , `String (Assembler_run_id.to_string assembler_run_id) )
+      ; "proposal_id", `String (Proposal_id.to_string proposal_id)
       ]
-;;
-
-let schedule_to_yojson (schedule : Tool_contract.schedule) =
-  `Assoc
-    [ "planned_index", `Int schedule.planned_index
-    ; "batch_index", `Int schedule.batch_index
-    ; "batch_size", `Int schedule.batch_size
-    ; "execution_mode", Tool_contract.execution_mode_to_yojson schedule.execution_mode
-    ]
 ;;
 
 let invocation_to_yojson invocation =
   `Assoc
     [ "tool_use_id", `String (Tool_contract.Invocation.tool_use_id invocation)
     ; "turn", `Int (Tool_contract.Invocation.turn invocation)
-    ; "schedule", schedule_to_yojson (Tool_contract.Invocation.schedule invocation)
+    ; "schedule", Schedule.to_yojson (Tool_contract.Invocation.schedule invocation)
     ; "completion", Tool_contract.completion_to_yojson (Tool_contract.Invocation.completion invocation)
     ]
 ;;
@@ -148,15 +189,28 @@ let create
       ~invocation
       ~accepted_checkpoint
   =
-  let* _ = Plan_request.to_yojson plan in
-  Ok
-    { composition_run_id
-    ; origin
-    ; accepted_surface_digest
-    ; plan
-    ; invocation
-    ; accepted_checkpoint
-    }
+  let* _ =
+    Plan_request.to_yojson plan
+    |> Result.map_error (fun error -> Unbound_plan error)
+  in
+  let turn = Tool_contract.Invocation.turn invocation in
+  if turn < 0
+  then Error (Create_negative_invocation_turn turn)
+  else
+    let schedule = Tool_contract.Invocation.schedule invocation in
+    let completion = Tool_contract.Invocation.completion invocation in
+    let* () =
+      Schedule.validate_completion_message ~completion schedule
+      |> Result.map_error (fun detail -> Create_invalid_invocation_schedule detail)
+    in
+    Ok
+      { composition_run_id
+      ; origin
+      ; accepted_surface_digest
+      ; plan
+      ; invocation
+      ; accepted_checkpoint
+      }
 ;;
 
 let to_yojson recipe =
@@ -166,7 +220,8 @@ let to_yojson recipe =
       [ ( "composition_run_id"
         , `String (Plan.Composition_run_id.to_string recipe.composition_run_id) )
       ; "origin", origin_to_yojson recipe.origin
-      ; "accepted_surface_digest", `String recipe.accepted_surface_digest
+      ; ( "accepted_surface_digest"
+        , `String (Accepted_surface_digest.to_string recipe.accepted_surface_digest) )
       ; "plan", plan
       ; "invocation", invocation_to_yojson recipe.invocation
       ; "accepted_checkpoint", Agent_core.Checkpoint.to_json recipe.accepted_checkpoint
@@ -197,36 +252,17 @@ let origin_of_yojson json =
     in
     let* assembler_run_id_value = required_string Origin "assembler_run_id" fields in
     let* assembler_run_id =
-      Proposal_request.Assembler_run_id.of_string assembler_run_id_value
-      |> Result.map_error (fun _ -> Invalid_assembler_run_id)
+      Assembler_run_id.of_string assembler_run_id_value
+      |> Result.map_error (fun Assembler_run_id.Empty -> Invalid_assembler_run_id)
     in
     let* proposal_id_value = required_string Origin "proposal_id" fields in
     let* proposal_id =
-      Proposal.Proposal_id.of_string proposal_id_value
-      |> Result.map_error (fun Proposal.Proposal_id.Not_lowercase_sha256 ->
+      Proposal_id.of_string proposal_id_value
+      |> Result.map_error (fun Proposal_id.Not_lowercase_sha256 ->
         Invalid_proposal_id proposal_id_value)
     in
     Ok (Assembler_proposal { assembler_run_id; proposal_id })
   | value -> Error (Invalid_origin_kind value)
-;;
-
-let schedule_of_yojson json =
-  let* fields = object_fields Schedule json in
-  let* () =
-    exact_fields
-      Schedule
-      ~allowed:[ "planned_index"; "batch_index"; "batch_size"; "execution_mode" ]
-      fields
-  in
-  let* planned_index = required_int Schedule "planned_index" fields in
-  let* batch_index = required_int Schedule "batch_index" fields in
-  let* batch_size = required_int Schedule "batch_size" fields in
-  let* execution_mode_json = required Schedule "execution_mode" fields in
-  let* execution_mode =
-    Tool_contract.execution_mode_of_yojson execution_mode_json
-    |> Result.map_error (fun detail -> Invalid_execution_mode detail)
-  in
-  Ok { Tool_contract.planned_index; batch_index; batch_size; execution_mode }
 ;;
 
 let invocation_of_yojson json =
@@ -239,14 +275,24 @@ let invocation_of_yojson json =
   in
   let* tool_use_id = required_string Invocation "tool_use_id" fields in
   let* turn = required_int Invocation "turn" fields in
-  let* schedule_json = required Invocation "schedule" fields in
-  let* schedule = schedule_of_yojson schedule_json in
-  let* completion_json = required Invocation "completion" fields in
-  let* completion =
-    Tool_contract.completion_of_yojson completion_json
-    |> Result.map_error (fun detail -> Invalid_completion detail)
-  in
-  Ok (Tool_contract.Invocation.create ~tool_use_id ~turn ~schedule ~completion)
+  if turn < 0
+  then Error (Negative_invocation_turn turn)
+  else
+    let* schedule_json = required Invocation "schedule" fields in
+    let* schedule =
+      Schedule.of_yojson schedule_json
+      |> Result.map_error (fun detail -> Invalid_schedule detail)
+    in
+    let* completion_json = required Invocation "completion" fields in
+    let* completion =
+      Tool_contract.completion_of_yojson completion_json
+      |> Result.map_error (fun detail -> Invalid_completion detail)
+    in
+    let* () =
+      Schedule.validate_completion_message ~completion schedule
+      |> Result.map_error (fun detail -> Invalid_completion_schedule detail)
+    in
+    Ok (Tool_contract.Invocation.create ~tool_use_id ~turn ~schedule ~completion)
 ;;
 
 let of_yojson ~descriptors json =
@@ -273,6 +319,11 @@ let of_yojson ~descriptors json =
   let* origin = origin_of_yojson origin_json in
   let* accepted_surface_digest =
     required_string Recipe "accepted_surface_digest" fields
+  in
+  let* accepted_surface_digest =
+    Accepted_surface_digest.of_string accepted_surface_digest
+    |> Result.map_error (fun Accepted_surface_digest.Not_lowercase_sha256 ->
+      Invalid_accepted_surface_digest accepted_surface_digest)
   in
   let* plan_json = required Recipe "plan" fields in
   let* plan =

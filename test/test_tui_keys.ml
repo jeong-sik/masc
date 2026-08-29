@@ -569,7 +569,7 @@ let () =
             test_planning_footer_carries_filter_and_sort
         ; Alcotest.test_case "Task Review is a Planning child" `Quick
             test_task_review_is_a_planning_child
-        ; test_case "Changes is a Keepers child" `Quick
+        ; Alcotest.test_case "Changes is a Keepers child" `Quick
             test_changes_is_a_keeper_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing

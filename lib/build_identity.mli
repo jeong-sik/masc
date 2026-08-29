@@ -30,9 +30,21 @@ type t = {
   source_fingerprint : string option;
     (** SHA-256 identity of the exact Dune link action and dependency bytes
         bound to this executable by a validated provenance sidecar. *)
+  provenance_source : string;
+    (** How [executable_sha256] below was obtained.
+
+        ["launcher_verified"] when run-local.sh materialised the binary,
+        hashed it, and re-checked that nothing moved before exec.
+        ["self_observed"] when the running binary hashed its own path with
+        no launcher involved.
+
+        The two answer different questions -- "this is what the build
+        produced" against "this is what is answering you" -- and a consumer
+        that reads them alike is trusting a check nobody ran. *)
   executable_sha256 : string option;
-    (** SHA-256 of the running executable, present only when it matches the
-        explicitly bound provenance sidecar. *)
+    (** SHA-256 of the running executable. Read [provenance_source] to know
+        whether the launcher verified it or the process hashed itself.
+        Absent only when the executable could not be read. *)
   executable_provenance_path : string option;
   executable_provenance_sha256 : string option;
   binary_commit_unix_ts : float option;

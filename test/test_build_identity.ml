@@ -102,6 +102,38 @@ let test_runtime_cwd_is_resolver_backed_snapshot () =
   Alcotest.(check bool) "cwd snapshot populated" true (String.length cwd > 0);
   Alcotest.(check bool) "cwd snapshot absolute" true (not (Filename.is_relative cwd))
 
+(* A direct _build launch reported no executable identity at all: the four
+   --build-provenance-* arguments come from run-local.sh, and without them
+   every field was left None, which the derived serializer omits entirely.
+   /health?full=1 then had no executable_sha256 key to read and the live-proof
+   runbook stopped before it began.
+
+   The test process is itself a direct launch, so this is that case. *)
+let test_direct_launch_still_identifies_its_executable () =
+  let current = Build_identity.current () in
+  let json = Build_identity.to_yojson current in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "the identity says nobody verified it"
+    "self_observed"
+    (json |> member "provenance_source" |> to_string);
+  (match json |> member "executable_sha256" with
+   | `String digest ->
+     Alcotest.(check int) "and carries a real sha256" 64 (String.length digest);
+     Alcotest.(check bool) "made of hex" true
+       (String.for_all
+          (fun c ->
+            (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
+          digest)
+   | other ->
+     Alcotest.failf "a readable executable produced no hash: %s"
+       (Yojson.Safe.to_string other));
+  (* The launcher's number is the one the binary cannot invent, so it stays
+     absent rather than being filled with something that looks like it. *)
+  Alcotest.(check bool) "the build-input fingerprint is not invented" true
+    (match json |> member "source_fingerprint" with
+     | `Null -> true
+     | _ -> false)
+
 let test_current_json_exposes_runtime_binary_identity () =
   let current = Build_identity.current () in
   let json = Build_identity.to_yojson current in
@@ -714,6 +746,8 @@ let () =
           Alcotest.test_case
             "pick_repo_candidates not sorted alphabetically" `Quick
             test_pick_repo_candidates_not_sorted_alphabetically;
+          Alcotest.test_case "direct launch still identifies its executable"
+            `Quick test_direct_launch_still_identifies_its_executable;
           Alcotest.test_case "parse commit timestamp output" `Quick
             test_parse_commit_unix_ts_output;
           Alcotest.test_case "parse dune-project version" `Quick

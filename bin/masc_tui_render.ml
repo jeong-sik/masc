@@ -5655,7 +5655,7 @@ let render_keeper_logs (state : state) =
 
     Buffer.add_string buf
       (footer_line state ~max_cells:cols
-         ~hints:"j/k:scroll  Esc:back  q:quit  r:refresh");
+         ~hints:(Masc_tui_keys.footer_hints state.view));
 
     finish_surface state ~surface_key:"keeper-logs" ~rows:terminal_rows
       ~cols buf
@@ -10133,7 +10133,8 @@ let render_keeper_calls (state : state) =
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/Esc:back  Tab:next  q:quit  r:refresh");
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~clamped:(Keeper_calls scroll) ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols buf
 
 (* The runtime's event feed, newest first, for watching every keeper act at

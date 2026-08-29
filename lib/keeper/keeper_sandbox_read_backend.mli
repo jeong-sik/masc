@@ -58,9 +58,11 @@ val read_file :
 
     Returns the captured stdout bytes clamped to [max_bytes]. Errors
     include image misconfiguration, empty [command_argv], runtime
-    preflight failure, and backend command failure. The error tag uses
-    the program name (e.g. [docker_rg_failed], [docker_cat_failed])
-    for caller log forensics. *)
+    preflight failure, and backend command failure. A backend command
+    failure tags the program name (e.g. [docker_rg_failed]); the
+    host-path preflight in {!read_file} tags the sandbox profile
+    (e.g. [microvm_read_failed]) since no backend ran. Both are for
+    caller log forensics. *)
 val run_command_with_status :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   ?ok_exit_codes:int list ->

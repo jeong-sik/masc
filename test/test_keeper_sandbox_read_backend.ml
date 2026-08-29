@@ -257,7 +257,14 @@ let test_read_missing_file_preflight_errors () =
            else if String.sub msg i nlen = needle then true
            else loop (i + 1)
          in
-         loop 0)
+         loop 0);
+      (* The preflight never ran a backend, so its tag names the sandbox
+         profile the keeper actually has, not a docker program. *)
+      Alcotest.(check bool) "preflight tag names the sandbox profile" true
+        (String_util.contains_substring msg
+           (Keeper_types_profile_sandbox.sandbox_profile_to_string
+              meta.Masc.Keeper_meta_contract.sandbox_profile
+            ^ "_read_failed"))
 
 (* Read on a directory must point the keeper at a tool that actually
    exists. The old message said "use the currently exposed read/listing

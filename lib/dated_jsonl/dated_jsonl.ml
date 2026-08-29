@@ -1397,6 +1397,115 @@ let reset_count_cache_for_testing () =
   Stdlib.Mutex.protect file_count_cache_mu (fun () -> Hashtbl.reset file_count_cache)
 ;;
 
+(* The count cache above lives in process memory, so every restart re-counted
+   every retained line of every dated store. Measured 2026-08-29: masc
+   bootstrapped 24 times that day, and 23 of the 28 telemetry_summary
+   "heavy refresh" warnings landed within five minutes of a bootstrap, the
+   worst at 225.70s and 5,704MB against tool_calls 1.1GB +
+   agent-core-events 935MB + trajectories 654MB.
+
+   Persisting (path, boundary, count) turns that back into the incremental
+   read it already is in steady state. The file is a cache and never an
+   authority: each entry is still checked against the file's current size on
+   use, so a boundary that no longer matches re-reads the delta, and a
+   boundary past the size falls back to the full rescan. A missing,
+   truncated, or unreadable cache file costs exactly what today costs. *)
+
+let count_cache_rows () =
+  Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+    Hashtbl.fold
+      (fun path entry acc -> (path, entry.fc_boundary, entry.fc_count) :: acc)
+      file_count_cache
+      [])
+;;
+
+(* Entries are merged rather than replacing the table: a load races nothing at
+   startup, but a caller that reloads later must not drop counts this process
+   has already measured. A row whose in-memory entry is at least as advanced
+   wins, since that one was measured against a size this process observed. *)
+let install_count_cache_rows rows =
+  Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+    List.iter
+      (fun (path, boundary, count) ->
+         if String.length path > 0 && boundary >= 0 && count >= 0
+         then (
+           match Hashtbl.find_opt file_count_cache path with
+           | Some existing when existing.fc_boundary >= boundary -> ()
+           | Some _ | None ->
+             Hashtbl.replace
+               file_count_cache
+               path
+               { fc_boundary = boundary; fc_count = count }))
+      rows)
+;;
+
+let count_cache_to_json rows =
+  `List
+    (List.map
+       (fun (path, boundary, count) ->
+          `Assoc
+            [ "path", `String path
+            ; "boundary", `Int boundary
+            ; "count", `Int count
+            ])
+       rows)
+;;
+
+let count_cache_of_json = function
+  | `List entries ->
+    List.filter_map
+      (fun entry ->
+         match entry with
+         | `Assoc fields ->
+           (match
+              ( List.assoc_opt "path" fields
+              , List.assoc_opt "boundary" fields
+              , List.assoc_opt "count" fields )
+            with
+            | Some (`String path), Some (`Int boundary), Some (`Int count) ->
+              Some (path, boundary, count)
+            | _ -> None)
+         | _ -> None)
+      entries
+  | _ -> []
+;;
+
+let save_count_cache ~path =
+  match count_cache_rows () with
+  | [] -> Ok ()
+  | rows ->
+    (try
+       Fs_compat.mkdir_p (Filename.dirname path);
+       let tmp = path ^ ".tmp" in
+       let oc = open_out tmp in
+       Fun.protect
+         ~finally:(fun () -> close_out_noerr oc)
+         (fun () ->
+            output_string oc (Yojson.Safe.to_string (count_cache_to_json rows)));
+       Sys.rename tmp path;
+       Ok ()
+     with
+     | Sys_error detail -> Error detail
+     | Unix.Unix_error (err, op, arg) ->
+       Error (Printf.sprintf "%s(%s): %s" op arg (Unix.error_message err)))
+;;
+
+let load_count_cache ~path =
+  if not (Sys.file_exists path)
+  then Ok 0
+  else (
+    try
+      let content = Fs_compat.load_file path in
+      let rows = count_cache_of_json (Yojson.Safe.from_string content) in
+      install_count_cache_rows rows;
+      Ok (List.length rows)
+    with
+    | Yojson.Json_error detail -> Error detail
+    | Sys_error detail -> Error detail
+    | Unix.Unix_error (err, op, arg) ->
+      Error (Printf.sprintf "%s(%s): %s" op arg (Unix.error_message err)))
+;;
+
 let append_rotating_unlocked t ~max_current_file_bytes json =
   let mutex = Atomic.get t.mutex in
   Eio.Mutex.use_ro mutex (fun () ->

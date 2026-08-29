@@ -304,6 +304,19 @@ val count_entries_uncached : t -> int
     trailing unterminated line. Use in tests or rare audit paths that
     must observe the live filesystem byte-for-byte. *)
 
+val save_count_cache : path:string -> (unit, string) result
+(** Writes the per-file (path, boundary, count) cache to [path] via a
+    temp-file rename. The cache is never an authority: every entry is still
+    validated against the file's current size when it is used, so a stale or
+    absent file only costs the full count it costs today. An empty cache
+    writes nothing. *)
+
+val load_count_cache : path:string -> (int, string) result
+(** Loads a cache written by {!save_count_cache}, returning how many rows were
+    read. Rows merge into the in-memory table and never overwrite an entry
+    this process has already advanced further. A missing file is [Ok 0]:
+    counting from scratch is correct, just slower. *)
+
 val reset_count_cache_for_testing : unit -> unit
 (** Reset the per-file incremental count cache. Test-only. *)
 

@@ -441,6 +441,50 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         Mcp_server.publication_recovery_availability_provider state
     }
   in
+  (* Dated-JSONL count cache: restore, keep, and hand back the per-file
+     (path, boundary, count) table that makes [count_entries] incremental.
+
+     It was process-memory only, so every restart re-counted every retained
+     line of every dated store. Measured 2026-08-29: masc bootstrapped 24
+     times that day, and 23 of the 28 telemetry_summary "heavy refresh"
+     warnings landed within five minutes of a bootstrap -- worst 225.70s and
+     5,704MB, reading tool_calls 1.1GB + agent-core-events 935MB +
+     trajectories 654MB.
+
+     The file is a cache, not a fact: every restored entry is still checked
+     against its file's current size before use, so a stale, truncated, or
+     absent cache costs exactly what a cold start costs today. The periodic
+     save exists because a crash is a restart too, and the whole point is the
+     restart path. *)
+  let count_cache_path =
+    Filename.concat (Workspace.masc_root_dir config) "dated-jsonl-count-cache.json"
+  in
+  (match Dated_jsonl.load_count_cache ~path:count_cache_path with
+   | Ok 0 -> ()
+   | Ok rows ->
+     Log.Server.info "dated-jsonl count cache restored: rows=%d" rows
+   | Error detail ->
+     Log.Server.warn
+       "dated-jsonl count cache load failed (counting from scratch): %s"
+       detail);
+  let save_count_cache () =
+    match Dated_jsonl.save_count_cache ~path:count_cache_path with
+    | Ok () -> ()
+    | Error detail ->
+      Log.Server.warn "dated-jsonl count cache save failed: %s" detail
+  in
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "dated_jsonl_count_cache")
+    (fun () ->
+      let interval_sec = 300.0 in
+      let rec tick () =
+        Eio.Time.sleep clock interval_sec;
+        save_count_cache ();
+        tick ()
+      in
+      tick ());
+  Shutdown.register ~name:"dated_jsonl_count_cache" ~priority:30 save_count_cache;
   (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
      Replaces the old mutex + synchronous file I/O pattern. *)
   fork_logged_fiber

@@ -3,6 +3,12 @@
     This module is the sole owner of the mapping between the host bookkeeping
     playground and an endpoint's remote playground. *)
 
+val normalize_remote : string -> string
+(** Lexical dot-segment cleanup for an endpoint-namespace path. Host realpath
+    is deliberately absent: it substitutes host symlinks and macOS firmlinks
+    (/home/x → /System/Volumes/Data/home/x) into paths that only exist on the
+    endpoint. *)
+
 val host_to_remote :
   base_path:string ->
   endpoint:Exec_ssh_endpoint.t ->

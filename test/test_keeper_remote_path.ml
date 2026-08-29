@@ -59,6 +59,54 @@ let test_jail_and_endpoint_isolation () =
        ~keeper:"keeper-a" host_file)
 ;;
 
+(* The remote namespace must not be resolved against the host filesystem: a
+   host symlink (stand-in for the macOS /home firmlink) under the endpoint
+   root's prefix must not leak its target into translated paths. *)
+let test_host_symlink_does_not_rewrite_remote_paths () =
+  let tmp = Filename.temp_file "remote-path" "" in
+  Sys.remove tmp;
+  Unix.mkdir tmp 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.unlink (Filename.concat tmp "link");
+      Unix.rmdir (Filename.concat tmp "target");
+      Unix.rmdir tmp)
+    (fun () ->
+      Unix.mkdir (Filename.concat tmp "target") 0o700;
+      Unix.symlink
+        (Filename.concat tmp "target")
+        (Filename.concat tmp "link");
+      let linked_root = Filename.concat tmp "link/playground" in
+      let endpoint = { endpoint with remote_root = linked_root } in
+      check (result string string) "host symlink not substituted"
+        (Ok (linked_root ^ "/keeper-a/src/main.ml"))
+        (Keeper_remote_path.host_to_remote ~base_path ~endpoint
+           ~keeper:"keeper-a" host_file);
+      check string "remote output maps back through the symlink form"
+        "src/main.ml"
+        (Keeper_remote_path.remote_to_logical ~endpoint ~keeper:"keeper-a"
+           (linked_root ^ "/keeper-a/src/main.ml")))
+;;
+
+let test_relative_dot_segments () =
+  check (result string string) "dot-segment cleanup stays lexical"
+    (Ok remote_file)
+    (Keeper_remote_path.host_to_remote ~base_path ~endpoint ~keeper:"keeper-a"
+       "./src/../src/main.ml");
+  check (result string string) "bare dot is the keeper root"
+    (Ok "/srv/masc/playground/keeper-a")
+    (Keeper_remote_path.host_to_remote ~base_path ~endpoint ~keeper:"keeper-a"
+       ".");
+  (match
+     Keeper_remote_path.host_to_remote ~base_path ~endpoint ~keeper:"keeper-a"
+       "src/../../escape"
+   with
+   | Ok path -> failf "escaping relative path translated to %s" path
+   | Error error ->
+     check bool "escape is a named jail error" true
+       (String.starts_with ~prefix:"remote_ssh_path_jail_violation:" error))
+;;
+
 let test_rewrite_output_and_chunk_boundary () =
   let expected = "error: " ^ host_file ^ ":12\n" in
   check string "absolute remote output becomes host logical" expected
@@ -88,6 +136,9 @@ let () =
         ; test_case "remote to logical" `Quick test_remote_to_logical
         ; test_case "jail + endpoint isolation" `Quick
             test_jail_and_endpoint_isolation
+        ; test_case "host symlink immunity" `Quick
+            test_host_symlink_does_not_rewrite_remote_paths
+        ; test_case "relative dot segments" `Quick test_relative_dot_segments
         ; test_case "output rewrite + chunk boundary" `Quick
             test_rewrite_output_and_chunk_boundary
         ] )

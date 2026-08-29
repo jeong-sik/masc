@@ -42,7 +42,11 @@ path = ".agents/skills"
 access = "read-write"
 
 [runtime]
-default = "ollama_cloud.deepseek-v4-flash"
+# Fleet default keeper runtime. Moved deepseek-v4-flash -> glm-5.3-flash on the
+# same ollama_cloud wire (no new credential): GLM-5.3-Flash is the newest flash
+# coding model (Z.AI 2026-08-14, /api/show 2026-08-29), 1M context, tools+vision.
+# It is dispatchable only because its binding now carries max-request-body-bytes.
+default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
 # Anti-rationalization/completion-authority work uses a typed verdict tool call.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane. The judgement call resolves the verifier_exact
@@ -925,6 +929,10 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-glm-5-3]
+# Keeper working-set bound, mirrored from the deepseek-v4-flash sibling on this
+# same ollama_cloud wire. Without a positive value the runtime is admitted but
+# not keeper-dispatchable (boot WARN), so this GLM cannot be selected.
+max-request-body-bytes = 524288
 
 # Zhipu GLM-5.3 Flash. /api/show 2026-08-29:
 # caps=[completion,thinking,tools,vision], context_length=1048576,
@@ -951,6 +959,9 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-glm-5-3-flash]
+# Same working-set bound as the sibling ollama_cloud runtimes; a positive value
+# is what makes this the keeper-dispatchable fleet default (see [runtime].default).
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-gpt-oss-20b]
 api-name = "gpt-oss:20b"
@@ -1041,6 +1052,9 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-kimi-k3]
+# Working-set bound mirrored from the sibling ollama_cloud runtimes so Moonshot
+# Kimi K3 is keeper-dispatchable rather than admitted-but-unusable.
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-minimax-m2-7]
 api-name = "minimax-m2.7"

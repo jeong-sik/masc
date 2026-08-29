@@ -271,8 +271,8 @@ PR-3 (retry loop body) 가 *전체 LOC delta 의 60%+ 차지* — 별도 RFC sub
 ## 7. References
 
 - [RFC-0051](RFC-0051-run-named-closure-decomposition.md) — `run_named` closure decomposition (parallel work, draft only).
-- [RFC-0056](RFC-0056-incremental-sub-library-extraction.md) — Sub-library extraction (이미 분리된 5 sub-module 패턴).
-- [RFC-0085](RFC-0085-keeper-namespace-bulk-promotion.md) — keeper namespace bulk promotion (sub-module 명명 conventions).
+- [RFC-0056](RFC-0056-incremental-sublib-extraction.md) — Sub-library extraction (이미 분리된 5 sub-module 패턴).
+- RFC-0085 — keeper namespace bulk promotion (sub-module 명명 conventions).
 - `lib/keeper/keeper_unified_turn.ml` — 1943 LOC, `run_keeper_cycle`.
 - `lib/keeper/keeper_unified_turn.mli` — 319 LOC, 30+ surface.
 - `scripts/lint/godfile-size-regression.sh` — cap 3350 LOC, decomposition mandate L22-26.

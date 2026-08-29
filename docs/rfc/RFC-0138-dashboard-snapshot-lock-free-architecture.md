@@ -40,7 +40,7 @@ Phase 2 (PRs #16656/#16660/#16664) added caches and frontend backoff. These redu
 | Frontend exponential backoff | Smooths client load but server still blocks the compute thread on cache miss |
 | `Dashboard_cache.get_or_compute_with_timeout` | The timeout itself is a symptom — the report counted **14+ MASC_* timeout env variables** (sw-dev §Symptom 억제 §1) accumulated to make blocking compute survivable. The root is that the HTTP path is allowed to block at all. |
 
-Adding more caches and more timeout env vars is the [sw-dev §워크어라운드 거부 §1 — Cap/Cooldown self-fulfilling spiral](../../../me/instructions/software-development.md). The instrumentation from Phase 1 made this visible.
+Adding more caches and more timeout env vars is the sw-dev §워크어라운드 거부 §1 — Cap/Cooldown self-fulfilling spiral. The instrumentation from Phase 1 made this visible.
 
 ## 3. Root Fix Proposal
 

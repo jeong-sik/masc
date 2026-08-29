@@ -196,7 +196,6 @@ val keeper_tool_group_to_string : keeper_tool_group -> string
 (** Convert raw TOML group names to a [tool_surface].
     [None] or empty list → [All] (inherit, no narrowing).
     Unknown names are logged and silently excluded (fail-open). *)
-val tool_groups_to_surface : string list option -> tool_surface
 
 val runtime_handler_to_string : runtime_handler -> string
 val tool_kind_to_string : tool_kind -> string

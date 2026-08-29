@@ -358,10 +358,6 @@ let ensure_keeper_meta_with_cause config name =
       | [] -> meta.agent_core_env
       | env -> env
     in
-    (* --- RFC-0389 tool surface --- *)
-    let target_tool_groups =
-      apply_default_opt defaults.tool_groups meta.tool_groups
-    in
     let overlayed =
       { meta with
         proactive = {
@@ -378,7 +374,6 @@ let ensure_keeper_meta_with_cause config name =
         telemetry_feedback_window_hours = target_tf_window;
         always_allow = target_always_allow;
         agent_core_env = target_agent_core_env;
-        tool_groups = target_tool_groups;
       }
     in
     (* Keep the runtime snapshot honest as well as the live overlay for fields
@@ -427,7 +422,6 @@ let ensure_keeper_meta_with_cause config name =
                  persisted_updated.telemetry_feedback_window_hours
              ; always_allow = persisted_updated.always_allow
              ; agent_core_env = persisted_updated.agent_core_env
-             ; tool_groups = persisted_updated.tool_groups
              ; updated_at = persisted_updated.updated_at
              })
       with

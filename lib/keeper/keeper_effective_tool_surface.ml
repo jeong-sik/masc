@@ -29,7 +29,6 @@ type t =
   ; official_client_kind : string
   ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
-  ; tool_groups : string list
   ; skill_names : string list option
   ; unavailable_skill_names : Keeper_skill_catalog.configured_name_unavailable list
   ; current_task_id : string option
@@ -121,7 +120,6 @@ let project
       ~official_client_kind
       ~tool_delivery
       ~native_posture
-      ~tool_groups
       ~skill_names
       ~current_task_id
       ~task_skill_references
@@ -150,7 +148,6 @@ let project
   | Ok task_selection ->
     let capability_surface =
       Keeper_capability_surface.create
-        ~tool_groups
         ~skill_names
         ~global_skill_catalog
         ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
@@ -314,7 +311,6 @@ let project
       ; official_client_kind
       ; tool_delivery
       ; native_posture
-      ; tool_groups = Option.value ~default:[] tool_groups
       ; skill_names
       ; unavailable_skill_names =
           Keeper_skill_catalog.configured_names_unavailable turn_skill_projection
@@ -499,7 +495,6 @@ let resolve ~config ~keeper_name =
                      ~official_client_kind:(client_kind runtime)
                      ~tool_delivery:(runtime_tool_delivery runtime)
                      ~native_posture
-                     ~tool_groups:meta.tool_groups
                      ~skill_names:profile_defaults.skill_names
                      ~current_task_id
                      ~skills_left_out
@@ -591,7 +586,6 @@ let to_yojson = function
         , match surface.native_posture with
           | None -> `Null
           | Some posture -> `String (Runtime_native_tools.to_string posture) )
-      ; "tool_groups", string_list surface.tool_groups
       ; ( "skill_selection"
         , match surface.skill_names with
           | None -> `Assoc [ "mode", `String "all" ]

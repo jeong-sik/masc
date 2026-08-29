@@ -392,12 +392,9 @@ let active_descriptor_names_for_descriptors descriptors =
 ;;
 
 let active_descriptor_names ~(meta : keeper_meta) =
-  let descriptors =
-    Keeper_tool_descriptor.tool_groups_to_surface meta.tool_groups
-    |> fun surface ->
-    Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
-  in
-  active_descriptor_names_for_descriptors descriptors
+  ignore meta;
+  active_descriptor_names_for_descriptors
+    (Keeper_tool_descriptor.model_visible_descriptors ())
 ;;
 
 let grouped_active_names active_descriptor_names =

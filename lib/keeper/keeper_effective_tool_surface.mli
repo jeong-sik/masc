@@ -36,7 +36,6 @@ type t =
   ; official_client_kind : string
   ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
-  ; tool_groups : string list
   ; skill_names : string list option
         (** [None] means all; [Some []] means the profile explicitly selects none. *)
   ; unavailable_skill_names : Keeper_skill_catalog.configured_name_unavailable list
@@ -82,7 +81,6 @@ module For_testing : sig
     official_client_kind:string ->
     tool_delivery:tool_delivery ->
     native_posture:Runtime_native_tools.posture option ->
-    tool_groups:string list option ->
     skill_names:string list option ->
     current_task_id:string option ->
     task_skill_references:Skill_reference.t list ->

@@ -63,8 +63,8 @@ module For_testing : sig
     -> ?skill_catalog:Keeper_skill_catalog.t
     -> unit
     -> Agent_core.Tool.t list
-  (** Test seam for a closed per-turn descriptor set. Production obtains the
-      same value from [meta.tool_groups]. *)
+  (** Test seam for a closed per-turn descriptor set. Production uses the
+      model-visible descriptor list. *)
 
   val initial_terminal_effect_state :
     Keeper_tools_agent_core.gate_replay_delivery option ->

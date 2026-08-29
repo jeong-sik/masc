@@ -667,35 +667,6 @@ let test_profile_rejects_unknown_tools_sibling_key () =
        check bool "names unknown key" true
          (String_util.contains_substring detail "keeper.tools.group"))
 
-(* RFC-0389: a typo in [keeper.tools.groups] must fail the load. All-unknown
-   used to fall back to All, which quietly cancelled the narrowing the
-   declaration existed to make. *)
-let test_tool_groups_rejects_unknown_names () =
-  let input = "[keeper.tools]\ngroups = [\"exeucte\", \"borad\"]\n" in
-  match TL.parse_toml input with
-  | Error error -> failf "fixture did not parse: %s" error
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ ->
-         fail "all-unknown groups fell back to All: the narrowing was cancelled"
-     | Error detail ->
-         check bool "names the first typo" true
-           (String_util.contains_substring detail "exeucte");
-         check bool "names the second typo" true
-           (String_util.contains_substring detail "borad"))
-;;
-
-let test_tool_groups_accepts_known_names () =
-  let input = "[keeper.tools]\ngroups = [\"execute\", \"meta\"]\n" in
-  match TL.parse_toml input with
-  | Error error -> failf "fixture did not parse: %s" error
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Error detail -> failf "known groups were rejected: %s" detail
-     | Ok defaults ->
-         check (option (list string)) "groups carried through"
-           (Some [ "execute"; "meta" ]) defaults.KTP.tool_groups)
-;;
 
 let test_skill_names_preserve_absent_empty_and_exact_values () =
   let parse input =
@@ -1775,10 +1746,6 @@ let () =
             test_discover_retains_invalid_files;
           test_case "each field kind rejects a wrong-typed value" `Quick
             test_each_keeper_field_kind_rejects_a_wrong_typed_value;
-          test_case "tool groups reject unknown names" `Quick
-            test_tool_groups_rejects_unknown_names;
-          test_case "tool groups accept known names" `Quick
-            test_tool_groups_accepts_known_names;
           test_case "Skill names preserve three-state selection" `Quick
             test_skill_names_preserve_absent_empty_and_exact_values;
           test_case "materializable helper uses base path" `Quick

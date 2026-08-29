@@ -242,11 +242,7 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
       in
       let tools =
         `Assoc
-          [ ( "groups"
-            , match m.tool_groups with
-              | None -> `Null
-              | Some groups -> Json_util.json_string_list groups )
-          ; ( "native"
+          [ ( "native"
             , match defaults.native_tool_posture with
               | None -> `Null
               | Some posture ->

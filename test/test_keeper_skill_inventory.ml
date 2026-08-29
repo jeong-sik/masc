@@ -117,14 +117,13 @@ let valid_named name inventory =
   | None -> failf "valid Skill %S missing from inventory" name
 ;;
 
-let capability_surface ?(skill_names = None) ?(tool_groups = None) frozen =
+let capability_surface ?(skill_names = None) frozen =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let global_skill_catalog, diagnostics =
     Masc.Keeper_skill_catalog.of_snapshot frozen
   in
   check int "catalog diagnostics" 0 (List.length diagnostics);
   Masc.Keeper_capability_surface.create
-    ~tool_groups
     ~skill_names
     ~global_skill_catalog
     ~skill_inventory:(Inventory.of_snapshot frozen)
@@ -332,23 +331,6 @@ let test_catalog_status_tracks_source_precedence () =
   | valid -> failf "expected two exact valid items, got %d" (List.length valid)
 ;;
 
-let test_capability_surface_keeps_active_and_outside_tools () =
-  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
-  let frozen = snapshot config [ [] ] in
-  let surface = capability_surface ~tool_groups:(Some [ "board" ]) frozen in
-  let capabilities = Masc.Keeper_capability_surface.tool_capabilities surface in
-  check bool "restricted surface has active Tools" true
-    (List.exists
-       (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
-          capability.availability = Masc.Keeper_capability_surface.Active)
-       capabilities);
-  check bool "restricted surface retains outside Tools" true
-    (List.exists
-       (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
-          capability.availability
-          = Masc.Keeper_capability_surface.Outside_tool_surface)
-       capabilities)
-;;
 
 let tool_capability_by_internal_name surface internal_name =
   Masc.Keeper_capability_surface.tool_capabilities surface
@@ -415,25 +397,6 @@ let test_complete_inventory_preserves_agent_core_surface () =
   check int "inventory covers every canonical descriptor"
     (List.length (Tool_descriptor.all_descriptors ()))
     (List.length (Masc.Keeper_capability_surface.tool_capabilities unrestricted));
-  let restricted = capability_surface ~tool_groups:(Some [ "board" ]) frozen in
-  let restricted_descriptor_ids =
-    descriptor_ids (Masc.Keeper_capability_surface.descriptors restricted)
-  in
-  let expected_restricted =
-    Tool_descriptor.tool_groups_to_surface (Some [ "board" ])
-    |> fun surface ->
-    Tool_descriptor.model_visible_descriptors_for_surface ~surface
-    |> descriptor_ids
-  in
-  check (list string) "restricted descriptors stay canonical model projection"
-    expected_restricted
-    restricted_descriptor_ids;
-  check (list string) "restricted active descriptors stay Agent Core projection"
-    restricted_descriptor_ids
-    (active_capability_descriptor_ids restricted);
-  let outside = tool_capability_by_internal_name restricted "tool_read_file" in
-  check bool "restricted model-visible Tool remains explicitly outside" true
-    (outside.availability = Masc.Keeper_capability_surface.Outside_tool_surface)
 ;;
 
 let test_empty_selection_makes_valid_skill_operator_only () =
@@ -559,37 +522,6 @@ let test_search_keeps_duplicate_exact_skill_references () =
   | _ -> fail "expected two exact Skill references"
 ;;
 
-let test_search_includes_outside_tool_and_skill () =
-  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
-  let frozen =
-    snapshot config [ [ candidate ~directory:"release-checklist" instruction_document ] ]
-  in
-  let surface =
-    capability_surface
-      ~tool_groups:(Some [ "board" ])
-      ~skill_names:(Some [])
-      frozen
-  in
-  let outside_tool =
-    search_candidates surface "tool_read_file"
-    |> List.exists (fun hit ->
-      match hit.Masc.Keeper_capability_search.document.payload with
-      | Masc.Keeper_capability_surface.Ordinary_tool capability ->
-        capability.availability = Masc.Keeper_capability_surface.Outside_tool_surface
-      | Skill _ -> false)
-  in
-  check bool "outside Tool is searchable" true outside_tool;
-  let outside_skill =
-    search_candidates surface "\"release-checklist\""
-    |> List.exists (fun hit ->
-      match hit.Masc.Keeper_capability_search.document.payload with
-      | Masc.Keeper_capability_surface.Skill capability ->
-        capability.availability
-        = Masc.Keeper_capability_surface.Outside_skill_surface
-      | Ordinary_tool _ -> false)
-  in
-  check bool "outside Skill is searchable" true outside_skill
-;;
 
 let test_invalid_skill_search_is_isolated () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
@@ -926,8 +858,6 @@ let () =
             test_invalid_sibling_isolated_with_digest
         ; test_case "catalog source precedence" `Quick
             test_catalog_status_tracks_source_precedence
-        ; test_case "restricted Tool availability" `Quick
-            test_capability_surface_keeps_active_and_outside_tools
         ; test_case "operator-only Tool inventory and search" `Quick
             test_operator_only_tool_is_in_inventory_and_search
         ; test_case "complete inventory preserves Agent Core surface" `Quick
@@ -938,8 +868,6 @@ let () =
             test_shadowed_and_invalid_skills_keep_typed_availability
         ; test_case "duplicate-name search keeps exact refs" `Quick
             test_search_keeps_duplicate_exact_skill_references
-        ; test_case "outside Tool and Skill search" `Quick
-            test_search_includes_outside_tool_and_skill
         ; test_case "invalid Skill search isolation" `Quick
             test_invalid_skill_search_is_isolated
         ; test_case "search has no cutoff" `Quick

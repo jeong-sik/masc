@@ -21,5 +21,3 @@ instructions = """
 
 # RFC-0389: 함대 표준 선언 — voice 그룹만 표면에서 내린다 (2026-08 함대 실측 0~7회).
 # [keeper.tools] 테이블은 반드시 [keeper] 키들(instructions 포함) 뒤에 둔다.
-[keeper.tools]
-groups = ["execute", "search_files", "fs", "board", "workspace", "surface", "memory", "meta", "core"]

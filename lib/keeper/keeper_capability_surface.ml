@@ -107,19 +107,12 @@ let missing_skill_capabilities ~skill_names ~skill_inventory =
 ;;
 
 let create
-      ~tool_groups
       ~skill_names
       ~global_skill_catalog
       ~skill_inventory
       ~task_skills
   =
-  let tool_surface =
-    Keeper_tool_descriptor.tool_groups_to_surface tool_groups
-  in
-  let descriptors =
-    Keeper_tool_descriptor.model_visible_descriptors_for_surface
-      ~surface:tool_surface
-  in
+  let descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
   let skill_projection =
     Keeper_skill_catalog.project_turn
       ~names:skill_names

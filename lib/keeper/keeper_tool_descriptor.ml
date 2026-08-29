@@ -220,33 +220,6 @@ let keeper_tool_group_to_string = Keeper_tool_group.to_string
 (* RFC-0389: strict inverse of [keeper_tool_group_to_string]. Unknown strings
    are [None], never a silent fallback — the TOML loader rejects them at
    load time; this reader is for rows that predate a rename. *)
-let keeper_tool_group_of_string = Keeper_tool_group.of_string
-;;
-
-(* RFC-0389: convert raw TOML group names to a [tool_surface].
-   [None] or empty list → [All] (inherit, no narrowing).
-   Unknown names are logged as warnings and silently excluded (fail-open).
-   Validation at TOML load time is impossible due to the dependency cycle
-   between Keeper_types_profile_defaults and Keeper_tool_descriptor. *)
-let tool_groups_to_surface (groups : string list option) : tool_surface =
-  match groups with
-  | None | Some [] -> All
-  | Some raw ->
-    let parsed =
-      List.filter_map
-        (fun name ->
-          match keeper_tool_group_of_string name with
-          | Some g -> Some g
-          | None ->
-            Log.Keeper.warn
-              "tool_groups: unknown group name %S ignored"
-              name;
-            None)
-        raw
-    in
-    if parsed = [] then All
-    else Declared { groups = parsed }
-;;
 
 let input_schema_source_to_string = function
   | Descriptor_owned -> "descriptor_owned"

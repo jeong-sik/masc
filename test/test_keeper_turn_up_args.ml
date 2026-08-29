@@ -480,17 +480,12 @@ let test_tools_patch_round_trips_and_rejects_invalid_values () =
               [ "name", `String name
               ; "instructions", `String "fixture instructions"
               ; ( "tools"
-                , `Assoc
-                    [ "groups", `List [ `String "fs"; `String "core" ]
-                    ; "native", `String posture
-                    ] )
+                , `Assoc [ "native", `String posture ] )
               ])
        in
-       let meta = { base_meta with tool_groups = parsed.tool_groups_opt } in
+       let meta = base_meta in
        persist parsed meta;
        let defaults = read_back () in
-       check (option (list string)) "groups round-trip"
-         (Some [ "fs"; "core" ]) defaults.tool_groups;
        check (option string)
          (Printf.sprintf "native %s round-trip" posture)
          (Some posture)
@@ -501,12 +496,11 @@ let test_tools_patch_round_trips_and_rejects_invalid_values () =
     parse_or_fail
       (`Assoc
          [ "name", `String name
-         ; "tools", `Assoc [ "groups", `Null; "native", `Null ]
+         ; "tools", `Assoc [ "native", `Null ]
          ])
   in
   persist clear base_meta;
   let cleared = read_back () in
-  check (option (list string)) "groups null clears" None cleared.tool_groups;
   check (option string) "native null clears" None
     (Option.map Runtime_native_tools.to_string cleared.native_tool_posture);
   List.iter
@@ -1480,7 +1474,7 @@ let () =
         ] )
     ; ( "tools"
       , [ test_case
-            "groups/native round-trip, clear, and invalid rejection"
+            "native round-trip, clear, and invalid rejection"
             `Quick
             test_tools_patch_round_trips_and_rejects_invalid_values
         ] )

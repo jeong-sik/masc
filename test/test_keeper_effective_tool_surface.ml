@@ -170,7 +170,6 @@ let project
       ?(snapshot = skill_snapshot ())
       ?(skills_left_out = [])
       ?(skill_names = None)
-      ~tool_groups
       ~task_skill_references
       ~native_posture
       ()
@@ -191,7 +190,6 @@ let project
     ~official_client_kind:"codex"
     ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
     ~native_posture:(Some native_posture)
-    ~tool_groups
     ~skill_names
     ~current_task_id:(Some "task-001")
     ~skills_left_out
@@ -209,7 +207,6 @@ let test_skill_name_selection_is_structured_and_filters_task () =
       project
         ~snapshot
         ~skill_names:(Some [ "guide"; "missing" ])
-        ~tool_groups:None
         ~task_skill_references:[ task_snapshot ]
         ~native_posture:Runtime_native_tools.Native_read
         ()
@@ -258,7 +255,6 @@ let test_skill_name_selection_is_structured_and_filters_task () =
       project
         ~snapshot
         ~skill_names:(Some [])
-        ~tool_groups:None
         ~task_skill_references:[ task_snapshot ]
         ~native_posture:Runtime_native_tools.Native_read
         ()
@@ -277,7 +273,6 @@ let test_projection_names_equal_turn_surface_authority () =
   match
     project
       ~snapshot
-      ~tool_groups:None
       ~skill_names:None
       ~task_skill_references:[ task_reference ]
       ~native_posture:Runtime_native_tools.Native_read
@@ -399,7 +394,6 @@ let test_narrow_projection_names_equal_turn_surface_authority () =
   match
     project
       ~snapshot
-      ~tool_groups:(Some [ "board" ])
       ~skill_names:None
       ~task_skill_references:[ task_reference ]
       ~native_posture:Runtime_native_tools.Native_read
@@ -423,7 +417,6 @@ let test_narrow_projection_names_equal_turn_surface_authority () =
     in
     let capability_surface =
       Keeper_capability_surface.create
-        ~tool_groups:(Some [ "board" ])
         ~skill_names:None
         ~global_skill_catalog
         ~skill_inventory:(Keeper_skill_inventory.of_snapshot snapshot)
@@ -453,7 +446,6 @@ let test_external_composition_preserves_snapshot_provenance () =
       ~official_client_kind:"codex"
       ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
       ~native_posture:None
-      ~tool_groups:None
       ~skill_names:None
       ~current_task_id:None
       ~skills_left_out:[]
@@ -511,14 +503,12 @@ let test_two_surfaces_have_different_names_and_digests () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let all =
     project
-      ~tool_groups:None
       ~task_skill_references:[]
       ~native_posture:Runtime_native_tools.Native_read
       ()
   in
   let narrow =
     project
-      ~tool_groups:(Some [ "fs" ])
       ~task_skill_references:[]
       ~native_posture:Runtime_native_tools.Native_full
       ()
@@ -539,7 +529,6 @@ let test_instruction_skill_without_read_is_admitted () =
   match
     project
       ~snapshot
-      ~tool_groups:(Some [ "board" ])
       ~task_skill_references:[ task_reference ]
       ~native_posture:Runtime_native_tools.Native_read
       ()
@@ -561,7 +550,6 @@ let test_instruction_description_changes_digest () =
     let snapshot = skill_snapshot_with_description description in
     project
       ~snapshot
-      ~tool_groups:None
       ~task_skill_references:[ reference_by_name snapshot "guide" ]
       ~native_posture:Runtime_native_tools.Native_read
       ()
@@ -621,7 +609,7 @@ let test_turn_admission_uses_dedicated_instruction_reader () =
                 ])
          with
          | Ok meta ->
-           { meta with current_task_id; tool_groups = Some [ "board" ] }
+           { meta with current_task_id }
          | Error detail -> fail detail
        in
        match
@@ -683,7 +671,7 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
          | Ok task_id -> Some task_id
          | Error detail -> fail detail
        in
-       let meta ~tool_groups =
+       let meta () =
          match
            Masc_test_deps.meta_of_json_fixture
              (`Assoc
@@ -691,13 +679,13 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
                 ; "trace_id", `String "skill-held-trace"
                 ])
          with
-         | Ok meta -> { meta with current_task_id; tool_groups }
+         | Ok meta -> { meta with current_task_id }
          | Error detail -> fail detail
        in
        (match
           validate_observed_task_skills
             ~config
-            ~meta:(meta ~tool_groups:(Some [ "board" ]))
+            ~meta:(meta ())
             ~skill_snapshot:
               (Skill_catalog_snapshot.config_unreadable ~detail:"fixture")
         with
@@ -708,14 +696,14 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
             (String_util.contains_substring rendered "guide"));
        (match
           validate_observed_task_skills
-            ~config ~meta:(meta ~tool_groups:(Some [ "board" ])) ~skill_snapshot:snapshot
+            ~config ~meta:(meta ()) ~skill_snapshot:snapshot
         with
         | Ok () -> ()
         | Error error -> fail (Agent_core.Error.to_string error));
        (match
           resolve_observed_task_skills
             ~config
-            ~meta:(meta ~tool_groups:(Some [ "board" ]))
+            ~meta:(meta ())
             ~skill_snapshot:snapshot
         with
         | Error error -> fail (Agent_core.Error.to_string error)
@@ -746,7 +734,6 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
                ~official_client_kind:"agent_core"
                ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
                ~native_posture:None
-               ~tool_groups:(Some [ "board" ])
                ~skill_names:None
                ~current_task_id:(Some task_a)
                ~skills_left_out:[]
@@ -782,7 +769,7 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
                 |> Yojson.Safe.to_string)));
        match
          validate_observed_task_skills
-           ~config ~meta:(meta ~tool_groups:None) ~skill_snapshot:snapshot
+           ~config ~meta:(meta ()) ~skill_snapshot:snapshot
        with
        | Ok () -> ()
        | Error error -> fail (Agent_core.Error.to_string error))
@@ -797,7 +784,6 @@ let test_left_out_skills_reach_the_surface () =
   match
     project
       ~skills_left_out:[ "not-a-policy: skill \"not-a-policy\": unsupported" ]
-      ~tool_groups:None
       ~skill_names:None
       ~task_skill_references:[]
       ~native_posture:Runtime_native_tools.Native_read
@@ -812,7 +798,7 @@ let test_left_out_skills_reach_the_surface () =
     (* And a workspace with nothing left out gains nothing: a row drawn on
        every turn stops being read. *)
     (match
-       project ~tool_groups:None ~task_skill_references:[]
+       project ~task_skill_references:[]
          ~native_posture:Runtime_native_tools.Native_read ()
      with
      | Error error -> Alcotest.fail (Keeper_task_skill_turn.error_to_string error)
@@ -827,7 +813,6 @@ let test_global_instruction_is_present_in_receipt () =
   match
     project
       ~snapshot
-      ~tool_groups:None
       ~task_skill_references:[]
       ~native_posture:Runtime_native_tools.Native_read
       ()
@@ -854,7 +839,6 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
       ~tool_delivery:
         Keeper_effective_tool_surface.Tools_suppressed_runtime_unsupported
       ~native_posture:None
-      ~tool_groups:None
       ~skill_names:None
       ~current_task_id:(Some "task-001")
       ~skills_left_out:[]
@@ -981,7 +965,6 @@ let test_frozen_selection_carries_the_shadowed_exact_reference () =
       ~official_client_kind:"agent_core"
       ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
       ~native_posture:None
-      ~tool_groups:(Some [ "board" ])
       ~skill_names:None
       ~current_task_id:None
       ~skills_left_out:[]

@@ -78,7 +78,6 @@
     "masc_heartbeat.toml",
     "masc_keeper_audit.toml",
     "masc_keeper_clear.toml",
-    "masc_keeper_compact.toml",
     "masc_keeper_delegate.toml",
     "masc_keeper_delegate_cancel.toml",
     "masc_keeper_delegate_list.toml",

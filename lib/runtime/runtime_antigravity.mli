@@ -59,6 +59,13 @@ type usage =
   ; cache_read_tokens : int
   ; total_tokens : int
   }
+(** Counts exactly as the CLI reports them, which is an {b exclusive} prompt
+    count: the parse accepts a frame only when
+    [total_tokens = input_tokens + output_tokens], so [cache_read_tokens] is
+    outside both. {!Agent_core.Types.api_usage.input_tokens} is the inclusive
+    total instead, so a caller converting to it must add the cache components
+    through [Backend_anthropic.usage_of_wire_counts] rather than copying the
+    fields across. *)
 
 type permission_mode =
   | Always_proceed

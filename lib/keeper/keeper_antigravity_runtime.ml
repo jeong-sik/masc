@@ -917,13 +917,20 @@ let run_without_lifecycle ~runtime_id ~keeper_name
             | Some detail -> Error (internal_error detail)
           in
           let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
-          let usage : Agent_core.Types.api_usage =
-            { input_tokens = turn.usage.input_tokens
-            ; output_tokens = turn.usage.output_tokens
-            ; cache_creation_input_tokens = 0
-            ; cache_read_input_tokens = turn.usage.cache_read_tokens
-            ; cost_usd = None
-            }
+          (* The CLI reports an exclusive prompt count: [parse_usage] accepts a
+             frame only when total_tokens = input_tokens + output_tokens, so
+             the cache it read is not in either. [api_usage.input_tokens] is
+             the inclusive total, so the components go through the shared
+             constructor -- assembling the record here put an exclusive count
+             in an inclusive slot, and every cache hit went missing from
+             context occupancy. The keeper's claude_code sibling has always
+             built through it. *)
+          let usage =
+            Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
+              ~input_tokens:turn.usage.input_tokens
+              ~output_tokens:turn.usage.output_tokens
+              ~cache_creation_input_tokens:0
+              ~cache_read_input_tokens:turn.usage.cache_read_tokens
           in
           let response =
             { Agent_core.Types.id = turn_id

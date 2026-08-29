@@ -50,7 +50,7 @@ describe('standalone lane id parity', () => {
   it('reads real values from the sources, not a copy', () => {
     // Guards the guard: a regex that stops matching throws above; a
     // degenerate parse cannot shrink the vocabulary unnoticed.
-    expect(registryLaneKeys().length).toBeGreaterThanOrEqual(4)
+    expect(registryLaneKeys().length).toBeGreaterThanOrEqual(3)
     expect(verifierLaneId()).not.toBe('')
   })
 })

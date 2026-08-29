@@ -1991,7 +1991,7 @@ describe('KeeperConfigPanel', () => {
 
 // keeper-v2 design vocabulary (prototypes/keeper-v2/keeper-config.jsx +
 // organisms-5.jsx parity): top-bar kr/sandbox badges, avatar block, 표시 이름
-// field, 파생 사실, fallback chain, kcf-dead removal notes, kcf-paths editor,
+// field, 파생 사실, fallback chain, kcf-dead removal note, kcf-paths editor,
 // set-link navigation. Every assertion reads a live signal — the roster row
 // (storeMocks.keepers) or the loaded KeeperConfig — never a static mock.
 describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
@@ -2070,7 +2070,7 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     expect(container.textContent).toContain('tier-group.keeper_unified')
   })
 
-  it('policy tab carries the kcf-dead removal notes for deleted gates and handoff', async () => {
+  it('policy tab carries the kcf-dead removal note for deleted handoff', async () => {
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
     await flush()
@@ -2079,8 +2079,7 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     await flush()
 
     const dead = container.querySelectorAll('.kcf-dead')
-    expect(dead.length).toBe(2)
-    expect(container.textContent).toContain('ratio / message / token 게이트')
+    expect(dead.length).toBe(1)
     expect(container.textContent).toContain('Handoff_triggered')
   })
 

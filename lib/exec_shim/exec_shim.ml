@@ -27,6 +27,11 @@ let denylist_exact =
 let denylisted_env_name name =
   List.mem name denylist_exact || String.starts_with ~prefix:"DYLD_" name
 
+(* These names are authored by the SSH runner for every request. They do not
+   belong to the endpoint's caller-controlled env allowlist: without them the
+   preflight can prove a Keeper identity that the payload can never use. *)
+let runtime_env_allowlist = [ "GH_CONFIG_DIR"; "GIT_TERMINAL_PROMPT" ]
+
 let env_of_process () =
   Array.to_list (Unix.environment ())
   |> List.filter_map (fun kv ->
@@ -46,7 +51,8 @@ let synthesize_env ~base_env ~allowlist ~request_env =
              ; ("USER", lookup "USER" "masc")
              ; ("TMPDIR", lookup "TMPDIR" "/tmp") ] in
   let upsert env (k, v) =
-    if List.mem k allowlist && not (denylisted_env_name k)
+    if (List.mem k runtime_env_allowlist || List.mem k allowlist)
+       && not (denylisted_env_name k)
     then (k, v) :: List.remove_assoc k env
     else env in
   List.fold_left upsert base request_env

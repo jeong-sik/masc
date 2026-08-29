@@ -40,6 +40,23 @@ let test_allowlist_overlay_survives () =
   check (option string) "allowlisted FOO kept" (Some "ok") (List.assoc_opt "FOO" env);
   check (option string) "non-allowlisted BAR dropped" None (List.assoc_opt "BAR" env)
 
+let test_runtime_identity_env_survives_empty_allowlist () =
+  let env =
+    Exec_shim.synthesize_env ~base_env:shim_env ~allowlist:[]
+      ~request_env:
+        [ "GH_CONFIG_DIR", "/srv/masc/playground/keeper-a/.config/gh"
+        ; "GIT_TERMINAL_PROMPT", "0"
+        ; "LANG", "C"
+        ]
+  in
+  check (option string) "runtime GitHub identity kept"
+    (Some "/srv/masc/playground/keeper-a/.config/gh")
+    (List.assoc_opt "GH_CONFIG_DIR" env);
+  check (option string) "runtime prompt guard kept" (Some "0")
+    (List.assoc_opt "GIT_TERMINAL_PROMPT" env);
+  check (option string) "ordinary caller env still needs allowlisting" None
+    (List.assoc_opt "LANG" env)
+
 let test_denylist_beats_allowlist () =
   let env = Exec_shim.synthesize_env ~base_env:[]
       ~allowlist:[ "PATH"; "FOO" ]
@@ -343,6 +360,8 @@ let () =
     [ "env", [ test_case "minimal base env" `Quick test_minimal_base_env
              ; test_case "base env defaults" `Quick test_base_env_defaults
              ; test_case "allowlist overlay survives" `Quick test_allowlist_overlay_survives
+             ; test_case "runtime identity env survives an empty allowlist" `Quick
+                 test_runtime_identity_env_survives_empty_allowlist
              ; test_case "denylist beats allowlist" `Quick test_denylist_beats_allowlist
              ; test_case "denylist names" `Quick test_denylist_names
              ; test_case "denylist predicate" `Quick test_denylisted_predicate ]

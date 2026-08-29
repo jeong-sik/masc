@@ -498,9 +498,169 @@ let checkpoint_to_json cp =
     ]
 ;;
 
+let rec validate_cached_tool_result_json ~scope = function
+  | ToolResult { json; content_blocks; _ } ->
+    let* () =
+      match json with
+      | None -> Ok ()
+      | Some json -> Execution_json.validate ~context:(scope ^ ".json") json
+    in
+    (match content_blocks with
+     | None -> Ok ()
+     | Some blocks ->
+       blocks
+       |> List.mapi (fun index block ->
+         validate_cached_tool_result_json
+           ~scope:(Printf.sprintf "%s.content_blocks[%d]" scope index)
+           block)
+       |> result_all
+       |> Result.map ignore)
+  | ( Text _
+    | Thinking _
+    | ReasoningDetails _
+    | RedactedThinking _
+    | ToolUse _
+    | Image _
+    | Document _
+    | Audio _ ) -> Ok ()
+;;
+
+let validate_cached_tool_result_jsons (cp : Checkpoint_types.t) =
+  cp.messages
+  |> List.mapi (fun message_index (message : Types.message) ->
+    message.content
+    |> List.mapi (fun block_index block ->
+      validate_cached_tool_result_json
+        ~scope:
+          (Printf.sprintf
+             "Checkpoint v10 message[%d].content[%d]"
+             message_index
+             block_index)
+        block)
+    |> result_all
+    |> Result.map ignore)
+  |> result_all
+  |> Result.map ignore
+;;
+
+let decode_current_json json =
+  try
+    let open Yojson.Safe.Util in
+    let* () = Checkpoint_v10_contract.validate_v10_json json in
+    let* tool_choice =
+      match json |> member "tool_choice" with
+      | `Null -> Ok None
+      | tc ->
+        let+ tc = tool_choice_of_json tc in
+        Some tc
+    in
+    let* model =
+      model_of_yojson (json |> member "model")
+      |> Result.map_error (fun e -> Error.Serialization (JsonParseError { detail = e }))
+    and* messages =
+      json |> member "messages" |> to_list |> List.map message_of_json |> result_all
+    and* tools =
+      json |> member "tools" |> to_list |> List.map tool_schema_of_json |> result_all
+    and* context =
+      Context.of_json (json |> member "context")
+      |> Result.map_error (fun error ->
+        Error.Serialization
+          (JsonParseError
+             { detail =
+                 Printf.sprintf
+                   "Checkpoint.of_json: %s"
+                   (Context.decode_error_to_string error)
+             }))
+    and* mcp_sessions =
+      match json |> member "mcp_sessions" with
+      | `List _ as lst -> Mcp_session.info_list_of_json lst
+      | _ ->
+        Error
+          (Error.Serialization
+             (JsonParseError
+                { detail = "Checkpoint.of_json: mcp_sessions must be a JSON array or null"
+                }))
+    and* response_format = response_format_of_json (json |> member "response_format") in
+    let* reasoning_effort =
+      reasoning_effort_option_of_json
+        ~scope:"Checkpoint"
+        (json |> member "reasoning_effort")
+    in
+    let* usage = json |> member "usage" |> usage_of_json in
+    let working_context =
+      match json |> member "working_context" with
+      | `Null -> None
+      | v -> Some v
+    in
+    Ok
+      { version = checkpoint_version
+      ; session_id = json |> member "session_id" |> to_string
+      ; agent_name = json |> member "agent_name" |> to_string
+      ; model
+      ; system_prompt = json |> member "system_prompt" |> to_string_option
+      ; messages
+      ; usage
+      ; turn_count = json |> member "turn_count" |> to_int
+      ; created_at = json |> member "created_at" |> to_float
+      ; tools
+      ; tool_choice
+      ; disable_parallel_tool_use = json |> member "disable_parallel_tool_use" |> to_bool
+      ; temperature = json |> member "temperature" |> to_float_option
+      ; top_p = json |> member "top_p" |> to_float_option
+      ; top_k = json |> member "top_k" |> to_int_option
+      ; min_p = json |> member "min_p" |> to_float_option
+      ; enable_thinking = json |> member "enable_thinking" |> to_bool_option
+      ; preserve_thinking = json |> member "preserve_thinking" |> to_bool_option
+      ; response_format
+      ; thinking_budget = json |> member "thinking_budget" |> to_int_option
+      ; reasoning_effort
+      ; cache_system_prompt = json |> member "cache_system_prompt" |> to_bool
+      ; context
+      ; mcp_sessions
+      ; working_context
+      }
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) ->
+    Error
+      (Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json: %s" msg }))
+  | Yojson.Json_error msg ->
+    Error
+      (Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json: %s" msg }))
+  | Failure msg ->
+    Error
+      (Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json: %s" msg }))
+;;
+
+let validate_json_encoding json =
+  try
+    ignore (Yojson.Safe.to_string json);
+    Ok ()
+  with
+  | Invalid_argument detail | Yojson.Json_error detail ->
+    Error
+      (Error.Serialization
+         (JsonParseError
+            { detail = "Checkpoint v10 is not serializable JSON: " ^ detail }))
+;;
+
 let checkpoint_json_result cp =
+  let* () =
+    validate_cached_tool_result_jsons cp
+    |> Result.map_error (fun detail ->
+      Error.Serialization (JsonParseError { detail }))
+  in
   let json = checkpoint_to_json cp in
-  let+ () = Checkpoint_v10_contract.validate_v10_json json in
+  let* () =
+    Execution_json.validate ~context:"Checkpoint v10" json
+    |> Result.map_error (fun detail ->
+      Error.Serialization (JsonParseError { detail }))
+  in
+  let* () = validate_json_encoding json in
+  let* () = Checkpoint_v10_contract.validate_v10_json json in
+  let+ _ = decode_current_json json in
   json
 ;;
 
@@ -769,97 +929,6 @@ let delta_of_json json =
 ;;
 
 let to_json cp = validated_checkpoint_json_exn ~scope:"Checkpoint.to_json" cp
-
-let decode_current_json json =
-  try
-    let open Yojson.Safe.Util in
-    let* () = Checkpoint_v10_contract.validate_v10_json json in
-    let* tool_choice =
-      match json |> member "tool_choice" with
-      | `Null -> Ok None
-      | tc ->
-        let+ tc = tool_choice_of_json tc in
-        Some tc
-    in
-    let* model =
-      model_of_yojson (json |> member "model")
-      |> Result.map_error (fun e -> Error.Serialization (JsonParseError { detail = e }))
-    and* messages =
-      json |> member "messages" |> to_list |> List.map message_of_json |> result_all
-    and* tools =
-      json |> member "tools" |> to_list |> List.map tool_schema_of_json |> result_all
-    and* context =
-      Context.of_json (json |> member "context")
-      |> Result.map_error (fun error ->
-        Error.Serialization
-          (JsonParseError
-             { detail =
-                 Printf.sprintf
-                   "Checkpoint.of_json: %s"
-                   (Context.decode_error_to_string error)
-             }))
-    and* mcp_sessions =
-      match json |> member "mcp_sessions" with
-      | `List _ as lst -> Mcp_session.info_list_of_json lst
-      | _ ->
-        Error
-          (Error.Serialization
-             (JsonParseError
-                { detail = "Checkpoint.of_json: mcp_sessions must be a JSON array or null"
-                }))
-    and* response_format = response_format_of_json (json |> member "response_format") in
-    let* reasoning_effort =
-      reasoning_effort_option_of_json
-        ~scope:"Checkpoint"
-        (json |> member "reasoning_effort")
-    in
-    let* usage = json |> member "usage" |> usage_of_json in
-    let working_context =
-      match json |> member "working_context" with
-      | `Null -> None
-      | v -> Some v
-    in
-    Ok
-      { version = checkpoint_version
-      ; session_id = json |> member "session_id" |> to_string
-      ; agent_name = json |> member "agent_name" |> to_string
-      ; model
-      ; system_prompt = json |> member "system_prompt" |> to_string_option
-      ; messages
-      ; usage
-      ; turn_count = json |> member "turn_count" |> to_int
-      ; created_at = json |> member "created_at" |> to_float
-      ; tools
-      ; tool_choice
-      ; disable_parallel_tool_use = json |> member "disable_parallel_tool_use" |> to_bool
-      ; temperature = json |> member "temperature" |> to_float_option
-      ; top_p = json |> member "top_p" |> to_float_option
-      ; top_k = json |> member "top_k" |> to_int_option
-      ; min_p = json |> member "min_p" |> to_float_option
-      ; enable_thinking = json |> member "enable_thinking" |> to_bool_option
-      ; preserve_thinking = json |> member "preserve_thinking" |> to_bool_option
-      ; response_format
-      ; thinking_budget = json |> member "thinking_budget" |> to_int_option
-      ; reasoning_effort
-      ; cache_system_prompt = json |> member "cache_system_prompt" |> to_bool
-      ; context
-      ; mcp_sessions
-      ; working_context
-      }
-  with
-  | Yojson.Safe.Util.Type_error (msg, _) ->
-    Error
-      (Error.Serialization
-         (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json: %s" msg }))
-  | Yojson.Json_error msg ->
-    Error
-      (Error.Serialization
-         (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json: %s" msg }))
-  | Failure msg ->
-    Error
-      (Error.Serialization
-         (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json: %s" msg }))
-;;
 
 let checkpoint_json_version = function
   | `Assoc fields ->

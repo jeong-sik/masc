@@ -65,6 +65,12 @@ let validate_string ~scope = function
   | _ -> json_errorf "%s must be a string" scope
 ;;
 
+let validate_identifier ~scope = function
+  | `String value when String.trim value <> "" -> Ok ()
+  | `String _ -> json_errorf "%s must not be blank" scope
+  | _ -> json_errorf "%s must be a string" scope
+;;
+
 let validate_bool ~scope = function
   | `Bool _ -> Ok ()
   | _ -> json_errorf "%s must be a boolean" scope
@@ -345,7 +351,7 @@ let rec validate_tool_result ~scope json =
     | `String value -> json_errorf "%s.type must be tool_result, got %S" scope value
     | _ -> json_errorf "%s.type must be a string" scope
   in
-  let* () = validate_string ~scope:(scope ^ ".tool_use_id") tool_use_id in
+  let* () = validate_identifier ~scope:(scope ^ ".tool_use_id") tool_use_id in
   let* () =
     match content with
     | `String _ -> Ok ()
@@ -460,8 +466,8 @@ and validate_content_block ~scope json =
        in
        let* id = required_field ~scope "id" fields in
        let* name = required_field ~scope "name" fields in
-       let* () = validate_string ~scope:(scope ^ ".id") id in
-       let+ () = validate_string ~scope:(scope ^ ".name") name in
+       let* () = validate_identifier ~scope:(scope ^ ".id") id in
+       let+ () = validate_identifier ~scope:(scope ^ ".name") name in
        json
      | [ `String ("image" | "document" | "audio") ] ->
        let* fields =

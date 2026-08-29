@@ -15,6 +15,7 @@
   tool_schemas_webmcp
   tool_schemas_skill
   tool_schemas_composition_control
+  tool_schemas_identity_tool_search
   tool_schemas_spawn_toml
   tool_schemas_spawn
   tool_schemas_workspace

@@ -88,45 +88,20 @@ let summary_of description =
   else String.sub line 0 (character_start line summary_max_bytes) ^ "..."
 ;;
 
-let preamble =
-  Printf.sprintf
-    "Make a tool of an attached work service callable. The services this \
-     Keeper is attached to offer more tools than one request can carry, so \
-     their argument schemas are left out and only their names are listed \
-     below. Pass the exact names you need in \"%s\"; each becomes callable \
-     from your next message in this same turn. A name below that you have \
-     not passed here is not callable -- calling it does nothing at all.\n\n\
-     Tools that can be loaded:"
-    names_param
-;;
+(* The fixed half of what the model reads lives in
+   config/tools/keeper_tool_search.toml with every other tool's prose; only
+   the listing is built here, because only this turn knows what is attached. *)
+let declared = Tool_schemas_identity_tool_search.schema
 
 let description_of entries =
   String.concat
     "\n"
-    (preamble
+    (declared.Masc_domain.description
      :: List.map
           (fun entry -> Printf.sprintf "- %s: %s" entry.name entry.summary)
           entries)
 ;;
 
-let input_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc
-          [ ( names_param
-            , `Assoc
-                [ "type", `String "array"
-                ; "items", `Assoc [ "type", `String "string" ]
-                ; ( "description"
-                  , `String
-                      "Exact tool names, copied from the list in this tool's \
-                       description." )
-                ] )
-          ] )
-    ; "required", `List [ `String names_param ]
-    ]
-;;
 
 let refusal message =
   Error
@@ -266,7 +241,7 @@ let make ~keeper_name ~build { offered; agent_cell } =
         Agent_core.Types.tool_schema_of_input_schema
           ~name:tool_name
           ~description:(description_of entries)
-          ~input_schema
+          ~input_schema:declared.Masc_domain.input_schema
           ()
       with
       | Ok schema -> schema

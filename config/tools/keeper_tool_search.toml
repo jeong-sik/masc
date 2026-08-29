@@ -1,0 +1,17 @@
+name = "keeper_tool_search"
+description = """
+Make a tool of an attached work service callable. The services this Keeper is \
+attached to offer more tools than one request can carry, so their argument \
+schemas are left out and only their names are listed below. Pass the exact \
+names you need in "names"; each becomes callable from your next message in \
+this same turn. A name below that you have not passed here is not callable -- \
+calling it does nothing at all.
+
+Tools that can be loaded:"""
+
+[[params]]
+name = "names"
+type = "array"
+required = true
+items = { type = "string" }
+description = "Exact tool names, copied from the list in this tool's description."

@@ -100,9 +100,9 @@ let test_top_level_store_list_is_ssot () =
     ; "audit-approvals"
     ; "costs"
     ; "events"
-    ; "messages"
     ; "telemetry"
     ; "tool_calls"
+    ; "tool_usage"
     ; "transition-audit"
     ; "voice_sessions"
     ]
@@ -178,6 +178,15 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   let approvals_old = p [ "audit-approvals"; "2020-01"; "01.jsonl" ] in
   let decision_old = p [ "decision_audit"; "keeper-a"; "2020-01"; "01.jsonl" ] in
   let decision_fresh = p [ "decision_audit"; "keeper-a"; "2999-01"; "01.jsonl" ] in
+  (* messages/: flat .json files, stale by mtime — the dated pruner was a
+     no-op on this layout the whole time it sat on the dated list. *)
+  let message_old = p [ "messages"; "000000001_taskmaster_wmsg-old_broadcast.json" ] in
+  let message_fresh = p [ "messages"; "000000002_taskmaster_wmsg-new_broadcast.json" ] in
+  (* tool_usage: dated layout, was on no list (own retention env is opt-in). *)
+  let tool_usage_old = p [ "tool_usage"; "2020-01"; "01.jsonl" ] in
+  (* reaction-ledger: versioned generation dir between store and months. *)
+  let reaction_old = p [ "keepers"; "keeper-a"; "reaction-ledger"; "v7"; "2020-01"; "01.jsonl" ] in
+  let reaction_fresh = p [ "keepers"; "keeper-a"; "reaction-ledger"; "v7"; "2999-01"; "01.jsonl" ] in
   List.iter
     write
     [ agent_core_old
@@ -193,15 +202,29 @@ let test_prune_shared_jsonl_stores_production_geometry () =
     ; approvals_old
     ; decision_old
     ; decision_fresh
+    ; message_old
+    ; message_fresh
+    ; tool_usage_old
+    ; reaction_old
+    ; reaction_fresh
     ];
-  List.iter (fun f -> Unix.utimes f old_ts old_ts) [ logs_old; raw_old; manifest_old ];
+  List.iter
+    (fun f -> Unix.utimes f old_ts old_ts)
+    [ logs_old; raw_old; manifest_old; message_old ];
   let prune_dir dir =
     if Sys.file_exists dir
     then Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days:30
     else 0
   in
   let n = SM.prune_shared_jsonl_stores ~prune_dir ~days:30 ~masc_root in
-  Alcotest.(check int) "eight stale files pruned" 8 n;
+  Alcotest.(check int) "eleven stale files pruned" 11 n;
+  Alcotest.(check bool) "stale message removed" false (Sys.file_exists message_old);
+  Alcotest.(check bool) "fresh message kept" true (Sys.file_exists message_fresh);
+  Alcotest.(check bool) "stale tool_usage day removed" false (Sys.file_exists tool_usage_old);
+  Alcotest.(check bool)
+    "stale reaction-ledger day removed" false (Sys.file_exists reaction_old);
+  Alcotest.(check bool)
+    "fresh reaction-ledger day kept" true (Sys.file_exists reaction_fresh);
   Alcotest.(check bool) "stale costs day removed" false (Sys.file_exists costs_old);
   Alcotest.(check bool) "future costs day kept" true (Sys.file_exists costs_fresh);
   Alcotest.(check bool)

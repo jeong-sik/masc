@@ -131,7 +131,6 @@ let prune_keeper_scoped_flat_stores ~days ~masc_root =
 let top_level_dated_stores =
   [ Audit_log.store_dirname
   ; "telemetry"
-  ; "messages"
   ; "events"
   ; Activity_graph.store_dirname
   ; "voice_sessions"
@@ -140,7 +139,66 @@ let top_level_dated_stores =
   ; "agent-core-events"
   ; "costs"
   ; "audit-approvals"
+  ; "tool_usage"
   ]
+
+(* messages/: flat [<seq>_<agent>_<id>_broadcast.json] files — one JSON per
+   message, no month dirs, so [Dated_jsonl.prune] was a provable no-op for the
+   whole time "messages" sat on the dated list (2,587 files measured live).
+   Prune by file mtime, mirroring [prune_flat_jsonl_older_than] for the [.json]
+   suffix. Any other extension is never removed. *)
+let prune_flat_json_older_than ~days dir =
+  if days <= 0 || not (Sys.file_exists dir)
+  then 0
+  else
+    let cutoff =
+      (* NDT-OK: wall clock is the retention boundary for mtime pruning; idempotent cleanup, never feeds deterministic replay. *)
+      Unix.gettimeofday () -. (float_of_int days *. Masc_time_constants.day)
+    in
+    Array.fold_left
+      (fun acc name ->
+        if Filename.check_suffix name ".json"
+        then
+          let path = Filename.concat dir name in
+          match (try Some (Unix.stat path) with Unix.Unix_error _ -> None) with
+          | Some (stat : Unix.stats)
+            when stat.st_kind = Unix.S_REG && stat.st_mtime < cutoff ->
+            (try
+               Sys.remove path;
+               acc + 1
+             with Sys_error _ -> acc)
+          | _ -> acc
+        else acc)
+      0
+      (Sys.readdir dir)
+
+(* Keeper-scoped versioned stores ([keepers/<name>/<store>/<generation>/
+   YYYY-MM/DD.jsonl] — reaction-ledger's [v7/2026-08/27.jsonl] shape). The
+   placement filter used to drop [Keeper_scoped_versioned] on the floor, and
+   even on the dated list the pruner would have seen only the generation dir
+   and returned 0, so these stores had no retention since introduction. Fold
+   the dated pruner one level deeper, per generation dir. *)
+let keeper_scoped_versioned_stores =
+  List.filter_map
+    (fun store ->
+       match Common.keeper_runtime_store_placement store with
+       | Common.Keeper_scoped_versioned ->
+         Some (Common.keeper_runtime_store_dirname store)
+       | Common.Keeper_scoped_dated
+       | Common.Keeper_scoped_rotated
+       | Common.Workspace_scoped -> None)
+    Common.keeper_runtime_stores
+
+let prune_keeper_scoped_versioned_stores ~prune_dir ~masc_root =
+  prune_children_dirs
+    ~prune_dir:(fun keeper_dir ->
+      List.fold_left
+        (fun acc store ->
+          acc
+          + prune_children_dirs ~prune_dir (Filename.concat keeper_dir store))
+        0
+        keeper_scoped_versioned_stores)
+    (Filename.concat masc_root Common.keepers_runtime_dirname)
 
 (* Single shared fold over every retention-covered JSONL store. Both the
    startup pass and the 24h periodic pass call exactly this function, so
@@ -167,7 +225,9 @@ let prune_shared_jsonl_stores ~prune_dir ~days ~masc_root =
      it lives at the masc root rather than under keepers/, which is why it is
      not in [keeper_scoped_dated_stores]. 23 MB measured with no retention. *)
   + prune_children_dirs ~prune_dir (Filename.concat masc_root "decision_audit")
+  + prune_flat_json_older_than ~days (Filename.concat masc_root "messages")
   + prune_keeper_scoped_stores ~prune_dir ~masc_root
+  + prune_keeper_scoped_versioned_stores ~prune_dir ~masc_root
   + prune_keeper_scoped_flat_stores ~days ~masc_root
 
 let startup_prune_jsonl (state : Mcp_server.server_state) =

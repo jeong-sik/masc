@@ -1458,6 +1458,17 @@ type state = {
      is needed rather than stored beside them: two copies of the same rows
      drift the moment one is rebuilt and the other is not. *)
   mutable runtime_config_view: (string * (string * string) list list) option;
+  (* The models pane's rows, parsed once when the source lands. The pane and
+     the scroll bound have to agree on how many rows exist; deriving the
+     count from the source instead made the keys move over 2,317 file lines
+     while the pane drew 49 table rows, so [j] left the view still and [k]
+     needed thousands of presses to come back. *)
+  mutable config_models_rows: Masc_tui_model_runtime_table.row list;
+  (* Which row [e] acts on. The pane cannot write a value itself -- the two
+     columns come from two tables and a writer would have to know which --
+     so [e] hands the file to $EDITOR the way the runtime.toml pane does,
+     positioned at this row's [models.NAME]. *)
+  mutable config_models_cursor: int;
   mutable runtime_config_view_error: string option;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
@@ -2198,6 +2209,8 @@ let create_state
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
   runtime_config_view = None;
+  config_models_rows = [];
+  config_models_cursor = 0;
   runtime_config_view_error = None;
   config_scroll = 0;
   detail_tab = Detail_info;
@@ -2956,10 +2969,20 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         ; sc_preview_keep = None
         }
   | Config ->
+      (* Per pane, because the two panes over the same file are different
+         lengths: the source pane draws every line, the models pane draws one
+         row per binding plus a header. One count for both let the keys run
+         off the end of the shorter one. *)
       listing ~error:state.runtime_config_view_error
-        (match state.runtime_config_view with
-         | None -> 0
-         | Some (_, rows) -> List.length rows)
+        (match state.config_pane with
+         | Config_models ->
+           (match state.runtime_config_view with
+            | None -> 0
+            | Some _ -> List.length state.config_models_rows + 1)
+         | Config_runtime | Config_params | Config_prompts | Config_themes ->
+           (match state.runtime_config_view with
+            | None -> 0
+            | Some (_, rows) -> List.length rows))
   (* Acting counts rows the drawing builds out of formatted text, not rows the
      state holds; counting them here would be a second copy of the formatting,
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,

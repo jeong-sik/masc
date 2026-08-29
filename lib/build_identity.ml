@@ -9,6 +9,7 @@ type t =
   ; binary_commit : string option [@default None]
   ; binary_commit_source : string option [@default None]
   ; source_fingerprint : string option [@default None]
+  ; provenance_source : string [@default "absent"]
   ; executable_sha256 : string option [@default None]
   ; executable_provenance_path : string option [@default None]
   ; executable_provenance_sha256 : string option [@default None]
@@ -868,6 +869,26 @@ let sha256_channel ic =
 
 let sha256_string value = Digestif.SHA256.(digest_string value |> to_hex)
 
+(* The hash of the binary that is running, read from its own path.
+
+   Not the same claim as the launcher's. run-local.sh rebuilds, hashes the
+   link result, and refuses to exec if anything moved between the two -- its
+   number says "this is the binary that build produced". This one says only
+   "this is the binary answering you". Both are worth having and they must
+   not arrive under one name, which is what [provenance_source] is for.
+
+   Failure is absence, not a guess: an unreadable executable leaves the field
+   out rather than reporting a hash of nothing. *)
+let self_observed_executable_sha256 path =
+  match open_in_bin path with
+  | exception Sys_error _ -> None
+  | ic ->
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      match sha256_channel ic with
+      | digest -> Some digest
+      | exception Sys_error _ -> None)
+;;
+
 let validate_source_root_identity provenance =
   try
     let canonical_source_root = Unix.realpath provenance.source_root in
@@ -1164,8 +1185,14 @@ let current () =
       Option.map
         (fun binding -> binding.provenance.build_input_fingerprint)
         provenance_binding
+  ; provenance_source =
+      (match provenance_binding with
+       | Some _ -> "launcher_verified"
+       | None -> "self_observed")
   ; executable_sha256 =
-      Option.map (fun binding -> binding.provenance.executable_sha256) provenance_binding
+      (match provenance_binding with
+       | Some binding -> Some binding.provenance.executable_sha256
+       | None -> self_observed_executable_sha256 resolved_executable_path)
   ; executable_provenance_path = Option.map (fun binding -> binding.path) provenance_binding
   ; executable_provenance_sha256 =
       Option.map (fun binding -> binding.sidecar_sha256) provenance_binding

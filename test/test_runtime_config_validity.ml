@@ -40,21 +40,7 @@ type ollama_cloud_case =
   }
 
 let ollama_cloud_seed_cases =
-  [ { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v3-1-671b"
-    ; api_name = "deepseek-v3.1:671b"
-    ; context = 163840
-    ; tools = true
-    ; thinking = true
-    ; vision = false
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v3-2"
-    ; api_name = "deepseek-v3.2"
-    ; context = 163840
-    ; tools = true
-    ; thinking = true
-    ; vision = false
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash"
+  [ { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash"
     ; api_name = "deepseek-v4-flash"
     ; context = 1048576
     ; tools = true
@@ -75,54 +61,12 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = false
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-gemini-3-flash-preview"
-    ; api_name = "gemini-3-flash-preview"
-    ; context = 1048576
-    ; tools = true
-    ; thinking = true
-    ; vision = true
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-gemma3-4b"
-    ; api_name = "gemma3:4b"
-    ; context = 131072
-    ; tools = false
-    ; thinking = false
-    ; vision = true
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-gemma3-12b"
-    ; api_name = "gemma3:12b"
-    ; context = 131072
-    ; tools = false
-    ; thinking = false
-    ; vision = true
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-gemma3-27b"
-    ; api_name = "gemma3:27b"
-    ; context = 131072
-    ; tools = false
-    ; thinking = false
-    ; vision = true
-    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-gemma4-31b"
     ; api_name = "gemma4:31b"
     ; context = 262144
     ; tools = true
     ; thinking = true
     ; vision = true
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-glm-4-7"
-    ; api_name = "glm-4.7"
-    ; context = 202752
-    ; tools = true
-    ; thinking = true
-    ; vision = false
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5"
-    ; api_name = "glm-5"
-    ; context = 202752
-    ; tools = true
-    ; thinking = true
-    ; vision = false
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5-1"
     ; api_name = "glm-5.1"
@@ -138,6 +82,20 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = false
     }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5-3"
+    ; api_name = "glm-5.3"
+    ; context = 1048576
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5-3-flash"
+    ; api_name = "glm-5.3-flash"
+    ; context = 1048576
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-gpt-oss-20b"
     ; api_name = "gpt-oss:20b"
     ; context = 131072
@@ -151,13 +109,6 @@ let ollama_cloud_seed_cases =
     ; tools = true
     ; thinking = true
     ; vision = false
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k2-5"
-    ; api_name = "kimi-k2.5"
-    ; context = 262144
-    ; tools = true
-    ; thinking = true
-    ; vision = true
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k2-6"
     ; api_name = "kimi-k2.6"
@@ -173,19 +124,12 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = true
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-minimax-m2-1"
-    ; api_name = "minimax-m2.1"
-    ; context = 204800
+  ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k3"
+    ; api_name = "kimi-k3"
+    ; context = 1048576
     ; tools = true
     ; thinking = true
-    ; vision = false
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-minimax-m2-5"
-    ; api_name = "minimax-m2.5"
-    ; context = 196608
-    ; tools = true
-    ; thinking = true
-    ; vision = false
+    ; vision = true
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-minimax-m2-7"
     ; api_name = "minimax-m2.7"
@@ -199,27 +143,6 @@ let ollama_cloud_seed_cases =
     ; context = 524288
     ; tools = true
     ; thinking = true
-    ; vision = true
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-ministral-3-3b"
-    ; api_name = "ministral-3:3b"
-    ; context = 262144
-    ; tools = true
-    ; thinking = false
-    ; vision = true
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-ministral-3-8b"
-    ; api_name = "ministral-3:8b"
-    ; context = 262144
-    ; tools = true
-    ; thinking = false
-    ; vision = true
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-ministral-3-14b"
-    ; api_name = "ministral-3:14b"
-    ; context = 262144
-    ; tools = true
-    ; thinking = false
     ; vision = true
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-mistral-large-3-675b"
@@ -250,33 +173,12 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = false
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-qwen3-coder-480b"
-    ; api_name = "qwen3-coder:480b"
-    ; context = 262144
-    ; tools = true
-    ; thinking = false
-    ; vision = false
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-qwen3-coder-next"
-    ; api_name = "qwen3-coder-next"
-    ; context = 262144
-    ; tools = true
-    ; thinking = false
-    ; vision = false
-    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-qwen3-5-397b"
     ; api_name = "qwen3.5:397b"
     ; context = 262144
     ; tools = true
     ; thinking = true
     ; vision = true
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-rnj-1-8b"
-    ; api_name = "rnj-1:8b"
-    ; context = 32768
-    ; tools = true
-    ; thinking = false
-    ; vision = false
     }
   ]
 
@@ -684,17 +586,19 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
      Llm_provider.Model_catalog.lookup_for_provider
        catalog
        ~provider_name:"ollama_cloud"
-       ~model_id:"rnj-1:8b"
+       ~model_id:"deepseek-v4-pro"
    with
-   | None -> fail "expected exact Ollama Cloud rnj-1:8b catalog row"
+   | None -> fail "expected exact Ollama Cloud deepseek-v4-pro catalog row"
    | Some entry ->
-     check string "rnj exact model" "rnj-1:8b" entry.id_prefix;
-     check (option string) "rnj exact provider" (Some "ollama_cloud")
+     check string "deepseek pro exact model" "deepseek-v4-pro" entry.id_prefix;
+     check (option string) "deepseek pro exact provider" (Some "ollama_cloud")
        entry.provider_name;
-     check (option int) "rnj context" (Some 32768) entry.max_context_tokens;
-     check (option bool) "rnj tools" (Some true) entry.supports_tools;
-     check (option bool) "rnj reasoning" (Some false) entry.supports_reasoning;
-     check (option bool) "rnj image input" (Some false)
+     check (option int) "deepseek pro context" (Some 524288)
+       entry.max_context_tokens;
+     check (option bool) "deepseek pro tools" (Some true) entry.supports_tools;
+     check (option bool) "deepseek pro reasoning" (Some true)
+       entry.supports_reasoning;
+     check (option bool) "deepseek pro image input" (Some false)
        entry.supports_image_input);
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   match Runtime.load_list ~config_path:path with
@@ -720,7 +624,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
                 (agent_core_provider_config runtime))
              (agent_core_provider_config runtime).model_id
          | Some _ ->
-           if String.equal runtime.id "ollama_cloud.ollama-cloud-rnj-1-8b"
+           if String.equal runtime.id "ollama_cloud.ollama-cloud-deepseek-v4-pro"
            then
              check
                bool

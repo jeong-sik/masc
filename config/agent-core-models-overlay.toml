@@ -300,22 +300,83 @@ supports_response_format_json = false
 supports_structured_output = false
 supports_native_streaming = true
 
-# Ollama's official rnj-1 page lists the 8B tag as a 32K text model with tool
-# calling. The runtime seed declares the same boundary and no reasoning or
-# image input; keep those unsupported surfaces fail-closed (#31066).
+# Ollama Cloud published glm-5.3-flash and glm-5.3 in the last week of August
+# 2026. The embedded base catalog stops at glm-5.2, so these two rows are the
+# catalog's only description of them and the seed's max-context would otherwise
+# be capped to the provider default. /api/show 2026-08-29 reports
+# context_length=1048576 and tools+thinking for both; only the flash tag adds
+# vision. thinking_control_format is "none" for the same reason the four rows
+# above carry it: the OpenAI-compatible /v1 wire has no enable_thinking control,
+# so declaring one would reject an explicit enable_thinking turn before dispatch.
 [[models]]
-id_prefix = "rnj-1:8b"
+id_prefix = "glm-5.3"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
-max_context_tokens = 32768
+max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
-supports_reasoning = false
-supports_extended_thinking = false
+supports_reasoning = true
+supports_extended_thinking = true
 supports_reasoning_budget = false
 thinking_control_format = "none"
+# /v1 streams reasoning under delta.reasoning, not delta.reasoning_content —
+# measured 2026-08-29 against this endpoint. The glm-coding row for the same
+# model carries reasoning_content because Z.AI's wire spells it that way.
+reasoning_streaming_format = "delta:reasoning"
+# The replay contract belongs to the model, not the wire: GLM keeps intermediate
+# reasoning across the tool-call rounds of one user turn and drops it when a new
+# user turn starts (bigmodel request-flow diagram, cited by the glm-coding rows).
+reasoning_replay = "latest_user_turn_tool_calls"
 supports_multimodal_inputs = false
 supports_image_input = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5.3-flash"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "none"
+reasoning_streaming_format = "delta:reasoning"
+reasoning_replay = "latest_user_turn_tool_calls"
+# Vision is measured, not inherited: a 64x64 probe PNG (white 44x20 rectangle on
+# black) came back described correctly on this wire on 2026-08-29.
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_response_format_json = false
+supports_structured_output = false
+supports_native_streaming = true
+
+# Moonshot Kimi K3 through Ollama Cloud, also absent from the embedded base
+# catalog. /api/show 2026-08-29: caps=[vision,thinking,completion,tools],
+# context_length=1048576. Values otherwise mirror the kimi-k2.6 row above,
+# which describes the same family on the same wire.
+[[models]]
+id_prefix = "kimi-k3"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "none"
+reasoning_streaming_format = "delta:reasoning"
+reasoning_replay = "preserve_always"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_response_format_json = false
+supports_structured_output = false
 supports_native_streaming = true
 
 # Exact-only copies bind target admission to the exact provider credential above.

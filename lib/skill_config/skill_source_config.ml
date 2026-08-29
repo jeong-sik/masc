@@ -9,9 +9,7 @@ type access =
   | Read_only
   | Read_write
 
-type activation_lifetime = Session
 type resource_read_max_bytes = int
-type precedence = Earlier_source_wins
 
 type source =
   { id : source_id
@@ -21,9 +19,7 @@ type source =
   }
 
 type t =
-  { activation_lifetime : activation_lifetime option
-  ; precedence : precedence option
-  ; resource_read_max_bytes : resource_read_max_bytes option
+  { resource_read_max_bytes : resource_read_max_bytes option
   ; sources : source list
   }
 
@@ -59,12 +55,6 @@ type anchor_rejection =
 
 type diagnostic =
   | Toml_syntax of string
-  | Missing_activation_lifetime
-  | Invalid_activation_lifetime_type of value_kind
-  | Unsupported_activation_lifetime of string
-  | Missing_precedence
-  | Invalid_precedence_type of value_kind
-  | Unsupported_precedence of string
   | Missing_resource_read_max_bytes
   | Invalid_resource_read_max_bytes_type of value_kind
   | Non_positive_resource_read_max_bytes of int
@@ -145,9 +135,6 @@ let access_to_string = function
   | Read_write -> "read-write"
 ;;
 
-let activation_lifetime_to_string Session = "session"
-let precedence_to_string Earlier_source_wins = "earlier-source-wins"
-
 let value_kind = function
   | Keeper_toml_loader.Toml_string _ -> String
   | Toml_int _ -> Integer
@@ -196,20 +183,6 @@ let anchor_rejection_to_string = function
 
 let diagnostic_to_string = function
   | Toml_syntax detail -> "invalid runtime TOML: " ^ detail
-  | Missing_activation_lifetime -> "skills.activation-lifetime is required"
-  | Invalid_activation_lifetime_type actual ->
-    Printf.sprintf
-      "skills.activation-lifetime must be a string, got %s"
-      (value_kind_to_string actual)
-  | Unsupported_activation_lifetime value ->
-    Printf.sprintf "unsupported Skill activation lifetime %S" value
-  | Missing_precedence -> "skills.precedence is required"
-  | Invalid_precedence_type actual ->
-    Printf.sprintf
-      "skills.precedence must be a string, got %s"
-      (value_kind_to_string actual)
-  | Unsupported_precedence value ->
-    Printf.sprintf "unsupported Skill source precedence %S" value
   | Missing_resource_read_max_bytes ->
     "skills.resource-read-max-bytes is required"
   | Invalid_resource_read_max_bytes_type actual ->
@@ -385,27 +358,8 @@ let parse_entry ~index = function
   | value -> Error [ Invalid_source_entry_type { index; actual = value_kind value } ]
 ;;
 
-let activation_lifetime_key = top_level_namespace ^ ".activation-lifetime"
-let precedence_key = top_level_namespace ^ ".precedence"
 let resource_read_max_bytes_key = top_level_namespace ^ ".resource-read-max-bytes"
 let sources_key = top_level_namespace ^ ".sources"
-
-let activation_lifetime ~required doc =
-  match List.assoc_opt activation_lifetime_key doc with
-  | None -> if required then None, [ Missing_activation_lifetime ] else None, []
-  | Some (Keeper_toml_loader.Toml_string "session") -> Some Session, []
-  | Some (Toml_string value) -> None, [ Unsupported_activation_lifetime value ]
-  | Some value -> None, [ Invalid_activation_lifetime_type (value_kind value) ]
-;;
-
-let precedence ~required doc =
-  match List.assoc_opt precedence_key doc with
-  | None -> if required then None, [ Missing_precedence ] else None, []
-  | Some (Keeper_toml_loader.Toml_string "earlier-source-wins") ->
-    Some Earlier_source_wins, []
-  | Some (Toml_string value) -> None, [ Unsupported_precedence value ]
-  | Some value -> None, [ Invalid_precedence_type (value_kind value) ]
-;;
 
 let resource_read_max_bytes ~required doc =
   match List.assoc_opt resource_read_max_bytes_key doc with
@@ -441,9 +395,7 @@ let duplicate_diagnostics indexed_sources =
 let parse_doc doc =
   let namespace_prefix = top_level_namespace ^ "." in
   let known_fields =
-    [ activation_lifetime_key
-    ; precedence_key
-    ; resource_read_max_bytes_key
+    [ resource_read_max_bytes_key
     ; sources_key
     ]
   in
@@ -466,10 +418,6 @@ let parse_doc doc =
          else None)
       doc
   in
-  let activation_lifetime, lifetime_diagnostics =
-    activation_lifetime ~required:configured doc
-  in
-  let precedence, precedence_diagnostics = precedence ~required:configured doc in
   let resource_read_max_bytes, resource_read_max_bytes_diagnostics =
     resource_read_max_bytes ~required:configured doc
   in
@@ -492,8 +440,6 @@ let parse_doc doc =
   in
   let diagnostics =
     unexpected
-    @ lifetime_diagnostics
-    @ precedence_diagnostics
     @ resource_read_max_bytes_diagnostics
     @ source_container_diagnostics
     @ entry_diagnostics
@@ -502,9 +448,7 @@ let parse_doc doc =
   if diagnostics = []
   then
     Ok
-      { activation_lifetime
-      ; precedence
-      ; resource_read_max_bytes
+      { resource_read_max_bytes
       ; sources = List.map snd indexed_sources
       }
   else Error diagnostics
@@ -519,15 +463,8 @@ let parse_text content =
 let validate_text content = Result.map (fun _ -> ()) (parse_text content)
 
 let to_yojson config =
-  let option_string render = function
-    | Some value -> `String (render value)
-    | None -> `Null
-  in
   `Assoc
-    [ ( "activation_lifetime"
-      , option_string activation_lifetime_to_string config.activation_lifetime )
-    ; "precedence", option_string precedence_to_string config.precedence
-    ; ( "resource_read_max_bytes"
+    [ ( "resource_read_max_bytes"
       , match config.resource_read_max_bytes with
         | Some value -> `Int (resource_read_max_bytes_to_int value)
         | None -> `Null )

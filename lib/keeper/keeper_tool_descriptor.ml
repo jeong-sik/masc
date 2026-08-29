@@ -1540,7 +1540,19 @@ let masc_board_descriptor board_name =
   let descriptor =
     in_process_descriptor_with_schema_source
        ~capability_identity:Internal_name_identity
-       ~keeper_model_projection:Internal_name
+       (* The sub-board CRUD tools stay registered for operator entrypoints
+          but leave the keeper model surface: no keeper called them in the
+          August .masc/tool_calls log, and every turn carried their schemas.
+          The board's own core and dashboard paths do not go through this
+          projection. *)
+       ~keeper_model_projection:
+         (match board_name with
+          | Tool_name.Board_name.Board_sub_board_create
+          | Tool_name.Board_name.Board_sub_board_update
+          | Tool_name.Board_name.Board_sub_board_delete
+          | Tool_name.Board_name.Board_sub_board_get
+          | Tool_name.Board_name.Board_sub_board_list -> Operator_only
+          | _ -> Internal_name)
        ~input_schema_source
        ~id:("masc.board." ^ Tool_name.Board_name.operation_name board_name)
        ~name
@@ -2146,13 +2158,16 @@ let internal_descriptors : t list =
     (* ── vision delegation (RFC-keeper-vision-delegation-tool §2.6) ─ *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
-      ~keeper_model_projection:Internal_name
+      (* [Operator_only]: the model has its own analyze_image builtin and the
+         .masc/tool_calls log shows this keeper-facing name was never called;
+         hiding it takes its schema off every keeper turn. The handler and the
+         read-only sub-call stay available to operator entrypoints. *)
+      ~keeper_model_projection:Operator_only
       ~input_schema_source:Canonical_registry
       ~id:"keeper.vision.analyze_image"
       ~name:Keeper_tool_runtime_schemas.keeper_analyze_image.name
       ~description:Keeper_tool_runtime_schemas.keeper_analyze_image.description
       ~input_schema:Keeper_tool_runtime_schemas.keeper_analyze_image.input_schema
-      (* [Internal_name] keeps the read-only vision sub-call model-visible. *)
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_analyze_image
       ()

@@ -113,7 +113,10 @@ end
 module Composition_run_id : sig
   type t
 
+  type error = Invalid_uuid_v7 of string
+
   val fresh : unit -> t
+  val of_string : string -> (t, error) result
   val to_string : t -> string
   val equal : t -> t -> bool
 end

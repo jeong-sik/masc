@@ -15,7 +15,7 @@
     Key invariant: given the same [conditions] and [event], [apply_event]
     always produces the same [transition_result]. *)
 
-(** {1 Phase (10-State Enum)} *)
+(** {1 Phase} *)
 
 (** Fine-grained keeper lifecycle phase.
     Buffer states ([Failing], [Draining], [Restarting])

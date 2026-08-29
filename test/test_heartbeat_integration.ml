@@ -4458,8 +4458,10 @@ let test_resolve_done_reports_prior_outcome () =
 
 module ES = Masc.Keeper_status_runtime
 
-(** Verify pipeline_stage_of_phase covers all 9 phases and produces
-    the expected deterministic mapping. No heuristic, no timestamps. *)
+(** Verify pipeline_stage_of_phase covers every phase and produces the
+    expected deterministic mapping. No heuristic, no timestamps. The case
+    list is checked against [KSM.all_phases], not a hand-counted literal —
+    the literal 9 survived one phase removal and failed for weeks. *)
 let test_pipeline_stage_of_phase_exhaustive () =
   let cases = [
     (KSM.Offline, "offline");
@@ -4471,7 +4473,15 @@ let test_pipeline_stage_of_phase_exhaustive () =
     (KSM.Crashed, "crashed");
     (KSM.Restarting, "restarting");
   ] in
-  check int "all 9 phases covered" 9 (List.length cases);
+  check int "every phase has a pinned mapping"
+    (List.length KSM.all_phases) (List.length cases);
+  List.iter
+    (fun phase ->
+      check bool
+        (Printf.sprintf "phase %s is pinned" (KSM.phase_to_string phase))
+        true
+        (List.mem_assoc phase cases))
+    KSM.all_phases;
   List.iter (fun (phase, expected) ->
     let actual = ES.pipeline_stage_of_phase phase in
     check string

@@ -3,7 +3,7 @@
 import { get } from '../api/core'
 import { createAsyncResource, loaded, type AsyncResource } from '../lib/async-state'
 import { lastEvent } from '../sse'
-import { asNumber, asString, asStringArray, isRecord } from './common/normalize'
+import { asNumber, asString, isRecord } from './common/normalize'
 
 export type RailStatus = 'healthy' | 'warning' | 'stale' | 'idle'
 
@@ -26,11 +26,9 @@ interface CalibrationStats {
 
 interface HarnessOverview {
   evaluator_status: RailStatus
-  pre_compact_status: RailStatus
   handoff_status: RailStatus
   last_signal_at: number | null
   evaluator_last_event_at: number | null
-  pre_compact_last_event_at: number | null
   handoff_last_event_at: number | null
   fallback_ratio: number
   // Added by lib/dashboard/dashboard_harness_health.ml as part of #6565.
@@ -38,7 +36,6 @@ interface HarnessOverview {
   // verdicts that carried a generator_runtime. undefined when the backend
   // had zero eligible verdicts to compute the ratio.
   cross_model_rate?: number
-  latest_pre_compact_checkpoint_bytes: number | null
   latest_handoff_generation: number | null
 }
 
@@ -56,14 +53,6 @@ export interface HarnessVerdictItem {
   fallback_reason?: string | null
 }
 
-export interface PreCompactEvent {
-  timestamp: number
-  keeper_name: string
-  checkpoint_bytes: number
-  message_count: number
-  strategies: string[]
-  trigger: string
-}
 
 export interface HandoffEvent {
   timestamp: number
@@ -90,7 +79,6 @@ export interface HarnessHealthData {
   overview: HarnessOverview
   calibration: CalibrationStats
   recent_verdicts: HarnessVerdictItem[]
-  pre_compact: HarnessSignalSection<PreCompactEvent>
   recent_handoffs: HarnessSignalSection<HandoffEvent>
 }
 
@@ -184,46 +172,6 @@ function processHarnessEvent(evt: unknown): void {
         ...data.overview,
         last_signal_at: nextItem.timestamp,
         evaluator_last_event_at: nextItem.timestamp,
-      },
-    }))
-    scheduleHarnessReload()
-  }
-
-  if (type === 'agent_core:masc:harness:pre_compact') {
-    if (!payload) return
-    const checkpointBytes = asNumber(payload.checkpoint_bytes)
-    const messageCount = asNumber(payload.message_count)
-    if (checkpointBytes == null || messageCount == null) return
-    const nextItem: PreCompactEvent = {
-      timestamp: asNumber(payload.timestamp) ?? Date.now() / 1000,
-      keeper_name: asString(payload.keeper_name, ''),
-      checkpoint_bytes: checkpointBytes,
-      message_count: messageCount,
-      strategies: asStringArray(payload.strategies),
-      trigger: asString(payload.trigger, ''),
-    }
-    updateHarnessData(data => ({
-      ...data,
-      pre_compact: {
-        ...data.pre_compact,
-        recent_events: mergeRecent(
-          data.pre_compact.recent_events,
-          nextItem,
-          (left, right) =>
-            left.timestamp === right.timestamp
-            && left.keeper_name === right.keeper_name
-            && left.trigger === right.trigger,
-          8,
-        ),
-        total_recent: data.pre_compact.total_recent + 1,
-        last_event_at: nextItem.timestamp,
-        empty_reason: null,
-      },
-      overview: {
-        ...data.overview,
-        last_signal_at: nextItem.timestamp,
-        pre_compact_last_event_at: nextItem.timestamp,
-        latest_pre_compact_checkpoint_bytes: nextItem.checkpoint_bytes,
       },
     }))
     scheduleHarnessReload()

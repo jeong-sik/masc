@@ -41,6 +41,7 @@ import {
   resetLaneQueueObservations,
 } from './lane-queue-panel'
 import { keepers } from '../../store'
+import { nowSecondsSignal } from '../../lib/now-signal'
 import type { Keeper } from '../../types'
 
 const NOW = Math.floor(Date.now() / 1000)
@@ -158,6 +159,11 @@ afterEach(() => {
 
 describe('LaneQueuePanel', () => {
   beforeEach(() => {
+    // Age labels read the shared wall-clock signal, which is seeded when
+    // lib/now-signal loads — before or after this module depending on the
+    // import graph. Pinning it to the same NOW the fixtures are built from
+    // makes "10분 전" mean 10 minutes regardless of that order.
+    nowSecondsSignal.value = NOW
     mocks.fetchKeeperWaitingInventory.mockImplementation((name: string) => Promise.resolve(waitingInventory(name)))
     mocks.fetchDashboardScheduledAutomation.mockResolvedValue(scheduleProjection())
     mocks.fetchKeeperLifecycle.mockImplementation((name: string) => Promise.resolve(lifecycleResponse(name)))
@@ -285,6 +291,11 @@ describe('LaneQueuePanel', () => {
 
 describe('KeeperWaitQueueRail', () => {
   beforeEach(() => {
+    // Age labels read the shared wall-clock signal, which is seeded when
+    // lib/now-signal loads — before or after this module depending on the
+    // import graph. Pinning it to the same NOW the fixtures are built from
+    // makes "10분 전" mean 10 minutes regardless of that order.
+    nowSecondsSignal.value = NOW
     mocks.fetchKeeperWaitingInventory.mockImplementation((name: string) => Promise.resolve(waitingInventory(name)))
   })
 

@@ -2,7 +2,6 @@
 
     Working context types live in {!Keeper_types}.
     Pure context operations are in {!Keeper_context_core}.
-    Compaction policy is in {!Keeper_compact_policy}.
     Post-turn lifecycle is in {!Keeper_post_turn}.
 
     This module preserves the original public API so that callers
@@ -48,24 +47,6 @@ let save_agent_core_checkpoint = Keeper_context_core.save_agent_core_checkpoint
 let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
 
 (* ================================================================ *)
-(* Re-export from Keeper_compact_policy                              *)
-(* ================================================================ *)
-
-type compaction_decision = Keeper_compact_policy.compaction_decision =
-  | Applied of Compaction_trigger.t
-  | Prepared of Compaction_trigger.t
-  | Rejected of Compaction_trigger.t * Keeper_compact_policy.compaction_rejection
-  | Not_requested
-  | Skipped_no_checkpoint
-
-let compaction_decision_to_string =
-  Keeper_compact_policy.compaction_decision_to_string
-
-let compaction_decision_applied =
-  Keeper_compact_policy.compaction_decision_applied
-
-let compaction_decision_prepared =
-  Keeper_compact_policy.compaction_decision_prepared
 
 
 (* ================================================================ *)
@@ -216,20 +197,6 @@ let dispatch_keeper_phase_event_result
 let dispatch_keeper_phase_event ~config ?origin ~keeper_name event =
   dispatch_keeper_phase_event_result ~config ?origin ~keeper_name event
   |> ignore
-
-let dispatch_compaction_completed
-    ~(config : Workspace.config)
-    ~origin
-    ~keeper_name =
-  match
-    dispatch_keeper_phase_event_result ~config ~origin ~keeper_name
-      Keeper_state_machine.Compaction_completed
-  with
-  | Error _ as error -> error
-  | Ok () as applied ->
-    Otel_metric_store.inc_counter Keeper_metrics.(to_string FsmEdgeTransitions)
-      ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
-    applied
 
 (* ================================================================ *)
 (* Remaining functions (not extracted — small utilities)              *)

@@ -5,41 +5,6 @@
 
 open Alcotest
 
-let test_compact_policy_callback () =
-  let open Masc in
-  let called = ref false in
-  let ts = 1234567890.0 in
-  Keeper_compact_policy.register_record_pre_compact
-    (fun ~keeper_name ~checkpoint_bytes ~message_count ~strategies ~trigger ->
-       called := true;
-       Some
-         { Keeper_compact_policy.timestamp = ts
-         ; keeper_name
-         ; checkpoint_bytes
-         ; message_count
-         ; strategies
-         ; trigger
-         });
-  let result =
-    Keeper_compact_policy.record_pre_compact_callback
-      ~keeper_name:"k"
-      ~checkpoint_bytes:128
-      ~message_count:1
-      ~strategies:[]
-      ~trigger:Compaction_trigger.Manual
-  in
-  check bool "callback was invoked" true !called;
-  check bool "returns registered event" true (Option.is_some result);
-  Keeper_compact_policy.register_record_pre_compact
-    (fun
-      ~keeper_name:_
-      ~checkpoint_bytes:_
-      ~message_count:_
-      ~strategies:_
-      ~trigger:_
-    -> None)
-;;
-
 let test_keepalive_signal_callbacks () =
   let open Masc in
   let started = ref false in
@@ -183,13 +148,7 @@ let test_turn_lifecycle_callback () =
 let () =
   Alcotest.run
     "keeper-global-shared-refs-atomic"
-    [ ( "compact-policy"
-      , [ test_case
-            "record_pre_compact callback registration"
-            `Quick
-            test_compact_policy_callback
-        ] )
-    ; ( "keepalive-signal"
+    [ ( "keepalive-signal"
       , [ test_case
             "all global callback registrations"
             `Quick

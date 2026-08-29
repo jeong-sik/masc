@@ -1,15 +1,14 @@
 (** Dashboard_harness_health — operator harness-health
-    telemetry: wake-time payload sampling, pre-compact
-    events, and recent eval-calibration verdicts.
+    telemetry: wake-time payload sampling and recent
+    eval-calibration verdicts.
 
     External surface:
     - {b records} ({!harness_verdict_item},
       {!wake_payload_event}) reached as types or via
       record-pattern access by callers.
-    - {b record-wake / record-pre-compact} writers
-      ({!record_wake_payload}, {!record_pre_compact}) used
+    - {b record-wake} writer ({!record_wake_payload}) used
       by [keeper_agent_run] / [keeper_wake_telemetry] /
-      [keeper_compact_policy] / [env_config_keeper].
+      [env_config_keeper].
     - {b verdict readers} ({!read_recent_verdicts},
       {!read_recent_verdicts_for_agents}) consumed by the
       keeper monitoring HTTP route.
@@ -22,8 +21,7 @@
     [wake_payload_event_of_json], [date_bounds] /
     [start_date] / [end_date], [max_recent_verdicts],
     [read_store_records], [verdict_item_of_json],
-    [record_pre_compact_at] / [record_wake_payload_at]
-    timestamp-injection variants, [get_pre_compact_store],
+    [record_wake_payload_at] timestamp-injection variant,
     every other private accumulator). *)
 
 (** {1 Verdict record} *)
@@ -41,23 +39,6 @@ type harness_verdict_item =
   ; verdict : string
   ; evaluator_runtime : string
   ; fallback_reason : string option
-  }
-
-(** {1 Pre-compact event} *)
-
-(** Pre-compact telemetry record returned by
-    {!record_pre_compact}.  Reached by record-pattern
-    access in [keeper_compact_policy] when assembling the
-    snapshot JSON.  [trigger] is the closed-sum classification
-    of the gate that fired — pair with [Compaction_trigger.to_label]
-    for Otel_metric_store emission and [to_detail_json] for SSE/JSON. *)
-type pre_compact_event =
-  { timestamp : float
-  ; keeper_name : string
-  ; checkpoint_bytes : int
-  ; message_count : int
-  ; strategies : string list
-  ; trigger : Compaction_trigger.t
   }
 
 (** {1 Wake-payload event} *)
@@ -82,19 +63,6 @@ type wake_payload_event =
   }
 
 (** {1 Recorders} *)
-
-(** Records one pre-compact event into the in-memory
-    rolling store and returns the constructed event.
-    Threaded by [keeper_compact_policy] when a compaction
-    fires; the caller reaches the event's fields via
-    record-pattern access. *)
-val record_pre_compact
-  :  keeper_name:string
-  -> checkpoint_bytes:int
-  -> message_count:int
-  -> strategies:string list
-  -> trigger:Compaction_trigger.t
-  -> pre_compact_event
 
 (** Records one wake-time payload sample and returns the
     constructed event.  Threaded by [keeper_agent_run] /
@@ -157,15 +125,9 @@ val read_wake_payload_events
     directly to assert on disk state. *)
 val get_wake_payload_store : unit -> Dated_jsonl.t
 
-(** Drops the cached pre-compact / wake-payload store
-    handles so the next access re-resolves the base
+(** Drops the cached wake-payload store handle so the next access re-resolves the base
     directory.  Test-only seam used between cases. *)
 val reset_runtime_stores_for_testing : unit -> unit
-
-(** Forces the pre-compact store to point at [base_dir]
-    instead of the resolved configuration default.
-    Test-only seam — production paths leave this alone. *)
-val set_pre_compact_store_for_testing : base_dir:string -> unit
 
 (** Forces the wake-payload store to point at [base_dir]
     instead of the resolved configuration default.
@@ -175,7 +137,7 @@ val set_wake_payload_store_for_testing : base_dir:string -> unit
 (** {1 Dashboard JSON entry} *)
 
 (** Renders the harness-health dashboard envelope:
-    eval-calibration stats, recent verdicts, pre-compact
-    events, and wake-payload telemetry — clipped to the
+    eval-calibration stats, recent verdicts, and
+    wake-payload telemetry — clipped to the
     [?since] / [?until] window when provided. *)
 val json : config:Workspace.config -> ?since:string -> ?until:string -> unit -> Yojson.Safe.t

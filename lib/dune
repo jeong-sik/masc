@@ -98,7 +98,6 @@
   masc.keeper_usage_trust
   masc.cost_ledger
   masc.event_bus_slots
-  masc.keeper_compaction_evidence
   masc.keeper_chat_delivery_identity
   masc.keeper_chat_operations
   masc.runtime_model
@@ -115,7 +114,6 @@
   masc.dashboard_tla_specs
   masc.sse_event
   masc.tool_call_quality_benchmark
-  masc.compaction_trigger
   masc.bounded_event_dedupe
   masc.tool_catalog_surfaces
   masc.config_dir_resolver

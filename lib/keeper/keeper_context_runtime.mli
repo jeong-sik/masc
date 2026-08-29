@@ -1,5 +1,5 @@
 (** Keeper_context_runtime — shared keeper context utilities: working context,
-    checkpoint management, compaction, system prompts,
+    checkpoint management, system prompts,
     text processing, proactive prompt helpers, and proactive generation.
 
     Working context types live in {!Keeper_types}.
@@ -95,19 +95,6 @@ val load_context_from_checkpoint
   -> base_dir:string
   -> session_context * working_context option
 
-(** {1 Compaction} *)
-
-type compaction_decision = Keeper_compact_policy.compaction_decision =
-  | Applied of Compaction_trigger.t
-  | Prepared of Compaction_trigger.t
-  | Rejected of Compaction_trigger.t * Keeper_compact_policy.compaction_rejection
-  | Not_requested
-  | Skipped_no_checkpoint
-
-val compaction_decision_to_string : compaction_decision -> string
-val compaction_decision_applied : compaction_decision -> bool
-val compaction_decision_prepared : compaction_decision -> bool
-
 val apply_post_turn_lifecycle
   :  meta:keeper_meta
   -> checkpoint:Agent_core.Checkpoint.t option
@@ -132,14 +119,6 @@ val dispatch_keeper_phase_event_result
   -> ?origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
   -> Keeper_state_machine.event
-  -> (unit, lifecycle_dispatch_error) result
-
-(** Dispatch [Compaction_completed] only after the prepared checkpoint has
-    been durably saved. *)
-val dispatch_compaction_completed
-  :  config:Workspace.config
-  -> origin:Keeper_registry.lifecycle_event_origin
-  -> keeper_name:string
   -> (unit, lifecycle_dispatch_error) result
 
 (** {1 Trace and Board Utilities} *)

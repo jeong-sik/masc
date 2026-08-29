@@ -59,24 +59,6 @@ module StringSet = Set_util.StringSet
 let schema_version = 1
 let manifest_file_suffix = ".jsonl"
 
-type compaction_outcome =
-  | Checkpoint_committed
-  | Lifecycle_cleanup_failed_without_checkpoint
-
-let compaction_outcome_key = "compaction_outcome"
-
-let compaction_outcome_to_string = function
-  | Checkpoint_committed -> "checkpoint_committed"
-  | Lifecycle_cleanup_failed_without_checkpoint ->
-    "lifecycle_cleanup_failed_without_checkpoint"
-;;
-
-let compaction_outcome_of_string = function
-  | "checkpoint_committed" -> Some Checkpoint_committed
-  | "lifecycle_cleanup_failed_without_checkpoint" ->
-    Some Lifecycle_cleanup_failed_without_checkpoint
-  | _ -> None
-;;
 
 let safe_segment value =
   let buf = Buffer.create (String.length value) in
@@ -282,14 +264,6 @@ let with_payload_role ~payload_role decision =
         ("payload_role", `String (payload_role_to_string payload_role));
       ]
 
-let with_compaction_outcome ~compaction_outcome decision =
-  let outcome_json = `String (compaction_outcome_to_string compaction_outcome) in
-  match decision with
-  | `Assoc fields when assoc_has_key compaction_outcome_key fields -> decision
-  | `Assoc fields -> `Assoc (fields @ [ compaction_outcome_key, outcome_json ])
-  | other ->
-    `Assoc [ "decision", other; compaction_outcome_key, outcome_json ]
-;;
 
 let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ~trace_id
     ?keeper_turn_id ?agent_core_turn_count ?logical_seq ~event ?runtime_id
@@ -338,17 +312,9 @@ let links_to_json links =
    The previous substring-based redaction (§2 anti-pattern) has been removed;
    public filtering now uses explicit allowlists in {!public_projection_of_decision}. *)
 
-(* [trigger_detail] keys come from the encoder that writes them, not from a
-   copy kept here. The flat list below used to name only "kind" and
-   "limit_tokens", so a [Request_body_over_capacity] refusal reached the public
-   projection stripped of the two measured integers that justify it — the
-   operator saw the refusal and not its bounds. Sourcing the key set from
-   {!Compaction_trigger.wire_field_names} means a field added to a trigger
-   constructor cannot be dropped here without also failing to compile there. *)
 let decision_public_allowlist =
   StringSet.of_list
-    (Compaction_trigger.wire_field_names
-    @ [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
+    [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
     ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
     ; "compaction_id"; "event_bus_correlation_id"
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
@@ -363,8 +329,7 @@ let decision_public_allowlist =
     ; "media_dropped_total"; "media_dropped_counts"
     ; "payload_role"; "trigger"; "trigger_detail"
     ; "ratio"; "threshold"; "count"
-    ; "source_requeued"; compaction_outcome_key
-    ; Keeper_compaction_evidence.exact_evidence_key
+    ; "source_requeued"
     ; "clock_refs"
     ; "checkpoint_installation_schema"; "checkpoint_installation_state"
     ; "checkpoint_installed_ref"; "checkpoint_installation_auxiliary"
@@ -378,10 +343,7 @@ let decision_public_allowlist =
        Dropping these here made intra-lane failover unreadable on every
        API consumer. *)
     ; "idx"; "runtime_id"; "error_kind"
-    ])
-
-let compaction_evidence_public_allowlist =
-  StringSet.of_list Keeper_compaction_evidence.wire_field_names
+    ]
 
 let clock_refs_public_allowlist =
   StringSet.of_list
@@ -394,18 +356,13 @@ let clock_refs_public_allowlist =
 type decision_projection_scope =
   | Decision
   | Clock_refs
-  | Compaction_evidence
 
 let decision_allowlist = function
   | Decision -> decision_public_allowlist
   | Clock_refs -> clock_refs_public_allowlist
-  | Compaction_evidence -> compaction_evidence_public_allowlist
 
 let decision_child_scope scope key =
-  if String.equal key "clock_refs" then Clock_refs
-  else if String.equal key Keeper_compaction_evidence.exact_evidence_key
-  then Compaction_evidence
-  else scope
+  if String.equal key "clock_refs" then Clock_refs else scope
 
 let public_projection_of_decision decision =
   let rec project scope path = function
@@ -534,115 +491,6 @@ type parsed_row = {
   links : links;
 }
 
-let canonicalize_compaction_evidence ~event_wire decision =
-  let evidence_key = Keeper_compaction_evidence.exact_evidence_key in
-  let canonicalize_present fields evidence_json =
-    match Keeper_compaction_evidence.of_json evidence_json with
-    | Error error ->
-      Error
-        (Printf.sprintf
-           "field \"decision.%s\" is invalid: %s"
-           evidence_key
-           (Keeper_compaction_evidence.decode_error_to_string error))
-    | Ok evidence ->
-      let canonical = Keeper_compaction_evidence.to_json evidence in
-      Ok
-        (`Assoc
-           (List.map
-              (fun (key, value) ->
-                 if String.equal key evidence_key then key, canonical else key, value)
-              fields))
-  in
-  match decision with
-  | `Assoc fields ->
-    let evidence_entries =
-      List.filter (fun (key, _) -> String.equal key evidence_key) fields
-    in
-    if not (String.equal event_wire (event_kind_to_string Context_compacted))
-    then
-      (match evidence_entries with
-       | [] -> Ok decision
-       | [ _, evidence_json ] -> canonicalize_present fields evidence_json
-       | _ ->
-         Error
-           (Printf.sprintf
-              "field \"decision.%s\" must appear exactly once"
-              evidence_key))
-    else
-      let outcome_entries =
-        List.filter (fun (key, _) -> String.equal key compaction_outcome_key) fields
-      in
-      (match outcome_entries with
-       | [ _, `String wire ] ->
-         (match compaction_outcome_of_string wire with
-          | None ->
-            Error
-              (Printf.sprintf
-                 "field \"decision.%s\" has unknown value %S"
-                 compaction_outcome_key
-                 wire)
-          | Some Checkpoint_committed ->
-            (match evidence_entries with
-             | [ _, evidence_json ] -> canonicalize_present fields evidence_json
-             | [] ->
-               Error
-                 (Printf.sprintf
-                    "field \"decision.%s\" is required for checkpoint_committed"
-                    evidence_key)
-             | _ ->
-               Error
-                 (Printf.sprintf
-                    "field \"decision.%s\" must appear exactly once"
-                    evidence_key))
-          | Some Lifecycle_cleanup_failed_without_checkpoint ->
-            (match evidence_entries with
-             | _ :: _ ->
-               Error
-                 (Printf.sprintf
-                    "field \"decision.%s\" is forbidden without a committed checkpoint"
-                    evidence_key)
-             | [] ->
-               (match
-                  List.filter (fun (key, _) -> String.equal key "error") fields
-                with
-                | [ _, `String cause ] when String.trim cause <> "" -> Ok decision
-                | [ _, `String _ ] ->
-                  Error
-                    "field \"decision.error\" must be nonblank for a failed compaction outcome"
-                | [ _, other ] ->
-                  Error
-                    (Printf.sprintf
-                       "field \"decision.error\" must be a string (received %s)"
-                       (Json_util.kind_name other))
-                | [] ->
-                  Error
-                    "field \"decision.error\" is required for a failed compaction outcome"
-                | _ ->
-                  Error "field \"decision.error\" must appear exactly once")))
-       | [ _, other ] ->
-         Error
-           (Printf.sprintf
-              "field \"decision.%s\" must be a string (received %s)"
-              compaction_outcome_key
-              (Json_util.kind_name other))
-       | [] ->
-         Error
-           (Printf.sprintf
-              "field \"decision.%s\" is required for current context_compacted rows"
-              compaction_outcome_key)
-       | _ ->
-         Error
-           (Printf.sprintf
-              "field \"decision.%s\" must appear exactly once"
-              compaction_outcome_key))
-  | _ when String.equal event_wire (event_kind_to_string Context_compacted) ->
-    Error
-      (Printf.sprintf
-         "field \"decision.%s\" is required for current context_compacted rows"
-         compaction_outcome_key)
-  | _ -> Ok decision
-;;
-
 let parse_row = function
   | `Assoc fields -> (
       let ( >>= ) result f =
@@ -666,8 +514,6 @@ let parse_row = function
             optional_string "runtime_id" fields >>= fun runtime_id ->
             required_string "status" fields >>= fun status ->
             field "decision" fields >>= fun decision ->
-            canonicalize_compaction_evidence ~event_wire decision
-            >>= fun decision ->
             field "links" fields >>= fun links_json ->
             links_of_json links_json >>= fun links ->
             Ok

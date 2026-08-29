@@ -205,33 +205,9 @@ type capacity_refusal =
 val capacity_refusal_of_error :
   Agent_core.Error.t ->
   capacity_refusal option
-(** Project the canonical capacity transition onto the token/byte refusal axes. *)
-
-type capacity_non_compaction =
-  | Serving_evidence_not_yet_valid of
-      { now_unix_s : int
-      ; checked_at_unix_s : int
-      }
-  | Serving_evidence_expired of
-      { now_unix_s : int
-      ; expires_at_unix_s : int
-      }
-  | Token_measurement_unavailable
-
-type capacity_transition =
-  | Not_capacity
-  | Capacity_refusal_classified of Compaction_trigger.t
-  | Capacity_non_compacting of capacity_non_compaction
-(** Provider-neutral transition input for the durable compaction lane.
-    [Capacity_refusal_classified] preserves the measured token or byte axis.
-    Future/expired serving evidence and unavailable token measurement remain
-    typed non-compacting facts; they are never guessed into a capacity limit. *)
-
-val capacity_transition_of_error :
-  Agent_core.Error.t ->
-  capacity_transition
-(** Total classifier over typed agent-core errors. This function does not inspect
-    rendered error prose and does not select a provider, model, or failover. *)
+(** Total classifier over typed agent-core errors onto the token/byte refusal
+    axes. This function does not inspect rendered error prose and does not
+    select a provider, model, or failover. *)
 
 val current_keeper_meta :
   config:Workspace.config ->

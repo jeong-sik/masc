@@ -11,14 +11,11 @@ function sampleResponse() {
     scope_note: 'Harness health explains safety rails and calibration loops.',
     overview: {
       evaluator_status: 'warning',
-      pre_compact_status: 'healthy',
       handoff_status: 'healthy',
       last_signal_at: 1711440300,
       evaluator_last_event_at: 1711440300,
-      pre_compact_last_event_at: 1711440000,
       handoff_last_event_at: 1711430000,
       fallback_ratio: 0.83,
-      latest_pre_compact_checkpoint_bytes: 131072,
       latest_handoff_generation: 27,
     },
     calibration: {
@@ -45,23 +42,6 @@ function sampleResponse() {
         fallback_reason: null,
       },
     ],
-    pre_compact: {
-      description: 'Pre-compaction signal',
-      status: 'healthy',
-      last_event_at: 1711440000,
-      empty_reason: null,
-      total_recent: 1,
-      recent_events: [
-        {
-          timestamp: 1711440000,
-          keeper_name: 'keeper-a',
-          checkpoint_bytes: 131072,
-          message_count: 88,
-          strategies: ['PruneToolOutputs'],
-          trigger: 'manual',
-        },
-      ],
-    },
     recent_handoffs: {
       description: 'Keeper checkpoint rollovers sourced from keeper metrics snapshots.',
       status: 'healthy',
@@ -167,10 +147,8 @@ describe('HarnessHealth', () => {
     expect(get).toHaveBeenCalledWith('/api/v1/dashboard/harness-health')
     expect(container.textContent).toContain('안전 감시')
     expect(container.textContent).toContain('감시 흐름도')
-    expect(container.textContent).toContain('keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다')
+    expect(container.textContent).toContain('keeper 장기 실행 중 평가와 교체가 정상인지 감시합니다')
     expect(container.textContent).toContain('평가 모델 건강도')
-    expect(container.textContent).toContain('압축 전 체크포인트')
-    expect(container.textContent).toContain('131,072 B')
     expect(container.textContent).toContain('keeper 세대 교체')
     expect(container.textContent).toContain('대체 처리율')
     expect(container.textContent).toContain('judge timeout')
@@ -248,7 +226,6 @@ describe('HarnessHealth', () => {
     const source = module.buildHarnessFlowMermaid(sampleResponse() as never)
 
     expect(source).toContain('class evaluator warningRail;')
-    expect(source).toContain('class preCompact healthyRail;')
     expect(source).toContain('class handoff healthyRail;')
     expect(source).toContain('class evaluator activeRail;')
     expect(source).toContain('교체 신호')

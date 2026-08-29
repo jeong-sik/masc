@@ -1,3 +1,0 @@
-(test
- (name test_keeper_compaction_evidence)
- (libraries alcotest yojson masc.keeper_compaction_evidence))

@@ -153,24 +153,6 @@ let test_wake_payload_reader_rejects_malformed_exact_records () =
     0
     (List.length (H.read_wake_payload_events ()))
 
-let test_pre_compact_store_setter_records_event () =
-  reset_after @@ fun () ->
-  with_temp_dir "pre-compact-store" @@ fun dir ->
-  H.set_pre_compact_store_for_testing ~base_dir:dir;
-  let event =
-    H.record_pre_compact
-      ~keeper_name:"keeper-harness"
-      ~checkpoint_bytes:3456
-      ~message_count:12
-      ~strategies:[ "drop-old"; "summarize" ]
-      ~trigger:Compaction_trigger.Manual
-  in
-  check string "keeper" "keeper-harness" event.keeper_name;
-  check int "checkpoint bytes" 3456 event.checkpoint_bytes;
-  check int "message count" 12 event.message_count;
-  check (list string) "strategies" [ "drop-old"; "summarize" ] event.strategies;
-  check string "trigger" "manual" (Compaction_trigger.to_label event.trigger)
-
 let () =
   Eio_main.run @@ fun _env ->
   run
@@ -185,7 +167,5 @@ let () =
             test_reset_rebinds_wake_payload_store;
           test_case "malformed exact records are rejected" `Quick
             test_wake_payload_reader_rejects_malformed_exact_records;
-          test_case "pre-compact setter records event" `Quick
-            test_pre_compact_store_setter_records_event;
         ] );
     ]

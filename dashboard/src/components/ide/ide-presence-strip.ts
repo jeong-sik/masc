@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
-import { useSignalValue, useStoreSubscription } from './use-signal-value'
+import { useStoreSubscription } from './use-signal-value'
 import { get } from '../../api/core'
 import { fetchIdePresence } from '../../api/ide'
 import { KeeperBadge } from '../keeper-badge'
@@ -13,10 +13,6 @@ import {
   type KeeperPresenceEntry,
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
-import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
-import { focusIdeContextAnchor, type IdeContextFocus } from './ide-state'
-import { IDE_INLINE_BADGE_BASE } from './context-badge-style'
-import { routeLinksForContext } from './ide-context-lens'
 import { parseAgentStatus } from '../../lib/agent-status'
 
 export interface ApiAgent {
@@ -30,16 +26,6 @@ export interface ApiStatus {
   readonly cluster?: string | null
   readonly project?: string | null
   readonly paused?: boolean
-}
-
-interface PresenceContextSummary {
-  readonly label: string
-  readonly title: string
-}
-
-const CONTEXT_BADGE_STYLE = {
-  ...IDE_INLINE_BADGE_BASE,
-  background: 'var(--color-bg-elevated)',
 }
 
 function mapAgentStatus(status: string): KeeperPresenceEntry['status'] {
@@ -165,7 +151,6 @@ export function IdePresenceStrip({ compact = false }: { readonly compact?: boole
   }, [presenceStore])
 
   useStoreSubscription(presenceStore.subscribe)
-  useSignalValue(cursorOverlaySignal)
 
   const current = presenceStore.snapshot()
   const entries = presenceStore.entries()
@@ -246,77 +231,14 @@ interface PresenceChipProps {
   readonly entry: KeeperPresenceEntry
 }
 
-interface PresenceContextAnchorInput {
-  readonly entry: KeeperPresenceEntry
-  readonly cursor: KeeperCursor | undefined
-}
-
-export function presenceContextAnchor({
-  entry,
-  cursor,
-}: PresenceContextAnchorInput): Omit<IdeContextFocus, 'activated_at_ms'> | null {
-  if (!cursor?.file_path) return null
-  const label = `${entry.keeper_id}@${entry.workspace_label}`
-  const sourceId = `presence:${entry.keeper_id}`
-  return {
-    file_path: cursor.file_path,
-    line: cursor.line,
-    surface: 'Keeper',
-    label,
-    source_id: sourceId,
-    keeper_id: entry.keeper_id,
-    route_links: routeLinksForContext({
-      filePath: cursor.file_path,
-      line: cursor.line,
-      surface: 'Keeper',
-      label,
-      sourceId,
-      telemetry: true,
-      telemetryQuery: entry.keeper_id,
-      keeperId: entry.keeper_id,
-    }),
-  }
-}
-
-export function presenceContextSummary(
-  anchor: Omit<IdeContextFocus, 'activated_at_ms'> | null,
-): PresenceContextSummary | null {
-  const labels = anchor?.route_links?.map(link => link.label) ?? []
-  if (labels.length === 0) return null
-  return {
-    label: `CTX ${labels.length}`,
-    title: `Linked context: ${labels.join(', ')}`,
-  }
-}
-
 function PresenceChip({ entry }: PresenceChipProps) {
   const isActive = entry.status === 'active'
-  const cursor = cursorOverlaySignal.value.cursors.get(entry.keeper_id)
-  const contextAnchor = presenceContextAnchor({ entry, cursor })
-  const contextSummary = presenceContextSummary(contextAnchor)
-
-  const focusLabel = cursor?.file_path
-    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
-    : null
-
-  const canNavigate = contextAnchor !== null
-  const navigate = (): void => {
-    if (contextAnchor) focusIdeContextAnchor(contextAnchor, 'operator')
-  }
-  const onKeyDown = canNavigate
-    ? (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate() } }
-    : undefined
 
   return html`
     <li
       class="ide-presence-chip v2-ide-row"
-      title=${`${entry.keeper_id} · ${entry.role} · ${focusLabel ?? 'no file focus'}`}
-      aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}${focusLabel ? ` editing ${focusLabel}` : ''}`}
-      role=${canNavigate ? 'button' : undefined}
-      aria-disabled=${canNavigate ? undefined : 'true'}
-      tabIndex=${canNavigate ? 0 : undefined}
-      onClick=${canNavigate ? navigate : undefined}
-      onKeyDown=${onKeyDown}
+      title=${`${entry.keeper_id} · ${entry.role}`}
+      aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}`}
       style=${{
         display: 'inline-flex',
         alignItems: 'center',
@@ -324,7 +246,6 @@ function PresenceChip({ entry }: PresenceChipProps) {
         maxWidth: '260px',
         color: 'var(--color-fg-secondary)',
         whiteSpace: 'nowrap',
-        cursor: cursor?.file_path ? 'pointer' : 'default',
         borderRadius: 'var(--r-1)',
         padding: '0 var(--sp-1)',
         transition: 'background 0.15s',
@@ -334,18 +255,6 @@ function PresenceChip({ entry }: PresenceChipProps) {
       <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
         ${entry.keeper_id}@${entry.workspace_label}
       </span>
-      ${focusLabel ? html`
-        <span style=${{
-          color: 'var(--color-accent-fg)',
-          fontSize: 'var(--fs-10)',
-          maxWidth: '90px',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}>${focusLabel}</span>
-      ` : null}
-      ${contextSummary ? html`
-        <span style=${CONTEXT_BADGE_STYLE} title=${contextSummary.title}>${contextSummary.label}</span>
-      ` : null}
       <span
         style=${{
           color: isActive ? 'var(--color-status-ok)' : 'var(--color-fg-muted)',

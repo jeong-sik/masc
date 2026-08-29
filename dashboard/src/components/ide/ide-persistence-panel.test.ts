@@ -14,7 +14,6 @@ import {
   lifecycleStateFromKeeperPhase,
   persistenceStateFromKeeperPhase,
 } from './ide-persistence-panel'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
 vi.mock('../../api/keeper', async () => {
   const actual = await vi.importActual<typeof import('../../api/keeper')>('../../api/keeper')
@@ -31,12 +30,6 @@ afterEach(() => {
   vi.clearAllMocks()
   activeKeeperName.value = ''
   keepers.value = []
-  cursorOverlaySignal.value = {
-    cursors: new Map(),
-    heatmap: new Map(),
-    collisions: [],
-    active_file: null,
-  }
   window.location.hash = ''
 })
 
@@ -98,29 +91,13 @@ describe('IdePersistencePanel', () => {
     expect(screen.getByText('keeper-2')).toBeTruthy()
   })
 
-  it('links persistence state back to code focus and keeper runtime context', async () => {
+  it('links persistence state back to keeper runtime context', async () => {
     activeKeeperName.value = 'sangsu'
     keepers.value = [{
       name: 'sangsu',
       status: 'online',
       phase: 'Running',
     }]
-    cursorOverlaySignal.value = {
-      cursors: new Map([[
-        'sangsu',
-        {
-          keeper_id: 'sangsu',
-          file_path: 'lib/runtime.ml',
-          line: 42,
-          column: 1,
-          focus_mode: 'editing',
-          last_update: 100,
-        },
-      ]]),
-      heatmap: new Map(),
-      collisions: [],
-      active_file: 'lib/runtime.ml',
-    }
     fetchKeeperStateDiagramMock.mockResolvedValue({
       keeper: 'sangsu',
       current_phase: 'Running',
@@ -130,33 +107,20 @@ describe('IdePersistencePanel', () => {
     render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
 
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
-    const focusChip = screen.getByRole('button', {
-      name: 'Open current persistence focus Code lib/runtime.ml:42',
-    })
-    fireEvent.click(focusChip)
-    expect(window.location.hash).toBe(
-      '#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Persistence&label=sangsu+current+focus&source_id=persistence%3Asangsu&keeper=sangsu',
-    )
 
     const links = Array.from(screen.getByLabelText('Persistence context links')
       .querySelectorAll<HTMLButtonElement>('button'))
-    expect(links.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
-    expect(links[0]?.title).toBe('Code lib/runtime.ml:42')
-    expect(links[1]?.title).toBe('Fleet telemetry event log · query sangsu')
-    expect(links[2]?.title).toBe('Keeper sangsu')
+    expect(links.map(link => link.textContent)).toEqual(['Telemetry', 'Keeper'])
+    expect(links[0]?.title).toBe('Fleet telemetry event log · query sangsu')
+    expect(links[1]?.title).toBe('Keeper sangsu')
 
-    const badge = screen.getByText('CTX 3')
-    expect(badge.getAttribute('data-context-route-count')).toBe('3')
-    expect(badge.getAttribute('title')).toBe('Linked context: Code, Telemetry, Keeper')
+    const badge = screen.getByText('CTX 2')
+    expect(badge.getAttribute('data-context-route-count')).toBe('2')
+    expect(badge.getAttribute('title')).toBe('Linked context: Telemetry, Keeper')
     expect(badge.getAttribute('aria-label'))
-      .toBe('Persistence map has 3 linked context routes: Code, Telemetry, Keeper')
+      .toBe('Persistence map has 2 linked context routes: Telemetry, Keeper')
 
     fireEvent.click(links[0]!)
-    expect(window.location.hash).toBe(
-      '#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Persistence&label=sangsu+current+focus&source_id=persistence%3Asangsu&keeper=sangsu',
-    )
-
-    fireEvent.click(links[1]!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=sangsu')
   })
 })

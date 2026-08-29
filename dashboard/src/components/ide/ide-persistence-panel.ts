@@ -10,7 +10,6 @@ import { keepers } from '../../store'
 import type { Keeper } from '../../types'
 import { PersistenceStatus, type PersistenceState } from '../common/persistence-status'
 import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceEntry } from './keeper-presence-store'
-import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import {
   openIdeContextRouteLink,
   routeLinksForContext,
@@ -168,18 +167,10 @@ export function IdePersistencePanel({
   const keeperName = resolveKeeperName(explicitKeeperName, activeName, keeperRows)
   const keeper = findKeeper(keeperRows, keeperName)
   const presence = useSignalValue(globalPresenceSnapshot)
-  const overlay = useSignalValue(cursorOverlaySignal)
   const entries: ReadonlyArray<KeeperPresenceEntry> = presenceEntries(presence)
   const entry = keeperName ? entries.find(e => e.keeper_id === keeperName) : null
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
-  const cursor = keeperName ? overlay.cursors.get(keeperName) : undefined
-  const focusLabel = cursor && cursor.file_path && cursor.line >= 1
-    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
-    : null
-  const routeLinks = persistenceRouteLinks(keeperName, cursor)
-  const focusRouteLink = focusLabel
-    ? routeLinks.find(link => link.label === 'Code') ?? null
-    : null
+  const routeLinks = persistenceRouteLinks(keeperName)
   const [diagram, setDiagram] = useState<KeeperStateDiagramResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -265,13 +256,6 @@ export function IdePersistencePanel({
             ${statusDot.label}
           </span>
         ` : null}
-        ${focusLabel ? html`
-          <${PersistenceFocusChip}
-            label=${focusLabel}
-            filePath=${cursor?.file_path}
-            routeLink=${focusRouteLink}
-          />
-        ` : null}
         <span style=${{ marginLeft: 'auto' }}>
           <${PersistenceStatus} status=${persistenceState} lastSaved=${lastSaved} />
         </span>
@@ -295,37 +279,11 @@ export function IdePersistencePanel({
   `
 }
 
-function PersistenceFocusChip({
-  label,
-  filePath,
-  routeLink,
-}: {
-  readonly label: string
-  readonly filePath: string | undefined
-  readonly routeLink: IdeContextRouteLink | null
-}) {
-  if (!routeLink) {
-    return html`<span class="ide-persistence-focus" title=${filePath}>↗ ${label}</span>`
-  }
-  return html`
-    <button
-      type="button"
-      class="ide-persistence-focus v2-ide-action"
-      title=${routeLink.evidence}
-      aria-label=${`Open current persistence focus ${routeLink.evidence}`}
-      onClick=${() => openIdeContextRouteLink(routeLink)}
-    >↗ ${label}</button>
-  `
-}
-
 function persistenceRouteLinks(
   keeperName: string,
-  cursor: KeeperCursor | undefined,
 ): ReadonlyArray<IdeContextRouteLink> {
   const keeperId = keeperName.trim()
   return routeLinksForContext({
-    filePath: cursor?.file_path,
-    line: cursor?.line,
     surface: 'Persistence',
     label: keeperId ? `${keeperId} current focus` : 'keeper current focus',
     sourceId: keeperId ? `persistence:${keeperId}` : 'persistence',

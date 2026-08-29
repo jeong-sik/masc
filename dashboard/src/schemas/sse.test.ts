@@ -92,14 +92,6 @@ describe('SSEMessageSchema', () => {
     if (r.success) expect(r.data.type).toBe('heartbeat')
   })
 
-  it('accepts a typed IDE cursor invalidation', () => {
-    const r = SSEMessageSchema.safeParse({
-      type: 'ide_cursor_changed',
-      keeper_id: 'kidsnote',
-    })
-    expect(r.success).toBe(true)
-  })
-
   it('accepts a keeper_tool_call with typed fields', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'keeper_tool_call',

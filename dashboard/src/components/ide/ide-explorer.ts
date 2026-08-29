@@ -23,7 +23,6 @@ import type { WorkspaceSource } from '../../api/workspace-source'
 import type { Repository } from '../../api/repositories'
 import { showToast } from '../common/toast'
 import { KeeperBadge } from '../keeper-badge'
-import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
 import { openIdeContextRouteLink } from './ide-context-lens'
 
 interface IdeExplorerProps {
@@ -150,9 +149,6 @@ export function IdeExplorer({
   const [contextFocus, setContextFocus] = useState(ideContextFocus.value)
   useEffect(() => ideContextFocus.subscribe(focus => setContextFocus(focus)), [])
 
-  const [cursorOverlay, setCursorOverlay] = useState(cursorOverlaySignal.value)
-  useEffect(() => cursorOverlaySignal.subscribe(v => setCursorOverlay(v)), [])
-
   const handleRepositoryScan = async (): Promise<void> => {
     if (!onRepositoryScan || isScanningRepositories) return
     setIsScanningRepositories(true)
@@ -187,19 +183,6 @@ export function IdeExplorer({
   const fileCountLabel = explorerFileCountLabel(visibleFileCount, filteredFileCount, filtering)
   const diffSummary = useMemo(() => store.diffSummary(), [store, tick])
   const scopeLabel = explorerScopeLabel(source, keeperName, repoList)
-
-  // Reverse map: file_path → keepers currently focused on that file
-  const keepersByFile = useMemo(() => {
-    const map = new Map<string, Array<{ readonly keeperId: string; readonly color: string; readonly focusMode: string }>>()
-    for (const [keeperId, cursor] of cursorOverlay.cursors) {
-      if (!cursor.file_path) continue
-      const entry = { keeperId, color: getKeeperColor(keeperId).cursor, focusMode: cursor.focus_mode }
-      const existing = map.get(cursor.file_path)
-      if (existing) existing.push(entry)
-      else map.set(cursor.file_path, [entry])
-    }
-    return map
-  }, [cursorOverlay])
 
   return html`
     <div
@@ -390,7 +373,6 @@ export function IdeExplorer({
               }
             },
             contextFocus?.file_path === node.path ? contextFocus : null,
-            keepersByFile.get(node.path),
             store.isChildrenLoading(node.path),
           ))}
         </ul>
@@ -492,7 +474,6 @@ function TreeRow(
   selected: boolean,
   onClick: () => void,
   contextFocus: IdeContextFocus | null,
-  activeKeepers?: ReadonlyArray<{ readonly keeperId: string; readonly color: string; readonly focusMode: string }>,
   loadingChildren = false,
 ) {
   const indent = node.depth * 12
@@ -532,24 +513,6 @@ function TreeRow(
           />`}
       <span class="ide-explorer-row-label">${node.label}</span>
       ${contextFocus ? ExplorerContextChip(contextFocus) : null}
-      ${activeKeepers && activeKeepers.length > 0
-        ? html`<span
-            aria-label=${`${activeKeepers.map(k => k.keeperId).join(', ')} focusing`}
-            style=${{ display: 'inline-flex', gap: '2px', marginLeft: 'auto', flexShrink: 0 }}
-          >${activeKeepers.map(k => html`
-            <span
-              key=${k.keeperId}
-              title=${`${k.keeperId} (${k.focusMode})`}
-              style=${{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: k.color,
-                display: 'inline-block',
-              }}
-            />
-          `)}</span>`
-        : null}
       ${node.diff !== null
         ? html`<span
             aria-label=${`Git diff ${node.diff}`}

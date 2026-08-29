@@ -2,7 +2,6 @@ import { get, post, fetchWithTimeout, authHeaders, type GetOptions } from './cor
 import {
   type IdeAnnotation,
   type IdeAnnotationReference,
-  type IdeCodeRegion,
   type AnnotationKind,
   parseIdeAnnotation,
 } from './schemas/ide-annotations'
@@ -11,7 +10,6 @@ import { isRecord } from '../lib/type-guards'
 export type {
   IdeAnnotation,
   IdeAnnotationReference,
-  IdeCodeRegion,
   AnnotationKind,
 } from './schemas/ide-annotations'
 
@@ -33,35 +31,6 @@ export type IdeEventKind = 'tool' | 'turn'
 export interface IdeEventsOptions extends IdeApiOptions {
   readonly kind?: IdeEventKind | 'all'
   readonly keeperId?: string
-  readonly limit?: number
-  readonly offset?: number
-}
-
-export type IdeCursorFocusMode = 'reading' | 'editing' | 'reviewing' | 'planning'
-
-export interface IdeCursorEntry {
-  readonly keeper_id: string
-  readonly file_path: string
-  readonly line: number
-  readonly column: number
-  readonly selection_end?: { readonly line: number; readonly column: number }
-  readonly focus_mode: IdeCursorFocusMode
-  readonly last_update: number
-  readonly tool_name?: string
-  readonly turn?: number
-  readonly turn_id?: string
-}
-
-export interface IdeCursorSnapshot {
-  readonly runtime_id: string
-  readonly branch?: string
-  readonly connected: boolean
-  readonly cursors: ReadonlyArray<IdeCursorEntry>
-}
-
-export interface IdeCursorOptions extends IdeApiOptions {
-  readonly keeperId?: string
-  readonly filePath?: string
   readonly limit?: number
   readonly offset?: number
 }
@@ -198,64 +167,8 @@ function parseStrictRow<T>(
   return parsed
 }
 
-function nullableStringField(record: Record<string, unknown>, key: string): string | null | undefined {
-  const value = record[key]
-  if (value === undefined || value === null) return null
-  return typeof value === 'string' ? value : undefined
-}
-
-function integerField(record: Record<string, unknown>, key: string): number | null {
-  const value = numberField(record, key)
-  return value !== null && Number.isInteger(value) ? value : null
-}
-
-function positiveIntegerField(record: Record<string, unknown>, key: string): number | null {
-  const value = integerField(record, key)
-  return value !== null && value > 0 ? value : null
-}
-
 function parseStrictIdeAnnotation(raw: unknown): IdeAnnotation | null {
   return parseIdeAnnotation(raw)
-}
-
-function parseStrictIdeCodeRegion(raw: unknown): IdeCodeRegion | null {
-  if (!isRecord(raw)) return null
-  const source = isRecord(raw.source) ? raw.source : null
-  if (source === null) return null
-  const filePath = stringField(raw, 'file_path')
-  const lineStart = positiveIntegerField(raw, 'line_start')
-  const lineEnd = positiveIntegerField(raw, 'line_end')
-  const keeperId = stringField(raw, 'keeper_id')
-  const sourceType = stringField(source, 'type')
-  const sourceToolName = nullableStringField(source, 'tool_name')
-  const sourceTurn = sourceType === 'tool_call' ? integerField(source, 'turn') : null
-  const sourceNote = sourceType === 'manual' ? nullableStringField(source, 'note') : null
-  const timestampMs = numberField(raw, 'timestamp_ms')
-  if (
-    !filePath
-    || lineStart === null
-    || lineEnd === null
-    || lineEnd < lineStart
-    || !keeperId
-    || (sourceType !== 'tool_call' && sourceType !== 'manual')
-    || sourceToolName === undefined
-    || sourceNote === undefined
-    || (sourceType === 'tool_call' && sourceTurn === null)
-    || timestampMs === null
-  ) {
-    return null
-  }
-  return {
-    file_path: filePath,
-    line_start: lineStart,
-    line_end: lineEnd,
-    keeper_id: keeperId,
-    source_type: sourceType,
-    source_tool_name: sourceToolName,
-    source_turn: sourceTurn,
-    source_note: sourceNote,
-    timestamp_ms: timestampMs,
-  }
 }
 
 export async function fetchIdeAnnotations(
@@ -335,17 +248,6 @@ export async function deleteIdeAnnotation(
   }
 }
 
-export async function fetchIdeRegions(
-  filePath: string,
-  opts: IdeApiOptions = {},
-): Promise<ReadonlyArray<IdeCodeRegion>> {
-  const params = new URLSearchParams()
-  params.set('file_path', filePath)
-  appendWorkspaceParams(params, opts)
-  const raw = await get<unknown>(`/api/v1/ide/regions?${params.toString()}`, opts)
-  return parseStrictRows('fetchIdeRegions', ideEnvelopeData(raw, 'fetchIdeRegions'), parseStrictIdeCodeRegion)
-}
-
 export async function fetchIdePresence(
   opts: IdeApiOptions = {},
 ): Promise<unknown> {
@@ -354,28 +256,6 @@ export async function fetchIdePresence(
   const raw = await get<unknown>(`/api/v1/ide/presence?${params.toString()}`, opts)
   if (!isRecord(raw) || raw.ok !== true) return null
   return raw.data
-}
-
-export async function fetchIdeCursors(
-  opts: IdeCursorOptions = {},
-): Promise<IdeCursorSnapshot | null> {
-  const params = new URLSearchParams()
-  appendWorkspaceParams(params, opts)
-  if (opts.keeperId) params.set('keeper_id', opts.keeperId)
-  if (opts.filePath) params.set('file_path', opts.filePath)
-  if (opts.limit !== undefined) params.set('limit', String(opts.limit))
-  if (opts.offset !== undefined) params.set('offset', String(opts.offset))
-  const query = params.size > 0 ? `?${params.toString()}` : ''
-  const raw = await get<unknown>(`/api/v1/ide/cursors${query}`, opts)
-  const data = ideEnvelopeRecord(raw, 'fetchIdeCursors')
-  const snapshot = parseIdeCursorSnapshot(data)
-  if (snapshot === null) throw new Error('fetchIdeCursors returned malformed data')
-  const cursorRows = data.cursors
-  if (!Array.isArray(cursorRows)) throw new Error('fetchIdeCursors returned malformed cursors')
-  if (snapshot.cursors.length !== cursorRows.length) {
-    throw new Error('fetchIdeCursors returned malformed cursor rows')
-  }
-  return snapshot
 }
 
 export async function fetchIdeEvents(
@@ -472,73 +352,3 @@ function stringArrayField(record: Record<string, unknown>, key: string): Readonl
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
-function parseIdeCursorSnapshot(raw: unknown): IdeCursorSnapshot | null {
-  if (!isRecord(raw)) return null
-  const runtimeId = stringField(raw, 'runtime_id')
-  if (!runtimeId) return null
-  const cursorsRaw = Array.isArray(raw.cursors) ? raw.cursors : []
-  const cursors = cursorsRaw.map(parseIdeCursorEntry).filter(isIdeCursorEntry)
-  const branch = stringField(raw, 'branch')
-  return {
-    runtime_id: runtimeId,
-    connected: raw.connected === true,
-    cursors,
-    ...(branch ? { branch } : {}),
-  }
-}
-
-function parseIdeCursorEntry(raw: unknown): IdeCursorEntry | null {
-  if (!isRecord(raw)) return null
-  const keeperId = stringField(raw, 'keeper_id')
-  const filePath = stringField(raw, 'file_path')
-  const line = numberField(raw, 'line')
-  const column = numberField(raw, 'column')
-  const focusMode = stringField(raw, 'focus_mode')
-  const lastUpdate = numberField(raw, 'last_update')
-  if (
-    !keeperId
-    || !filePath
-    || line === null
-    || line < 1
-    || column === null
-    || column < 0
-    || !isIdeCursorFocusMode(focusMode)
-    || lastUpdate === null
-  ) return null
-
-  const selectionEnd = parseSelectionEnd(raw.selection_end)
-  const toolName = stringField(raw, 'tool_name')
-  const turn = numberField(raw, 'turn')
-  const turnId = stringField(raw, 'turn_id')
-  return {
-    keeper_id: keeperId,
-    file_path: filePath,
-    line,
-    column,
-    ...(selectionEnd ? { selection_end: selectionEnd } : {}),
-    focus_mode: focusMode,
-    last_update: lastUpdate,
-    ...(toolName ? { tool_name: toolName } : {}),
-    ...(turn !== null ? { turn } : {}),
-    ...(turnId ? { turn_id: turnId } : {}),
-  }
-}
-
-function isIdeCursorEntry(value: IdeCursorEntry | null): value is IdeCursorEntry {
-  return value !== null
-}
-
-function parseSelectionEnd(raw: unknown): { readonly line: number; readonly column: number } | null {
-  if (!isRecord(raw)) return null
-  const line = numberField(raw, 'line')
-  const column = numberField(raw, 'column')
-  if (line === null || line < 1 || column === null || column < 0) return null
-  return { line, column }
-}
-
-function isIdeCursorFocusMode(value: string | null): value is IdeCursorFocusMode {
-  return value === 'reading'
-    || value === 'editing'
-    || value === 'reviewing'
-    || value === 'planning'
-}

@@ -15,7 +15,6 @@ import {
   type IdeContextRouteLink,
 } from './ide-context-lens'
 import { globalPresenceSnapshot, presenceEntries, type KeeperPresenceStatus } from './keeper-presence-store'
-import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
 import { activeIdeFocus } from './ide-state'
 import { ideEditorSelection } from './ide-editor-selection'
 import { buildIdeInterjectSurfaceContext } from './ide-interject-surface-context'
@@ -81,12 +80,6 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
     return () => unsub()
   }, [])
 
-  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(v => setOverlay(v))
-    return () => unsub()
-  }, [])
-
   const snapshot = interjectStore.snapshot()
   const actions = interjectStore.actions()
   const keeperId = snapshot.active_keeper_id ?? ''
@@ -97,10 +90,7 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
   const presenceEntry = keeperIdNorm
     ? presenceEntries(presence).find(e => e.keeper_id.trim().toLowerCase() === keeperIdNorm) ?? null
     : null
-  const cursor = keeperId
-    ? resolveCursor(keeperId, overlay.cursors)
-    : null
-  const contextLinks = interjectContextRouteLinks(keeperId, cursor)
+  const contextLinks = interjectContextRouteLinks(keeperId)
 
   if (compact && !expanded) {
     return html`
@@ -145,7 +135,6 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
           </span>
           ${presenceEntry ? KeeperPresencePill(presenceEntry.status) : null}
         </div>
-        ${cursor ? CursorLocation(cursor) : null}
         <${InterjectContextLinks} links=${contextLinks} />
       </div>
       <input
@@ -188,29 +177,17 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
 
 export function interjectContextRouteLinks(
   keeperId: string,
-  cursor: KeeperCursor | null,
 ): ReadonlyArray<IdeContextRouteLink> {
   const keeper = keeperId.trim()
   if (!keeper) return []
   return routeLinksForContext({
-    filePath: cursor?.file_path,
-    line: cursor?.line,
     surface: 'Interject',
-    label: cursor?.tool_name ?? cursor?.focus_mode ?? 'active keeper',
+    label: 'active keeper',
     sourceId: `interject:${keeper}`,
     keeperId: keeper,
     telemetry: true,
-    telemetryQuery: interjectTelemetryQuery(keeper, cursor),
+    telemetryQuery: `interject keeper:${keeper}`,
   })
-}
-
-function interjectTelemetryQuery(keeperId: string, cursor: KeeperCursor | null): string {
-  return [
-    'interject',
-    `keeper:${keeperId}`,
-    cursor?.focus_mode ? `mode:${cursor.focus_mode}` : null,
-    cursor?.tool_name ? `tool:${cursor.tool_name}` : null,
-  ].filter((value): value is string => value !== null).join(' ')
 }
 
 function InterjectContextLinks({
@@ -308,56 +285,3 @@ function KeeperPresencePill(status: KeeperPresenceStatus) {
   `
 }
 
-function CursorLocation(cursor: {
-  keeper_id: string
-  file_path: string
-  line: number
-  focus_mode: string
-  tool_name?: string
-}) {
-  const fileName = cursor.file_path.split('/').pop() ?? cursor.file_path
-  const color = getKeeperColor(cursor.keeper_id)
-  return html`
-    <div
-      style=${{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--sp-1)',
-        fontSize: 'var(--fs-10)',
-        fontFamily: 'var(--font-mono)',
-        color: 'var(--color-fg-muted)',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}
-      title=${cursor.file_path}
-    >
-      <span
-        aria-hidden="true"
-        style=${{
-          width: '4px',
-          height: '4px',
-          borderRadius: '50%',
-          background: color.cursor,
-          display: 'inline-block',
-          flexShrink: 0,
-        }}
-      />
-      <span>${fileName}:${cursor.line}</span>
-      ${cursor.tool_name
-        ? html`<span style=${{ color: 'var(--color-fg-disabled)' }}>· ${cursor.tool_name}</span>`
-        : null}
-    </div>
-  `
-}
-
-function resolveCursor(
-  keeperId: string,
-  cursors: Map<string, KeeperCursor>,
-): KeeperCursor | null {
-  const target = keeperId.toLowerCase().trim()
-  for (const [id, cursor] of cursors) {
-    if (id.toLowerCase() === target) return cursor
-  }
-  return null
-}

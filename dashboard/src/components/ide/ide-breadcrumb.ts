@@ -1,8 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { activeIdeFile, focusIdeContextAnchor } from './ide-state'
-import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
-import { routeLinksForContext } from './ide-context-lens'
+import { activeIdeFile } from './ide-state'
 
 const FILE_ICONS: Readonly<Record<string, string>> = {
   '.ts': '🟦', '.tsx': '🟦',
@@ -21,12 +19,6 @@ export function IdeBreadcrumb() {
     return () => unsub()
   }, [])
 
-  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(v => setOverlay(v))
-    return () => unsub()
-  }, [])
-
   if (filePath === null) {
     return html`
       <nav
@@ -39,46 +31,6 @@ export function IdeBreadcrumb() {
   const fileName = segments.at(-1) ?? ""
   const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : ''
   const icon = FILE_ICONS[ext] ?? '📄'
-
-  const activeOnFile: Array<{
-    readonly keeperId: string
-    readonly color: string
-    readonly focusMode: KeeperCursor['focus_mode']
-    readonly toolName: string | undefined
-    readonly turn: number | undefined
-    readonly line: number
-  }> = []
-  for (const [keeperId, cursor] of overlay.cursors) {
-    if (cursor.file_path === filePath) {
-      activeOnFile.push({
-        keeperId,
-        color: getKeeperColor(keeperId).cursor,
-        focusMode: cursor.focus_mode,
-        toolName: cursor.tool_name,
-        turn: cursor.turn,
-        line: cursor.line,
-      })
-    }
-  }
-
-  const activateKeeperBreadcrumb = (keeper: (typeof activeOnFile)[number]) => {
-    focusIdeContextAnchor({
-      file_path: filePath,
-      line: keeper.line,
-      surface: 'Keeper',
-      label: keeper.toolName ?? keeper.focusMode,
-      source_id: `breadcrumb:${keeper.keeperId}:${keeper.line}`,
-      keeper_id: keeper.keeperId,
-      route_links: routeLinksForContext({
-        filePath,
-        line: keeper.line,
-        surface: 'Keeper',
-        label: keeper.toolName ?? keeper.focusMode,
-        sourceId: `breadcrumb:${keeper.keeperId}:${keeper.line}`,
-        keeperId: keeper.keeperId,
-      }),
-    }, 'operator')
-  }
 
   return html`
     <div
@@ -100,38 +52,6 @@ export function IdeBreadcrumb() {
           >${seg}</span>
         `)}
       </span>
-      ${activeOnFile.length > 0
-        ? html`
-          <span class="flex items-center gap-1 ml-auto shrink-0">
-            ${activeOnFile.map(k => html`
-              <button
-                key=${k.keeperId}
-                type="button"
-                class="ide-breadcrumb-keeper v2-ide-action"
-                title=${`${k.keeperId} · ${k.focusMode}${k.toolName ? ` · ${k.toolName}` : ''}${k.turn != null ? ` · turn ${k.turn}` : ''}`}
-                aria-label=${`Focus ${k.keeperId} keeper context at line ${k.line}`}
-                onClick=${() => activateKeeperBreadcrumb(k)}
-                style=${{ color: 'var(--color-fg-muted)' }}
-              >
-                <span
-                  aria-hidden="true"
-                  style=${{
-                    width: '7px',
-                    height: '7px',
-                    borderRadius: '50%',
-                    background: k.color,
-                    display: 'inline-block',
-                    boxShadow: k.focusMode === 'editing' ? `0 0 4px ${k.color}` : 'none',
-                  }}
-                />
-                <span>${k.keeperId}</span>
-                ${k.toolName ? html`<span class="text-[var(--color-fg-disabled)]" style=${{ fontSize: '10px' }}>${k.toolName}</span>` : null}
-                ${k.turn != null ? html`<span style=${{ fontSize: '10px', color: 'var(--color-accent-fg)' }}>T${k.turn}</span>` : null}
-              </button>
-            `)}
-          </span>
-        `
-        : null}
     </div>
   `
 }

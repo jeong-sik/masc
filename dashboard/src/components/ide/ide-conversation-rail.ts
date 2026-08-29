@@ -27,7 +27,6 @@ import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 import { activeIdeFile, focusIdeContextAnchor, normalizeIdeContextFilePath } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
 import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceEntry } from './keeper-presence-store'
-import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
 import {
   openIdeContextRouteLink,
   routeLinksForContext,
@@ -122,7 +121,6 @@ export function IdeConversationRail() {
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
   const [, bumpThreads] = useState(0)
   useSignalValue(globalPresenceSnapshot)
-  useSignalValue(cursorOverlaySignal)
   useEffect(() => {
     const unsub = ideReplayUntilMs.subscribe(value => setReplayUntilMs(value))
     return () => unsub()
@@ -197,7 +195,6 @@ export function IdeConversationRail() {
 
   const presence = globalPresenceSnapshot.value
   const entries: ReadonlyArray<KeeperPresenceEntry> = presenceEntries(presence)
-  const overlay = cursorOverlaySignal.value
 
   return html`
     <div
@@ -237,7 +234,6 @@ export function IdeConversationRail() {
               focusedId,
               nextFocusedId => setFocusedId(focusedId === nextFocusedId ? null : nextFocusedId),
               entries,
-              overlay,
             ))}
       </ol>
     </div>
@@ -350,7 +346,6 @@ function ReplayRailCard(
   focusedId: string | null,
   onFocus: (id: string) => void,
   entries: ReadonlyArray<KeeperPresenceEntry>,
-  overlay: KeeperCursorOverlay,
 ) {
   if (item.source === 'thread') {
     return PostCard(
@@ -358,10 +353,9 @@ function ReplayRailCard(
       focusedId === item.post.id,
       () => onFocus(item.post.id),
       entries,
-      overlay,
     )
   }
-  return DecisionCard(item, entries, overlay)
+  return DecisionCard(item, entries)
 }
 
 function PostCard(
@@ -369,7 +363,6 @@ function PostCard(
   focused: boolean,
   onFocus: () => void,
   entries: ReadonlyArray<KeeperPresenceEntry>,
-  overlay: KeeperCursorOverlay,
 ) {
   const kind = boardKindFromPost(post)
   const kindColor = KIND_TOKEN[kind]
@@ -379,9 +372,6 @@ function PostCard(
   const bodyText = post.body || post.title || ''
   const entry = entries.find(e => e.keeper_id === postAuthorId(post))
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
-  const cursor = overlay.cursors.get(postAuthorId(post))
-  const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
-  const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
   const thread = postToAnchoredThread(post)
   const anchor = thread?.anchor ?? null
   const routeLinks = conversationRouteLinks(post, anchor, kind, bodyText)
@@ -446,19 +436,6 @@ function PostCard(
           </div>
         ` : null}
         <p class="ide-conversation-body">${bodyText}</p>
-        ${hasFocus ? html`
-          <span style=${{
-            fontSize: 'var(--fs-10)',
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--color-accent-fg)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            display: 'block',
-          }}
-          title=${cursor.file_path}
-          >↗ ${focusFile}:${cursor.line}</span>
-        ` : null}
         <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>
           ${post.comment_count > 0 ? `${post.comment_count} replies · ` : ''}${(post.votes ?? 0) > 0 ? `${post.votes ?? 0} votes` : ''}
         </div>
@@ -544,7 +521,6 @@ function ConversationContextBadge(summary: ConversationContextSummary) {
 function DecisionCard(
   item: Extract<ReplayRailItem, { source: 'decision' }>,
   entries: ReadonlyArray<KeeperPresenceEntry>,
-  overlay: KeeperCursorOverlay,
 ) {
   const decision = item.decision
   const keeper = decision.keeper_name || '(unknown keeper)'
@@ -557,15 +533,7 @@ function DecisionCard(
   ].filter(Boolean).join(' · ')
   const entry = entries.find(e => e.keeper_id === keeper)
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
-  const cursor = overlay.cursors.get(keeper)
-  const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
-  const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
-  const routeLinks = decisionRouteLinks(
-    item,
-    hasFocus ? cursor.file_path : undefined,
-    hasFocus ? cursor.line : undefined,
-    summary,
-  )
+  const routeLinks = decisionRouteLinks(item, summary)
   const contextSummary = conversationContextSummary(routeLinks)
   return html`
     <li class="v2-ide-row" style=${{ display: 'block' }}>
@@ -613,18 +581,6 @@ function DecisionCard(
           <span style=${{ marginLeft: 'auto', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${formatThreadTime(item.timestamp_ms)}</span>
         </div>
         <p style=${{ margin: 0, color: 'var(--color-fg-secondary)', fontSize: 'var(--fs-12)' }}>${summary || 'decision event'}</p>
-        ${hasFocus ? html`
-          <span style=${{
-            fontSize: 'var(--fs-10)',
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--color-accent-fg)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          title=${cursor.file_path}
-          >↗ ${focusFile}:${cursor.line}</span>
-        ` : null}
         ${routeLinks.length > 0 ? html`
           <div class="ide-conversation-route-links v2-ide-detail" aria-label="Decision operational links">
             ${routeLinks.map(link => ConversationRouteLink(link))}
@@ -637,15 +593,11 @@ function DecisionCard(
 
 function decisionRouteLinks(
   item: Extract<ReplayRailItem, { source: 'decision' }>,
-  filePath: string | undefined,
-  line: number | undefined,
   summary: string,
 ): ReadonlyArray<IdeContextRouteLink> {
   const decision = item.decision
   const keeper = decision.keeper_name || '(unknown keeper)'
   return routeLinksForContext({
-    filePath,
-    line,
     surface: 'Decision',
     label: summary || decision.event_type || '(unknown decision event)',
     sourceId: `decision-${keeper}-${item.timestamp_ms}-${decision.event_type}`,

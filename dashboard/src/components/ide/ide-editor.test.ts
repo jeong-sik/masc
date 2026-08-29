@@ -8,7 +8,6 @@ import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
 import { focusIdeContextAnchor, focusIdeFile, ideContextFocus } from './ide-state'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 
@@ -35,12 +34,6 @@ describe('IdeEditor', () => {
     clearTraces()
     lspDiagnosticSnapshot.value = new Map()
     ideConversationThreadSnapshot.value = { filePath: '', threads: [] }
-    cursorOverlaySignal.value = {
-      cursors: new Map(),
-      heatmap: new Map(),
-      collisions: [],
-      active_file: null,
-    }
     window.location.hash = ''
   })
 
@@ -107,7 +100,7 @@ describe('IdeEditor', () => {
     await waitFor(() => {
       expect(container.querySelector('.cm-blame-gutter')).not.toBeNull()
       expect(container.querySelector('[data-testid="ide-observation-summary"]')?.textContent)
-        .toContain('metadata pending')
+        .toContain('1 owned')
     })
     expect(container.querySelector('.ide-codemirror-shell')?.getAttribute('data-view'))
       .toBe('source-ownership')
@@ -341,22 +334,6 @@ describe('IdeEditor', () => {
         reply_count: 1,
       }],
     }
-    cursorOverlaySignal.value = {
-      cursors: new Map([[
-        'sangsu',
-        {
-          keeper_id: 'sangsu',
-          file_path: 'runtime.ts',
-          line: 2,
-          column: 1,
-          focus_mode: 'editing',
-          last_update: Date.now(),
-        },
-      ]]),
-      heatmap: new Map(),
-      collisions: [],
-      active_file: 'runtime.ts',
-    }
     pushTrace({
       id: 'activity-runtime',
       tsMs: 3000,
@@ -421,7 +398,6 @@ describe('IdeEditor', () => {
       'Trace2',
       'Ops1',
       'Diff2',
-      'Keepers1',
     ])
     expect(signals.every(item => item.getAttribute('data-active') === 'true')).toBe(true)
     expect(signals.map(item => item.title)).toEqual([
@@ -431,7 +407,6 @@ describe('IdeEditor', () => {
       '2 current-file trace events',
       '1 current-file operational surface link',
       '2 current-file changed rows',
-      '1 keeper active in this file',
     ])
   })
 

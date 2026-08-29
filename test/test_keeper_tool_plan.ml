@@ -876,6 +876,75 @@ pointer = "now_iso"
   check bool "TOML rejects the same invalid pointer" true toml_rejected
 ;;
 
+let test_validated_plan_has_a_closed_durable_request_encoding () =
+  let original =
+    request_of_string
+      {|{"nodes":[
+          {"id":"clock","tool":"keeper_time_now",
+           "input":{"kind":"literal","value":{}}},
+          {"id":"memory","tool":"keeper_memory_search","after":["clock"],
+           "input":{"kind":"object","fields":[
+             {"name":"query","value":{"kind":"output","node":"clock",
+                                            "pointer":"/now_iso"}},
+             {"name":"filters","value":{"kind":"array","items":[
+               {"kind":"literal","value":"recent"}]}}]}}]}|}
+  in
+  let plan =
+    match parse_request original with
+    | Ok plan -> plan
+    | Error error -> failf "durable fixture rejected: %s" (Request.error_message error)
+  in
+  let encoded =
+    match Request.to_yojson plan with
+    | Ok encoded -> encoded
+    | Error (Request.Unsubstituted_param { name }) ->
+      failf "validated request retained parameter %S" name
+  in
+  let decoded =
+    match parse_request encoded with
+    | Ok decoded -> decoded
+    | Error error ->
+      failf "canonical durable encoding did not revalidate: %s"
+        (Request.error_message error)
+  in
+  check (list string) "round-trip plan identity" (plan_signature plan)
+    (plan_signature decoded);
+  match Request.to_yojson decoded with
+  | Error _ -> fail "round-trip plan stopped being encodable"
+  | Ok reencoded ->
+    check
+      (testable Yojson.Safe.pp Yojson.Safe.equal)
+      "canonical encoding is stable"
+      encoded
+      reencoded
+;;
+
+let test_durable_request_encoding_rejects_unsubstituted_params () =
+  let query = Plan.Json_template.param ~name:"query" in
+  let input =
+    match Plan.Json_template.object_ [ "query", query ] with
+    | Ok input -> input
+    | Error _ -> fail "unique parameter input was rejected"
+  in
+  let node =
+    Plan.node
+      ~id:(node_id "memory")
+      ~tool_name:"keeper_memory_search"
+      ~input
+      ()
+  in
+  let plan =
+    match Plan.create ~descriptors:(Descriptor.all_descriptors ()) [ node ] with
+    | Ok plan -> plan
+    | Error error -> failf "parameterized plan rejected: %s" (Plan.error_to_string error)
+  in
+  match Request.to_yojson plan with
+  | Error (Request.Unsubstituted_param { name = "query" }) -> ()
+  | Error (Request.Unsubstituted_param { name }) ->
+    failf "wrong unsubstituted parameter %S" name
+  | Ok _ -> fail "durable encoding admitted an unsubstituted parameter"
+;;
+
 let test_request_defaults_missing_input_to_empty_object () =
   let json = request_of_string {|{"nodes":[{"id":"clock","tool":"keeper_time_now"}]}|} in
   match parse_request json with
@@ -1230,6 +1299,14 @@ let () =
             "JSON and TOML invalid pointer parity"
             `Quick
             test_request_and_toml_reject_the_same_invalid_pointer
+        ; test_case
+            "closed durable request encoding"
+            `Quick
+            test_validated_plan_has_a_closed_durable_request_encoding
+        ; test_case
+            "durable encoding rejects parameters"
+            `Quick
+            test_durable_request_encoding_rejects_unsubstituted_params
         ; test_case
             "missing input defaults"
             `Quick

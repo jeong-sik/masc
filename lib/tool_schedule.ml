@@ -261,13 +261,15 @@ let schedule_request_json ?last_wake (request : Schedule_domain.schedule_request
              | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts) )
          ; ( "requested_at_iso"
            , `String (Masc_domain.iso8601_of_unix_seconds request.requested_at) )
-           (* The dashboard projection emits the structured form through the
-              same serialiser. Sending only the two flattened strings here left
-              the client reconstructing recurrence from them, with an
-              unknown-shape fallback at the end of that chain. Both surfaces
-              now carry the structure, and the flattened pair stays for the
-              readers that already use it. *)
-         ; "recurrence", Schedule_domain.recurrence_to_yojson request.recurrence
+           (* [Schedule_domain.schedule_request_to_yojson] already emits the
+              structured "recurrence" in [fields] above. Appending it a second
+              time here produced an object with the key twice: readers that
+              take the first binding and readers that take the last read
+              different values from one result, and the checkpoint encoder --
+              which rejects duplicate keys outright -- failed the whole turn
+              at [message[_].content[_].json], after the tool had already run.
+              Keeper sangsu lost 12 consecutive turns to that on 2026-08-29.
+              The flattened pair below stays for the readers that use it. *)
          ; ( "recurrence_kind"
            , `String (Schedule_domain.recurrence_kind_to_string request.recurrence) )
          ; ( "recurrence_summary"

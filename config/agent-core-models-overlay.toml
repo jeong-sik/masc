@@ -478,3 +478,16 @@ model_id = "glm-4.7"
 id = "kimi_coding.kimi-for-coding"
 provider_ref = "kimi_coding"
 model_id = "kimi-for-coding"
+
+# Healthy fallback for the exact-output judgement lanes: a quota-independent
+# provider (ollama.com) separate from the z.ai glm-coding primary and the kimi
+# coding plan, so one provider's rate limit does not stall a whole lane.
+# Mirrors the live deployment's target. enable_thinking=false is required --
+# deepseek-v4-flash has thinking on by default, and without it the answer lands
+# in the thinking field and content comes back empty. Probed 2026-08-30 on
+# ollama.com/v1: json_object -> {"ok":true} with no fence.
+[[targets]]
+id = "ollama_cloud.deepseek-v4-flash-0731"
+provider_ref = "ollama_cloud"
+model_id = "deepseek-v4-flash:0731"
+enable_thinking = false

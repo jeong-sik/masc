@@ -59,25 +59,27 @@ default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
 # Set `enabled = false` in either table to keep the catalog example while
 # excluding it from the executable runtime inventory. A disabled runtime cannot
 # remain referenced by [runtime].default, lanes, assignments, or failover lists.
-# 2026-08-29: the deployed exact-output catalog retired the
-# deepseek.deepseek-v4-pro target (live boot ERROR "retired target ref(s)
-# ignored"); the live lanes run glm + kimi since the 2026-08-28 swap.
+# 2026-08-30: every lane leads with glm-coding.glm-5.3 (z.ai) and falls over to
+# ollama_cloud.deepseek-v4-flash-0731 (ollama.com). The two slots are on
+# different providers with independent quotas, so one provider's weekly limit
+# does not stall a whole lane -- the failure the kimi coding plan hit on
+# 2026-08-30. Both were probed live: glm-5.3 answers a json_object request on
+# the z.ai coding wire, deepseek-0731 answers one (no fence) on ollama.com.
 [runtime.exact_output_lanes.librarian_exact]
-slots = ["glm-coding.glm-5-3", "kimi_coding.kimi-for-coding"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
 
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = ["glm-coding.glm-5-3", "glm-coding.glm-4-7-coding"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
 
 [runtime.exact_output_lanes.board_attention_exact]
-slots = ["glm-coding.glm-5-3", "glm-coding.glm-4-7-coding"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
 
 # Verifier/completion-authority judgement lane (RFC-0361 D7(a)). Judgement
 # calls resolve only this lane and fail over in declared slot order, the same
-# frozen-order contract as the other exact-output lanes. Same 2026-08-29
-# retirement as librarian_exact: deepseek.deepseek-v4-pro left the deployed
-# exact-output catalog, so the seed mirrors the live glm + kimi slots.
+# frozen-order contract as the other exact-output lanes. Same glm-5.3 primary
+# and deepseek-0731 healthy fallback as the lanes above.
 [runtime.exact_output_lanes.verifier_exact]
-slots = ["glm-coding.glm-5-3", "kimi_coding.kimi-for-coding"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
 
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
 # docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).

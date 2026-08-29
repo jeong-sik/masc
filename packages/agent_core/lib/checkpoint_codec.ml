@@ -503,7 +503,9 @@ let rec validate_cached_tool_result_json ~scope = function
     let* () =
       match json with
       | None -> Ok ()
-      | Some json -> Execution_json.validate ~context:(scope ^ ".json") json
+      | Some json ->
+        Execution_json.validate ~context:(scope ^ ".json") json
+        |> Result.map_error Execution_json.validation_error_to_string
     in
     (match content_blocks with
      | None -> Ok ()
@@ -656,7 +658,8 @@ let checkpoint_json_result cp =
   let* () =
     Execution_json.validate ~context:"Checkpoint v10" json
     |> Result.map_error (fun detail ->
-      Error.Serialization (JsonParseError { detail }))
+      Error.Serialization
+        (JsonParseError { detail = Execution_json.validation_error_to_string detail }))
   in
   let* () = validate_json_encoding json in
   let* () = Checkpoint_v10_contract.validate_v10_json json in

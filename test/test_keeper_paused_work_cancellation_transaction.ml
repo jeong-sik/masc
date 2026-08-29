@@ -107,6 +107,7 @@ let with_pending_lane ?registered ?latched_reason ~paused f =
            ~keeper_name
          |> require_ok "load pending accepted source incarnation"
          |> State.select_when
+              ~now:(Unix.gettimeofday ())
               ~ready:(Queue.stimulus_identity_equal source)
          |> require_some "select pending accepted source"
          |> fun selection -> selection.admitted_revision

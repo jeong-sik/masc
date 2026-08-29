@@ -248,19 +248,44 @@ let with_revision revision state = { state with revision }
 
 let transition_outbox_blocked state = state.transition_outbox <> []
 
-let rec first_ready_entry ~ready = function
-  | [] -> None
-  | entry :: _ when ready entry.source -> Some entry
-  | _ :: rest -> first_ready_entry ~ready rest
+(* #31597: a plain head-of-list scan never looks past the first ready
+   [Normal]/[Immediate] entry, so a [Low] entry sitting further back never
+   gets picked while the Keeper's own [Normal] backlog keeps refilling ahead
+   of it — measured as a recurring schedule dispatching "succeeded" every
+   hour for 16 days with zero Board output. [pending_entries] is still
+   urgency-sorted on arrival (see [with_pending] above), so this full scan
+   is over an already-short, already-ordered list; it picks the ready entry
+   with the lowest *effective* urgency rank (aging applied), tie-broken by
+   earliest [arrived_at] — which reduces to the old head-of-list behaviour
+   whenever no entry has aged, since the list is still urgency-then-arrival
+   ordered in that case. *)
+let first_ready_entry ~now ~ready entries =
+  let rank_of entry = Keeper_event_queue.effective_urgency_rank ~now entry.source in
+  entries
+  |> List.filter (fun entry -> ready entry.source)
+  |> List.fold_left
+       (fun best entry ->
+          match best with
+          | None -> Some entry
+          | Some current ->
+            let cmp = Int.compare (rank_of entry) (rank_of current) in
+            if cmp < 0
+            then Some entry
+            else if cmp > 0
+            then Some current
+            else if entry.source.arrived_at < current.source.arrived_at
+            then Some entry
+            else Some current)
+       None
 ;;
 
-let peek_when ~ready state =
+let peek_when ~now ~ready state =
   Option.map
     (fun entry -> entry.source)
-    (first_ready_entry ~ready state.pending_entries)
+    (first_ready_entry ~now ~ready state.pending_entries)
 ;;
 
-let select_when ~ready state = first_ready_entry ~ready state.pending_entries
+let select_when ~now ~ready state = first_ready_entry ~now ~ready state.pending_entries
 
 let validate_pending_selection
       ~(selection : pending_selection)

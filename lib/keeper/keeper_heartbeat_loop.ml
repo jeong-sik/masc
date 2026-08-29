@@ -405,6 +405,7 @@ let pending_stimulus_remains ~ctx ~keeper_name =
     Keeper_registry_event_queue.peek_when_result
       ~base_path:ctx.config.base_path
       keeper_name
+      ~now:(Time_compat.now ())
       ~ready:(fun (_ : Keeper_event_queue.stimulus) -> true)
   with
   | Ok (Some _) -> true

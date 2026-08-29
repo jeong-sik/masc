@@ -24,8 +24,8 @@ let post_ids queue =
   Queue.to_list queue |> List.map (fun (item : Queue.stimulus) -> item.post_id)
 ;;
 
-let select state =
-  State.select_when ~ready:(fun _ -> true) state
+let select ?(now = Unix.gettimeofday ()) state =
+  State.select_when ~now ~ready:(fun _ -> true) state
   |> require_some "pending selection"
 ;;
 
@@ -57,6 +57,81 @@ let test_exact_ack_removes_only_selected_identity () =
     "distinct source remains"
     [ "approval-b" ]
     (post_ids (State.pending acked))
+;;
+
+(* #31597: Low never competes with a fresh Normal entry before it has aged
+   past the threshold — this is the pre-existing strict-priority behaviour,
+   kept as a regression baseline so the aging tests below can't pass by
+   accident (e.g. a bug that always promotes Low regardless of age). *)
+let test_low_below_aging_threshold_still_loses_to_fresh_normal () =
+  let low = { (stimulus "low-item" 0.0) with urgency = Queue.Low } in
+  let normal = stimulus "normal-item" 1000.0 in
+  let state = State.with_pending (queue [ low; normal ]) State.empty in
+  let selected =
+    State.select_when ~now:1000.0 ~ready:(fun _ -> true) state
+    |> require_some "pending selection"
+  in
+  Alcotest.(check string)
+    "unaged Low (age 1000s < 3600s threshold) still loses to Normal"
+    "normal-item"
+    selected.source.post_id
+;;
+
+(* Once a Low entry has waited at least the aging threshold, it competes with
+   Normal entries on arrival order instead of losing unconditionally. *)
+let test_low_aged_past_threshold_competes_with_normal_by_arrival () =
+  let low = { (stimulus "low-item" 0.0) with urgency = Queue.Low } in
+  let normal = stimulus "normal-item" 1000.0 in
+  let state = State.with_pending (queue [ low; normal ]) State.empty in
+  let selected =
+    State.select_when ~now:3700.0 ~ready:(fun _ -> true) state
+    |> require_some "pending selection"
+  in
+  Alcotest.(check string)
+    "aged Low (age 3700s >= 3600s threshold) wins on earlier arrival"
+    "low-item"
+    selected.source.post_id
+;;
+
+(* Aging promotes Low to Normal only — it never reaches Immediate, no matter
+   how long it has waited. Immediate stays a producer-declared contract
+   (keeper_composition_completion_wake.ml). *)
+let test_low_aging_never_reaches_immediate () =
+  let low = { (stimulus "low-item" 0.0) with urgency = Queue.Low } in
+  let immediate =
+    { (stimulus "immediate-item" 5000.0) with urgency = Queue.Immediate }
+  in
+  let state = State.with_pending (queue [ low; immediate ]) State.empty in
+  let selected =
+    State.select_when ~now:100_000.0 ~ready:(fun _ -> true) state
+    |> require_some "pending selection"
+  in
+  Alcotest.(check string)
+    "an arbitrarily old Low still loses to Immediate"
+    "immediate-item"
+    selected.source.post_id
+;;
+
+(* Two Low entries aged past the threshold keep their relative arrival order
+   once promoted, the same fairness guarantee same-urgency entries already
+   had (see [with_pending]'s "stable order" invariant). *)
+let test_multiple_aged_low_entries_keep_arrival_order () =
+  let low_a = { (stimulus "low-a" 0.0) with urgency = Queue.Low } in
+  let low_b = { (stimulus "low-b" 100.0) with urgency = Queue.Low } in
+  let state = State.with_pending (queue [ low_a; low_b ]) State.empty in
+  let first =
+    State.select_when ~now:4000.0 ~ready:(fun _ -> true) state
+    |> require_some "first pending selection"
+  in
+  Alcotest.(check string) "earlier-arrived aged Low is picked first" "low-a" first.source.post_id;
+  let acked =
+    State.ack_pending ~selection:first state |> require_ok "ack first aged Low"
+  in
+  let second =
+    State.select_when ~now:4000.0 ~ready:(fun _ -> true) acked
+    |> require_some "second pending selection"
+  in
+  Alcotest.(check string) "later-arrived aged Low is picked next" "low-b" second.source.post_id
 ;;
 
 let test_pending_collapses_duplicate_source_identity () =
@@ -307,6 +382,7 @@ let test_projected_disposition_ledger_replays_older_operation () =
     { source = cancelled_source
     ; source_incarnation =
         (State.select_when
+           ~now:(Unix.gettimeofday ())
            ~ready:(Queue.stimulus_identity_equal cancelled_source)
            initial
          |> require_some "select cancellation source")
@@ -337,6 +413,7 @@ let test_projected_disposition_ledger_replays_older_operation () =
     { source = transferred_source
     ; source_incarnation =
         (State.select_when
+           ~now:(Unix.gettimeofday ())
            ~ready:(Queue.stimulus_identity_equal transferred_source)
            projected_cancel
          |> require_some "select transfer source")
@@ -466,6 +543,7 @@ let test_durable_peek_ack_restart () =
       Persistence.select_when_result
         ~base_path
         ~keeper_name
+        ~now:(Unix.gettimeofday ())
         ~ready:(fun _ -> true)
       |> require_ok "durable peek"
       |> require_some "durable selection"
@@ -510,6 +588,7 @@ let test_immediate_arrival_precedes_pending_normal_entries () =
       Persistence.select_when_result
         ~base_path
         ~keeper_name
+        ~now:(Unix.gettimeofday ())
         ~ready:(fun _ -> true)
       |> require_ok "select head"
       |> require_some "head selection"
@@ -537,6 +616,7 @@ let test_durable_reprioritize_is_source_incarnation_fenced () =
     in
     let selection =
       State.select_when
+        ~now:(Unix.gettimeofday ())
         ~ready:(Queue.stimulus_identity_equal second)
         state
       |> require_some "select exact priority source"
@@ -611,6 +691,7 @@ let test_durable_turn_attempt_terminal_restart () =
       Persistence.select_when_result
         ~base_path
         ~keeper_name
+        ~now:(Unix.gettimeofday ())
         ~ready:(fun _ -> true)
       |> require_ok "peek failed turn source"
       |> require_some "failed turn selection"
@@ -692,6 +773,7 @@ let test_durable_turn_attempt_terminal_restart () =
       Persistence.select_when_result
         ~base_path
         ~keeper_name
+        ~now:(Unix.gettimeofday ())
         ~ready:(Queue.stimulus_identity_equal selection.source)
       |> require_ok "select re-enqueued identical source"
       |> require_some "later identical selection"
@@ -731,6 +813,7 @@ let test_durable_inflight_selection_rejects_reinserted_source () =
       Persistence.select_when_result
         ~base_path
         ~keeper_name
+        ~now:(Unix.gettimeofday ())
         ~ready:(fun _ -> true)
       |> require_ok "select first source incarnation"
       |> require_some "first source selection"
@@ -789,6 +872,7 @@ let test_durable_completed_turn_projects_reaction_ack () =
       Persistence.select_when_result
         ~base_path
         ~keeper_name
+        ~now:(Unix.gettimeofday ())
         ~ready:(fun _ -> true)
       |> require_ok "select completed turn source"
       |> require_some "completed turn selection"
@@ -863,6 +947,7 @@ let test_owner_terminalizes_consecutive_turns_without_projection_gap () =
         Persistence.select_when_result
           ~base_path
           ~keeper_name
+          ~now:(Unix.gettimeofday ())
           ~ready:(fun _ -> true)
         |> require_ok "select consecutive turn source"
         |> require_some "consecutive turn selection"
@@ -904,6 +989,22 @@ let () =
     [ ( "state"
       , [ Alcotest.test_case "peek keeps pending authoritative" `Quick test_peek_keeps_pending_authoritative
         ; Alcotest.test_case "exact ack preserves distinct source" `Quick test_exact_ack_removes_only_selected_identity
+        ; Alcotest.test_case
+            "unaged Low still loses to fresh Normal"
+            `Quick
+            test_low_below_aging_threshold_still_loses_to_fresh_normal
+        ; Alcotest.test_case
+            "aged Low competes with Normal by arrival"
+            `Quick
+            test_low_aged_past_threshold_competes_with_normal_by_arrival
+        ; Alcotest.test_case
+            "Low aging never reaches Immediate"
+            `Quick
+            test_low_aging_never_reaches_immediate
+        ; Alcotest.test_case
+            "multiple aged Low entries keep arrival order"
+            `Quick
+            test_multiple_aged_low_entries_keep_arrival_order
         ; Alcotest.test_case
             "pending collapses duplicate source identity"
             `Quick

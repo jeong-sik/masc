@@ -176,6 +176,7 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~operation_id =
   let selection =
     load_queue_state ~base_path ~keeper_name:from_keeper
     |> Keeper_event_queue_state.select_when
+         ~now:(Unix.gettimeofday ())
          ~ready:(Keeper_event_queue.stimulus_identity_equal source)
     |> function
     | Some selection -> selection

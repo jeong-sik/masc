@@ -390,6 +390,30 @@ let sort_by_urgency (queue : t) : t =
        (fun a b -> Int.compare (urgency_rank a.urgency) (urgency_rank b.urgency))
   |> of_list
 
+(* Starvation fix for #31597: [Low] competes forever against a Keeper's own
+   continuous [Normal] backlog (explicit task work, board mentions) under a
+   strict-priority selector with no fairness correction — measured as a
+   16-day-old recurring schedule that dispatched "succeeded" every hour
+   without a single Board post ever landing. 3600s matches the cadence most
+   recurring schedules in this fleet already use; it is a reasoned default,
+   not a measured distribution (unlike the dated comments elsewhere in this
+   file — there is no equivalent aging measurement yet). [Normal] is never
+   aged into [Immediate]: [Immediate] is a producer-declared contract (see
+   keeper_composition_completion_wake.ml) reserved for "this Keeper is
+   waiting on an answer to something it asked for," and letting aging blur
+   into that would erode the one guarantee Immediate still gives callers. *)
+let low_to_normal_aging_threshold_sec = 3600.0
+
+let effective_urgency ~now (s : stimulus) : urgency =
+  match s.urgency with
+  | Low when now -. s.arrived_at >= low_to_normal_aging_threshold_sec -> Normal
+  | u -> u
+;;
+
+let effective_urgency_rank ~now (s : stimulus) : int =
+  urgency_rank (effective_urgency ~now s)
+;;
+
 let payload_kind_label = function
   | Board_signal _ -> "board_signal"
   | Board_attention _ -> "board_attention"

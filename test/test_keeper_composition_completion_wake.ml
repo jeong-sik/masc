@@ -346,7 +346,12 @@ let a_result_is_read_before_the_board_backlog () =
     with
     | Error detail -> fail ("queue state load failed: " ^ detail)
     | Ok state ->
-      (match Keeper_event_queue_state.select_when ~ready:(fun _ -> true) state with
+      (match
+         Keeper_event_queue_state.select_when
+           ~now:(Unix.gettimeofday ())
+           ~ready:(fun _ -> true)
+           state
+       with
        | None -> fail "nothing was selectable"
        | Some entry ->
          (match entry.Keeper_event_queue_state.source.payload with

@@ -444,6 +444,7 @@ let pending_selection_exn ~base_path ~keeper_name =
     Keeper_event_queue_persistence.select_when_result
       ~base_path
       ~keeper_name
+      ~now:(Unix.gettimeofday ())
       ~ready:(fun _ -> true)
   with
   | Ok (Some selection) -> selection
@@ -1221,6 +1222,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       in
       let selection =
         Keeper_event_queue_state.select_when
+          ~now:(Unix.gettimeofday ())
           ~ready:(fun _ -> true)
           pending_state
         |> function

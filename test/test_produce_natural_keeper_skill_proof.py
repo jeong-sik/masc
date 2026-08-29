@@ -205,7 +205,11 @@ class NaturalKeeperSkillProofProducerTest(unittest.TestCase):
         response = {
             "result": {
                 "isError": False,
-                "_meta": {"agent_id": "proof-operator"},
+                "_meta": {
+                    "com.github.yousleepwhen.masc/call": {
+                        "agent_id": "proof-operator"
+                    }
+                },
                 "structuredContent": {"name": "keeper-one"},
             }
         }

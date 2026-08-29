@@ -14,7 +14,7 @@ type init_mode =
 
    Every [Tool_result.error] carries a typed [tool_failure_class] -- it is a
    required argument, so no refusal can omit it -- and the MCP envelope puts
-   it on the wire under [result._meta.failure_class]. Reading that is the
+   it on the wire under the call's [_meta] entry. Reading that is the
    whole check.
 
    It replaced a list of ~20 substrings ("not found", "missing", "invalid",
@@ -894,7 +894,7 @@ let host_failure_fragments =
     "tools/call timeout";
   ]
 
-(* [result._meta.failure_class], parsed back into the variant the tool set.
+(* The class the tool set, read back from the call's [_meta] entry.
    [None] means the response carried no class: either it succeeded, or the
    envelope shape changed under us. The caller distinguishes those. *)
 let response_failure_class response =
@@ -907,8 +907,12 @@ let response_failure_class response =
       | Some (`Assoc result_fields) -> (
           match meta_field result_fields "_meta" with
           | Some (`Assoc meta_fields) -> (
-              match meta_field meta_fields "failure_class" with
-              | Some (`String raw) -> Tool_result.tool_failure_class_of_string raw
+              match meta_field meta_fields Masc.Mcp_server.tool_call_meta_key with
+              | Some (`Assoc call_fields) -> (
+                  match meta_field call_fields "failure_class" with
+                  | Some (`String raw) ->
+                    Tool_result.tool_failure_class_of_string raw
+                  | Some _ | None -> None)
               | Some _ | None -> None)
           | Some _ | None -> None)
       | Some _ | None -> None)

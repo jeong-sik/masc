@@ -71,7 +71,7 @@ module Agent_id : sig
   type t
   val of_string : string -> (t, board_error) result
   (** Validates [a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?, length 1–64.
-      Strict superset of {!Validation.Agent_id} — see #8633 for the
+      Strict superset of {!Validation.Id_shape} — see #8633 for the
       colon-namespace fix and #8625 for the 32→64 length raise. *)
   val to_string : t -> string
 end

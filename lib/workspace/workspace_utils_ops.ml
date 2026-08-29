@@ -5,7 +5,7 @@ open Result.Syntax
 
 
 let validate_agent_name name =
-  let+ _ = Validation.Agent_id.validate name in
+  let+ _ = Validation.Id_shape.validate name in
   name
 
 let validate_task_id id =
@@ -38,7 +38,7 @@ let safe_filename = Common.safe_filename
 
 let validate_agent_name_r name : (string, masc_error) result =
   (* Delegate to Validation module, convert error type *)
-  Validation.Agent_id.validate name
+  Validation.Id_shape.validate name
   |> Result.map (fun _ -> name)
   |> Result.map_error (fun msg -> Agent (Agent_error.InvalidName msg))
 

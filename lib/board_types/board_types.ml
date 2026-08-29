@@ -106,14 +106,14 @@ module Agent_id : sig
 end = struct
   type t = string
 
-  (* SSOT: [Validation.Agent_id] owns the agent id shape. This module carried
+  (* SSOT: [Validation.Id_shape] owns the agent id shape. This module carried
      its own copy and drifted twice -- #8625 raised the length cap by hand to
      match, #8633 re-widened the pattern by hand to match -- each time catching
      up after the fact. It now delegates, so the two cannot disagree again, and
      board inherits the path-separator and traversal checks it never had. *)
   let of_string s =
-    match Validation.Agent_id.validate (String.trim s) with
-    | Ok id -> Ok (Validation.Agent_id.to_string id)
+    match Validation.Id_shape.validate (String.trim s) with
+    | Ok id -> Ok (Validation.Id_shape.to_string id)
     | Error reason -> Error (Validation_error (Printf.sprintf "Invalid agent_id: %s" reason))
 
   let to_string t = t

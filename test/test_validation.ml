@@ -7,34 +7,34 @@ let test_agent_id_valid () =
   (* Valid agent IDs *)
   let cases = ["claude"; "gemini"; "codex"; "agent-1"; "my_agent"; "Agent123"] in
   List.iter (fun s ->
-    match Validation.Agent_id.validate s with
+    match Validation.Id_shape.validate s with
     | Ok _ -> ()
     | Error e -> Alcotest.fail (Printf.sprintf "Expected valid agent_id '%s': %s" s e)
   ) cases
 
 let test_agent_id_empty () =
-  match Validation.Agent_id.validate "" with
+  match Validation.Id_shape.validate "" with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "Expected error for empty agent_id"
 
 let test_agent_id_path_traversal () =
   let cases = ["../admin"; "..\\admin"; "agent/subdir"; "agent\\subdir"] in
   List.iter (fun s ->
-    match Validation.Agent_id.validate s with
+    match Validation.Id_shape.validate s with
     | Error _ -> ()
     | Ok _ -> Alcotest.fail (Printf.sprintf "Expected error for path traversal '%s'" s)
   ) cases
 
 let test_agent_id_too_long () =
   let long_name = String.make 65 'a' in
-  match Validation.Agent_id.validate long_name with
+  match Validation.Id_shape.validate long_name with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "Expected error for too long agent_id"
 
 let test_agent_id_invalid_chars () =
   let cases = ["agent@host"; "agent!"; "agent#1"; "agent$money"] in
   List.iter (fun s ->
-    match Validation.Agent_id.validate s with
+    match Validation.Id_shape.validate s with
     | Error _ -> ()
     | Ok _ -> Alcotest.fail (Printf.sprintf "Expected error for invalid chars '%s'" s)
   ) cases
@@ -47,7 +47,7 @@ let test_agent_id_invalid_chars () =
 let test_agent_id_allows_dots () =
   let cases = ["edgar.a.poe"; "a.b"; "keeper:edgar.a.poe"; "x.y-z_1"] in
   List.iter (fun s ->
-    match Validation.Agent_id.validate s with
+    match Validation.Id_shape.validate s with
     | Ok _ -> ()
     | Error e -> Alcotest.fail (Printf.sprintf "Expected valid agent_id '%s': %s" s e)
   ) cases
@@ -57,7 +57,7 @@ let test_agent_id_allows_dots () =
 let test_agent_id_dot_traversal_still_refused () =
   let cases = [".."; "../x"; "..foo"] in
   List.iter (fun s ->
-    match Validation.Agent_id.validate s with
+    match Validation.Id_shape.validate s with
     | Error _ -> ()
     | Ok _ -> Alcotest.fail (Printf.sprintf "Expected error for '%s'" s)
   ) cases
@@ -71,7 +71,7 @@ let test_board_agent_id_agrees_with_validation () =
     ; ""; ".."; "../x"; "agent/subdir"; "agent@host"; String.make 65 'a' ]
   in
   List.iter (fun s ->
-    let canonical = Result.is_ok (Validation.Agent_id.validate s) in
+    let canonical = Result.is_ok (Validation.Id_shape.validate s) in
     let board = Result.is_ok (Board_types.Agent_id.of_string s) in
     if canonical <> board
     then
@@ -165,7 +165,7 @@ let test_rejection_stats () =
   Alcotest.(check int) "initial count" 0 count1;
 
   (* Trigger a rejection *)
-  let _ = Validation.Agent_id.validate "" in
+  let _ = Validation.Id_shape.validate "" in
   let (count2, time2) = Validation.get_rejection_stats () in
   Alcotest.(check int) "after rejection" 1 count2;
   Alcotest.(check bool) "time updated" true (time2 > 0.0);

@@ -49,8 +49,17 @@ let log_rejection ~validator ~input ~reason =
   Log.Misc.warn "%s rejected input '%s': %s"
     validator safe_input reason
 
-(** Agent ID validation *)
-module Agent_id : sig
+(** Whether a string is usable as an identifier at all — length, path
+    separators, "..", character set. A gate: it refuses input, and says so in
+    the log when it does.
+
+    Not "the id of an agent". Three modules were called [Agent_id] and only
+    one of them meant that: [Ids.Agent_id] mints a UUID, [Board_types.Agent_id]
+    is a board author, and this one asks about the shape of any string. The
+    name sent a reader to the wrong one twice in a single session (2026-08-28,
+    chasing why edgar.a.poe could not claim its own task) and later put a gate
+    where a parser belonged, which cost 208 WARN lines in a day (#31815). *)
+module Id_shape : sig
   type t
   val validate : string -> (t, string) result
   val to_string : t -> string
@@ -81,15 +90,15 @@ end = struct
 
   let strict s =
     if String.length s = 0 then
-      Error "agent_id cannot be empty"
+      Error "identifier cannot be empty"
     else if String.length s > 64 then
-      Error (Printf.sprintf "agent_id too long: %d chars (max 64)" (String.length s))
+      Error (Printf.sprintf "identifier too long: %d chars (max 64)" (String.length s))
     else if String.contains s '/' || String.contains s '\\' then
-      Error "agent_id cannot contain path separators"
+      Error "identifier cannot contain path separators"
     else if String.contains s '.' && String.starts_with s ~prefix:".." then
-      Error "agent_id cannot contain path traversal"
+      Error "identifier cannot contain path traversal"
     else if not (Re.execp valid_pattern s) then
-      Error "agent_id contains characters outside [A-Za-z0-9_:-]"
+      Error "identifier contains characters outside [A-Za-z0-9_:-]"
     else
       Ok s
 
@@ -97,7 +106,7 @@ end = struct
     match strict s with
     | Ok t -> Ok t
     | Error reason ->
-      log_rejection ~validator:"Agent_id" ~input:s ~reason;
+      log_rejection ~validator:"Id_shape" ~input:s ~reason;
       Error reason
 
   let to_string t = t

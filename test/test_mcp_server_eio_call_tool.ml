@@ -774,9 +774,9 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check string "task id" "task-456"
         (row |> U.member "task_id" |> U.to_string);
       let runtime_contract = row |> U.member "runtime_contract" in
-      check string "runtime contract agent"
+      check string "runtime contract keeper"
         keeper_name
-        (runtime_contract |> U.member "agent_name" |> U.to_string);
+        (runtime_contract |> U.member "keeper_name" |> U.to_string);
       check string "runtime contract sandbox profile"
         (row |> U.member "sandbox_profile" |> U.to_string)
         (runtime_contract |> U.member "sandbox_profile" |> U.to_string);
@@ -828,10 +828,6 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       in
       check string "trajectory runtime keeper" keeper_name
         (trajectory_json |> U.member "runtime_contract" |> U.member "keeper_name"
-         |> U.to_string);
-      check string "trajectory runtime agent"
-        keeper_name
-        (trajectory_json |> U.member "runtime_contract" |> U.member "agent_name"
          |> U.to_string);
       check bool "trajectory runtime has runtime_profile field" true
         (match trajectory_json |> U.member "runtime_contract"

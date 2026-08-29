@@ -16,6 +16,7 @@ import type {
   DashboardGateResponse,
   KeeperApprovalQueueItem,
   KeeperApprovalQueueRowViolation,
+  KeeperResolvedApprovalRowViolation,
   KeeperResolvedApprovalItem,
   KeeperResolvedApprovalPage,
   KeeperResolvedApprovalState,
@@ -326,25 +327,12 @@ function normalizeGateDecisionSource(raw: unknown): GateDecisionSource | null {
     : null
 }
 
+/** Decode one resolved-history row.  Every field below carries its own
+ *  validity check, so a missing key is already rejected here; an exact-key
+ *  gate would add only "reject a key I do not know yet", which on a
+ *  read-only projection turns a rolling deploy into a blank Gate (#31695). */
 function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprovalItem | null {
   if (!isRecord(raw)) return null
-  if (!hasExactKeys(raw, [
-    'id',
-    'event',
-    'keeper_name',
-    'tool_name',
-    'decision',
-    'decision_kind',
-    'decision_reason',
-    'resolved_at',
-    'turn_id',
-    'task_id',
-    'goal_id',
-    'actor',
-    'decision_source',
-    'summary_status',
-    'exact_attempt',
-  ])) return null
   const id = asString(raw.id, '').trim()
   const keeperName = asString(raw.keeper_name, '').trim()
   const toolName = asString(raw.tool_name, '').trim()
@@ -464,6 +452,7 @@ export function fetchDashboardGate(
     const approvalQueueState = normalizeApprovalQueueState(raw.approval_queue_state)
     let approvalQueue: KeeperApprovalQueueItem[] | null
     const approvalQueueViolations: KeeperApprovalQueueRowViolation[] = []
+    const recentResolvedViolations: KeeperResolvedApprovalRowViolation[] = []
     if (approvalQueueState.state === 'unavailable') {
       if (raw.approval_queue !== null) {
         return gateSnapshotProtocolDrift('unavailable approval_queue must be null')
@@ -505,16 +494,34 @@ export function fetchDashboardGate(
       if (!Array.isArray(raw.recent_resolved)) {
         return gateSnapshotProtocolDrift('ready recent_resolved must be an array')
       }
-      const normalized = raw.recent_resolved.map(item => normalizeKeeperResolvedApprovalItem(item))
-      if (normalized.some(item => item === null)) {
-        return gateSnapshotProtocolDrift('recent_resolved contains an invalid row')
-      }
-      recentResolved = normalized as KeeperResolvedApprovalItem[]
+      // Preserve the exact valid rows and expose every invalid row as a typed
+      // violation, the way approval_queue already does (#26094).  One
+      // undecodable history row must not blind the operator to the open-Gate
+      // count (#31695).
+      const accepted: KeeperResolvedApprovalItem[] = []
+      const sentRowCount = raw.recent_resolved.length
+      raw.recent_resolved.forEach((item, index) => {
+        const normalized = normalizeKeeperResolvedApprovalItem(item)
+        if (normalized !== null) {
+          accepted.push(normalized)
+          return
+        }
+        const record = isRecord(item) ? item : undefined
+        recentResolvedViolations.push({
+          index,
+          id: record ? asNullableString(record.id) : null,
+          keeper_name: record ? asNullableString(record.keeper_name) : null,
+          tool_name: record ? asNullableString(record.tool_name) : null,
+        })
+      })
+      recentResolved = accepted
       recentResolvedPage = normalizeKeeperResolvedApprovalPage(raw.recent_resolved_page)
       if (recentResolvedPage === null) {
         return gateSnapshotProtocolDrift('ready recent_resolved_page is invalid')
       }
-      if (recentResolvedPage.returned !== recentResolved.length) {
+      // [returned] is the server's count of rows it emitted, so it is compared
+      // against what arrived — not against what this client could decode.
+      if (recentResolvedPage.returned !== sentRowCount) {
         return gateSnapshotProtocolDrift('recent_resolved_page.returned does not match row count')
       }
     }
@@ -552,6 +559,7 @@ export function fetchDashboardGate(
       approval_queue: approvalQueue,
       approval_queue_state: approvalQueueState,
       approval_queue_violations: approvalQueueViolations,
+      recent_resolved_violations: recentResolvedViolations,
       recent_resolved: recentResolved,
       recent_resolved_page: recentResolvedPage,
       recent_resolved_state: recentResolvedState,

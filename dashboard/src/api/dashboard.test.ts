@@ -1946,6 +1946,84 @@ describe('fetchDashboardGate', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/gate?force=1')
   })
 
+  it('keeps the Gate snapshot when a resolved row carries an unknown key', async () => {
+    // #31695: an exact-key gate on this read-only projection turned one
+    // unrecognized field into a blank open-Gate count.  A key the client does
+    // not know yet is what a rolling deploy looks like; the row must still
+    // decode.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        recent_resolved: [
+          { ...currentResolvedRow({ id: 'appr-future' }), field_this_client_does_not_know: ['x'] },
+        ],
+        recent_resolved_page: {
+          returned: 1,
+          matched: 1,
+          limit: 20,
+          window_minutes: 1440,
+          truncated: false,
+          scan_exhausted: false,
+        },
+        recent_resolved_state: { state: 'ready' },
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        keeper_modes: [],
+        keeper_modes_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
+        hitl: gateHitl,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGate()
+
+    expect(result.recent_resolved).toHaveLength(1)
+    expect(result.recent_resolved?.[0]?.id).toBe('appr-future')
+    expect(result.recent_resolved_violations).toEqual([])
+  })
+
+  it('salvages the valid resolved rows and reports the undecodable one', async () => {
+    // #26094 taught approval_queue this; recent_resolved threw the whole
+    // snapshot away instead.  One bad row must cost one row, not the screen.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        recent_resolved: [
+          currentResolvedRow({ id: 'appr-good' }),
+          currentResolvedRow({ id: 'appr-bad', keeper_name: 'keeper-b', tool_name: 'fs_write', decision_source: 'not_a_source' }),
+        ],
+        recent_resolved_page: {
+          returned: 2,
+          matched: 2,
+          limit: 20,
+          window_minutes: 1440,
+          truncated: false,
+          scan_exhausted: false,
+        },
+        recent_resolved_state: { state: 'ready' },
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        keeper_modes: [],
+        keeper_modes_state: { state: 'ready' },
+        keeper_exact_lanes: [],
+        keeper_exact_lanes_state: { state: 'ready' },
+        hitl: gateHitl,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGate()
+
+    expect(result.recent_resolved?.map(row => row.id)).toEqual(['appr-good'])
+    expect(result.recent_resolved_violations).toEqual([
+      { index: 1, id: 'appr-bad', keeper_name: 'keeper-b', tool_name: 'fs_write' },
+    ])
+  })
+
   it('normalizes resolved approval history separately from pending queue items', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

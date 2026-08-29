@@ -5,7 +5,6 @@ import { selectedAgentName } from './agent-detail-selection'
 import { showToast } from './common/toast'
 import {
   agents,
-  executionContinuityBriefs,
   executionWorkerSupportBriefs,
   tasks,
 } from '../store'
@@ -18,7 +17,6 @@ import { missionSnapshot } from '../mission-store'
 import type { JournalEntry } from '../types'
 import type {
   Agent,
-  DashboardExecutionContinuityBrief,
   DashboardMissionAgentBrief,
   Task,
 } from '../types'
@@ -69,13 +67,6 @@ export function missionAgentBrief(agentName: string | null): DashboardMissionAge
   return mission.agent_briefs.find(brief => brief.agent_name === agentName) ?? null
 }
 
-export function continuityBriefForAgent(agentName: string | null): DashboardExecutionContinuityBrief | null {
-  if (!agentName) return null
-  return executionContinuityBriefs.value.find(
-    brief => brief.name === agentName,
-  ) ?? null
-}
-
 export function workerBriefForAgent(agentName: string | null) {
   if (!agentName) return null
   return executionWorkerSupportBriefs.value.find(w => w.name === agentName) ?? null
@@ -106,13 +97,6 @@ export function agentJournalEntries(agentName: string | null): JournalEntry[] {
 
 // --- Actions ---
 
-// Keeper redirect — set by agent-detail.ts to avoid circular imports.
-let _keeperRedirect: ((agentName: string) => boolean) | null = null
-
-export function setKeeperRedirect(fn: (agentName: string) => boolean): void {
-  _keeperRedirect = fn
-}
-
 /** Open the workspace-agent profile without attempting a keeper redirect.
  *
  * Callers use this when they already resolved the typed keeper relation and
@@ -122,24 +106,6 @@ export function setKeeperRedirect(fn: (agentName: string) => boolean): void {
 export function openAgentProfile(agentName: string): void {
   selectedAgentName.value = agentName
   void refreshAgentDetail()
-}
-
-export function openAgentDetail(agentName: string): void {
-  if (_keeperRedirect && _keeperRedirect(agentName)) return
-  const keeper = findKeeper(agentName)
-  if (keeper) {
-    void import('./keeper-detail')
-      .then(({ openKeeperDetail }) => {
-        openKeeperDetail(keeper)
-      })
-      .catch(err => {
-        console.warn('[agent-detail] keeper redirect failed', err instanceof Error ? err.message : err)
-        selectedAgentName.value = agentName
-        void refreshAgentDetail()
-      })
-    return
-  }
-  openAgentProfile(agentName)
 }
 
 export function closeAgentDetail(): void {

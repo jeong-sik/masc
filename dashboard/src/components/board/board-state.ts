@@ -1,6 +1,5 @@
 import { signal } from '@preact/signals'
 import { showToast } from '../common/toast'
-import { requestConfirm } from '../common/confirm-dialog'
 import {
   boardPosts,
   boardSortMode,
@@ -21,13 +20,11 @@ import {
 import {
   fetchBoardHearths,
   fetchBoardFlairs,
-  fetchSubBoards,
   fetchBoardPost,
   commentPost,
   type BoardHearth,
   type BoardFlair,
 } from '../../api'
-import { deleteBoardPost } from '../../api/actions'
 import type { BoardComment, BoardPost, BoardSortMode } from '../../types'
 
 // ── Re-exports (used by sibling UI files) ──────────────────────────
@@ -87,9 +84,6 @@ export const replyingTo = signal<string | null>(null)
 // ── Signals: v2 board surface chrome ───────────────────────────────
 export const selectedBoardPostId = signal<string | null>(null)
 export const boardComposerMode = signal<'post' | 'mention'>('post')
-export const boardComposerDraft = signal('')
-
-// ── Pagination ─────────────────────────────────────────────────────
 export const PAGE_SIZE = 20
 export const feedVisibleLimit = signal(PAGE_SIZE)
 
@@ -97,20 +91,6 @@ export const feedVisibleLimit = signal(PAGE_SIZE)
 export const deletingPostId = signal<string | null>(null)
 export const selectedPostIds = signal<Set<string>>(new Set())
 export const bulkDeleting = signal(false)
-
-export async function loadSubBoardOptionsForPost(): Promise<void> {
-  subBoardOptionsLoading.value = true
-  subBoardOptionsError.value = false
-  try {
-    const boards = await fetchSubBoards()
-    subBoardOptions.value = boards.map(b => ({ slug: b.slug, name: b.name || b.slug }))
-  } catch (err) {
-    console.warn('[Board] failed to load sub-board options:', err)
-    subBoardOptionsError.value = true
-  } finally {
-    subBoardOptionsLoading.value = false
-  }
-}
 
 export async function refreshBoardHearths(): Promise<void> {
   const requestId = ++boardHearthsRequestId
@@ -209,17 +189,6 @@ export function categoryLabel(cat: ContentCategory): string {
   return CONTENT_CATEGORIES.find(c => c.id === cat)?.label ?? cat
 }
 
-export function categoryBadgeColor(cat: ContentCategory): string {
-  switch (cat) {
-    case 'article': return 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)]'
-    case 'review': return 'bg-[var(--purple-10)] text-[var(--purple)] border-[var(--purple-20)]'
-    case 'notice': return 'bg-[var(--warn-10)] text-[var(--warn-bright)] border-[var(--warn-20)]'
-    case 'system': return 'bg-[var(--color-bg-panel-alt)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
-    default: return 'bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
-  }
-}
-
-// ── Grouped posts by content category ─────────────────────────────
 type CategoryGroup = { category: ContentCategory; posts: BoardPost[]; total: number; hidden: number }
 
 export type VisibleBoardGroups = {
@@ -433,25 +402,4 @@ export function togglePostSelection(postId: string, event: Event) {
   if (next.has(postId)) next.delete(postId)
   else next.add(postId)
   selectedPostIds.value = next
-}
-
-export async function bulkDeleteSelected() {
-  const ids = Array.from(selectedPostIds.value)
-  if (ids.length === 0) return
-  const confirmed = await requestConfirm({
-    title: '선택 삭제',
-    message: `${ids.length}개의 글을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`,
-    tone: 'danger'
-  })
-  if (!confirmed) return
-  bulkDeleting.value = true
-  const results = await Promise.allSettled(ids.map(id => deleteBoardPost(id)))
-  const deleted = results.filter(r => r.status === 'fulfilled').length
-  results.forEach((r, i) => {
-    if (r.status === 'rejected') console.warn('[board] bulk delete failed for', ids[i], r.reason)
-  })
-  bulkDeleting.value = false
-  selectedPostIds.value = new Set()
-  showToast(`${deleted}/${ids.length}개 게시글을 삭제했습니다`, deleted === ids.length ? 'success' : 'error')
-  refreshBoard()
 }

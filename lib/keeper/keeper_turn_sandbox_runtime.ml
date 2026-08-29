@@ -1185,12 +1185,27 @@ let prepare_github_identity_secret_files ?timeout_sec t =
        central revision is handled by dropping the handle so the next boot
        rebuilds it. *)
     let ensure_bound () =
+      let snapshot_paths () =
+        match (Atomic.get t.github_identity_snapshots).current with
+        | Some _ -> Ok (github_identity_secret_files t)
+        | None -> Error "running container has no GitHub identity snapshot"
+      in
       match ensure_started ?timeout_sec t with
       | Error _ as error -> error
       | Ok _container_name ->
-        (match (Atomic.get t.github_identity_snapshots).current with
-         | None -> Error "running container has no GitHub identity snapshot"
-         | Some _ -> Ok (github_identity_secret_files t))
+        (match snapshot_paths () with
+         | Ok _ as result -> result
+         | Error _ ->
+           (* A runtime can retain [Running] across turns while its local
+              handle was lost (for example after a failed adoption). Do not
+              report a live guest as usable without the credential it was
+              booted to mount: force the normal MicroVM start path to
+              reconcile the stable guest and registry, which reboots when no
+              safe snapshot exists. *)
+           set_state t Not_started;
+           (match start_container ?timeout_sec t with
+            | Error _ as error -> error
+            | Ok _ -> snapshot_paths ()))
     in
     match
       Keeper_github_identity.current_tool_identity_revision

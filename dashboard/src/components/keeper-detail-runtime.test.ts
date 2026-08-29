@@ -340,9 +340,6 @@ describe('RuntimeLensSection', () => {
         event_bus_correlated_count: 1,
         correlation_ids: ['corr-1'],
         run_ids: ['run-1'],
-        context_compact_started_count: 1,
-        context_compacted_count: 1,
-        last_compaction: null,
       },
       memory: {
         memory_injected_count: 1,
@@ -402,13 +399,9 @@ describe('RuntimeLensSection', () => {
           },
           context: {
             context_injected_count: 1,
-            context_compacted_event_count: 1,
             event_bus_correlated_count: 1,
-            context_compact_started_count: 1,
-            context_compacted_count: 1,
             checkpoint_loaded_count: 1,
             checkpoint_saved_count: 1,
-            last_compaction: null,
           },
           memory: {
             memory_injected_count: 1,
@@ -444,7 +437,6 @@ describe('RuntimeLensSection', () => {
             provider_attempt_id: 'trace-lens:keeper-7:provider-attempt-1',
             tool_batch_id: null,
             checkpoint_id: null,
-            compaction_id: null,
             event_bus_correlation_id: 'corr-1',
             event_bus_run_id: 'run-1',
             event_bus_event_count: 2,

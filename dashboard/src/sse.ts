@@ -481,23 +481,6 @@ function handleEvent(event: SSEEvent): void {
         },
       )
       break
-    case 'keeper_compaction': {
-      const keeperNameCompaction = event.name ?? agent
-      addTypedJournalEntry(
-        keeperNameCompaction,
-        `Compaction saved ${event.saved_tokens ?? '?'} tokens (${event.trigger ?? '?'})`,
-        'keepers',
-        'keeper_compaction',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText:
-            `${actorLabel(keeperNameCompaction)}가 context compaction을 수행했습니다`
-            + ` (${event.saved_tokens ?? '?'} tokens, ${event.trigger ?? '?'})`,
-        },
-      )
-      break
-    }
     case 'keeper_phase_changed':
       addTypedJournalEntry(
         event.name ?? agent,

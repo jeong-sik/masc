@@ -76,7 +76,6 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   Offline: { key: 'Offline', label: PHASE_LABEL_KO.offline, description: '런타임이 올라오지 않았거나 연결 정보 없음' },
   Running: phaseMetaFromToken('Running', 'running'),
   Failing: phaseMetaFromToken('Failing', 'failing'),
-  Compacting: phaseMetaFromToken('Compacting', 'compacting'),
   Draining: phaseMetaFromToken('Draining', 'draining'),
   Paused: phaseMetaFromToken('Paused', 'paused'),
   Stopped: phaseMetaFromToken('Stopped', 'stopped'),
@@ -99,7 +98,6 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
 // `Keeper_status_runtime.pipeline_stage_of_phase`).
 const STAGE_LABELS: Record<string, StageMeta> = {
   idle: { key: 'idle', label: '활동 없음', description: '지금 진행 중인 세부 활동 단계 없음' },
-  compacting: { key: 'compacting', label: '압축', description: '컨텍스트 압축 단계를 수행 중입니다.' },
   offline: { key: 'offline', label: '오프라인', description: '활동 정보를 확인하지 못했습니다.' },
   failing: { key: 'failing', label: '오류', description: '세부 파이프라인 단계에서 오류를 감지했습니다.' },
   draining: { key: 'draining', label: '종료', description: '활동 종료를 위해 파이프라인을 비우는 중입니다.' },
@@ -114,11 +112,10 @@ const DEFAULT_PHASE_BY_BAND: Partial<Record<RuntimeBand, string>> = {
   paused: 'Paused',
   offline: 'Offline',
   // No transient default: the band intentionally preserves the concrete
-  // Compacting / Draining / Restarting phase as evidence.
+  // Draining / Restarting phase as evidence.
 }
 
 const STAGE_PHASE_EQUIVALENTS: Record<string, string> = {
-  compacting: 'Compacting',
   failing: 'Failing',
   draining: 'Draining',
   paused: 'Paused',
@@ -150,7 +147,7 @@ const BAND_META: Record<RuntimeBand, RuntimeBandMeta> = {
   transient: {
     key: 'transient',
     label: KEEPER_TRANSIENT_LABEL_KO,
-    description: '컨텍스트 압축, 종료, 재시작 등 단계 전이 중이라 결과 확인 전 입니다.',
+    description: '종료나 재시작 단계 전이 중이라 결과 확인 전 입니다.',
   },
 }
 
@@ -172,7 +169,7 @@ function normalizeStage(stage: PipelineStage | string | null | undefined): strin
 
 // Transient FSM phases — accepted here only after upstream normalization to
 // the closed-sum KeeperPhase and PipelineStage SSOTs in `types/core.ts`.
-// These signal an *autonomous* transition (compacting/restarting)
+// These signal an *autonomous* restart transition
 // rather than steady-state, so they route to the dedicated `transient` band
 // instead of `active` (which would silently re-merge them with healthy
 // keepers mid-transition) or `attention` (which is reserved for failure/stall
@@ -191,12 +188,10 @@ function normalizeStage(stage: PipelineStage | string | null | undefined): strin
 // of a silent runtime mismatch. `as const` keeps the literal types so the
 // `ReadonlySet<string>` derivation stays branch-free.
 const TRANSIENT_KEEPER_PHASES = [
-  'Compacting',
   'Restarting',
 ] as const satisfies readonly KeeperPhase[]
 
 const TRANSIENT_PIPELINE_STAGES = [
-  'compacting',
   'restarting',
 ] as const satisfies readonly PipelineStage[]
 
@@ -230,9 +225,9 @@ function keeperBand(projection: KeeperRuntimeProjection): RuntimeBand {
   // projection keeps monitoring aligned with detail live-truth.
   //
   // Pixel-perfect Fleet tone rail: autonomous transient FSM
-  // phases (Compacting / Restarting) get their own band so the
+  // Restarting gets its own band so the
   // prototype's busy rail becomes live instead of collapsing into `active`.
-  // Routed *before* attention so a mid-compaction blocker check doesn't
+  // Routed *before* attention so a restart blocker check doesn't
   // repaint the row as red — the operator's first scan question is "what is
   // currently moving", not "what is currently failing".
   //

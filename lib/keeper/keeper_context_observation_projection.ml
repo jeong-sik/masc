@@ -8,8 +8,8 @@
     measurement, for its typed absence, and for the separate,
     provider-reported last-turn usage.
 
-    Display-only: nothing here may feed context pressure or compaction
-    decisions. Fleet observation reads only the dated-JSONL tail, never
+    Display-only: nothing here may feed request admission decisions. Fleet
+    observation reads only the dated-JSONL tail, never
     checkpoints. *)
 
 let turn_record_source = "turn_record"

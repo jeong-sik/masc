@@ -51,7 +51,7 @@ describe('appendCompositeObservation', () => {
   })
 
   it('trims to maxEntries', () => {
-    const phases = ['Stable', 'Running', 'Compacting', 'Failing', 'Draining'] as const
+    const phases = ['Stable', 'Running', 'Restarting', 'Failing', 'Draining'] as const
     const observations = Array.from({ length: 30 }, (_, i) => obs({ ts: i, phase: phases[i % phases.length]! }))
     const extra = obs({ ts: 100, phase: 'Failing' })
     const result = appendCompositeObservation(observations, extra, 10)
@@ -110,7 +110,7 @@ describe('deriveTransitionHistory', () => {
   })
 
   it('trims to maxEntries', () => {
-    const phases = ['Stable', 'Running', 'Compacting', 'Failing'] as const
+    const phases = ['Stable', 'Running', 'Restarting', 'Failing'] as const
     const observations: CompositeObservation[] = []
     for (let i = 0; i < 50; i++) {
       observations.push(obs({ ts: i * 10, phase: phases[i % phases.length]! }))
@@ -154,7 +154,7 @@ describe('deriveTopTransitions', () => {
   })
 
   it('respects limit', () => {
-    const phases = ['Stable', 'Running', 'Compacting'] as const
+    const phases = ['Stable', 'Running', 'Restarting'] as const
     const observations: CompositeObservation[] = []
     for (let i = 0; i < 20; i++) {
       observations.push(obs({ ts: i * 10, phase: phases[i % 3]! }))
@@ -186,19 +186,13 @@ describe('inferTransitionReason', () => {
     expect(result).toContain('소진')
   })
 
-  it('returns Korean reason for KMC compacting→accumulating', () => {
-    const result = inferTransitionReason('KMC', 'compacting', 'accumulating')
-    expect(result).toContain('압축 완료')
-  })
-
   it('returns null for unknown field', () => {
     expect(inferTransitionReason('UNKNOWN', 'a', 'b')).toBeNull()
   })
 
   it('returns null for unhandled transition within known field', () => {
-    expect(inferTransitionReason('KTC', 'compacting', 'idle')).toBeNull()
+    expect(inferTransitionReason('KTC', 'unknown', 'idle')).toBeNull()
   })
-
 
 })
 
@@ -224,7 +218,7 @@ describe('derivePhaseLog', () => {
   })
 
   it('trims to maxEntries', () => {
-    const phases = ['Stable', 'Running', 'Compacting', 'Failing'] as const
+    const phases = ['Stable', 'Running', 'Restarting', 'Failing'] as const
     const observations: CompositeObservation[] = []
     for (let i = 0; i < 50; i++) {
       observations.push(obs({ ts: i * 10, phase: phases[i % phases.length]! }))
@@ -322,7 +316,7 @@ describe('deriveStateEntries', () => {
     expect(result!.turn).toBe(300)
   })
 
-  it('handles all 5 lanes', () => {
+  it('handles all 4 lanes', () => {
     const observations = [
       obs({ ts: 100 }),
       obs({ ts: 200, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'trying' }),

@@ -80,8 +80,8 @@ export function statusDotColor(status: string): string {
  *  (orange) here and `ok` (green) there. Keeper surfaces route their token
  *  through this map instead of relying on the string switch.
  *
- *  `busy → info` rather than `warn`: a transitional phase (compacting /
- *  handoff / restarting) is progress, not an operator warning. `idle` is
+ *  `busy → info` rather than `warn`: a transitional phase (handoff /
+ *  restarting) is progress, not an operator warning. `idle` is
  *  the fleet tone for stopped/unbooted, so it maps to `neutral`. */
 const FLEET_TONE_TO_BADGE_TONE: Readonly<Record<FleetTone, StatusBadgeTone>> = {
   ok: 'ok',

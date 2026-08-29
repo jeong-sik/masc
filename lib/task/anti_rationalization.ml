@@ -365,8 +365,8 @@ let run
             "generator runtime %s is one of the verifier_exact lane slots"
             generator
         | None | Some _ -> ());
-       (* Frozen-order slot failover, the same contract as the librarian /
-          compaction lanes: each slot is tried at most once, in declaration
+       (* Frozen-order slot failover, the same contract as the other exact
+          lanes: each slot is tried at most once, in declaration
           order, and a slot that produces no usable verdict — provider error or
           a reply without exactly one valid verdict tool call — yields to the
           next slot. The terminal runtime/reason describes the last attempt,

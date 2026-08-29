@@ -154,7 +154,7 @@ let runtime_manifest_context ~keeper_name ~trace_id
 let append_runtime_manifest ~config ~keeper_name ~trace_id
     ~runtime_id ?status ?decision ?keeper_turn_id
     ?agent_core_turn_count ?elapsed_ms ?logical_seq ?checkpoint_path ?receipt_path
-    ?compaction_source ~site event =
+    ~site event =
   let decision =
     match keeper_turn_id with
     | None -> decision
@@ -172,7 +172,7 @@ let append_runtime_manifest ~config ~keeper_name ~trace_id
         (Keeper_runtime_manifest.with_clock_refs
            ~clock_refs:
              (Keeper_runtime_manifest.clock_refs_for_context ctx ~event
-                ?agent_core_turn_count ?elapsed_ms ?logical_seq ?compaction_source ())
+                ?agent_core_turn_count ?elapsed_ms ?logical_seq ())
            decision)
   in
   Keeper_runtime_manifest.make ~keeper_name ~trace_id
@@ -232,7 +232,6 @@ type append_manifest_fn =
   ?keeper_turn_id:int ->
   ?agent_core_turn_count:int ->
   ?checkpoint_path:string ->
-  ?compaction_source:string ->
   site:string ->
   Keeper_runtime_manifest.event_kind ->
   unit
@@ -247,7 +246,7 @@ let make_append_manifest
   : append_manifest_fn
   =
   fun ?elapsed_ms ?logical_seq ?status ?decision ?keeper_turn_id ->
-  fun ?agent_core_turn_count ?checkpoint_path ?compaction_source ~site event ->
+  fun ?agent_core_turn_count ?checkpoint_path ~site event ->
   let elapsed_ms =
     match elapsed_ms with
     | Some _ -> elapsed_ms
@@ -271,7 +270,7 @@ let make_append_manifest
     ~runtime_id
     ?status ?decision ?keeper_turn_id ?agent_core_turn_count
     ?elapsed_ms ?logical_seq
-    ?checkpoint_path ?compaction_source
+    ?checkpoint_path
     ~site
     event
 

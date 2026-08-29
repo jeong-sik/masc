@@ -2,18 +2,18 @@
 // Consumers should import from here; constants.ts values are fallback defaults only.
 
 import { signal, computed, type ReadonlySignal } from '@preact/signals'
-import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './constants'
+import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_HIGH } from './constants'
 
 export interface ContextThresholds {
   critical: number
   warn: number
-  compacting: number
+  high: number
 }
 
 const _thresholds = signal<ContextThresholds>({
   critical: CONTEXT_RATIO_CRITICAL,
   warn: CONTEXT_RATIO_WARN,
-  compacting: CONTEXT_RATIO_COMPACTING,
+  high: CONTEXT_RATIO_HIGH,
 })
 
 /** Mutable ref for the writer (app.ts init).  Consumers read via `contextThresholds`. */

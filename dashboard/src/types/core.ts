@@ -543,7 +543,6 @@ export interface KeeperTrustSummary {
 // of trusting arbitrary wire strings.
 export type KeeperLifecycleState =
   | 'active'
-  | 'compacting'
   | 'preparing'
   | 'handoff-imminent'
   | 'idle'
@@ -1016,7 +1015,7 @@ export interface KeeperStatusDetail {
 
 // Backend SSOT: `Keeper_status_runtime.pipeline_stage_of_phase`
 // (lib/keeper/keeper_status_runtime.ml:537) deterministic mapping from
-// the 13-state KeeperPhase, post-RFC-0046 (#14707). Emits 10 distinct
+// the KeeperPhase lifecycle. Emits the closed set below;
 // values; `unknown` is a dashboard-side marker for missing data
 // (`asString(row.pipeline_stage) ?? 'unknown'`). Removed legacy
 // `thinking` / `tool_use` (= trajectory content_type, never
@@ -1024,7 +1023,6 @@ export interface KeeperStatusDetail {
 // pipeline_stage).
 export type PipelineStage =
   | 'idle'
-  | 'compacting'
   | 'offline'
   | 'failing'
   | 'draining'
@@ -1082,7 +1080,6 @@ export type KeeperPhase =
   | 'Offline'
   | 'Running'
   | 'Failing'
-  | 'Compacting'
   | 'Draining'
   | 'Paused'
   | 'Stopped'
@@ -1263,12 +1260,6 @@ export interface Keeper {
   k2k_count?: number
   k2k_mentions?: Array<{ keeper: string; count: number }>
   handoff_count_total?: number
-  compaction_count?: number
-  last_compaction_saved_tokens?: number
-  // Most recent compaction decision string (e.g. a provider-overflow recovery
-  // failure reason). Backend emits it as `last_compaction_decision`; surfaced so
-  // a stuck/looping compaction shows its cause instead of appearing idle.
-  last_compaction_decision?: string | null
   metrics_window?: MetricsWindow
   // Metrics time-series (from backend metrics_series)
   metrics_series?: KeeperMetricPoint[]
@@ -1292,12 +1283,10 @@ export interface KeeperOutcomes {
   observed_turns: number
   successes: {
     substantive_turns: number
-    compactions_ok: number
     handoffs_ok: number
   }
   failures: {
     turn_failed: number
-    compaction_failed: number
     handoff_failed: number
     crashes: number
     restarts: number
@@ -1322,7 +1311,6 @@ export interface KeeperConditions {
   heartbeat_healthy: boolean
   turn_healthy: boolean
   context_handoff_needed: boolean
-  compaction_active: boolean
   handoff_active: boolean
   operator_paused: boolean
   stop_requested: boolean
@@ -1486,7 +1474,6 @@ interface KeeperConfigMetrics {
   last_latency_ms: number | null
   last_total_tokens_per_sec: number | null
   last_output_tokens_per_sec: number | null
-  compaction_count: number
 }
 
 export interface KeeperConfigFieldPresence {

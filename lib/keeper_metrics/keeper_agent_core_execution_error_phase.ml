@@ -4,7 +4,6 @@ type t =
   | Terminal_non_exhaustion
   | Cycle_failed
   | Persistent_escalation
-  | Compaction_checkpoint_load
   | Provider_context_overflow
 
 let to_label = function
@@ -13,6 +12,5 @@ let to_label = function
   | Terminal_non_exhaustion -> "terminal_non_exhaustion"
   | Cycle_failed -> "cycle_failed"
   | Persistent_escalation -> "persistent_escalation"
-  | Compaction_checkpoint_load -> "compaction_checkpoint_load"
   | Provider_context_overflow -> "provider_context_overflow"
 ;;

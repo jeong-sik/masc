@@ -36,7 +36,7 @@ interface PhaseStyle {
 
 // 6 visual groups per design system README:
 //   ok      running                                          → --ok
-//   working compacting · draining · restarting → --accent (slate)
+//   working draining · restarting → --accent (slate)
 //   warn    failing                                          → --warn
 //   paused  paused                                           → --paused
 //   inactive offline · stopped · dead                        → --text-muted / --bad-light
@@ -62,7 +62,6 @@ export const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Offline:    { label: PHASE_LABEL_KO.unbooted,     color: 'var(--color-fg-muted)', bg: 'var(--color-bg-elevated)',   border: 'var(--color-border-default)',   glow: 'none',        icon: '○' },
   Running:    { label: PHASE_LABEL_KO.running,     color: 'var(--color-status-ok)',         bg: 'var(--ok-10)',     border: 'var(--ok-20)',      glow: SOFT_GLOW,     icon: '●' },
   Failing:    { label: PHASE_LABEL_KO.failing,     color: 'var(--color-status-warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '▲' },
-  Compacting: { label: PHASE_LABEL_KO.compacting,     color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '◆' },
   Draining:   { label: PHASE_LABEL_KO.draining,     color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '▽' },
   Paused:     { label: PHASE_LABEL_KO.paused,     color: 'var(--paused)',     bg: 'var(--paused-10)', border: 'var(--paused-20)',  glow: 'none',        icon: '⏸' },
   Stopped:    { label: PHASE_LABEL_KO.stopped,     color: 'var(--color-fg-muted)', bg: 'var(--color-bg-elevated)',   border: 'var(--color-border-default)',   glow: 'none',        icon: '■' },
@@ -76,7 +75,6 @@ const PIPELINE_STAGE_DETAIL_LABELS: Record<string, string> = {
   phase_running_idle: '대기',
   health_or_turn_failure_probe: '복구 확인',
   context_overflow_retired_phase: '컨텍스트 초과 (retired)',
-  context_compaction_in_progress: '압축 진행',
   generation_handoff_in_progress: '승계 진행',
   graceful_shutdown_draining: '종료 정리',
   operator_or_policy_paused: '일시정지',

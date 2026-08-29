@@ -56,7 +56,7 @@ A single-axis type exclusion (decision pattern) cannot encode this — `Trying`,
 
 ### 2.2 Turn phase — even more scattered
 
-`turn_phase` = { Idle, Prompting, Routing, Executing, Compacting, Finalizing, Exhausted, ... } (8+ variants). The matrix has 60+ pairs with forbidden cycles like `Idle -> Compacting` (Idle has no measurement to compact). The forbidden set is larger and the topology is acyclic-with-retries, not a simple sub-sum.
+`turn_phase` = { Idle, Prompting, Routing, Executing, Finalizing, Exhausted, ... }. The forbidden set is larger and the topology is acyclic-with-retries, not a simple sub-sum.
 
 ### 2.3 Current enforcement is runtime-only
 

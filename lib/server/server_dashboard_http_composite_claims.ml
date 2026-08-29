@@ -309,11 +309,9 @@ let composite_latest_activity_epoch snapshot execution =
 let composite_snapshot_is_idle snapshot =
   let decision = json_member "decision" snapshot in
   let runtime = json_member "runtime" snapshot in
-  let compaction = json_member "compaction" snapshot in
   json_string_eq "turn_phase" snapshot "idle"
   && json_string_eq "stage" decision "undecided"
   && json_string_eq "state" runtime "idle"
-  && json_string_eq "stage" compaction "accumulating"
 ;;
 
 let composite_execution_config_blocked execution =

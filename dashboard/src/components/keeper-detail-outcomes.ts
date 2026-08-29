@@ -15,7 +15,7 @@ import { MutedSpan, DetailCard } from './keeper-detail-kpi'
 //       ✅ successes.substantive_turns
 //       ⚠️ failures.turn_failed
 //     Rendered as compact inline counters + a stacked proportion bar.
-//     Secondary row lists compactions_ok / handoffs_ok as chips.
+//     Secondary row lists successful handoffs as chips.
 //
 //   Row 2 — Validator Pass Rate (Agent Core verdicts)
 //     "pass N/M (P%)" with a horizontal progress bar colored by tone,
@@ -61,10 +61,8 @@ export function OutcomesLedger({ outcomes }: {
           <div class="h-full bg-[var(--color-status-ok)]" style="width:${pctSuccess}%" title=${`성공 ${Math.round(pctSuccess)}%`}></div>
           <div class="h-full bg-[var(--color-status-warn)]" style="width:${pctFail}%" title=${`실패 ${Math.round(pctFail)}%`}></div>
         </div>
-        ${(successes.compactions_ok > 0 || successes.handoffs_ok > 0 || failures.compaction_failed > 0 || failures.handoff_failed > 0) ? html`
+        ${(successes.handoffs_ok > 0 || failures.handoff_failed > 0) ? html`
           <div class="mt-2 flex flex-wrap gap-1.5 text-3xs">
-            ${successes.compactions_ok > 0 ? html`<${StatusChip} tone="ok" uppercase=${false}>압축 ${successes.compactions_ok}<//>` : null}
-            ${failures.compaction_failed > 0 ? html`<${StatusChip} tone="bad" uppercase=${false}>압축 실패 ${failures.compaction_failed}<//>` : null}
             ${successes.handoffs_ok > 0 ? html`<${StatusChip} tone="ok" uppercase=${false}>인계 ${successes.handoffs_ok}<//>` : null}
             ${failures.handoff_failed > 0 ? html`<${StatusChip} tone="bad" uppercase=${false}>인계 실패 ${failures.handoff_failed}<//>` : null}
           </div>

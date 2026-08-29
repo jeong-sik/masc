@@ -8,7 +8,7 @@ import {
 function validTransition(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     prev_phase: 'Running',
-    new_phase: 'Compacting',
+    new_phase: 'Draining',
     selected_event: null,
     event_type: 'operator_pause',
     wall_clock_at_decision: 1_712_000_000.5,
@@ -37,7 +37,7 @@ describe('parseKeeperTransitionsResponse', () => {
       transitions: [
         validTransition(),
         validTransition({
-          prev_phase: 'Compacting',
+          prev_phase: 'Draining',
           new_phase: 'Running',
           selected_event: { kind: 'tool_result', tool: 'masc_check' },
         }),

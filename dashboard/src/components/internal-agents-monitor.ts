@@ -33,7 +33,6 @@ type Filter =
   | 'librarian'
   | 'auto-judge'
   | 'board-attention'
-  | 'compaction'
   | 'verification'
   | 'fusion'
 type Row =
@@ -117,7 +116,6 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'librarian', label: 'Librarian' },
   { id: 'auto-judge', label: 'Auto Judge' },
   { id: 'board-attention', label: 'Board Attention' },
-  { id: 'compaction', label: 'Compaction' },
   { id: 'verification', label: 'Verification' },
   { id: 'fusion', label: 'Fusion' },
 ]
@@ -129,7 +127,6 @@ function laneLabel(row: Row): string {
     case 'librarian_exact': return 'Librarian'
     case 'hitl_auto_judge': return 'Auto Judge'
     case 'board_attention_exact': return 'Board Attention'
-    case 'compaction_exact': return 'Compaction'
   }
 }
 
@@ -182,7 +179,6 @@ function rowKind(row: Row): Exclude<Filter, 'all'> {
     case 'librarian_exact': return 'librarian'
     case 'hitl_auto_judge': return 'auto-judge'
     case 'board_attention_exact': return 'board-attention'
-    case 'compaction_exact': return 'compaction'
     default: {
       const unreachable: never = row.run.lane
       return unreachable

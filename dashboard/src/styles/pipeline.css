@@ -33,11 +33,6 @@
   border-color: rgb(var(--warn-glow) / .9);
 }
 
-.pipeline-stage-node.active.stage-compacting .pipeline-stage-dot {
-  background: rgb(var(--brass-glow) / .7);
-  border-color: rgb(var(--brass-glow) / .9);
-}
-
 .pipeline-stage-node.active.stage-handoff .pipeline-stage-dot {
   background: rgb(var(--stalled-glow) / .7);
   border-color: rgb(var(--stalled-glow) / .9);

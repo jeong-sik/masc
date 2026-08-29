@@ -130,7 +130,7 @@ let replacement_catalog_with_unbound_target =
 
 let runtime_toml
       ?hitl_slots
-      ?compaction_slots
+      ?auxiliary_slots
       ?runtime_lane_candidates
       ?(include_board_attention = true)
       ?(include_hitl_auto_judge = true)
@@ -164,7 +164,7 @@ let runtime_toml
     else ""
   in
   let base =
-    let compaction_slots = Option.value ~default:[ lane_target ] compaction_slots in
+    let auxiliary_slots = Option.value ~default:[ lane_target ] auxiliary_slots in
     (Printf.sprintf
        {|[providers.replacement_provider]
 protocol = "openai-compatible-http"
@@ -195,10 +195,10 @@ max-request-body-bytes = 65536
 [runtime]
 default = "replacement_provider.replacement"
 
-[runtime.exact_output_lanes.compaction_exact]
+[runtime.exact_output_lanes.auxiliary_exact]
 slots = [%s]
 |}
-       (compaction_slots |> List.map (Printf.sprintf "%S") |> String.concat ", "))
+       (auxiliary_slots |> List.map (Printf.sprintf "%S") |> String.concat ", "))
     ^ board_attention_lane
     ^ runtime_lane
     ^ hitl_auto_judge_lane

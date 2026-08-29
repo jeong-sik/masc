@@ -636,9 +636,8 @@ let is_context_overflow (err : Agent_core.Error.t) : bool =
      urgency-lane tail, so a persistently failing transport cannot monopolize
      other independent queued sources. The source is
      retained with a new incarnation and may be retried after independent work.
-   - context overflow: NOT exempt (#26546). The automatic in-lane compaction
-     recovery was removed after producing no committed compaction. A provider
-     overflow without a state-changing successor has no evidence that
+   - context overflow: NOT exempt (#26546). A provider overflow without a
+     state-changing successor has no evidence that
      mechanical retry will fit. The ordinary consecutive-failure threshold
      bounds it, and the heartbeat quarantines the selected source unless the
      failure carries a deferred runtime lane

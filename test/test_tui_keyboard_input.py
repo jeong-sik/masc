@@ -779,10 +779,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "last_output_tokens",
         "last_total_tokens",
         "last_latency_ms",
-        "compaction_count",
-        "last_compaction_ts",
-        "last_compaction_before_tokens",
-        "last_compaction_after_tokens",
         "proactive_count_total",
         "last_proactive_ts",
         "proactive_visible_count_total",
@@ -5945,11 +5941,6 @@ def standalone_lanes_response() -> HttpResponse:
                 ),
                 standalone_lane_fixture("hitl_auto_judge", "HITL Auto Judge"),
                 standalone_lane_fixture("librarian_exact", "Librarian"),
-                standalone_lane_fixture(
-                    "compaction_exact",
-                    "Compaction",
-                    status="no_retained_observation",
-                ),
                 standalone_lane_fixture("verifier_exact", "Verifier"),
             ],
         },
@@ -6284,16 +6275,9 @@ def keeper_lanes_interaction(
             )
         # Enter on a standalone lane opens its run list -- with Verifier the
         # one exception, since its runs live in the verification registries
-        # and get a notice pane instead. Two k's walk the band from Verifier
-        # down to Librarian, whose run list is the paged exact-run summary.
+        # and get a notice pane instead. One k walks the band from Verifier
+        # to Librarian, whose run list is the paged exact-run summary.
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"k",
-            re.compile(rb"\x1b\[7m[^\x1b\n]*Compaction"),
-        )
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         # PgDn moves the run cursor by a page and the window must follow
         # (#31290): before the follow, the selected row walked off the frame
@@ -6322,13 +6306,6 @@ def keeper_lanes_interaction(
         send_and_wait(process, master_fd, output, b"\x1b", banded_librarian)
         # Back on the last standalone row, so the j below still lands on the
         # first Keeper row.
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            re.compile(rb"\x1b\[7m[^\x1b\n]*Compaction"),
-        )
         send_and_wait(process, master_fd, output, b"j", banded_verifier)
         # j past the last standalone row lands back on the first Keeper row.
         send_and_wait(process, master_fd, output, b"j", banded_alpha)

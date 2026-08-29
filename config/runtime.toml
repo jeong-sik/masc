@@ -60,9 +60,6 @@ default = "ollama_cloud.deepseek-v4-flash"
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
 
-[runtime.exact_output_lanes.compaction_exact]
-slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
-
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 
@@ -71,7 +68,7 @@ slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 
 # Verifier/completion-authority judgement lane (RFC-0361 D7(a)). Judgement
 # calls resolve only this lane and fail over in declared slot order, the same
-# frozen-order contract as the librarian/compaction lanes.
+# frozen-order contract as the other exact-output lanes.
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["deepseek.deepseek-v4-pro", "glm-coding.glm-5-turbo"]
 

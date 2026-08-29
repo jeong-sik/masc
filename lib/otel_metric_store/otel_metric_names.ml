@@ -189,24 +189,6 @@ let metric_file_lock_table_cas_retries =
 let metric_tool_keeper_cache_ttl_parse_failures =
   Otel_metric_store_core.declare_counter "masc_tool_keeper_cache_ttl_parse_failures_total"
 
-(* Keeper compaction (keeper_compact_policy.ml, keeper_tool_surface.ml). *)
-
-(* #9943: per-keeper counter of "compaction triggered but
-   resulted in no token reduction".  2026-04-24 audit found
-   956/972 (98.4%) of recorded compaction snapshots had
-   [compaction_before_tokens = compaction_after_tokens > 0],
-   meaning a trigger fired but the strategy returned the same
-   token budget — a silent failure mode that
-   [masc_keeper_compactions_total] hides because that counter
-   is incremented on the trigger rather than the savings.  This
-   counter labels by [keeper, trigger] so dashboards separate
-   "provider_overflow triggered noop" from "manual
-   trigger noop" etc. and operators can attribute blame.  Pair
-   with [masc_keeper_compaction_saved_tokens_total] (already
-   shipping) — that one tracks the bytes saved by the 1.6%
-   that DID save anything; this one tracks the 98.4% that
-   ran for nothing. *)
-
 (* Tier K5 — observability over the K4c per-keeper tool-emission
    accumulator registry. The registry is process-local; this gauge
    exposes its size so operators can alert on divergence from the

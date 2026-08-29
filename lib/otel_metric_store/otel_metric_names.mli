@@ -164,14 +164,6 @@ val metric_tool_keeper_cache_ttl_parse_failures : string
     FIFO wait queue. Reactive turn depth is intentionally not inferred from
     semaphore availability. *)
 
-(** #9943: per-keeper noop compaction counter.  Increments when
-    a snapshot records [compaction_before_tokens =
-    compaction_after_tokens > 0] — the trigger fired but the
-    strategy returned the same token budget.  Pre-fix, 956/972
-    (98.4%) of compaction snapshots in production were silent
-    noops because [masc_keeper_compactions_total] counts
-    triggers rather than savings.  Labels: [keeper, trigger]. *)
-
 (** Tier K5 — registry size for the per-keeper tool-emission
     accumulator (Tier K4c). Operators can alert on divergence from
     the active keeper count — a steady-state leak shows up as the

@@ -87,8 +87,6 @@ val clock_refs :
   ?provider_attempt_id:string ->
   ?tool_batch_id:string ->
   ?checkpoint_id:string ->
-  ?compaction_id:string ->
-  ?compaction_source:string ->
   ?event_bus_correlation_id:string ->
   ?event_bus_run_id:string ->
   ?parent_event_id:string ->
@@ -107,7 +105,6 @@ val clock_refs_for_context :
   ?parent_event_id:string ->
   ?caused_by:string ->
   ?logical_seq:int ->
-  ?compaction_source:string ->
   unit ->
   Yojson.Safe.t
 

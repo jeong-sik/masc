@@ -85,7 +85,7 @@
   --ok-35: rgb(var(--ok-glow) / .35);
 
   /* Semantic - Warning (Yellow) */
-  /* --warn-bright lifted to source.ts (Iter 2c-10); FSM Compacting tint */
+  /* --warn-bright lifted to source.ts (Iter 2c-10). */
   --warn-soft: rgb(var(--warn-glow) / .15);
   --warn-10: rgb(var(--warn-glow) / .10);
   --warn-20: rgb(var(--warn-glow) / .20);
@@ -182,8 +182,7 @@
   --yellow-bright-28: rgba(250, 204, 21, 0.28);
 
   /* Semantic - Amber Bright. Pure orange (#f59e0b), distinct from
-     --warn-bright (#f97316, redder orange). Used for FSM "Compacting"
-     swimlane segments where amber reads as cautionary-but-not-critical.
+     --warn-bright (#f97316, redder orange).
      Base hex (--amber-bright) lifted to source.ts in Iter 2c-2. */
   --amber-bright-45: rgba(245, 158, 11, 0.45);
 

@@ -19,7 +19,7 @@ name = "instructions"
 type = "string"
 description = """
 Complete Keeper instructions, written to the keeper TOML declaration (kept \
-across compaction/handoff)."""
+across handoff)."""
 
 [[params]]
 name = "mention_targets"

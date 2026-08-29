@@ -24,12 +24,12 @@
 
     Tool protocol cycles are never split, reordered, or dropped. The last
     [keep_recent_messages] messages — and the structurally protected suffix
-    from {!Keeper_compaction_unit.partition} — are returned byte-exact.
+    from {!Keeper_transcript_unit.partition} — are returned byte-exact.
     Signed thinking ([Thinking] with a signature and [RedactedThinking]) is
     never removed: providers replay it byte-exact on tool turns.
 
     Input and output are both validated with
-    {!Keeper_compaction_unit.validate}; a checkpoint that fails input
+    {!Keeper_transcript_unit.validate}; a checkpoint that fails input
     validation is refused rather than repaired, because a structurally broken
     history has to be prevented at the write boundary that admitted it
     (#25443). [session_id], [turn_count], and every other checkpoint field
@@ -70,8 +70,8 @@ type report =
 
 type purge_error =
   | Invalid_config of string
-  | Invalid_input_structure of Keeper_compaction_unit.structural_error
-  | Invalid_output_structure of Keeper_compaction_unit.structural_error
+  | Invalid_input_structure of Keeper_transcript_unit.structural_error
+  | Invalid_output_structure of Keeper_transcript_unit.structural_error
       (** Defensive re-validation of our own output; reaching this is a bug in
           the transform, never a property of the input. *)
 

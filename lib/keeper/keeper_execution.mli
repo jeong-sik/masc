@@ -1,5 +1,5 @@
 (** Keeper_execution — keeper tool execution loop, prompting,
-    compaction, and keepalive runtime.
+    checkpointing, and keepalive runtime.
 
     Internal helpers (proactive quality checks, explicit workspace replies,
     autonomous execution) are hidden. Only externally-called functions

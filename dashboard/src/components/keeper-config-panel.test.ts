@@ -147,7 +147,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       last_latency_ms: 2400,
       last_total_tokens_per_sec: 22.4,
       last_output_tokens_per_sec: 11.2,
-      compaction_count: 1,
     },
     ...overrides,
     skills: overrides.skills ?? { names: null },
@@ -158,7 +157,7 @@ describe('filterHookSlots', () => {
   const entries: HookSlotEntry[] = [
     ['pre_tool_call', makeSlot({ source: 'builtin', gates: ['typed_input', 'path_scope'] })],
     ['post_turn', makeSlot({ source: 'override', effects: ['handoff_auto'] })],
-    ['compaction_watcher', makeSlot({ source: 'keeper', features: ['snapshot'] })],
+    ['snapshot_observer', makeSlot({ source: 'keeper', features: ['snapshot'] })],
     ['orphan', makeSlot({ source: 'builtin' })],
   ]
 
@@ -177,7 +176,7 @@ describe('filterHookSlots', () => {
 
   it('matches by source substring', () => {
     const result = filterHookSlots(entries, 'keeper')
-    expect(result.map(([name]) => name)).toEqual(['compaction_watcher'])
+    expect(result.map(([name]) => name)).toEqual(['snapshot_observer'])
   })
 
   it('matches by gates entry', () => {
@@ -192,7 +191,7 @@ describe('filterHookSlots', () => {
 
   it('matches by features entry', () => {
     const result = filterHookSlots(entries, 'snapshot')
-    expect(result.map(([name]) => name)).toEqual(['compaction_watcher'])
+    expect(result.map(([name]) => name)).toEqual(['snapshot_observer'])
   })
 
   it('returns empty when nothing matches', () => {

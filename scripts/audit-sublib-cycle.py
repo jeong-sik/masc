@@ -100,7 +100,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_registry_types_kill_class",
     "masc.keeper_registry_types_turn_phase",
     "masc.keeper_registry_types_decision",
-    "masc.keeper_registry_types_compaction",
     "masc.keeper_hooks_agent_core_types",
     "masc.keeper_binding_health_config",
     "masc.keeper_transition_audit_types",

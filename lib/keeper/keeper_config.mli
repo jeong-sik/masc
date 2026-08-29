@@ -1,7 +1,7 @@
 (** Keeper configuration — defaults, environment variable parsing, profiles.
 
     Central SSOT for keeper runtime constants, environment variable parsing,
-    compaction profiles, and runtime parameter registrations.
+    runtime profiles and parameter registrations.
 
     @since v2.128.0 *)
 

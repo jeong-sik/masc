@@ -416,8 +416,8 @@ module Dashboard = struct
     get_float ~default:0.85 "MASC_DASHBOARD_CTX_HANDOFF_IMMINENT"
   let ctx_preparing =
     get_float ~default:0.70 "MASC_DASHBOARD_CTX_PREPARING"
-  let ctx_compacting =
-    get_float ~default:0.50 "MASC_DASHBOARD_CTX_COMPACTING"
+  let ctx_high =
+    get_float ~default:0.50 "MASC_DASHBOARD_CTX_HIGH"
 
   (** Dashboard shell-cache pre-warm timeouts.
 

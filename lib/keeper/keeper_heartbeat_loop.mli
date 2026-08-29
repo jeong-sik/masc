@@ -147,10 +147,6 @@ val record_crashed_cycle_failure :
 val handle_cycle_exception :
   base_path:string -> meta:keeper_meta -> exn -> keepalive_turn_outcome
 
-(** Pure mapping from one possibly nested cycle to every compaction
-    commit/failure observation it contains. Only committed outcomes mutate
-    durable compaction state. *)
-
 type connector_attention_outcome =
   | Attention_resolved
   | Attention_ignored

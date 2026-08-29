@@ -107,7 +107,6 @@ Schema returns either a canonical `KeeperPhase` literal or a typed `{unknown: st
 - `toPascalPhase` (keeper-phase-strip.ts:16) — DELETE.
 - `keeper-state-diagram.ts:42-60` internal phase map — DELETE.
 - All PascalCase keys in `STATE_DISPLAY_NAMES` (fsm-hub-types.ts:176-188) — DELETE.
-- `keeper-memory-tier-panel.ts:164` defensive `phase === 'Compacting' || phase === 'compacting'` — REPLACE with single lowercase compare.
 
 ### 4.5 Consumer sweep
 
@@ -130,7 +129,7 @@ Total estimated blast radius: 12-18 files. **All in one PR per 사용자 절대 
 | Phase | Output | Verification |
 |---|---|---|
 | 0 | This RFC merged (Draft → Active on PR start) | RFC body merge |
-| 1 | PR sweep: type flip + 4 normalizers deleted + consumer compares rekeyed + display map purged | `pnpm typecheck` clean, `pnpm vitest run` no new failures, `rg "'(Running\|Failing\|Compacting\|HandingOff\|Draining\|Overflowed\|Paused\|Stopped\|Crashed\|Restarting\|Dead\|Zombie\|Offline)'" dashboard/src/` → only test fixtures + scripts |
+| 1 | PR sweep: type flip + 4 normalizers deleted + consumer compares rekeyed + display map purged | `pnpm typecheck` clean, `pnpm vitest run` no new failures |
 | 2 | Schema picklist + `{unknown}` carrier + exhaustive match conversion | parse-error test asserts unknown phase surfaces as `{unknown: 'newphase'}` not coerced |
 | 3 | Closeout commit + RFC status → Implemented | grep audit shows zero PascalCase phase literals in dashboard runtime code |
 

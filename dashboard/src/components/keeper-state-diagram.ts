@@ -196,7 +196,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
       <div>
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2 v2-monitoring-toolbar">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
-            통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC)
+            통합 라이프사이클 (KSM · KTC · KDP · KCL)
           </div>
           <${FilterChips}
             chips=${DIAGRAM_VIEW_CHIPS}

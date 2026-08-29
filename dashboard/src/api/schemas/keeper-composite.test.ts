@@ -9,7 +9,7 @@ import {
 // phase_diagnosis, execution, runtime_attention,
 // recommended_actions) are added per-test. Value shapes here mirror what
 // `keeper_composite_observer.ml` `snapshot_to_json` emits: lowercase
-// snake_case phase / turn_phase / decision / runtime / compaction (via
+// snake_case phase / turn_phase / decision / runtime (via
 // `Keeper_state_machine.phase_to_string` etc.). Capitalized variants
 // like `"Stable"` are forward-looking — they appear only in schema-
 // permissiveness tests below, never in real backend payloads today.
@@ -83,11 +83,11 @@ describe('parseKeeperCompositeSnapshot', () => {
   })
 
   // Every phase string the backend can emit, per
-  // `Keeper_state_machine.phase_to_string` (9 ctors, lowercase
+  // `Keeper_state_machine.phase_to_string` (8 ctors, lowercase
   // snake_case). The schema must round-trip each one verbatim.
   it('round-trips every phase the backend can emit', () => {
     for (const phase of [
-      'offline', 'running', 'failing', 'compacting',
+      'offline', 'running', 'failing',
       'draining', 'paused', 'stopped', 'crashed',
       'restarting',
     ]) {
@@ -406,6 +406,7 @@ describe('parseKeeperCompositeSnapshot', () => {
       },
     })
     expect(result.measurement.context_actions).toBeDefined()
+    expect(result.measurement.context_actions!.handoff).toBe(false)
   })
 
   it('parses collapsed_from when Stable hides a raw keeper phase', () => {

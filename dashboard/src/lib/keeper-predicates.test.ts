@@ -122,7 +122,7 @@ describe('isKeeperOffline', () => {
 // control-plane 의 paused 뿐이다.
 describe('running 판정은 phase 와 health 로만 한다', () => {
   it('running 계열 phase 는 running 이다', () => {
-    for (const phase of ['Running', 'Failing', 'Compacting', 'Draining']) {
+    for (const phase of ['Running', 'Failing', 'Draining']) {
       expect(isKeeperRunningExcludingRestarting(k({ phase } as Partial<Keeper>))).toBe(true)
     }
   })
@@ -188,7 +188,7 @@ describe('isKeeperCrashed — audit A1 (2026-05-19)', () => {
   })
   it.each<[Keeper['phase']]>([
     ['Running'], ['Paused'], ['Offline'], ['Stopped'], ['Restarting'],
-    ['Failing'], ['Compacting'], ['Draining'],
+    ['Failing'], ['Draining'],
   ])('phase=%s ⇒ NOT crashed (terminal-failure-only subset)', (phase) => {
     expect(isKeeperCrashed(k({ phase }))).toBe(false)
   })
@@ -256,7 +256,7 @@ describe('keeperCanWakeup', () => {
 
 describe('isKeeperRunningExcludingRestarting — RFC-0135 PR-11', () => {
   it.each([
-    ['Running'], ['Failing'], ['Compacting'], ['Draining'],
+    ['Running'], ['Failing'], ['Draining'],
   ])('phase=%s ⇒ running', (phase) => {
     expect(isKeeperRunningExcludingRestarting(k({ status: 'unknown', phase: phase as Keeper['phase'] }))).toBe(true)
   })

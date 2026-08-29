@@ -1,7 +1,7 @@
 (** Runtime-lens clock-group projection and gap detection.
 
     Derives grouped clock edges (turns, batches, attempts, checkpoints,
-    compactions and event-bus correlations) from the edge
+    and event-bus correlations) from the edge
     stream produced by {!Server_dashboard_http_keeper_runtime_lens_clock_edges}. *)
 
 open Server_dashboard_http_keeper_runtime_manifest_scan
@@ -49,7 +49,6 @@ let clock_group_terminal_event group_type event =
   | "provider_attempt", "provider_attempt_finished" -> true
   | "tool_batch", "provider_lane_resolved" -> true
   | "checkpoint", "checkpoint_saved" -> true
-  | "compaction", ("context_compacted" | "event_bus_correlated") -> true
   | "event_bus_correlation", "event_bus_correlated" -> true
   | _ -> false
 
@@ -156,7 +155,6 @@ let runtime_lens_clock_groups_json scan =
     add_if_present edge "tool_batch" "tool_batch_id";
     add_if_present edge "provider_attempt" "provider_attempt_id";
     add_if_present edge "checkpoint" "checkpoint_id";
-    add_if_present edge "compaction" "compaction_id";
     add_if_present edge "event_bus_correlation" "event_bus_correlation_id");
   !ordered_keys
   |> List.filter_map (fun key -> Hashtbl.find_opt groups key)
@@ -252,13 +250,6 @@ let runtime_lens_clock_group_gaps scan =
          clock_group_open_gap ~code:"clock_memory_injection_unflushed"
            ~severity:"warn" ~lane:"memory_context" ~label:"memory_injection"
            (groups_of_type "memory_injection")
-       with
-       | Some gap -> gap :: gaps
-       | None -> gaps)
-  |> (fun gaps ->
-       match
-         clock_group_open_gap ~code:"clock_compaction_group_open" ~severity:"warn"
-           ~lane:"memory_context" ~label:"compaction" (groups_of_type "compaction")
        with
        | Some gap -> gap :: gaps
        | None -> gaps)

@@ -424,7 +424,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       last_latency_ms: lastLatencyMs != null && lastLatencyMs > 0 ? lastLatencyMs : null,
       last_total_tokens_per_sec: asLooseNullableNumber(metrics.last_total_tokens_per_sec),
       last_output_tokens_per_sec: asLooseNullableNumber(metrics.last_output_tokens_per_sec),
-      compaction_count: asInt(metrics.compaction_count) ?? 0,
     },
     field_presence: normalizeKeeperConfigFieldPresence(data),
   }

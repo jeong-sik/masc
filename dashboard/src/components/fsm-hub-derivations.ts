@@ -143,10 +143,6 @@ export function inferTransitionReason(field: string, from: string, to: string): 
     if (to === 'exhausted') return '모든 runtime lane 실패 — failover 소진'
     if (from === 'trying' && to === 'idle') return 'runtime 호출 종료 (성공/실패와 무관)'
   }
-  if (field === 'KMC') {
-    if (to === 'compacting') return '컨텍스트 압축 작업 시작 (KMC 동기화)'
-    if (from === 'compacting' && to === 'accumulating') return '압축 완료 — 다시 누적 모드로'
-  }
   return null
 }
 

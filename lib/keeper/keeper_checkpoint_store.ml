@@ -79,25 +79,6 @@ let encode_checkpoint_string_off_scheduler (ckpt : Agent_core.Checkpoint.t) :
     string =
   offload_checkpoint_cpu (fun () -> Agent_core.Checkpoint.to_string ckpt)
 
-let compaction_commit_count_context_key = "masc_compaction_commit_count"
-
-let compaction_commit_count_of_context context =
-  match
-    Agent_core.Context.get_scoped
-      context
-      Agent_core.Context.Session
-      compaction_commit_count_context_key
-  with
-  | None -> Ok 0
-  | Some (`Int count) when count >= 0 -> Ok count
-  | Some (`Intlit raw) ->
-    (match int_of_string_opt raw with
-     | Some count when count >= 0 -> Ok count
-     | Some _ -> Error "checkpoint compaction commit count is negative"
-     | None -> Error "checkpoint compaction commit count is not an integer")
-  | Some _ -> Error "checkpoint compaction commit count is not an integer"
-;;
-
 let agent_core_history_snapshot_id_of_checkpoint (ckpt : Agent_core.Checkpoint.t) : string =
   let created_ms = max 0 (int_of_float (ckpt.created_at *. 1000.0)) in
   Printf.sprintf "%s%013d%s"
@@ -330,7 +311,7 @@ type save_agent_core_error =
   | Existing_checkpoint_unreadable of checkpoint_load_error
   | Canonical_write_failed of Keeper_fs.durable_write_error
   | Transaction_lock_failed of File_lock_eio.durable_lock_error
-  | Structurally_invalid of Keeper_compaction_unit.structural_error
+  | Structurally_invalid of Keeper_transcript_unit.structural_error
       (** The messages do not satisfy the tool-protocol contract a reload has
           to replay. One of the three writers ran this check before calling
           here; the mid-run sink and finalize assembled their checkpoint
@@ -367,7 +348,7 @@ let save_agent_core_error_to_string = function
     ^ File_lock_eio.durable_lock_error_to_string error
   | Structurally_invalid error ->
     "checkpoint messages are structurally invalid: "
-    ^ Keeper_compaction_unit.show_structural_error error
+    ^ Keeper_transcript_unit.show_structural_error error
 
 let canonical_session_location session_dir =
   (* Containment boundary for every checkpoint path (issue #25077).
@@ -919,7 +900,7 @@ let save_agent_core_classified_typed
     ~(session_dir : string)
     (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, save_agent_core_error) result =
-  match Keeper_compaction_unit.validate ckpt.messages with
+  match Keeper_transcript_unit.validate ckpt.messages with
   | Error structural -> Error (Structurally_invalid structural)
   | Ok () ->
   match Keeper_id.Trace_id.of_string ckpt.session_id with

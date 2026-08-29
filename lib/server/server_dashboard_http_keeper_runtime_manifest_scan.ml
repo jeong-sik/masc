@@ -24,21 +24,16 @@ type runtime_manifest_scan =
   ; event_bus_count : int
   ; event_bus_correlation_ids : string list
   ; event_bus_run_ids : string list
-  ; context_compact_started_count : int
-  ; context_compacted_count : int
-  ; last_compaction : Yojson.Safe.t option
   ; latest_provider_lane_decision : Yojson.Safe.t option
   ; latest_provider_lane_row : Keeper_runtime_manifest.t option
   ; latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
   ; payload_role_counts : (string, int) Hashtbl.t
   ; source_clock_counts : (string, int) Hashtbl.t
   ; context_injected_count : int
-  ; context_compacted_event_count : int
   ; provider_started_count : int
   ; provider_finished_count : int
   ; provider_terminal_row : Keeper_runtime_manifest.t option
   ; latest_context_injected_row : Keeper_runtime_manifest.t option
-  ; latest_context_compacted_row : Keeper_runtime_manifest.t option
   ; dag_edges : (string * string) list
   ; scanned_lines : int
   ; scan_line_limit : int
@@ -77,21 +72,16 @@ let make_runtime_manifest_scan ~path ~limit ~scan_line_limit ~scan_scope =
   ; event_bus_count = 0
   ; event_bus_correlation_ids = []
   ; event_bus_run_ids = []
-  ; context_compact_started_count = 0
-  ; context_compacted_count = 0
-  ; last_compaction = None
   ; latest_provider_lane_decision = None
   ; latest_provider_lane_row = None
   ; latest_pre_dispatch_blocked_row = None
   ; payload_role_counts = Hashtbl.create 17
   ; source_clock_counts = Hashtbl.create 17
   ; context_injected_count = 0
-  ; context_compacted_event_count = 0
   ; provider_started_count = 0
   ; provider_finished_count = 0
   ; provider_terminal_row = None
   ; latest_context_injected_row = None
-  ; latest_context_compacted_row = None
   ; dag_edges = []
   ; scanned_lines = 0
   ; scan_line_limit
@@ -300,27 +290,10 @@ let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
       context_injected_count = scan.context_injected_count + 1
     ; latest_context_injected_row = Some row
     }
-  | Keeper_runtime_manifest.Context_compacted ->
-    { scan with
-      context_compacted_event_count = scan.context_compacted_event_count + 1
-    ; latest_context_compacted_row = Some row
-    }
   | Keeper_runtime_manifest.Event_bus_correlated ->
     let decision = row.Keeper_runtime_manifest.decision in
     let scan =
-      { scan with
-        event_bus_count = scan.event_bus_count + 1
-      ; context_compact_started_count =
-          scan.context_compact_started_count
-          + Option.value
-              (Json_util.get_int decision "context_compact_started_count")
-              ~default:0
-      ; context_compacted_count =
-          scan.context_compacted_count
-          + Option.value
-              (Json_util.get_int decision "context_compacted_count")
-              ~default:0
-      }
+      { scan with event_bus_count = scan.event_bus_count + 1 }
     in
     let scan =
       match Json_util.get_string decision "correlation_id" with
@@ -336,9 +309,7 @@ let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
         { scan with event_bus_run_ids = value :: scan.event_bus_run_ids }
       | None -> scan
     in
-    (match Json_util.assoc_member_opt "last_compaction" decision with
-     | Some (`Assoc _ as obj) -> { scan with last_compaction = Some obj }
-     | _ -> scan)
+    scan
   | Keeper_runtime_manifest.Provider_attempt_started ->
     push_bounded scan.provider_attempt_rows scan.limit row;
     { scan with provider_started_count = scan.provider_started_count + 1 }

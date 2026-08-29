@@ -96,9 +96,6 @@ blocking_lints() {
   run_self_test_when_changed "Keeper turn content boundary self-test" \
     scripts/check-keeper-turn-content-boundary.sh \
     bash scripts/check-keeper-turn-content-boundary.sh --self-test
-  run_self_test_when_changed "Compaction exact-flow boundary self-test" \
-    scripts/check-compaction-exact-flow-boundary.sh \
-    bash scripts/check-compaction-exact-flow-boundary.sh --self-test
   run_lint "No Tool_result.error + Printexc (RFC-0148)" bash scripts/lint/no-tool-result-error-printexc.sh
   run_self_test_when_changed "Board attention exact-flow boundary self-test" \
     scripts/check-board-attention-exact-flow-boundary.sh \

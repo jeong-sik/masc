@@ -133,33 +133,7 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
   ()
 ;;
 
-let test_compaction_plan_schema_uses_codec_ssot () =
-  let schema = Keeper_structured_output_schema.compaction_plan_output_schema in
-  check
-    (list string)
-    "compaction plan required fields"
-    (List.sort
-       String.compare
-       [ Keeper_structured_output_schema.compaction_plan_field_summary
-       ; Keeper_structured_output_schema.compaction_plan_field_keep_from_unit_index
-       ])
-    (required_strings schema);
-  check bool "compaction plan is closed" false
-    (allows_additional_properties schema);
-  let _summary_schema =
-    schema_property
-      Keeper_structured_output_schema.compaction_plan_field_summary
-      schema
-  in
-  let _boundary_schema =
-    schema_property
-      Keeper_structured_output_schema.compaction_plan_field_keep_from_unit_index
-      schema
-  in
-  ()
-;;
-
-let test_librarian_claim_schema_is_closed () =
+ let test_librarian_claim_schema_is_closed () =
   let claim_schema =
     Keeper_structured_output_schema.librarian_current_output_schema
     |> schema_property Keeper_librarian.wire_field_new_claims
@@ -351,12 +325,6 @@ let () =
             "fusion judge schema uses parser wire contract"
             `Quick
             test_fusion_judge_schema_uses_parser_wire_contract
-        ] )
-    ; ( "compaction schemas"
-      , [ test_case
-            "compaction plan schema uses codec SSOT"
-            `Quick
-            test_compaction_plan_schema_uses_codec_ssot
         ] )
     ; ( "librarian schemas"
       , [ test_case

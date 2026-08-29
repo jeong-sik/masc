@@ -11,12 +11,12 @@ open Keeper_types_profile
 include Keeper_context_core_accessors
 
 type 'persistence_error checkpoint_write_error =
-  | Tool_history_invalid of Keeper_compaction_unit.structural_error
+  | Tool_history_invalid of Keeper_transcript_unit.structural_error
   | Persistence_error of 'persistence_error
 
 let checkpoint_write_error_to_string ~persistence_error_to_string = function
   | Tool_history_invalid error ->
-    "tool history invalid: " ^ Keeper_compaction_unit.show_structural_error error
+    "tool history invalid: " ^ Keeper_transcript_unit.show_structural_error error
   | Persistence_error error -> persistence_error_to_string error
 ;;
 
@@ -45,7 +45,7 @@ let checkpoint_for_persistence
     ~(session : session_context)
     ~(agent_name : string)
     ~(ctx : working_context)
-  : (Agent_core.Checkpoint.t, Keeper_compaction_unit.structural_error) result =
+  : (Agent_core.Checkpoint.t, Keeper_transcript_unit.structural_error) result =
   let checkpoint_context = Agent_core.Context.copy ~eio:true (agent_core_context_of_context ctx) in
   let checkpoint_messages = messages_of_context ctx in
   (* RFC vision-delegation §2.3 site 2 (checkpoint write boundary). For a
@@ -65,7 +65,7 @@ let checkpoint_for_persistence
          ~keeper_name)
       checkpoint_messages
   in
-  match Keeper_compaction_unit.validate checkpoint_messages with
+  match Keeper_transcript_unit.validate checkpoint_messages with
   | Error _ as error -> error
   | Ok () ->
     Ok

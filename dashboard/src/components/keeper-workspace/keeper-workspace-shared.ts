@@ -143,7 +143,7 @@ export function keeperFleetTone(keeper: Keeper): FleetTone {
 /** The state-pill modifier class for the chat header, derived from the
  *  health tone so error phases get the `bad` pill rather than collapsing
  *  to `off`. Transient (busy) phases get the dedicated `busy` pill so the
- *  header shows "compacting" as working-through, not stopped.
+ *  header shows transitional phases as working-through, not stopped.
  *
  *  Note: this is a 1:1 type mapping, not a classifier. Same `FleetTone`
  *  keyspace → CSS class suffix. Kept as a function (not a constant table)

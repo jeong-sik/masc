@@ -379,10 +379,10 @@ let ensure_exact_backup ~config ~trace_id ~source_ref source_bytes =
 let checkpoint_purge_error_to_string = function
   | Keeper_checkpoint_purge.Invalid_config detail -> "invalid config: " ^ detail
   | Invalid_input_structure structural ->
-    Keeper_compaction_unit.show_structural_error structural
+    Keeper_transcript_unit.show_structural_error structural
   | Invalid_output_structure structural ->
     "purge produced invalid structure: "
-    ^ Keeper_compaction_unit.show_structural_error structural
+    ^ Keeper_transcript_unit.show_structural_error structural
 ;;
 
 let purge_current_unlocked config ~keeper_name ~apply =

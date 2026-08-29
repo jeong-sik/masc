@@ -33,7 +33,7 @@ MCP_URL="${MCP_URL:-}"
 MCP_TOKEN="${MASC_TOKEN:-}"
 KEEPER_RUNTIME_NAME="${KEEPER_RUNTIME_NAME:-}"
 KEEPER_NAME="${KEEPER_NAME:-continuity-${RUN_ID}}"
-TARGET_PHASES="${TARGET_PHASES:-bootstrap,liveness,continuity,compaction,handoff,recovery}"
+TARGET_PHASES="${TARGET_PHASES:-bootstrap,liveness,continuity,handoff,recovery}"
 MAX_TURNS="${MAX_TURNS:-4}"
 TURN_TIMEOUT_SEC="${TURN_TIMEOUT_SEC:-90}"
 HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-20}"
@@ -51,14 +51,12 @@ KEEPER_STOPPED=0
 BOOTSTRAP_PASS=0
 LIVENESS_PASS=0
 CONTINUITY_PASS=0
-COMPACTION_PASS=0
 HANDOFF_PASS=0
 RECOVERY_PASS=0
 LATEST_INPUT_PREVIEW=""
 LATEST_OUTPUT_PREVIEW=""
 LATEST_TRACE_ID=""
 LATEST_GENERATION=""
-LATEST_COMPACTIONS=""
 LATEST_HANDOFFS=""
 LATEST_HEALTH=""
 LATEST_HEARTBEAT=""
@@ -287,7 +285,6 @@ refresh_latest_evidence_from_status() {
   [[ -z "$status_json" ]] && return 0
   LATEST_TRACE_ID="$(printf '%s' "$status_json" | jq -r '.meta.trace_id // ""')"
   LATEST_GENERATION="$(printf '%s' "$status_json" | jq -r '.generation // .meta.generation // ""')"
-  LATEST_COMPACTIONS="$(printf '%s' "$status_json" | jq -r '.compaction_count // .meta.compaction_count // ""')"
   LATEST_HANDOFFS="$(printf '%s' "$status_json" | jq -r '.handoff_count_total // ""')"
   LATEST_HEALTH="$(printf '%s' "$status_json" | jq -r '.diagnostic.health_state // ""')"
   if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running // false')" == "true" ]] \
@@ -312,7 +309,6 @@ keeper_status_json() {
     include_context: true,
     include_metrics_overview: true,
     include_history_tail: true,
-    include_compaction_history: true,
     tail_messages: 5,
     tail_turns: 3
   }')"
@@ -585,7 +581,7 @@ phase_report_string() {
 run_dry_run() {
   local phase snapshot_file heartbeat_file
   write_text "$SERVER_LOG" "dry-run mode: no live MCP calls executed"
-  for phase in bootstrap liveness continuity compaction handoff recovery; do
+  for phase in bootstrap liveness continuity handoff recovery; do
     [[ -n "$TARGET_PHASES" ]] && ! phase_enabled "$phase" && continue
     snapshot_file="$SNAP_DIR/${phase}-keeper-status.json"
     heartbeat_file="$SNAP_DIR/${phase}-heartbeat.txt"
@@ -596,14 +592,12 @@ run_dry_run() {
   BOOTSTRAP_PASS=2
   LIVENESS_PASS=2
   CONTINUITY_PASS=2
-  COMPACTION_PASS=2
   HANDOFF_PASS=2
   RECOVERY_PASS=2
   LATEST_INPUT_PREVIEW="[simulated] dry-run validation input"
   LATEST_OUTPUT_PREVIEW="[simulated] dry-run validation output"
   LATEST_TRACE_ID="trace-dry-run-simulated"
   LATEST_GENERATION="0"
-  LATEST_COMPACTIONS="0"
   LATEST_HANDOFFS="0"
   LATEST_HEALTH="simulated"
   LATEST_HEARTBEAT="simulated"
@@ -637,13 +631,11 @@ finalize_report() {
   local bootstrap_ok="$BOOTSTRAP_PASS"
   local liveness_ok="$LIVENESS_PASS"
   local continuity_ok="$CONTINUITY_PASS"
-  local compaction_ok="$COMPACTION_PASS"
   local handoff_ok="$HANDOFF_PASS"
   local recovery_ok="$RECOVERY_PASS"
   if ! phase_enabled bootstrap; then bootstrap_ok=1; fi
   if ! phase_enabled liveness; then liveness_ok=1; fi
   if ! phase_enabled continuity; then continuity_ok=1; fi
-  if ! phase_enabled compaction; then compaction_ok=1; fi
   if ! phase_enabled handoff; then handoff_ok=1; fi
   if ! phase_enabled recovery; then recovery_ok=1; fi
 
@@ -651,7 +643,7 @@ finalize_report() {
     classification="DRY_RUN"
     VALIDATION_EXIT_CODE=2
   elif [[ $bootstrap_ok -eq 1 && $liveness_ok -eq 1 && $continuity_ok -eq 1 ]]; then
-    if [[ $compaction_ok -eq 1 && $handoff_ok -eq 1 && $recovery_ok -eq 1 ]]; then
+    if [[ $handoff_ok -eq 1 && $recovery_ok -eq 1 ]]; then
       classification="PASS"
       VALIDATION_EXIT_CODE=0
     else
@@ -677,7 +669,6 @@ finalize_report() {
     --arg latest_output_preview "$LATEST_OUTPUT_PREVIEW" \
     --arg latest_trace_id "$LATEST_TRACE_ID" \
     --arg latest_generation "$LATEST_GENERATION" \
-    --arg latest_compactions "$LATEST_COMPACTIONS" \
     --arg latest_handoffs "$LATEST_HANDOFFS" \
     --arg latest_health "$LATEST_HEALTH" \
     --arg latest_heartbeat "$LATEST_HEARTBEAT" \
@@ -686,13 +677,11 @@ finalize_report() {
     --argjson bootstrap_pass "$( [[ $BOOTSTRAP_PASS -eq 1 ]] && echo true || echo false )" \
     --argjson liveness_pass "$( [[ $LIVENESS_PASS -eq 1 ]] && echo true || echo false )" \
     --argjson continuity_pass "$( [[ $CONTINUITY_PASS -eq 1 ]] && echo true || echo false )" \
-    --argjson compaction_pass "$( [[ $COMPACTION_PASS -eq 1 ]] && echo true || echo false )" \
     --argjson handoff_pass "$( [[ $HANDOFF_PASS -eq 1 ]] && echo true || echo false )" \
     --argjson recovery_pass "$( [[ $RECOVERY_PASS -eq 1 ]] && echo true || echo false )" \
     --argjson target_bootstrap "$( phase_enabled bootstrap && echo true || echo false )" \
     --argjson target_liveness "$( phase_enabled liveness && echo true || echo false )" \
     --argjson target_continuity "$( phase_enabled continuity && echo true || echo false )" \
-    --argjson target_compaction "$( phase_enabled compaction && echo true || echo false )" \
     --argjson target_handoff "$( phase_enabled handoff && echo true || echo false )" \
     --argjson target_recovery "$( phase_enabled recovery && echo true || echo false )" \
     '{
@@ -713,7 +702,6 @@ finalize_report() {
         latest_output_preview:$latest_output_preview,
         latest_trace_id:$latest_trace_id,
         latest_generation:$latest_generation,
-        latest_compactions:$latest_compactions,
         latest_handoffs:$latest_handoffs,
         latest_health:$latest_health,
         latest_heartbeat:$latest_heartbeat
@@ -722,7 +710,6 @@ finalize_report() {
         bootstrap:{selected:$target_bootstrap,pass:$bootstrap_pass},
         liveness:{selected:$target_liveness,pass:$liveness_pass},
         continuity:{selected:$target_continuity,pass:$continuity_pass},
-        compaction:{selected:$target_compaction,pass:$compaction_pass},
         handoff:{selected:$target_handoff,pass:$handoff_pass},
         recovery:{selected:$target_recovery,pass:$recovery_pass}
       },
@@ -747,7 +734,6 @@ finalize_report() {
 | bootstrap | $(phase_report_string bootstrap "$BOOTSTRAP_PASS") |
 | liveness | $(phase_report_string liveness "$LIVENESS_PASS") |
 | continuity | $(phase_report_string continuity "$CONTINUITY_PASS") |
-| compaction | $(phase_report_string compaction "$COMPACTION_PASS") |
 | handoff | $(phase_report_string handoff "$HANDOFF_PASS") |
 | recovery | $(phase_report_string recovery "$RECOVERY_PASS") |
 
@@ -757,7 +743,6 @@ finalize_report() {
 - Latest liveness signal: \`$LATEST_HEARTBEAT\`
 - Latest trace: \`$LATEST_TRACE_ID\`
 - Generation: \`$LATEST_GENERATION\`
-- Compactions: \`$LATEST_COMPACTIONS\`
 - Handoffs: \`$LATEST_HANDOFFS\`
 - Recent input preview: $LATEST_INPUT_PREVIEW
 - Recent output preview: $LATEST_OUTPUT_PREVIEW
@@ -773,7 +758,7 @@ EOF
 EOF
   else
     cat >>"$RUN_DIR/summary.md" <<'EOF'
-- **PASS**: real live keeper continuity proven. Heartbeat, completed turns, typed checkpoint messages, compaction, handoff, and restart recovery all produced runtime evidence.
+- **PASS**: real live keeper continuity proven. Heartbeat, completed turns, typed checkpoint messages, handoff, and restart recovery all produced runtime evidence.
 - **PARTIAL**: keeper was live and a typed checkpoint was observed, but one or more lifecycle transitions did not happen within the validation window.
 - **FAIL**: the typed checkpoint and lifecycle evidence required for live continuity was not observed.
 EOF
@@ -814,8 +799,8 @@ EOF
 
 real_run() {
   local status_json heartbeat_output snapshot_info snapshot_file heartbeat_file workspace_file
-  local baseline_compactions baseline_generation baseline_handoffs baseline_trace
-  local turn status_after heartbeat_after agent_name compaction_done handoff_done
+  local baseline_generation baseline_handoffs baseline_trace
+  local turn status_after heartbeat_after agent_name handoff_done
 
   require_cmd jq || { echo "jq is required" >&2; return 1; }
   require_cmd curl || { echo "curl is required" >&2; return 1; }
@@ -922,11 +907,9 @@ real_run() {
   snapshot_info="$(capture_snapshot baseline)"
   snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
   status_json="$(cat "$snapshot_file")"
-  baseline_compactions="$(printf '%s' "$status_json" | jq -r '((.compaction_count // .meta.compaction_count) | tonumber?) // 0')"
   baseline_generation="$(printf '%s' "$status_json" | jq -r '((.generation // .meta.generation) | tonumber?) // 0')"
   baseline_handoffs="$(printf '%s' "$status_json" | jq -r '(.handoff_count_total | tonumber?) // 0')"
   baseline_trace="$(printf '%s' "$status_json" | jq -r '.meta.trace_id')"
-  compaction_done=0
   handoff_done=0
 
   if phase_enabled continuity; then
@@ -968,7 +951,7 @@ real_run() {
   fi
 
   for turn in $(seq 2 "$MAX_TURNS"); do
-    if ! phase_enabled compaction && ! phase_enabled handoff; then
+    if ! phase_enabled handoff; then
       break
     fi
     if ! send_keeper_message "$((1400 + turn))" "$(pressure_prompt "$turn")"; then
@@ -980,14 +963,6 @@ real_run() {
     heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
     status_after="$(cat "$snapshot_file")"
     refresh_latest_evidence_from_status "$status_after"
-
-    if [[ $compaction_done -eq 0 ]] \
-      && [[ "$(printf '%s' "$status_after" | jq -r '((((.compaction_count // .meta.compaction_count) | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_compactions")" == "true" ]]; then
-      COMPACTION_PASS=1
-      compaction_done=1
-      append_phase "compaction" "pass" "compaction counter increased under isolated pressure" "$snapshot_file" "$heartbeat_file"
-      baseline_compactions="$(printf '%s' "$status_after" | jq -r '((.compaction_count // .meta.compaction_count) | tonumber?) // 0')"
-    fi
 
     if [[ $handoff_done -eq 0 ]] \
       && { [[ "$(printf '%s' "$status_after" | jq -r '((((.generation // .meta.generation) | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_generation")" == "true" ]] \
@@ -1001,17 +976,10 @@ real_run() {
       baseline_trace="$(printf '%s' "$status_after" | jq -r '.meta.trace_id')"
     fi
 
-    if [[ $compaction_done -eq 1 && $handoff_done -eq 1 ]]; then
+    if [[ $handoff_done -eq 1 ]]; then
       break
     fi
   done
-
-  if phase_enabled compaction && [[ $COMPACTION_PASS -eq 0 ]]; then
-    snapshot_info="$(capture_snapshot compaction-miss)"
-    snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
-    heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
-    append_phase "compaction" "fail" "compaction evidence did not appear within the validation window" "$snapshot_file" "$heartbeat_file"
-  fi
 
   if phase_enabled handoff && [[ $HANDOFF_PASS -eq 0 ]]; then
     snapshot_info="$(capture_snapshot handoff-miss)"

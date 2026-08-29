@@ -340,7 +340,6 @@ jobs:
             audit-tla-cfg-orphan.sh \
             check_silent_failure.sh \
             check-board-attention-exact-flow-boundary.sh \
-            check-compaction-exact-flow-boundary.sh \
             check-keeper-turn-content-boundary.sh \
             check-opam-lock-covers-deps.sh \
             check-tool-error-format.sh \

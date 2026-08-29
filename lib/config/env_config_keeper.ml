@@ -683,7 +683,7 @@ end
 (** {1 Dashboard Health Thresholds}
 
     Thresholds used by the dashboard keeper health scorer and harness health
-    panels.  Distinct from compaction triggers — these affect UI display only. *)
+    panels. These affect UI display only. *)
 
 module DashboardHealth = struct
   let runtime_warning_ctx_ratio =

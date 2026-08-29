@@ -5,7 +5,6 @@ export type ExactLane =
   | 'librarian_exact'
   | 'hitl_auto_judge'
   | 'board_attention_exact'
-  | 'compaction_exact'
 
 export type ExactLaneRunStatus =
   | 'running'
@@ -61,7 +60,6 @@ const LANES: readonly string[] = [
   'librarian_exact',
   'hitl_auto_judge',
   'board_attention_exact',
-  'compaction_exact',
 ]
 const STATUSES: readonly string[] = [
   'running',

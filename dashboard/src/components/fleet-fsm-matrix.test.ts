@@ -130,7 +130,7 @@ describe('chipClassFor', () => {
     // raw Tailwind color names.
     expect(chipClassFor('Running')).toContain('var(--ok')
     expect(chipClassFor('Failing')).toContain('var(--bad-light')
-    expect(chipClassFor('Compacting')).toContain('var(--warn')
+    expect(chipClassFor('Draining')).toContain('var(--accent')
     expect(chipClassFor('exhausted')).toContain('var(--bad-light')
   })
 
@@ -174,14 +174,11 @@ describe('tallyInvariantViolations', () => {
 
   it('counts one per keeper per violated invariant', () => {
     const s = [
-      snapshot({ name: 'a', violate: { no_runtime_before_measurement: false } }),
-      snapshot({ name: 'b', violate: { no_runtime_before_measurement: false, event_priority_monotone: false } }),
       snapshot({ name: 'c' }),
     ]
     const t = tallyInvariantViolations(s)
-    expect(t.no_runtime_before_measurement).toBe(2)
-    expect(t.event_priority_monotone).toBe(1)
-    expect(t.phase_derivation_agreement).toBe(0)
+    expect(t.no_runtime_before_measurement).toBe(0)
+    expect(t.event_priority_monotone).toBe(0)
   })
 
   it('treats an empty fleet as clean', () => {

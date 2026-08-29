@@ -43,7 +43,7 @@ describe('ide persistence helpers', () => {
 
   it('maps keeper phases to persistence states', () => {
     expect(persistenceStateFromKeeperPhase('Running')).toBe('saved')
-    expect(persistenceStateFromKeeperPhase('Compacting')).toBe('syncing')
+    expect(persistenceStateFromKeeperPhase('Restarting')).toBe('syncing')
     expect(persistenceStateFromKeeperPhase('Offline')).toBe('offline')
     expect(persistenceStateFromKeeperPhase('Running', true)).toBe('offline')
   })
@@ -60,7 +60,7 @@ describe('IdePersistencePanel', () => {
     }]
     fetchKeeperStateDiagramMock.mockResolvedValue({
       keeper: 'sangsu',
-      current_phase: 'Compacting',
+      current_phase: 'Restarting',
       mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
 

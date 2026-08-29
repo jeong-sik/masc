@@ -40,7 +40,6 @@ export const FSM_STATES = [
   'Offline',
   'Restarting',
   'Running',
-  'Compacting',
   'Failing',
   'Draining',
   'Paused',
@@ -53,7 +52,6 @@ const PHASE_TONE: Readonly<Record<KeeperPhase, KeeperTone>> = {
   Running: 'ok',
   Paused: 'warn',
   Draining: 'warn',
-  Compacting: 'busy',
   Restarting: 'busy',
   Failing: 'bad',
   Crashed: 'bad',
@@ -65,7 +63,6 @@ const PHASE_TONE: Readonly<Record<KeeperPhase, KeeperTone>> = {
 // Verbatim from prototype data.jsx:43-45.
 const PHASE_PULSE: Readonly<Record<KeeperPhase, boolean>> = {
   Running: true,
-  Compacting: true,
   Restarting: true,
   Failing: true,
   Paused: false,
@@ -80,7 +77,6 @@ const PHASE_INFO: Readonly<Record<KeeperPhase, string>> = {
   Offline: '오프라인 — 실행 중이 아님',
   Restarting: '재시작 중',
   Running: '실행 중 — 작업/라운드 순환',
-  Compacting: '컨텍스트 압축 중',
   Failing: '실패 처리 중',
   Draining: '정상 종료를 위해 작업을 비우는 중',
   Paused: '슈퍼바이저가 일시정지함',
@@ -91,13 +87,12 @@ const PHASE_INFO: Readonly<Record<KeeperPhase, string>> = {
 // Reusable action literals (shared across phases keeps the table honest).
 const A_STOP: FsmAction = { id: 'stop', label: '중지', glyph: '⏹', via: 'Draining', to: 'Stopped', ms: 1500, danger: true, hint: '작업을 비우고 종료 (Drain → Stopped)' }
 
-// phase → ordered operator actions. Phases absent here (Compacting,
-// Draining, Restarting) expose no action — they are
+// phase → ordered operator actions. Phases absent here (Draining,
+// Restarting) expose no action — they are
 // transient or terminal.
 const FSM_ACTIONS: Readonly<Partial<Record<KeeperPhase, readonly FsmAction[]>>> = {
   Running: [
     { id: 'pause', label: '일시정지', glyph: '⏸', to: 'Paused', hint: '슈퍼바이저가 잠시 멈춤 — 컨텍스트·소유 태스크 보존, 즉시 재개 가능' },
-    { id: 'compact', label: '컴팩션', glyph: '◉', via: 'Compacting', to: 'Running', ms: 1700, hint: '컨텍스트를 지금 압축하고 실행 복귀' },
     A_STOP,
   ],
   Paused: [
@@ -121,7 +116,6 @@ const FSM_ACTIONS: Readonly<Partial<Record<KeeperPhase, readonly FsmAction[]>>> 
 
 const RUN_PHASES: ReadonlySet<KeeperPhase> = new Set<KeeperPhase>([
   'Running',
-  'Compacting',
   'Restarting',
   'Failing',
 ])
@@ -163,7 +157,6 @@ const KEEPER_PHASE_REGISTRY: Readonly<Record<string, true>> = Object.freeze(
     Offline: true,
     Restarting: true,
     Running: true,
-    Compacting: true,
     Failing: true,
     Draining: true,
     Paused: true,

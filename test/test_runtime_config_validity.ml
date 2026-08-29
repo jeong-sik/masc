@@ -986,7 +986,7 @@ let test_model_without_wall_clock_ceiling_leaves_it_unset () =
 
 let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
   let valid =
-    "[runtime.exact_output_lanes.compaction_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
+    "[runtime.exact_output_lanes.auxiliary_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
   in
   (match Runtime_toml.parse_string valid with
    | Error _ -> fail "valid exact-output lane must parse"
@@ -997,7 +997,7 @@ let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
           [ "slot-b"; "slot-a" ] lane.slot_ids
       | _ -> fail "exactly one exact-output lane must parse"));
   let duplicate =
-    "[runtime.exact_output_lanes.compaction_exact]\nslots = [\"slot-a\", \"slot-a\"]\n"
+    "[runtime.exact_output_lanes.auxiliary_exact]\nslots = [\"slot-a\", \"slot-a\"]\n"
   in
   match Runtime_toml.parse_string duplicate with
   | Error _ -> ()
@@ -1039,7 +1039,7 @@ let test_exact_output_lane_cli_slots_parse_in_order () =
 
 let test_exact_output_lane_rejects_unknown_key () =
   let config =
-    "[runtime.exact_output_lanes.compaction_exact]\n\
+    "[runtime.exact_output_lanes.auxiliary_exact]\n\
      slots = [\"slot-a\"]\n\
      slost = [\"slot-b\"]\n"
   in
@@ -1050,7 +1050,7 @@ let test_exact_output_lane_rejects_unknown_key () =
          (fun (error : Runtime_toml.parse_error) ->
             String.equal
               error.path
-              "runtime.exact_output_lanes.compaction_exact.slost")
+              "runtime.exact_output_lanes.auxiliary_exact.slost")
          errors)
   | Ok _ -> fail "unknown exact-output lane key must fail config parsing"
 
@@ -1163,7 +1163,6 @@ check
   (list string)
   "public seed exact-output lane ids"
   [ "board_attention_exact"
-  ; "compaction_exact"
   ; "hitl_auto_judge"
   ; "librarian_exact"
   ; "verifier_exact"
@@ -3702,7 +3701,7 @@ let test_structured_judge_runtime_key_is_rejected () =
 let test_save_config_text_commits_exact_registry_with_runtime_state () =
   with_fake_runtime_model_catalog @@ fun () ->
   let snapshot =
-    Compaction_exact_output_fixture.resolver_snapshot
+    Exact_output_fixture.resolver_snapshot
       ~source:"runtime raw-save exact replacement"
       [ { id = "slot-a"; base_url = "http://127.0.0.1:9" }
       ; { id = "slot-b"; base_url = "http://127.0.0.1:10" }
@@ -3711,8 +3710,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       ]
   in
   ignore
-    (Compaction_exact_output_fixture.publish_registry
-       ~lane_id:"compaction_exact"
+    (Exact_output_fixture.publish_registry
+       ~lane_id:"auxiliary_exact"
        ~slot_ids:[ "slot-a" ]
        snapshot
       : Runtime_exact_output_registry.t);
@@ -3742,7 +3741,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        [runtime]\n\
        default = \"%s\"\n\
        \n\
-       [runtime.exact_output_lanes.compaction_exact]\n\
+       [runtime.exact_output_lanes.auxiliary_exact]\n\
        slots = [\"%s\"]\n"
       default
       slot
@@ -3804,7 +3803,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       (not (after_degraded == stable_registry));
     check bool "degraded save leaves optional lane without admitted slots" true
       (lane_has_no_admitted_slots
-         ~lane_id:"compaction_exact"
+         ~lane_id:"auxiliary_exact"
          after_degraded);
     check bool "degraded save does not synthesize HITL lane" true
       (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_degraded);
@@ -3826,7 +3825,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
            (after_write_failure == after_degraded);
          check bool "write failure preserves no-admitted lane" true
            (lane_has_no_admitted_slots
-              ~lane_id:"compaction_exact"
+              ~lane_id:"auxiliary_exact"
               after_write_failure);
          check bool "write failure does not synthesize HITL lane" true
            (lane_is_unconfigured
@@ -3842,7 +3841,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check bool "valid save republishes the registry" true
       (not (replaced == after_degraded));
     check (list string) "valid save commits registry slots" [ "slot-b" ]
-      (slots_exn ~lane_id:"compaction_exact" replaced);
+      (slots_exn ~lane_id:"auxiliary_exact" replaced);
     check bool "valid save does not synthesize HITL lane" true
       (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
 

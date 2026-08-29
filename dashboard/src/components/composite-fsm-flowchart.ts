@@ -1,7 +1,7 @@
 /**
  * CompositeFsmFlowchart (LT-16e)
  *
- * Static Mermaid rendering of the 5 orthogonal keeper FSM axes from
+ * Static Mermaid rendering of the 4 orthogonal keeper FSM axes from
  * KeeperCompositeLifecycle.tla, side by side. Each subgraph is one
  * region (Harel parallel region); the subgraphs do not share edges
  * because the axes are orthogonal by design — the invariants that
@@ -37,8 +37,6 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     ksm_offline["Offline"] --> ksm_running["Running"]
     ksm_running --> ksm_failing["Failing"]
     ksm_failing --> ksm_running
-    ksm_running --> ksm_compacting["Compacting"]
-    ksm_compacting --> ksm_running
     ksm_running --> ksm_paused["Paused"]
     ksm_paused --> ksm_running
     ksm_running --> ksm_draining["Draining"]
@@ -48,14 +46,12 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     ksm_restarting --> ksm_running
   end
 
-  %% ─ KTC (Turn cycle, 5 states) ──────────────────────────
+  %% ─ KTC (Turn cycle, 4 states) ──────────────────────────
   subgraph KTC ["턴 · KTC"]
     direction LR
     ktc_idle["idle"] --> ktc_prompting["prompting"]
     ktc_prompting --> ktc_executing["executing"]
-    ktc_executing --> ktc_compacting["compacting"]
     ktc_executing --> ktc_finalizing["finalizing"]
-    ktc_compacting --> ktc_finalizing
     ktc_finalizing --> ktc_idle
   end
 
@@ -76,14 +72,6 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     kcl_trying --> kcl_exhausted["exhausted"]
   end
 
-  %% ─ KMC (Memory compaction, 3 states) ───────────────────
-  subgraph KMC ["압축 · KMC"]
-    direction LR
-    kmc_accumulating["accumulating"] --> kmc_compacting["compacting"]
-    kmc_compacting --> kmc_done["done"]
-    kmc_done --> kmc_accumulating
-  end
-
   %% Mermaid classDef parser does not support CSS var() — values must be
   %% literal CSS color tokens. Hex literals below mirror the design-system
   %% tokens 1:1 (--rose-light=#fb7185, --ok-fg=#8ebc8e, --amber-bright=#f59e0b).
@@ -94,8 +82,8 @@ const MERMAID_COMPOSITE: string = `flowchart TB
   classDef error    fill:#1e0a0a,stroke:#b91c1c,color:#fb7185
 
   class ksm_stopped terminal
-  class ksm_running,ksm_paused,ktc_idle,kcl_idle,kmc_accumulating stable
-  class ksm_compacting,ksm_handingoff,ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_compacting,ktc_finalizing,kcl_selecting,kcl_trying,kmc_compacting motion
+  class ksm_running,ksm_paused,ktc_idle,kcl_idle stable
+  class ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_finalizing,kcl_selecting,kcl_trying motion
   class ksm_failing,ksm_crashed,kcl_exhausted error
 `
 

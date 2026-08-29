@@ -248,6 +248,7 @@ describe('fsm-hub derived state', () => {
       value: 'executing',
     })
   })
+
 })
 
 describe('inferTransitionReason', () => {
@@ -340,7 +341,7 @@ describe('deriveStateEntries', () => {
       observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle' }),
       observation({ ts: 110, phase: 'Running', turn: 'prompting', decision: 'undecided', runtime: 'idle' }),
       observation({ ts: 120, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'selecting' }),
-      observation({ ts: 130, phase: 'Failing', turn: 'executing', decision: 'guard_ok', runtime: 'done' }),
+      observation({ ts: 130, phase: 'Draining', turn: 'executing', decision: 'guard_ok', runtime: 'done' }),
     ]
     const entries = deriveStateEntries(observations)
     expect(entries).toEqual({

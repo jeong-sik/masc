@@ -27,7 +27,7 @@ fi
 # ── 2. Collect OCaml variant constructors for known lifecycle types ────────────
 echo ""
 echo "=== Scan: OCaml lifecycle variants ==="
-# The last three used to be listed under lib/keeper_registry_types_<x>/ —
+# The last two used to be listed under lib/keeper_registry_types_<x>/ —
 # directories that do not exist. rg skipped them silently (2>/dev/null) and the
 # OCaml side of the comparison was built from two files instead of five.
 variant_sources=(
@@ -35,7 +35,6 @@ variant_sources=(
   lib/keeper/keeper_registry_types.ml
   lib/keeper_registry/keeper_registry_types_turn_phase.ml
   lib/keeper_registry/keeper_registry_types_decision.ml
-  lib/keeper_registry/keeper_registry_types_compaction.ml
 )
 for src in "${variant_sources[@]}"; do
   if [ ! -f "$src" ]; then

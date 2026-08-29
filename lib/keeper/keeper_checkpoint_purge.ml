@@ -1,6 +1,6 @@
 (* Deterministic offline checkpoint purge (RFC-0351 S1). See the .mli for the
    rule contract. The implementation works on the closed units produced by
-   [Keeper_compaction_unit.partition] so a tool cycle is one indivisible item
+   [Keeper_transcript_unit.partition] so a tool cycle is one indivisible item
    from the first line to the last. *)
 
 type config =
@@ -33,14 +33,14 @@ type report =
 
 type purge_error =
   | Invalid_config of string
-  | Invalid_input_structure of Keeper_compaction_unit.structural_error
-  | Invalid_output_structure of Keeper_compaction_unit.structural_error
+  | Invalid_input_structure of Keeper_transcript_unit.structural_error
+  | Invalid_output_structure of Keeper_transcript_unit.structural_error
 
 (* One purge work item: an ordinary message or a whole closed tool cycle.
    [flat_last] is the index of the item's last message in the original list,
    used for the count-based protected tail. *)
 type item =
-  { unit_ : Keeper_compaction_unit.closed_unit
+  { unit_ : Keeper_transcript_unit.closed_unit
   ; flat_last : int
   }
 
@@ -187,7 +187,7 @@ let purge_messages ~config messages =
             "keep_recent_messages must be >= 0 (got %d)"
             config.keep_recent_messages))
   else (
-    match Keeper_compaction_unit.partition messages with
+    match Keeper_transcript_unit.partition messages with
     | Error structural -> Error (Invalid_input_structure structural)
     | Ok { closed_prefix; protected_suffix } ->
       let messages_before = List.length messages in
@@ -195,7 +195,7 @@ let purge_messages ~config messages =
         let flat_index = ref (-1) in
         List.map
           (fun unit_ ->
-             let unit_messages = Keeper_compaction_unit.messages_of_closed_unit unit_ in
+             let unit_messages = Keeper_transcript_unit.messages_of_closed_unit unit_ in
              flat_index := !flat_index + List.length unit_messages;
              { unit_; flat_last = !flat_index })
           closed_prefix
@@ -219,12 +219,12 @@ let purge_messages ~config messages =
       let purge_item item =
         if protected item
         then
-          { messages = Keeper_compaction_unit.messages_of_closed_unit item.unit_
+          { messages = Keeper_transcript_unit.messages_of_closed_unit item.unit_
           ; dedup_key = None
           }
         else (
           match item.unit_ with
-          | Keeper_compaction_unit.Ordinary_message message ->
+          | Keeper_transcript_unit.Ordinary_message message ->
             if config.strip_thinking && is_assistant message
             then (
               let stripped_message, stripped = strip_reasoning_blocks message in
@@ -238,7 +238,7 @@ let purge_messages ~config messages =
                 ; dedup_key = dedup_key_of stripped_message
                 })
             else { messages = [ message ]; dedup_key = dedup_key_of message }
-          | Keeper_compaction_unit.Closed_tool_cycle cycle_messages ->
+          | Keeper_transcript_unit.Closed_tool_cycle cycle_messages ->
             let cycle_messages =
               if config.clear_tool_results
               then
@@ -300,7 +300,7 @@ let purge_messages ~config messages =
            |> List.map (fun transformed -> transformed.messages))
       in
       let purged = purged_prefix @ protected_suffix in
-      (match Keeper_compaction_unit.validate purged with
+      (match Keeper_transcript_unit.validate purged with
        | Error structural -> Error (Invalid_output_structure structural)
        | Ok () ->
          Ok

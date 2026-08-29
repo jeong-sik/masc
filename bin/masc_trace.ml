@@ -204,18 +204,11 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
         | first :: _ -> first
         | [] -> "-"
       in
-      let sum_event_bus_int key =
-        event_bus_rows
-        |> List.fold_left
-             (fun total json ->
-               total + Option.value (decision_int_field json key) ~default:0)
-             0
-      in
       Printf.printf
         "=== turn identity === keeper=%s keeper_turn_id=%d manifest_rows=%d \
          max_agent_core_turn_count=%s provider_attempts=%d/%d provider_lanes=%d \
          checkpoints_saved=%d receipts_appended=%d turn_finished=%d \
-         event_bus=%d correlation_id=%s compaction=%d/%d\n"
+         event_bus=%d correlation_id=%s\n"
         keeper turn_id (List.length matches)
         (match max_agent_core_turn_count with
          | None -> "-"
@@ -227,9 +220,7 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
         (count_event "receipt_appended")
         (count_event "turn_finished")
         (List.length event_bus_rows)
-        event_bus_correlation
-        (sum_event_bus_int "context_compact_started_count")
-        (sum_event_bus_int "context_compacted_count");
+        event_bus_correlation;
       List.iter
         (fun (f, json) ->
           let ts = Option.value (string_field json "ts") ~default:"-" in

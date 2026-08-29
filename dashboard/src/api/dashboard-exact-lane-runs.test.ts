@@ -84,7 +84,7 @@ describe('parseExactLaneRunsResponse', () => {
       runs: [
         {
           run_id: 'failed-append',
-          lane: 'compaction_exact',
+          lane: 'board_attention_exact',
           subject_id: 'trace-1',
           actor: 'keeper-a',
           started_at: 1,
@@ -136,7 +136,7 @@ describe('parseExactLaneRunsResponse', () => {
       has_more: false,
       runs: [{
         run_id: 'mismatch',
-        lane: 'compaction_exact',
+        lane: 'board_attention_exact',
         subject_id: 'trace',
         actor: 'keeper-a',
         started_at: 1,

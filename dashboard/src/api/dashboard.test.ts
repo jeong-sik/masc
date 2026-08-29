@@ -3231,7 +3231,6 @@ describe('fetchKeeperConfig', () => {
         last_latency_ms: '2400',
         last_total_tokens_per_sec: '22.4',
         last_output_tokens_per_sec: '11.2',
-        compaction_count: '1',
       },
     }
 

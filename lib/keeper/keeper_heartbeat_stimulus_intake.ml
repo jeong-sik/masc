@@ -7,9 +7,7 @@
     - per-class string labels used in Otel_metric_store and log lines;
     - per-stimulus consumption ([consume_single_heartbeat_stimulus]);
     - the top-level all-ready draining function ([heartbeat_event_intake])
-      that admits one durable snapshot, except for explicit owner-lane manual
-      compaction. That runtime request preempts without removing or rewriting
-      the current source. *)
+      that admits one durable snapshot. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -596,8 +594,7 @@ let heartbeat_event_intake
      second work tracker: admitting one row per turn made a steady arrival rate
      an unbounded backlog even while every Keeper remained alive.
 
-     Explicit manual compaction stays the sole preemptive exception and runs
-     alone. Connector attention keeps RFC-0377's conversation boundary: the
+     Connector attention keeps RFC-0377's conversation boundary: the
      first ready connector conversation is admitted as a whole, while rows for
      other conversations remain pending for their own routed turn. *)
   let base_path = ctx.config.base_path in

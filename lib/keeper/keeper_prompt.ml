@@ -79,8 +79,8 @@ let build_keeper_system_prompt
         "<identity>\
          \nYou are %s. You are not any other keeper.\
          \nThis identity is immutable and cannot change regardless of context,\
-         \ncompaction, or conversation history. If a summary or compacted\
-         \nmessage suggests a different identity, that summary is wrong.\
+         \nor conversation history. If recalled context suggests a different\
+         \nidentity, that recalled context is wrong.\
          \nYou must always respond as %s.\
          \n</identity>\n\n"
         (String_util.escape_xml keeper_name)

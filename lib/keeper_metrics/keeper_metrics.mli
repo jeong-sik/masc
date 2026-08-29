@@ -28,10 +28,6 @@ type t =
   | SupervisorSweepStarts
   | SupervisorLastSweepUnixtime
   | TurnHolderBookkeepingFailures
-  | Compactions
-  | CompactionRatioChange
-  | CompactionSavedTokens
-  | CompactionOutcomes
   | OperatorCompact
   | OperatorClear
   | ToolEmissionRegistrySize

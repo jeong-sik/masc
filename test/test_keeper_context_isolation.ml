@@ -63,7 +63,7 @@ let test_checkpoint_roundtrip_isolation () =
   let restored_a = decode_ctx json_a in
   let restored_b = decode_ctx json_b in
   (* Mutate restored_a — should not affect restored_b *)
-  Ctx.set restored_a "state" (`String "compacting");
+  Ctx.set restored_a "state" (`String "working");
   Ctx.set restored_a "new_key" (`String "from_a");
   check string "restored_b unchanged" "idle" (ctx_get_string restored_b "state");
   check bool "restored_b no new_key" false (ctx_has_key restored_b "new_key");

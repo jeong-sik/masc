@@ -299,7 +299,7 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
   return payload
 }
 
-// Runtime config draft for sandbox/proactive/compaction inline editing
+// Runtime config draft for sandbox/proactive inline editing
 export type MaxContextOverrideDraftResult =
   | { ok: true; value: number | null }
   | { ok: false; error: string }
@@ -997,7 +997,6 @@ export function keeperConfigControlInventory(
             'metrics.last_latency_ms',
             'metrics.last_total_tokens_per_sec',
             'metrics.last_output_tokens_per_sec',
-            'metrics.compaction_count',
           ]),
         },
       ]
@@ -2192,7 +2191,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     ${runtimeWriteUnsupportedNotice}
     <${MajorSectionHeader} title="검증" />
     <${BoolRow} label="검증" value=${c.execution.verify} />
-    <div class="kcf-dead">☠ 제거됨 · <span class="mono">ratio / message / token 게이트</span>와 <span class="mono">context_within_budget</span> FSM 조건은 zero-consumer 로 소스에서 삭제됐습니다. 컴팩션 임계치를 설정하는 곳은 없습니다 (컴팩션은 owner-lane 런타임이 provider overflow 시 실행 · metrics.compaction_count 로 관측).</div>
     <div class="kcf-dead">☠ 제거됨 · <span class="mono">Handoff_triggered</span> 이벤트와 자동 핸드오프 임계치는 소스에서 삭제됐습니다 — config 스키마에 handoff 설정 필드가 없습니다.</div>
 
     <${SectionHeader} title="프로액티브" />

@@ -37,10 +37,6 @@ type t =
   | SupervisorSweepStarts
   | SupervisorLastSweepUnixtime
   | TurnHolderBookkeepingFailures
-  | Compactions
-  | CompactionRatioChange
-  | CompactionSavedTokens
-  | CompactionOutcomes
   | OperatorCompact
   | OperatorClear
   | ToolEmissionRegistrySize
@@ -239,10 +235,6 @@ let to_string = function
   | SupervisorSweepStarts -> "masc_keeper_supervisor_sweep_starts_total"
   | SupervisorLastSweepUnixtime -> "masc_keeper_supervisor_last_sweep_unixtime"
   | TurnHolderBookkeepingFailures -> "masc_keeper_turn_holders_bookkeeping_failures_total"
-  | Compactions -> "masc_keeper_compactions_total"
-  | CompactionRatioChange -> "masc_keeper_compaction_ratio_change"
-  | CompactionSavedTokens -> "masc_keeper_compaction_saved_tokens_total"
-  | CompactionOutcomes -> "masc_keeper_compaction_outcomes_total"
   | OperatorCompact -> "masc_keeper_operator_compact_total"
   | OperatorClear -> "masc_keeper_operator_clear_total"
   | ToolEmissionRegistrySize -> "masc_keeper_tool_emission_registry_size"

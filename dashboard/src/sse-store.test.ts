@@ -514,21 +514,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
   })
 
-  it('normalizes MASC lifecycle aliases before route-scoped execution refresh', async () => {
-    const { sseStore } = await loadSseStore()
-    route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
-    sseStore.routeServerPushEvent({
-      type: 'masc/keeper_compaction',
-      name: 'qa-king',
-    })
-    vi.advanceTimersByTime(1_000)
-    await flushAsyncWork()
-
-    expect(refreshExecution).toHaveBeenCalledTimes(1)
-    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
-
-  })
-
   it('refreshes only the scoped Keeper status on turn complete', async () => {
     const { sseStore } = await loadSseStore()
     const refreshKeeperTurn = vi.fn<(keeperName: string) => void>()

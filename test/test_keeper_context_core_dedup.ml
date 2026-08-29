@@ -476,7 +476,7 @@ let test_checkpoint_write_rejects_orphan_tool_result () =
        with
        | Error
            (C.Tool_history_invalid
-              (Masc.Keeper_compaction_unit.Orphan_tool_result
+              (Masc.Keeper_transcript_unit.Orphan_tool_result
                  { message_index = 0; tool_use_id = "orphan" })) ->
          ()
        | Error error ->

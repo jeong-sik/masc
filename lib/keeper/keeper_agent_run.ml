@@ -345,9 +345,9 @@ let provider_transcript_admission messages =
   let reject transcript_error =
     let reason, tool_use_ids =
       match transcript_error with
-      | Keeper_compaction_unit.Invalid_transcript_structure _ ->
+      | Keeper_transcript_unit.Invalid_transcript_structure _ ->
         Keeper_internal_error.Structurally_invalid, []
-      | Keeper_compaction_unit.Unresolved_tool_results { tool_use_ids } ->
+      | Keeper_transcript_unit.Unresolved_tool_results { tool_use_ids } ->
         Keeper_internal_error.Unresolved_tool_results, tool_use_ids
     in
     Error
@@ -355,17 +355,17 @@ let provider_transcript_admission messages =
          (Keeper_internal_error.Incomplete_tool_transcript
             { reason
             ; detail =
-                Keeper_compaction_unit.show_provider_transcript_error transcript_error
+                Keeper_transcript_unit.show_provider_transcript_error transcript_error
             ; tool_use_ids
             }))
   in
-  match Keeper_compaction_unit.validate_provider_transcript messages with
+  match Keeper_transcript_unit.validate_provider_transcript messages with
   | Ok () -> Ok messages
-  | Error (Keeper_compaction_unit.Invalid_transcript_structure _ as transcript_error) ->
+  | Error (Keeper_transcript_unit.Invalid_transcript_structure _ as transcript_error) ->
     reject transcript_error
-  | Error (Keeper_compaction_unit.Unresolved_tool_results _ as transcript_error) ->
-    (match Keeper_compaction_unit.close_open_tail messages with
-     | Ok { Keeper_compaction_unit.messages; closed_tool_use_ids } ->
+  | Error (Keeper_transcript_unit.Unresolved_tool_results _ as transcript_error) ->
+    (match Keeper_transcript_unit.close_open_tail messages with
+     | Ok { Keeper_transcript_unit.messages; closed_tool_use_ids } ->
        Log.Keeper.info
          "closed %d in-flight tool call(s) an interrupted turn left open: %s"
          (List.length closed_tool_use_ids)
@@ -1422,7 +1422,7 @@ let run_turn
             (* Cache counts travel with the turn rather than being dropped: a large
                input_tokens on a cache-heavy turn and one on a genuinely large prompt
                read identically without them, and the ctx-fill denominator below is the
-               compaction ceiling, so the difference is what an operator acts on. *)
+               conversation ceiling, so the difference is what an operator acts on. *)
             { input_tokens = Some result.usage.input_tokens
             ; output_tokens = Some result.usage.output_tokens
             ; cache_creation_input_tokens =

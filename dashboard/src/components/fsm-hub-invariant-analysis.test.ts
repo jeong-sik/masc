@@ -32,7 +32,7 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
 // ================================================================
 
 describe('invariantRows', () => {
-  it('returns 3 rows for all invariants', () => {
+  it('returns one row per current invariant', () => {
     const rows = invariantRows(makeSnapshot())
     expect(rows).toHaveLength(3)
   })
@@ -45,13 +45,12 @@ describe('invariantRows', () => {
   it('marks broken invariant as not ok', () => {
     const rows = invariantRows(makeSnapshot({
       invariants: {
-        no_runtime_before_measurement: true,
+        no_runtime_before_measurement: false,
         event_priority_monotone: true,
         phase_derivation_agreement: true,
       },
     }))
-    expect(rows.find(r => r.key === 'no_runtime_before_measurement')!.ok).toBe(true)
-    expect(rows.filter(r => r.ok).length).toBe(3)
+    expect(rows.filter(r => r.ok).length).toBe(2)
   })
 
   it('includes labels for each invariant', () => {
@@ -69,7 +68,6 @@ describe('invariantRows', () => {
       expect(row.detail.length).toBeGreaterThan(0)
     })
   })
-
 
 })
 

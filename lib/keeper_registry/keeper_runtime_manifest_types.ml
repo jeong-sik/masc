@@ -17,7 +17,6 @@ type event_kind =
   | Provider_attempt_started
   | Provider_attempt_finished
   | Context_injected
-  | Context_compacted
   | Event_bus_correlated
   | Checkpoint_loaded
   | Checkpoint_saved
@@ -37,7 +36,6 @@ let all_event_kinds =
     Provider_attempt_started;
     Provider_attempt_finished;
     Context_injected;
-    Context_compacted;
     Event_bus_correlated;
     Checkpoint_loaded;
     Checkpoint_saved;
@@ -57,7 +55,6 @@ let event_kind_to_string = function
   | Provider_attempt_started -> "provider_attempt_started"
   | Provider_attempt_finished -> "provider_attempt_finished"
   | Context_injected -> "context_injected"
-  | Context_compacted -> "context_compacted"
   | Event_bus_correlated -> "event_bus_correlated"
   | Checkpoint_loaded -> "checkpoint_loaded"
   | Checkpoint_saved -> "checkpoint_saved"
@@ -76,7 +73,6 @@ let event_kind_of_string = function
   | "provider_attempt_started" -> Some Provider_attempt_started
   | "provider_attempt_finished" -> Some Provider_attempt_finished
   | "context_injected" -> Some Context_injected
-  | "context_compacted" -> Some Context_compacted
   | "event_bus_correlated" -> Some Event_bus_correlated
   | "checkpoint_loaded" -> Some Checkpoint_loaded
   | "checkpoint_saved" -> Some Checkpoint_saved

@@ -50,7 +50,7 @@ let parse_positive_int_arg name raw =
   | _ -> error (Printf.sprintf "invalid %s: %S (expected an integer >= 0)" name raw)
 
 let structural_error_text structural =
-  Masc.Keeper_compaction_unit.show_structural_error structural
+  Masc.Keeper_transcript_unit.show_structural_error structural
 
 let purge_error_text = function
   | Purge.Invalid_config detail -> "invalid config: " ^ detail

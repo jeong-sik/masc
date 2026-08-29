@@ -17,7 +17,7 @@ property — R2 before R1 is what makes a single pass a fixpoint):
 | R1 duplicate collapse | byte-identical text-only messages repeated 3+ times keep first and last occurrence | tool cycles, message order |
 
 The last 20 messages (and the structural protected suffix) pass through
-byte-exact. Input and output both run `Keeper_compaction_unit.validate`;
+byte-exact. Input and output both run `Keeper_transcript_unit.validate`;
 a structurally broken checkpoint is refused, never repaired (#25443 owns
 the write boundary). `session_id`/`turn_count` are unchanged, so the save
 lands as an equal-watermark re-save through the locked validated store.
@@ -120,8 +120,8 @@ a decision before it is added.
 ## Relation to the sanctioned pipeline
 
 Purge is an explicit operator action, not an automatic runtime mechanism. The
-runtime path stays compaction (until RFC-0351 S4 retires it) plus the S0
-settlement ceilings (#25536, #25541, #25544). If a purge is needed twice on
+runtime has no automatic Keeper compaction path. Settlement ceilings remain
+the normal capacity boundary (#25536, #25541, #25544). If a purge is needed twice on
 the same keeper, that is a signal the inflow paths (#25462 wake markers,
 oversized tool results) are not closed — fix the inflow, do not schedule the
 purge.

@@ -1,5 +1,4 @@
-(** Server IDE HTTP — REST endpoints for observational IDE annotations
-    and code regions.
+(** Server IDE HTTP — REST endpoints for observational IDE annotations.
 
     Reads/writes are scoped to the workspace base resolved by
     {!Server_routes_http_routes_workspace.classify_workspace_query}. *)
@@ -77,8 +76,8 @@ let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
 (* ── Observation snapshot endpoint (task-1686) ─────────────────────── *)
 
 (** GET /api/v1/ide/observations/snapshot — returns accumulated observation
-    data (tool events, PR events, turn events, write regions, annotations)
-    from the IDE bridge observation snapshot helper.
+    data (tool events and annotations) from the IDE bridge observation
+    snapshot helper.
 
     Usage: ?take=true resets accumulators after read (destructive),
            default is non-destructive peek.
@@ -166,18 +165,6 @@ let validate_annotation_post_fields = function
         | Some key -> Error (Printf.sprintf "Duplicate annotation field: %s" key)
         | None -> Ok ()))
   | _ -> Error "Annotation request must be an object"
-;;
-
-let cursor_focus_mode_field = function
-  | `Assoc fields ->
-    (match List.assoc_opt "focus_mode" fields with
-     | None -> Ok None
-     | Some (`String mode) ->
-       (match Ide_bridge.cursor_focus_mode_of_string mode with
-        | Some mode -> Ok (Some mode)
-        | None -> Error "focus_mode must be one of reading, editing, reviewing, planning")
-     | Some _ -> Error "focus_mode must be a string")
-  | _ -> Ok None
 ;;
 
 let log_keeper_id_not_accepted ~operation ~auth_identity ~requested =
@@ -301,12 +288,6 @@ let keeper_id_param uri =
      | _ -> None)
 ;;
 
-let file_path_param uri =
-  match Uri.get_query_param uri "file_path" with
-  | Some p when String.trim p <> "" -> Some (String.trim p)
-  | _ -> None
-;;
-
 let runtime_id_and_branch state =
   let base = base_path_of_state state in
   let runtime_id =
@@ -379,38 +360,7 @@ let build_presence_snapshot state =
     ]
 ;;
 
-let build_cursor_snapshot state uri ~codebase ~keeper_id ~limit ~offset =
-  let base = base_path_of_state state in
-  let runtime_id, branch = runtime_id_and_branch state in
-  let file_path = file_path_param uri in
-  let cursors =
-    Ide_bridge.list_cursors
-      ~base_path:base
-      ~codebase
-      ?keeper_id
-      ?file_path
-      ~limit
-      ~offset
-      ()
-  in
-  `Assoc
-    [ "runtime_id", `String runtime_id
-    ; "branch", `String branch
-    ; "connected", `Bool true
-    ; "cursors", `List cursors
-    ; "count", `Int (List.length cursors)
-    ; "limit", `Int limit
-    ; "offset", `Int offset
-    ]
-;;
-
 let add_routes router =
-  Ide_bridge.register_cursor_changed_sink (fun ~keeper_id ->
-    Sse.broadcast
-      (`Assoc
-         [ "type", `String "ide_cursor_changed"
-         ; "keeper_id", `String keeper_id
-         ]));
   Ide_bridge.install_agent_observation_sinks ();
   router
   |> Http.Router.get "/api/v1/ide/observations/snapshot" observation_snapshot_handler
@@ -465,7 +415,7 @@ let add_routes router =
             workspace tree returned by [resolve_workspace_base]. The
             latter exists for /api/v1/workspace/{tree,file} routes
             that browse a specific repo's filesystem contents. IDE
-            annotation/region storage must mirror the keeper write
+            annotation storage must mirror the keeper write
             path, which writes to [server-base/.masc-ide/]. *)
          let base = base_path_of_state state in
          let file_path =
@@ -527,7 +477,7 @@ let add_routes router =
             workspace tree returned by [resolve_workspace_base]. The
             latter exists for /api/v1/workspace/{tree,file} routes
             that browse a specific repo's filesystem contents. IDE
-            annotation/region storage must mirror the keeper write
+            annotation storage must mirror the keeper write
             path, which writes to [server-base/.masc-ide/]. *)
          let base = base_path_of_state state in
          Http.Request.read_body_async reqd (fun body_str ->
@@ -664,7 +614,7 @@ let add_routes router =
             workspace tree returned by [resolve_workspace_base]. The
             latter exists for /api/v1/workspace/{tree,file} routes
             that browse a specific repo's filesystem contents. IDE
-            annotation/region storage must mirror the keeper write
+            annotation storage must mirror the keeper write
             path, which writes to [server-base/.masc-ide/]. *)
          let base = base_path_of_state state in
          let id =
@@ -729,34 +679,6 @@ let add_routes router =
                      reqd)))
            request
            reqd)
-  |> Http.Router.get "/api/v1/ide/regions" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd ->
-         let uri = Uri.of_string request.target in
-         (* RFC-0378 §5.2: the IDE store lives under the
-            *server* base_path (single .masc-ide/ tree), not the
-            workspace tree returned by [resolve_workspace_base]. The
-            latter exists for /api/v1/workspace/{tree,file} routes
-            that browse a specific repo's filesystem contents. IDE
-            annotation/region storage must mirror the keeper write
-            path, which writes to [server-base/.masc-ide/]. *)
-         let base = base_path_of_state state in
-         let file_path =
-           match Uri.get_query_param uri "file_path" with
-           | Some p when p <> "" -> Some p
-           | _ -> None
-         in
-         match resolve_ide_scope_for_query ~state ~uri with
-         | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
-         | Ok scope ->
-           let codebase = codebase_of_ide_scope scope in
-           let regions =
-             Ide_region_tracker.read_regions ~base_dir:base ~codebase ?file_path ()
-           in
-           let json = `List (List.map Ide_annotation_types.region_to_json regions) in
-           Http.Response.json_value ~compress:true ~request (json_ok json) reqd)
-      request
-      reqd)
   |> Http.Router.get "/api/v1/ide/events" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->
@@ -825,136 +747,6 @@ let add_routes router =
            ~request
            (json_ok snapshot)
            reqd)
-      request
-      reqd)
-  |> Http.Router.get "/api/v1/ide/cursors" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd ->
-         let uri = Uri.of_string request.target in
-         match parse_pagination_query ~max_limit:200 uri with
-         | Error msg ->
-           Http.Response.json_value
-             ~status:`Bad_request
-             ~request
-             (json_error msg)
-             reqd
-         | Ok (limit, offset) ->
-           (match resolve_ide_scope_for_query ~state ~uri with
-            | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
-            | Ok scope ->
-              (let keeper_id = keeper_id_param uri in
-                 let codebase = codebase_of_ide_scope scope in
-                 let snapshot =
-                   build_cursor_snapshot state uri ~codebase ~keeper_id ~limit ~offset
-                 in
-                 Http.Response.json_value
-                   ~compress:true
-                   ~request
-                   (json_ok snapshot)
-                   reqd)))
-      request
-      reqd)
-  |> Http.Router.post "/api/v1/ide/cursors" (fun request reqd ->
-    (* Cursor writes mutate the same observation plane as annotations.
-       They use the same write tier ([CanBroadcast]) and the same
-       identity rule: the token-bound [auth_identity] is the only source
-       of keeper_id; a body-supplied keeper_id is rejected outright. *)
-    with_token_permission_auth
-      ~permission:Masc_domain.CanBroadcast
-      (fun state auth_identity _req reqd ->
-         let base = base_path_of_state state in
-         let uri = Uri.of_string request.target in
-         Http.Request.read_body_async reqd (fun body_str ->
-           match parse_json_body body_str with
-           | Error msg ->
-             Http.Response.json_value
-               ~status:`Bad_request
-               ~request
-               (json_error msg)
-               reqd
-           | Ok json ->
-             let find_string key = json_string_field key json in
-             let find_int key = json_int_field key json in
-             (match find_string "file_path", find_int "line" with
-              | Some file_path, Some line when line >= 1 ->
-                let column = find_int "column" in
-                (match column with
-                 | Some value when value < 0 ->
-                   Http.Response.json_value
-                     ~status:`Bad_request
-                     ~request
-                     (json_error "column must be >= 0")
-                     reqd
-                 | _ ->
-                   let source =
-                     match find_string "source" with
-                     | Some source -> source
-                     | None ->
-                       (* DET-OK: an absent source names the editor surface. *)
-                       "editor"
-                   in
-                   (match cursor_focus_mode_field json with
-                 | Error msg ->
-                   Http.Response.json_value
-                     ~status:`Bad_request
-                     ~request
-                     (json_error ~code:"invalid_focus_mode" msg)
-                     reqd
-                 | Ok focus_mode ->
-                   let requested_keeper_id = find_string "keeper_id" in
-                   (match
-                      bind_mutation_keeper_id ~auth_identity ~requested:requested_keeper_id
-                    with
-                    | Error msg ->
-                      Option.iter
-                        (fun requested ->
-                           log_keeper_id_not_accepted
-                             ~operation:"cursor"
-                             ~auth_identity
-                             ~requested)
-                        requested_keeper_id;
-                      Http.Response.json_value
-                        ~status:`Forbidden
-                        ~request
-                        (json_error msg)
-                        reqd
-                    | Ok keeper_id ->
-                      (* RFC-0378 §5.3: the cursor write goes through the same
-                         mint as annotations — the scope names the codebase and
-                         the posted path is repo-root-relative. *)
-                      (match resolve_annotation_post_address ~state ~uri ~file_path with
-                       | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
-                       | Ok address ->
-                         (match
-                            Ide_bridge.ingest_cursor_event
-                              ~base_path:base
-                              ~keeper_id
-                              ~file_path:(Agent_observation.Code_address.path address)
-                              ~line
-                              ?column
-                              ~codebase:(Agent_observation.Code_address.codebase address)
-                              ?focus_mode
-                              ~source
-                              ()
-                          with
-                          | Ok () ->
-                            Http.Response.json_value
-                              ~status:`Created
-                              ~request
-                              (json_ok (`Assoc [ "ok", `Bool true ]))
-                              reqd
-                          | Error msg ->
-                            Http.Response.json_value
-                              ~status:`Internal_server_error
-                              ~request
-                              (json_error ~code:"observation_write_failed" msg)
-                              reqd)))))
-              | _ ->
-                Http.Response.json_value
-                  ~status:`Bad_request
-                  ~request
-                  (json_error "Missing required fields: file_path, line (>=1)")
-                  reqd)))
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/memory" (fun request reqd ->

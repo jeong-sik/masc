@@ -5994,32 +5994,21 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
             raise AssertionError(
                 f"the note anchor mark is missing from the gutter: {back!r}"
             )
-        # H over the repo-scoped file: the commits and the recorded keeper
-        # edits arrive woven into one timeline, newest first.
-        history = send_and_wait(process, master_fd, output, b"H", b"Edit (turn 7)")
+        # H over the repo-scoped file: the commits that touched it,
+        # newest first.
+        history = send_and_wait(process, master_fd, output, b"H", b"abc1234")
         history_plain = CSI_RE.sub(b"", history).decode("utf-8")
-        for needle in ("history: note.ml", "seed the file", "L2", "alpha"):
+        for needle in ("history: note.ml", "seed the file"):
             if needle not in history_plain:
                 raise AssertionError(
                     f"the history missed {needle!r}: {history_plain!r}"
                 )
-        # Enter on the top row (the newer commit): its subject's (#N) plus
+        # Enter on the top row (the newest commit): its subject's (#N) plus
         # the registered remote become the PR link.
         send_and_wait(
             process, master_fd, output, b"\r",
             b"github.com/jeong-sik/masc/pull/1256",
         )
-        # j scrolls the edit row to the top; Enter on it closes the history
-        # and jumps the cursor (the reverse gutter) to the lines it wrote.
-        jumped = send_and_wait(
-            process, master_fd, output, b"j\r", b"\x1b[7m   2\x1b[0m"
-        )
-        # The loaded history now decorates the gutter too: the edit's line
-        # carries the recorded-edit mark.
-        if "\u00b7".encode() not in jumped:
-            raise AssertionError(
-                f"the recorded-edit mark is missing from the gutter: {jumped!r}"
-            )
         os.write(master_fd, b"q")
 
     return interact
@@ -7331,8 +7320,7 @@ def code_lane_interaction(
     # history)" frame and lands on the fetched listing.
     history = send_and_wait(process, master_fd, output, b"H", b"abc1234")
     history_plain = CSI_RE.sub(b"", history).decode("utf-8")
-    for needle in ("history: lib/a.ml", "feat: add x", "def5678", "vincent",
-                   "keeper edits not shown"):
+    for needle in ("history: lib/a.ml", "feat: add x", "def5678", "vincent"):
         if needle not in history_plain:
             raise AssertionError(
                 f"history missed {needle!r}: {history_plain!r}"
@@ -8886,17 +8874,6 @@ def run_keyboard_regression(executable: str) -> None:
         {"ok": True, "commits": [
             {"hash": "abc1234", "timestamp_ms": 1787650000000,
              "author": "keeper", "subject": "docs: seed the file (#1256)"},
-        ]},
-    )
-    repositories_fixtures[
-        "/api/v1/ide/regions?codebase=github.com_jeong-sik_masc&file_path=note.ml"
-    ] = (
-        200,
-        {"ok": True, "data": [
-            {"file_path": "note.ml", "line_start": 2, "line_end": 2,
-             "keeper_id": "alpha",
-             "source": {"type": "tool_call", "tool_name": "Edit", "turn": 7},
-             "timestamp_ms": 1787600000000},
         ]},
     )
     repositories_fixtures[

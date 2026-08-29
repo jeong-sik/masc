@@ -2297,7 +2297,6 @@ let code_scope_codebase state =
 
 let code_history_entry_at_ms = function
   | Hist_commit (row : Masc.Tui_decode.git_log_row) -> row.gl_at_ms
-  | Hist_edit (region : Masc.Tui_decode.ide_region) -> region.ir_at_ms
 
 let launch_code_history_load state ~mailbox ~path =
   let host = server_peer_host in
@@ -2312,32 +2311,14 @@ let launch_code_history_load state ~mailbox ~path =
         with
         | Error detail -> Error detail
         | Ok commits ->
-            (* The recorded keeper edits ride the same listing. A scope
-               without a codebase slug, or a fetch that fails, drops only
-               them -- the commits still show, and the note says what is
-               missing rather than passing the shorter history off as the
-               whole one. *)
-            let edits, chl_edits_note =
-              match code_scope_codebase state with
-              | Error why -> ([], Some ("keeper edits not shown: " ^ why))
-              | Ok codebase -> (
-                  match
-                    Masc_tui_http.fetch_ide_regions ~host ~port ~codebase
-                      ~file_path:path
-                  with
-                  | Error detail ->
-                      ([], Some ("keeper edits not shown: " ^ detail))
-                  | Ok regions -> (regions, None))
-            in
             let chl_entries =
               List.stable_sort
                 (fun a b ->
                   Float.compare (code_history_entry_at_ms b)
                     (code_history_entry_at_ms a))
-                (List.map (fun c -> Hist_commit c) commits
-                @ List.map (fun r -> Hist_edit r) edits)
+                (List.map (fun c -> Hist_commit c) commits)
             in
-            Ok { chl_entries; chl_edits_note }
+            Ok { chl_entries }
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -11980,9 +11961,7 @@ and is loaded on demand through keeper_skill.
                   (* The top visible row is the selected one, the way the
                      Changes list treats its scroll. A commit answers with
                      its PR -- the subject's "(#N)" against the repository's
-                     remote, or why there is no link. A keeper edit jumps
-                     the cursor to the lines it wrote, the way a definition
-                     jump lands, with B holding the way back. *)
+                     remote, or why there is no link. *)
                   match state.code_history with
                   | None -> ()
                   | Some (_, listing) -> (
@@ -11991,26 +11970,6 @@ and is loaded on demand through keeper_skill.
                           state.code_history_scroll
                       with
                       | None -> ()
-                      | Some (Hist_edit region) -> (
-                          match state.code_file with
-                          | None -> ()
-                          | Some (_, rows) ->
-                              push_code_jump state;
-                              state.code_history_open <- false;
-                              let cursor =
-                                max 0
-                                  (min
-                                     (region.Masc.Tui_decode.ir_line_start
-                                     - 1)
-                                     (List.length rows - 1))
-                              in
-                              state.code_file_cursor <- cursor;
-                              state.code_file_scroll <-
-                                Masc_tui_scroll.ensure_visible ~cursor
-                                  ~height:
-                                    (Masc_tui_render
-                                     .code_pane_content_height state)
-                                  state.code_file_scroll)
                       | Some (Hist_commit row) ->
                           let open Masc.Tui_decode in
                           state.code_lsp_note <-

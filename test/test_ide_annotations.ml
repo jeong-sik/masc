@@ -2,7 +2,6 @@ open Alcotest
 
 module Types = Ide_annotation_types
 module Store = Ide_annotations
-module Region = Ide_region_tracker
 module Lsp = Lsp_overlay_provider
 
 (* The overlay reader has to name the store it addresses. These cases write
@@ -58,20 +57,6 @@ let with_temp_dir f =
   Unix.mkdir path 0o700;
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 ;;
-
-let load_regions_from path =
-  Fs_compat.fold_jsonl_lines
-    ~init:[]
-    ~f:(fun acc ~line_no:_ json ->
-      match Types.region_of_json json with
-      | Ok region -> region :: acc
-      | Error msg -> fail msg)
-    path
-  |> List.rev
-;;
-
-let load_regions base_dir =
-  load_regions_from (Region.regions_file ~base_dir ~codebase:"github.com_other_repo" ())
 
 let contains ~needle haystack =
   let needle_len = String.length needle in
@@ -219,41 +204,6 @@ let test_lsp_overlay_exposes_route_context () =
       check_contains "hover carries review reference" "review:review-15035" value;
       check_contains "hover carries telemetry reference" "telemetry:trace-9" value))
 ;;
-
-let test_region_tracker_writes_fixed_regions_file () =
-  with_temp_dir (fun base_dir ->
-    Region.ingest_tool_call
-      ~base_dir
-      ~codebase:"github.com_other_repo"
-      ~keeper_id:"alpha"
-      ~turn:7
-      (`Assoc
-        [ "name", `String "write_file"
-        ; ( "arguments"
-          , `Assoc
-              [ "path", `String "lib/a.ml"
-              ; "content", `String "let x = 1\n"
-              ] )
-        ]);
-    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir ~codebase:"github.com_other_repo" ()));
-    match load_regions base_dir with
-    | [ region ] ->
-      check string "file path" "lib/a.ml" region.Types.file_path;
-      check int "line start" 1 region.line_start;
-      check int "line end" 1 region.line_end;
-      check string "keeper" "alpha" region.keeper_id;
-      (match region.source with
-       | Types.Tool_call { tool_name; turn } ->
-         check string "tool name" "write_file" tool_name;
-         check int "turn" 7 turn
-       | Types.Manual _ -> fail "expected tool-call source")
-    | rows -> failf "expected one region, got %d" (List.length rows))
-;;
-
-(* test_meta_sync_flush_writes_fixed_regions_file removed in RFC-0128
-   PR-1f: the Ide_meta_sync module is gone now that PR-1e dropped its
-   only call site. Its coverage is preserved by the
-   [ingest content fallback] + [no double-write] cases below. *)
 
 (* RFC-0128 §4.2 — codebase-aware store routing. *)
 
@@ -411,120 +361,6 @@ let test_delete_is_codebase_scoped () =
     (match in_by_url with
      | Ok () -> ()
      | Error msg -> failf "delete in the owning codebase failed: %s" msg))
-;;
-
-let test_region_append_isolates_codebases () =
-  with_temp_dir (fun base_dir ->
-    let slug = "github.com_owner_repo" in
-    let region : Types.code_region =
-      { keeper_id = "alpha"
-      ; file_path = "lib/foo.ml"
-      ; line_start = 1
-      ; line_end = 5
-      ; source = Types.Tool_call { tool_name = "write_file"; turn = 0 }
-      ; timestamp_ms = 1L
-      }
-    in
-    Region.append_region ~base_dir ~codebase:(slug) region;
-    let by_url_path = Region.regions_file ~base_dir ~codebase:(slug) () in
-    let other_path = Region.regions_file ~base_dir ~codebase:"github.com_other_repo" () in
-    check bool "by-url regions exists" true (Sys.file_exists by_url_path);
-    check bool "other codebase regions absent" false (Sys.file_exists other_path))
-;;
-
-(* RFC-0128 PR-1e — content fallback + single-write invariant.
-
-   Before PR-1e, edit_file tool_calls with no diff/patch argument
-   produced zero regions in Ide_region_tracker.ingest_tool_call. The
-   missing record was previously synthesised by Ide_meta_sync.flush_regions,
-   which wrote to an unaddressed store while ingest_tool_call (post
-   PR-1c) wrote to the resolved codebase — a double-write of the
-   same region across two stores. PR-1e moves the content fallback
-   into ingest_tool_call itself and removes the meta_sync call site
-   from track_write_region, restoring a single source of truth. *)
-
-let count_lines path =
-  if not (Sys.file_exists path) then 0
-  else (
-    let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        let n = ref 0 in
-        try
-          while true do
-            ignore (input_line ic);
-            incr n
-          done;
-          !n
-        with End_of_file -> !n))
-;;
-
-let test_ingest_edit_file_content_fallback () =
-  with_temp_dir (fun base_dir ->
-    let slug = "github.com_owner_repo" in
-    (* edit_file with only path + content (no diff, no patch). Before
-       PR-1e this dropped regions silently. *)
-    let json =
-      `Assoc
-        [ "name", `String "edit_file"
-        ; "arguments"
-        , `Assoc
-            [ "path", `String "lib/foo.ml"
-            ; "content", `String "line one\nline two\nline three\n"
-            ; "old_string", `String "line one"
-            ; "new_string", `String "LINE ONE"
-            ]
-        ]
-    in
-    Region.ingest_tool_call
-      ~base_dir
-      ~codebase:(slug)
-      ~keeper_id:"alpha"
-      ~turn:1
-      json;
-    let by_url_path =
-      Region.regions_file ~base_dir ~codebase:(slug) ()
-    in
-    check int "edit_file content fallback emits one region" 1 (count_lines by_url_path);
-    match load_regions_from by_url_path with
-    | [ region ] -> (
-      match region.source with
-      | Types.Tool_call { tool_name; turn } ->
-        check string "fallback preserves tool name" "edit_file" tool_name;
-        check int "turn" 1 turn
-      | Types.Manual _ -> fail "expected tool-call source")
-    | rows -> failf "expected one region, got %d" (List.length rows))
-;;
-
-let test_ingest_no_double_write () =
-  with_temp_dir (fun base_dir ->
-    let slug = "github.com_owner_repo" in
-    (* The same tool_call must produce exactly one region in the named
-       codebase and zero anywhere else. Regression guard for the
-       meta_sync/ingest double-write that PR-1e closed. *)
-    let json =
-      `Assoc
-        [ "name", `String "write_file"
-        ; "arguments"
-        , `Assoc
-            [ "path", `String "lib/foo.ml"
-            ; "content", `String "alpha\nbeta\ngamma\n"
-            ]
-        ]
-    in
-    Region.ingest_tool_call
-      ~base_dir
-      ~codebase:(slug)
-      ~keeper_id:"alpha"
-      ~turn:0
-      json;
-    let by_url_path =
-      Region.regions_file ~base_dir ~codebase:(slug) ()
-    in
-    let other_path = Region.regions_file ~base_dir ~codebase:"github.com_other_repo" () in
-    check int "by-url has one region" 1 (count_lines by_url_path);
-    check int "other codebase has zero regions" 0 (count_lines other_path))
 ;;
 
 let test_completion_items_kinds () =
@@ -931,10 +767,6 @@ let () =
             "LSP overlays expose route context"
             `Quick
             test_lsp_overlay_exposes_route_context
-        ; test_case
-            "region tracker writes fixed regions.jsonl"
-            `Quick
-            test_region_tracker_writes_fixed_regions_file
         ] )
     ; ( "codebase isolation"
       , [ test_case
@@ -957,18 +789,6 @@ let () =
             "delete is codebase-scoped"
             `Quick
             test_delete_is_codebase_scoped
-        ; test_case
-            "append_region isolates codebases"
-            `Quick
-            test_region_append_isolates_codebases
-        ; test_case
-            "edit_file ingest content fallback emits one region (PR-1e)"
-            `Quick
-            test_ingest_edit_file_content_fallback
-        ; test_case
-            "ingest writes exactly one codebase store (PR-1e)"
-            `Quick
-            test_ingest_no_double_write
         ] )
     ; ( "overlay (expanded)"
       , [ test_case "completion_items returns 4 kinds" `Quick test_completion_items_kinds

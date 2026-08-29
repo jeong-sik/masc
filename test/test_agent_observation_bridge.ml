@@ -18,14 +18,6 @@ let json_string key json =
   Yojson.Safe.Util.member key json |> Yojson.Safe.Util.to_string
 ;;
 
-let json_int key json =
-  Yojson.Safe.Util.member key json |> Yojson.Safe.Util.to_int
-;;
-
-let json_list key json =
-  Yojson.Safe.Util.member key json |> Yojson.Safe.Util.to_list
-;;
-
 let summary_count key json =
   Yojson.Safe.Util.member "summary" json
   |> Yojson.Safe.Util.member key
@@ -37,20 +29,15 @@ let install_fresh_ide_sink () =
   Ide_bridge.install_agent_observation_sinks ()
 ;;
 
-(* RFC-0378 A2: test-side attribution builders ([file_attribution] for
-   region/annotation facts; wrap in [File] for tool facts). *)
-let unattributed_file attempted_path =
-  Agent_observation.Unaddressed
-    { reason = Agent_observation.Unattributed.Unregistered_path; attempted_path }
-;;
-
+(* RFC-0378 A2: test-side attribution builder ([file_attribution] for
+   annotation facts; wrap in [File] for tool facts). *)
 let addressed_file ~codebase ~path =
   match Agent_observation.Code_address.v ~codebase ~path with
   | Ok address -> Agent_observation.Addressed { address; checkout = None }
   | Error e -> failwith (Agent_observation.Code_address.invalid_to_string e)
 ;;
 
-let test_tool_observation_reaches_ide_storage_and_cursor () =
+let test_tool_observation_reaches_ide_storage () =
   with_temp_dir (fun base_dir ->
     install_fresh_ide_sink ();
     Agent_observation.emit_tool_event
@@ -71,107 +58,20 @@ let test_tool_observation_reaches_ide_storage_and_cursor () =
           `Assoc
             [ "file_path", `String "lib/test.ml"
             ; "line_start", `Int 42
-            ; "focus_mode", `String "editing"
             ]
       };
-    (match
-       Ide_bridge.list_events
-         ~base_path:base_dir
-         ~codebase:("github.com_owner_repo")
-         ~kind:Ide_bridge.Tool
-         ~limit:1
-         ()
-     with
-     | [ event ] ->
-       check string "tool_name" "keeper_ide_annotate" (json_string "tool_name" event);
-       check string "keeper_id" "keeper-alpha" (json_string "keeper_id" event)
-     | _ -> fail "expected one tool event");
     match
-      Ide_bridge.list_cursors
+      Ide_bridge.list_events
         ~base_path:base_dir
         ~codebase:("github.com_owner_repo")
+        ~kind:Ide_bridge.Tool
+        ~limit:1
         ()
     with
-    | [ cursor ] ->
-      check string "cursor file" "lib/test.ml" (json_string "file_path" cursor);
-      check int "cursor line" 42 (json_int "line" cursor)
-    | _ -> fail "expected one cursor")
-;;
-
-let test_write_region_observation_reaches_ide_storage () =
-  with_temp_dir (fun base_dir ->
-    install_fresh_ide_sink ();
-    let attribution =
-      addressed_file ~codebase:"github.com_owner_repo" ~path:"lib/region.ml"
-    in
-    (match
-       Agent_observation.emit_write_region_event
-         { base_path = base_dir
-         ; attribution
-         ; keeper_id = "keeper-delta"
-         ; turn = 12
-         ; tool_call_json =
-             `Assoc
-               [ "name", `String "write_file"
-               ; ( "arguments"
-                 , `Assoc
-                     [ "path", `String "lib/region.ml"
-                     ; "content", `String "let a = 1\nlet b = 2\n"
-                     ] )
-               ]
-         }
-     with
-     | Ok () -> ()
-     | Error err ->
-       failf
-         "write-region emit failed: %s"
-         (Agent_observation.write_region_error_to_string err));
-    match
-      Ide_region_tracker.read_regions
-        ~base_dir
-        ~codebase:("github.com_owner_repo")
-        ()
-    with
-    | [ region ] ->
-      check string "region file" "lib/region.ml" region.file_path;
-      check int "line start" 1 region.line_start;
-      check int "line end" 2 region.line_end;
-      check string "keeper id" "keeper-delta" region.keeper_id;
-      (match region.source with
-       | Ide_annotation_types.Tool_call { tool_name; turn } ->
-         check string "tool name" "write_file" tool_name;
-         check int "turn" 12 turn
-       | Ide_annotation_types.Manual _ -> fail "expected tool-call region source")
-    | _ -> fail "expected one region")
-;;
-
-let test_write_region_no_sink_returns_error () =
-  with_temp_dir (fun base_dir ->
-    Agent_observation.reset_for_testing ();
-    let result =
-      Agent_observation.emit_write_region_event
-        { base_path = base_dir
-        ; attribution = unattributed_file "lib/region.ml"
-        ; keeper_id = "keeper-delta"
-        ; turn = 12
-        ; tool_call_json =
-            `Assoc
-              [ "name", `String "write_file"
-              ; ( "arguments"
-                , `Assoc
-                    [ "path", `String "lib/region.ml"
-                    ; "content", `String "let a = 1\n"
-                    ] )
-              ]
-        }
-    in
-    match result with
-    | Error Agent_observation.Write_region_sink_not_installed -> ()
-    | Ok () -> fail "expected missing write-region sink error"
-    | Error err ->
-      failf
-        "unexpected write-region error: %s"
-        (Agent_observation.write_region_error_to_string err))
+    | [ event ] ->
+      check string "tool_name" "keeper_ide_annotate" (json_string "tool_name" event);
+      check string "keeper_id" "keeper-alpha" (json_string "keeper_id" event)
+    | _ -> fail "expected one tool event")
 ;;
 
 let test_annotation_request_reaches_ide_storage () =
@@ -288,42 +188,6 @@ let test_snapshot_reset_clears_accumulated_observations () =
   check int "tool events cleared" 0 (summary_count "tool_event_count" after)
 ;;
 
-let test_write_region_snapshot_uses_tool_call_payload () =
-  Agent_observation.reset_for_testing ();
-  let result =
-    Agent_observation.emit_write_region_event
-      { base_path = "/tmp/masc"
-      ; attribution = addressed_file ~codebase:"github.com_owner_repo" ~path:"lib/region.ml"
-      ; keeper_id = "keeper-region"
-      ; turn = 7
-      ; tool_call_json =
-          `Assoc
-            [ "name", `String "write_file"
-            ; "arguments", `Assoc [ "path", `String "lib/region.ml" ]
-            ]
-      }
-  in
-  (match result with
-   | Error Agent_observation.Write_region_sink_not_installed -> ()
-   | Ok () -> fail "expected missing write-region sink error"
-   | Error err ->
-     failf
-       "unexpected write-region error: %s"
-       (Agent_observation.write_region_error_to_string err));
-  let json = Agent_observation.peek_snapshot () |> Agent_observation.snapshot_to_json in
-  match json_list "write_regions" json with
-  | [ row ] ->
-    check string "keeper id" "keeper-region" (json_string "keeper_id" row);
-    check int "turn" 7 (json_int "turn" row);
-    let tool_call = Yojson.Safe.Util.member "tool_call" row in
-    check string "tool name" "write_file" (json_string "name" tool_call);
-    check string
-      "tool path"
-      "lib/region.ml"
-      (Yojson.Safe.Util.member "arguments" tool_call |> json_string "path")
-  | rows -> failf "expected one write-region snapshot row, got %d" (List.length rows)
-;;
-
 (* keeper_ide_annotate declares kind as a JSON-schema enum and the runtime
    parses it back with annotation_kind_of_string. Two hand-written lists of the
    same four names drift silently: before this test the runtime folded every
@@ -373,17 +237,9 @@ let () =
     "agent_observation_bridge"
     [ ( "adapter"
       , [ test_case
-            "tool observation reaches IDE storage and cursor"
+            "tool observation reaches IDE storage"
             `Quick
-            test_tool_observation_reaches_ide_storage_and_cursor
-        ; test_case
-            "write-region observation reaches IDE storage"
-            `Quick
-            test_write_region_observation_reaches_ide_storage
-        ; test_case
-            "write-region no-sink returns error"
-            `Quick
-            test_write_region_no_sink_returns_error
+            test_tool_observation_reaches_ide_storage
         ; test_case
             "annotation request reaches IDE storage"
             `Quick
@@ -396,10 +252,6 @@ let () =
             "snapshot reset clears accumulated observations"
             `Quick
             test_snapshot_reset_clears_accumulated_observations
-        ; test_case
-            "write-region snapshot uses tool-call payload"
-            `Quick
-            test_write_region_snapshot_uses_tool_call_payload
         ; test_case
             "annotation kind enum matches variants"
             `Quick

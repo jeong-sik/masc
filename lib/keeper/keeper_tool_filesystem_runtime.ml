@@ -778,87 +778,6 @@ let resolve_write_attribution ~base_dir ~file_path =
        unaddressed Agent_observation.Unattributed.Repository_catalog_unavailable)
 ;;
 
-(** After a successful file write, record the code region in the IDE
-    observation store. Fire-and-forget: errors are logged but never
-    block the write path. Emits a neutral
-    [Agent_observation.write_region_event]; the IDE adapter registers
-    the concrete region-tracker sink.
-
-    RFC-0378 §5.1: the attribution is minted per-write from the
-    [file_path], so sandbox-clone keeper writes and working-tree IDE
-    reads join on the same [Code_address]. *)
-let track_write_region
-      ~config
-      ~keeper_name
-      ~file_path
-      ~content
-      ~mode_raw
-      ~old_string
-      ~new_string
-      ?(turn = 0)
-      ()
-  =
-  let base_dir = Keeper_alerting_path.project_root_of_config config in
-  let attribution = resolve_write_attribution ~base_dir ~file_path in
-  let rel_file_path =
-    match attribution with
-    | Agent_observation.Addressed { address; _ } ->
-      Agent_observation.Code_address.path address
-    | Agent_observation.Unaddressed { attempted_path; _ } -> attempted_path
-  in
-  let tool_name =
-    match fs_write_mode_of_string_opt mode_raw with
-    | Some Patch -> "edit_file"
-    | _ -> "write_file"
-  in
-  (* RFC-0128 PR-1e: the legacy meta-sync invocation that used to live here
-     wrote to the Legacy partition (server base_path) while
-     region observation below now writes to the
-     resolved partition (PR-1c). That produced a double-write of the
-     same region into two different bucket layouts. The full-file
-     region fallback meta_sync was carrying for edit_file/apply_patch
-     is now served directly by the IDE sink, so we drop this path entirely. *)
-  let arguments =
-    let fields = [ "path", `String rel_file_path; "content", `String content ] in
-    match fs_write_mode_of_string_opt mode_raw with
-    | Some Patch ->
-      `Assoc
-        (fields @ [ "old_string", `String old_string; "new_string", `String new_string ])
-    | _ -> `Assoc fields
-  in
-  let tool_call_json = `Assoc [ "name", `String tool_name; "arguments", arguments ] in
-  let warn_and_surface message =
-    Log.Keeper.warn
-      "IDE region tracking failed for keeper=%s path=%s: %s"
-      keeper_name
-      file_path
-      message;
-    Some message
-  in
-  try
-    match
-      Agent_observation.emit_write_region_event
-        { base_path = base_dir; attribution; keeper_id = keeper_name; turn; tool_call_json }
-    with
-    | Ok () -> None
-    | Error err ->
-      Agent_observation.write_region_error_to_string err |> warn_and_surface
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Printexc.to_string exn |> warn_and_surface
-;;
-
-let ide_observation_failure_fields = function
-  | None -> []
-  | Some error ->
-    [ ( "ide_observation"
-      , `Assoc
-          [ ( "write_region"
-            , `Assoc [ "ok", `Bool false; "error", `String error ] )
-          ] )
-    ]
-;;
-
 let created_file_permissions = 0o644
 let created_directory_permissions = 0o755
 
@@ -2460,17 +2379,6 @@ let handle_file_write_with_outcome
         target
         mode_label
         (String.length content);
-      let ide_observation_error =
-        track_write_region
-          ~config
-          ~keeper_name:meta.name
-          ~file_path:target
-          ~content
-          ~mode_raw:mode_label
-          ~old_string:""
-          ~new_string:""
-          ()
-      in
       Ok
         (Write_succeeded
            { payload =
@@ -2481,7 +2389,6 @@ let handle_file_write_with_outcome
                       ; "mode", `String mode_label
                       ; "bytes_written", `Int (String.length content)
                       ]
-                      @ ide_observation_failure_fields ide_observation_error
                       @ via_field))
            ; file_change_evidence =
                (match mode with
@@ -2827,17 +2734,6 @@ let handle_file_write_with_outcome
                     replace_all
                     occurrence_count
                     (String.length updated);
-                  let ide_observation_error =
-                    track_write_region
-                      ~config
-                      ~keeper_name:meta.name
-                      ~file_path:target
-                      ~content:updated
-                      ~mode_raw:"patch"
-                      ~old_string
-                      ~new_string
-                      ()
-                  in
                   Ok
                     (Write_succeeded
                        { payload =
@@ -2850,8 +2746,6 @@ let handle_file_write_with_outcome
                                   ; "occurrences", `Int occurrence_count
                                   ; "bytes_written", `Int (String.length updated)
                                   ]
-                                  @ ide_observation_failure_fields
-                                      ide_observation_error
                                   @ via_field))
                        ; file_change_evidence =
                            Some

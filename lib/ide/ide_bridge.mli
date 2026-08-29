@@ -19,46 +19,8 @@ val list_events :
   unit ->
   Yojson.Safe.t list
 
-val list_cursors :
-  base_path:string ->
-  codebase:string ->
-  ?keeper_id:string ->
-  ?file_path:string ->
-  ?limit:int ->
-  ?offset:int ->
-  unit ->
-  Yojson.Safe.t list
-
-val cursor_focus_mode_of_string : string -> string option
-(** Return the canonical cursor focus mode when [mode] is part of the IDE
-    cursor contract. *)
-
-val register_cursor_changed_sink : (keeper_id:string -> unit) -> unit
-(** Register the server-push adapter notified after a cursor record is durable.
-    The IDE storage layer does not depend on the server transport. *)
-
-(** Ingest a cursor event from an external source (e.g. editor or LSP).
-    Unlike [ingest_cursor_event_from_hook], this does not require a tool hook
-    context and uses the provided [source] label as the tool_name field. *)
-val ingest_cursor_event :
-  base_path:string ->
-  codebase:string ->
-  keeper_id:string ->
-  file_path:string ->
-  line:int ->
-  ?column:int ->
-  ?selection_end:(int * int) ->
-  ?focus_mode:string ->
-  source:string ->
-  unit ->
-  (unit, string) result
-(** Return latest valid cursor records, newest first. Cursor records are
-    produced from tool hooks only when the hook input contains a non-empty
-    file path and a positive line number. *)
-
 val install_agent_observation_sinks : unit -> unit
-(** Register IDE storage as the sink for neutral [Agent_observation] events,
-    including write-region observations. *)
+(** Register IDE storage as the sink for neutral [Agent_observation] events. *)
 
 val observation_snapshot_json : take:bool -> Yojson.Safe.t
 (** Return the accumulated neutral observation snapshot as IDE-facing JSON.

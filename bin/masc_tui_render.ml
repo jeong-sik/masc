@@ -10441,33 +10441,14 @@ let render_code (state : state) =
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, { chl_entries = []; chl_edits_note }) ->
+       | None, Some (_, { chl_entries = [] }) ->
            box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (no commit or recorded keeper edit touches \
-                          this file)" ^ Ansi.reset);
-           (match chl_edits_note with
-            | Some note ->
-                box_line pane_buf pane_cols
-                  (Ansi.dim ^ "  " ^ Terminal_text.single_line note
-                  ^ Ansi.reset)
-            | None -> ());
-           let used = 1 + if chl_edits_note = None then 0 else 1 in
-           for _ = used + 1 to content_height do
+             (Ansi.dim ^ "  (no commit touches this file)" ^ Ansi.reset);
+           for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, { chl_entries; chl_edits_note }) ->
-           (* When the keeper edits could not ride along, the first row
-              says so; the timeline scrolls beneath it. *)
-           let note_rows =
-             match chl_edits_note with
-             | None -> 0
-             | Some note ->
-                 box_line pane_buf pane_cols
-                   (Ansi.dim ^ "  " ^ Terminal_text.single_line note
-                   ^ Ansi.reset);
-                 1
-           in
-           let list_height = max 1 (content_height - note_rows) in
+       | None, Some (_, { chl_entries }) ->
+           let list_height = max 1 content_height in
            let total = List.length chl_entries in
            let max_scroll = max 0 (total - list_height) in
            let scroll = max 0 (min state.code_history_scroll max_scroll) in
@@ -10487,23 +10468,6 @@ let render_code (state : state) =
                       row.gl_hash Ansi.reset
                       (Terminal_text.single_line row.gl_author)
                       (Terminal_text.single_line row.gl_subject))
-             | Some (Hist_edit region) ->
-                 let open Masc.Tui_decode in
-                 let anchor =
-                   if region.ir_line_start = region.ir_line_end then
-                     Printf.sprintf "L%d" region.ir_line_start
-                   else
-                     Printf.sprintf "L%d-%d" region.ir_line_start
-                       region.ir_line_end
-                 in
-                 box_line pane_buf pane_cols
-                   (Printf.sprintf "  %s%s%s  %s%-9s%s %s%s%s  %s" Ansi.dim
-                      (at_of region.ir_at_ms) Ansi.reset Ansi.dim anchor
-                      Ansi.reset
-                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                      (Terminal_text.single_line region.ir_keeper)
-                      Ansi.reset
-                      (Terminal_text.single_line region.ir_source))
              | None -> box_empty pane_buf pane_cols
            done
      else
@@ -10528,10 +10492,9 @@ let render_code (state : state) =
                (min state.code_file_hscroll
                   (max 0 (state.code_file_max_width - 1)))
            in
-           (* Which lines carry a note or a recorded keeper edit -- only
-              what is already loaded (m or H has been opened for this
-              file); the pane does not fetch to decorate. A line with both
-              shows the note's mark. *)
+           (* Which lines carry a note -- only what is already loaded (m
+              has been opened for this file); the pane does not fetch to
+              decorate. *)
            let matches_open_file loaded_path =
              match state.code_file with
              | Some (open_path, _) -> String.equal loaded_path open_path
@@ -10545,18 +10508,6 @@ let render_code (state : state) =
                    (fun (n : Masc.Tui_decode.ide_annotation) ->
                      (n.ia_line_start, n.ia_line_end))
                    notes
-             | _ -> []
-           in
-           let edit_spans =
-             match state.code_history with
-             | Some (loaded_path, listing)
-               when matches_open_file loaded_path ->
-                 List.filter_map
-                   (function
-                     | Hist_edit (r : Masc.Tui_decode.ide_region) ->
-                         Some (r.ir_line_start, r.ir_line_end)
-                     | Hist_commit _ -> None)
-                   listing.chl_entries
              | _ -> []
            in
            let covers line spans =
@@ -10583,8 +10534,6 @@ let render_code (state : state) =
                    if covers line note_spans then
                      Masc_tui_theme.tone Masc_tui_theme.Accent
                      ^ "\xe2\x97\x8f" ^ Ansi.reset
-                   else if covers line edit_spans then
-                     Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
                    else " "
                  in
                  box_line pane_buf pane_cols

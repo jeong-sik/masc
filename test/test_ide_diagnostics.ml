@@ -149,50 +149,6 @@ let test_annotation_of_json_rejects_unknown_fields () =
       msg
 ;;
 
-let test_region_json_round_trip_tool_call () =
-  let original =
-    { Ide_annotation_types.file_path = "lib/server.ml"
-    ; line_start = 7
-    ; line_end = 9
-    ; keeper_id = "beta"
-    ; source = Ide_annotation_types.Tool_call { tool_name = "masc_status"; turn = 42 }
-    ; timestamp_ms = 1700000000123L
-    }
-  in
-  match
-    original
-    |> Ide_annotation_types.region_to_json
-    |> Ide_annotation_types.region_of_json
-  with
-  | Ok parsed ->
-    Alcotest.(check bool) "tool-call region round-trip preserves record" true
-      (parsed = original)
-  | Error msg ->
-    Alcotest.failf "region_of_json rejected region_to_json output: %s" msg
-;;
-
-let test_region_json_round_trip_manual () =
-  let original =
-    { Ide_annotation_types.file_path = "lib/manual.ml"
-    ; line_start = 1
-    ; line_end = 1
-    ; keeper_id = "nova"
-    ; source = Ide_annotation_types.Manual { note = "operator bookmark" }
-    ; timestamp_ms = 1700000000999L
-    }
-  in
-  match
-    original
-    |> Ide_annotation_types.region_to_json
-    |> Ide_annotation_types.region_of_json
-  with
-  | Ok parsed ->
-    Alcotest.(check bool) "manual region round-trip preserves record" true
-      (parsed = original)
-  | Error msg ->
-    Alcotest.failf "region_of_json rejected region_to_json output: %s" msg
-;;
-
 (* ── test suite ──────────────────────────────────────────────────── *)
 
 let () =
@@ -219,12 +175,6 @@ let () =
             test_annotation_of_json_rejects_non_object
         ; Alcotest.test_case "rejects unknown fields" `Quick
             test_annotation_of_json_rejects_unknown_fields
-        ] )
-    ; ( "region_json"
-      , [ Alcotest.test_case "tool-call round-trip" `Quick
-            test_region_json_round_trip_tool_call
-        ; Alcotest.test_case "manual round-trip" `Quick
-            test_region_json_round_trip_manual
         ] )
     ]
 ;;

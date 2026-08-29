@@ -166,8 +166,8 @@ status: reference
   - lab tool quality aggregates, unified usage metrics, and prompt registry read model
 - `GET /api/v1/dashboard/harness-health`
   - lab harness health
-- `GET /api/v1/ide/annotations`, `GET /api/v1/ide/regions`, `GET /api/v1/ide/presence`
-  - code IDE annotations, source regions, and live collaboration presence
+- `GET /api/v1/ide/annotations`, `GET /api/v1/ide/presence`
+  - code IDE annotations and live collaboration presence
 - `GET /api/v1/dashboard/logs`
   - log viewer
 

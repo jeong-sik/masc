@@ -128,14 +128,6 @@ type tool_event =
     derived by joining addressed tool facts on [turn_id]. The
     observation bus carries no turn events. *)
 
-type write_region_event =
-  { base_path : string
-  ; attribution : file_attribution
-  ; keeper_id : string
-  ; turn : int
-  ; tool_call_json : Yojson.Safe.t
-  }
-
 type annotation_kind =
   | Comment
   | Decision
@@ -186,21 +178,12 @@ type annotation_result =
   }
 
 type tool_event_sink = tool_event -> unit
-type write_region_error =
-  | Write_region_sink_not_installed
-  | Write_region_sink_failed
-
-val write_region_error_to_string : write_region_error -> string
-
-type write_region_sink = write_region_event -> (unit, write_region_error) result
 type annotation_sink = annotation_request -> (annotation_result, string) result
 
 val register_tool_event_sink : tool_event_sink -> unit
-val register_write_region_sink : write_region_sink -> unit
 val register_annotation_sink : annotation_sink -> unit
 
 val emit_tool_event : tool_event -> unit
-val emit_write_region_event : write_region_event -> (unit, write_region_error) result
 val emit_annotation_request : annotation_request -> (annotation_result, string) result
 
 type snapshot

@@ -28,9 +28,6 @@ type keeper_profile_defaults = {
      no-layer default; a non-empty list is admitted only for Yolo keepers
      (a loaded layer can carry skills/hooks that execute outside the MASC
      approval gate). *)
-  (* RFC-0389: per-keeper model tool surface. [None] inherits the default
-     (every model-visible tool). A [Some (Declared _)] narrows the surface to
-     the declared groups; [Core_group] and [Meta_group] are always retained. *)
   (** Profile-only Keeper Skill selection. [None] exposes all names; [Some []]
       exposes none. Names use exact equality against canonical Skill names. *)
   skill_names : string list option;

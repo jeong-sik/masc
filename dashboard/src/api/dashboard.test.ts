@@ -513,7 +513,6 @@ describe('keeper tool telemetry fetchers', () => {
               receipt_labels: {
                 descriptor_id: 'keeper.time.now',
                 executor: 'in_process',
-                keeper_tool_group: 'meta',
                 input_schema_source: 'descriptor_owned',
               },
               eval_tags: [],
@@ -565,7 +564,6 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.route_evidence?.receipt_labels).toEqual({
       descriptor_id: 'keeper.time.now',
       executor: 'in_process',
-      keeper_tool_group: 'meta',
       input_schema_source: 'descriptor_owned',
     })
   })

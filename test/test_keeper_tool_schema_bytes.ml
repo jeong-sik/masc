@@ -69,11 +69,9 @@ let measured () =
   (List.length schemas, bytes)
 ;;
 
-(* RFC-0389 backward-compat golden: a Keeper with no [keeper.tools]
-   declaration (surface = All) must keep the tool surface it had before that
-   feature, so a later refactor cannot quietly take a tool away from the
-   Keepers that never opted in. Pinned on 2026-08-23 from the pre-feature
-   surface.
+(* Backward-compat golden: the tool surface a Keeper carries must not
+   change without someone saying so, so a later refactor cannot quietly take
+   a tool away. Pinned on 2026-08-23.
 
    The names, not a byte total. The invariant above is about which tools a
    Keeper can still call, and a byte count answers that only by accident. It
@@ -253,9 +251,9 @@ let () =
         ; test_case "the ceiling still tracks the surface" `Quick
             test_the_ceiling_still_tracks_the_surface
         ] )
-    ; ( "RFC-0389 per-keeper surface"
-      , [ test_case "All surface is unchanged (backward compat)" `Quick
+    ; ( "surface golden"
+      , [ test_case "the surface is unchanged (backward compat)" `Quick
             test_all_surface_is_unchanged
-        ;        ] )
+        ] )
     ]
 ;;

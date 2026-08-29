@@ -7,7 +7,7 @@ updated: 2026-08-25
 author: claude
 supersedes: []
 superseded_by: null
-related: ["0389", "prompts-and-tool-definitions-outside-ocaml", "skills-declared-not-discovered"]
+related: ["prompts-and-tool-definitions-outside-ocaml", "skills-declared-not-discovered"]
 ---
 
 # RFC: Skills as Tools (skills-as-tools)
@@ -167,7 +167,7 @@ type surface =
 2. **합성 스킬 = 도구 (Skill as a Tool).** 합성 block 을 가진 스킬은 기존
    `make_tools` 경로로 `keeper_compose_<name>` 도구가 된다. 실행기·텔레메트리·async
    broker(status/cancel)는 재사용이고 변경이 없다. 도구는 턴 시작에 고정되는
-   전역 표면이므로(RFC-0389 §3.3) 합성 스킬은 task 라우팅과 무관하게 전원에게 실린다 —
+   전역 표면이므로 합성 스킬은 task 라우팅과 무관하게 전원에게 실린다 —
    지시는 task 단위, 능력은 fleet 단위라는 분리다.
 3. **참조 파일 (3단계).** 본문이 스킬 디렉토리의 상대 경로를 가리키면 기존 Read 도구로
    읽는다. 새 도구는 없다.
@@ -231,13 +231,12 @@ skills 디렉토리 하나가 된다. 마이그레이션 코드·호환 reader �
 
 ## 3. 하지 않을 것
 
-- **도구의 동적 탈착.** 표면은 턴 시작에 고정된다(RFC-0389 §3.3 유지). 스킬 본문 로드는
+- **도구의 동적 탈착.** 표면은 턴 시작에 고정된다. 스킬 본문 로드는
   표면 변경이 아니라 도구 호출이다.
 - **스킬 자동 생성·원격 설치.** 카탈로그는 운영자가 파일로 선언한다. pi 식 패키지 배포는
   이 RFC 밖이다.
 - **`keeper_plan_execute` 제거.** 즉석 문법은 사용량이 0에 가깝지만, 스킬을 만들 가치가
   없는 1회성 조합의 유일한 통로다. 스킬 도입 후 사용량을 다시 재고 판단한다.
-- **keeper 별 스킬 표면.** RFC-0389 의 `[keeper.tools]` 가 구현될 때 `[keeper.skills]` 를
   같은 축으로 더한다. 이 RFC 는 전원 동일 카탈로그로 시작한다.
 - **런타임(claude-code CLI) 스킬 로딩 켜기.** `--setting-sources=` 는 그대로 둔다.
   masc 의 스킬은 masc 카탈로그가 소유한다 — 런타임별 스킬 로더에 위임하면 non-claude
@@ -283,8 +282,6 @@ current task 뿐 아니라 함께 든 task 의 스킬도 프롬프트·admission
   이 RFC 는 그 위에서 합성 스킬의 도구 승격과 파라미터를 소유한다. 초안에 있던
   `keeper_skill` 도구·`## Skills` 전역 섹션·`config/skills` 임베드는 그 설계에 맞춰
   제거했다 (§2.2).
-- **RFC-0389 (Keeper 별 도구 표면, Draft)**: 충돌 없음. 이 RFC 의 스킬 카탈로그는 0389 의
-  `compositions = [...]` 선언이 참조할 이름 공간을 skills 로 바꾼다. 0389 구현 시
   `[keeper.skills]` 를 같은 선언에 더한다.
 - **RFC-prompts-and-tool-definitions-outside-ocaml (Draft)**: 같은 방향의 이웃. §3.8 의
   `tool_help_registry → [help]` 항목을 이 RFC §2.4 가 md 파일로 개정·흡수한다. 나머지

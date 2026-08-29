@@ -358,7 +358,6 @@ let ensure_keeper_meta_with_cause config name =
       | [] -> meta.agent_core_env
       | env -> env
     in
-    (* --- RFC-0389 tool surface --- *)
     let overlayed =
       { meta with
         proactive = {

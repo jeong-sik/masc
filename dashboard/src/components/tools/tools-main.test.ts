@@ -144,7 +144,6 @@ function keeperReceiptFixture(
       official_client_kind: 'codex',
       tool_delivery: { status: 'delivered' },
       native_posture: 'read',
-      tool_groups: [],
       skill_selection: { mode: 'all' },
       unavailable_skill_names: [],
       current_task_id: 'task-001',

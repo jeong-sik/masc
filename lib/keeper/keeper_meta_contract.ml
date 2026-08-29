@@ -297,10 +297,6 @@ type keeper_meta =
   ; (* -- Identity & concurrency -- *)
     keeper_id : Keeper_id.Uid.t option
   ; agent_core_env : (string * string) list
-    (** RFC-0389: declared [keeper.tools.groups] from the keeper TOML profile.
-        [None] means no declaration → the full model surface ([All]). When set,
-        the per-turn tool bundle is narrowed to the declared groups (plus the
-        always-retained Core/Meta groups). *)
   }
 
 (* Sanctioned generic unpause transform. Every latch this type can carry is an

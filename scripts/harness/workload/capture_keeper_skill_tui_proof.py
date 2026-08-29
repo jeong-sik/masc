@@ -1224,6 +1224,10 @@ def scroll_to_skill_receipt(
             jumped_to_end = True
         elif jumped_to_end and next_receipt_index == 0:
             press(page, "k")
+        elif next_receipt_index == len(expected) and (
+            "skill_header" not in observations or "session_line" not in observations
+        ):
+            press(page, "Home")
         else:
             press(page, "j")
         advanced = screen_text(page)

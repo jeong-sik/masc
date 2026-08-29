@@ -447,6 +447,18 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("priority", `Int 3);
           ("description", `String "tool matrix task body");
         ]
+  (* cdp_port is pinned to a closed port so the case refuses deterministically
+     on every machine — a developer's live Chrome on 9222 must not turn this
+     smoke case into a real browser call. *)
+  | "keeper_webmcp_list" ->
+    `Assoc [ "page", `String "matrix-no-such-page"; "cdp_port", `Int 59999 ]
+  | "keeper_webmcp_call" ->
+    `Assoc
+      [ "page", `String "matrix-no-such-page"
+      ; "tool", `String "masc_status"
+      ; "args_json", `String "{}"
+      ; "cdp_port", `Int 59999
+      ]
   | other -> failwith ("missing keeper arguments contract for " ^ other)
 
 (* Every keeper tool here may either do the work or refuse it when called with

@@ -34,7 +34,15 @@ const port = flagValue('port', '9222')
 const pageNeedle = flagValue('page', 'localhost:8935')
 
 async function findPage() {
-  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+  let targets
+  try {
+    targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+  } catch (error) {
+    // An unreachable CDP endpoint is the same operator condition as a missing
+    // page: Chrome is not up in the expected shape. Same exit code.
+    console.error(`CDP endpoint 127.0.0.1:${port} unreachable: ${error}`)
+    process.exit(2)
+  }
   const page = targets.find(t => t.type === 'page' && t.url.includes(pageNeedle))
   if (!page) {
     console.error(`page matching "${pageNeedle}" not found on CDP port ${port}; pages:`)

@@ -266,6 +266,15 @@ val handle_keeper_code_query_with_outcome
     Answers with a refusal outside a turn, where there is no pool: a server
     started here would outlive every caller that could ask it anything. *)
 
+val handle_keeper_webmcp_with_outcome
+  :  name:string
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
+(** [keeper_webmcp_list] / [keeper_webmcp_call], relayed through the embedded
+    node bridge to an operator-run headed Chrome. Call failures carry
+    [Effect_outcome_unknown] because the bridge cannot prove the page's tool
+    did not run. *)
+
 val handle_keeper_spawn_with_outcome
   :  name:string
   -> args:Yojson.Safe.t

@@ -145,6 +145,7 @@ type runtime_handler =
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
   | Tool_keeper_code_query_dispatch
+  | Tool_keeper_webmcp_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -288,6 +289,7 @@ let runtime_handler_to_string = function
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_keeper_spawn_dispatch -> "tool_keeper_spawn_dispatch"
   | Tool_keeper_code_query_dispatch -> "tool_keeper_code_query_dispatch"
+  | Tool_keeper_webmcp_dispatch -> "tool_keeper_webmcp_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
@@ -298,6 +300,9 @@ let runtime_handler_to_string = function
 
 let keeper_tool_group_of_runtime_handler = function
   | Tool_execute -> Execute_group
+  (* WebMCP consumption runs an external browser bridge, so it rides the
+     execute opt-in group rather than adding an eleventh group. *)
+  | Tool_keeper_webmcp_dispatch -> Execute_group
   (* A code query answers the question Grep answers -- where is this name --
      from the compiler's view of the code rather than the text's, so it
      belongs to the same group and not to the filesystem tools. *)
@@ -502,6 +507,7 @@ let descriptor
     | Tool_memory_write -> Direct_terminal
     | ( Tool_execute
       | Tool_keeper_code_query_dispatch
+      | Tool_keeper_webmcp_dispatch
       | Tool_search_files
       | Tool_read_file
       | Tool_edit_file
@@ -1808,6 +1814,41 @@ let keeper_code_query_descriptor () =
     ()
 ;;
 
+(* RFC-webmcp-keeper-consumption Lane B: relay to WebMCP tools a browser page
+   registered, through the embedded node bridge and an operator-run Chrome. *)
+let keeper_webmcp_list_descriptor () =
+  let schema : Masc_domain.tool_schema = Tool_schemas_webmcp.list_schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:"masc.webmcp_list"
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_keeper_webmcp_dispatch
+    (* Discovery only: reads the page's registered tool catalog. *)
+    ~readonly:true
+    ()
+;;
+
+let keeper_webmcp_call_descriptor () =
+  let schema : Masc_domain.tool_schema = Tool_schemas_webmcp.call_schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:"masc.webmcp_call"
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_keeper_webmcp_dispatch
+    (* Executes whatever the page tool does — a page may register mutating
+       tools, and the bridge cannot know which kind it called. *)
+    ~readonly:false
+    ()
+;;
+
 let masc_keeper_descriptor
     ?(polling_read = false)
     ~keeper_model_projection
@@ -2333,6 +2374,8 @@ let internal_descriptors : t list =
   @ List.map keeper_spawn_descriptor Tool_schemas_spawn.definitions
   (* ── RFC a-language-server-the-keeper-can-ask (1 entry) ───────── *)
   @ [ keeper_code_query_descriptor () ]
+  (* ── RFC-webmcp-keeper-consumption Lane B (2 entries) ─────────── *)
+  @ [ keeper_webmcp_list_descriptor (); keeper_webmcp_call_descriptor () ]
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
     masc_keeper_descriptor ~keeper_model_projection:Operator_only "list" "masc_keeper_list"

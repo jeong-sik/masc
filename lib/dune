@@ -176,6 +176,9 @@
   ;; language server, and the client sits below this library so it can.
   masc.lsp_client
   masc.tool_spawn
+  ;; RFC-webmcp-keeper-consumption: keeper_tool_webmcp relays to the embedded
+  ;; node bridge that drives a headed Chrome over CDP.
+  masc.masc_webmcp
   masc.masc_tool_blob_store
   masc.activity_graph
   masc.prompt_registry

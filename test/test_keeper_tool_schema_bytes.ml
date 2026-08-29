@@ -132,6 +132,10 @@ let all_surface_golden_names =
   ; "keeper_voice_session_start"
   ; "keeper_voice_sessions"
   ; "keeper_voice_speak"
+    (* RFC-webmcp-keeper-consumption Lane B: WebMCP consumption rides the
+       execute group, so the default surface carries both bridge tools. *)
+  ; "keeper_webmcp_call"
+  ; "keeper_webmcp_list"
   ; "masc_agent_fitness"
   ; "masc_board_cleanup"
   ; "masc_board_comment"

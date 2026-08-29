@@ -2814,12 +2814,83 @@ let test_verification_evidence_decode_requires_both_keys () =
     ; ("a non-object", `List [])
     ]
 
+(* The store resolves an artifact reference against the producer's sandbox
+   root and nowhere else.
+
+   It used to guess further: on a miss it enumerated [<root>/repos/*] and read
+   the file when exactly one entry held it. A keeper puts its checkouts where
+   it likes — [Keeper_playground_checkouts] exists because three scans each
+   hardcoded [repos/] and disagreed — so that guess missed every top-level
+   checkout, and where a keeper holds one repository several times the file
+   sits in several of them with different content. Reading a file the
+   submitter did not name hands the judge content without its provenance.
+
+   The miss is now typed and travels to the judge, which holds Read/Grep on
+   this root and a root_layout naming every checkout under it. *)
+let test_checkout_relative_artifact_is_not_guessed () =
+  with_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    ignore (W.init config ~agent_name:(Some "checkout-worker"));
+    ensure_keeper_meta config "checkout-worker";
+    ensure_producer_playground config "checkout-worker";
+    let root =
+      Keeper_sandbox_config.host_root_abs_of_agent
+        ~base_path:(VS.project_root_of_base_path config.base_path)
+        ~agent_name:"checkout-worker"
+    in
+    let write relative contents =
+      let path = Filename.concat root relative in
+      Fs_compat.mkdir_p (Filename.dirname path);
+      Out_channel.with_open_text path (fun channel ->
+        Out_channel.output_string channel contents)
+    in
+    (* Two checkouts of the same repository, one under [repos/] and one at the
+       top level, each holding the same relative path with different content.
+       This is the polisher layout that produced task-785. *)
+    write "repos/masc/lib/proof.ml" "content from repos checkout";
+    write "masc/lib/proof.ml" "content from top-level checkout";
+    let item reference =
+      VS.snapshot_submitted_evidence_json
+        ~base_path:config.base_path
+        ~worker:"checkout-worker"
+        [ reference ]
+      |> Yojson.Safe.Util.to_list
+      |> List.hd
+    in
+    let open Yojson.Safe.Util in
+    let checkout_relative = item "artifact:lib/proof.ml" in
+    Alcotest.(check string)
+      "a checkout-relative path resolves to no file and says so"
+      "artifact_unreadable"
+      (checkout_relative |> member "kind" |> to_string);
+    Alcotest.(check string)
+      "the judge is told which reference missed"
+      "artifact:lib/proof.ml"
+      (checkout_relative |> member "reference" |> to_string);
+    Alcotest.(check string)
+      "and why"
+      (VS.evidence_read_failure_code VS.Evidence_missing)
+      (checkout_relative |> member "reason" |> member "code" |> to_string);
+    (* The path the submitter can write instead still reads, and it reads the
+       checkout it names rather than whichever one sorted first. *)
+    let named = item "artifact:masc/lib/proof.ml" in
+    Alcotest.(check string)
+      "a root-relative path reads"
+      "artifact"
+      (named |> member "kind" |> to_string);
+    Alcotest.(check string)
+      "and reads the checkout it named"
+      "content from top-level checkout"
+      (named |> member "content" |> to_string))
+;;
+
 (* task-808 was refused for a missing artifact and approved four minutes later
-   with the file still absent, so the answer has to be the same both times. Only
-   the reference that leads to no file is named: a note carries its own text, an
-   artifact that read carries its content, and a file that exists but cannot be
-   read is something a reviewer can still reason about. *)
-let test_unresolved_artifact_references_are_named () =
+   with the file still absent. The answer has to be the same both times, and
+   after 2026-08-29 the judge is the one giving it: an unreadable artifact no
+   longer stops the review before an evaluator runs. What this pins is that
+   the judge is handed enough to answer with — which reference failed and why
+   — rather than a bundle that silently omits it. *)
+let test_unreadable_artifacts_reach_the_judge () =
   let items =
     [ VS.Evidence_note "narrative evidence"
     ; VS.Evidence_artifact
@@ -2834,19 +2905,42 @@ let test_unresolved_artifact_references_are_named () =
         { reference = "artifact:locked.txt"
         ; reason = VS.Evidence_read_error "Unix.Unix_error(EACCES, open, _)"
         }
-    ; VS.Evidence_invalid_reference
     ]
   in
-  Alcotest.(check (list string))
-    "only the reference that leads to no file is named"
-    [ "artifact:missing.txt" ]
-    (Masc.Completion_authority_agent.For_testing.unresolved_artifact_references
-       items);
-  Alcotest.(check (list string))
-    "evidence that all resolves names nothing"
-    []
-    (Masc.Completion_authority_agent.For_testing.unresolved_artifact_references
-       [ VS.Evidence_note "narrative evidence" ])
+  let transported =
+    VS.submitted_evidence_access_transport_to_yojson
+      (VS.Evidence_available
+         { request =
+             { id = "vrf-001"
+             ; task_id = "task-001"
+             ; worker = "producer"
+             ; created_at = 0.0
+             }
+         ; items
+         })
+  in
+  let open Yojson.Safe.Util in
+  let carried =
+    transported
+    |> member "items"
+    |> to_list
+    |> List.filter_map (fun item ->
+      match item |> member "kind" |> to_string with
+      | "artifact_unreadable" ->
+        Some
+          ( item |> member "reference" |> to_string
+          , item |> member "reason" |> to_string )
+      | _ -> None)
+  in
+  Alcotest.(check (list (pair string string)))
+    "every unreadable artifact reaches the judge with its reference and reason"
+    [ "artifact:missing.txt", VS.evidence_read_failure_code VS.Evidence_missing
+    ; ( "artifact:locked.txt"
+      , VS.evidence_read_failure_code
+          (VS.Evidence_read_error "Unix.Unix_error(EACCES, open, _)") )
+    ]
+    carried
+;;
 
 let () =
   Alcotest.run "Verification" [
@@ -2966,7 +3060,9 @@ let () =
         test_submitted_evidence_requires_exact_task_assignment_identity;
       Alcotest.test_case "keeper task projection has no evidence or verdict action" `Quick
         test_keeper_task_projection_never_exposes_snapshot_or_verdict_action;
-      Alcotest.test_case "a reference to no file is named, not weighed" `Quick
-        test_unresolved_artifact_references_are_named;
+      Alcotest.test_case "an unreadable artifact reaches the judge, not a defer" `Quick
+        test_unreadable_artifacts_reach_the_judge;
+      Alcotest.test_case "a checkout-relative artifact path is not guessed" `Quick
+        test_checkout_relative_artifact_is_not_guessed;
     ];
   ]

@@ -19,14 +19,6 @@ module For_testing : sig
   val evidence_refs_of_output :
     Yojson.Safe.t -> (string list, string) result
 
-  val unresolved_artifact_references :
-    Workspace_verification_store.submitted_evidence_item list -> string list
-  (** The artifact references the store resolved to nothing. A submission
-      carrying one is refused before the reviewer sees it: there is no file to
-      read, so a verdict on it would be a judgement about an absence. Only
-      [Evidence_missing] counts here — a file that exists and cannot be read is
-      the reviewer's to weigh. *)
-
   val completion_verdict_of_review :
     Task.Anti_rationalization.verdict -> Masc_domain.completion_verdict
 

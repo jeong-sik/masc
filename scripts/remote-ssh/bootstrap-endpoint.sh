@@ -13,8 +13,8 @@
 #   5. git available                 (gh too, for the identity preflight)
 #
 # plus the local half: endpoint keypair, pinned host key, and the
-# runtime.toml [exec.ssh.endpoints.<name>] block (printed; --write-config
-# appends it).
+# runtime.toml [exec.ssh.endpoints.<name>] block (printed for explicit review;
+# this provisioning script never edits runtime configuration).
 #
 # The provisioning connection uses the operator's EXISTING ssh access (cloud
 # vendors hand out root/key access at instance creation). The endpoint's own
@@ -27,7 +27,7 @@
 #     --name build-box --host 203.0.113.7 --user masc \
 #     [--port 22] [--remote-root /opt/masc-playground] \
 #     [--keeper rondo]... [--shim-dist dist/remote-ssh] \
-#     [--base-path ~/me] [--write-config]
+#     --host-key-sha256 SHA256:<fingerprint> [--base-path ~/me]
 #
 # Idempotent: every remote step is a no-op when its outcome is already in
 # place, so re-running after a partial failure is safe.
@@ -37,7 +37,7 @@ NAME="" HOST="" USER_NAME="" PORT=22
 REMOTE_ROOT="/opt/masc-playground"
 SHIM_DIST="dist/remote-ssh"
 BASE_PATH="${MASC_BASE_PATH:-$HOME/me}"
-WRITE_CONFIG=0
+HOST_KEY_SHA256=""
 KEEPERS=()
 
 usage() {
@@ -55,18 +55,60 @@ while [ $# -gt 0 ]; do
     --keeper) shift; KEEPERS+=("${1:?}") ;;
     --shim-dist) shift; SHIM_DIST="${1:?}" ;;
     --base-path) shift; BASE_PATH="${1:?}" ;;
-    --write-config) WRITE_CONFIG=1 ;;
+    --host-key-sha256) shift; HOST_KEY_SHA256="${1:?}" ;;
+    --write-config)
+      echo "--write-config was removed: review and apply the printed TOML block explicitly" >&2
+      exit 2
+      ;;
     -h | --help) usage ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
   shift
 done
 
-[ -n "$NAME" ] && [ -n "$HOST" ] && [ -n "$USER_NAME" ] || usage
+[ -n "$NAME" ] && [ -n "$HOST" ] && [ -n "$USER_NAME" ] \
+  && [ -n "$HOST_KEY_SHA256" ] || usage
+case "$NAME" in
+  *[!A-Za-z0-9._-]* | "") echo "unsafe --name: $NAME" >&2; exit 2 ;;
+esac
+case "$USER_NAME" in
+  *[!A-Za-z0-9_-]* | "") echo "unsafe --user: $USER_NAME" >&2; exit 2 ;;
+esac
+case "$HOST" in
+  *[!A-Za-z0-9._:-]* | "") echo "unsafe --host: $HOST" >&2; exit 2 ;;
+esac
+case "$PORT" in
+  *[!0-9]* | "") echo "--port must be an integer" >&2; exit 2 ;;
+esac
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  echo "--port must be in 1..65535" >&2
+  exit 2
+fi
+case "$HOST_KEY_SHA256" in
+  SHA256:*) ;;
+  *) echo "--host-key-sha256 must be an OpenSSH SHA256 fingerprint" >&2; exit 2 ;;
+esac
+case "$HOST_KEY_SHA256" in
+  *[!A-Za-z0-9:+/=]*)
+    echo "unsafe --host-key-sha256: $HOST_KEY_SHA256" >&2
+    exit 2
+    ;;
+esac
 case "$REMOTE_ROOT" in
   /*) ;;
   *) echo "--remote-root must be absolute, got: $REMOTE_ROOT" >&2; exit 2 ;;
 esac
+case "$REMOTE_ROOT" in
+  *[!A-Za-z0-9_./:@%+=,~-]* | */../* | */.. | *//* )
+    echo "unsafe --remote-root: $REMOTE_ROOT" >&2
+    exit 2
+    ;;
+esac
+for keeper in "${KEEPERS[@]:-}"; do
+  case "$keeper" in
+    *[!A-Za-z0-9._-]* | "") echo "unsafe --keeper: $keeper" >&2; exit 2 ;;
+  esac
+done
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 key_file="$BASE_PATH/.masc/ssh/$NAME.key"
@@ -114,11 +156,29 @@ op_ssh "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && c
 step "endpoint key authorized"
 
 # --- 2. pinned host key ----------------------------------------------------
-if [ ! -s "$known_hosts" ]; then
-  step "pinning host key into $known_hosts"
-  mkdir -p "$(dirname "$known_hosts")"
-  ssh-keyscan -p "$PORT" -t ed25519 "$HOST" > "$known_hosts" 2>/dev/null
-  [ -s "$known_hosts" ] || { echo "ssh-keyscan returned nothing for $HOST:$PORT" >&2; exit 1; }
+# ssh-keyscan is discovery, not authentication. Compare its key with a
+# fingerprint obtained from the vendor console or an already-trusted channel
+# before writing the pin or copying any keeper credentials.
+mkdir -p "$(dirname "$known_hosts")"
+scanned_hosts="$(mktemp)"
+trap 'rm -f "$scanned_hosts"' EXIT
+ssh-keyscan -p "$PORT" -t ed25519 "$HOST" > "$scanned_hosts" 2>/dev/null
+[ -s "$scanned_hosts" ] || { echo "ssh-keyscan returned nothing for $HOST:$PORT" >&2; exit 1; }
+scanned_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk 'NR == 1 { print $2 }')"
+if [ "$scanned_fingerprint" != "$HOST_KEY_SHA256" ]; then
+  echo "host key mismatch for $HOST:$PORT: expected $HOST_KEY_SHA256, got $scanned_fingerprint" >&2
+  exit 1
+fi
+if [ -s "$known_hosts" ]; then
+  pinned_fingerprint="$(ssh-keygen -lf "$known_hosts" -E sha256 | awk 'NR == 1 { print $2 }')"
+  if [ "$pinned_fingerprint" != "$HOST_KEY_SHA256" ]; then
+    echo "existing pin mismatch at $known_hosts: expected $HOST_KEY_SHA256, got $pinned_fingerprint" >&2
+    exit 1
+  fi
+else
+  step "pinning verified host key into $known_hosts"
+  cp "$scanned_hosts" "$known_hosts"
+  chmod 600 "$known_hosts"
 fi
 
 # --- 3. packages: git + gh -------------------------------------------------
@@ -199,17 +259,8 @@ user = \"$USER_NAME\"
 port = $PORT
 remote_root = \"$REMOTE_ROOT\"
 "
-if [ "$WRITE_CONFIG" = 1 ]; then
-  if grep -q "\[exec\.ssh\.endpoints\.$NAME\]" "$runtime_toml" 2>/dev/null; then
-    step "runtime.toml already has endpoint $NAME — not touching it"
-  else
-    printf '%s' "$block" >> "$runtime_toml"
-    step "appended endpoint $NAME to $runtime_toml (parsed live on next dispatch; no restart)"
-  fi
-else
-  step "add this to $runtime_toml (or re-run with --write-config):"
-  printf '%s' "$block"
-fi
+step "review and add this block to $runtime_toml:"
+printf '%s' "$block"
 
 step "keeper TOML lines for each keeper using this endpoint:"
 printf 'sandbox_profile = "remote_ssh"\nremote_endpoint = "%s"\n' "$NAME"

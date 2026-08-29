@@ -30,8 +30,8 @@ scripts/remote-ssh/build-shim.sh --arch arm64    # 한쪽만
 # 2. 머신 프로비저닝 + 검증 (벤더가 준 기존 ssh 접근으로 진입)
 scripts/remote-ssh/bootstrap-endpoint.sh \
   --name build-box --host 203.0.113.7 --user masc \
-  --keeper rondo --keeper sangsu \
-  --write-config
+  --host-key-sha256 SHA256:<vendor-console-fingerprint> \
+  --keeper rondo --keeper sangsu
 
 # 3. keeper 전환 (keeper TOML)
 #    sandbox_profile = "remote_ssh"
@@ -40,7 +40,9 @@ scripts/remote-ssh/bootstrap-endpoint.sh \
 
 bootstrap 스크립트는 마지막에 서버가 쓰는 것과 같은 연결 모양(엔드포인트
 키 + BatchMode + 핀된 호스트 키)으로 preflight 다섯 항목을 전부 재현해
-검증한다. 여기서 통과하면 서버 디스패치도 통과한다.
+검증한다. 호스트 키 fingerprint는 벤더 콘솔이나 이미 신뢰한 채널에서
+확인한 값을 필수로 받으며, `runtime.toml`은 직접 수정하지 않고 검토할
+블록만 출력한다. 여기서 통과하면 서버 디스패치도 통과한다.
 
 ## 벤더별 유의점
 

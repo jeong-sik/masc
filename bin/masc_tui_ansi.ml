@@ -302,8 +302,11 @@ end
     decision. *)
 let screen_title text = Ansi.bold ^ text ^ Ansi.reset
 
-(** Terminal size changes only after SIGWINCH. Cache the process-backed probe so
-    an idle TUI does not spawn [tput] twice per frame. *)
+(** Keep the last valid shape in the shared cache, but re-probe once per
+    input/render loop. The probe is a direct ioctl now, so this does not spawn
+    a process, and terminals that omit or coalesce SIGWINCH cannot leave layout
+    geometry stuck at the startup size. A transient probe failure reuses that
+    last valid shape; the fallback is used only before the first valid probe. *)
 let terminal_size_cache =
   Masc_tui_render_schedule.Terminal_size_cache.create ~fallback:(24, 80)
 
@@ -325,6 +328,10 @@ let invalidate_terminal_size () =
    is gone because a fabricated 80x24 is the failure, not the cure. Two
    processes per resize become none. *)
 let probe_terminal_size () = Terminal_size.get ()
+
+let refresh_terminal_size () =
+  Masc_tui_render_schedule.Terminal_size_cache.refresh terminal_size_cache
+    ~probe:probe_terminal_size
 
 (** Get terminal size (fallback to 80x24). *)
 let get_terminal_size () =

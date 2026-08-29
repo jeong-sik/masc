@@ -4784,8 +4784,8 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
 
 let skill_evidence_fixture () =
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v2"
-    ; "status", `String "not_observed_in_current_coverage"
+    [ "schema", `String "masc.skill-evidence/v5"
+    ; "status", `String "not_observed_in_retained_coverage"
     ; ( "reference"
       , `Assoc
           [ ( "identity"
@@ -4800,32 +4800,80 @@ let skill_evidence_fixture () =
     ; "composition", `Null
     ; ( "coverage"
       , `Assoc
-          [ "composition_scan_limit", `Int 5000
-          ; "composition_rows_scanned", `Int 17
+          [ "composition_scope", `String "exact_reference_latest_completed"
+          ; "composition_records_read", `Int 0
+          ; "composition_unavailable", `List []
           ; "coverage_complete", `Bool false
-          ; "activation_scope", `String "current_keeper_sessions"
+          ; "activation_scope", `String "complete_retained_trace_snapshot"
+          ; "activation_sessions_inspected", `Int 3
           ; "activation_ledgers_loaded", `Int 2
-          ; "unavailable", `List [ `String "keeper: ledger_unreadable" ]
+          ; "activation_gaps", `List []
+          ; "activation_owner_gap_count", `Int 0
           ] )
     ]
 ;;
 
-let test_decode_skill_evidence_reads_exact_v2_coverage () =
+let test_decode_skill_evidence_reads_exact_v5_coverage () =
   match Tui_decode.decode_skill_evidence (skill_evidence_fixture ()) with
   | Error detail -> Alcotest.fail detail
   | Ok evidence ->
     (match evidence.se_status with
-     | Tui_decode.Skill_evidence_not_observed_in_current_coverage -> ()
+     | Tui_decode.Skill_evidence_not_observed_in_retained_coverage -> ()
      | Tui_decode.Skill_evidence_observed ->
        Alcotest.fail "bounded absence decoded as observed");
     Alcotest.(check int)
       "activation ledgers"
       2
       evidence.se_coverage.sec_activation_ledgers_loaded;
-    Alcotest.(check (list string))
-      "unavailable details"
-      [ "keeper: ledger_unreadable" ]
-      evidence.se_coverage.sec_unavailable
+    Alcotest.(check int)
+      "retained sessions"
+      3
+      evidence.se_coverage.sec_activation_sessions_inspected
+;;
+
+let test_decode_skill_evidence_accepts_declared_composition_scopes () =
+  let with_scope scope = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if name = "coverage"
+              then
+                ( name
+                , match value with
+                  | `Assoc coverage ->
+                    let coverage =
+                      ("composition_scope", `String scope)
+                      :: List.remove_assoc "composition_scope" coverage
+                    in
+                    if String.equal scope "unavailable"
+                    then
+                      `Assoc
+                        (("composition_unavailable", `List [ `String "index" ])
+                         :: List.remove_assoc "composition_unavailable" coverage)
+                    else `Assoc coverage
+                  | _ -> value )
+              else name, value)
+           fields)
+    | json -> json
+  in
+  List.iter
+    (fun (scope, expected) ->
+       match
+         skill_evidence_fixture ()
+         |> with_scope scope
+         |> Tui_decode.decode_skill_evidence
+       with
+       | Error detail -> Alcotest.fail detail
+       | Ok evidence ->
+         Alcotest.(check bool)
+           scope
+           true
+           (evidence.se_coverage.sec_composition_scope = expected))
+    [ ( "exact_reference_latest_completed"
+      , Tui_decode.Skill_evidence_exact_reference_latest_completed )
+    ; "unavailable", Tui_decode.Skill_evidence_composition_unavailable
+    ]
 ;;
 
 let test_decode_skill_evidence_rejects_v1_and_status_disagreement () =
@@ -4838,7 +4886,7 @@ let test_decode_skill_evidence_rejects_v1_and_status_disagreement () =
     "v1 rejected"
     true
     (skill_evidence_fixture ()
-     |> replace "schema" (`String "masc.skill-evidence/v1")
+     |> replace "schema" (`String "masc.skill-evidence/v2")
      |> Tui_decode.decode_skill_evidence
      |> Result.is_error);
   Alcotest.(check bool)
@@ -4869,12 +4917,15 @@ let test_decode_skill_evidence_requires_observation_fields () =
 
 let test_decode_skill_evidence_requires_every_coverage_field () =
   let required =
-    [ "composition_scan_limit"
-    ; "composition_rows_scanned"
+    [ "composition_scope"
+    ; "composition_records_read"
+    ; "composition_unavailable"
     ; "coverage_complete"
     ; "activation_scope"
+    ; "activation_sessions_inspected"
     ; "activation_ledgers_loaded"
-    ; "unavailable"
+    ; "activation_gaps"
+    ; "activation_owner_gap_count"
     ]
   in
   List.iter
@@ -4903,6 +4954,188 @@ let test_decode_skill_evidence_requires_every_coverage_field () =
           |> Tui_decode.decode_skill_evidence
           |> Result.is_error))
     required
+;;
+
+let skill_evidence_observed_fixture () =
+  let reference =
+    `Assoc
+      [ ( "identity"
+        , `Assoc
+            [ "source_id", `String "workspace"
+            ; "package_id", `String "proof"
+            ; "name", `String "proof"
+            ] )
+      ; "content_revision", `String (String.make 64 'a')
+      ]
+  in
+  let activation =
+    `Assoc
+      [ "selection", `String "most_recent_observed"
+      ; ( "evidence"
+        , `Assoc
+            [ "trace_id", `String "trace-proof"
+            ; ( "owner"
+              , `Assoc
+                  [ "status", `String "known"
+                  ; ( "claims"
+                    , `List
+                        [ `Assoc
+                            [ "keeper", `String "rondo"
+                            ; "source", `String "runtime_manifest"
+                            ]
+                        ] )
+                  ; "gaps", `List []
+                  ] )
+            ; ( "activation"
+              , `Assoc
+                  [ "identity", Yojson.Safe.Util.member "identity" reference
+                  ; ( "content_revision"
+                    , Yojson.Safe.Util.member "content_revision" reference )
+                  ; "snapshot_revision", `String (String.make 64 'b')
+                  ; "turn_ref", `String "trace-proof#1"
+                  ; "runtime_id", `String "codex.default"
+                  ; "activated_at", `String "2026-08-29T00:00:00Z"
+                  ; "skill_tool_use_id", `String "skill-call-1"
+                  ; "agent_core_turn", `Int 1
+                  ; ( "invocation"
+                    , `Assoc
+                        [ "kind", `String "instruction"
+                        ; "origin", `Assoc [ "kind", `String "session_instruction" ]
+                        ; ( "served_content"
+                          , `Assoc
+                              [ "kind", `String "skill_body"
+                              ; "bytes", `Int 4
+                              ; "sha256", `String (String.make 64 'c')
+                              ] )
+                        ] )
+                  ; "delivery", `Null
+                  ; "actions", `List []
+                  ] )
+            ] )
+      ]
+  in
+  match skill_evidence_fixture () with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> List.remove_assoc "status"
+       |> List.remove_assoc "activation"
+       |> fun fields ->
+       ("status", `String "observed") :: ("activation", activation) :: fields)
+  | _ -> Alcotest.fail "Skill evidence fixture is not an object"
+;;
+
+let test_decode_skill_evidence_reads_typed_activation_owner () =
+  match Tui_decode.decode_skill_evidence (skill_evidence_observed_fixture ()) with
+  | Error detail -> Alcotest.fail detail
+  | Ok
+      { se_activation =
+          Some (Tui_decode.Skill_evidence_most_recent_observed item)
+      ; _
+      } ->
+    Alcotest.(check string) "trace" "trace-proof" item.sea_trace_id;
+    Alcotest.(check (list string))
+      "owner claim"
+      [ "rondo" ]
+      (List.map (fun claim -> claim.Tui_decode.seo_keeper) item.sea_owner_claims)
+  | Ok _ -> Alcotest.fail "typed activation selection was not preserved"
+;;
+
+let map_skill_evidence_coverage f = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (name, value) -> name, if String.equal name "coverage" then f value else value)
+         fields)
+  | json -> json
+;;
+
+let test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation () =
+  let open_gap =
+    skill_evidence_fixture ()
+    |> map_skill_evidence_coverage (function
+         | `Assoc fields ->
+           `Assoc
+             (("activation_scope", `String "incomplete_retained_trace_snapshot")
+              :: ("activation_gaps", `List [ `Assoc [ "code", `String "ledger_unreadable" ] ])
+              :: (fields
+                  |> List.remove_assoc "activation_scope"
+                  |> List.remove_assoc "activation_gaps"))
+         | json -> json)
+  in
+  Alcotest.(check bool)
+    "known code without variant fields is rejected"
+    true
+    (Tui_decode.decode_skill_evidence open_gap |> Result.is_error);
+  let without_loaded_ledger =
+    skill_evidence_observed_fixture ()
+    |> map_skill_evidence_coverage (function
+         | `Assoc fields ->
+           `Assoc
+             (List.map
+                (fun (name, value) ->
+                   if String.equal name "activation_ledgers_loaded"
+                   then name, `Int 0
+                   else name, value)
+                fields)
+         | json -> json)
+  in
+  Alcotest.(check bool)
+    "activation requires a loaded ledger"
+    true
+    (Tui_decode.decode_skill_evidence without_loaded_ledger |> Result.is_error)
+;;
+
+let test_decode_skill_evidence_tie_compares_rfc3339_instants () =
+  let first = skill_evidence_observed_fixture () in
+  let first_evidence =
+    first |> Yojson.Safe.Util.member "activation" |> Yojson.Safe.Util.member "evidence"
+  in
+  let second_evidence =
+    match first_evidence with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              match name, value with
+              | "trace_id", _ -> name, `String "trace-proof-2"
+              | "activation", `Assoc activation ->
+                ( name
+                , `Assoc
+                    (List.map
+                       (fun (field, value) ->
+                          match field with
+                          | "turn_ref" -> field, `String "trace-proof-2#1"
+                          | "activated_at" ->
+                            field, `String "2026-08-29T09:00:00+09:00"
+                          | _ -> field, value)
+                       activation) )
+              | _ -> name, value)
+           fields)
+    | _ -> Alcotest.fail "activation evidence fixture is not an object"
+  in
+  let tie =
+    match first with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "activation"
+              then
+                ( name
+                , `Assoc
+                    [ "selection", `String "most_recent_observed_timestamp_tie"
+                    ; "evidence", `List [ first_evidence; second_evidence ]
+                    ] )
+              else name, value)
+           fields)
+    | _ -> Alcotest.fail "Skill evidence fixture is not an object"
+  in
+  match Tui_decode.decode_skill_evidence tie with
+  | Ok { se_activation = Some (Skill_evidence_most_recent_observed_timestamp_tie rows); _ } ->
+    Alcotest.(check int) "two equal instants" 2 (List.length rows)
+  | Ok _ -> Alcotest.fail "timestamp tie lost its typed selection"
+  | Error detail -> Alcotest.fail detail
 ;;
 
 let () =
@@ -5342,13 +5575,21 @@ let () =
           test_decode_skills_catalog_rejects_a_wrong_kind_type;
       ] );
     ( "skill_evidence",
-      [ Alcotest.test_case "reads exact v2 coverage" `Quick
-          test_decode_skill_evidence_reads_exact_v2_coverage
+      [ Alcotest.test_case "reads exact v5 coverage" `Quick
+          test_decode_skill_evidence_reads_exact_v5_coverage
+      ; Alcotest.test_case "accepts declared composition scopes" `Quick
+          test_decode_skill_evidence_accepts_declared_composition_scopes
       ; Alcotest.test_case "rejects v1 and status disagreement" `Quick
           test_decode_skill_evidence_rejects_v1_and_status_disagreement
       ; Alcotest.test_case "requires observation fields" `Quick
           test_decode_skill_evidence_requires_observation_fields
       ; Alcotest.test_case "requires every coverage field" `Quick
           test_decode_skill_evidence_requires_every_coverage_field
+      ; Alcotest.test_case "reads typed activation owner" `Quick
+          test_decode_skill_evidence_reads_typed_activation_owner
+      ; Alcotest.test_case "rejects open gaps and unbacked activations" `Quick
+          test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation
+      ; Alcotest.test_case "timestamp ties compare parsed instants" `Quick
+          test_decode_skill_evidence_tie_compares_rfc3339_instants
       ] );
   ]

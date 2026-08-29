@@ -5,6 +5,7 @@
 // parser-derived surface of each effective Skill.
 
 import { Either, ParseResult, Schema } from 'effect'
+import { validate as isUuid, version as uuidVersion } from 'uuid'
 import { ApiRequestError, get, post, postControlPlane, type GetOptions } from './core'
 
 export interface SkillIdentity {
@@ -114,29 +115,70 @@ export interface SkillProfile {
 export type SkillSurfaceProfile = Omit<SkillProfile, 'reference' | 'kind'>
 
 export interface SkillEvidenceCoverage {
-  composition_scan_limit: number
-  composition_rows_scanned: number
+  composition_scope: 'exact_reference_latest_completed' | 'unavailable'
+  composition_records_read: number
+  composition_unavailable: readonly string[]
   coverage_complete: false
-  activation_scope: 'current_keeper_sessions'
+  activation_scope:
+    | 'complete_retained_trace_snapshot'
+    | 'incomplete_retained_trace_snapshot'
+    | 'trace_store_unavailable'
+  activation_sessions_inspected: number
   activation_ledgers_loaded: number
-  unavailable: readonly string[]
+  activation_gaps: readonly Record<string, unknown>[]
+  activation_owner_gap_count: number
+}
+
+export interface SkillActivationOwnerClaim {
+  keeper: string
+  source: 'current_meta' | 'trace_history' | 'runtime_manifest'
+}
+
+export interface SkillActivationOwner {
+  status:
+    | 'known'
+    | 'not_claimed_in_retained_catalog'
+    | 'conflicting'
+    | 'incomplete'
+    | 'catalog_unavailable'
+  claims: readonly SkillActivationOwnerClaim[]
+  gaps: readonly Record<string, unknown>[]
 }
 
 export interface SkillActivationEvidence {
-  keeper: string
+  trace_id: string
+  owner: SkillActivationOwner
   activation: Record<string, unknown>
 }
 
+export type SkillActivationSelection =
+  | { selection: 'most_recent_observed'; evidence: SkillActivationEvidence }
+  | {
+      selection: 'most_recent_observed_timestamp_tie'
+      evidence: readonly SkillActivationEvidence[]
+    }
+
 export interface SkillCompositionEvidence {
-  run: Record<string, unknown>
-  nodes: readonly Record<string, unknown>[]
+  schema: 'masc.skill-composition-evidence/v1'
+  reference: SkillReference
+  composition_run_id: string
+  parent_tool_use_id: string
+  parent_turn: number
+  parent_planned_index: number
+  request_id: string | null
+  keeper: string
+  composition_tool: string
+  composition_execution: 'inline' | 'async'
+  result: Record<string, unknown>
+  executor_settlements: readonly Record<string, unknown>[]
+  recorded_at: number
 }
 
 export interface SkillEvidenceResponse {
-  schema: 'masc.skill-evidence/v2'
-  status: 'observed' | 'not_observed_in_current_coverage'
+  schema: 'masc.skill-evidence/v5'
+  status: 'observed' | 'not_observed_in_retained_coverage'
   reference: SkillReference
-  activation: SkillActivationEvidence | null
+  activation: SkillActivationSelection | null
   composition: SkillCompositionEvidence | null
   coverage: SkillEvidenceCoverage
 }
@@ -334,25 +376,216 @@ const UnknownRecordSchema = Schema.Record({
   value: Schema.Unknown,
 })
 
+const ToolOutputResultSchema = Schema.Struct({
+  disposition: Schema.Literal('completed', 'deferred'),
+  data: Schema.Unknown,
+  tool_name: Schema.NonEmptyString,
+  duration_ms: Schema.Number,
+  metadata: Schema.optional(Schema.Unknown),
+})
+
+const ToolFailedResultSchema = Schema.Struct({
+  disposition: Schema.Literal('failed'),
+  data: Schema.Unknown,
+  tool_name: Schema.NonEmptyString,
+  duration_ms: Schema.Number,
+  failure_class: Schema.Literal(
+    'dependency_unavailable',
+    'policy_rejection',
+    'runtime_failure',
+    'workflow_rejection',
+    'operator_cancelled',
+  ),
+  message: Schema.String,
+  metadata: Schema.optional(Schema.Unknown),
+})
+
+const ToolResultSchema = Schema.Union(ToolOutputResultSchema, ToolFailedResultSchema)
+
+const CompositionNodeSchema = Schema.Struct({
+  node_id: Schema.NonEmptyString,
+  execution_id: Schema.NonEmptyString,
+  tool_name: Schema.NonEmptyString,
+  input: Schema.Unknown,
+  schedule: Schema.Struct({
+    planned_index: NonNegativeSafeIntegerSchema,
+    batch_index: NonNegativeSafeIntegerSchema,
+    batch_size: PositiveSafeIntegerSchema,
+    execution_mode: Schema.Literal('serial', 'concurrent'),
+  }),
+  result: ToolResultSchema,
+  tool_use_id: Schema.String,
+  failure_effect_disposition: Schema.NullOr(Schema.Literal(
+    'proven_pre_effect',
+    'proven_post_effect',
+    'effect_outcome_unknown',
+  )),
+  deferred_kind: Schema.NullOr(Schema.Literal(
+    'generic_deferred',
+    'external_effect_deferred',
+  )),
+  result_bytes: NonNegativeSafeIntegerSchema,
+  truncated_to: Schema.NullOr(NonNegativeSafeIntegerSchema),
+})
+
+const TaskInstructionOriginSchema = Schema.Struct({
+  kind: Schema.Literal('task_instruction'),
+  task_ids: Schema.NonEmptyArray(Schema.NonEmptyString),
+})
+const SessionInstructionOriginSchema = Schema.Struct({
+  kind: Schema.Literal('session_instruction'),
+})
+const TaskCompositionOriginSchema = Schema.Struct({
+  kind: Schema.Literal('task_composition'),
+  task_ids: Schema.NonEmptyArray(Schema.NonEmptyString),
+})
+const SessionCompositionOriginSchema = Schema.Struct({
+  kind: Schema.Literal('session_composition'),
+})
+const ServedContentSchema = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal('skill_body'),
+    bytes: NonNegativeSafeIntegerSchema,
+    sha256: Schema.NonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('skill_resource'),
+    relative_path: Schema.NonEmptyString,
+    bytes: NonNegativeSafeIntegerSchema,
+    sha256: Schema.NonEmptyString,
+  }),
+)
+const SkillInvocationSchema = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal('instruction'),
+    origin: Schema.Union(TaskInstructionOriginSchema, SessionInstructionOriginSchema),
+    served_content: ServedContentSchema,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('composition'),
+    origin: Schema.Union(TaskCompositionOriginSchema, SessionCompositionOriginSchema),
+    tool_name: Schema.NonEmptyString,
+  }),
+)
+const ActionIdentitySchema = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal('call_id'), call_id: Schema.NonEmptyString }),
+  Schema.Struct({
+    kind: Schema.Literal('provider_step'),
+    conversation_id: Schema.NonEmptyString,
+    step_index: NonNegativeSafeIntegerSchema,
+  }),
+)
+const SkillActionSchema = Schema.Struct({
+  identity: ActionIdentitySchema,
+  tool_name: Schema.NonEmptyString,
+  runtime_id: Schema.NonEmptyString,
+  agent_core_turn: NonNegativeSafeIntegerSchema,
+  observed_at: Schema.NonEmptyString,
+})
+const SkillDeliverySchema = Schema.Struct({
+  boundary: Schema.Struct({
+    kind: Schema.Literal('model_response', 'official_client_result_handoff'),
+    agent_core_turn: NonNegativeSafeIntegerSchema,
+  }),
+  runtime_id: Schema.NonEmptyString,
+  delivered_at: Schema.NonEmptyString,
+  content_bytes: NonNegativeSafeIntegerSchema,
+  content_sha256: Schema.NonEmptyString,
+})
+const SkillActivationPayloadSchema = Schema.Struct({
+  identity: SkillIdentitySchema,
+  content_revision: Schema.NonEmptyString,
+  snapshot_revision: Schema.NonEmptyString,
+  turn_ref: Schema.NonEmptyString,
+  runtime_id: Schema.NonEmptyString,
+  skill_tool_use_id: Schema.NonEmptyString,
+  agent_core_turn: NonNegativeSafeIntegerSchema,
+  invocation: SkillInvocationSchema,
+  delivery: Schema.NullOr(SkillDeliverySchema),
+  actions: Schema.Array(SkillActionSchema),
+  activated_at: Schema.NonEmptyString,
+})
+
 const SkillEvidenceResponseSchema = Schema.Struct({
-  schema: Schema.Literal('masc.skill-evidence/v2'),
-  status: Schema.Literal('observed', 'not_observed_in_current_coverage'),
+  schema: Schema.Literal('masc.skill-evidence/v5'),
+  status: Schema.Literal('observed', 'not_observed_in_retained_coverage'),
   reference: SkillReferenceSchema,
-  activation: Schema.NullOr(Schema.Struct({
-    keeper: Schema.NonEmptyString,
-    activation: UnknownRecordSchema,
-  })),
+  activation: Schema.NullOr(Schema.Union(
+    Schema.Struct({
+      selection: Schema.Literal('most_recent_observed'),
+      evidence: Schema.Struct({
+        trace_id: Schema.NonEmptyString,
+        owner: Schema.Struct({
+          status: Schema.Literal(
+            'known',
+            'not_claimed_in_retained_catalog',
+            'conflicting',
+            'incomplete',
+            'catalog_unavailable',
+          ),
+          claims: Schema.Array(Schema.Struct({
+            keeper: Schema.NonEmptyString,
+            source: Schema.Literal('current_meta', 'trace_history', 'runtime_manifest'),
+          })),
+          gaps: Schema.Array(UnknownRecordSchema),
+        }),
+        activation: SkillActivationPayloadSchema,
+      }),
+    }),
+    Schema.Struct({
+      selection: Schema.Literal('most_recent_observed_timestamp_tie'),
+      evidence: Schema.Array(Schema.Struct({
+        trace_id: Schema.NonEmptyString,
+        owner: Schema.Struct({
+          status: Schema.Literal(
+            'known',
+            'not_claimed_in_retained_catalog',
+            'conflicting',
+            'incomplete',
+            'catalog_unavailable',
+          ),
+          claims: Schema.Array(Schema.Struct({
+            keeper: Schema.NonEmptyString,
+            source: Schema.Literal('current_meta', 'trace_history', 'runtime_manifest'),
+          })),
+          gaps: Schema.Array(UnknownRecordSchema),
+        }),
+        activation: SkillActivationPayloadSchema,
+      })),
+    }),
+  )),
   composition: Schema.NullOr(Schema.Struct({
-    run: UnknownRecordSchema,
-    nodes: Schema.Array(UnknownRecordSchema),
+    schema: Schema.Literal('masc.skill-composition-evidence/v1'),
+    reference: SkillReferenceSchema,
+    composition_run_id: Schema.NonEmptyString,
+    parent_tool_use_id: Schema.String,
+    parent_turn: NonNegativeSafeIntegerSchema,
+    parent_planned_index: NonNegativeSafeIntegerSchema,
+    request_id: Schema.NullOr(Schema.NonEmptyString),
+    keeper: Schema.NonEmptyString,
+    composition_tool: Schema.NonEmptyString,
+    composition_execution: Schema.Literal('inline', 'async'),
+    result: ToolResultSchema,
+    executor_settlements: Schema.Array(CompositionNodeSchema),
+    recorded_at: Schema.Number,
   })),
   coverage: Schema.Struct({
-    composition_scan_limit: PositiveSafeIntegerSchema,
-    composition_rows_scanned: NonNegativeSafeIntegerSchema,
+    composition_scope: Schema.Literal(
+      'exact_reference_latest_completed',
+      'unavailable',
+    ),
+    composition_records_read: NonNegativeSafeIntegerSchema,
+    composition_unavailable: Schema.Array(Schema.String),
     coverage_complete: Schema.Literal(false),
-    activation_scope: Schema.Literal('current_keeper_sessions'),
+    activation_scope: Schema.Literal(
+      'complete_retained_trace_snapshot',
+      'incomplete_retained_trace_snapshot',
+      'trace_store_unavailable',
+    ),
+    activation_sessions_inspected: NonNegativeSafeIntegerSchema,
     activation_ledgers_loaded: NonNegativeSafeIntegerSchema,
-    unavailable: Schema.Array(Schema.String),
+    activation_gaps: Schema.Array(UnknownRecordSchema),
+    activation_owner_gap_count: NonNegativeSafeIntegerSchema,
   }),
 })
 
@@ -659,11 +892,429 @@ export async function fetchSkills(opts: GetOptions = {}): Promise<SkillsResponse
   return decodeSkillsResponse(raw)
 }
 
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort()
+  return actual.length === expected.length
+    && [...expected].sort().every((field, index) => field === actual[index])
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string'
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && typeof value === 'number' && value > 0
+}
+
+const filesystemOperations = new Set([
+  'open_directory',
+  'read_directory',
+  'close_directory',
+  'stat_entry',
+])
+const fileKinds = new Set([
+  'regular',
+  'directory',
+  'character_device',
+  'block_device',
+  'symbolic_link',
+  'fifo',
+  'socket',
+])
+
+function isFilesystemGap(gap: Record<string, unknown>, code: string): boolean {
+  return hasExactKeys(gap, ['code', 'operation', 'path', 'detail'])
+    && gap.code === code
+    && isString(gap.operation)
+    && filesystemOperations.has(gap.operation)
+    && isString(gap.path)
+    && isString(gap.detail)
+}
+
+function isManifestCause(value: unknown): boolean {
+  if (!isRecord(value) || !isString(value.code)) return false
+  switch (value.code) {
+    case 'manifest_read_failed':
+      return hasExactKeys(value, ['code', 'detail']) && isString(value.detail)
+    case 'manifest_empty':
+      return hasExactKeys(value, ['code'])
+    case 'manifest_invalid_json':
+    case 'manifest_invalid_row':
+      return hasExactKeys(value, ['code', 'line_number', 'detail'])
+        && isPositiveInteger(value.line_number)
+        && isString(value.detail)
+    case 'manifest_identity_mismatch':
+      return hasExactKeys(value, [
+        'code', 'line_number', 'observed_keeper', 'observed_trace',
+      ])
+        && isPositiveInteger(value.line_number)
+        && isString(value.observed_keeper)
+        && isString(value.observed_trace)
+    default:
+      return false
+  }
+}
+
+function isOwnerGap(gap: Record<string, unknown>): boolean {
+  if (!isString(gap.code)) return false
+  switch (gap.code) {
+    case 'keeper_catalog_unavailable':
+      return hasExactKeys(gap, ['code', 'detail']) && isString(gap.detail)
+    case 'keeper_catalog_changed_during_resolution':
+      return hasExactKeys(gap, ['code'])
+    case 'invalid_persisted_keeper_name':
+      return hasExactKeys(gap, ['code', 'keeper']) && isString(gap.keeper)
+    case 'keeper_meta_name_mismatch':
+      return hasExactKeys(gap, ['code', 'keeper', 'metadata_name'])
+        && isString(gap.keeper)
+        && isString(gap.metadata_name)
+    case 'keeper_meta_unavailable':
+      return hasExactKeys(gap, ['code', 'keeper', 'detail'])
+        && isString(gap.keeper)
+        && isString(gap.detail)
+    case 'runtime_manifest_unreadable':
+      return hasExactKeys(gap, ['code', 'keeper', 'cause'])
+        && isString(gap.keeper)
+        && isManifestCause(gap.cause)
+    default:
+      return false
+  }
+}
+
+function isActivationGap(gap: Record<string, unknown>): boolean {
+  if (!isString(gap.code)) return false
+  switch (gap.code) {
+    case 'trace_root_unavailable':
+    case 'trace_entry_unreadable':
+      return isFilesystemGap(gap, gap.code)
+    case 'trace_root_not_directory':
+      return hasExactKeys(gap, ['code', 'kind'])
+        && isString(gap.kind)
+        && fileKinds.has(gap.kind)
+    case 'invalid_trace_directory':
+    case 'symlink_trace_entry':
+      return hasExactKeys(gap, ['code', 'entry']) && isString(gap.entry)
+    case 'trace_entry_not_directory':
+      return hasExactKeys(gap, ['code', 'trace_id', 'kind'])
+        && isString(gap.trace_id)
+        && isString(gap.kind)
+        && fileKinds.has(gap.kind)
+    case 'trace_inventory_changed_during_discovery':
+    case 'trace_root_changed_during_discovery':
+      return hasExactKeys(gap, ['code'])
+    case 'ledger_changed_during_discovery':
+      return hasExactKeys(gap, ['code', 'trace_id']) && isString(gap.trace_id)
+    case 'ledger_unreadable':
+      return hasExactKeys(gap, ['code', 'trace_id', 'cause_code', 'detail'])
+        && isString(gap.trace_id)
+        && isString(gap.cause_code)
+        && isString(gap.detail)
+    default:
+      return false
+  }
+}
+
+function isLowerHexRevision(value: string): boolean {
+  if (value.length !== 64) return false
+  for (const character of value) {
+    if (!((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f'))) {
+      return false
+    }
+  }
+  return true
+}
+
+interface Rfc3339Instant {
+  value: number
+}
+
+function parseStrictRfc3339(value: string): Rfc3339Instant | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(value)
+  if (match === null) return null
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText,
+    fractionText = '', zone, sign, offsetHourText = '0', offsetMinuteText = '0'] = match
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const day = Number(dayText)
+  const hour = Number(hourText)
+  const minute = Number(minuteText)
+  const second = Number(secondText)
+  const offsetHour = Number(offsetHourText)
+  const offsetMinute = Number(offsetMinuteText)
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 60
+    || offsetHour > 23 || offsetMinute > 59) return null
+  const monthBoundary = new Date(0)
+  monthBoundary.setUTCFullYear(year, month, 0)
+  const daysInMonth = monthBoundary.getUTCDate()
+  if (day < 1 || day > daysInMonth) return null
+  const civil = new Date(0)
+  civil.setUTCFullYear(year, month - 1, day)
+  civil.setUTCHours(hour, minute, second, 0)
+  const offset = zone === 'Z'
+    ? 0
+    : (offsetHour * 60 + offsetMinute) * (sign === '+' ? 60 : -60)
+  const wholeSeconds = civil.getTime() / 1000 - offset
+  const minimum = new Date(0)
+  minimum.setUTCFullYear(0, 0, 1)
+  minimum.setUTCHours(0, 0, 0, 0)
+  const maximumExclusive = new Date(0)
+  maximumExclusive.setUTCFullYear(10_000, 0, 1)
+  maximumExclusive.setUTCHours(0, 0, 0, 0)
+  if (wholeSeconds < minimum.getTime() / 1000
+    || wholeSeconds >= maximumExclusive.getTime() / 1000) return null
+  const ptimeFraction = fractionText.slice(0, 12)
+  const instant = wholeSeconds
+    + (ptimeFraction === '' ? 0 : Number(`0.${ptimeFraction}`))
+  return { value: instant }
+}
+
+function compareRfc3339(left: Rfc3339Instant, right: Rfc3339Instant): number {
+  return left.value === right.value ? 0 : left.value < right.value ? -1 : 1
+}
+
+function sameRfc3339Instant(left: string, right: string): boolean {
+  const leftInstant = parseStrictRfc3339(left)
+  const rightInstant = parseStrictRfc3339(right)
+  return leftInstant !== null && rightInstant !== null
+    && compareRfc3339(leftInstant, rightInstant) === 0
+}
+
+function turnRefBelongsToTrace(turnRef: string, traceId: string): boolean {
+  const separator = turnRef.lastIndexOf('#')
+  if (separator <= 0) return false
+  const turnText = turnRef.slice(separator + 1)
+  if (!/^[0-9]+$/.test(turnText)) return false
+  const absoluteTurn = Number(turnText)
+  return turnRef.slice(0, separator) === traceId
+    && Number.isSafeInteger(absoluteTurn)
+    && absoluteTurn > 0
+}
+
+function isPortableName(value: string): boolean {
+  return value !== '.' && value !== '..' && /^[A-Za-z0-9._-]+$/.test(value)
+}
+
+function isCanonicalSkillName(value: string): boolean {
+  const canonical = value.trim().normalize('NFKC')
+  const scalars = [...canonical]
+  return value === canonical
+    && scalars.length > 0
+    && scalars.length <= 64
+    && !canonical.startsWith('-')
+    && !canonical.endsWith('-')
+    && !canonical.includes('--')
+    && /^[\p{Alphabetic}\p{Number}-]+$/u.test(canonical)
+    && canonical.toLowerCase() === canonical
+}
+
+function skillReferenceIdentityIsValid(identity: SkillIdentity): boolean {
+  return isPortableName(identity.source_id)
+    && identity.package_id !== '.'
+    && identity.package_id !== '..'
+    && identity.package_id !== ''
+    && !identity.package_id.includes('/')
+    && !identity.package_id.includes('\\')
+    && !identity.package_id.includes('\0')
+}
+
+function skillIdentityIsValid(identity: SkillIdentity): boolean {
+  return skillReferenceIdentityIsValid(identity) && isCanonicalSkillName(identity.name)
+}
+
+function isTaskId(value: string): boolean {
+  return value.length > 0 && value.length <= 128 && /^[A-Za-z0-9_:-]+$/.test(value)
+}
+
+function hasUniqueStrings(values: readonly string[]): boolean {
+  return new Set(values).size === values.length
+}
+
+function isSkillResourcePath(value: string): boolean {
+  return value !== ''
+    && !value.startsWith('/')
+    && !value.includes('\\')
+    && !value.includes('\0')
+    && value.split('/').every(segment => segment !== '' && segment !== '.' && segment !== '..')
+}
+
+type SkillActionPayload = Schema.Schema.Type<typeof SkillActionSchema>
+type SkillActivationPayload = Schema.Schema.Type<typeof SkillActivationPayloadSchema>
+
+function actionIdentityKey(action: SkillActionPayload): string {
+  return JSON.stringify(action.identity)
+}
+
+function actionIdentityIsValid(action: SkillActionPayload): boolean {
+  return action.identity.kind === 'call_id'
+    ? action.identity.call_id.trim() !== ''
+    : action.identity.conversation_id.trim() !== '' && action.identity.step_index >= 0
+}
+
+function activationPayloadIsValid(
+  activation: SkillActivationPayload,
+  traceId: string,
+): boolean {
+  const activatedAt = parseStrictRfc3339(activation.activated_at)
+  const origin = activation.invocation.origin
+  const taskIds = origin.kind === 'task_instruction' || origin.kind === 'task_composition'
+    ? origin.task_ids
+    : []
+  const served = activation.invocation.kind === 'instruction'
+    ? activation.invocation.served_content
+    : null
+  const invocationValid = activation.invocation.kind === 'composition'
+    ? isPortableName(activation.invocation.tool_name)
+    : isLowerHexRevision(served!.sha256)
+      && (served!.kind === 'skill_body' || isSkillResourcePath(served!.relative_path))
+  const actionKeys = activation.actions.map(actionIdentityKey)
+  const deliveryTurn = activation.delivery?.boundary.agent_core_turn
+  const deliveryValid = activation.delivery === null
+    ? activation.actions.length === 0
+    : isLowerHexRevision(activation.delivery.content_sha256)
+      && activation.delivery.runtime_id.trim() !== ''
+      && parseStrictRfc3339(activation.delivery.delivered_at) !== null
+      && deliveryTurn !== undefined
+      && (activation.delivery.boundary.kind === 'model_response'
+        ? deliveryTurn > activation.agent_core_turn
+        : deliveryTurn >= activation.agent_core_turn)
+      && activation.actions.every(action => action.agent_core_turn >= deliveryTurn
+        && actionIdentityIsValid(action)
+        && action.runtime_id.trim() !== ''
+        && isPortableName(action.tool_name)
+        && parseStrictRfc3339(action.observed_at) !== null)
+  return isLowerHexRevision(activation.content_revision)
+    && isLowerHexRevision(activation.snapshot_revision)
+    && skillIdentityIsValid(activation.identity)
+    && activatedAt !== null
+    && traceId.length <= 64
+    && /^[A-Za-z0-9_-]+$/.test(traceId)
+    && turnRefBelongsToTrace(activation.turn_ref, traceId)
+    && activation.runtime_id.trim() !== ''
+    && activation.skill_tool_use_id.trim() !== ''
+    && taskIds.every(isTaskId)
+    && hasUniqueStrings(taskIds)
+    && invocationValid
+    && hasUniqueStrings(actionKeys)
+    && deliveryValid
+}
+
 export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse {
   const decoded = decodeWithSchema(SkillEvidenceResponseSchema, raw, 'invalid_response')
+  if (!skillReferenceIdentityIsValid(decoded.reference.identity)
+    || !isLowerHexRevision(decoded.reference.content_revision)) {
+    contractError('invalid_response', 'skill evidence reference is invalid')
+  }
   const observed = decoded.activation !== null || decoded.composition !== null
   if ((decoded.status === 'observed') !== observed) {
     contractError('invalid_response', 'skill evidence status disagrees with its observations')
+  }
+  const activationEvidence = decoded.activation === null
+    ? []
+    : decoded.activation.selection === 'most_recent_observed'
+      ? [decoded.activation.evidence]
+      : decoded.activation.evidence
+  if (decoded.activation?.selection === 'most_recent_observed_timestamp_tie'
+    && activationEvidence.length < 2) {
+    contractError('invalid_response', 'activation timestamp tie requires at least two traces')
+  }
+  let ownerGapCount = 0
+  for (const evidence of activationEvidence) {
+    const { status, claims, gaps } = evidence.owner
+    const ownerAgrees = status === 'known'
+      ? claims.length === 1 && gaps.length === 0
+      : status === 'not_claimed_in_retained_catalog'
+        ? claims.length === 0 && gaps.length === 0
+        : status === 'conflicting'
+          ? claims.length >= 2 && gaps.length === 0
+          : status === 'incomplete'
+            ? gaps.length > 0
+            : claims.length === 0 && gaps.length > 0
+    if (!ownerAgrees) {
+      contractError('invalid_response', 'activation owner status disagrees with claims or gaps')
+    }
+    if (!gaps.every(isOwnerGap)) {
+      contractError('invalid_response', 'activation owner carries an invalid typed gap')
+    }
+    const activation = evidence.activation
+    if (activation.identity.source_id !== decoded.reference.identity.source_id
+      || activation.identity.package_id !== decoded.reference.identity.package_id
+      || activation.identity.name !== decoded.reference.identity.name
+      || evidence.activation.content_revision !== decoded.reference.content_revision) {
+      contractError('invalid_response', 'activation reference disagrees with evidence envelope')
+    }
+    if (!activationPayloadIsValid(activation, evidence.trace_id)) {
+      contractError('invalid_response', 'activation payload violates typed occurrence invariants')
+    }
+    ownerGapCount += gaps.length
+  }
+  if (decoded.activation?.selection === 'most_recent_observed_timestamp_tie') {
+    const traces = new Set(activationEvidence.map(evidence => evidence.trace_id))
+    const firstTimestamp = activationEvidence[0]?.activation.activated_at
+    const sameInstant = firstTimestamp !== undefined
+      && activationEvidence.every(evidence =>
+        sameRfc3339Instant(firstTimestamp, evidence.activation.activated_at))
+    if (traces.size !== activationEvidence.length || !sameInstant) {
+      contractError('invalid_response', 'activation timestamp tie is inconsistent')
+    }
+  }
+  if (decoded.composition !== null) {
+    if (referenceKey(decoded.composition.reference) !== referenceKey(decoded.reference)) {
+      contractError('invalid_response', 'composition reference disagrees with evidence envelope')
+    }
+    if (!isUuid(decoded.composition.composition_run_id)
+      || uuidVersion(decoded.composition.composition_run_id) !== 7) {
+      contractError('invalid_response', 'composition_run_id must be UUIDv7')
+    }
+    const requestIdentityAgrees = decoded.composition.composition_execution === 'inline'
+      ? decoded.composition.request_id === null
+      : decoded.composition.request_id !== null && decoded.composition.request_id.trim() !== ''
+    if (!requestIdentityAgrees) {
+      contractError('invalid_response', 'composition execution disagrees with request_id')
+    }
+    const validResultDuration = Number.isFinite(decoded.composition.result.duration_ms)
+      && decoded.composition.result.duration_ms >= 0
+      && decoded.composition.result.tool_name === decoded.composition.composition_tool
+      && Number.isFinite(decoded.composition.recorded_at)
+    const validNodes = decoded.composition.executor_settlements.every(node =>
+      Number.isFinite(node.result.duration_ms)
+      && node.result.duration_ms >= 0
+      && node.result.tool_name === node.tool_name
+      && node.schedule.batch_index < node.schedule.batch_size
+      && (node.truncated_to === null
+        || (node.truncated_to >= 0 && node.truncated_to <= node.result_bytes)))
+    if (!validResultDuration || !validNodes) {
+      contractError('invalid_response', 'composition result violates typed numeric invariants')
+    }
+  }
+  const { composition_scope: scope, composition_records_read: read } = decoded.coverage
+  const coverageAgrees = scope === 'exact_reference_latest_completed'
+    ? (decoded.composition === null ? read === 0 : read === 1)
+      && decoded.coverage.composition_unavailable.length === 0
+    : decoded.composition === null
+      && read === 0
+      && decoded.coverage.composition_unavailable.length > 0
+  if (!coverageAgrees) {
+    contractError('invalid_response', 'composition coverage disagrees with its record')
+  }
+  const coverage = decoded.coverage
+  const activationCoverageAgrees = coverage.activation_ledgers_loaded
+      <= coverage.activation_sessions_inspected
+    && coverage.activation_owner_gap_count === ownerGapCount
+    && coverage.activation_gaps.every(isActivationGap)
+    && activationEvidence.length <= coverage.activation_ledgers_loaded
+    && (coverage.activation_scope === 'complete_retained_trace_snapshot'
+      ? coverage.activation_gaps.length === 0
+      : coverage.activation_scope === 'trace_store_unavailable'
+        ? coverage.activation_gaps.length === 1
+          && (coverage.activation_gaps[0]?.code === 'trace_root_unavailable'
+            || coverage.activation_gaps[0]?.code === 'trace_root_not_directory')
+          && decoded.activation === null
+          && coverage.activation_sessions_inspected === 0
+          && coverage.activation_ledgers_loaded === 0
+          && coverage.activation_owner_gap_count === 0
+        : coverage.activation_gaps.length > 0)
+  if (!activationCoverageAgrees) {
+    contractError('invalid_response', 'activation coverage disagrees with retained snapshot')
   }
   return decoded
 }

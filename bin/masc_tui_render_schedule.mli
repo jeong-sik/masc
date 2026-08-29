@@ -127,9 +127,14 @@ val keeper_columns_used_width : keeper_columns -> int
     the minimum row. *)
 
 module Terminal_size_cache : sig
+  type refresh =
+    | Changed of (int * int)
+    | Unchanged of (int * int)
+
   type t
 
   val create : fallback:int * int -> t
   val invalidate : t -> unit
   val get : t -> probe:(unit -> (int * int) option) -> int * int
+  val refresh : t -> probe:(unit -> (int * int) option) -> refresh
 end

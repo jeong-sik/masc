@@ -169,14 +169,12 @@ let test_the_halves_fit_together () =
 ;;
 
 
-(* The two readers of one number.
+(* The two readers of one body budget.
 
-   [finish_surface] takes the strip's rows off the body and [scrolled_surface]
-   takes them off the scroll bound. Both go through [rows_taken] on the same
-   projection, and that is the whole reason the number lives in one function:
-   a renderer that shrank its own list while the keypress kept moving against
-   the full height is what put the Changes list out of reach of its own arrow
-   keys, and what left the Changes preview's keys dead a day before this.
+   [surface_body_rows] takes the strip's row off before either renderer or key
+   bound receives the budget. [finish_surface] reads the same agenda projection
+   only to draw that row. Subtracting it again in [scrolled_surface] is what
+   made key geometry shorter than the frame whenever the strip was present.
 
    [Ast_grep] rather than a substring, because this file names both
    identifiers in the paragraph above. *)
@@ -234,15 +232,16 @@ let test_the_frame_and_the_bound_read_the_same_number () =
        ~binding_name:"finish_surface"
        ~callee:"Masc_tui_types.agenda_chrome_rows"
      >= 1);
-  check
-    bool
-    "the scroll bound subtracts them too"
-    true
+  check int "the surface body subtracts the strip once" 1
+    (calls
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"surface_body_rows"
+       ~callee:"agenda_chrome_rows");
+  check int "the typed scroll layout does not subtract it again" 0
     (calls
        ~module_path:"bin/masc_tui_types.ml"
        ~binding_name:"scrolled_surface"
-       ~callee:"agenda_chrome_rows"
-     >= 1);
+       ~callee:"agenda_chrome_rows");
   check
     int
     "and that is the same [rows_taken], not a second count"
@@ -251,6 +250,65 @@ let test_the_frame_and_the_bound_read_the_same_number () =
        ~module_path:"bin/masc_tui_types.ml"
        ~binding_name:"agenda_chrome_rows"
        ~callee:"Masc_tui_agenda.rows_taken")
+  ; check int "one loop snapshot refreshes terminal geometry" 1
+      (calls
+         ~module_path:"bin/masc_tui.ml"
+         ~binding_name:"run_loop"
+         ~callee:"refresh_terminal_size")
+  ; check int "ordinary geometry reads share the loop snapshot" 1
+      (calls
+         ~module_path:"bin/masc_tui_ansi.ml"
+         ~binding_name:"get_terminal_size"
+         ~callee:"Masc_tui_render_schedule.Terminal_size_cache.get")
+  ; check int "a polled resize invalidates the presented frame" 1
+      (calls
+         ~module_path:"bin/masc_tui.ml"
+         ~binding_name:"run_loop"
+         ~callee:"Frame_presenter.invalidate")
+  ; check int "Tools End uses the exact projected maximum" 1
+      (calls
+         ~module_path:"bin/masc_tui.ml"
+         ~binding_name:"move_surface_to_end"
+         ~callee:"Masc_tui_scroll.maximum")
+;;
+
+let test_tools_scroll_counts_the_rendered_projection () =
+  check int "the key bound counts the renderer's exact rows" 1
+    (calls
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"tools_scrolled"
+       ~callee:"tools_display_lines");
+  check int "the main loop routes Tools to that bound" 1
+    (calls
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"scrolled_surface"
+       ~callee:"Masc_tui_render.tools_scrolled")
+;;
+
+let test_tools_renderer_reads_the_typed_scroll_layout () =
+  check int "the renderer reads the same display projection" 1
+    (calls
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_tools"
+       ~callee:"tools_display_lines");
+  check int "the renderer derives geometry from those same rows" 1
+    (calls
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_tools"
+       ~callee:"tools_scrolled_for_lines")
+;;
+
+let test_tools_projection_defers_inactive_panes () =
+  check int "only selected typed branches force their projection" 4
+    (calls
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"tools_display_lines"
+       ~callee:"Lazy.force");
+  check int "the async branch remains a direct selected projection" 1
+    (calls
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"tools_display_lines"
+       ~callee:"async_request_observation_lines")
 ;;
 
 
@@ -398,6 +456,12 @@ let () =
             test_the_frame_and_the_bound_read_the_same_number
         ; test_case "the drawing does not measure the body itself" `Quick
             test_the_drawing_does_not_measure_the_body_itself
+        ; test_case "Tools scroll counts the rendered projection" `Quick
+            test_tools_scroll_counts_the_rendered_projection
+        ; test_case "Tools renderer uses the typed scroll layout" `Quick
+            test_tools_renderer_reads_the_typed_scroll_layout
+        ; test_case "Tools projection defers inactive panes" `Quick
+            test_tools_projection_defers_inactive_panes
         ] )
     ; ( "how it reads"
       , [ test_case "the clock is local" `Quick test_the_clock_is_local

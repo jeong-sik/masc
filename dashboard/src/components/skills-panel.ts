@@ -13,6 +13,7 @@ import {
   readSkillSource,
   saveSkillSource,
   type SkillEvidenceResponse,
+  type SkillCompositionEvidence,
   type SkillEditorLoaded,
   type SkillEditorPreview,
   type AsyncRequestObservation,
@@ -214,42 +215,66 @@ function runOutput(value: unknown): string {
   }
 }
 
+function compositionNodes(composition: SkillCompositionEvidence): readonly Record<string, unknown>[] {
+  return composition.executor_settlements
+}
+
+function compositionCoverageLabel(scope: SkillEvidenceResponse['coverage']['composition_scope']): string {
+  switch (scope) {
+    case 'exact_reference_latest_completed':
+      return 'composition exact-reference latest completed authority'
+    case 'unavailable':
+      return 'composition exact-reference latest-completed authority unavailable'
+  }
+}
+
 function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null }) {
-  if (!result) return html`<div class="ss-muted">Load the latest exact-revision result.</div>`
-  if (result.status === 'not_observed_in_current_coverage') {
+  if (!result) return html`<div class="ss-muted">Load retained exact-revision evidence.</div>`
+  const activationGapCount = result.coverage.activation_gaps.length
+  const coverageSummary = html`${result.coverage.activation_sessions_inspected} retained sessions inspected · ${result.coverage.activation_ledgers_loaded} activation ledgers loaded · ${activationGapCount} activation gaps · ${result.coverage.activation_owner_gap_count} owner gaps · ${result.coverage.composition_records_read} composition records read · ${compositionCoverageLabel(result.coverage.composition_scope)}`
+  if (result.status === 'not_observed_in_retained_coverage') {
     return html`
-      <div class="text-[var(--color-status-warn)]">No exact-revision run was found in the current coverage. This is not proof that it never ran.</div>
-      <div class="ss-muted text-3xs">${result.coverage.activation_ledgers_loaded} current-session activation ledgers · ${result.coverage.composition_rows_scanned}/${result.coverage.composition_scan_limit} bounded log rows · incomplete coverage</div>
-      ${result.coverage.unavailable.length > 0 ? html`<div class="text-[var(--color-status-warn)] text-3xs">Unavailable: ${result.coverage.unavailable.join(' · ')}</div>` : null}
+      <div class="text-[var(--color-status-warn)]">No exact-revision run was found in the retained coverage. This is not proof that it never ran.</div>
+      <div class="ss-muted text-3xs">${coverageSummary} · ${result.coverage.activation_scope}</div>
+      ${result.coverage.composition_unavailable.length > 0 ? html`<div class="text-[var(--color-status-warn)] text-3xs">Composition unavailable: ${result.coverage.composition_unavailable.join(' · ')}</div>` : null}
     `
   }
-  const activation = result.activation?.activation ?? null
-  const actions = Array.isArray(activation?.actions) ? activation.actions.length : 0
-  const delivered = activation?.delivery !== null && activation?.delivery !== undefined
+  const activationEvidence = result.activation === null
+    ? []
+    : result.activation.selection === 'most_recent_observed'
+      ? [result.activation.evidence]
+      : result.activation.evidence
   const composition = result.composition
-  const output = composition?.run.output
+  const compositionNodeCount = composition ? compositionNodes(composition).length : 0
+  const output = composition?.result.data
   return html`
-    <div class="space-y-2" data-testid="skill-latest-evidence">
-      ${activation ? html`
-        <div>
-          <div class="font-semibold">${delivered ? '✓ delivered' : '◌ invoked'} · ${result.activation?.keeper} · ${actions} actions</div>
-          <div class="ss-muted mono">${runField(activation, 'activated_at')} · tool use ${runField(activation, 'skill_tool_use_id')}</div>
-        </div>
-      ` : null}
+    <div class="space-y-2" data-testid="skill-retained-evidence">
+      ${activationEvidence.map((item, index) => {
+        const activation = item.activation
+        const actions = Array.isArray(activation.actions) ? activation.actions.length : 0
+        const delivered = activation.delivery !== null && activation.delivery !== undefined
+        const ownerClaims = item.owner.claims.map(claim => claim.keeper).join(', ') || 'unclaimed'
+        return html`
+          <div>
+            <div class="font-semibold">${delivered ? '✓ delivered' : '◌ invoked'} · ${ownerClaims} · ${actions} actions${activationEvidence.length > 1 ? ` · equal-time candidate ${index + 1}/${activationEvidence.length}` : ''}</div>
+            <div class="ss-muted mono">${runField(activation, 'activated_at')} · tool use ${runField(activation, 'skill_tool_use_id')} · trace ${item.trace_id} · owner ${item.owner.status}</div>
+          </div>
+        `
+      })}
       ${composition ? html`
         <div>
           <div class="font-semibold">
-            ${runField(composition.run, 'success') === 'true' ? '✓ completed' : '✗ failed'}
-            · ${runDuration(composition.run)}
-            · ${runField(composition.run, 'keeper')}
+            ${runField(composition.result, 'disposition') === 'completed' ? '✓ completed' : runField(composition.result, 'disposition')}
+            · ${runDuration(composition.result)}
+            · ${composition.keeper}
           </div>
-          <div class="ss-muted mono">${runField(composition.run, 'composition_run_id')} · ${composition.nodes.length} node rows</div>
+          <div class="ss-muted mono">${composition.composition_run_id} · ${compositionNodeCount} typed node settlements</div>
           <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-raised)] p-2 text-3xs">${runOutput(output)}</pre>
         </div>
       ` : null}
       <div class="ss-muted text-3xs">
-        coverage ${result.coverage.activation_ledgers_loaded} current-session activation ledgers · ${result.coverage.composition_rows_scanned}/${result.coverage.composition_scan_limit} bounded log rows · incomplete
-        ${result.coverage.unavailable.length > 0 ? html` · ⚠ ${result.coverage.unavailable.join(' · ')}` : null}
+        coverage ${coverageSummary} · ${result.coverage.activation_scope}
+        ${result.coverage.composition_unavailable.length > 0 ? html` · ⚠ ${result.coverage.composition_unavailable.join(' · ')}` : null}
       </div>
     </div>
   `
@@ -728,7 +753,7 @@ export function SkillsPanel() {
                   <div class="grid gap-3 p-2 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
                     <div><strong>Execution flow</strong>${row.surface && row.surface.kind !== 'unavailable' ? html`<${SkillFlowView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
                     <div>
-                      <div class="mb-2 flex items-center justify-between"><strong>Latest evidence</strong><button class="ss-btn" type="button" disabled=${evidenceLoading.value === rowKey} onClick=${async () => {
+                      <div class="mb-2 flex items-center justify-between"><strong>Retained evidence</strong><button class="ss-btn" type="button" disabled=${evidenceLoading.value === rowKey} onClick=${async () => {
                         if (!row.surface) return
                         evidenceLoading.value = rowKey
                         try { evidence.value = { ...evidence.value, [rowKey]: await fetchSkillEvidence(row.surface.reference) } }

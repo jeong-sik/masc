@@ -855,10 +855,9 @@ let agenda_line agenda ~cols =
    partway up the screen; now it would push the composer up with it, and the
    row an operator reaches for would move per surface. *)
 let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
-  (* The strip's rows come off the body here and off the scroll bound in
-     [scrolled_surface], both from [Agenda.rows_taken] on the same projection.
-     Two readers of one number: the row the frame draws is the row the
-     keypress stops short of. *)
+  (* [surface_body_rows] removes the strip before either the frame or the
+     typed scroll layout receives its body budget. Two readers of that one
+     budget: the row the frame draws is the row the keypress stops short of. *)
   let agenda_rows = Masc_tui_types.agenda_chrome_rows state in
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows:rows in
   let drawn = frame_lines buf in
@@ -8652,39 +8651,14 @@ let tools_pane_strip (state : state) =
   ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
 ;;
 
-let render_tools (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
+let tools_display_lines (state : state) =
   let registered_tools =
     match state.tools_inventory with
     | None -> []
     | Some s -> s.Masc.Tui_decode.ts_tools
   in
-  let registered_rows = Tool_tree.rows registered_tools in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
-  let header =
-    (* The strip replaces the old subtitle. "effective Keeper + registered
-       catalog" named two of the five sections and the header is where a
-       reader looks for what a surface holds. *)
-    Printf.sprintf "%s  %s  %s  %s"
-      (screen_title " MASC Tools") (tools_pane_strip state) timestamp
-      (connection_badge state)
-  in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-  (match state.tools_error with
-   | None -> ()
-   | Some detail ->
-       box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
-       box_divider buf cols);
   let effective_lines =
+    lazy begin
     match state.tools_inventory with
     | None -> [ (Theme.warn ()), " Effective Keeper Surface — not loaded" ]
     | Some { Masc.Tui_decode.ts_effective = None; _ } ->
@@ -8912,44 +8886,33 @@ let render_tools (state : state) =
              | Some (observed_key, json) when String.equal key observed_key ->
               (match Tui_decode.decode_skill_evidence json with
                | Error _ ->
-                 [ Theme.bad (), "     Latest evidence response is malformed" ]
-               | Ok _ ->
-               let has_evidence_field name =
-                 match json_assoc_member_opt name json with
-                 | None | Some `Null -> false
-                 | Some _ -> true
-               in
-               let has_evidence =
-                 has_evidence_field "activation"
-                 || has_evidence_field "composition"
-               in
+                 [ Theme.bad (), "     Retained evidence response is malformed" ]
+               | Ok evidence ->
                let evidence_lines =
-                 match
-                   json_assoc_member_opt "schema" json,
-                   json_assoc_member_opt "status" json
-                 with
-                | ( Some (`String "masc.skill-evidence/v2")
-                  , Some (`String "not_observed_in_current_coverage") )
-                  when not has_evidence ->
+                 match evidence.Masc.Tui_decode.se_status with
+                 | Masc.Tui_decode.Skill_evidence_not_observed_in_retained_coverage ->
                   [ Theme.warn (),
-                    "     Latest evidence: not found in current coverage (not proof of never)"
+                    "     Retained evidence: not found in retained coverage (not proof of never)"
                   ]
-                | Some (`String "masc.skill-evidence/v2"), Some (`String "observed")
-                  when has_evidence ->
+                 | Masc.Tui_decode.Skill_evidence_observed ->
                   let activation_lines =
-                    match json_assoc_member_opt "activation" json with
-                    | Some (`Assoc _ as evidence) ->
-                      let keeper =
-                        match json_assoc_member_opt "keeper" evidence with
-                        | Some (`String value) -> value
-                        | _ -> "?"
-                      in
-                      (match json_assoc_member_opt "activation" evidence with
-                       | Some (`Assoc _ as activation) ->
-                         let string_field name fallback =
+                    let items, tied =
+                      match evidence.se_activation with
+                      | None -> [], false
+                      | Some (Masc.Tui_decode.Skill_evidence_most_recent_observed item) ->
+                        [ item ], false
+                      | Some
+                          (Masc.Tui_decode.Skill_evidence_most_recent_observed_timestamp_tie
+                             items) ->
+                        items, true
+                    in
+                    List.concat_map
+                      (fun item ->
+                         let activation = item.Masc.Tui_decode.sea_activation in
+                         let string_field name =
                            match json_assoc_member_opt name activation with
                            | Some (`String value) -> value
-                           | _ -> fallback
+                           | _ -> ""
                          in
                          let delivered =
                            match json_assoc_member_opt "delivery" activation with
@@ -8961,115 +8924,122 @@ let render_tools (state : state) =
                            | Some (`List values) -> List.length values
                            | Some _ | None -> 0
                          in
+                         let keepers =
+                           item.sea_owner_claims
+                           |> List.map (fun claim -> claim.seo_keeper)
+                           |> String.concat ","
+                         in
                          [ Ansi.bold,
                            Printf.sprintf
-                             "     Activation: %s · keeper=%s · actions=%d · at=%s"
+                             "     Activation: %s · owner=%s(%s) · actions=%d · at=%s"
                              delivered
-                             (Terminal_text.single_line keeper)
+                             (Terminal_text.single_line item.sea_owner_status)
+                             (Terminal_text.single_line keepers)
                              action_count
-                             (Terminal_text.single_line
-                                (string_field "activated_at" "?"))
+                             (Terminal_text.single_line (string_field "activated_at"))
                          ; Ansi.dim,
-                           "       tool use "
-                           ^ Terminal_text.single_line
-                               (string_field "skill_tool_use_id" "?")
-                         ]
-                       | Some _ | None ->
-                         [ Theme.bad (), "     Activation evidence is malformed" ])
-                    | Some `Null | None -> []
-                    | Some _ -> [ Theme.bad (), "     Activation evidence is malformed" ]
+                           Printf.sprintf
+                             "       trace %s · tool use %s%s"
+                             (Terminal_text.single_line item.sea_trace_id)
+                             (Terminal_text.single_line
+                                (string_field "skill_tool_use_id"))
+                             (if tied then " · equal-time candidate" else "")
+                         ])
+                      items
                   in
                   let composition_lines =
-                    match json_assoc_member_opt "composition" json with
+                    match evidence.se_composition with
                     | Some (`Assoc _ as composition) ->
-                      (match json_assoc_member_opt "run" composition with
-                       | Some (`Assoc _ as run) ->
+                      (match json_assoc_member_opt "result" composition with
+                       | Some (`Assoc _ as result) ->
                          let string_field name fallback =
-                           match json_assoc_member_opt name run with
+                           match json_assoc_member_opt name composition with
                            | Some (`String value) -> value
                            | _ -> fallback
                          in
                          let duration =
-                           match json_assoc_member_opt "duration_ms" run with
+                           match json_assoc_member_opt "duration_ms" result with
                            | Some (`Float value) -> Printf.sprintf "%.0fms" value
                            | Some (`Int value) -> Printf.sprintf "%dms" value
                            | _ -> "?ms"
                          in
                          let success =
-                           match json_assoc_member_opt "success" run with
-                           | Some (`Bool true) -> "✓ completed"
-                           | Some (`Bool false) -> "✗ failed"
-                           | _ -> "unknown"
+                           match json_assoc_member_opt "disposition" result with
+                           | Some (`String "completed") -> "✓ completed"
+                           | Some (`String "deferred") -> "◌ deferred"
+                           | Some (`String "failed") -> "✗ failed"
+                           | Some _ | None -> "unknown"
                          in
                          let output =
-                           match json_assoc_member_opt "output" run with
+                           match json_assoc_member_opt "data" result with
                            | Some (`String value) -> value
                            | Some value -> Yojson.Safe.to_string value
                            | None -> "no output"
                          in
+                         let settlement_count =
+                           match
+                             json_assoc_member_opt
+                               "executor_settlements"
+                               composition
+                           with
+                           | Some (`List values) -> List.length values
+                           | Some _ | None -> 0
+                         in
                          [ Ansi.bold,
                            Printf.sprintf
-                             "     Composition: %s · %s · keeper=%s · run=%s"
+                             "     Composition: %s · %s · keeper=%s · run=%s · settlements=%d"
                              success
                              duration
                              (Terminal_text.single_line
                                 (string_field "keeper" "?"))
                              (Terminal_text.single_line
                                 (string_field "composition_run_id" "?"))
+                             settlement_count
                          ; Ansi.dim, "       " ^ Terminal_text.single_line output
                          ]
                        | Some _ | None ->
                          [ Theme.bad (), "     Composition evidence is malformed" ])
-                    | Some `Null | None -> []
+                    | None -> []
                     | Some _ -> [ Theme.bad (), "     Composition evidence is malformed" ]
                   in
                   activation_lines @ composition_lines
-                | _ -> [ Theme.bad (), "     Latest evidence response is malformed" ]
                in
                let coverage_lines =
-                 match json_assoc_member_opt "coverage" json with
-                 | Some (`Assoc _ as coverage)
-                   when json_assoc_member_opt "coverage_complete" coverage
-                        = Some (`Bool false)
-                        && json_assoc_member_opt "activation_scope" coverage
-                           = Some (`String "current_keeper_sessions") ->
-                   let int_field name =
-                     match json_assoc_member_opt name coverage with
-                     | Some (`Int value) -> value
-                     | Some _ | None -> 0
-                   in
-                   let unavailable =
-                     match json_assoc_member_opt "unavailable" coverage with
-                     | Some (`List values) ->
-                       List.filter_map
-                         (function
-                           | `String value ->
-                             Some (Terminal_text.single_line value)
-                           | _ -> None)
-                         values
-                     | Some _ | None -> []
-                   in
+                 let coverage = evidence.Masc.Tui_decode.se_coverage in
+                 let composition_scope =
+                   match coverage.sec_composition_scope with
+                   | Masc.Tui_decode.Skill_evidence_exact_reference_latest_completed ->
+                     "latest_completed"
+                   | Masc.Tui_decode.Skill_evidence_composition_unavailable ->
+                     "unavailable"
+                 in
+                 let unavailable =
+                   List.map
+                     Terminal_text.single_line
+                     coverage.sec_composition_unavailable
+                 in
                    [ Ansi.dim,
                      Printf.sprintf
-                       "       coverage current_ledgers=%d bounded_log_rows=%d/%d incomplete unavailable=%d"
-                       (int_field "activation_ledgers_loaded")
-                       (int_field "composition_rows_scanned")
-                       (int_field "composition_scan_limit")
-                       (List.length unavailable)
+                       "       coverage retained_sessions=%d ledgers=%d activation=%s gaps=%d owner_gaps=%d exact_reference=%s records_read=%d"
+                       coverage.sec_activation_sessions_inspected
+                       coverage.sec_activation_ledgers_loaded
+                       coverage.sec_activation_scope
+                       coverage.sec_activation_gap_count
+                       coverage.sec_activation_owner_gap_count
+                       composition_scope
+                       coverage.sec_composition_records_read
                    ]
                    @
                    (match unavailable with
                     | [] -> []
                     | values ->
                       [ Theme.warn (),
-                        "       unavailable: " ^ String.concat " · " values
+                        "       composition unavailable: " ^ String.concat " · " values
                       ])
-                 | Some _ | None ->
-                   [ Theme.warn (), "       evidence coverage is unavailable" ]
                in
                evidence_lines @ coverage_lines)
              | Some _ | None ->
-               [ Ansi.dim, "     Latest evidence: Enter to load this exact revision" ])
+               [ Ansi.dim, "     Retained evidence: Enter to load this exact revision" ])
         in
         [ Ansi.bold,
           Printf.sprintf " Effective Keeper Surface — %s (%d tools)"
@@ -9122,8 +9092,10 @@ let render_tools (state : state) =
                   left_out)
         @ [ Ansi.bold, Printf.sprintf "   %-34s %s" "Tool" "Origin" ]
         @ tool_lines
+    end
   in
   let activation_lines =
+    lazy begin
     match state.tools_inventory with
     | None -> [ Theme.warn (), " Skill Activations — not loaded" ]
     | Some { Masc.Tui_decode.ts_skill_activations = None; _ } ->
@@ -9370,8 +9342,11 @@ let render_tools (state : state) =
         @ timeline_lines
         @ scoped_lines
         @ receipt_lines
+    end
   in
   let catalog_lines =
+    lazy begin
+    let registered_rows = Tool_tree.rows registered_tools in
     let heading =
       [ Ansi.bold,
         Printf.sprintf " Registered Catalog — %d tools"
@@ -9413,8 +9388,10 @@ let render_tools (state : state) =
                   (if tool.tl_direct_call then "yes" else "no")
                   (Terminal_text.single_line surfaces) ))
         registered_rows
+    end
   in
   let usage_matrix_lines =
+    lazy begin
     match state.skills_catalog with
     | None ->
         [ Ansi.dim, " Skill Usage — loading workspace catalog…" ]
@@ -9455,6 +9432,7 @@ let render_tools (state : state) =
             used
         in
         heading @ rows
+    end
   in
   (* One section at a time. These used to be concatenated, and the first of
      them is one row per tool -- ninety-five of them on this workspace -- so
@@ -9463,15 +9441,61 @@ let render_tools (state : state) =
      nothing saying so. *)
   let display_lines =
     match state.tools_pane with
-    | Masc_tui_types.Tools_surface -> effective_lines
+    | Masc_tui_types.Tools_surface -> Lazy.force effective_lines
     | Masc_tui_types.Tools_async -> async_request_observation_lines state
-    | Masc_tui_types.Tools_activations -> activation_lines
-    | Masc_tui_types.Tools_usage -> usage_matrix_lines
-    | Masc_tui_types.Tools_catalog -> catalog_lines
+    | Masc_tui_types.Tools_activations -> Lazy.force activation_lines
+    | Masc_tui_types.Tools_usage -> Lazy.force usage_matrix_lines
+    | Masc_tui_types.Tools_catalog -> Lazy.force catalog_lines
   in
-  let chrome_rows = if Option.is_some state.tools_error then 7 else 5 in
-  let content_height = max 1 (rows - chrome_rows) in
-  let drawable = List.length display_lines in
+  display_lines
+;;
+
+let tools_scrolled_for_lines state display_lines =
+  { sc_count = List.length display_lines
+  ; sc_chrome = if Option.is_some state.tools_error then 7 else 5
+  ; sc_overflow_takes_row = true
+  ; sc_preview_keep = None
+  }
+;;
+
+let tools_scrolled state =
+  tools_scrolled_for_lines state (tools_display_lines state)
+;;
+
+let render_tools (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    (* The strip replaces the old subtitle. "effective Keeper + registered
+       catalog" named two of the five sections and the header is where a
+       reader looks for what a surface holds. *)
+    Printf.sprintf "%s  %s  %s  %s"
+      (screen_title " MASC Tools") (tools_pane_strip state) timestamp
+      (connection_badge state)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  (match state.tools_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:(Theme.bad ())
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let display_lines = tools_display_lines state in
+  let layout = tools_scrolled_for_lines state display_lines in
+  let drawable = layout.sc_count in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+      ~count:drawable ~preview_keep:layout.sc_preview_keep
+      ~overflow_takes_row:layout.sc_overflow_takes_row
+  in
   let max_scroll = max 0 (drawable - content_height) in
   let scroll = max 0 (min state.tools_scroll max_scroll) in
   for i = 0 to content_height - 1 do

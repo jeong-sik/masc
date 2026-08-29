@@ -467,6 +467,7 @@ def make_bundle(root: Path):
         )
     tui = {
         "schema": verifier.TUI_SCHEMA,
+        "captured_at": "2026-08-27T00:00:04Z",
         "source": {
             "expected_sha": HEAD,
             "capture_head": HEAD,
@@ -494,7 +495,28 @@ def make_bundle(root: Path):
             "visited_tools_panes": ["surface", "async", "activations"],
         },
         "producer_artifacts": producer_artifacts,
-        "terminal": {"cols": 180, "rows": 42},
+        "terminal": {
+            "requested": {"cols": 180, "rows": 42},
+            "frontend": {"cols": 180, "rows": 42},
+            "backend_before": {
+                "child_pid": 123,
+                "device": "/dev/ttys001",
+                "cols": 180,
+                "rows": 42,
+            },
+            "backend_after": {
+                "child_pid": 123,
+                "device": "/dev/ttys001",
+                "cols": 180,
+                "rows": 42,
+            },
+            "ttyd": {
+                "path": "/opt/homebrew/bin/ttyd",
+                "bytes": 42,
+                "sha256": "9" * 64,
+                "version": "ttyd version 1.7.7",
+            },
+        },
         "observations": {
             "skill_header": "Skill Use — keeper-one (1 receipts)",
             "session_line": f"session=trace-one  ledger={durable['revision']}",
@@ -770,6 +792,33 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             with self.assertRaisesRegex(verifier.VerificationError, "TUI proof SHA"):
                 verify(bundle)
 
+    def test_tui_v4_top_level_contract_is_closed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            bundle["tui"]["unexpected"] = True
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "TUI proof field set differs"
+            ):
+                verify(bundle)
+
+    def test_tui_backend_pty_size_is_bound_to_the_request(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            bundle["tui"]["terminal"]["backend_after"]["rows"] = 46
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "backend_after PTY size differs"
+            ):
+                verify(bundle)
+
+    def test_tui_ttyd_identity_requires_a_binary_digest(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            bundle["tui"]["terminal"]["ttyd"]["sha256"] = "unknown"
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "ttyd identity is invalid"
+            ):
+                verify(bundle)
+
     def test_visible_text_hash_tamper_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
@@ -823,12 +872,12 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                 with self.assertRaisesRegex(verifier.VerificationError, message):
                     verify(bundle)
 
-    def test_tui_v3_rejects_removed_single_frame_fields(self):
+    def test_tui_v4_rejects_removed_single_frame_fields(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
             bundle["tui"]["visible_text"] = "legacy"
             with self.assertRaisesRegex(
-                verifier.VerificationError, "removed single-frame fields"
+                verifier.VerificationError, "TUI proof field set differs"
             ):
                 verify(bundle)
 

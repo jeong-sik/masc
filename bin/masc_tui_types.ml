@@ -2882,11 +2882,6 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = None
         }
-  | Tools ->
-      listing ~error:state.tools_error
-        (match state.tools_inventory with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.ts_tools)
   | Config ->
       listing ~error:state.runtime_config_view_error
         (match state.runtime_config_view with
@@ -2898,18 +2893,14 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
      Planning and Schedules move a cursor or a detail pane rather than a plain
      list. *)
   | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
-  | Fusion | Resources | Code ->
+  | Fusion | Resources | Code | Tools ->
       None
 
-(* Every counted surface pays for the agenda strip, and it pays once. The
-   drawing subtracts the same rows in [finish_surface]; a bound worked out
-   from fewer chrome rows than the frame uses lets the cursor name a row the
-   frame will not draw, which is how Changes lost the tail of its own list. *)
+(* Callers pass [surface_body_rows], which has already removed the composer
+   and agenda strip. Adding the agenda again here makes every key bound one row
+   shorter than the renderer whenever the strip is present. *)
 let scrolled_surface (state : state) (surface : surface) : scrolled option =
-  let taken = agenda_chrome_rows state in
-  Option.map
-    (fun s -> { s with sc_chrome = s.sc_chrome + taken })
-    (scrolled_surface_rows state surface)
+  scrolled_surface_rows state surface
 ;;
 
 (* The text a "/" search reads for each row: the identifiers an operator

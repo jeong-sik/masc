@@ -211,6 +211,10 @@ type decode_error =
 
 type store_error =
   | Lock_failed of string
+  | Canonical_root_failed of
+      { path : string
+      ; cause : Unix.error
+      }
   | Read_failed of Fs_compat.owned_regular_file_read_error
   | Decode_failed of decode_error
   | Invocation_id_collision of string
@@ -278,6 +282,7 @@ let decode_error_code = function
 
 let store_error_code = function
   | Lock_failed _ -> "lock_failed"
+  | Canonical_root_failed _ -> "canonical_root_failed"
   | Read_failed _ -> "read_failed"
   | Decode_failed error -> "decode_failed." ^ decode_error_code error
   | Invocation_id_collision _ -> "invocation_id_collision"
@@ -295,6 +300,11 @@ let store_error_code = function
 
 let store_error_to_string = function
   | Lock_failed detail -> "lock failed: " ^ detail
+  | Canonical_root_failed { path; cause } ->
+    Printf.sprintf
+      "canonical trace root failed for %s: %s"
+      path
+      (Unix.error_message cause)
   | Read_failed error ->
     "read failed: " ^ Fs_compat.owned_regular_file_read_error_to_string error
   (* Keep the category in the human string too: the ledger write path is
@@ -1548,6 +1558,10 @@ let decode_activation ~expected_trace_id json =
    | None -> Ok { activation with delivery; actions })
 ;;
 
+let activation_of_yojson ~expected_trace_id json =
+  decode_activation ~expected_trace_id json
+;;
+
 let exact_key_equal (left : activation) (right : activation) =
   String.equal left.skill_tool_use_id right.skill_tool_use_id
 ;;
@@ -1734,6 +1748,24 @@ let load_existing ~config ~trace_id =
   | Ok (Some _) ->
     with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
       read_existing_locked ~ownership_root ~expected_trace_id:trace_id session_dir)
+;;
+
+let load_existing_read_only_from_root ~ownership_root ~trace_id =
+  let session_dir =
+    Filename.concat ownership_root (Keeper_id.Trace_id.to_string trace_id)
+  in
+  read_existing_locked ~ownership_root ~expected_trace_id:trace_id session_dir
+;;
+
+let load_existing_read_only ~config ~trace_id =
+  let ownership_root = Keeper_fs.session_store_path config in
+  match Unix.realpath ownership_root with
+  | exception Unix.Unix_error (cause, _, _) ->
+    Error (Canonical_root_failed { path = ownership_root; cause })
+  | canonical_root ->
+    load_existing_read_only_from_root
+      ~ownership_root:canonical_root
+      ~trace_id
 ;;
 
 let persist_locked

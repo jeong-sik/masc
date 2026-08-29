@@ -785,7 +785,7 @@ let test_operator_approvals_use_current_contract () =
   check int "the tools header does not serialise its skills" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_tools"
+       ~binding_name:"tools_display_lines"
        ~callee:"Skill_reference.list_to_yojson");
   check bool "approval renderer measures its name column" true
     (Ast_grep.count_calls_in_value_binding

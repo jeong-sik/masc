@@ -1054,6 +1054,26 @@ let test_exact_output_lane_rejects_unknown_key () =
          errors)
   | Ok _ -> fail "unknown exact-output lane key must fail config parsing"
 
+(* The routing rebirth (RFC-0206) dropped the lane strategy ADT — a lane is
+   ordered by construction — but a [strategy = "ordered"] line survived in the
+   seed config and fixtures because the lane parser silently skipped keys it
+   did not read. The concrete unknown key here is that purged line, so a
+   reintroduction fails this test by name. *)
+let test_lane_rejects_unknown_key () =
+  let config =
+    "[runtime.lanes.default]\n\
+     strategy = \"ordered\"\n\
+     candidates = [\"local.sample\"]\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error errors ->
+    check bool "unknown lane key is named" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal error.path "runtime.lanes.default.strategy")
+         errors)
+  | Ok _ -> fail "unknown lane key must fail config parsing"
+
 let test_retired_native_streaming_capability_is_rejected () =
   let config =
     "[models.sample]\n\
@@ -2315,7 +2335,6 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
      default = \"local.sample\"\n\
      \n\
      [runtime.lanes.\"local.sample\"]\n\
-     strategy = \"ordered\"\n\
      candidates = [\"local.lane\"]\n"
   in
   let snapshot = Runtime.For_testing.snapshot () in
@@ -2459,7 +2478,6 @@ let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
      default = \"local.sample\"\n\
      \n\
      [runtime.lanes.dormant]\n\
-     strategy = \"ordered\"\n\
      candidates = [\"local.dormant\"]\n"
   in
   let snapshot = Runtime.For_testing.snapshot () in
@@ -3210,7 +3228,7 @@ let test_every_routing_field_names_itself_in_its_diagnostic () =
     (String_util.contains_substring media "[runtime].media_failover entry \"local.typo\"")
 
 let test_routing_reference_domains_stay_distinct () =
-  let lane = "\n[runtime.lanes.safe]\nstrategy = \"ordered\"\ncandidates = [\"local.good\"]\n" in
+  let lane = "\n[runtime.lanes.safe]\ncandidates = [\"local.good\"]\n" in
   (* An assignment resolves among runtimes only. runtime.mli documents the
      assignment snapshot as ids that resolve to a configured runtime, so admitting
      a lane here would load a config the assignment consumer cannot look up. *)
@@ -3677,7 +3695,6 @@ let test_load_allows_a_lane_that_mixes_checkpoint_owners () =
     (base
      ^ "\n\
         [runtime.lanes.\"subscription.sonnet\"]\n\
-        strategy = \"ordered\"\n\
         candidates = [\"subscription.sonnet\", \"local.chat\"]\n")
     (fun path ->
       match Runtime.load_list ~config_path:path with
@@ -4073,7 +4090,6 @@ let test_lane_budget_is_bound_by_smallest_candidate_window () =
      [ollama_cloud.smallwin]\n\
      \n\
      [runtime.lanes.\"ollama_cloud.bigwin\"]\n\
-     strategy = \"ordered\"\n\
      candidates = [\"ollama_cloud.bigwin\", \"ollama_cloud.smallwin\"]\n\
      \n\
      [runtime]\n\
@@ -4470,6 +4486,8 @@ let () =
             test_exact_output_lane_cli_slots_parse_in_order;
           test_case "exact-output lane rejects unknown keys" `Quick
             test_exact_output_lane_rejects_unknown_key;
+          test_case "lane rejects unknown keys" `Quick
+            test_lane_rejects_unknown_key;
           test_case "retired native-streaming capability is rejected" `Quick
             test_retired_native_streaming_capability_is_rejected;
           test_case "repo runtime.toml loads through runtime parser" `Quick

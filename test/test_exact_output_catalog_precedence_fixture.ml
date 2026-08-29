@@ -143,7 +143,7 @@ let runtime_toml
     | None -> ""
     | Some candidates ->
       Printf.sprintf
-        "\n[runtime.lanes.verifiers]\nstrategy = \"ordered\"\ncandidates = [%s]\n"
+        "\n[runtime.lanes.verifiers]\ncandidates = [%s]\n"
         (candidates |> List.map (Printf.sprintf "%S") |> String.concat ", ")
   in
   let board_attention_lane =

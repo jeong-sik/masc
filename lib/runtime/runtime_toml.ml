@@ -1854,11 +1854,34 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
 (* [\[runtime.lanes.<id>\]] — ordered failover candidate lists. Each lane is a
    table with [candidates] (array of runtime ids). Candidate ids are resolved
    against materialized runtimes at load time, not here, so the parser returns
-   declarations only. *)
+   declarations only.
+
+   [candidates] is the whole vocabulary. The RFC-0206 routing rebirth dropped
+   the strategy ADT (a lane is ordered by construction), and until this check
+   a leftover [strategy = "ordered"] line was accepted and ignored — a key an
+   operator could edit with no effect. Unknown keys fail the load instead,
+   the same shape as [parse_exact_output_lane] below. *)
 let parse_lane ~(id : string) (tbl : Otoml.t)
   : (Runtime_schema.lane_decl, parse_error list) result
   =
   let path = Printf.sprintf "runtime.lanes.%s" id in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if String.equal key "candidates"
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown lane key %S; expected candidates (lanes are ordered \
+                   by construction; there is no strategy key)"
+                  key))
+        entries
+    | _ -> []
+  in
   let candidate_ids_result =
     match Otoml.find_opt tbl Fun.id [ "candidates" ] with
     | None -> Error (error (path ^ ".candidates") "lane candidates is required")
@@ -1873,7 +1896,8 @@ let parse_lane ~(id : string) (tbl : Otoml.t)
                  msg)))
   in
   match candidate_ids_result with
-  | Error e -> Error e
+  | Error e -> Error (unknown_key_errors @ e)
+  | Ok _ when unknown_key_errors <> [] -> Error unknown_key_errors
   | Ok candidate_ids ->
     if candidate_ids = []
     then Error (error path "lane must have at least one candidate")

@@ -84,7 +84,6 @@ tools-support = true
 # A Keeper assignment must still name a materialized runtime. To add ordered
 # failover, give the lane the same ID; runtime resolution prefers the lane.
 [runtime.lanes."codex_subscription.gpt-5.3-codex-spark"]
-strategy = "ordered"
 candidates = [
   "codex_subscription.gpt-5.3-codex-spark",
   "glm-coding.glm-5-turbo",

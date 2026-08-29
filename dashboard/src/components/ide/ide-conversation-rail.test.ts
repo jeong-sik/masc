@@ -13,7 +13,6 @@ import { routeHashParams } from './ide-test-helpers'
 import { activeIdeFile, focusIdeFile, ideContextFocus } from './ide-state'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
 import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import type { BoardPost } from '../../types/core'
 
 function stubEmptyConversationFetch(): void {
@@ -57,12 +56,6 @@ afterEach(() => {
   })
   ideContextFocus.value = null
   setIdeReplayUntilMs(null)
-  cursorOverlaySignal.value = {
-    cursors: new Map(),
-    heatmap: new Map(),
-    collisions: [],
-    active_file: null,
-  }
   window.location.hash = ''
   clearTraces()
 })
@@ -291,22 +284,6 @@ describe('IdeConversationRail', () => {
 
   it('renders route links for keeper decision replay entries', async () => {
     const decisionTs = Date.UTC(2026, 4, 5, 10, 1, 0) / 1000
-    cursorOverlaySignal.value = {
-      cursors: new Map([[
-        'scholar',
-        {
-          keeper_id: 'scholar',
-          file_path: 'lib/runtime.ml',
-          line: 42,
-          column: 3,
-          focus_mode: 'reviewing',
-          last_update: Date.UTC(2026, 4, 5, 10, 1, 30),
-        },
-      ]]),
-      heatmap: new Map(),
-      collisions: [],
-      active_file: 'lib/runtime.ml',
-    }
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/v1/board')) {
         return new Response(JSON.stringify({ posts: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -344,16 +321,11 @@ describe('IdeConversationRail', () => {
 
     const decisionCard = container.querySelector<HTMLElement>('[data-replay-source="decision"]')
     expect(decisionCard).not.toBeNull()
-    expect(decisionCard?.querySelector('.ide-conversation-context-badge')?.textContent).toBe('CTX 3')
+    expect(decisionCard?.querySelector('.ide-conversation-context-badge')?.textContent).toBe('CTX 2')
     expect(decisionCard?.querySelector('.ide-conversation-context-badge')?.getAttribute('title'))
-      .toBe('Linked context: Code, Telemetry, Keeper')
+      .toBe('Linked context: Telemetry, Keeper')
     const decisionLinks = [...decisionCard!.querySelectorAll<HTMLButtonElement>('.ide-conversation-route-link')]
-    expect(decisionLinks.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
-
-    fireEvent.click(decisionLinks.find(link => link.textContent === 'Code')!)
-    expect(window.location.hash.startsWith('#code?')).toBe(true)
-    expect(routeHashParams().get('file')).toBe('lib/runtime.ml')
-    expect(routeHashParams().get('line')).toBe('42')
+    expect(decisionLinks.map(link => link.textContent)).toEqual(['Telemetry', 'Keeper'])
 
     fireEvent.click(decisionLinks.find(link => link.textContent === 'Telemetry')!)
     expect(routeHashParams().get('q')).toBe(

@@ -37,8 +37,6 @@ import {
   type SelectedAnnotation,
 } from './ide-lsp-client'
 import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
-import { keeperCursorExtension } from './keeper-cursor-cm-extension'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import { filterTraceEventsByReplay, keeperTraceState, type KeeperTraceEvent } from './keeper-trace-store'
 import { globalPresenceSnapshot } from './keeper-presence-store'
 import { ideContextFocus, type IdeContextFocus } from './ide-state'
@@ -51,7 +49,6 @@ import {
   editorGridRows,
   activeLayersInDisplayOrder,
 } from './ide-editor-blame'
-import { keepersWithCursorInFile, EditorKeeperCursorChip } from './ide-editor-cursor'
 import { buildCurrentFileSignals, EditorCurrentFileSignals, focusTraceLineContext } from './ide-editor-signals'
 import { EditorContextRouteLink, EditorContextRouteCount, AnnotationPopover } from './ide-editor-annotation-ui'
 
@@ -101,9 +98,7 @@ export function IdeEditor({
   onAnnotationDelete,
 }: IdeEditorProps) {
   useStoreSubscription(documentStore.subscribe)
-  useStoreSubscription(documentStore.subscribeRegions)
   useStoreSubscription(ownershipStore.subscribe)
-  useSignalValue(cursorOverlaySignal)
   useSignalValue(globalPresenceSnapshot)
   useSignalValue(ideContextFocus)
   useSignalValue(ideConversationThreadSnapshot)
@@ -132,15 +127,10 @@ export function IdeEditor({
   }
   const documentFilePath: string = document.file_path
   const lines = documentStore.lines()
-  const regions = documentStore.regions()
-  const regionsState = documentStore.regionsState()
   const ownership = ownershipStore.ownership()
   const keepers = ownershipStore.knownKeepers()
-  const overlay = cursorOverlaySignal.value
-  const presence = globalPresenceSnapshot.value
   const contextFocus = ideContextFocus.value
   const currentFileFocus = contextFocus?.file_path === documentFilePath ? contextFocus : null
-  const activeCursors = keepersWithCursorInFile(overlay.cursors, documentFilePath)
   const activeLayerKinds = activeLayersInDisplayOrder(activeLayers)
   const currentDiffRows = diffRows()
   const replayTraceEvents = filterTraceEventsByReplay(keeperTraceState.value.events, ideReplayUntilMs.value)
@@ -148,24 +138,11 @@ export function IdeEditor({
     filePath: documentFilePath,
     annotations,
     diffRows: currentDiffRows,
-    activeKeeperCount: activeCursors.length,
     traceEvents: replayTraceEvents,
   })
   const gridTemplateRows = editorGridRows(activeLayerKinds.length > 0, findOpen)
-  const observationSummary = regionsState === 'loading'
-    ? 'metadata loading…'
-    : regionsState === 'error'
-      ? 'metadata unavailable'
-      : regionsState === 'idle'
-        ? 'metadata pending'
-        : `${regions.length} observed · ${ownership.size} owned · ${keepers.length} keepers`
-  const observationTitle = regionsState === 'loading'
-    ? 'Loading keeper-authored code-region metadata'
-    : regionsState === 'error'
-      ? 'Keeper code-region metadata could not be loaded; see the workspace diagnostics'
-      : regionsState === 'idle'
-        ? 'Keeper code-region metadata has not been requested for this file yet'
-        : `${regions.length} observed region(s), ${ownership.size} owned line(s), ${keepers.length} keeper(s)`
+  const observationSummary = `${ownership.size} owned · ${keepers.length} keepers`
+  const observationTitle = `${ownership.size} owned line(s), ${keepers.length} keeper(s)`
 
   return html`
     <div
@@ -231,23 +208,6 @@ export function IdeEditor({
               </span>
             ` : null}
           </div>
-        ` : null}
-        ${activeCursors.length > 0 ? html`
-          <ul
-            role="status"
-            aria-label="Keepers active in this file"
-            style=${{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 'var(--sp-1)',
-              listStyle: 'none',
-              margin: 0,
-              padding: 0,
-              flexShrink: 0,
-            }}
-          >
-            ${activeCursors.map(ac => EditorKeeperCursorChip(ac, presence, ac.keeper_id))}
-          </ul>
         ` : null}
         ${onFindOpen || onFindClose ? html`
           <button
@@ -382,7 +342,6 @@ function CodeMirrorEditor({
           syntaxHighlightExt(),
           lang,
           lspExtension({ filePath: mountFilePath }),
-          keeperCursorExtension(),
           contextFocusLineExt(),
           annotationLineChipExt(),
           EditorView.updateListener.of((update) => {

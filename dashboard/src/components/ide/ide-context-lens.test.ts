@@ -6,7 +6,6 @@ import { deriveIdeContextLens, IdeContextLens, routeLinksForContext } from './id
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import type { AnchoredThread } from './anchored-thread-rail-store'
-import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
 import type { RunActivityEvent } from './run-activity-store'
 import { ideContextFocus } from './ide-state'
 
@@ -54,25 +53,6 @@ const events: ReadonlyArray<RunActivityEvent> = [
   },
 ]
 
-const overlay: KeeperCursorOverlay = {
-  cursors: new Map([[
-    'sangsu',
-    {
-      keeper_id: 'sangsu',
-      file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
-      line: 12,
-      column: 4,
-      focus_mode: 'editing',
-      last_update: 100,
-      tool_name: 'keeper_tool_ide_runtime',
-      turn: 7,
-    },
-  ]]),
-  heatmap: new Map(),
-  collisions: [],
-  active_file: 'lib/keeper/keeper_tool_ide_runtime.ml',
-}
-
 const thread: AnchoredThread = {
   id: 'thread-1',
   kind: 'question',
@@ -90,13 +70,12 @@ const thread: AnchoredThread = {
 }
 
 describe('IdeContextLens', () => {
-  it('derives linked surfaces from annotations, diff rows, activity, and cursors', () => {
+  it('derives linked surfaces from annotations, diff rows, and activity', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [annotation],
       diffRows,
       events,
-      overlay,
     })
 
     const linked = new Set(
@@ -120,7 +99,7 @@ describe('IdeContextLens', () => {
     ]))
     expect(model.activeLineCount).toBe(1)
     expect(model.changedLineCount).toBe(2)
-    expect(model.anchorTotalCount).toBe(4)
+    expect(model.anchorTotalCount).toBe(3)
     expect(model.anchors.map(anchor => anchor.surface)).toContain('Git')
     expect(model.surfaces.find(surface => surface.id === 'line')?.routeLink).toMatchObject({
       label: 'Code',
@@ -147,7 +126,6 @@ describe('IdeContextLens', () => {
       annotations: [annotation],
       diffRows,
       events: [],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
@@ -168,7 +146,6 @@ describe('IdeContextLens', () => {
         annotations: [annotation],
         diffRows,
         events,
-        overlay,
         onRouteLinkActivate: link => activated.push(link),
       }),
       container,
@@ -178,7 +155,7 @@ describe('IdeContextLens', () => {
     expect(container.textContent).toContain('CONTEXT LENS')
     expect(container.textContent).toContain('11/12 linked')
     expect(container.textContent).toContain('keeper_tool_ide_runtime.ml')
-    expect(container.textContent).toContain('4 anchors')
+    expect(container.textContent).toContain('3 anchors')
     expect(container.textContent).toContain('goal goal-ide')
 
     const surfaceButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-context-surface-action')]
@@ -223,23 +200,6 @@ describe('IdeContextLens', () => {
       body: 'Second anchored thread',
       anchor: { ...thread.anchor, line_start: 20, line_end: 20 },
     }
-    const busyOverlay: KeeperCursorOverlay = {
-      ...overlay,
-      cursors: new Map([
-        ...overlay.cursors,
-        ['analyst', {
-          keeper_id: 'analyst',
-          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
-          line: 17,
-          column: 2,
-          focus_mode: 'reviewing',
-          last_update: 101,
-          tool_name: 'review',
-          turn: 8,
-        }],
-      ]),
-    }
-
     render(
       h(IdeContextLens, {
         filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
@@ -263,15 +223,14 @@ describe('IdeContextLens', () => {
         diffRows,
         events: [],
         threads: [thread, secondThread],
-        overlay: busyOverlay,
       }),
       container,
     )
 
     const panel = container.querySelector('[data-testid="ide-context-lens"]')
     expect(panel?.getAttribute('data-visible-anchors')).toBe('6')
-    expect(panel?.getAttribute('data-total-anchors')).toBe('10')
-    expect(container.textContent).toContain('6/10 anchors')
+    expect(panel?.getAttribute('data-total-anchors')).toBe('8')
+    expect(container.textContent).toContain('6/8 anchors')
   })
 
   it('keeps operational PR, Git, and planning anchors visible when the current file is busy', () => {
@@ -280,23 +239,6 @@ describe('IdeContextLens', () => {
       { ...annotation, id: 'ann-2', line_start: 15, content: 'Second task note' },
       { ...annotation, id: 'ann-3', line_start: 16, content: 'Third task note' },
     ]
-    const busyOverlay: KeeperCursorOverlay = {
-      ...overlay,
-      cursors: new Map([
-        ...overlay.cursors,
-        ['analyst', {
-          keeper_id: 'analyst',
-          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
-          line: 17,
-          column: 2,
-          focus_mode: 'reviewing',
-          last_update: 101,
-          tool_name: 'review',
-          turn: 8,
-        }],
-      ]),
-    }
-
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: extraAnnotations,
@@ -338,7 +280,6 @@ describe('IdeContextLens', () => {
         },
       }],
       threads: [thread],
-      overlay: busyOverlay,
     })
 
     expect(model.anchorTotalCount).toBeGreaterThan(6)
@@ -366,7 +307,6 @@ describe('IdeContextLens', () => {
         annotations: [annotation],
         diffRows: [],
         events: [],
-        overlay: { ...overlay, cursors: new Map() },
       }),
       container,
     )
@@ -398,7 +338,6 @@ describe('IdeContextLens', () => {
       }],
       diffRows: [],
       events: [],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
@@ -445,7 +384,6 @@ describe('IdeContextLens', () => {
       }],
       diffRows: [],
       events: [],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual(['Code'])
@@ -463,7 +401,6 @@ describe('IdeContextLens', () => {
       annotations: [invalidLineAnnotation],
       diffRows: [],
       events: [],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     expect(model.activeLineCount).toBe(0)
@@ -481,7 +418,6 @@ describe('IdeContextLens', () => {
         annotations: [invalidLineAnnotation],
         diffRows: [],
         events: [],
-        overlay: { ...overlay, cursors: new Map() },
       }),
       container,
     )
@@ -502,7 +438,6 @@ describe('IdeContextLens', () => {
         annotations: [annotation],
         diffRows: [],
         events: [],
-        overlay: { ...overlay, cursors: new Map() },
         onRouteLinkActivate: link => activated.push(link),
       }),
       container,
@@ -535,7 +470,6 @@ describe('IdeContextLens', () => {
       annotations: [linkedAnnotation],
       diffRows: [],
       events: [],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
@@ -599,7 +533,6 @@ describe('IdeContextLens', () => {
       diffRows: [],
       events: [],
       threads: [thread],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
@@ -641,7 +574,6 @@ describe('IdeContextLens', () => {
           worker_run_id: 'wr-9',
         },
       }],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
@@ -763,7 +695,6 @@ describe('IdeContextLens', () => {
           worker_run_id: 'wr-9',
         },
       }],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     expect(model.activeLineCount).toBe(1)
@@ -834,7 +765,6 @@ describe('IdeContextLens', () => {
           worker_run_id: 'wr-9',
         },
       }],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     expect(model.surfaces.find(surface => surface.id === 'runtime')).toMatchObject({
@@ -897,7 +827,6 @@ describe('IdeContextLens', () => {
           log_id: 'turn-9',
         },
       }],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'PR')).toMatchObject({
@@ -934,7 +863,6 @@ describe('IdeContextLens', () => {
           log_id: 'turn-10',
         },
       }],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     expect(model.linkedCount).toBe(0)
@@ -972,16 +900,6 @@ describe('IdeContextLens', () => {
           file_path: 'lib\\keeper\\keeper_tool_ide_runtime.ml',
         },
       }],
-      overlay: {
-        ...overlay,
-        cursors: new Map([[
-          'sangsu',
-          {
-            ...overlay.cursors.get('sangsu')!,
-            file_path: 'lib\\keeper\\keeper_tool_ide_runtime.ml',
-          },
-        ]]),
-      },
     })
 
     const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
@@ -991,7 +909,6 @@ describe('IdeContextLens', () => {
     expect(model.activeLineCount).toBe(3)
     expect(model.anchors.map(anchor => anchor.id)).toEqual([
       'annotation-ann-backslash',
-      'cursor-sangsu-12',
       'thread-thread-backslash',
       'event-evt-backslash',
     ])
@@ -1015,7 +932,6 @@ describe('IdeContextLens', () => {
           log_id: 'turn-9',
         },
       }],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     const lineSurface = model.surfaces.find(surface => surface.id === 'line')
@@ -1030,7 +946,6 @@ describe('IdeContextLens', () => {
       annotations: [],
       diffRows: [{ kind: 'delete', oldLine: 13, newLine: null, text: '-let old = ...' }],
       events: [],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     expect(model.changedLineCount).toBe(1)
@@ -1060,7 +975,6 @@ describe('IdeContextLens', () => {
           log_id: 'turn-9',
         },
       }],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     const logRoute = model.anchors[0]?.route_links?.find(link => link.label === 'Log')
@@ -1085,7 +999,6 @@ describe('IdeContextLens', () => {
           log_id: 'turn-9',
         },
       }],
-      overlay: { ...overlay, cursors: new Map() },
     })
 
     const telemetryRoute = model.anchors[0]?.route_links?.find(link => link.label === 'Telemetry')

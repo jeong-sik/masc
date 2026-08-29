@@ -728,22 +728,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(ideRefresh).not.toHaveBeenCalled()
   })
 
-  it('routes IDE cursor invalidations delivered by the dashboard websocket', async () => {
-    const { sseStore } = await loadSseStore()
-    const cursorRefresh = vi.fn()
-    const unregister = sseStore.registerIdeCursorRefresh(cursorRefresh)
-
-    sseStore.routeServerPushEvent({
-      type: 'ide_cursor_changed',
-      keeper_id: 'kidsnote',
-    })
-    vi.advanceTimersByTime(1)
-    await flushAsyncWork()
-
-    expect(cursorRefresh).toHaveBeenCalledOnce()
-    unregister()
-  })
-
   it('routes keeper_chat_appended pushes to the live chat refresh hook', async () => {
     const { sseStore } = await loadSseStore()
 

@@ -3,9 +3,7 @@ import {
   createIdeAnnotation,
   deleteIdeAnnotation,
   fetchIdeAnnotations,
-  fetchIdeCursors,
   fetchIdeEvents,
-  fetchIdeRegions,
 } from './ide'
 import { clearStoredToken, setStoredToken } from './core'
 
@@ -43,15 +41,6 @@ const annotation = {
   references: [],
   created_at_ms: 1,
   updated_at_ms: 1,
-}
-
-const region = {
-  file_path: 'lib/a.ml',
-  line_start: 1,
-  line_end: 1,
-  keeper_id: 'sangsu',
-  source: { type: 'tool_call', tool_name: 'write_file', turn: 7 },
-  timestamp_ms: 1,
 }
 
 describe('ide API', () => {
@@ -200,33 +189,6 @@ describe('ide API', () => {
     })).rejects.toThrow('createIdeAnnotation returned malformed row')
   })
 
-  it('fetchIdeRegions appends repo_id param', async () => {
-    stubFetch({ ok: true, data: [region] })
-
-    await fetchIdeRegions('lib/a.ml', { codebase: 'github.com_jeong-sik_masc' })
-
-    const url = String(mockFetch.mock.calls[0]![0])
-    expect(url).toContain('/api/v1/ide/regions?')
-    expect(url).toContain('file_path=lib%2Fa.ml')
-    expect(url).toContain('codebase=github.com_jeong-sik_masc')
-  })
-
-  it('fetchIdeRegions rejects malformed response data', async () => {
-    stubFetch({ ok: true, data: { regions: [] } })
-
-    await expect(fetchIdeRegions('lib/a.ml')).rejects.toThrow(
-      'fetchIdeRegions returned malformed data',
-    )
-  })
-
-  it('fetchIdeRegions rejects malformed region rows instead of coercing defaults', async () => {
-    stubFetch({ ok: true, data: [{ ...region, source: { type: 'legacy' } }] })
-
-    await expect(fetchIdeRegions('lib/a.ml')).rejects.toThrow(
-      'fetchIdeRegions returned malformed row at index 0',
-    )
-  })
-
   it('deleteIdeAnnotation sends the bearer token and appends repo_id param without keeper_id', async () => {
     setStoredToken('delete-test-token', { source: 'manual' })
     stubFetch({}, true)
@@ -353,68 +315,4 @@ describe('ide API', () => {
     )
   })
 
-  it('fetchIdeCursors appends cursor filters and parses valid cursor rows', async () => {
-    stubFetch({
-      ok: true,
-      data: {
-        runtime_id: 'masc-runtime',
-        branch: 'main',
-        connected: true,
-        cursors: [{
-          keeper_id: 'sangsu',
-          file_path: 'lib/a.ml',
-          line: 12,
-          column: 3,
-          selection_end: { line: 14, column: 3 },
-          focus_mode: 'editing',
-          last_update: '1717400000000',
-          tool_name: 'keeper_ide_annotate',
-          turn: 7,
-        }],
-      },
-    })
-
-    const snapshot = await fetchIdeCursors({
-      keeperId: 'sangsu',
-      filePath: 'lib/a.ml',
-      codebase: 'github.com_jeong-sik_masc',
-      limit: 10,
-    })
-
-    const url = String(mockFetch.mock.calls[0]![0])
-    expect(url).toContain('/api/v1/ide/cursors?')
-    expect(url).toContain('keeper_id=sangsu')
-    expect(url).toContain('file_path=lib%2Fa.ml')
-    expect(url).toContain('codebase=github.com_jeong-sik_masc')
-    expect(url).toContain('limit=10')
-    expect(snapshot?.cursors).toEqual([expect.objectContaining({
-      keeper_id: 'sangsu',
-      file_path: 'lib/a.ml',
-      line: 12,
-      focus_mode: 'editing',
-      turn: 7,
-    })])
-  })
-
-  it('fetchIdeCursors rejects malformed cursor rows instead of dropping them', async () => {
-    stubFetch({
-      ok: true,
-      data: {
-        runtime_id: 'masc-runtime',
-        connected: true,
-        cursors: [{
-          keeper_id: 'sangsu',
-          file_path: 'lib/a.ml',
-          line: 0,
-          column: 3,
-          focus_mode: 'editing',
-          last_update: 1717400000000,
-        }],
-      },
-    })
-
-    await expect(fetchIdeCursors()).rejects.toThrow(
-      'fetchIdeCursors returned malformed cursor rows',
-    )
-  })
 })

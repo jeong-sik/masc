@@ -37,14 +37,6 @@ import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeMemoryPanel } from './ide-memory-panel'
 import { routeLinksForContext } from './ide-context-lens'
-import {
-  connectKeeperCursorPush,
-  cursorOverlaySignal,
-  getKeeperColor,
-  type KeeperCursor,
-  type KeeperCursorOverlay,
-  type KeeperCursorStreamState,
-} from './keeper-cursor-overlay'
 import { lspStatusSnapshot, type LspStatusSnapshot, type SelectedAnnotation } from './ide-lsp-client'
 import { deleteIdeAnnotation, type IdeAnnotationDeleteOutcome } from '../../api/ide'
 import { showToast } from '../common/toast'
@@ -56,7 +48,6 @@ import { devTokenBootstrapStatus } from '../../api/dev-token'
 import { dashboardWsReady } from '../../dashboard-ws-state'
 import { fetchRepositoryObservation, type Repository } from '../../api/repositories'
 import type { WorkspaceSource } from '../../api/workspace-source'
-import { KeeperBadge } from '../keeper-badge'
 import type { WorkspaceFetchIssue } from './ide-data-workspace-store'
 import {
   parseActive,
@@ -67,7 +58,7 @@ import { useIsMobile } from '../../hooks/use-is-mobile'
 
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
-type IdeRightRailTab = 'activity' | 'annotations' | 'cursors'
+type IdeRightRailTab = 'activity' | 'annotations'
 type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok' | 'warn'
 type IdeConnectionTone = 'ok' | 'warn'
 
@@ -122,11 +113,6 @@ const IDE_RIGHT_RAIL_TABS: ReadonlyArray<IdeRightRailTabDescriptor> = [
     id: 'annotations',
     label: '어노테이션',
     title: 'File-addressable comments, decisions, questions, and bookmarks',
-  },
-  {
-    id: 'cursors',
-    label: '커서',
-    title: 'Live keeper file focus and cursor stream status',
   },
 ]
 
@@ -416,8 +402,6 @@ function workspaceIssueLabel(issue: WorkspaceFetchIssue): string {
       return 'tree'
     case 'file':
       return issue.file_path ? `file ${shortStatusbarPath(issue.file_path)}` : 'file'
-    case 'regions':
-      return 'regions'
     case 'blame':
       return 'blame'
     case 'diff':
@@ -579,8 +563,8 @@ function IdeDashboardConnectionChip({
   readonly tone: IdeConnectionTone
 }) {
   const title = tone === 'ok'
-    ? 'Dashboard event transport is live. Repository tree loads, LSP, and keeper cursor streams report separate status.'
-    : 'Dashboard event transport is not live. Repository tree loads, LSP, and keeper cursor streams report separate status.'
+    ? 'Dashboard event transport is live. Repository tree loads and LSP report separate status.'
+    : 'Dashboard event transport is not live. Repository tree loads and LSP report separate status.'
   return html`
     <span
       class=${`tag-chip sm is-${tone}`}
@@ -620,178 +604,6 @@ function paramsWithRails(
     delete next.rails
   }
   return next
-}
-
-function shortCursorPath(path: string): string {
-  const parts = path.trim().split('/').filter(Boolean)
-  if (parts.length <= 2) return path.trim() || '(no file)'
-  return `${parts.at(-2)}/${parts.at(-1)}`
-}
-
-function cursorAgeLabel(lastUpdate: number): string {
-  if (!Number.isFinite(lastUpdate) || lastUpdate <= 0) return 'unknown age'
-  const seconds = Math.max(0, Math.round((Date.now() - lastUpdate) / 1000))
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  return `${Math.round(minutes / 60)}h ago`
-}
-
-function cursorStreamStatusTone(status: KeeperCursorStreamState['status']): 'ghost' | 'info' | 'ok' | 'warn' {
-  switch (status) {
-    case 'connecting':
-      return 'info'
-    case 'live':
-      return 'ok'
-    case 'degraded':
-      return 'warn'
-    case 'closed':
-      return 'ghost'
-  }
-}
-
-function cursorStreamStatusLabel(stream: KeeperCursorStreamState): string {
-  switch (stream.status) {
-    case 'connecting':
-      return 'stream connecting'
-    case 'live':
-      return 'stream live'
-    case 'degraded':
-      return stream.failedCount > 0
-        ? `stream degraded ${stream.failedCount} failed`
-        : 'stream degraded'
-    case 'closed':
-      return 'stream closed'
-  }
-}
-
-function cursorStreamStatusTitle(stream: KeeperCursorStreamState): string {
-  const parts = [cursorStreamStatusLabel(stream)]
-  if (stream.lastOpenMs !== undefined) parts.push(`last open ${new Date(stream.lastOpenMs).toISOString()}`)
-  if (stream.lastErrorMs !== undefined) parts.push(`last error ${new Date(stream.lastErrorMs).toISOString()}`)
-  if (stream.error) parts.push(stream.error)
-  return parts.join(' · ')
-}
-
-function sortedCursors(overlay: KeeperCursorOverlay): ReadonlyArray<KeeperCursor> {
-  return [...overlay.cursors.values()].sort((left, right) => {
-    if (right.last_update !== left.last_update) return right.last_update - left.last_update
-    return left.keeper_id.localeCompare(right.keeper_id)
-  })
-}
-
-function focusCursor(cursor: KeeperCursor): void {
-  const filePath = cursor.file_path.trim()
-  if (!filePath) return
-  const line = cursor.line >= 1 ? cursor.line : undefined
-  const label = cursor.tool_name ?? cursor.focus_mode
-  const sourceId = `cursor:${cursor.keeper_id}:${filePath}:${line ?? 0}`
-  focusIdeContextAnchor({
-    file_path: filePath,
-    line,
-    surface: 'Keeper',
-    label,
-    source_id: sourceId,
-    keeper_id: cursor.keeper_id,
-    route_links: routeLinksForContext({
-      filePath,
-      line,
-      surface: 'Keeper',
-      label,
-      sourceId,
-      keeperId: cursor.keeper_id,
-      telemetry: true,
-      telemetryQuery: [
-        cursor.keeper_id,
-        cursor.focus_mode ? `mode:${cursor.focus_mode}` : null,
-        cursor.tool_name ? `tool:${cursor.tool_name}` : null,
-      ].filter((part): part is string => Boolean(part)).join(' '),
-    }),
-  }, 'operator')
-}
-
-function IdeCursorRailPanel() {
-  const overlay = useSignalValue(cursorOverlaySignal)
-  const cursors = useMemo(() => sortedCursors(overlay), [overlay])
-  return html`
-    <div
-      class="ide-plane-cursors"
-      data-testid="ide-cursor-rail"
-      role="region"
-      aria-label="Keeper cursor focus"
-    >
-      <div class="ide-rail-head">
-        <span>KEEPER CURSORS</span>
-        <span>${cursors.length} active</span>
-      </div>
-      ${overlay.stream ? html`
-        <div
-          class=${`ide-cursor-stream-status tag-chip sm is-${cursorStreamStatusTone(overlay.stream.status)}`}
-          data-testid="ide-cursor-stream-status"
-          data-state=${overlay.stream.status}
-          role="status"
-          aria-live="polite"
-          title=${cursorStreamStatusTitle(overlay.stream)}
-        >${cursorStreamStatusLabel(overlay.stream)}</div>
-      ` : null}
-      ${overlay.active_file ? html`
-        <div class="ide-cursor-rail-active-file" title=${overlay.active_file}>
-          active file · ${shortCursorPath(overlay.active_file)}
-        </div>
-      ` : null}
-      ${overlay.collisions.length > 0 ? html`
-        <div class="ide-cursor-collision-list" role="status" aria-label="Cursor collision summary">
-          ${overlay.collisions.slice(0, 4).map(collision => html`
-            <span
-              key=${`${collision.line}:${collision.keeper_ids.join(',')}`}
-              title=${collision.keeper_ids.join(', ')}
-            >
-              L${collision.line} · ${collision.keeper_ids.length} keepers
-            </span>
-          `)}
-        </div>
-      ` : null}
-      <ol class="ide-cursor-rail-list" aria-label="Active keeper cursors">
-        ${cursors.length === 0
-          ? html`<li class="ide-rail-empty" data-testid="ide-cursor-rail-empty">no active cursors</li>`
-          : cursors.map(cursor => html`<${IdeCursorRailRow} key=${cursor.keeper_id} cursor=${cursor} />`)}
-      </ol>
-    </div>
-  `
-}
-
-function IdeCursorRailRow({ cursor }: { readonly cursor: KeeperCursor }) {
-  const color = getKeeperColor(cursor.keeper_id)
-  const hasFile = cursor.file_path.trim() !== ''
-  const selection = cursor.selection_end && cursor.selection_end.line !== cursor.line
-    ? `-${cursor.selection_end.line}`
-    : ''
-  return html`
-    <li
-      class="ide-cursor-rail-row v2-ide-row"
-      style=${{ '--ide-cursor-color': color.cursor }}
-    >
-      <div class="ide-cursor-rail-row-head">
-        <${KeeperBadge} id=${cursor.keeper_id} variant="sigil" size="sm" />
-        <span class="ide-cursor-rail-keeper">${cursor.keeper_id}</span>
-        <span class="ide-cursor-rail-age">${cursorAgeLabel(cursor.last_update)}</span>
-      </div>
-      <div class="ide-cursor-rail-meta">
-        <span>${cursor.focus_mode}</span>
-        ${cursor.tool_name ? html`<span>${cursor.tool_name}</span>` : null}
-        ${cursor.turn !== undefined ? html`<span>turn ${cursor.turn}</span>` : null}
-      </div>
-      <div class="ide-cursor-rail-path" title=${cursor.file_path}>
-        ${hasFile ? `${shortCursorPath(cursor.file_path)}:${cursor.line}${selection}` : 'no file focus'}
-      </div>
-      <button
-        type="button"
-        class="v2-ide-action ide-cursor-rail-focus"
-        disabled=${!hasFile}
-        onClick=${() => focusCursor(cursor)}
-      >Focus</button>
-    </li>
-  `
 }
 
 /**
@@ -955,29 +767,6 @@ export function IdeShell() {
     const unsubscribe = ideContextFocus.subscribe(setContextFocus)
     return () => unsubscribe()
   }, [])
-
-  useEffect(() => {
-    const repoId = activeRepositoryId?.trim()
-    const codebase = activeCodebase
-    if (!repoId || !codebase) {
-      cursorOverlaySignal.value = {
-        cursors: new Map(),
-        heatmap: new Map(),
-        collisions: [],
-        active_file: null,
-        stream: { status: 'closed', failedCount: 0 },
-      }
-      return
-    }
-    return connectKeeperCursorPush((overlay) => {
-      cursorOverlaySignal.value = { ...overlay, stream: cursorOverlaySignal.value.stream }
-    }, {
-      codebase,
-      onStatus: stream => {
-        cursorOverlaySignal.value = { ...cursorOverlaySignal.value, stream }
-      },
-    })
-  }, [activeCodebase, activeRepositoryId])
 
   const routeFileFocus = routeFocusFile(route.value.params)
   const routeLineFocus = routeFocusLine(route.value.params)
@@ -1495,7 +1284,6 @@ export function IdeShell() {
                     <${IdeAnnotationRail} annotations=${annotations} />
                   </div>
                 ` : null}
-                ${rightRailTab === 'cursors' ? html`<${IdeCursorRailPanel} />` : null}
               </div>
             </div>
           `}

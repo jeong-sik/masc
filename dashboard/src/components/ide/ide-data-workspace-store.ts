@@ -88,7 +88,6 @@ export type WorkspaceFetchIssueKind =
   | 'repositories'
   | 'tree'
   | 'file'
-  | 'regions'
   | 'blame'
   | 'diff'
   | 'annotations'
@@ -681,40 +680,6 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
           return
         }
         clearIssue('file', { filePath, keeper: keeperParam ?? null, repoId })
-
-        // The document load invalidates metadata for a different file. Start
-        // the region read only after that load has committed; doing both in
-        // parallel let a slower file response mark a valid region response as
-        // stale before it could populate the ownership projection.
-        if (codebase) {
-          documentStore.loadRegions(filePath, ideOpts).then(() => {
-            if (signal.aborted || documentStore.document().file_path !== filePath) return
-            for (const region of documentStore.regions()) {
-              ownershipStore.ingest({
-                file_path: region.file_path,
-                line_start: region.line_start,
-                line_end: region.line_end,
-                keeper_id: region.keeper_id,
-                timestamp_ms: region.timestamp_ms,
-                // Regions prove that a keeper operated on this code range, but the
-                // wire contract deliberately does not infer a more specific edit
-                // operation such as create/refactor/revert.
-                kind: 'observed',
-              })
-            }
-            clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
-          }).catch(error => {
-            if (signal.aborted) return
-            recordIssue('regions', error, {
-              filePath,
-              keeper: keeperParam ?? null,
-              repoId,
-              fallbackMessage: 'IDE regions fetch failed',
-            })
-          })
-        } else {
-          clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
-        }
       } else {
         documentStore.invalidate()
         const currentFocus = activeIdeFocus.peek()

@@ -508,10 +508,14 @@ let upsert_explicit_fact
   =
   let keeper_id = meta.name in
   let now = Time_compat.now () in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let fact : Keeper_memory_os_types.fact =
     { claim = body
     ; category = Keeper_memory_os_types.Fact
     ; first_seen = now
+    ; last_seen = now
+    ; reinforcement = 0
+    ; origin = { kind = Keeper_memory_os_types.Authored; trace_id }
     }
   in
   let result =
@@ -521,7 +525,7 @@ let upsert_explicit_fact
       ~now
       ~source:
         { kind = Keeper_memory_os_current.Explicit_write
-        ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+        ; trace_id
         }
       fact
   in

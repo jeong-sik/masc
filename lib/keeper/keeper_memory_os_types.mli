@@ -57,11 +57,37 @@ val all_categories : category list
 (** Parse an exact category token. Unknown or non-canonical tokens reject. *)
 val category_of_string : string -> category option
 
-(** A single semantic claim extracted from conversation history. *)
+(** Row-level provenance. [Authored]: explicit keeper memory_write.
+    [Injected]: librarian extraction (a copy of what the keeper already
+    saw — the feed the self-referential reinjection loop runs on).
+    [Legacy]: rows written before this field existed; provenance unknown,
+    never back-filled with a guess. *)
+type origin_kind =
+  | Authored
+  | Injected
+  | Legacy
+
+type origin =
+  { kind : origin_kind
+  ; trace_id : string
+  }
+
+(** Canonical lowercase token for an origin kind. Category tokens only —
+    this never renders a unique identity into a prompt (masc#29558). *)
+val origin_kind_to_string : origin_kind -> string
+
+(** A single semantic claim extracted from conversation history.
+    [first_seen] insertion (authoritative, preserved across re-upsert);
+    [last_seen] most recent re-observation of the same claim bytes —
+    the eviction ordering key; [reinforcement] re-observation count of the
+    exact claim bytes, the measurable damper on byte-identical reinjection. *)
 type fact =
   { claim : string
   ; category : category
   ; first_seen : float
+  ; last_seen : float
+  ; reinforcement : int
+  ; origin : origin
   }
 
 (** SHA-256 of the exact claim bytes. This derived identifier is used only for
@@ -69,4 +95,9 @@ type fact =
 val memory_id : fact -> string
 
 val fact_to_json : fact -> Yojson.Safe.t
+
+(** Inverse of {!fact_to_json}. Accepts both the current six-field row and
+    the legacy three-field row; a legacy row decodes with [Legacy] origin,
+    [last_seen = first_seen], [reinforcement = 0]. A row mixing the two
+    vocabularies rejects rather than being read past. *)
 val fact_of_json : Yojson.Safe.t -> fact option

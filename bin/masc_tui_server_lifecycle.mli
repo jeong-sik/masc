@@ -60,6 +60,10 @@ type owned_server
 val owned_pgid : owned_server -> int
 val owned_port : owned_server -> int
 
+val is_running : owned_server -> bool
+(** True while at least one member of the owned server's process group is
+    still alive. Suitable as the [child_alive] argument to {!wait_healthy}. *)
+
 val start :
   masc_bin:string ->
   base_path:string ->

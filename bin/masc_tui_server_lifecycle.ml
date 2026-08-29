@@ -60,6 +60,7 @@ type owned_server = {
 
 let owned_pgid t = t.pgid
 let owned_port t = t.port
+let is_running t = Process_eio_detached.is_pgid_alive ~pgid:t.pgid
 
 let start ~masc_bin ~base_path ~host ~port ~env =
   let argv = server_argv ~masc_bin ~base_path ~host ~port in

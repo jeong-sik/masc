@@ -52,9 +52,10 @@
     The payload's environment is synthesized server-side: a documented
     minimal base env ({!default_base_path} for [PATH]; [HOME], [USER],
     [TMPDIR] taken from the shim's own environment when present, else the
-    defaults [/tmp], ["masc"], [/tmp]) overlaid with ONLY the
-    allowlisted request entries.  A reserved-name denylist is NEVER
-    accepted from the wire — the denylist beats the allowlist. *)
+    defaults [/tmp], ["masc"], [/tmp]) overlaid with the endpoint-allowlisted
+    request entries and the runner-owned [GH_CONFIG_DIR] and
+    [GIT_TERMINAL_PROMPT] entries.  A reserved-name denylist is NEVER accepted
+    from the wire — the denylist beats both allowlists. *)
 
 val default_base_path : string
 (** [= "/usr/local/bin:/usr/bin:/bin"].  The payload's [PATH] is always
@@ -73,10 +74,11 @@ val synthesize_env :
   (string * string) list
 (** [synthesize_env ~base_env ~allowlist ~request_env] is the payload's
     full environment: the minimal base env (see above; [base_env] is the
-    shim's own process environment — the function itself is pure and
-    performs no process-state lookups) with each allowlisted,
-    non-denylisted request entry overlaid.  A request entry whose name
-    collides with a base key replaces the base value.  Duplicate names in
+    shim's own process environment — the function itself is pure and performs
+    no process-state lookups) with each non-denylisted request entry overlaid
+    when its name is in [allowlist] or is one of the runner-owned
+    [GH_CONFIG_DIR] and [GIT_TERMINAL_PROMPT] names.  A request entry whose
+    name collides with a base key replaces the base value.  Duplicate names in
     [request_env] are last-wins.  The result has unique keys; order is
     unspecified. *)
 

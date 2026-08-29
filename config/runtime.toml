@@ -199,7 +199,10 @@ path = "/api/tags"
 #
 #   tools                        two calls in one turn (Seoul + Tokyo)
 #   tool_choice {name}           honoured
-#   tool_choice "required"       NOT honoured — answered in prose, no call
+#   tool_choice "required"       NOT honoured — answered in prose, no call.
+#                                Qwen3.8-27B on the same server does honour it
+#                                (measured 2026-08-30), so this one is the
+#                                model's chat template, not llama.cpp's.
 #   response_format json_schema  honoured exactly: asked for verdict+score,
 #                                got {"verdict":"Excellent","score":5}
 #   reasoning_content            populated under --reasoning-format deepseek
@@ -283,7 +286,9 @@ path = "/api/tags"
 # [models.llama-server-local.capabilities]
 # supports-tool-choice = true
 # supports-named-tool-choice = true
-# Measured false: with tool_choice "required" the model answered in prose.
+# Measured false for this model: with tool_choice "required" it answered in
+# prose. Re-measure after changing the served weights — Qwen3.8-27B honours the
+# same request on the same build, so the value belongs to the model.
 # supports-required-tool-choice = false
 # supports-parallel-tool-calls = true
 # supports-extended-thinking = true

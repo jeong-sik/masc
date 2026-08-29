@@ -9838,7 +9838,23 @@ let render_acting (state : state) =
     let row = Acting.row_of_entry ~duration_ms entry in
     { row with Acting.keeper = Acting.keeper_of_event ~traces event }
   in
-  let shown = List.length visible in
+  (* [Turns] folds the whole ring into per-turn rows; the flat filters keep
+     the page-lazy pairing above. *)
+  let chunked =
+    match state.acting_filter with
+    | Acting.Turns -> Some (Acting.chunk_rows ~traces state.acting)
+    | Acting.Actions | Acting.Everything -> None
+  in
+  let shown =
+    match chunked with
+    | Some rows -> List.length rows
+    | None -> List.length visible
+  in
+  let row_at idx =
+    match chunked with
+    | Some rows -> List.nth_opt rows idx
+    | None -> Option.map row_of (List.nth_opt visible idx)
+  in
   let feed =
     match state.observer with
     | Observer_off -> "feed: off"
@@ -9908,7 +9924,7 @@ let render_acting (state : state) =
   else
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
-      match Option.map row_of (List.nth_opt visible idx) with
+      match row_at idx with
       | None -> box_empty buf cols
       | Some row ->
           let style =

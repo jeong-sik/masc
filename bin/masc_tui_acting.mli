@@ -9,12 +9,15 @@
 
 module Observer = Masc_tui_observer
 
-(** Which events the surface shows. [Actions] is the default: what keepers
-    did. [Everything] adds the events that say a keeper is still there or
-    that a projection changed - heartbeats, composite and snapshot pushes,
-    telemetry - which on the live runtime were more than half of the feed
-    and said nothing a row could act on. *)
+(** Which events the surface shows. [Turns] is the default: one row per
+    keeper turn, folded by {!chunk_rows} from the up-to-seven lifecycle rows
+    a single tool call produces across the two reporting planes. [Actions]
+    is the flat log of what keepers did. [Everything] adds the events that
+    say a keeper is still there or that a projection changed - heartbeats,
+    composite and snapshot pushes, telemetry - which on the live runtime
+    were more than half of the feed and said nothing a row could act on. *)
 type filter =
+  | Turns
   | Actions
   | Everything
 
@@ -95,6 +98,18 @@ val row_of_event :
     check the order was blank on 925 of 927 rows. *)
 (** One row per event. [duration_ms] is drawn on a completed call when the
     caller could pair it with its start; see {!duration_of_completion}. *)
+
+val chunk_rows : traces:(string * string) list -> entry list -> row list
+(** The [Turns] projection: entries (newest first) folded into one row per
+    keeper turn, plus the rows that are not turn lifecycle (chat, approvals,
+    server events, internal agent runs) unchanged. Rows come back newest
+    first by latest activity. Events that carry a turn number key their
+    chunk; the keeper-ledger events carry none and attach to the keeper's
+    most recent chunk, which can misfile a ledger row that arrives after the
+    next turn's ready - a display blemish, never a stored fact. A settled
+    chunk names its tools (ledger plane preferred, wire plane standing in
+    when the ledger is silent), tokens, and cost; a running one shows the
+    calls so far. *)
 
 val duration_of_completion :
   before:Observer.event list -> Observer.agent_core -> float option

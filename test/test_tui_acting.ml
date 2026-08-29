@@ -44,6 +44,124 @@ let text row =
   Printf.sprintf "%s %s %s | %s" (Acting.glyph_text row.Acting.glyph)
     row.Acting.keeper row.Acting.label row.Acting.detail
 
+let entries_of events =
+  (* Newest first, as the screen holds them; arrival follows list order. *)
+  List.rev
+    (List.mapi
+       (fun index event ->
+         { Acting.ae_at = 100. +. float_of_int index; ae_event = event })
+       events)
+
+let ledger_tool ?duration_ms ~keeper tool : Observer.event =
+  Observer.Keeper_tool_call
+    { Observer.kt_keeper = keeper
+    ; kt_tool = tool
+    ; kt_duration_ms = duration_ms
+    ; kt_disposition = Some "completed"
+    ; kt_at = 100.
+    }
+
+let turn_settled ~keeper ~turn ~input ~output ~cost : Observer.event =
+  Observer.Keeper_turn_complete
+    { Observer.tc_keeper = keeper
+    ; tc_turn = Some turn
+    ; tc_model = None
+    ; tc_input_tokens = Some input
+    ; tc_output_tokens = Some output
+    ; tc_cost_usd = Some cost
+    ; tc_tool_calls = Some 1
+    ; tc_at = 100.
+    }
+
+(* The exact interleaving the live screen showed on 2026-08-28: the keeper
+   ledger (completed / settled) lands BEFORE the agent-core wire replays the
+   same turn (call / returned / end), and the next turn's ready follows.
+   Fourteen rows on the flat view; the fold owes three. *)
+let test_turns_fold_the_two_planes_into_one_row_per_turn () =
+  let k = "kpr-07" in
+  let events_oldest_first =
+    [ turn_settled ~keeper:k ~turn:49 ~input:39050 ~output:70 ~cost:0.0100
+    ; ledger_tool ~duration_ms:63. ~keeper:k "masc_schedule_list"
+    ; agent_core ~kind:Observer.Turn_completed ~turn:49 k
+    ; agent_core ~kind:Observer.Tool_called ~tool:"masc_schedule_list"
+        ~turn:49 ~tool_use_id:"c49" k
+    ; agent_core ~kind:Observer.Tool_completed ~tool:"masc_schedule_list"
+        ~turn:49 ~tool_use_id:"c49" k
+    ; agent_core ~kind:Observer.Turn_started ~turn:50 k
+    ; agent_core ~kind:Observer.Turn_ready ~turn:50 k
+    ; turn_settled ~keeper:k ~turn:50 ~input:39237 ~output:76 ~cost:0.0102
+    ; ledger_tool ~duration_ms:6. ~keeper:k "keeper_artifact_read"
+    ; agent_core ~kind:Observer.Turn_completed ~turn:50 k
+    ; agent_core ~kind:Observer.Tool_called ~tool:"keeper_artifact_read"
+        ~turn:50 ~tool_use_id:"c50" k
+    ; agent_core ~kind:Observer.Tool_completed ~tool:"keeper_artifact_read"
+        ~turn:50 ~tool_use_id:"c50" k
+    ; agent_core ~kind:Observer.Turn_started ~turn:51 k
+    ; agent_core ~kind:Observer.Turn_ready ~turn:51 k
+    ]
+  in
+  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
+  check int "fourteen lifecycle rows fold to three turns" 3 (List.length rows);
+  check (list string)
+    "newest first: 51 running, 50 and 49 settled with ledger durations"
+    [ "\xe2\x96\xb6 kpr-07 turn 51 | running"
+    ; "\xe2\x96\xa0 kpr-07 turn 50 | keeper_artifact_read 6ms \xc2\xb7 in \
+       39237 out 76 \xc2\xb7 $0.0102"
+    ; "\xe2\x96\xa0 kpr-07 turn 49 | masc_schedule_list 63ms \xc2\xb7 in \
+       39050 out 70 \xc2\xb7 $0.0100"
+    ]
+    (List.map text rows)
+
+(* What is not turn lifecycle stays its own row, in feed position. *)
+let test_turns_pass_non_lifecycle_rows_through () =
+  let events_oldest_first =
+    [ agent_core ~kind:Observer.Turn_ready ~turn:7 "analyst"
+    ; Observer.Keeper_chat_appended
+        { keeper = "analyst"; connector = Some "discord"; at = 100. }
+    ; Observer.Other "operator_digest"
+    ]
+  in
+  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
+  check (list string) "chunk plus the chat and server rows"
+    [ "? server operator_digest | "
+    ; "\xe2\x97\x8f analyst chat | discord"
+    ; "\xe2\x96\xb6 analyst turn 7 | running"
+    ]
+    (List.map text rows)
+
+(* A running turn names what it is doing right now: the call alone puts the
+   tool on screen, before any return or ledger row exists. *)
+let test_a_running_turn_names_its_in_flight_call () =
+  let events_oldest_first =
+    [ agent_core ~kind:Observer.Turn_ready ~turn:7 "alpha"
+    ; agent_core ~kind:Observer.Tool_called ~tool:"read_file" ~turn:7
+        ~tool_use_id:"w1" "alpha"
+    ]
+  in
+  match Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) with
+  | [ row ] ->
+      check string "the in-flight tool is on the row"
+        "\xe2\x96\xb6 alpha turn 7 | read_file" (text row)
+  | rows -> failf "expected one chunk row, got %d" (List.length rows)
+
+(* A runtime whose ledger plane is silent still names its tools: the wire
+   pair supplies the name and the call-to-return gap supplies the duration. *)
+let test_turns_fall_back_to_the_wire_when_the_ledger_is_silent () =
+  let events_oldest_first =
+    [ agent_core ~kind:Observer.Turn_ready ~turn:3 "edgar"
+    ; agent_core ~kind:Observer.Tool_called ~tool:"read_file" ~turn:3
+        ~tool_use_id:"w1" "edgar"
+    ; agent_core ~kind:Observer.Tool_completed ~tool:"read_file" ~turn:3
+        ~tool_use_id:"w1" "edgar"
+    ]
+  in
+  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
+  match rows with
+  | [ row ] ->
+      check string "wire duration is the call-to-return gap"
+        "\xe2\x96\xb6 edgar turn 3 | read_file 1.0s" (text row)
+  | rows -> failf "expected one chunk row, got %d" (List.length rows)
+
 let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   let events =
     [ agent_core ~tool:"read_file" "analyst"
@@ -372,5 +490,13 @@ let () =
         ; test_case "elapsed text picks a unit" `Quick test_elapsed_text_picks_a_unit
         ; test_case "skill tools wear a skill label in the feed" `Quick
             test_skill_tools_wear_a_skill_label
+        ; test_case "turns fold the two planes into one row per turn" `Quick
+            test_turns_fold_the_two_planes_into_one_row_per_turn
+        ; test_case "a running turn names its in-flight call" `Quick
+            test_a_running_turn_names_its_in_flight_call
+        ; test_case "turns pass non-lifecycle rows through" `Quick
+            test_turns_pass_non_lifecycle_rows_through
+        ; test_case "turns fall back to the wire when the ledger is silent"
+            `Quick test_turns_fall_back_to_the_wire_when_the_ledger_is_silent
         ] )
     ]

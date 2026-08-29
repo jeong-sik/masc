@@ -33,9 +33,6 @@ type skill = private
   ; body : string
         (** Everything after the frontmatter, including any composition
             fence, exactly as {!Agent_core.Skill_document} returned it. *)
-  ; conformance : Agent_core.Skill_document.conformance
-        (** Specification diagnostics retained for the turn and operator
-            projections. Runtime-compatible documents remain usable. *)
   ; reference : Skill_reference.t option
         (** Exact snapshot identity. [None] exists only for document-only test
             catalogs that have no snapshot authority. *)
@@ -84,10 +81,6 @@ type error =
           contract (case, tabs, doubled spaces) but does not match it exactly.
           The entry stays a projected instruction skill; the diagnostic tells
           the author why no composition tool appeared. *)
-  | Removed_invocation_policy of
-      { skill : string
-      ; field : string
-      }
   | Duplicate_skill of { name : string }
 
 type rejected_document = private

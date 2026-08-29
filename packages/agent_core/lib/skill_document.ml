@@ -54,10 +54,6 @@ type diagnostic =
   | Compatibility_too_long of { length : int }
   | Invalid_metadata_value of { key : string }
 
-type conformance =
-  | Conformant
-  | Runtime_compatible of diagnostic list
-
 type extension_value =
   | Null
   | Boolean of bool
@@ -74,15 +70,11 @@ type t =
   ; compatibility : string option
   ; metadata : (string * string) list
   ; metadata_values : (string * extension_value) list
-  ; extensions : (string * extension_value) list
   ; body : string
   }
 
 type load_outcome =
-  | Loaded of
-      { document : t
-      ; conformance : conformance
-      }
+  | Loaded of t
   | Unloadable of diagnostic list
 
 type line =
@@ -374,15 +366,6 @@ let metadata fields =
       ] )
 ;;
 
-let extensions fields =
-  List.filter_map
-    (fun (key, value) ->
-       match standard_field_of_key key with
-       | Some _ -> None
-       | None -> Some (key, extension_value_of_yaml value))
-    fields
-;;
-
 let runtime_name ~directory_name declared =
   let directory, directory_violations = analyze_name directory_name in
   let invalid_name name violations = Invalid_name { name; violations } in
@@ -392,20 +375,18 @@ let runtime_name ~directory_name declared =
     (match declared_violations, directory_violations with
      | [], [] when String.equal declared directory -> Ok (declared, [])
      | [], [] ->
-       Ok
-         ( directory
-         , [ Name_mismatch
-               { declared = declared_name; directory = directory_name }
-           ] )
+       Error
+         [ Name_mismatch
+             { declared = declared_name; directory = directory_name }
+         ]
      | [], directory_violations ->
-       Ok
-         ( declared
-         , [ Name_mismatch
-               { declared = declared_name; directory = directory_name }
-           ; invalid_name directory_name directory_violations
-           ] )
+       Error
+         [ Name_mismatch
+             { declared = declared_name; directory = directory_name }
+         ; invalid_name directory_name directory_violations
+         ]
      | declared_violations, [] ->
-       Ok (directory, [ invalid_name declared_name declared_violations ])
+       Error [ invalid_name declared_name declared_violations ]
      | declared_violations, directory_violations ->
        Error
          [ invalid_name declared_name declared_violations
@@ -413,7 +394,7 @@ let runtime_name ~directory_name declared =
          ])
   | None ->
     (match directory_violations with
-     | [] -> Ok (directory, [ Missing_name ])
+     | [] -> Error [ Missing_name ]
      | violations -> Error [ Missing_name; invalid_name directory_name violations ])
 ;;
 
@@ -458,11 +439,13 @@ let decode_stripped ~directory_name contents =
                  | Error diagnostic -> [ diagnostic ]
                in
                let metadata, metadata_values, metadata_diagnostics = metadata fields in
-               let extension_values = extensions fields in
                let extension_diagnostics =
-                 List.map
-                   (fun (key, _) -> Unexpected_frontmatter_field key)
-                   extension_values
+                 List.filter_map
+                   (fun (key, _) ->
+                      match standard_field_of_key key with
+                      | Some _ -> None
+                      | None -> Some (Unexpected_frontmatter_field key))
+                   fields
                in
                let length_diagnostics =
                  (match utf_8_scalar_length description with
@@ -496,17 +479,12 @@ let decode_stripped ~directory_name contents =
                  ; compatibility
                  ; metadata
                  ; metadata_values
-                 ; extensions = extension_values
                  ; body
                  }
                in
-               Loaded
-                 { document
-                 ; conformance =
-                     (match diagnostics with
-                      | [] -> Conformant
-                      | diagnostics -> Runtime_compatible diagnostics)
-                 }))
+               (match diagnostics with
+                | [] -> Loaded document
+                | diagnostics -> Unloadable diagnostics)))
      | Ok _ -> Unloadable [ Frontmatter_not_mapping ])
 ;;
 
@@ -534,22 +512,11 @@ let decode ~directory_name contents =
   match decode_stripped ~directory_name contents, bom_stripped with
   | result, false -> result
   | Unloadable diagnostics, true -> Unloadable (Byte_order_mark :: diagnostics)
-  | Loaded { document; conformance = Conformant }, true ->
-    Loaded { document; conformance = Runtime_compatible [ Byte_order_mark ] }
-  | Loaded { document; conformance = Runtime_compatible diagnostics }, true ->
-    Loaded
-      { document
-      ; conformance = Runtime_compatible (Byte_order_mark :: diagnostics)
-      }
-;;
-
-let conformance_diagnostics = function
-  | Conformant -> []
-  | Runtime_compatible diagnostics -> diagnostics
+  | Loaded _, true -> Unloadable [ Byte_order_mark ]
 ;;
 
 let diagnostics = function
-  | Loaded { conformance; _ } -> conformance_diagnostics conformance
+  | Loaded _ -> []
   | Unloadable diagnostics -> diagnostics
 ;;
 
@@ -628,9 +595,4 @@ let diagnostic_to_string = function
       Spec_limits.compatibility
   | Invalid_metadata_value { key } ->
     Printf.sprintf "SKILL.md metadata value for %S must be a string" key
-;;
-
-let conformance_to_string = function
-  | Conformant -> "conformant"
-  | Runtime_compatible _ -> "runtime_compatible"
 ;;

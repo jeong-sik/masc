@@ -251,8 +251,8 @@ let test_revisions_track_only_skill_truth () =
   let config_one = parse_config text_one in
   let config_two = parse_config text_two in
   let config_with_other_bound = parse_config text_with_other_bound in
-  let original = candidate ~directory:"pkg" (document ~name:"inspect" ~description:"Inspect" ~body:"one") in
-  let changed = candidate ~directory:"pkg" (document ~name:"inspect" ~description:"Inspect" ~body:"two") in
+  let original = candidate ~directory:"inspect" (document ~name:"inspect" ~description:"Inspect" ~body:"one") in
+  let changed = candidate ~directory:"inspect" (document ~name:"inspect" ~description:"Inspect" ~body:"two") in
   let build config candidate =
     configured_snapshot
       ~config
@@ -300,7 +300,7 @@ let test_exact_duplicate_is_rejected () =
   let config =
     parse_config (config_text (source_row ~id:"only" ~path:"skills"))
   in
-  let duplicate = candidate ~directory:"pkg" (document ~name:"same" ~description:"Same" ~body:"body") in
+  let duplicate = candidate ~directory:"same" (document ~name:"same" ~description:"Same" ~body:"body") in
   let snapshot =
     configured_snapshot
       ~config
@@ -315,7 +315,7 @@ let test_public_projection_redacts_private_content () =
     parse_config (config_text (source_row ~id:"only" ~path:"skills"))
   in
   let private_body = "PRIVATE_SKILL_BODY" in
-  let entry = candidate ~directory:"pkg" (document ~name:"private" ~description:"Private" ~body:private_body) in
+  let entry = candidate ~directory:"private" (document ~name:"private" ~description:"Private" ~body:private_body) in
   let snapshot =
     configured_snapshot
       ~config
@@ -329,7 +329,7 @@ let test_public_projection_redacts_private_content () =
     (String_util.contains_substring public "/private/host/workspace")
 ;;
 
-let test_public_projection_exposes_conformance_diagnostics () =
+let test_public_projection_exposes_document_rejection () =
   let config =
     parse_config (config_text (source_row ~id:"only" ~path:"skills"))
   in
@@ -347,26 +347,23 @@ let test_public_projection_exposes_conformance_diagnostics () =
       (scans ~base_path:"/workspace" config [ [ mismatched ] ])
     |> Snapshot.to_public_yojson
   in
-  let public = Yojson.Safe.to_string public_json in
-  check
-    bool
-    "compatibility class is public"
-    true
-    (String_util.contains_substring public "runtime_compatible");
   let diagnostics =
     match public_json with
     | `Assoc fields ->
-      (match List.assoc_opt "skills" fields with
-       | Some (`List [ `Assoc skill_fields ]) ->
-         (match List.assoc_opt "diagnostics" skill_fields with
-          | Some (`List values) ->
-            List.filter_map
-              (function
-                | `String value -> Some value
-                | _ -> None)
-              values
-          | _ -> fail "public skill has no diagnostics array")
-       | _ -> fail "public snapshot does not contain exactly one skill")
+      (match List.assoc_opt "rejections" fields with
+       | Some (`List [ `Assoc rejection_fields ]) ->
+         (match List.assoc_opt "reason" rejection_fields with
+          | Some (`Assoc reason_fields) ->
+            (match List.assoc_opt "diagnostics" reason_fields with
+             | Some (`List values) ->
+               List.filter_map
+                 (function
+                   | `String value -> Some value
+                   | _ -> None)
+                 values
+             | _ -> fail "public rejection has no diagnostics array")
+          | _ -> fail "public rejection has no typed reason")
+       | _ -> fail "public snapshot does not contain exactly one rejection")
     | _ -> fail "public snapshot is not an object"
   in
   check
@@ -576,8 +573,8 @@ let () =
         ; test_case "exact duplicate" `Quick test_exact_duplicate_is_rejected
         ; test_case "public projection redaction" `Quick
             test_public_projection_redacts_private_content
-        ; test_case "public conformance diagnostics" `Quick
-            test_public_projection_exposes_conformance_diagnostics
+        ; test_case "public document rejection" `Quick
+            test_public_projection_exposes_document_rejection
         ; test_case "absolute path redaction" `Quick
             test_public_projection_redacts_absolute_config_path
         ; test_case "package id" `Quick test_package_id_is_one_path_segment

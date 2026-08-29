@@ -49,7 +49,6 @@ function entry(
     package_id?: string
     content_revision?: string
     body_bytes?: number
-    diagnostics?: string[]
   } = {},
 ): SkillSnapshotEntry {
   return {
@@ -60,8 +59,6 @@ function entry(
     },
     content_revision: options.content_revision ?? `revision-${name}`,
     description: `about ${name}`,
-    conformance: 'conformant',
-    diagnostics: options.diagnostics,
     body_bytes: options.body_bytes ?? 100,
   }
 }
@@ -149,19 +146,17 @@ describe('mergeSkillRows', () => {
     expect(rows.map(row => [row.name, row.surface])).toEqual([['work-intake', null]])
   })
 
-  it('merges snapshot and exact surface diagnostics without duplicates', () => {
-    const compatible = entry('compatible', {
-      diagnostics: ['name differs from directory', 'shared diagnostic'],
-    })
+  it('keeps exact surface diagnostics without duplicates', () => {
+    const compatible = entry('compatible')
     const rows = mergeSkillRows(
       [compatible, entry('plain')],
       [{
         ...instructionSurface(compatible),
-        diagnostics: ['shared diagnostic', 'composition fence malformed'],
+        diagnostics: ['composition fence malformed', 'composition fence malformed'],
       }],
     )
     expect(rows.map(row => row.diagnostics)).toEqual([
-      ['name differs from directory', 'shared diagnostic', 'composition fence malformed'],
+      ['composition fence malformed'],
       [],
     ])
   })
@@ -244,10 +239,7 @@ function readyPayload(
         resource_read_max_bytes: 65_536,
       },
       sources: [],
-      skills: entries.map(snapshotEntry => ({
-        ...snapshotEntry,
-        diagnostics: snapshotEntry.diagnostics ?? [],
-      })),
+      skills: entries,
       effective_skills: entries.map(snapshotEntry => snapshotEntry.identity),
       shadows: [],
       rejections: [],

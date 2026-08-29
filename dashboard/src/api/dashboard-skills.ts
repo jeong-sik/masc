@@ -18,8 +18,6 @@ export interface SkillSnapshotEntry {
   identity: SkillIdentity
   content_revision: string
   description: string
-  conformance: string
-  diagnostics?: readonly string[]
   body_bytes: number
 }
 
@@ -753,8 +751,6 @@ const SkillSnapshotEntrySchema = Schema.Struct({
   identity: SkillIdentitySchema,
   content_revision: Schema.NonEmptyString,
   description: Schema.NonEmptyString,
-  conformance: Schema.NonEmptyString,
-  diagnostics: Schema.Array(Schema.String),
   body_bytes: Schema.NonNegativeInt,
 })
 

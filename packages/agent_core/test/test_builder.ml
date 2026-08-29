@@ -621,7 +621,7 @@ let test_with_skill_appends_prompt () =
         ~directory_name:"reviewer"
         "---\nname: reviewer\ndescription: Review skill\n---\nState concrete findings first."
     with
-    | Loaded { document; _ } -> document
+    | Loaded document -> document
     | Unloadable diagnostics ->
       Alcotest.fail
         (String.concat "; " (List.map Skill_document.diagnostic_to_string diagnostics))

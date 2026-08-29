@@ -16,7 +16,6 @@ type skill =
   { name : string
   ; description : string
   ; body : string
-  ; conformance : Agent_core.Skill_document.conformance
   ; reference : Skill_reference.t option
   ; provenance : provenance option
   ; composition_span : Keeper_skill_body_ast.span option
@@ -56,10 +55,6 @@ type error =
   | Composition_info_near_miss of
       { skill : string
       ; info : string
-      }
-  | Removed_invocation_policy of
-      { skill : string
-      ; field : string
       }
   | Duplicate_skill of { name : string }
 
@@ -173,32 +168,15 @@ let composition_of_block ~skill block =
        Error (Not_exactly_one_composition { skill; count = List.length entries }))
 ;;
 
-let reject_invocation_policy ~skill
-      (extensions : (string * Agent_core.Skill_document.extension_value) list) =
-  match
-    List.find_opt
-      (fun (field, _) ->
-         String.equal field "disable-model-invocation"
-         || String.equal field "masc-composition-tool")
-      extensions
-  with
-  | None -> Ok ()
-  | Some (field, _) -> Error (Removed_invocation_policy { skill; field })
-;;
-
-let parse_document ~conformance (document : Agent_core.Skill_document.t) =
+let parse_document (document : Agent_core.Skill_document.t) =
   let { Agent_core.Skill_document.name
       ; description
       ; body
-      ; extensions
       ; _
       }
     = document
   in
-  match reject_invocation_policy ~skill:name extensions with
-  | Error _ as error -> error
-  | Ok () ->
-    (match composition_blocks body with
+  match composition_blocks body with
      | Error `Unterminated ->
        Error (Unterminated_composition_block { skill = name })
      | Ok [] ->
@@ -206,7 +184,6 @@ let parse_document ~conformance (document : Agent_core.Skill_document.t) =
          { name
          ; description
          ; body
-         ; conformance
          ; reference = None
          ; provenance = None
          ; composition_span = None
@@ -220,7 +197,6 @@ let parse_document ~conformance (document : Agent_core.Skill_document.t) =
             { name
             ; description
             ; body
-            ; conformance
             ; reference = None
             ; provenance = None
             ; composition_span = Some block.span
@@ -229,13 +205,13 @@ let parse_document ~conformance (document : Agent_core.Skill_document.t) =
      | Ok blocks ->
        Error
          (Multiple_composition_blocks
-            { skill = name; count = List.length blocks }))
+            { skill = name; count = List.length blocks })
 ;;
 
 let parse_skill ~directory content =
   match Agent_core.Skill_document.decode ~directory_name:directory content with
   | Unloadable diagnostics -> Error (Definition_rejected { directory; diagnostics })
-  | Loaded { document; conformance } -> parse_document ~conformance document
+  | Loaded document -> parse_document document
 ;;
 
 let empty = []
@@ -295,7 +271,6 @@ let fallback_instruction_of_entry snapshot (entry : Skill_catalog_snapshot.entry
   { name = document.name
   ; description = document.description
   ; body = document.body
-  ; conformance = entry.conformance
   ; reference = Some (Skill_catalog_snapshot.entry_reference entry)
   ; provenance = provenance_of_entry snapshot entry
   ; composition_span = None
@@ -312,13 +287,12 @@ let composition_projection_failed = function
     true
   | Definition_rejected _
   | Composition_info_near_miss _
-  | Removed_invocation_policy _
   | Duplicate_skill _ ->
     false
 ;;
 
 let project_entry snapshot (entry : Skill_catalog_snapshot.entry) =
-  parse_document ~conformance:entry.conformance entry.document
+  parse_document entry.document
   |> Result.map (fun skill ->
     { skill with
       reference = Some (Skill_catalog_snapshot.entry_reference entry)
@@ -605,7 +579,6 @@ let error_code = function
   | Not_exactly_one_composition _ -> "not_exactly_one_composition"
   | Composition_name_mismatch _ -> "composition_name_mismatch"
   | Composition_info_near_miss _ -> "composition_info_near_miss"
-  | Removed_invocation_policy _ -> "removed_invocation_policy"
   | Duplicate_skill _ -> "duplicate_skill"
 ;;
 
@@ -652,10 +625,5 @@ let error_to_string = function
       info
       composition_fence_info
       composition_fence_info
-  | Removed_invocation_policy { skill; field } ->
-    Printf.sprintf
-      "skill %S: %s is unsupported; the composition fence alone determines the surface"
-      skill
-      field
   | Duplicate_skill { name } -> "duplicate skill name: " ^ name
 ;;

@@ -69,7 +69,7 @@ export function mergeSkillRows(
       description: entry.description,
       source: `${entry.identity.source_id}/${entry.identity.package_id}`,
       body_bytes: entry.body_bytes,
-      diagnostics: [...new Set([...(entry.diagnostics ?? []), ...(surface?.diagnostics ?? [])])],
+      diagnostics: [...new Set(surface?.diagnostics ?? [])],
       surface,
     }
   })

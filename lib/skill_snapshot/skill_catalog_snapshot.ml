@@ -62,7 +62,6 @@ type entry =
   ; source_index : int
   ; directory : string
   ; document : Agent_core.Skill_document.t
-  ; conformance : Agent_core.Skill_document.conformance
   ; content_revision : content_revision
   }
 
@@ -287,8 +286,6 @@ let entry_to_private_yojson (entry : entry) =
     [ "identity", identity_to_yojson entry.identity
     ; "source_index", `Int entry.source_index
     ; "content_revision", `String (content_revision_to_string entry.content_revision)
-    ; ( "conformance"
-      , `String (Agent_core.Skill_document.conformance_to_string entry.conformance) )
     ]
 ;;
 
@@ -387,7 +384,7 @@ let build_entries sources =
                         ; reason = Document_rejected diagnostics
                         }
                         :: rejections )
-                    | Loaded { document; conformance } ->
+                    | Loaded document ->
                       let identity = make_identity ~source_id ~package_id ~name:document.name in
                       let key = identity_key identity in
                       (match Hashtbl.find_opt exact key with
@@ -407,7 +404,6 @@ let build_entries sources =
                            ; source_index
                            ; directory
                            ; document
-                           ; conformance
                            ; content_revision = content_revision source_text
                            }
                            :: entries
@@ -619,18 +615,10 @@ let source_to_public_yojson (scan : source_scan) =
 ;;
 
 let entry_to_public_yojson (entry : entry) =
-  let diagnostics =
-    Agent_core.Skill_document.conformance_diagnostics entry.conformance
-    |> List.map (fun diagnostic ->
-      `String (Agent_core.Skill_document.diagnostic_to_string diagnostic))
-  in
   `Assoc
     [ "identity", identity_to_yojson entry.identity
     ; "content_revision", `String (content_revision_to_string entry.content_revision)
     ; "description", `String entry.document.description
-    ; ( "conformance"
-      , `String (Agent_core.Skill_document.conformance_to_string entry.conformance) )
-    ; "diagnostics", `List diagnostics
     ; "body_bytes", `Int (String.length entry.document.body)
     ]
 ;;

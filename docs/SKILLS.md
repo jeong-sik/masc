@@ -26,13 +26,10 @@ description: Walk the release checklist before shipping.
 ```
 
 - Agent Skills 표준상 `name`과 `description`은 필수이고 `name`은 디렉토리 이름과
-  같아야 한다. MASC는 복구 가능한 편차를 `runtime_compatible`로 로드한다: `name`이
-  없거나 선언 이름이 잘못됐어도 디렉토리 이름이 유효하면 그 이름을 쓰며, 이름 불일치·
-  길이 초과·확장 키는 진단으로 남긴다. 양쪽 이름이 모두 잘못됐거나 `description`이
-  없거나 frontmatter 구조를 읽을 수 없을 때만 문서를 거부한다.
-- `metadata.openclaw` 같은 다른 런타임의 네임스페이스도 문서를 막지는 않는다. 편차의
-  정확한 이유는 `/api/v1/skills`와 Monitor › Skills에 표시된다.
-- `masc-composition-tool`과 `disable-model-invocation`은 거부한다. composition의 존재와
+  같아야 한다. 이름 누락·불일치·문법 오류, 필드 길이 초과, 알 수 없는 top-level field,
+  잘못된 metadata 값은 그 Skill 하나를 거부한다. 클라이언트 확장은 공식 `metadata`
+  string map 아래에 둔다.
+- `masc-composition-tool`과 `disable-model-invocation` 같은 top-level field는 거부한다. composition의 존재와
   표면은 본문 fence 하나가 전부 결정한다. 별도 invocation-policy 스위치를 두지 않으므로
   선언과 본문이 서로 다른 상태도 없다. 문서용 fence 예시는 더 긴 CommonMark 외부
   fence로 감싼다.
@@ -150,15 +147,15 @@ name = "query"
 
 ## 4. 오류는 턴을 막는다
 
-구조적으로 읽을 수 없는 frontmatter, 유효한 runtime 이름이 전혀 없는 문서,
-`description` 누락, fence 문법/합성 plan 오류, 중복 스킬은 그 턴을 typed config
-error로 거부한다. 반면 이름 불일치·한계 초과·확장 키는 `runtime_compatible` 진단이며
-턴을 막지 않는다. `SKILL.md`가 없는 디렉토리는 스킬이 아니므로 그냥 건너뛴다.
+Agent Skills frontmatter 계약을 어긴 문서, fence 문법/합성 plan 오류, 중복 스킬은 그
+source candidate를 typed rejection으로 격리한다. 해당 Skill을 Task가 지명한 턴만 admission
+오류를 받고, 올바른 형제 Skill은 계속 사용할 수 있다. `SKILL.md`가 없는 디렉토리는
+스킬이 아니므로 그냥 건너뛴다.
 
 ## 5. 관측
 
-- `GET /api/v1/skills` — 발행 스냅샷의 이름·설명·conformance·diagnostics와, 턴 파서가
-  만든 종류·합성 도구 이름/실행 모드·최근 사용 및 완료 성공/실패 횟수를 함께 돌려준다.
+- `GET /api/v1/skills` — 발행 스냅샷의 valid entry와 typed rejection, 종류·합성 도구
+  이름/실행 모드·최근 사용 및 완료 성공/실패 횟수를 함께 돌려준다.
 - 합성 실행은 노드 단위로 `tool_calls` 스토어에 남는다 (`composition_tool`,
   `composition_run_id`, `composition_node_id`) — SSE
   `keeper_tool_call_evidence_committed` 로도 흐른다. 이벤트에는 `success`, `disposition`,

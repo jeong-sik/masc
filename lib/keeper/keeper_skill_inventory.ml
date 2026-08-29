@@ -11,7 +11,6 @@ type valid_skill =
   ; description : string
   ; kind : skill_kind
   ; catalog_status : catalog_status
-  ; conformance : Agent_core.Skill_document.conformance
   ; diagnostics : Keeper_skill_catalog.error list
   }
 
@@ -58,7 +57,6 @@ let valid_of_projection snapshot entry skill diagnostics =
     ; description = skill.Keeper_skill_catalog.description
     ; kind = kind_of_surface skill.surface
     ; catalog_status = catalog_status_of_entry snapshot entry
-    ; conformance = skill.conformance
     ; diagnostics
     }
 ;;
@@ -113,11 +111,7 @@ let snapshot_rejection_to_yojson = function
       [ "kind", `String "document_rejected"
       ; ( "diagnostics"
         , `List
-            (List.map
-               (fun diagnostic ->
-                  `String
-                    (Agent_core.Skill_document.diagnostic_to_string diagnostic))
-               diagnostics) )
+            (List.map Agent_core.Skill_document.diagnostic_to_yojson diagnostics) )
       ]
   | Skill_catalog_snapshot.Document_unreadable { path; detail } ->
     `Assoc

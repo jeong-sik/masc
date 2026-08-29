@@ -143,10 +143,10 @@ value = {}
   2개 이상이면 기동 오류. block 의 내용은 **기존
   `Keeper_tool_composition_catalog.parse` 가 그대로 읽는다** — 새 문법은 없고, kind
   선언과 실체가 어긋나는 상태 자체가 표현 불가능하다.
-- 구조적으로 읽을 수 없는 문서와 composition/fence 오류는 fail-closed다. 이름 불일치,
-  유효한 디렉토리 이름으로 복구 가능한 선언 이름, 길이 초과, 확장 키는
-  `Runtime_compatible diagnostics`로 로드한다. skills 디렉토리가 없거나 비어 있는
-  것은 오류가 아니라 "스킬 0개"다.
+- Agent Skills frontmatter 계약을 어긴 문서와 composition/fence 오류는 그 문서만
+  fail-closed다. 이름 누락·불일치·문법 오류, 길이 초과, 알 수 없는 top-level field,
+  잘못된 metadata shape는 typed rejection으로 남는다. skills 디렉토리가 없거나 비어
+  있는 것은 오류가 아니라 "스킬 0개"다.
 
 ### 2.2 표면 — 스킬 하나가 두 얼굴을 갖는다
 
@@ -266,9 +266,9 @@ current task 뿐 아니라 함께 든 task 의 스킬도 프롬프트·admission
 
 - 지시 스킬 N개는 도구 스키마 표면을 0 B 늘린다. 합성 스킬만 도구가 된다.
   `test_keeper_tool_schema_bytes` 상한 85,000 B 유지.
-- 구조적으로 읽을 수 없는 SKILL.md와 fenced block/plan 오류는 파일을 가리키는 기동
-  오류다. name 불일치·복구 가능한 선언 이름·길이 초과·확장 키는 사용 가능하며
-  conformance diagnostics로 관측된다 — 양쪽 경로 모두 테스트로 고정.
+- Agent Skills frontmatter 계약을 어긴 SKILL.md와 fenced block/plan 오류는 source
+  candidate와 content revision을 가진 rejection으로 격리된다. 올바른 형제 Skill은 계속
+  발행된다.
 - `mission-snapshot`/`background-snapshot` 이 SKILL.md 로 이전된 뒤 도구 이름·발행 스키마가
   이전과 동일하다(스키마 diff 테스트).
 - 파라미터 합성: `[[compositions.params]]` 선언이 input schema 에 반영되고, 라이브에서
@@ -300,8 +300,8 @@ current task 뿐 아니라 함께 든 task 의 스킬도 프롬프트·admission
   (`name`, `description`, `license`, `compatibility`, `metadata`, 실험적 `allowed-tools`).
   3단계 progressive disclosure
   (메타 ~100토큰 상시 / 본문 <5k 토큰 / 참조 파일 필요 시). 채택 클라이언트 40+
-  (Claude Code, Codex, Gemini CLI, Cursor, OpenClaw, pi 등). masc는 휴대성을 위해
-  복구 가능한 스펙 편차를 거부하지 않고 `runtime_compatible` 진단으로 노출한다.
+  (Claude Code, Codex, Gemini CLI, Cursor, OpenClaw, pi 등). masc는 같은 portable
+  frontmatter 계약을 admission에 사용하고, 클라이언트 확장은 `metadata` 아래에 둔다.
   `allowed-tools`는 문법만 검증하고 semantic AST와 snapshot entry에서 값을 버린다.
   편집기에서 보이는 원문은 portable source round-trip일 뿐이며, MASC 승인 정책만 실행
   권한의 권위다.

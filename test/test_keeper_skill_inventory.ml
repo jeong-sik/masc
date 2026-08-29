@@ -236,36 +236,71 @@ let test_valid_composition () =
 
 let test_invalid_sibling_isolated_with_digest () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
-  let malformed = "---\nname: broken\n---\nbody\n" in
-  let inventory =
-    snapshot
-      config
-      [ [ candidate ~directory:"broken" malformed
-        ; candidate ~directory:"release-checklist" instruction_document
-        ] ]
-    |> Inventory.of_snapshot
+  let cases =
+    [ ( "missing-name"
+      , "---\ndescription: Missing name.\n---\nbody\n"
+      , function
+        | Agent_core.Skill_document.Missing_name -> true
+        | _ -> false )
+    ; ( "mismatch"
+      , "---\nname: declared-name\ndescription: Mismatched name.\n---\nbody\n"
+      , function
+        | Agent_core.Skill_document.Name_mismatch
+            { declared = "declared-name"; directory = "mismatch" } -> true
+        | _ -> false )
+    ; ( "description-limit"
+      , Printf.sprintf
+          "---\nname: description-limit\ndescription: %s\n---\nbody\n"
+          (String.make 1025 'x')
+      , function
+        | Agent_core.Skill_document.Description_too_long { length = 1025 } -> true
+        | _ -> false )
+    ; ( "unknown-field"
+      , "---\nname: unknown-field\ndescription: Unknown field.\ncustom: value\n---\nbody\n"
+      , function
+        | Agent_core.Skill_document.Unexpected_frontmatter_field "custom" -> true
+        | _ -> false )
+    ]
   in
-  ignore (valid_named "release-checklist" inventory);
-  match invalid_items inventory with
-  | [ invalid ] ->
-    check string "invalid directory" "broken" invalid.directory;
-    check bool "snapshot rejection has no fabricated reference" true
-      (Option.is_none invalid.reference);
-    (match invalid.error with
-     | Inventory.Snapshot_rejection (Snapshot.Document_rejected diagnostics) ->
-       check bool "typed parser diagnostics retained" true (diagnostics <> [])
-     | Snapshot_rejection _ -> fail "invalid document has the wrong snapshot reason"
-     | Catalog_rejection _ -> fail "invalid document bypassed snapshot rejection");
-    (match invalid.content_revision with
-     | None -> fail "readable invalid document lost its source digest"
-     | Some revision ->
-       check
-         string
-         "invalid source digest"
-         (Skill_reference.content_revision_of_source_text malformed
-          |> Skill_reference.content_revision_to_string)
-         (Skill_reference.content_revision_to_string revision))
-  | invalid -> failf "expected one invalid item, got %d" (List.length invalid)
+  List.iter
+    (fun (directory, malformed, has_expected_diagnostic) ->
+       let inventory =
+         snapshot
+           config
+           [ [ candidate ~directory malformed
+             ; candidate ~directory:"release-checklist" instruction_document
+             ] ]
+         |> Inventory.of_snapshot
+       in
+       ignore (valid_named "release-checklist" inventory);
+       match invalid_items inventory with
+       | [ invalid ] ->
+         check string "invalid directory" directory invalid.directory;
+         check bool
+           "snapshot rejection has no fabricated reference"
+           true
+           (Option.is_none invalid.reference);
+         (match invalid.error with
+          | Inventory.Snapshot_rejection (Snapshot.Document_rejected diagnostics) ->
+            check bool
+              "typed parser diagnostic retained"
+              true
+              (List.exists has_expected_diagnostic diagnostics)
+          | Snapshot_rejection _ ->
+            fail "invalid document has the wrong snapshot reason"
+          | Catalog_rejection _ ->
+            fail "invalid document bypassed snapshot rejection");
+         (match invalid.content_revision with
+          | None -> fail "readable invalid document lost its source digest"
+          | Some revision ->
+            check
+              string
+              "invalid source digest"
+              (Skill_reference.content_revision_of_source_text malformed
+               |> Skill_reference.content_revision_to_string)
+              (Skill_reference.content_revision_to_string revision))
+       | invalid -> failf "expected one invalid item, got %d" (List.length invalid))
+    cases
 ;;
 
 let test_catalog_status_tracks_source_precedence () =

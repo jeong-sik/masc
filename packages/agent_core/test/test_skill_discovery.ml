@@ -47,7 +47,7 @@ let make_skill name body =
          name
          body)
   with
-  | Loaded { document; _ } -> document
+  | Loaded document -> document
   | Unloadable diagnostics ->
     Alcotest.fail
       (String.concat "; " (List.map Skill_document.diagnostic_to_string diagnostics))

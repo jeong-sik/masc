@@ -8,7 +8,7 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Acting, Keepers, Lanes, Approvals, Board,
-Planning, Schedules, Verify, Harness, Fusion, Repos, Code, Changes, Connectors,
+Planning, Schedules, Harness, Fusion, Repos, Code, Changes, Connectors,
 Runtime, Config, Resources, Tools, Logs.
 
 ## Quick Start
@@ -624,10 +624,13 @@ that line instead of being flattened into one truncated row.
 
 ### Planning
 
-Goals with backlog rollups.
+Planning is one workspace with two child views: `Goals` and `Task Review`.
+Press `v` to switch between them. They share navigation but not authority:
+Goals manages Goal lifecycle, while Task Review records an operator verdict
+on a Task completion request.
 
 ```
- MASC Planning  10:44:57  [connected]
+ MASC Planning  ▸Goals  Task Review·2  10:44:57  [connected]
    Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
    Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37
  >   [dropped ] P1  Reduce all kidsnote service backlogs to 0
@@ -643,6 +646,19 @@ armed rather than pressed - the first press shows what the same key again
 would send, any other key disarms - and the server owns the phase rules: a
 transition the current phase does not allow comes back as the server's
 rejection on the detail, not a local guess.
+
+#### Task Review
+
+Task Review is the queue of Tasks a keeper submitted for a verdict. The title
+keeps it under Planning and the `Planning·N` badge keeps waiting work visible
+from the top-level strip. It does not mean the same thing as a Goal's
+`Verifying` phase: that phase belongs to the Goal proof agent; this queue is a
+human/operator decision on Task evidence.
+
+`a` on the row under the cursor arms an approval and the same key again sends
+it. `x` rejects; the reason is required, so `$EDITOR` opens with a one-field
+form. Both use the Task verification API and retain its admin permission
+boundary.
 
 ### Schedules
 
@@ -708,22 +724,6 @@ retained completed/failed run has no current Board projection; it does not
 claim the post was never written, that the sink failed, or that retention
 expired. A failed refresh leaves the prior reading visible under an explicit
 error instead of redrawing it as an empty result.
-
-### Verification
-
-The queue of tasks a keeper submitted for a verdict, with what each asks
-for and how much evidence rides along. The verdict happens here: `a` on the
-row under the cursor arms an approval and the same key again sends it — the
-armed row is named under the list, and moving the cursor between the two
-presses re-arms for the new row rather than approving the one you left.
-`x` rejects; the reason is required, so `$EDITOR` opens with a one-field
-form and the editor itself is the confirmation — exiting without saving,
-or saving an empty reason, judges nothing.
-
-Both go through `POST /api/v1/verification/verdict` with the admin bearer
-the TUI mints at startup. Whether a task is still awaiting verification is
-the server's store rules to say; a verdict on a row that has moved on comes
-back as the server's own words under the list.
 
 ### Changes
 

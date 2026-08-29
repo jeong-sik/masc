@@ -960,7 +960,10 @@ type surface =
 
 (* The Tab cycle and the strip drawn above every surface share this order,
    so the strip cannot disagree with where Tab actually goes. Labels are the
-   strip's spelling; the Keepers entry stands for every keeper sub-mode. *)
+   strip's spelling. Keepers stands for every keeper sub-mode; Planning owns
+   both its Goal view and the Task Review queue. The latter remains a distinct
+   internal surface because it has a different API and permission boundary,
+   but it is not a second top-level destination. *)
 let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Acting");
@@ -970,7 +973,6 @@ let surface_ring : (surface * string) list =
     (Board, "Board");
     (Planning, "Planning");
     (Schedules, "Schedules");
-    (Verification, "Verify");
     (Harness, "Harness");
     (Fusion, "Fusion");
     (Repositories, "Repos");
@@ -985,9 +987,14 @@ let surface_ring : (surface * string) list =
   ]
 
 (* Ring position of the family a view belongs to. Keeper sub-modes collapse
-   onto the Keepers entry; every other surface is its own entry. *)
+   onto Keepers, and Task Review collapses onto Planning. *)
 let surface_ring_index (view : surface) =
-  let family = match view with Keepers _ -> Keepers Keeper_list | v -> v in
+  let family =
+    match view with
+    | Keepers _ -> Keepers Keeper_list
+    | Verification -> Planning
+    | v -> v
+  in
   let rec find i = function
     | [] -> 0
     | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
@@ -2747,8 +2754,8 @@ let verifier_lane_notice_lines =
       "  tool observations with output excerpts -- never a prompt."
   ; Lane_notice_text ""
   ; Lane_notice_dim
-      "  Read them on the Verification surface: Tab to Verify, or press :"
-  ; Lane_notice_dim "  and type \"go verify\"."
+      "  Read them in Planning > Task Review: press v from Planning, or :"
+  ; Lane_notice_dim "  and type \"go Task Review\"."
   ]
 
 (** Where a left-button press lands on the Lanes overview, as a row of one of
@@ -3176,6 +3183,7 @@ let workspace_entries_count_label total =
 
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
+  @ [ "go Task Review", Palette_goto Verification ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

@@ -5850,12 +5850,15 @@ def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        unread = tab_until(process, master_fd, output, b"MASC Verification")
+        tab_until(process, master_fd, output, b"MASC Planning")
+        unread = send_and_wait(
+            process, master_fd, output, b"v", b"Task Review"
+        )
         if b"(not loaded)" not in unread:
             raise AssertionError(
                 f"Verification header did not say not loaded: {unread!r}"
             )
-        if b"(not loaded yet)" not in unread:
+        if b"(not loaded yet" not in unread:
             raise AssertionError(
                 f"Verification body claimed a reading before one was made: {unread!r}"
             )
@@ -5872,10 +5875,48 @@ def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
         )
         # The title and the count are asserted apart: a style reset may sit
         # between them once surface titles carry their own styling.
-        if b"MASC Verification" not in loaded or b"(0 of 0)" not in loaded:
+        if (
+            b"MASC Planning" not in loaded
+            or b"Task Review" not in loaded
+            or b"(0 of 0)" not in loaded
+        ):
             raise AssertionError(
                 f"Verification header did not report the read: {loaded!r}"
             )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def planning_review_hierarchy_interaction() -> Interaction:
+    """Planning owns Goals and Task Review while Tab sees one parent."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        goals = tab_until(process, master_fd, output, b"MASC Planning")
+        if b"\xe2\x96\xb8Goals" not in goals or b"Task Review" not in goals:
+            raise AssertionError(f"Planning did not expose both child views: {goals!r}")
+        review = send_and_wait(
+            process, master_fd, output, b"v", b"\xe2\x96\xb8Task Review"
+        )
+        wait_for_output(process, master_fd, output, b"task-901", start=0, timeout=3.0)
+        plain_review = CSI_RE.sub(b"", review)
+        if b"MASC Planning" not in plain_review:
+            raise AssertionError(f"Task Review lost its Planning parent: {plain_review!r}")
+        goals_again = send_and_wait(
+            process, master_fd, output, b"v", b"\xe2\x96\xb8Goals"
+        )
+        if b"Task Review" not in goals_again:
+            raise AssertionError(
+                f"Goals did not retain the Task Review sibling: {goals_again!r}"
+            )
+        # Task Review is a child, not the next top-level Tab destination.
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Schedules")
         os.write(master_fd, b"q")
 
     return interact
@@ -6075,7 +6116,8 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Verification")
+        tab_until(process, master_fd, output, b"MASC Planning")
+        send_and_wait(process, master_fd, output, b"v", b"Task Review")
         wait_for_output(
             process, master_fd, output, b"task-901", start=0, timeout=3.0
         )
@@ -9101,14 +9143,37 @@ def run_cli_base_path_regression(executable: str) -> None:
     )
 
 
+def run_planning_review_regression(executable: str) -> None:
+    verification_gate = GatedHttpResponse((200, {"requests": [], "total": 0}))
+    run_terminal_scenario(
+        executable,
+        description="Planning Task Review unread before read",
+        interact=verification_unread_interaction(verification_gate),
+        http_fixtures={
+            "/api/v1/verification/requests?limit=200": verification_gate,
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Planning owns Goals and Task Review",
+        interact=planning_review_hierarchy_interaction(),
+        http_fixtures=verification_verdict_fixtures(),
+    )
+
+
 def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
         print("tui CLI base-path regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "planning-review":
+        run_planning_review_regression(os.path.abspath(sys.argv[1]))
+        print("tui Planning Task Review regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
-            "usage: test_tui_keyboard_input.py <masc_tui.exe> [cli-base-path]"
+            "usage: test_tui_keyboard_input.py <masc_tui.exe> "
+            "[cli-base-path|planning-review]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

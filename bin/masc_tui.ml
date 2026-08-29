@@ -3523,6 +3523,7 @@ let goto_surface state ~mailbox (destination : surface) =
        launch_gate_snapshot_load state ~mailbox
    | Schedules -> launch_schedules_load state ~mailbox
    | Verification -> launch_verification_load state ~mailbox
+   | Planning -> launch_verification_load state ~mailbox
    | Harness -> launch_harness_load state ~mailbox
    | Fusion ->
        launch_fusion_runs_load state ~mailbox;
@@ -3563,7 +3564,7 @@ let goto_surface state ~mailbox (destination : surface) =
        | Config_runtime | Config_themes -> launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
-   | Overview | Acting | Keepers _ | Board | Planning | System_logs -> ());
+   | Overview | Acting | Keepers _ | Board | System_logs -> ());
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
      arm did on the Approvals -> Board step. *)
   (match state.view with
@@ -11021,7 +11022,7 @@ and is loaded on demand through keeper_skill.
                      launch_keeper_chat_file_changes_load ~force:true state
                        ~mailbox:async_messages ~keeper_name
                  | None -> ())
-            | Verification ->
+            | Planning | Verification ->
                 launch_verification_load state ~mailbox:async_messages
             | Lanes ->
                 launch_lanes_load state ~mailbox:async_messages;
@@ -11064,7 +11065,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load state ~mailbox:async_messages
             | Overview | Acting | Keepers Keeper_list
-            | Approvals | Planning | System_logs -> ());
+            | Approvals | System_logs -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" | Some "shift-tab" ->
            cycle_surface state ~mailbox:async_messages
@@ -12378,6 +12379,12 @@ and is loaded on demand through keeper_skill.
                         state.changes_tree_diff_path <- Some path;
                         launch_git_diff_load state ~mailbox:async_messages
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
+       | Some "v" | Some "V"
+         when state.view = Planning || state.view = Verification ->
+           (* Planning is the parent workspace; [v] switches its two child
+              modes without adding Task Review back to the top-level ring. *)
+           goto_surface state ~mailbox:async_messages
+             (if state.view = Planning then Verification else Planning)
        | Some "v" when state.view = Changes ->
            (* View the selected change on the Code surface. The clone-relative
               address resolves through the same ?keeper= axis the git-diff
@@ -12945,8 +12952,9 @@ and is loaded on demand through keeper_skill.
               | Board_list | Board_compose -> ())
          | Verification ->
              (* The queue moves while an operator watches it -- a task settles,
-                another arrives. Refreshed on the same tick as the surfaces
-                above rather than only on a keypress. *)
+                another arrives. Planning reads this list on entry and on an
+                explicit refresh for its child badge, but does not poll a
+                hidden 200-row queue on every cadence tick. *)
              launch_verification_load state ~mailbox:async_messages
          | Lanes -> launch_lanes_load state ~mailbox:async_messages
          | Harness -> launch_harness_load state ~mailbox:async_messages

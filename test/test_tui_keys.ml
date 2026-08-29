@@ -103,7 +103,7 @@ let test_harness_footer_links_to_overview_task () =
    can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
-    "j/k:scroll  p:section  J/K:Skill  [/]:Keeper  e:edit Skill  Esc:overview  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [/]:Keeper  e:edit Skill  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
 let test_repositories_footer_offers_the_code_tree () =
@@ -115,7 +115,7 @@ let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before
      the two-press approve or the $EDITOR reject reason changes it. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  Right / Enter:details  Left / Esc:back  a:approve  x:reject  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:Goals  Right / Enter:details  Left / Esc:back  a:approve  x:reject  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
@@ -151,8 +151,15 @@ let test_overview_footer_projects_by_focus () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  f:filter  s:sort  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:Task Review  f:filter  s:sort  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
+
+let test_task_review_is_a_planning_child () =
+  Alcotest.(check bool) "Task Review is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Verification) surface_ring);
+  Alcotest.(check int) "Task Review highlights Planning"
+    (surface_ring_index Planning)
+    (surface_ring_index Verification)
 
 let test_system_logs_lost_the_keys_it_never_had () =
   (* The old help table documented g, G, and f on System logs; the dispatch
@@ -360,8 +367,8 @@ let test_lane_notice_says_what_is_recorded () =
     ; "T  exact-lane run store. A run records its outcome, elapsed time, and"
     ; "T  tool observations with output excerpts -- never a prompt."
     ; "T"
-    ; "D  Read them on the Verification surface: Tab to Verify, or press :"
-    ; "D  and type \"go verify\"."
+    ; "D  Read them in Planning > Task Review: press v from Planning, or :"
+    ; "D  and type \"go Task Review\"."
     ]
     rendered
 
@@ -473,6 +480,8 @@ let () =
             test_system_logs_lost_the_keys_it_never_had
         ; Alcotest.test_case "Planning carries filter and sort" `Quick
             test_planning_footer_carries_filter_and_sort
+        ; Alcotest.test_case "Task Review is a Planning child" `Quick
+            test_task_review_is_a_planning_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick

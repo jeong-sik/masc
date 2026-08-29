@@ -513,6 +513,27 @@ let evict_stale_cache_entries cache ~live_paths =
     (fun path entry -> if StringSet.mem path live_set then Some entry else None)
     cache.current_day_cache
 
+(* One file, through whichever cache owns it. The caller holds [cache.mutex].
+   Extracted so the recent-only read below shares the exact parse and cache
+   behaviour of the full read -- two copies of this would drift, and the
+   drift would show up as a page that disagrees with itself. *)
+let parse_file_through_cache cache config ~current_day path =
+  if String.equal path current_day
+  then parse_current_day_events_cached cache config path
+  else (
+    match file_fingerprint path with
+    | None -> parse_events_from_file config path
+    | Some fingerprint ->
+      (match Past_day_path_map.find_opt path cache.past_day_cache with
+       | Some (cached_fingerprint, parsed)
+         when same_file_fingerprint cached_fingerprint fingerprint -> parsed
+       | None | Some _ ->
+         let parsed = parse_events_from_file config path in
+         cache.past_day_cache
+         <- Past_day_path_map.add path (fingerprint, parsed) cache.past_day_cache;
+         parsed))
+;;
+
 let read_all_events config =
   let root = root_dir config in
   let cache = acquire_all_events_workspace_cache root in
@@ -547,25 +568,7 @@ let read_all_events config =
                  |> List.fold_left
                       (fun acc path ->
                          let rows =
-                           match file_fingerprint path with
-                           | None -> parse_events_from_file config path
-                           | Some fingerprint ->
-                             (match
-                                Past_day_path_map.find_opt path cache.past_day_cache
-                              with
-                              | Some (cached_fingerprint, parsed)
-                                when same_file_fingerprint
-                                       cached_fingerprint
-                                       fingerprint ->
-                                parsed
-                              | None | Some _ ->
-                                let parsed = parse_events_from_file config path in
-                                cache.past_day_cache <-
-                                  Past_day_path_map.add
-                                    path
-                                    (fingerprint, parsed)
-                                    cache.past_day_cache;
-                                parsed)
+                           parse_file_through_cache cache config ~current_day path
                          in
                          List.rev_append rows acc)
                       []
@@ -628,21 +631,131 @@ let matches_filters ?(kinds = []) (value : event) =
    boots on 2026-08-29/30, 2,905MB to 2,920MB, one per boot). masc#31722
    carries that. This removes a copy that had no reason to exist; it does not
    remove the parse. *)
+(* Line counts per file, keyed on size, so [total] does not need the store
+   parsed. Counting bytes is not parsing: the whole 238MB store scans in a
+   fraction of what parsing 440,068 events costs, and after the first pass
+   only appended bytes are read.
+
+   [total] means "events matching the filters", and with no filters that is
+   every event in the store. Line count answers it only while every
+   non-empty line parses to an event -- measured 2026-08-30 on the live
+   store, 444,600 non-empty lines and 444,600 parsed events with an integer
+   seq, difference zero. A corrupt line would make this over-count, which
+   moves [has_more] toward true; the pinned test below is what catches the
+   assumption breaking. *)
+let line_count_cache : (string, int * int) Hashtbl.t = Hashtbl.create 64
+let line_count_cache_mu = Stdlib.Mutex.create ()
+
+let reset_line_count_cache_for_testing () =
+  Stdlib.Mutex.protect line_count_cache_mu (fun () -> Hashtbl.reset line_count_cache)
+;;
+
+let count_lines_cached path =
+  match Unix.stat path with
+  | exception (Unix.Unix_error _ | Sys_error _) -> 0
+  | st ->
+    let size = st.Unix.st_size in
+    let cached =
+      Stdlib.Mutex.protect line_count_cache_mu (fun () ->
+        Hashtbl.find_opt line_count_cache path)
+    in
+    let from, base =
+      match cached with
+      | Some (boundary, count) when boundary = size -> size, count
+      | Some (boundary, count) when boundary < size -> boundary, count
+      (* boundary past the size: the file shrank or rotated, so recount. *)
+      | Some _ | None -> 0, 0
+    in
+    if from = size && cached <> None
+    then base
+    else (
+      let count, boundary =
+        Fs_compat.fold_appended_lines ~path ~from ~init:base ~f:(fun acc line ->
+          if String.trim line = "" then acc else acc + 1)
+      in
+      Stdlib.Mutex.protect line_count_cache_mu (fun () ->
+        Hashtbl.replace line_count_cache path (boundary, count));
+      count)
+;;
+
+let total_event_count config =
+  collect_event_files config
+  |> List.fold_left (fun acc path -> acc + count_lines_cached path) 0
+;;
+
+(* The newest [limit] events without parsing the ones before them.
+
+   Files are collected in month/day order and seq is bumped under the same
+   lock that appends the line, so a later file never holds a smaller seq than
+   an earlier one -- verified on the live store 2026-08-30: 31 files, zero
+   non-ascending seq inside a file and zero ordering violations across them.
+   Walking newest-first and stopping once [limit] is covered therefore yields
+   the same suffix the full read would.
+
+   One file past the stopping point is read anyway. That is the margin for
+   the one way the ordering could bend -- a clock that moves back would append
+   to an older file with a still-increasing seq -- and it costs one file's
+   parse rather than the store's. *)
+let read_recent_events config ~limit =
+  let root = root_dir config in
+  let cache = acquire_all_events_workspace_cache root in
+  Fun.protect
+    ~finally:(fun () -> release_all_events_workspace_cache cache)
+    (fun () ->
+       Stdlib.Mutex.protect cache.mutex (fun () ->
+         let current_day = day_path config in
+         let files = collect_event_files config in
+         evict_stale_cache_entries cache ~live_paths:files;
+         let rec gather acc covered = function
+           | [] -> acc
+           | path :: rest ->
+             let rows = parse_file_through_cache cache config ~current_day path in
+             let acc = rows :: acc in
+             let covered = covered + List.length rows in
+             if covered >= limit
+             then (
+               match rest with
+               | [] -> acc
+               | margin :: _ ->
+                 parse_file_through_cache cache config ~current_day margin :: acc)
+             else gather acc covered rest
+         in
+         gather [] 0 (List.rev files)
+         |> List.concat
+         |> List.sort (fun (a : event) (b : event) -> Int.compare a.seq b.seq)))
+;;
+
 let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ?keep
     ?since_ms () =
-  let stored = read_all_events config in
-  let stored_max_seq = max_event_seq stored in
-  let latest_store_seq = max (read_current_seq config) stored_max_seq in
   let filtered =
     after_seq > 0
     || kinds <> []
     || Option.is_some keep
     || Option.is_some since_ms
   in
-  let all =
-    if not filtered then
-      stored
-    else
+  if not filtered
+  then (
+    (* The three default dashboard projections land here: the whole store, no
+       kind, no cursor, no time bound, and a page of the newest 500 or 1000.
+       Reading only the files that cover those, and counting the rest rather
+       than parsing them, is what keeps the first read after a restart off
+       the whole store. A filtered read still needs everything, because a
+       kind or a time bound can match an event of any age. *)
+    let recent = read_recent_events config ~limit in
+    let recent_count = List.length recent in
+    let page =
+      if recent_count > limit
+      then List.drop (recent_count - limit) recent
+      else recent
+    in
+    let max_seq = max_event_seq recent in
+    let total = total_event_count config in
+    (page, total, max (read_current_seq config) max_seq, max_seq))
+  else (
+    let stored = read_all_events config in
+    let stored_max_seq = max_event_seq stored in
+    let latest_store_seq = max (read_current_seq config) stored_max_seq in
+    let all =
       stored
       |> List.filter (fun value ->
              value.seq > after_seq
@@ -651,16 +764,15 @@ let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ?keep
              && (match since_ms with
                  | None -> true
                  | Some ms -> value.ts_ms >= ms))
-  in
-  let total = List.length all in
-  let page =
-    if after_seq > 0 then
-      List.take limit all
-    else
-      all |> List.drop (max 0 (total - limit))
-  in
-  let latest_matching_seq = if filtered then max_event_seq all else stored_max_seq in
-  (page, total, latest_store_seq, latest_matching_seq)
+    in
+    let total = List.length all in
+    let page =
+      if after_seq > 0 then
+        List.take limit all
+      else
+        all |> List.drop (max 0 (total - limit))
+    in
+    (page, total, latest_store_seq, max_event_seq all))
 
 (** Returns [(page, total_matching)] where [total_matching] is the count
     of all events matching filters before [limit] is applied. *)
@@ -1097,6 +1209,7 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
 module For_testing = struct
   let reset_current_day_cache_for_testing = reset_current_day_cache_for_testing
   let reset_past_day_cache_for_testing = reset_past_day_cache_for_testing
+  let reset_line_count_cache_for_testing = reset_line_count_cache_for_testing
   let current_day_rebuild_count () = Atomic.get current_day_rebuild_counter
   let all_events_rebuild_count () = Atomic.get all_events_rebuild_counter
   let past_merged_rebuild_count () = Atomic.get past_merged_rebuild_counter

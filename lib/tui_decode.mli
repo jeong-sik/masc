@@ -249,27 +249,8 @@ type skills_catalog_surface = {
   scs_flow : skill_flow option;
 }
 
-type skill_diagnostic_code =
-  | Skill_missing_frontmatter
-  | Skill_byte_order_mark
-  | Skill_unterminated_frontmatter
-  | Skill_malformed_yaml
-  | Skill_frontmatter_not_mapping
-  | Skill_duplicate_field
-  | Skill_duplicate_metadata_key
-  | Skill_unexpected_frontmatter_field
-  | Skill_missing_name
-  | Skill_missing_description
-  | Skill_invalid_field_type
-  | Skill_invalid_name
-  | Skill_name_mismatch
-  | Skill_description_too_long
-  | Skill_compatibility_empty
-  | Skill_compatibility_too_long
-  | Skill_invalid_metadata_value
-
 type skill_rejection_diagnostic = {
-  srd_code : skill_diagnostic_code;
+  srd_diagnostic : Agent_core.Skill_document.diagnostic;
   srd_message : string;
 }
 
@@ -280,19 +261,28 @@ type skill_rejection_reason =
   | Skill_invalid_package_id
 
 type skill_catalog_rejection = {
+  scr_source_index : int;
   scr_source_id : string;
   scr_package_id : string option;
   scr_content_revision : string option;
   scr_reason : skill_rejection_reason;
 }
 
+type skills_catalog_state =
+  | Skills_ready
+  | Skills_not_registered
+  | Skills_uninitialized
+  | Skills_invalid_workspace
+
 type skills_catalog = {
-  sc_state : string;
+  sc_state : skills_catalog_state;
   sc_surfaces : skills_catalog_surface list;
   sc_rejections : skill_catalog_rejection list;
 }
 
-val skill_diagnostic_code_to_string : skill_diagnostic_code -> string
+val skills_catalog_state_to_string : skills_catalog_state -> string
+val skill_diagnostic_code_to_string :
+  Agent_core.Skill_document.diagnostic -> string
 
 type effective_skill_load_reason =
   | Skill_catalog_default
@@ -561,6 +551,7 @@ type harness_verdict = {
   hv_verdict : string;
   hv_evaluator : string;
   hv_fallback_reason : string option;
+  hv_notes_hash : string;  (** joins an operator label to this verdict *)
       (** Why the named evaluator did not run, when something else did. A
           verdict reached by a fallback is not the verdict that was asked for,
           and the surface says so rather than showing them alike. *)

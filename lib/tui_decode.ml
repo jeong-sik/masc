@@ -1805,6 +1805,7 @@ type harness_verdict = {
   hv_verdict : string;
   hv_evaluator : string;
   hv_fallback_reason : string option;
+  hv_notes_hash : string;
 }
 
 type harness_snapshot = { hs_verdicts : harness_verdict list }
@@ -2117,27 +2118,10 @@ type skills_catalog_surface =
   ; scs_flow : skill_flow option
   }
 
-type skill_diagnostic_code =
-  | Skill_missing_frontmatter
-  | Skill_byte_order_mark
-  | Skill_unterminated_frontmatter
-  | Skill_malformed_yaml
-  | Skill_frontmatter_not_mapping
-  | Skill_duplicate_field
-  | Skill_duplicate_metadata_key
-  | Skill_unexpected_frontmatter_field
-  | Skill_missing_name
-  | Skill_missing_description
-  | Skill_invalid_field_type
-  | Skill_invalid_name
-  | Skill_name_mismatch
-  | Skill_description_too_long
-  | Skill_compatibility_empty
-  | Skill_compatibility_too_long
-  | Skill_invalid_metadata_value
+module Skill_document = Agent_core.Skill_document
 
 type skill_rejection_diagnostic =
-  { srd_code : skill_diagnostic_code
+  { srd_diagnostic : Skill_document.diagnostic
   ; srd_message : string
   }
 
@@ -2148,57 +2132,245 @@ type skill_rejection_reason =
   | Skill_invalid_package_id
 
 type skill_catalog_rejection =
-  { scr_source_id : string
+  { scr_source_index : int
+  ; scr_source_id : string
   ; scr_package_id : string option
   ; scr_content_revision : string option
   ; scr_reason : skill_rejection_reason
   }
 
+type skills_catalog_state =
+  | Skills_ready
+  | Skills_not_registered
+  | Skills_uninitialized
+  | Skills_invalid_workspace
+
 type skills_catalog =
-  { sc_state : string
+  { sc_state : skills_catalog_state
   ; sc_surfaces : skills_catalog_surface list
   ; sc_rejections : skill_catalog_rejection list
   }
 
-let skill_diagnostic_code_to_string = function
-  | Skill_missing_frontmatter -> "missing_frontmatter"
-  | Skill_byte_order_mark -> "byte_order_mark"
-  | Skill_unterminated_frontmatter -> "unterminated_frontmatter"
-  | Skill_malformed_yaml -> "malformed_yaml"
-  | Skill_frontmatter_not_mapping -> "frontmatter_not_mapping"
-  | Skill_duplicate_field -> "duplicate_field"
-  | Skill_duplicate_metadata_key -> "duplicate_metadata_key"
-  | Skill_unexpected_frontmatter_field -> "unexpected_frontmatter_field"
-  | Skill_missing_name -> "missing_name"
-  | Skill_missing_description -> "missing_description"
-  | Skill_invalid_field_type -> "invalid_field_type"
-  | Skill_invalid_name -> "invalid_name"
-  | Skill_name_mismatch -> "name_mismatch"
-  | Skill_description_too_long -> "description_too_long"
-  | Skill_compatibility_empty -> "compatibility_empty"
-  | Skill_compatibility_too_long -> "compatibility_too_long"
-  | Skill_invalid_metadata_value -> "invalid_metadata_value"
+let skills_catalog_state_to_string = function
+  | Skills_ready -> "ready"
+  | Skills_not_registered -> "not_registered"
+  | Skills_uninitialized -> "uninitialized"
+  | Skills_invalid_workspace -> "invalid_workspace"
 
-let skill_diagnostic_code_of_string = function
-  | "missing_frontmatter" -> Ok Skill_missing_frontmatter
-  | "byte_order_mark" -> Ok Skill_byte_order_mark
-  | "unterminated_frontmatter" -> Ok Skill_unterminated_frontmatter
-  | "malformed_yaml" -> Ok Skill_malformed_yaml
-  | "frontmatter_not_mapping" -> Ok Skill_frontmatter_not_mapping
-  | "duplicate_field" -> Ok Skill_duplicate_field
-  | "duplicate_metadata_key" -> Ok Skill_duplicate_metadata_key
-  | "unexpected_frontmatter_field" -> Ok Skill_unexpected_frontmatter_field
-  | "missing_name" -> Ok Skill_missing_name
-  | "missing_description" -> Ok Skill_missing_description
-  | "invalid_field_type" -> Ok Skill_invalid_field_type
-  | "invalid_name" -> Ok Skill_invalid_name
-  | "name_mismatch" -> Ok Skill_name_mismatch
-  | "description_too_long" -> Ok Skill_description_too_long
-  | "compatibility_empty" -> Ok Skill_compatibility_empty
-  | "compatibility_too_long" -> Ok Skill_compatibility_too_long
-  | "invalid_metadata_value" -> Ok Skill_invalid_metadata_value
+let skill_diagnostic_code_to_string = function
+  | Skill_document.Missing_frontmatter -> "missing_frontmatter"
+  | Skill_document.Byte_order_mark -> "byte_order_mark"
+  | Skill_document.Unterminated_frontmatter -> "unterminated_frontmatter"
+  | Skill_document.Malformed_yaml _ -> "malformed_yaml"
+  | Skill_document.Frontmatter_not_mapping -> "frontmatter_not_mapping"
+  | Skill_document.Duplicate_field _ -> "duplicate_field"
+  | Skill_document.Duplicate_metadata_key _ -> "duplicate_metadata_key"
+  | Skill_document.Unexpected_frontmatter_field _ ->
+    "unexpected_frontmatter_field"
+  | Skill_document.Missing_name -> "missing_name"
+  | Skill_document.Missing_description -> "missing_description"
+  | Skill_document.Invalid_field_type _ -> "invalid_field_type"
+  | Skill_document.Invalid_name _ -> "invalid_name"
+  | Skill_document.Name_mismatch _ -> "name_mismatch"
+  | Skill_document.Description_too_long _ -> "description_too_long"
+  | Skill_document.Compatibility_empty -> "compatibility_empty"
+  | Skill_document.Compatibility_too_long _ -> "compatibility_too_long"
+  | Skill_document.Invalid_metadata_value _ -> "invalid_metadata_value"
+
+let validate_closed_object ~label ~allowed = function
+  | `Assoc fields ->
+    let rec find_duplicate seen = function
+      | [] -> None
+      | (key, _) :: rest ->
+        if List.mem key seen then Some key else find_duplicate (key :: seen) rest
+    in
+    (match find_duplicate [] fields with
+     | Some key ->
+       Error (Printf.sprintf "%s duplicates field %S" label key)
+     | None ->
+       (match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
+        | Some (key, _) ->
+          Error (Printf.sprintf "%s has unexpected field %S" label key)
+        | None -> Ok ()))
+  | bad -> field_type_error label "an object" bad
+
+let required_nonempty_string_field json key =
+  let* value = required_string_field json key in
+  if String.equal value ""
+  then Error (Printf.sprintf "field '%s' must be a non-empty string" key)
+  else Ok value
+
+let required_nullable_nonempty_string_field json key =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | None -> missing_field key
+     | Some `Null -> Ok None
+     | Some (`String "") ->
+       Error (Printf.sprintf "field '%s' must be non-empty or null" key)
+     | Some (`String value) -> Ok (Some value)
+     | Some bad -> field_type_error key "a non-empty string or null" bad)
+  | bad -> field_type_error "skill snapshot rejection" "an object" bad
+
+let required_nonnegative_int_field json key =
+  let* value = required_int_field json key in
+  if value < 0
+  then Error (Printf.sprintf "field '%s' must be non-negative" key)
+  else Ok value
+
+let decode_skill_document_field json =
+  let* () = validate_closed_object ~label:"diagnostic.field" ~allowed:[ "kind"; "name" ] json in
+  let* kind = required_string_field json "kind" in
+  let* name = required_string_field json "name" in
+  match kind, name with
+  | "standard", "name" -> Ok (Skill_document.Standard Skill_document.Name)
+  | "standard", "description" ->
+    Ok (Skill_document.Standard Skill_document.Description)
+  | "standard", "license" -> Ok (Skill_document.Standard Skill_document.License)
+  | "standard", "compatibility" ->
+    Ok (Skill_document.Standard Skill_document.Compatibility)
+  | "standard", "metadata" -> Ok (Skill_document.Standard Skill_document.Metadata)
+  | "standard", "allowed-tools" ->
+    Ok (Skill_document.Standard Skill_document.Allowed_tools_syntax_only)
+  | "standard", unknown ->
+    Error (Printf.sprintf "diagnostic.field has unknown standard name %S" unknown)
+  | "extension", name -> Ok (Skill_document.Extension name)
+  | unknown, _ ->
+    Error (Printf.sprintf "diagnostic.field has unknown kind %S" unknown)
+
+let decode_skill_expected_shape json =
+  match json with
+  | `String "string" -> Ok Skill_document.String_value
+  | `String "string_mapping" -> Ok Skill_document.String_mapping
+  | `String unknown ->
+    Error (Printf.sprintf "diagnostic.expected has unknown value %S" unknown)
+  | bad -> field_type_error "diagnostic.expected" "a string" bad
+
+let decode_skill_name_violation json =
+  let* kind = required_string_field json "kind" in
+  let closed fields =
+    validate_closed_object
+      ~label:"diagnostic.violations[]"
+      ~allowed:("kind" :: fields)
+      json
+  in
+  match kind with
+  | "empty_name" ->
+    let* () = closed [] in
+    Ok Skill_document.Empty_name
+  | "name_too_long" ->
+    let* () = closed [ "length"; "maximum" ] in
+    let* length = required_nonnegative_int_field json "length" in
+    let* maximum = required_int_field json "maximum" in
+    if maximum <= 0
+    then Error "field 'maximum' must be positive"
+    else Ok (Skill_document.Name_too_long { length; maximum })
+  | "name_not_lowercase" ->
+    let* () = closed [] in
+    Ok Skill_document.Name_not_lowercase
+  | "name_starts_with_hyphen" ->
+    let* () = closed [] in
+    Ok Skill_document.Name_starts_with_hyphen
+  | "name_ends_with_hyphen" ->
+    let* () = closed [] in
+    Ok Skill_document.Name_ends_with_hyphen
+  | "name_has_consecutive_hyphens" ->
+    let* () = closed [] in
+    Ok Skill_document.Name_has_consecutive_hyphens
+  | "name_has_invalid_character" ->
+    let* () = closed [] in
+    Ok Skill_document.Name_has_invalid_character
   | unknown ->
-    Error (Printf.sprintf "skill diagnostic code has unknown value %S" unknown)
+    Error (Printf.sprintf "skill name violation has unknown kind %S" unknown)
+
+let decode_skill_rejection_diagnostic json =
+  let* code = required_string_field json "code" in
+  let* srd_message = required_nonempty_string_field json "message" in
+  let closed payload =
+    validate_closed_object
+      ~label:"skill rejection diagnostic"
+      ~allowed:("code" :: "message" :: payload)
+      json
+  in
+  let* srd_diagnostic =
+    match code with
+    | "missing_frontmatter" ->
+      let* () = closed [] in
+      Ok Skill_document.Missing_frontmatter
+    | "byte_order_mark" ->
+      let* () = closed [] in
+      Ok Skill_document.Byte_order_mark
+    | "unterminated_frontmatter" ->
+      let* () = closed [] in
+      Ok Skill_document.Unterminated_frontmatter
+    | "malformed_yaml" ->
+      let* () = closed [ "detail" ] in
+      let* detail = required_nonempty_string_field json "detail" in
+      Ok (Skill_document.Malformed_yaml detail)
+    | "frontmatter_not_mapping" ->
+      let* () = closed [] in
+      Ok Skill_document.Frontmatter_not_mapping
+    | "duplicate_field" ->
+      let* () = closed [ "field" ] in
+      let* field_json = required_object_field json "field" in
+      let* field = decode_skill_document_field field_json in
+      Ok (Skill_document.Duplicate_field field)
+    | "duplicate_metadata_key" ->
+      let* () = closed [ "key" ] in
+      let* key = required_string_field json "key" in
+      Ok (Skill_document.Duplicate_metadata_key key)
+    | "unexpected_frontmatter_field" ->
+      let* () = closed [ "field" ] in
+      let* field = required_string_field json "field" in
+      Ok (Skill_document.Unexpected_frontmatter_field field)
+    | "missing_name" ->
+      let* () = closed [] in
+      Ok Skill_document.Missing_name
+    | "missing_description" ->
+      let* () = closed [] in
+      Ok Skill_document.Missing_description
+    | "invalid_field_type" ->
+      let* () = closed [ "field"; "expected" ] in
+      let* field_json = required_object_field json "field" in
+      let* field = decode_skill_document_field field_json in
+      let* expected_json = required_member json "expected" in
+      let* expected = decode_skill_expected_shape expected_json in
+      Ok (Skill_document.Invalid_field_type { field; expected })
+    | "invalid_name" ->
+      let* () = closed [ "name"; "violations" ] in
+      let* name = required_string_field json "name" in
+      let* violations_json = required_list_field json "violations" in
+      let* violations =
+        decode_list
+          "skill rejection diagnostic.violations"
+          decode_skill_name_violation
+          violations_json
+      in
+      Ok (Skill_document.Invalid_name { name; violations })
+    | "name_mismatch" ->
+      let* () = closed [ "declared"; "directory" ] in
+      let* declared = required_string_field json "declared" in
+      let* directory = required_string_field json "directory" in
+      Ok (Skill_document.Name_mismatch { declared; directory })
+    | "description_too_long" ->
+      let* () = closed [ "length" ] in
+      let* length = required_nonnegative_int_field json "length" in
+      Ok (Skill_document.Description_too_long { length })
+    | "compatibility_empty" ->
+      let* () = closed [] in
+      Ok Skill_document.Compatibility_empty
+    | "compatibility_too_long" ->
+      let* () = closed [ "length" ] in
+      let* length = required_nonnegative_int_field json "length" in
+      Ok (Skill_document.Compatibility_too_long { length })
+    | "invalid_metadata_value" ->
+      let* () = closed [ "key" ] in
+      let* key = required_string_field json "key" in
+      Ok (Skill_document.Invalid_metadata_value { key })
+    | unknown ->
+      Error (Printf.sprintf "skill diagnostic code has unknown value %S" unknown)
+  in
+  Ok { srd_diagnostic; srd_message }
 
 let decode_skill_usage_row json =
   let* su_keeper = required_string_field json "keeper" in
@@ -2233,21 +2405,38 @@ let decode_skills_catalog_surface json =
   in
   Ok { scs_name; scs_kind; scs_usage; scs_flow }
 
-let decode_skill_rejection_diagnostic json =
-  let* code = required_string_field json "code" in
-  let* srd_code = skill_diagnostic_code_of_string code in
-  let* srd_message = required_string_field json "message" in
-  Ok { srd_code; srd_message }
-
 let decode_skill_catalog_rejection json =
-  let* scr_source_id = required_string_field json "source_id" in
-  let* scr_package_id = optional_string_field json "package_id" in
-  let* scr_content_revision = optional_string_field json "content_revision" in
+  let* () =
+    validate_closed_object
+      ~label:"skill snapshot rejection"
+      ~allowed:
+        [ "source_index"
+        ; "source_id"
+        ; "package_id"
+        ; "content_revision"
+        ; "reason"
+        ]
+      json
+  in
+  let* scr_source_index = required_nonnegative_int_field json "source_index" in
+  let* scr_source_id = required_nonempty_string_field json "source_id" in
+  let* scr_package_id =
+    required_nullable_nonempty_string_field json "package_id"
+  in
+  let* scr_content_revision =
+    required_nullable_nonempty_string_field json "content_revision"
+  in
   let* reason = required_object_field json "reason" in
   let* kind = required_string_field reason "kind" in
   let* scr_reason =
     match kind with
     | "document_rejected" ->
+      let* () =
+        validate_closed_object
+          ~label:"skill snapshot rejection.reason"
+          ~allowed:[ "kind"; "diagnostics" ]
+          reason
+      in
       let* diagnostics_json = required_list_field reason "diagnostics" in
       let* diagnostics =
         decode_list
@@ -2256,32 +2445,144 @@ let decode_skill_catalog_rejection json =
           diagnostics_json
       in
       Ok (Skill_document_rejected diagnostics)
-    | "document_unreadable" -> Ok Skill_document_unreadable
-    | "exact_identity_duplicate" -> Ok Skill_exact_identity_duplicate
-    | "invalid_package_id" -> Ok Skill_invalid_package_id
+    | "document_unreadable" ->
+      let* () =
+        validate_closed_object
+          ~label:"skill snapshot rejection.reason"
+          ~allowed:[ "kind" ]
+          reason
+      in
+      Ok Skill_document_unreadable
+    | "exact_identity_duplicate" ->
+      let* () =
+        validate_closed_object
+          ~label:"skill snapshot rejection.reason"
+          ~allowed:[ "kind" ]
+          reason
+      in
+      Ok Skill_exact_identity_duplicate
+    | "invalid_package_id" ->
+      let* () =
+        validate_closed_object
+          ~label:"skill snapshot rejection.reason"
+          ~allowed:[ "kind" ]
+          reason
+      in
+      Ok Skill_invalid_package_id
     | unknown ->
       Error (Printf.sprintf "skill rejection kind has unknown value %S" unknown)
   in
-  Ok { scr_source_id; scr_package_id; scr_content_revision; scr_reason }
+  Ok
+    { scr_source_index
+    ; scr_source_id
+    ; scr_package_id
+    ; scr_content_revision
+    ; scr_reason
+    }
+
+let decode_skill_snapshot_rejections json =
+  let* () =
+    validate_closed_object
+      ~label:"skills snapshot"
+      ~allowed:
+        [ "snapshot_revision"
+        ; "catalog_revision"
+        ; "config"
+        ; "sources"
+        ; "skills"
+        ; "effective_skills"
+        ; "shadows"
+        ; "rejections"
+        ]
+      json
+  in
+  let* _snapshot_revision =
+    required_nonempty_string_field json "snapshot_revision"
+  in
+  let* _catalog_revision =
+    required_nonempty_string_field json "catalog_revision"
+  in
+  let* _config = required_object_field json "config" in
+  let* _sources = required_list_field json "sources" in
+  let* _skills = required_list_field json "skills" in
+  let* _effective_skills = required_list_field json "effective_skills" in
+  let* _shadows = required_list_field json "shadows" in
+  let* rejections_json = required_list_field json "rejections" in
+  decode_list
+    "snapshot.rejections"
+    decode_skill_catalog_rejection
+    rejections_json
 
 let decode_skills_catalog json =
-  let* sc_state = required_string_field json "state" in
-  let* surfaces_json = optional_list_field json "surfaces" in
-  let* sc_surfaces =
-    decode_list "surfaces" decode_skills_catalog_surface surfaces_json
-  in
-  let* sc_rejections =
-    if String.equal sc_state "ready"
-    then
+  let* schema = required_string_field json "schema" in
+  if not (String.equal schema "masc.skill-snapshot/v1")
+  then Error (Printf.sprintf "skills catalog has unknown schema %S" schema)
+  else
+    let* state = required_string_field json "state" in
+    match state with
+    | "ready" ->
+      let* () =
+        validate_closed_object
+          ~label:"skills catalog"
+          ~allowed:[ "schema"; "state"; "snapshot"; "surfaces"; "usage_coverage" ]
+          json
+      in
       let* snapshot = required_object_field json "snapshot" in
-      let* rejections_json = required_list_field snapshot "rejections" in
-      decode_list
-        "snapshot.rejections"
-        decode_skill_catalog_rejection
-        rejections_json
-    else Ok []
-  in
-  Ok { sc_state; sc_surfaces; sc_rejections }
+      let* sc_rejections = decode_skill_snapshot_rejections snapshot in
+      let* surfaces_json = required_list_field json "surfaces" in
+      let* sc_surfaces =
+        decode_list "surfaces" decode_skills_catalog_surface surfaces_json
+      in
+      Ok { sc_state = Skills_ready; sc_surfaces; sc_rejections }
+    | "not_registered" ->
+      let* () =
+        validate_closed_object
+          ~label:"skills catalog"
+          ~allowed:[ "schema"; "state" ]
+          json
+      in
+      Ok
+        { sc_state = Skills_not_registered
+        ; sc_surfaces = []
+        ; sc_rejections = []
+        }
+    | "uninitialized" ->
+      let* () =
+        validate_closed_object
+          ~label:"skills catalog"
+          ~allowed:[ "schema"; "state" ]
+          json
+      in
+      Ok
+        { sc_state = Skills_uninitialized
+        ; sc_surfaces = []
+        ; sc_rejections = []
+        }
+    | "invalid_workspace" ->
+      let* () =
+        validate_closed_object
+          ~label:"skills catalog"
+          ~allowed:[ "schema"; "state"; "reason" ]
+          json
+      in
+      let* reason = required_object_field json "reason" in
+      let* () =
+        validate_closed_object
+          ~label:"skills catalog.reason"
+          ~allowed:[ "code" ]
+          reason
+      in
+      let* code = required_string_field reason "code" in
+      if not (String.equal code "invalid_workspace")
+      then Error (Printf.sprintf "invalid workspace has unknown reason %S" code)
+      else
+        Ok
+          { sc_state = Skills_invalid_workspace
+          ; sc_surfaces = []
+          ; sc_rejections = []
+          }
+    | unknown ->
+      Error (Printf.sprintf "skills catalog has unknown state %S" unknown)
 
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the
@@ -2992,6 +3293,7 @@ let decode_harness_verdict json =
   let* hv_evaluator = required_string_field json "evaluator_runtime" in
   let* hv_fallback_reason = optional_string_field json "fallback_reason" in
   let* hv_at = require_float_field json "timestamp" in
+  let* hv_notes_hash = required_string_field json "notes_hash" in
   Ok
     { hv_at
     ; hv_task_id
@@ -3001,6 +3303,7 @@ let decode_harness_verdict json =
     ; hv_verdict
     ; hv_evaluator
     ; hv_fallback_reason
+    ; hv_notes_hash
     }
 
 let decode_harness_snapshot json =

@@ -1327,6 +1327,24 @@ let post_verification_verdict ~(host : string) ~(port : int)
   post_json ~host ~port ~path:"/api/v1/verification/verdict"
     ~body:(Yojson.Safe.to_string (`Assoc fields))
 
+(* The operator's own verdict on a Harness row, joined to the machine's by
+   the notes hash. The verdict is what the human holds — not agreement with
+   the machine — so the caller resolves y/n against the row before posting. *)
+let post_harness_label ~(host : string) ~(port : int) ~(notes_hash : string)
+    ~(verdict : [ `Approve | `Reject ]) ~(reason : string) :
+    (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/dashboard/harness-label"
+    ~body:
+      (Yojson.Safe.to_string
+         (`Assoc
+           [ ("notes_hash", `String notes_hash)
+           ; ( "verdict"
+             , `String
+                 (match verdict with `Approve -> "approve" | `Reject -> "reject")
+             )
+           ; ("reason", `String reason)
+           ]))
+
 (** POST /api/v1/keepers/:name/config — a partial settings patch. The body is
     exactly the fields the operator left in $EDITOR; a field absent from the
     body is absent from the patch, so the editor round-trip cannot blank a

@@ -178,6 +178,8 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "verdict" ~help:"open the full harness verdict"
       ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
+      ; b Act "y" "agree" ~help:"record the machine's verdict as yours"
+      ; b Act "n" "overrule" ~help:"record the opposite verdict; $EDITOR takes the reason"
       ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
       ]
       @ listing_meta

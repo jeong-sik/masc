@@ -158,6 +158,17 @@ let () =
   run
     "dashboard_harness_health"
     [
+      ( "operator_labels",
+        [
+          test_case "a well-formed approve label parses" `Quick
+            test_label_body_approve_parses;
+          test_case "a reject label parses with its reason" `Quick
+            test_label_body_reject_parses;
+          test_case "a malformed notes hash is refused" `Quick
+            test_label_body_bad_hash_refused;
+          test_case "an unknown verdict word is refused" `Quick
+            test_label_body_unknown_verdict_refused;
+        ] );
       ( "runtime_stores",
         [
           test_case "wake payload round trip" `Quick test_wake_payload_store_round_trip;

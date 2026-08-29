@@ -2603,64 +2603,96 @@ let test_cli_walk_exhaustion_quarantines_the_last_cli_identity () =
 ;;
 
 
-(* The metric label text is a contract with anything reading the
-   [HitlSummaryOutcomes] counter, and it survived the move off 27 string
-   literals only if every pair still spells the same word. Adding a variant
-   is a compile error in [outcome_label]; forgetting to list it here is
-   caught by the count. *)
-let expected_outcome_labels =
+(* The metric label text is the contract with anything reading the
+   [HitlSummaryOutcomes] counter, so this suite keeps its own copy of every
+   pair and checks the module still spells them the same way.
+
+   [pinned_label] is deliberately an exhaustive match rather than a lookup:
+   a variant added to [flow_outcome] stops this file from compiling until
+   someone decides what the new branch is called on the wire. The list below
+   is not enforced the same way -- nothing makes you append to it -- but the
+   compile error lands first, which is where both get noticed. *)
+let pinned_label : Worker.flow_outcome -> string = function
+  | Ok_summary -> "ok_summary"
+  | Ok_summary_cli -> "ok_summary_cli"
+  | Source_resolved -> "exact_source_resolved"
+  | Identity_unbound -> "exact_identity_unbound"
+  | Identity_unbound_source_changed -> "exact_identity_unbound_source_changed"
+  | Terminal_sync_unconfirmed -> "exact_terminal_sync_unconfirmed"
+  | Terminal_persistence_failure -> "exact_terminal_persistence_failure"
+  | Terminal_rejected -> "exact_terminal_rejected"
+  | Provenance_mismatch -> "exact_provenance_mismatch"
+  | Domain_invalid_output -> "exact_domain_invalid_output"
+  | Attempt_replay -> "exact_attempt_replay"
+  | Attempt_start_failed -> "exact_attempt_start_failed"
+  | Measurement_start_failed -> "exact_measurement_start_failed"
+  | Measurement_callback_failed -> "exact_measurement_callback_failed"
+  | Candidates_exhausted -> "exact_candidates_exhausted"
+  | Bind_failed -> "exact_bind_failed"
+  | Release_failed -> "exact_release_failed"
+  | Execution_failed -> "exact_execution_failed"
+  | Cli_slots_exhausted -> "exact_cli_slots_exhausted"
+  | Cli_released_without_binding -> "exact_cli_released_without_binding"
+  | Cli_walk_fell_back -> "exact_cli_walk_fell_back"
+  | Cli_release_unconfirmed -> "exact_cli_release_unconfirmed"
+  | Cli_bind_unconfirmed -> "exact_cli_bind_unconfirmed"
+  | Cli_bind_failed -> "exact_cli_bind_failed"
+  | Cancellation -> "exact_cancellation"
+  | Cancellation_settlement_failed -> "exact_cancellation_settlement_failed"
+  | Crashed -> "crashed"
+;;
+
+let all_outcomes =
   Worker.
-    [ Ok_summary, "ok_summary"
-    ; Ok_summary_cli, "ok_summary_cli"
-    ; Source_resolved, "exact_source_resolved"
-    ; Identity_unbound, "exact_identity_unbound"
-    ; Identity_unbound_source_changed, "exact_identity_unbound_source_changed"
-    ; Terminal_sync_unconfirmed, "exact_terminal_sync_unconfirmed"
-    ; Terminal_persistence_failure, "exact_terminal_persistence_failure"
-    ; Terminal_rejected, "exact_terminal_rejected"
-    ; Provenance_mismatch, "exact_provenance_mismatch"
-    ; Domain_invalid_output, "exact_domain_invalid_output"
-    ; Attempt_replay, "exact_attempt_replay"
-    ; Attempt_start_failed, "exact_attempt_start_failed"
-    ; Measurement_start_failed, "exact_measurement_start_failed"
-    ; Measurement_callback_failed, "exact_measurement_callback_failed"
-    ; Candidates_exhausted, "exact_candidates_exhausted"
-    ; Bind_failed, "exact_bind_failed"
-    ; Release_failed, "exact_release_failed"
-    ; Execution_failed, "exact_execution_failed"
-    ; Cli_slots_exhausted, "exact_cli_slots_exhausted"
-    ; Cli_released_without_binding, "exact_cli_released_without_binding"
-    ; Cli_walk_fell_back, "exact_cli_walk_fell_back"
-    ; Cli_release_unconfirmed, "exact_cli_release_unconfirmed"
-    ; Cli_bind_unconfirmed, "exact_cli_bind_unconfirmed"
-    ; Cli_bind_failed, "exact_cli_bind_failed"
-    ; Cancellation, "exact_cancellation"
-    ; Cancellation_settlement_failed, "exact_cancellation_settlement_failed"
-    ; Crashed, "crashed" ]
+    [ Ok_summary
+    ; Ok_summary_cli
+    ; Source_resolved
+    ; Identity_unbound
+    ; Identity_unbound_source_changed
+    ; Terminal_sync_unconfirmed
+    ; Terminal_persistence_failure
+    ; Terminal_rejected
+    ; Provenance_mismatch
+    ; Domain_invalid_output
+    ; Attempt_replay
+    ; Attempt_start_failed
+    ; Measurement_start_failed
+    ; Measurement_callback_failed
+    ; Candidates_exhausted
+    ; Bind_failed
+    ; Release_failed
+    ; Execution_failed
+    ; Cli_slots_exhausted
+    ; Cli_released_without_binding
+    ; Cli_walk_fell_back
+    ; Cli_release_unconfirmed
+    ; Cli_bind_unconfirmed
+    ; Cli_bind_failed
+    ; Cancellation
+    ; Cancellation_settlement_failed
+    ; Crashed ]
 ;;
 
 let test_outcome_labels_are_stable () =
   Alcotest.(check int)
-    "every flow_outcome is pinned"
+    "every flow_outcome is listed"
     27
-    (List.length expected_outcome_labels);
+    (List.length all_outcomes);
   List.iter
-    (fun (outcome, label) ->
+    (fun outcome ->
+       let expected = pinned_label outcome in
        Alcotest.(check string)
-         (Printf.sprintf "label for %s" label)
-         label
+         (Printf.sprintf "label for %s" expected)
+         expected
          (Worker.outcome_label outcome))
-    expected_outcome_labels
+    all_outcomes
 ;;
 
 let test_outcome_labels_are_distinct () =
-  let labels =
-    List.map (fun (_, label) -> label) expected_outcome_labels
-    |> List.sort_uniq String.compare
-  in
+  let labels = List.sort_uniq String.compare (List.map pinned_label all_outcomes) in
   Alcotest.(check int)
     "no two outcomes share a label"
-    (List.length expected_outcome_labels)
+    (List.length all_outcomes)
     (List.length labels)
 ;;
 

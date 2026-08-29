@@ -463,7 +463,7 @@ SafetyInvariant 추가 시 같은 spec에 `BugAction`도 짝으로 추가, clean
 **PR 체크:**
 ```bash
 # specs/<topic>/<Name>.tla 와 sibling -buggy*.cfg 짝 매핑 확인
-# (variant cfg 지원: -buggy.cfg, -buggy-runtime.cfg, -buggy-compaction.cfg 모두 매치)
+# (variant cfg 지원: -buggy.cfg, -buggy-runtime.cfg 등 -buggy* 모두 매치)
 comm -23 \
   <(find specs -name "*.tla" | sed 's|.tla$||' | sort) \
   <(find specs -name "*-buggy*.cfg" | sed -E 's|-buggy[^.]*\.cfg$||' | sort -u)

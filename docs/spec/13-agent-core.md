@@ -65,8 +65,8 @@ timestamps. MASC-owned domain events use the process-wide bus in
 - Agent Core owns the transcript and generic checkpoint representation.
 - MASC owns Keeper lanes, Board, Goal, Task, Gate, receipts, and durable product
   state.
-- MASC compaction is an explicit product operation. Agent Core reports typed
-  capacity or context overflow; it does not mutate MASC history implicitly.
+- Agent Core reports typed capacity or context overflow; it does not mutate
+  MASC history implicitly.
 - Concrete provider and model identity remains agent-core runtime data. MASC
   product policy routes by typed runtime lane and capability.
 

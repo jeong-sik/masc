@@ -23,7 +23,7 @@ The UI projects source facts from:
 - Channel/Connector scope and message correlations;
 - Gate pending/resolved records and LLM/operator provenance;
 - Fusion panel runs, individual results, Judge results, and failures;
-- Memory events and compaction/consolidation provenance;
+- Memory events and consolidation provenance;
 - agent core runtime/provider/model call telemetry.
 
 Every projection retains the source id, version, timestamp, and correlation

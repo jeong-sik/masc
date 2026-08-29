@@ -105,11 +105,11 @@ Current code cross-check: `keeper_unified_turn.ml` still calls these helpers dir
 
 | Helper | Current direct caller(s) | Composite fields touched | Emits `keeper_composite_changed`? |
 | --- | --- | --- | --- |
-| `mark_turn_started` | live turn entry | installs `current_turn_observation`, initializes `turn_phase=prompting`, resets compaction stage | Yes |
+| `mark_turn_started` | live turn entry | installs `current_turn_observation`, initializes `turn_phase=prompting` | Yes |
 | `mark_turn_measurement` | live turn measurement bind | binds pending measurement into the current turn snapshot | Yes, when a pending measurement exists |
 | `set_turn_decision_stage` | live turn decision path | updates `decision_stage` to `guard_ok` when measurement is present | Yes, when a live turn exists |
 | `set_turn_runtime_state` | runtime attempt path | updates `runtime_state`, and via `turn_phase_of_runtime_state` also changes `turn_phase` | Yes, when a live turn exists |
-| `set_turn_phase` | terminal/compaction/error paths | forces `turn_phase` during terminal/compaction/error paths | Yes, when a live turn exists |
+| `set_turn_phase` | terminal/error path, tool hook path | forces `turn_phase` outside the runtime-state transition | Yes, when a live turn exists |
 | `set_turn_selected_model` | successful runtime attempt path | stores `selected_model` after a successful runtime attempt | Yes, when a live turn exists |
 | `mark_turn_finished` | turn finally block | clears `current_turn_observation`, ending the live turn snapshot and freezing `last_completed_turn` | Yes, when a live turn exists |
 
@@ -210,9 +210,9 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 | --- | --- |
 | Workspace / workspace | `agent_bound`, `agent_unbound`, `broadcast`, `task_update` |
 | Board and notification compatibility | `board_post`, `masc/board_post`, `board_comment`, `masc/board_comment`, `board_delete`, `masc/board_delete`, `post_created`, `comment_added`, `post_voted`, `comment_voted` |
-| Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_compaction`, `masc/keeper_compaction`, `keeper_guardrail`, `masc/keeper_guardrail`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_skipped`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
+| Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
 | Gate / HITL | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `approval:pending`, `approval:resolved` |
-| agent core bridge | `agent_core:masc:keeper:lifecycle`, `agent_core:agent_started`, `agent_core:agent_completed`, `agent_core:tool_called`, `agent_core:tool_completed`, `agent_core:turn_started`, `agent_core:turn_completed`, `agent_core:context_compacted`, `agent_core:task_state_changed`, `agent_core:masc:harness:verdict_recorded`, `agent_core:masc:harness:pre_compact`, `agent_core:masc:harness:handoff` |
+| agent core bridge | `agent_core:masc:keeper:lifecycle`, `agent_core:agent_started`, `agent_core:agent_completed`, `agent_core:tool_called`, `agent_core:tool_completed`, `agent_core:turn_started`, `agent_core:turn_completed`, `agent_core:masc:harness:verdict_recorded`, `agent_core:masc:harness:handoff` |
 | Server-push snapshots | `project_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
 
 ### 2. Agent Core custom events published by MASC
@@ -226,7 +226,6 @@ Domain publishers emit typed `Agent_core.Event_bus.Custom` payloads and
 | `masc:keeper:lifecycle` | keeper lifecycle update |
 | `masc:institution_episode` | institution episode recorded |
 | `masc:harness:verdict_recorded` | harness verdict persisted |
-| `masc:harness:pre_compact` | pre-compaction observation |
 | `masc:harness:handoff` | harness handoff observation |
 
 ### 3. Removed names

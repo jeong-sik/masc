@@ -22,7 +22,7 @@ MASC coordinator -> masc.agent_core
 | Agent execution | `Agent_core.Agent`, hooks, checkpoints | when and why a run starts |
 | Provider request | provider runtime and typed failure | runtime lane and capability policy |
 | Tool turn | `Agent_core.Tool.t` lifecycle | descriptor, authorization, handler |
-| Transcript | typed messages and checkpoint state | explicit Keeper compaction and durable product state |
+| Transcript | typed messages and checkpoint state | durable product state |
 | Events | typed `Agent_core.Event_bus` payloads | domain event publication, SSE projection, replay store |
 | Orchestration | reusable primitives | Keeper, Board, Goal, Task, Gate, receipts |
 

@@ -653,9 +653,7 @@ let test_keeper_wake_consumer_records_wake_receipt () =
       (terminal_row
        |> member "dispatch_receipt"
        |> member "projection_status"
-       |> to_string);
-    check string "dispatch success is explicit" "succeeded"
-      (terminal_row |> member "dispatch_status" |> to_string)
+       |> to_string)
 ;;
 
 let test_routed_schedule_carries_occurrence_destination_to_keeper () =
@@ -709,8 +707,6 @@ let test_routed_schedule_carries_occurrence_destination_to_keeper () =
   in
   let open Yojson.Safe.Util in
   let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
-  check string "schedule FSM reports dispatch acceptance" "succeeded"
-    (row |> member "dispatch_status" |> to_string);
   check string "dispatch receipt preserves routed result policy" "reply_to_origin"
     (row
      |> member "dispatch_receipt"

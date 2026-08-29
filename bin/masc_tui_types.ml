@@ -283,7 +283,6 @@ type schedule_row = {
   sch_schedule_id: string;
   sch_schedule_instance_id: string;
   sch_status: string;
-  sch_dispatch_status: string;
   sch_source: string;
   sch_requested_by: string;
   sch_scheduled_by: string;

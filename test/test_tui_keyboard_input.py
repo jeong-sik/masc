@@ -7701,7 +7701,6 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
                     "schedule_instance_id": "instance-proof-701",
                     "schedule_id": "schedule-proof-701",
                     "status": "running",
-                    "dispatch_status": "running",
                     "source": "operator",
                     "requested_by": {
                         "id": "operator-701",
@@ -7756,7 +7755,6 @@ def schedule_detail_interaction() -> Interaction:
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
             b"wake:succeeded",
-            b"dispatch:running",
             b"queue:matched_pending/2 pending",
             b"reaction:matched_recorded",
         ):
@@ -7771,7 +7769,6 @@ def schedule_detail_interaction() -> Interaction:
         for needle in (
             b"masc://schedules/schedule-proof-701",
             b"masc://keepers/alpha",
-            b"Dispatch",
             b"Operator Proof (human_operator)",
             b"keeper_wake",
             b"digest-proof-701",

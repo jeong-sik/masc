@@ -661,7 +661,6 @@ let schedule_request_dashboard_json
     [ "schedule_instance_id", `String request.schedule_instance_id
     ; "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
-    ; "dispatch_status", `String (Schedule_domain.schedule_status_to_string request.status)
     ; "source", `String (Schedule_domain.schedule_source_to_string request.source)
     ; "requested_by", Schedule_domain.actor_to_yojson request.requested_by
     ; "scheduled_by", Schedule_domain.actor_to_yojson request.scheduled_by

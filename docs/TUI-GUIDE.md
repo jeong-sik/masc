@@ -675,7 +675,7 @@ wake reaches (a keeper, for keeper wakes); rows without one fall back to the
 payload summary.
 
 Right or `Enter` opens the selected schedule. The detail includes schedule and instance
-identity, dispatch state, requesting actors, timestamps, recurrence, payload
+identity, status, requesting actors, timestamps, recurrence, payload
 kind/tool/digest/summary, last wake, and queue/reaction evidence. Left or `Esc` returns
 to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
@@ -937,8 +937,9 @@ Per surface:
 Tab cycles the surfaces:
 
   Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning
-           -> Schedules -> Verification -> Harness -> Fusion -> Repositories
-           -> Connectors -> Runtime -> Tools -> System Logs -> Overview
+           -> Schedules -> Verify -> Harness -> Fusion -> Repos -> Code
+           -> Changes -> Connectors -> Runtime -> Config -> Resources
+           -> Tools -> Logs -> Overview
 
 Within a surface:
 

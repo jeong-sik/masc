@@ -215,8 +215,6 @@ export interface DashboardScheduledAutomationSignal {
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
   status: 'scheduled' | 'due' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'expired'
-  /** Alias that makes clear this FSM tracks schedule dispatch, not result delivery. */
-  dispatch_status?: DashboardScheduledAutomationRequest['status']
   source: string
   requested_by?: DashboardScheduledAutomationActor | null
   scheduled_by?: DashboardScheduledAutomationActor | null

@@ -161,6 +161,13 @@ let finalize
         (match runtime_observation with
          | Some obs -> List.length obs.attempts
          | None -> 0)
+      (* Calls the winning runtime made, and candidates the lane routed to, are
+         two counts. [attempts] belongs to one runtime_id, so on a failover it
+         reports the winner's calls and says nothing about the ones before it:
+         a turn that routed to two candidates read as attempt_count=1 next to
+         fallback_applied=true. The index of the candidate that won is one less
+         than the number routed, and the turn already has it. *)
+    ; runtime_lane_attempt_count = lane_attempt_index + 1
     ; runtime_fallback_applied = lane_failover_applied
     ; runtime_outcome =
         Keeper_agent_error.runtime_outcome_of_observation

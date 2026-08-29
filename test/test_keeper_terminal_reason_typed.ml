@@ -284,6 +284,7 @@ let base_receipt : R.t =
   ; runtime_id = "runtime-1"
   ; runtime_selected_model = None
   ; runtime_attempt_count = 1
+  ; runtime_lane_attempt_count = 1
   ; runtime_fallback_applied = false
   ; runtime_outcome = R.Runtime_completed
   ; agent_core_internal_runtime_allowed = true
@@ -1248,6 +1249,42 @@ let () =
   check
     "unavailable queue never claims backlog clean"
     (member "backlog_clean" unavailable = `Bool false)
+;;
+
+(* The shape reported on 2026-08-29: a turn routed to two lane candidates, the
+   first failed, the second completed, and the receipt read attempt_count=1
+   beside fallback_applied=true. Every one of the 208 failover receipts on disk
+   said 1. The two counts answer different questions and both have to survive
+   the projection. *)
+let () =
+  let failed_over =
+    { base_receipt with
+      runtime_attempt_count = 1
+    ; runtime_lane_attempt_count = 2
+    ; runtime_fallback_applied = true
+    }
+  in
+  let runtime = Yojson.Safe.Util.member "runtime" (R.to_json failed_over) in
+  check
+    "a failover receipt reports the candidates the lane routed to"
+    (Json_util.get_int runtime "lane_attempt_count" = Some 2);
+  check
+    "and still reports the winning runtime's own calls"
+    (Json_util.get_int runtime "attempt_count" = Some 1);
+  check
+    "fallback stays visible beside them"
+    (Yojson.Safe.Util.member "fallback_applied" runtime = `Bool true);
+  let single =
+    { base_receipt with
+      runtime_attempt_count = 1
+    ; runtime_lane_attempt_count = 1
+    ; runtime_fallback_applied = false
+    }
+  in
+  let single_runtime = Yojson.Safe.Util.member "runtime" (R.to_json single) in
+  check
+    "a turn that never failed over reports one candidate, not zero"
+    (Json_util.get_int single_runtime "lane_attempt_count" = Some 1)
 ;;
 
 let () =

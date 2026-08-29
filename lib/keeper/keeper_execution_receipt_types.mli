@@ -66,6 +66,15 @@ type t = {
   runtime_id : string;
   runtime_selected_model : string option;
   runtime_attempt_count : int;
+      (** Calls the selected runtime made. Scoped to one runtime_id, so a
+          failover's earlier candidates are not in here. *)
+  runtime_lane_attempt_count : int;
+      (** Lane candidates this turn routed to, the winner included.
+
+          A separate count because [runtime_attempt_count] cannot carry it:
+          that one belongs to the runtime that won, and on a failover the
+          receipt showed 1 beside [runtime_fallback_applied = true] while the
+          manifest recorded two routings. 1 when nothing failed over. *)
   runtime_fallback_applied : bool;
   runtime_outcome : runtime_outcome;
   agent_core_internal_runtime_allowed : bool;

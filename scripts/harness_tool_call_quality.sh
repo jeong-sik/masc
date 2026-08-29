@@ -53,6 +53,8 @@ EOF
 source "${ROOT_DIR}/scripts/harness/lib/test_framework.sh"
 # shellcheck source=scripts/harness/lib/server_bootstrap.sh
 source "${ROOT_DIR}/scripts/harness/lib/server_bootstrap.sh"
+# shellcheck source=scripts/harness/lib/mcp_call.sh
+source "${ROOT_DIR}/scripts/harness/lib/mcp_call.sh"
 
 cleanup() {
   harness_stop_server "${SERVER_PID}" 10
@@ -112,61 +114,9 @@ ensure_cli_built() {
   )
 }
 
-call_mcp_tool() {
-  local req_id="$1"
-  local tool_name="$2"
-  local args_json="$3"
-  local timeout_sec="${4:-$TIMEOUT_SEC}"
-  local saved_timeout="${CURL_TIMEOUT_SEC:-25}"
-
-  CURL_TIMEOUT_SEC="$timeout_sec"
-  LAST_TOOL_RAW="$(call_tool "$req_id" "$tool_name" "$args_json")"
-  CURL_TIMEOUT_SEC="$saved_timeout"
-
-  if printf '%s' "$LAST_TOOL_RAW" | jq -e '._harness_error? != null' >/dev/null 2>&1; then
-    LAST_TOOL_ERROR="$(printf '%s' "$LAST_TOOL_RAW" | jq -r '._harness_error.message // "transport error"')"
-    return 1
-  fi
-
-  LAST_TOOL_ERROR="$(printf '%s' "$LAST_TOOL_RAW" | jq -r '
-    if .error?.message then .error.message
-    elif (.result?.isError // false) == true then
-      ([.result.content[]? | select(.type == "text") | .text] | join(" "))
-    else empty end
-  ' 2>/dev/null | awk 'NF { print; exit }')"
-
-  if [[ -n "${LAST_TOOL_ERROR}" ]]; then
-    return 1
-  fi
-  return 0
-}
-
-tool_result_json() {
-  printf '%s' "${LAST_TOOL_RAW}" | extract_result
-}
-
-tool_result_payload_json() {
-  printf '%s' "${LAST_TOOL_RAW}" | jq -c '
-    if ._harness_error? then
-      empty
-    else
-      try (.result.content[0].text | fromjson) catch empty
-    end
-  '
-}
-
-tool_result_text() {
-  printf '%s' "${LAST_TOOL_RAW}" | extract_text
-}
-
-tool_error_text() {
-  if [[ -n "${LAST_TOOL_ERROR}" ]]; then
-    printf '%s' "${LAST_TOOL_ERROR}"
-  else
-    printf '%s' "${LAST_TOOL_RAW}" | extract_error
-  fi
-}
-
+# call_mcp_tool / tool_result_json / tool_result_payload_json /
+# tool_result_text / tool_error_text live in scripts/harness/lib/mcp_call.sh
+# (sourced above), shared with harness_coding_eval.sh.
 select_case_rows() {
   local keepers_json case_ids_json
   keepers_json="$(csv_to_json "${KEEPERS}")"

@@ -2071,6 +2071,9 @@
 (include stanzas/test_agent_api_query_params.inc)
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
+(include stanzas/coding_eval_lib.inc)
+(include stanzas/coding_eval_report_cli.inc)
+(include stanzas/test_coding_eval_cases.inc)
 (include stanzas/test_dedup_rules.inc)
 (include stanzas/test_jsonl_retention_window.inc)
 (include stanzas/test_trailing_slash_rules.inc)

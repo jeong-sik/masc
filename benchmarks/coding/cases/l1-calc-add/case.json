@@ -1,0 +1,9 @@
+{
+  "id": "l1-calc-add",
+  "level": "L1",
+  "lang": "python",
+  "timeout_sec": 420,
+  "verify": "verify.sh",
+  "prompt": "The check in this workspace fails. Run `bash check.sh` inside the workspace directory to see the failure, then fix calc.py so the check passes. Do not modify check.sh. Reply DONE once `bash check.sh` prints PASS.",
+  "description": "Single-file bug fix: add_two_and_three returns the wrong value; fix calc.py so check.sh passes."
+}

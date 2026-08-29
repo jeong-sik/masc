@@ -1353,6 +1353,14 @@ let test_async_recipe_checkpoint_snapshot_is_immutable () =
   check_bytes "source checkpoint mutation" recipe;
   let exposed_checkpoint = accepted_checkpoint recipe in
   poison_checkpoint_context exposed_checkpoint;
+  let fresh_checkpoint = accepted_checkpoint recipe in
+  List.iter
+    (fun key ->
+       check bool
+         ("fresh accessor excludes mutation " ^ key)
+         true
+         (Agent_core.Context.get fresh_checkpoint.context key |> Option.is_none))
+    [ "non_finite"; "duplicate" ];
   check_bytes "decoded accessor mutation" recipe;
   let loaded = decode_recipe accepted_json |> Result.get_ok in
   let loaded_checkpoint = accepted_checkpoint loaded in

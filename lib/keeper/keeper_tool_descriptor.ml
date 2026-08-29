@@ -394,7 +394,9 @@ let translate_read_file input =
 (* Edit is patch-only: mode is pinned here, never inferred from the input. The
    closed Edit schema rejects an undeclared 'content' key before translation;
    inferring overwrite from its presence turned a mistaken key into a silent
-   whole-file overwrite (masc#31573). *)
+   whole-file overwrite (masc#31573). Translation is closed to match: only the
+   declared patch fields reach the runtime, so even a validation-bypassing
+   caller cannot smuggle extra members through this path. *)
 let translate_edit_file input =
   match input with
   | `Assoc fields ->
@@ -404,8 +406,7 @@ let translate_edit_file input =
          match k with
          | "file_path" -> out := ("path", v) :: !out
          | "old_string" | "new_string" | "replace_all" -> out := (k, v) :: !out
-         | "mode" -> ()
-         | _ -> out := (k, v) :: !out)
+         | _ -> ())
       fields;
     `Assoc (List.rev !out)
   | _ -> input

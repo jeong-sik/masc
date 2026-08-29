@@ -101,16 +101,21 @@ let test_parameters_keep_their_order_and_requirement () =
     ]
 ;;
 
-(* Read was the only [closed_object_schema] of the four. That difference is
-   what an unread fifth key costs a caller, so it is pinned rather than
-   normalized. *)
-let test_read_stays_closed_and_the_others_stay_open () =
+(* Read and Edit are the [closed_object_schema]s of the four, for different
+   costs: an unread fifth key on a Read is a silent no-op, and an undeclared
+   'content' key on an Edit used to flip the call into a whole-file overwrite
+   through translator mode inference (masc#31573). Write and Grep stay open;
+   the split is pinned rather than normalized. *)
+let test_read_and_edit_stay_closed_and_the_others_stay_open () =
   let additional name = member (visible name).input_schema "additionalProperties" in
-  check bool "Read is closed" true (additional "Read" = Some (`Bool false));
+  List.iter
+    (fun name ->
+       check bool (name ^ " is closed") true (additional name = Some (`Bool false)))
+    [ "Read"; "Edit" ];
   List.iter
     (fun name ->
        check bool (name ^ " is open") true (additional name = None))
-    [ "Edit"; "Write"; "Grep" ]
+    [ "Write"; "Grep" ]
 ;;
 
 let () =
@@ -123,9 +128,9 @@ let () =
             `Quick
             test_parameters_keep_their_order_and_requirement
         ; test_case
-            "Read stays closed, the others stay open"
+            "Read and Edit stay closed, the others stay open"
             `Quick
-            test_read_stays_closed_and_the_others_stay_open
+            test_read_and_edit_stay_closed_and_the_others_stay_open
         ] )
     ]
 ;;

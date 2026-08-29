@@ -6,6 +6,12 @@
   _build_codex_trpg
   ; Ad hoc refutation probes are operator scratch, never project source.
   refute_tmp
+  ; The running server writes here and deletes as it rotates, so a scan that
+  ; includes it races the process it is building: dune reads a proof file
+  ; into the source tree, the server drops it, and the build stops with
+  ; "File unavailable: logs/masc-runtime-health-proof.<pid>.v2". Nothing in
+  ; the tree builds from logs/ and git does not track it.
+  logs
   dashboard_bonsai))
 
 ; Warning 32 (unused value declaration) is set here, once, for the whole

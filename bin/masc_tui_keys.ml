@@ -84,9 +84,12 @@ let for_surface = function
       ]
       @ List.filter (fun binding -> binding.key <> "l") keeper_actions
   | Keepers Keeper_logs ->
-      [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ]
+      (* The shared tail was missing here while the renderer's own footer
+         string carried it, so the sheet and the footer disagreed about
+         whether r/q worked on this screen. *)
+      [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ] @ listing_meta
   | Keepers Keeper_calls ->
-      [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ]
+      [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ] @ listing_meta
   | Keepers Keeper_message ->
       [ b Navigate "h / Left" "roster"
           ~help:"focus the visible Keeper roster (h when the draft is empty)"

@@ -5,32 +5,8 @@
     resume gate. Effects such as persistence and execution stay outside this
     module. *)
 
-module Assembler_run_id : sig
-  type t
-
-  type error = Empty
-
-  val of_string : string -> (t, error) result
-  val to_string : t -> string
-  val equal : t -> t -> bool
-end
-
-module Proposal_id : sig
-  type t
-
-  type error = Not_lowercase_sha256
-
-  val of_string : string -> (t, error) result
-  val to_string : t -> string
-  val equal : t -> t -> bool
-end
-
 type origin =
   | Skill_composition of Skill_reference.t
-  | Assembler_proposal of
-      { assembler_run_id : Assembler_run_id.t
-      ; proposal_id : Proposal_id.t
-      }
 
 module Accepted_surface_digest : sig
   type t
@@ -82,8 +58,6 @@ type decode_error =
       Keeper_tool_plan.Composition_run_id.error
   | Invalid_origin_kind of string
   | Invalid_skill_reference of Skill_reference.decode_error
-  | Invalid_assembler_run_id
-  | Invalid_proposal_id of string
   | Invalid_accepted_surface_digest of string
   | Negative_invocation_turn of int
   | Invalid_schedule of string

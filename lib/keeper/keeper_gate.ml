@@ -1124,7 +1124,13 @@ and start_auto_judge_entry (entry : Keeper_approval_queue_rules_types.pending_ap
             ~expected_disposition:current.summary_attempt_disposition
             current
         with
-        | Ok _ -> Ok Started
+        | Ok Retry_started -> Ok Started
+        (* A reservation that did not take means no worker ran. Reporting it
+           as [Started] made boot recovery log started=1 for an entry nothing
+           had picked up, and the next restart found the same row still
+           pending -- the operator-retry path at [retry_blocked_auto_judge]
+           already tells these two apart. *)
+        | Ok Retry_skipped -> Ok Skipped
         | Error reason -> Error reason)
      | Auto_judge_finalizable _
      | Auto_judge_ineligible ->

@@ -1,12 +1,12 @@
 (** Telemetry_eio — event tracking + analytics over a date-split
     JSONL store.
 
-    Public surface covers: typed events ({!event} / {!event_record} /
-    {!metrics}) with their auto-derived JSON / show converters, the
-    [track_*] convenience emitters, the read-side aggregations
-    ([read_all_events], [read_events_since], [summarize_tool_usage],
-    [summarize_agent_activity], [get_metrics]), the pure metric
-    calculators, plus the [rotate] maintenance entry point.
+    Public surface covers: typed events ({!event} / {!event_record})
+    with their auto-derived JSON / show converters, the [track_*]
+    convenience emitters, the read-side aggregations
+    ([read_all_events], [summarize_tool_usage],
+    [summarize_agent_activity]), the pure metric calculators, plus the
+    [rotate] maintenance entry point.
 
     Internal helpers ([empty_tool_usage_stats], [update_tool_usage],
     the [telemetry_store_cache] Hashtbl + mutex,
@@ -76,16 +76,6 @@ type event_record = {
   event : event;
 } [@@deriving yojson, show]
 
-(** {1 Aggregated metrics} *)
-
-type metrics = {
-  active_agents : int;
-  tasks_in_progress : int;
-  tasks_completed_24h : int;
-  avg_task_duration_ms : float;
-  error_rate : float;
-} [@@deriving yojson, show]
-
 type tool_usage_stats = {
   count : int;
   success_count : int;
@@ -128,8 +118,6 @@ val summarize_agent_activity :
 
 val tool_usage_fields :
   tool_usage_summary -> string -> (string * Yojson.Safe.t) list
-
-val get_metrics : ?fs:'a -> config -> metrics
 
 (** {1 Pure metric calculators} *)
 

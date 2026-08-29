@@ -72,15 +72,6 @@ type event_record = {
   event: event;
 } [@@deriving yojson, show]
 
-(** Aggregated metrics *)
-type metrics = {
-  active_agents: int;
-  tasks_in_progress: int;
-  tasks_completed_24h: int;
-  avg_task_duration_ms: float;
-  error_rate: float;
-} [@@deriving yojson, show]
-
 type tool_usage_stats = {
   count: int;
   success_count: int;
@@ -312,12 +303,6 @@ let tool_usage_fields summary tool_name =
      | None -> `Null);
   ]
 
-(** Read events since a timestamp.
-    With date-split storage, reads recent entries and filters by timestamp. *)
-let read_events_since ?fs config ~since : event_record list =
-  let all = read_all_events ?fs config in
-  List.filter (fun r -> r.timestamp >= since) all
-
 (** Metrics calculation functions (pure) *)
 
 (* [count_active_agents] = session_bound \ left,
@@ -380,19 +365,6 @@ let calculate_error_rate events =
   let total = List.length events in
   if total = 0 then 0.0
   else float_of_int errors /. float_of_int total
-
-(** Get aggregated metrics for last 24 hours *)
-let get_metrics ?fs config : metrics =
-  let now = Time_compat.now () in
-  let since_24h = now -. Masc_time_constants.day in
-  let events = read_events_since ?fs config ~since:since_24h in
-  {
-    active_agents = count_active_agents events;
-    tasks_in_progress = count_tasks_in_progress events;
-    tasks_completed_24h = count_completed_tasks events;
-    avg_task_duration_ms = avg_duration events;
-    error_rate = calculate_error_rate events;
-  }
 
 (** Convenience tracking functions *)
 let track_agent_session_bound ?fs config ~agent_id ?(capabilities=[]) () =

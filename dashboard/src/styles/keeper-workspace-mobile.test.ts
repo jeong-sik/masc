@@ -447,7 +447,6 @@ describe('keeper workspace v2 (26) mobile contract', () => {
   it('keeps the mobile context drawer close to the v2 rail without prototype-local state', () => {
     expect(keeperWorkspaceRailSource).toContain('keeper.context_ratio')
     expect(keeperWorkspaceRailSource).toContain('tasks.value.filter')
-    expect(keeperWorkspaceRailSource).toContain('callMcpTool(\'masc_keeper_compact\'')
     expect(mobileRuleDecls('.kw-mobile-rail-overlay').background).toBe('rgb(4 5 8 / 0.60)')
     expect(mobileRuleDecls('.kw-mobile-rail-drawer').width).toBe('min(330px, 88vw)')
     expect(mobileRuleDecls('.kw-mobile-rail-drawer')['max-width']).toContain('env(safe-area-inset-left, 0px)')

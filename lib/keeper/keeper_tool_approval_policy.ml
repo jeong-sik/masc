@@ -112,6 +112,16 @@ and undescribed_kind ?composition_plan_index tool_name =
   then
     Control
       (Run { because = "reads one instruction skill this keeper already carries" })
+  else if String.equal tool_name Keeper_identity_tool_search.tool_name
+  then
+    (* Names the attached tools this keeper already holds and makes one of
+       them callable. It reaches no service; the call to the attached tool
+       itself is what the Gate still decides. *)
+    Control
+      (Run
+         { because =
+             "reads the list of tools this keeper's attached services offer"
+         })
   else
     match
       Option.bind composition_plan_index (fun index ->

@@ -384,6 +384,7 @@
   test_telemetry_error_occurred_wire_10358
   test_warn_root_causes
   test_keeper_tool_bundle_classifiable
+  test_keeper_identity_tool_search
   test_mid_turn_resume
   test_telemetry_observe
   test_keeper_typed_labels
@@ -725,6 +726,7 @@
   test_telemetry_error_occurred_wire_10358
   test_warn_root_causes
   test_keeper_tool_bundle_classifiable
+  test_keeper_identity_tool_search
   test_mid_turn_resume
   test_telemetry_observe
   test_keeper_typed_labels

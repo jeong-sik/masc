@@ -152,6 +152,44 @@ let test_extend_tools_does_not_rebind_an_existing_name () =
   Alcotest.(check string) "the original definition still answers" "original" ran
 ;;
 
+(* Widening only matters if the next provider request carries the new tool.
+   The turn is prepared from [agent.tools] on every round, so a tool added
+   between rounds reaches the wire -- and until it does, the model calling
+   that name has its [tool_use] dropped before the history sees it
+   ([Agent_tools.admit_tool_use_names]). *)
+let test_a_widened_tool_reaches_the_next_request () =
+  Eio_main.run
+  @@ fun env ->
+  let tool name =
+    Tool.create ~name ~description:name ~parameters:[] (fun _ ->
+      Ok { Types.content = name; _meta = None })
+  in
+  let agent =
+    Agent.create
+      ~config:(Types.default_config ~model:"test-model")
+      ~tools:[ tool "index" ]
+      ~net:env#net
+      ()
+  in
+  let offered_this_round () =
+    match
+      Agent_turn.prepare_turn
+        ~tools:(Agent.tools agent)
+        ~messages:[]
+        ~turn_params:Hooks.default_turn_params
+        ()
+    with
+    | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
+    | Ok prep -> prep.Agent_turn.visible_tool_names
+  in
+  Alcotest.(check (list string)) "the first round offers what it was built with"
+    [ "index" ] (offered_this_round ());
+  Agent.extend_tools agent [ tool "loaded" ];
+  Alcotest.(check (list string)) "the next round offers the widened set"
+    [ "index"; "loaded" ]
+    (List.sort String.compare (offered_this_round ()))
+;;
+
 let test_extend_tools_with_nothing_changes_nothing () =
   Eio_main.run
   @@ fun env ->
@@ -209,6 +247,8 @@ let () =
             test_extend_tools_does_not_rebind_an_existing_name
         ; test_case "extend_tools with nothing changes nothing" `Quick
             test_extend_tools_with_nothing_changes_nothing
+        ; test_case "a widened tool reaches the next request" `Quick
+            test_a_widened_tool_reaches_the_next_request
         ; test_case "version info" `Quick test_version_info
         ] )
     ; ( "builder"

@@ -27,8 +27,35 @@ type surface =
 type entry =
   { name : string
   ; summary : string
-  ; tool : Agent_core.Tool.t
+  ; callable : Agent_core.Tool.t
   }
+
+type turn_discovery =
+  | Listing_unused
+  | Loaded_and_used
+  | Loaded_unused of string list
+
+type placement =
+  { tool : Agent_core.Tool.t
+  ; observe_turn : unit -> turn_discovery
+  }
+
+(* Which names this turn made callable, and which of those then ran. Atomic
+   rather than a mutex because tools of one turn run in sibling fibers under
+   concurrent admission, and a name is added at most once. *)
+type usage =
+  { loaded : string list Atomic.t
+  ; used : string list Atomic.t
+  }
+
+let rec note (cell : string list Atomic.t) name =
+  let current = Atomic.get cell in
+  if List.mem name current
+  then ()
+  else if Atomic.compare_and_set cell current (name :: current)
+  then ()
+  else note cell name
+;;
 
 let tool_name = "keeper_tool_search"
 let names_param = "names"
@@ -138,7 +165,7 @@ let requested_names input =
          (Yojson.Safe.to_string other))
 ;;
 
-let load ~keeper_name ~agent_cell ~entries requested =
+let load ~keeper_name ~agent_cell ~entries ~usage requested =
   match !agent_cell with
   | None ->
     (* The cell is filled at agent creation, so an empty one here means the
@@ -174,7 +201,8 @@ let load ~keeper_name ~agent_cell ~entries requested =
     (match found with
      | [] -> refusal (Printf.sprintf "not in the list: %s" (String.concat ", " unknown))
      | _ :: _ ->
-       Agent_core.Agent.extend_tools agent (List.map (fun entry -> entry.tool) found);
+       Agent_core.Agent.extend_tools agent (List.map (fun entry -> entry.callable) found);
+       List.iter (fun entry -> note usage.loaded entry.name) found;
        let loaded =
          Printf.sprintf
            "now callable: %s"
@@ -189,16 +217,47 @@ let load ~keeper_name ~agent_cell ~entries requested =
        Ok { Agent_core.Types.content; _meta = None })
 ;;
 
+(* Same tool, and it also says it ran. The wrapper keeps the descriptor so
+   the schedule this tool is admitted under does not change. *)
+let observed usage (tool : Agent_core.Tool.t) =
+  { tool with
+    Agent_core.Tool.handler =
+      (fun env input ->
+        note usage.used tool.Agent_core.Tool.schema.name;
+        tool.Agent_core.Tool.handler env input)
+  }
+;;
+
+let observe_turn ~keeper_name ~usage () =
+  match Atomic.get usage.loaded, Atomic.get usage.used with
+  | [], _ -> Listing_unused
+  | _ :: _, _ :: _ -> Loaded_and_used
+  | (_ :: _ as loaded), [] ->
+    let loaded = List.rev loaded in
+    Log.Keeper.emit
+      Log.Warn
+      ~keeper_name
+      ~category:Log.Tool
+      ~details:
+        (`Assoc
+           [ "error_kind", `String "keeper_attached_tool_loaded_unused"
+           ; "loaded", Json_util.json_string_list loaded
+           ])
+      "A turn loaded attached tools and called none of them";
+    Loaded_unused loaded
+;;
+
 let make ~keeper_name ~build { offered; agent_cell } =
   match offered with
   | [] -> None
   | _ :: _ ->
+    let usage = { loaded = Atomic.make []; used = Atomic.make [] } in
     let entries =
       List.map
         (fun (offer : Keeper_identity_tools.offered_tool) ->
            { name = offer.Keeper_identity_tools.schema.name
            ; summary = summary_of offer.Keeper_identity_tools.schema.description
-           ; tool = build offer
+           ; callable = observed usage (build offer)
            })
         offered
     in
@@ -224,8 +283,18 @@ let make ~keeper_name ~build { offered; agent_cell } =
       | Ok [] ->
         refusal (Printf.sprintf "\"%s\" was empty; name at least one tool" names_param)
       | Ok requested ->
-        load ~keeper_name ~agent_cell ~entries (List.sort_uniq String.compare requested)
+        load
+          ~keeper_name
+          ~agent_cell
+          ~entries
+          ~usage
+          (List.sort_uniq String.compare requested)
     in
     Some
-      (Agent_core.Tool.of_schema schema (Agent_core.Tool.ignoring_execution_env handler))
+      { tool =
+          Agent_core.Tool.of_schema
+            schema
+            (Agent_core.Tool.ignoring_execution_env handler)
+      ; observe_turn = observe_turn ~keeper_name ~usage
+      }
 ;;

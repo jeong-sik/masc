@@ -560,7 +560,17 @@ let prepare_agent_setup
         ()
     : string list * turn_lane
     =
-    let schema_filter = all_tool_names in
+    (* What is actually on the wire this round, not what was on it when the
+       tools were built. The attached-service listing widens the callable set
+       mid-turn, so from the round after a load the built list is short by
+       exactly the tools the model just asked for -- and this is the record an
+       operator reads to find out what the model was offered. Before the agent
+       exists the built list is the whole truth. *)
+    let schema_filter =
+      match !agent_cell with
+      | Some agent -> Agent_core.Tool_set.names (Agent_core.Agent.tools agent)
+      | None -> all_tool_names
+    in
     let lane : Keeper_agent_tool_surface.turn_lane =
       if is_retry
       then Lane_retry

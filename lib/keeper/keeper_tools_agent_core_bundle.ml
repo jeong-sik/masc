@@ -539,9 +539,9 @@ let make_tool_bundle_for_descriptors_with_policy
      They reach the model through the listing rather than directly: an
      attached service offers more tools than a request can carry, and the
      Gate wrapper is the same either way. *)
-  let identity_listing_tool =
+  let identity_listing =
     match identity_surface with
-    | None -> []
+    | None -> None
     | Some surface ->
       Keeper_identity_tool_search.make
         ~keeper_name:meta.Keeper_meta_contract.name
@@ -554,11 +554,28 @@ let make_tool_bundle_for_descriptors_with_policy
             ?gate_grant
             offered)
         surface
-      |> Option.to_list
   in
-  { tools = descriptor_tools @ composition_tools @ identity_listing_tool
+  { tools =
+      descriptor_tools
+      @ composition_tools
+      @ (match identity_listing with
+         | None -> []
+         | Some listing -> [ listing.Keeper_identity_tool_search.tool ])
   ; cleanup =
       (fun () ->
+        (* Turn end on both the ordinary and the raised path -- this thunk is
+           what [run_with_setup_cleanup] guarantees -- which is the only point
+           where "the listing found nothing usable" is still answerable.
+           Before the sandbox release rather than after: this reads two lists
+           and writes a log line, and releasing a runtime can raise, which
+           would take the reading with it. *)
+        Option.iter
+          (fun (listing : Keeper_identity_tool_search.placement) ->
+             let (_ : Keeper_identity_tool_search.turn_discovery) =
+               listing.Keeper_identity_tool_search.observe_turn ()
+             in
+             ())
+          identity_listing;
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
   ; terminal_effect_state = (fun () -> Atomic.get terminal_effect_state)
   ; gate_replay_delivery

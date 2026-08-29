@@ -27,11 +27,36 @@ type surface =
 
 val tool_name : string
 
+(** What one turn got out of the listing. *)
+type turn_discovery =
+  | Listing_unused  (** The model never asked for a tool through it. *)
+  | Loaded_and_used  (** It asked, and something it loaded then ran. *)
+  | Loaded_unused of string list
+      (** It asked, loaded these, and called none of them. Either the
+          one-line summaries did not say enough to choose from, or the names
+          it chose were not the ones it needed. *)
+
+type placement =
+  { tool : Agent_core.Tool.t  (** What the turn places. *)
+  ; observe_turn : unit -> turn_discovery
+        (** Call once when the turn ends, on both the ordinary and the raised
+            path, and records {!Loaded_unused} where an operator can read it.
+
+            Deferring the whole surface behind a name only works if the model
+            finds what it needs through it, and {!Loaded_unused} is how that
+            fails. Nothing else can see it: the durable tool-call rows name a
+            tool but not where it came from, so "an attached tool ran this
+            turn" is a question only the thing that built them can answer.
+            {!Listing_unused} and {!Loaded_and_used} record nothing -- how
+            often the listing is used at all is one [tool_calls] query away,
+            and that is the denominator. *)
+  }
+
 val make
   :  keeper_name:string
   -> build:(Keeper_identity_tools.offered_tool -> Agent_core.Tool.t)
   -> surface
-  -> Agent_core.Tool.t option
+  -> placement option
 (** The listing tool for one turn, or [None] when nothing is attached.
 
     [build] turns one offered tool into the tool that would have been placed

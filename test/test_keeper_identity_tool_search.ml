@@ -67,11 +67,18 @@ let build (offer : Keeper_identity_tools.offered_tool) =
           }))
 ;;
 
-let search ?(agent_cell = ref None) offering =
+let placement ?(agent_cell = ref None) offering =
   Keeper_identity_tool_search.make
     ~keeper_name:"search-test"
     ~build
     { Keeper_identity_tool_search.offered = offering; agent_cell }
+;;
+
+let search ?agent_cell offering =
+  Option.map
+    (fun (p : Keeper_identity_tool_search.placement) ->
+       p.Keeper_identity_tool_search.tool)
+    (placement ?agent_cell offering)
 ;;
 
 let the_tool offering =
@@ -282,6 +289,74 @@ let test_a_long_summary_is_cut_without_breaking_a_character () =
     (contains description (String.sub long 0 60))
 ;;
 
+(* Hiding the surface behind a name only pays off if the model finds what it
+   needs through it. These three cases are what "it found something" and "it
+   did not" look like from inside the turn. *)
+
+let discovery = Alcotest.testable
+  (fun fmt -> function
+    | Keeper_identity_tool_search.Listing_unused -> Format.fprintf fmt "Listing_unused"
+    | Keeper_identity_tool_search.Loaded_and_used -> Format.fprintf fmt "Loaded_and_used"
+    | Keeper_identity_tool_search.Loaded_unused names ->
+      Format.fprintf fmt "Loaded_unused [%s]" (String.concat "; " names))
+  ( = )
+;;
+
+let with_placement offering f =
+  Eio_main.run
+  @@ fun env ->
+  let agent =
+    Agent_core.Agent.create
+      ~config:(Agent_core.Types.default_config ~model:"test-model")
+      ~net:env#net
+      ()
+  in
+  match placement ~agent_cell:(ref (Some agent)) offering with
+  | None -> fail "expected a listing tool"
+  | Some p -> f agent p
+;;
+
+let test_a_turn_that_never_asked_records_nothing () =
+  with_placement (offered [ "jira_search", "Search" ]) (fun _agent p ->
+    check discovery "the model never asked"
+      Keeper_identity_tool_search.Listing_unused
+      (p.Keeper_identity_tool_search.observe_turn ()))
+;;
+
+let test_a_turn_that_loaded_and_called_records_nothing () =
+  with_placement (offered [ "jira_search", "Search" ]) (fun agent p ->
+    (match
+       execute p.Keeper_identity_tool_search.tool (names_input [ "atlassian_jira_search" ])
+     with
+     | Error e -> failf "loading failed: %s" e.Agent_core.Types.message
+     | Ok _ -> ());
+    (match Agent_core.Tool_set.find "atlassian_jira_search" (Agent_core.Agent.tools agent) with
+     | None -> fail "the loaded tool is not callable"
+     | Some (t : Agent_core.Tool.t) ->
+       (match Agent_core.Tool.execute t (`Assoc []) with
+        | Ok _ -> ()
+        | Error e -> failf "the attached tool failed: %s" e.Agent_core.Types.message));
+    check discovery "it asked and then called what it got"
+      Keeper_identity_tool_search.Loaded_and_used
+      (p.Keeper_identity_tool_search.observe_turn ()))
+;;
+
+(* The case the whole observation exists for. *)
+let test_a_turn_that_loaded_and_called_nothing_names_what_it_loaded () =
+  with_placement (offered [ "jira_search", "Search"; "page_create", "Create" ]) (fun _agent p ->
+    (match
+       execute
+         p.Keeper_identity_tool_search.tool
+         (names_input [ "atlassian_jira_search"; "atlassian_page_create" ])
+     with
+     | Error e -> failf "loading failed: %s" e.Agent_core.Types.message
+     | Ok _ -> ());
+    check discovery "it asked, got two, and used neither"
+      (Keeper_identity_tool_search.Loaded_unused
+         [ "atlassian_jira_search"; "atlassian_page_create" ])
+      (p.Keeper_identity_tool_search.observe_turn ()))
+;;
+
 let () =
   run
     "keeper_identity_tool_search"
@@ -306,6 +381,14 @@ let () =
             test_a_turn_without_an_agent_fails_rather_than_answering_empty
         ; test_case "refuses arguments of the wrong shape" `Quick
             test_arguments_of_the_wrong_shape_are_refused
+        ] )
+    ; ( "what the turn found"
+      , [ test_case "nothing when the model never asked" `Quick
+            test_a_turn_that_never_asked_records_nothing
+        ; test_case "nothing when it called what it loaded" `Quick
+            test_a_turn_that_loaded_and_called_records_nothing
+        ; test_case "names what it loaded and never called" `Quick
+            test_a_turn_that_loaded_and_called_nothing_names_what_it_loaded
         ] )
     ]
 ;;

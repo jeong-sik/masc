@@ -7628,6 +7628,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.gate_pending <- snapshot.Tui_decode.gs_pending;
            state.gate_modes <- snapshot.Tui_decode.gs_modes;
            state.gate_queue_unavailable <- snapshot.Tui_decode.gs_queue_unavailable;
+           state.gate_rules <- snapshot.Tui_decode.gs_rules;
+           state.gate_rules_unavailable <- snapshot.Tui_decode.gs_rules_unavailable;
            state.gate_error <- None;
            let count = List.length (approval_items state) in
            if state.approval_cursor >= count then

@@ -4220,12 +4220,65 @@ let test_decode_secret_projection_rejects_a_wrong_env_name_type () =
 
 (* ── the durable Gate snapshot ──────────────────────────────────────── *)
 
-let gate_snapshot_json ?(queue = `List []) ?(hitl = `Null) ?(queue_state = `Null) () =
+let gate_snapshot_json ?(queue = `List []) ?(hitl = `Null) ?(queue_state = `Null)
+    ?(rules = `Null) ?(rules_state = `Null) () =
   `Assoc
     [ ("approval_queue", queue);
       ("approval_queue_state", queue_state);
       ("hitl", hitl);
+      ("approval_rules", rules);
+      ("approval_rules_state", rules_state);
     ]
+
+(* A standing rule answers its call before the call can become a pending ask,
+   so the queue alone never shows one exists. The decoder has to carry them,
+   and an unreadable rule store must not decode as "no rules". *)
+let test_decode_gate_rules_and_their_store_state () =
+  let rule =
+    `Assoc
+      [ ("id", `String "rule-1");
+        ("keeper_name", `String "polisher");
+        ("tool_name", `String "Execute");
+        ("request_fingerprint", `String "fp-abc");
+        ("created_at", `Float 1_788_000_000.);
+        ("created_by", `String "operator");
+        ("source_approval_id", `Null);
+        ("expires_at", `Null);
+      ]
+  in
+  (match
+     Tui_decode.decode_gate_snapshot (gate_snapshot_json ~rules:(`List [ rule ]) ())
+   with
+   | Error message -> Alcotest.failf "rules did not decode: %s" message
+   | Ok snapshot ->
+       (match snapshot.Tui_decode.gs_rules with
+        | [ decoded ] ->
+            Alcotest.check Alcotest.string "keeper" "polisher"
+              decoded.Tui_decode.gr_keeper;
+            Alcotest.check Alcotest.string "tool" "Execute"
+              decoded.Tui_decode.gr_tool;
+            Alcotest.check Alcotest.string "fingerprint" "fp-abc"
+              decoded.Tui_decode.gr_fingerprint;
+            Alcotest.check Alcotest.(option (float 0.01)) "no expiry" None
+              decoded.Tui_decode.gr_expires_at
+        | rows -> Alcotest.failf "expected one rule, got %d" (List.length rows));
+       Alcotest.check Alcotest.(option string) "store is readable" None
+         snapshot.Tui_decode.gs_rules_unavailable);
+  (* An unreadable store is not an empty one. *)
+  match
+    Tui_decode.decode_gate_snapshot
+      (gate_snapshot_json
+         ~rules_state:
+           (`Assoc
+              [ ("state", `String "unavailable");
+                ("error", `String "rule store is unreadable");
+              ])
+         ())
+  with
+  | Error message -> Alcotest.failf "rule store state did not decode: %s" message
+  | Ok snapshot ->
+      Alcotest.check Alcotest.(option string) "store failure is carried"
+        (Some "rule store is unreadable") snapshot.Tui_decode.gs_rules_unavailable
 
 let test_decode_gate_identity_row_reads_its_target () =
   (* The row a human decides on: an identity_call names its provider and
@@ -5651,6 +5704,8 @@ let () =
       [
         Alcotest.test_case "an identity row reads its target" `Quick
           test_decode_gate_identity_row_reads_its_target;
+        Alcotest.test_case "standing rules and their store state" `Quick
+          test_decode_gate_rules_and_their_store_state;
         Alcotest.test_case "rows distinguish Auto Judge phases" `Quick
           test_decode_gate_rows_distinguish_operator_phases;
         Alcotest.test_case "an execute row leads with the command" `Quick

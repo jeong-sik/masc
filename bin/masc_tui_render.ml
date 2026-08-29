@@ -1792,9 +1792,10 @@ let render_approvals (state : state) =
   let ask_buf = Buffer.create 1024 in
   draw_ask_questions ask_buf cols state;
   let ask_rows = ask_section_rows ask_buf in
-  (* One extra chrome row on this surface only: the always-drawn Gate lane
-     line between the header and the divider. *)
-  let gate_lane_rows = 1 in
+  (* Two extra chrome rows on this surface only, both always drawn between
+     the header and the divider: the Gate lane line, and the standing
+     always-allow rule line under it. *)
+  let gate_lane_rows = 2 in
   let approval_body_rows =
     max 1 (rows - boxed_surface_chrome_rows - gate_lane_rows - ask_rows)
   in
@@ -1847,8 +1848,9 @@ let render_approvals (state : state) =
 
   box_top buf cols;
   box_line buf cols header;
-  (* Both Gate lanes, always on screen here — exactly one row, so the body
-     arithmetic below can subtract it as a constant. The durable rows obey
+  (* Both Gate lanes, always on screen here — one row, counted with the rule
+     row below it in [gate_lane_rows] so the body arithmetic can subtract
+     both as a constant. The durable rows obey
      the external lane, and an operator deciding them needs to see which
      switch they are under. The [e] that cycles the external lane is a
      footer key like any other -- it reaches the footer and the [?] help
@@ -1866,6 +1868,27 @@ let render_approvals (state : state) =
      | None, Some err -> data_unreliable_row ~cols ("gate: " ^ err)
      | None, None ->
          Ansi.dim ^ "  Gate lanes: loading" ^ Ansi.reset);
+  (* Standing always-allow rules, on the row under the lanes. A rule answers
+     its call before the call can reach the queue, so an operator reading an
+     empty queue is reading the rules' work without seeing them. One row: the
+     count, and who the newest one covers. *)
+  box_line buf cols
+    (match state.gate_rules_unavailable, state.gate_rules with
+     | Some detail, _ ->
+         data_unreliable_row ~cols ("always-allow rules: " ^ detail)
+     | None, [] ->
+         Ansi.dim ^ "  Always-allow rules: none" ^ Ansi.reset
+     | None, (newest :: _ as rules) ->
+         Printf.sprintf
+           "  %sAlways-allow rules: %d  ·  newest %s / %s%s%s"
+           Ansi.dim
+           (List.length rules)
+           newest.Tui_decode.gr_keeper
+           newest.Tui_decode.gr_tool
+           (match newest.Tui_decode.gr_expires_at with
+            | Some _ -> " (expires)"
+            | None -> "")
+           Ansi.reset);
   box_divider buf cols;
 
   let approvals_error =

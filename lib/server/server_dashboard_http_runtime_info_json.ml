@@ -22,7 +22,6 @@ let take = List.take
 
 let opt_string_json = Json_util.string_opt_to_json
 
-let opt_bool_json = Json_util.bool_opt_to_json
 
 let is_hex_commit value =
   let length = String.length value in

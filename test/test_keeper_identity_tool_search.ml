@@ -142,6 +142,29 @@ let test_the_listing_names_every_attached_tool () =
   check bool "its summary is carried" true (mentions "Search issues")
 ;;
 
+(* The instructions half of what the model reads is declared in
+   config/tools/keeper_tool_search.toml, and only the listing is built in
+   OCaml. A wiring that dropped the declared half would still name every tool
+   and still pass the test above, while telling the model nothing about how to
+   ask for one. *)
+let test_the_declared_prose_reaches_the_model () =
+  let tool = the_tool (offered [ "jira_search", "Search issues" ]) in
+  let description = tool.Agent_core.Tool.schema.description in
+  let declared = Tool_schemas_identity_tool_search.schema.Masc_domain.description in
+  check bool "the declaration is not empty" true (String.length declared > 0);
+  check
+    bool
+    "the model reads the declared instructions before the listing"
+    true
+    (String.length description >= String.length declared
+     && String.equal (String.sub description 0 (String.length declared)) declared);
+  check
+    bool
+    "and they say how to name a tool"
+    true
+    (contains declared "names")
+;;
+
 (* The point of the listing is the bytes. A description that carried the
    argument schemas would name the tools and save nothing. *)
 let test_the_listing_costs_less_than_the_schemas () =
@@ -365,6 +388,8 @@ let () =
             test_nothing_attached_offers_no_tool
         ; test_case "names every attached tool" `Quick
             test_the_listing_names_every_attached_tool
+        ; test_case "carries the declared instructions" `Quick
+            test_the_declared_prose_reaches_the_model
         ; test_case "costs less than the schemas" `Quick
             test_the_listing_costs_less_than_the_schemas
         ; test_case "cuts a long summary without breaking a character" `Quick

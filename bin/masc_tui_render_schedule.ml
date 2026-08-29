@@ -84,6 +84,19 @@ let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
   let maximum_scroll = max 0 (line_count - content_height) in
   max 0 (min scroll maximum_scroll)
 
+(* A repeated action writes the same line again and again — six manual
+   refreshes spent six of the eleven event rows saying one thing. Consecutive
+   runs with the same key fold into their newest element and a count; the
+   window and scroll then move over folded rows, so a burst costs one row. *)
+let collapse_consecutive ~key items =
+  let fold collapsed item =
+    match collapsed with
+    | (newest, count) :: rest when String.equal (key newest) (key item) ->
+        (newest, count + 1) :: rest
+    | _ -> (item, 1) :: collapsed
+  in
+  List.rev (List.fold_left fold [] items)
+
 type overview_event_window = {
   oew_offset : int;
   oew_first_position : int;

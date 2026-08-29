@@ -11520,7 +11520,11 @@ and is loaded on demand through keeper_skill.
                   in
                   state.overview_event_scroll <-
                     Render_schedule.scroll_overview_events_older
-                      ~event_count:(List.length state.events)
+                      ~event_count:
+                        (List.length
+                           (Render_schedule.collapse_consecutive
+                              ~key:Masc_tui_types.overview_event_collapse_key
+                              state.events))
                       ~visible_rows:row_budget.attention_rows
                       state.overview_event_scroll
                 end
@@ -11803,7 +11807,11 @@ and is loaded on demand through keeper_skill.
                   in
                   state.overview_event_scroll <-
                     Render_schedule.scroll_overview_events_newer
-                      ~event_count:(List.length state.events)
+                      ~event_count:
+                        (List.length
+                           (Render_schedule.collapse_consecutive
+                              ~key:Masc_tui_types.overview_event_collapse_key
+                              state.events))
                       ~visible_rows:row_budget.attention_rows
                       state.overview_event_scroll
                 end

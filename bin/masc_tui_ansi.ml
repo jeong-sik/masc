@@ -372,12 +372,11 @@ let task_status_icon status =
   | Masc_domain.Todo -> "\xe2\x97\x8b"  (* empty circle *)
   | Masc_domain.Cancelled _ -> "\xc3\x97"
 
-(** Priority indicator *)
+(** Priority indicator. Empty for everything but the top priority — the glyph
+    owner in [Masc_tui_theme.Glyph] says which ranks speak at all. *)
 let priority_indicator p =
   let glyph = Masc_tui_theme.Glyph.priority p in
-  if p <= 2 then Theme.bad () ^ glyph ^ Ansi.reset
-  else if p <= 3 then Theme.warn () ^ glyph ^ Ansi.reset
-  else glyph
+  if String.equal glyph "" then "" else Theme.bad () ^ glyph ^ Ansi.reset
 
 (** Context ratio tone: healthy capacity recedes; only pressure and danger
     claim an attention colour. All three resolve against the terminal palette. *)

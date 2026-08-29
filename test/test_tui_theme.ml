@@ -288,9 +288,11 @@ let test_glyphs_hold_their_bytes () =
   check str "todo" "\xe2\x97\x8b" task_todo;
   check str "cancelled" "\xc3\x97" task_cancelled;
   check str "breadcrumb" "\xe2\x96\xb8" breadcrumb_sep;
-  check str "priority 1" "!!!" (priority 1);
-  check str "priority 2" "!!" (priority 2);
-  check str "priority 3" "!" (priority 3);
+  (* Only the top priority speaks; the !!!/!!/! ladder put a mark on most
+     rows, which distinguishes nothing. *)
+  check str "priority 1 speaks once" "!" (priority 1);
+  check str "priority 2 says nothing" "" (priority 2);
+  check str "priority 3 says nothing" "" (priority 3);
   check str "priority 4 and below say nothing" "" (priority 4)
 
 let test_the_shim_is_the_same_strings () =

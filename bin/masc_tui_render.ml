@@ -1159,7 +1159,13 @@ let render_overview (state : state) =
   let panel_width = (cols - 3) / 2 in
   let right_panel_width = cols - 3 - panel_width in
   let attention_title = " Attention " in
-  let event_count = List.length state.events in
+  (* A burst of identical lines (manual refreshes, a broadcast fan-out) folds
+     into one row with a ×N tail; the window scrolls over folded rows. *)
+  let collapsed_events =
+    Render_schedule.collapse_consecutive
+      ~key:Masc_tui_types.overview_event_collapse_key state.events
+  in
+  let event_count = List.length collapsed_events in
   let event_window =
     Render_schedule.project_overview_event_window ~event_count
       ~visible_rows:row_budget.attention_rows state.overview_event_scroll
@@ -1201,10 +1207,15 @@ let render_overview (state : state) =
     let event_str =
       let event_index = i + event_window.oew_offset in
       if event_index < event_count then
-        let e = List.nth state.events event_index in
-        Printf.sprintf "%s[%s]%s %s"
+        let e, run = List.nth collapsed_events event_index in
+        let tail =
+          if run > 1 then Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
+          else ""
+        in
+        Printf.sprintf "%s[%s]%s %s%s"
           Ansi.dim e.timestamp Ansi.reset
           (Terminal_text.single_line e.content)
+          tail
       else ""
     in
     Buffer.add_string buf (Printf.sprintf "  %s %s%s%s %s\n"

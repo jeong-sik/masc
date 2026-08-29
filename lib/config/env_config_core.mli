@@ -182,10 +182,9 @@ val base_path_source_opt : unit -> (string * string) option
 val running_under_test_executable : unit -> bool
 val base_path_prod_guard : string -> string
 
-val test_fake_docker_path_env : string
 val test_allow_real_docker_env : string
-(** Names of the two keeper-sandbox test hooks, exposed so a refusal message
-    can tell the operator which variable to set. *)
+(** Name of the hook a refusal message tells the operator to set. The fake
+    docker path's key stays private: callers want the value, not the name. *)
 
 val fake_docker_path_opt : unit -> string option
 (** The fake docker script a test asked for, or [None] when the variable is

@@ -166,6 +166,46 @@ let test_run_argv_with_status_fallback_observes_timeout () =
    deadline had left (2026-08-27 audit), which reads as a zero-timeout
    spawn instead of an exhausted one. The timeout WARN comes from the
    Eio-native paths, so this test initializes the Eio runtime first. *)
+
+(* A non-zero exit keeps its stdout -- [output_for_status] joins it with
+   stderr -- but a timeout used to drop it entirely: a keeper search that had
+   been matching for fifteen seconds got back the word "timeout" and nothing
+   else (masc#31742, 18 occurrences on 2026-08-29). The bytes the child
+   already wrote are the same bytes a successful call would have returned, so
+   they come back labelled rather than discarded. *)
+let test_timeout_returns_the_partial_stdout () =
+  Eio_main.run
+  @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let output =
+    Process_eio.run_argv
+      ~timeout_sec:0.5
+      [ "/bin/sh"; "-c"; "/bin/echo MATCH-BEFORE-TIMEOUT; sleep 5" ]
+  in
+  check bool "the failure line comes first" true
+    (String.length output >= 18
+     && String.equal (String.sub output 0 18) "process_eio_error:");
+  check bool "the timeout is still named" true (contains output "timeout after");
+  check bool "the partial stdout survives" true
+    (contains output "MATCH-BEFORE-TIMEOUT");
+  check bool "and it is labelled incomplete" true (contains output "incomplete")
+
+(* A timeout with nothing written keeps the old shape: the error alone, with
+   no empty section inviting a reader to think output was captured. *)
+let test_timeout_without_output_stays_bare () =
+  Eio_main.run
+  @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let output = Process_eio.run_argv ~timeout_sec:0.2 [ "/bin/sleep"; "5" ] in
+  check bool "the timeout is named" true (contains output "timeout after");
+  check bool "no partial section is added" false (contains output "incomplete")
+
 let test_timeout_log_keeps_subsecond_precision () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -656,6 +696,10 @@ let () =
             test_run_argv_with_status_fallback_observes_timeout;
           test_case "timeout-log-keeps-subsecond-precision" `Quick
             test_timeout_log_keeps_subsecond_precision;
+          test_case "timeout-returns-the-partial-stdout" `Quick
+            test_timeout_returns_the_partial_stdout;
+          test_case "timeout-without-output-stays-bare" `Quick
+            test_timeout_without_output_stays_bare;
           test_case "init-exposes-complete-runtime" `Quick
             test_init_exposes_complete_runtime;
         ] );

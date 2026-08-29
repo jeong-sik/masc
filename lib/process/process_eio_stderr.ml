@@ -27,12 +27,31 @@ let output_for_status ~(status : Unix.process_status) ~(stdout : string)
     | out, "" -> out
     | out, err -> out ^ "\n" ^ err
 
-let process_error_output ?(stderr = "") ~label:_ ~reason () =
+(* [partial_stdout] is what the child had already written when the call
+   failed. A non-zero exit keeps its stdout -- [output_for_status] joins it
+   with stderr -- so a timeout dropping it was the odd one out, and the drop
+   was total: a search that had matched for fifteen seconds returned the word
+   "timeout" and nothing else. It is labelled rather than returned bare
+   because the caller asked for a complete result and is not getting one; the
+   error line stays first so a consumer reading only the head still sees the
+   failure. Nothing is truncated here beyond the capture buffer's own caps --
+   this is the same text a successful call would have returned. *)
+let process_error_output ?(stderr = "") ?(partial_stdout = "") ~label:_ ~reason
+    () =
   let stderr = String.trim stderr in
-  if stderr = "" then
-    Printf.sprintf "process_eio_error: %s" reason
+  let partial_stdout = String.trim partial_stdout in
+  let base =
+    if stderr = "" then
+      Printf.sprintf "process_eio_error: %s" reason
+    else
+      Printf.sprintf "process_eio_error: %s\nstderr:\n%s" reason stderr
+  in
+  if partial_stdout = "" then
+    base
   else
-    Printf.sprintf "process_eio_error: %s\nstderr:\n%s" reason stderr
+    Printf.sprintf
+      "%s\npartial stdout captured before the failure (incomplete):\n%s"
+      base partial_stdout
 
 let reason_of_exn_for_output = function
   | Unix.Unix_error (err, fn, _) ->

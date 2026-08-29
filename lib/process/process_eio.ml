@@ -854,6 +854,7 @@ let run_argv ?timeout_sec ?env (argv : string list) : string =
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 process_error_output ~label
+                  ~partial_stdout:(Exec_buffer.render buf)
                   ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ()
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
@@ -907,6 +908,7 @@ let run_argv_with_stdin ?timeout_sec ?env ~(stdin_content : string) (argv : stri
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 process_error_output ~label
+                  ~partial_stdout:(Exec_buffer.render buf)
                   ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ()
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->

@@ -342,8 +342,63 @@ let write_state config state =
   Ok ()
 ;;
 
+(* Terminal wake records are history, not state: the runner never reads a
+   finished wake back, only [update_latest_running_wake] touches one, and it
+   looks for a [Wake_running] row. Kept unbounded they grew to 6,534 records /
+   5.3 MB against 64 schedules (measured 2026-08-29, 24 days of history — the
+   history was 90x the state it annotated), and every mutation rewrites that
+   whole file under the store lock. On 2026-08-28 two runner ticks died on it:
+
+     schedule_runner: startup recovery crashed / tick crashed:
+       Failed to acquire distributed lock for key: schedules.json
+       (50 attempts exhausted)
+
+   The bound is per schedule_id, not global, because a broken schedule
+   out-writes a healthy one by two orders of magnitude. Three schedules alone
+   held 3,757 of the 6,534 records after one four-hour incident; a global cap
+   would have been spent entirely on them and evicted every other schedule's
+   history — exactly the record an operator needs to tell a broken schedule
+   from a quiet one. *)
+let terminal_wakes_retained_per_schedule = 32
+
+let is_running_wake (wake : Schedule_domain.wake_record) =
+  match wake.Schedule_domain.status with
+  | Schedule_contract_values.Wake_running -> true
+  | Schedule_contract_values.Wake_succeeded | Schedule_contract_values.Wake_failed -> false
+;;
+
+(* In-flight wakes are never dropped: they are live state the runner settles.
+   Only finished rows are trimmed, newest first within each schedule. *)
+let prune_wakes wakes =
+  let running, terminal = List.partition is_running_wake wakes in
+  let newest_first =
+    List.stable_sort
+      (fun (left : Schedule_domain.wake_record) (right : Schedule_domain.wake_record) ->
+         Float.compare right.Schedule_domain.started_at left.Schedule_domain.started_at)
+      terminal
+  in
+  let kept_per_schedule : (string, int) Hashtbl.t = Hashtbl.create 16 in
+  let retained =
+    List.filter
+      (fun (wake : Schedule_domain.wake_record) ->
+         let schedule_id = wake.Schedule_domain.schedule_id in
+         let kept = Option.value (Hashtbl.find_opt kept_per_schedule schedule_id) ~default:0 in
+         if kept < terminal_wakes_retained_per_schedule
+         then (
+           Hashtbl.replace kept_per_schedule schedule_id (kept + 1);
+           true)
+         else false)
+      newest_first
+  in
+  running @ retained
+;;
+
 let bump_state state ~schedules ~wakes =
-  { version = state.version + 1; updated_at = now (); schedules; wakes }
+  { version = state.version + 1
+  ; updated_at = now ()
+  ; schedules
+  ; wakes = prune_wakes wakes
+  }
 ;;
 
 let find_schedule state schedule_id =

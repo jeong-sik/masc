@@ -130,7 +130,7 @@ let expected_model_tool_names
          @ instruction_names
          @ control_names
          (* What the work services this Keeper is attached to offer. They
-            reach the model as one index tool rather than as themselves, so
+            reach the model as one listing tool rather than as themselves, so
             the surface carries that one name and the attached names appear
             only inside its description. Named here from the same list the
             bundle was handed, so the projection check keeps meaning "the

@@ -937,8 +937,9 @@ Per surface:
 Tab cycles the surfaces:
 
   Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning
-           -> Schedules -> Verification -> Harness -> Fusion -> Repositories
-           -> Connectors -> Runtime -> Tools -> System Logs -> Overview
+           -> Schedules -> Verify -> Harness -> Fusion -> Repos -> Code
+           -> Changes -> Connectors -> Runtime -> Config -> Resources
+           -> Tools -> Logs -> Overview
 
 Within a surface:
 

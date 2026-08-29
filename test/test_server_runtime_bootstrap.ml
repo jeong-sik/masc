@@ -206,6 +206,7 @@ let test_keeper_msg_startup_recovery_settles_disk_only_running_request () =
       ; "submitted_by", `String "startup-recovery-caller"
       ; "status", `String "running"
       ; "submitted_at", `Float 1.0
+      ; "request_context", `Null
       ]
     |> Yojson.Safe.to_string
     |> Fs_compat.save_file active_path;
@@ -3090,13 +3091,14 @@ let test_lazy_startup_plan_groups_independent_tasks () =
   | [ initialize; cleanup ] ->
       check_lazy_group initialize ~name:"initialize" ~execution:"parallel"
         ~tasks:[ "restore_sessions" ];
-      check_lazy_group cleanup ~name:"cleanup" ~execution:"serial"
-        ~tasks:[ "jsonl_prune" ];
+      check_lazy_group cleanup ~name:"cleanup" ~execution:"parallel"
+        ~tasks:[ "jsonl_prune"; "microvm_guest_sweep" ];
       Alcotest.(check (list string))
         "flattened task order"
         [
           "restore_sessions";
           "jsonl_prune";
+          "microvm_guest_sweep";
         ]
         (Server_runtime_bootstrap.lazy_startup_task_names ())
   | _ -> Alcotest.fail "unexpected lazy startup group shape"

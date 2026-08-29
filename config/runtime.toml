@@ -1108,9 +1108,9 @@ max-concurrent = 1
 # A lane is an ordered list of runtime candidates. When a keeper is assigned
 # to a lane, the turn attempts candidates in order until one succeeds or the
 # lane is exhausted. Lanes are resolved at config load; unknown candidate ids
-# abort startup. Only the "ordered" strategy is implemented today.
+# abort startup. Ordering is the only semantics; a lane table carries only
+# [candidates].
 [runtime.lanes.default]
-strategy = "ordered"
 candidates = [
   "ollama_cloud.deepseek-v4-flash",
   "deepseek.deepseek-v4-pro",

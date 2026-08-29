@@ -3783,12 +3783,10 @@ let test_config_post_round_trips_typed_tools_patch () =
              (Lib.Mcp_server.For_testing.create_state
                 ~base_path:config.base_path)
            ~name
-           {|{"tools":{"groups":["fs","core"],"native":"full"}}|}
+           {|{"tools":{"native":"full"}}|}
        in
        check bool "HTTP 200" true (String.starts_with ~prefix:"HTTP/1.1 200" raw);
        let open Yojson.Safe.Util in
-       check (list string) "readback groups" [ "fs"; "core" ]
-         (json |> member "tools" |> member "groups" |> to_list |> List.map to_string);
        check string "readback native" "full"
          (json |> member "tools" |> member "native" |> to_string);
        check string "Auto rejects full preview" "rejected"
@@ -3805,8 +3803,6 @@ let test_config_post_round_trips_typed_tools_patch () =
          | Ok doc -> doc
          | Error error -> fail error
        in
-       check (list string) "TOML groups" [ "fs"; "core" ]
-         (Keeper_toml_loader.toml_string_list doc "keeper.tools.groups");
        check (option string) "TOML native" (Some "full")
          (Keeper_toml_loader.toml_string_opt doc "keeper.tools.native");
        (* The POST above restarts this keeper's keepalive lane, and that lane
@@ -3877,7 +3873,6 @@ let test_config_post_round_trips_typed_skills_patch () =
     ^ "\n[keeper.skills]\n"
     ^ "names = [\"initial-skill\"]\n"
     ^ "\n[keeper.tools]\n"
-    ^ "groups = [\"core\"]\n"
     ^ "native = \"read\"\n"
   in
   write_file toml_path initial_content;
@@ -3949,11 +3944,6 @@ let test_config_post_round_trips_typed_skills_patch () =
          (Keeper_toml_loader.toml_string_list
             none_doc
             "keeper.skills.names");
-       check (list string) "nested tool groups survive exact and none"
-         [ "core" ]
-         (Keeper_toml_loader.toml_string_list
-            none_doc
-            "keeper.tools.groups");
        check (option string) "nested native posture survives exact and none"
          (Some "read")
          (Keeper_toml_loader.toml_string_opt
@@ -3980,11 +3970,6 @@ let test_config_post_round_trips_typed_skills_patch () =
        let all_doc = parse_toml "parse all selection TOML" in
        check bool "nested Skill key removed" true
          (List.assoc_opt "keeper.skills.names" all_doc = None);
-       check (list string) "nested tool groups survive key removal"
-         [ "core" ]
-         (Keeper_toml_loader.toml_string_list
-            all_doc
-            "keeper.tools.groups");
        check (option string) "nested native posture survives key removal"
          (Some "read")
          (Keeper_toml_loader.toml_string_opt

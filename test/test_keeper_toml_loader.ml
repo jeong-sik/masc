@@ -52,7 +52,7 @@ let with_temp_toml content f =
 
 let test_nested_table_edits_follow_semantic_path () =
   with_temp_toml
-    "[keeper]\nname = \"probe\"\n\n[keeper.skills]\nnames = [\"old\"]\n\n[keeper.tools]\ngroups = [\"fs\"]\nnative = \"read\"\n"
+    "[keeper]\nname = \"probe\"\nmention_targets = [\"fs\"]\n\n[keeper.skills]\nnames = [\"old\"]\n\n[keeper.tools]\nnative = \"read\"\n"
     (fun path ->
       let edit fields =
         match L.edit_keeper_toml_fields_strict_staged ~path fields with
@@ -61,7 +61,7 @@ let test_nested_table_edits_follow_semantic_path () =
       in
       edit
         [ "skills.names", L.Set (L.Toml_string_array [ "ocaml-coding" ])
-        ; "tools.groups", L.Set (L.Toml_string_array [ "core"; "fs" ])
+        ; "mention_targets", L.Set (L.Toml_string_array [ "core"; "fs" ])
         ];
       let parse label =
         let content = In_channel.with_open_bin path In_channel.input_all in
@@ -72,27 +72,27 @@ let test_nested_table_edits_follow_semantic_path () =
       let updated = parse "updated nested tables" in
       check (list string) "nested Skill updated" [ "ocaml-coding" ]
         (L.toml_string_list updated "keeper.skills.names");
-      check (list string) "nested tool groups updated" [ "core"; "fs" ]
-        (L.toml_string_list updated "keeper.tools.groups");
+      check (list string) "sibling array updated" [ "core"; "fs" ]
+        (L.toml_string_list updated "keeper.mention_targets");
       check (option string) "unrelated nested tool field preserved" (Some "read")
         (L.toml_string_opt updated "keeper.tools.native");
       edit [ "skills.names", L.Remove ];
       let removed = parse "removed nested key" in
       check bool "nested Skill key removed" true
         (List.assoc_opt "keeper.skills.names" removed = None);
-      check (list string) "tool groups survive removal" [ "core"; "fs" ]
-        (L.toml_string_list removed "keeper.tools.groups"))
+      check (list string) "sibling array survives removal" [ "core"; "fs" ]
+        (L.toml_string_list removed "keeper.mention_targets"))
 ;;
 
 let test_dotted_assignments_follow_semantic_path () =
   with_temp_toml
-    "[keeper]\nskills.names = [\"old\"]\ntools.groups = [\"fs\"]\ntools.native = \"read\"\n"
+    "[keeper]\nskills.names = [\"old\"]\nmention_targets = [\"fs\"]\ntools.native = \"read\"\n"
     (fun path ->
       (match
          L.edit_keeper_toml_fields_strict_staged
            ~path
            [ "skills.names", L.Set (L.Toml_string_array [])
-           ; "tools.groups", L.Set (L.Toml_string_array [ "core" ])
+           ; "mention_targets", L.Set (L.Toml_string_array [ "core" ])
            ]
        with
        | Ok () -> ()
@@ -103,8 +103,8 @@ let test_dotted_assignments_follow_semantic_path () =
       | Ok doc ->
         check (list string) "dotted Skill updated" []
           (L.toml_string_list doc "keeper.skills.names");
-        check (list string) "dotted tool groups updated" [ "core" ]
-          (L.toml_string_list doc "keeper.tools.groups");
+        check (list string) "dotted sibling array updated" [ "core" ]
+          (L.toml_string_list doc "keeper.mention_targets");
         check (option string) "dotted native posture preserved" (Some "read")
           (L.toml_string_opt doc "keeper.tools.native"))
 ;;

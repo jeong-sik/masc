@@ -1825,6 +1825,7 @@ type harness_verdict = {
   hv_verdict : string;
   hv_evaluator : string;
   hv_fallback_reason : string option;
+  hv_notes_hash : string;
 }
 
 type harness_snapshot = { hs_verdicts : harness_verdict list }
@@ -3012,6 +3013,7 @@ let decode_harness_verdict json =
   let* hv_evaluator = required_string_field json "evaluator_runtime" in
   let* hv_fallback_reason = optional_string_field json "fallback_reason" in
   let* hv_at = require_float_field json "timestamp" in
+  let* hv_notes_hash = required_string_field json "notes_hash" in
   Ok
     { hv_at
     ; hv_task_id
@@ -3021,6 +3023,7 @@ let decode_harness_verdict json =
     ; hv_verdict
     ; hv_evaluator
     ; hv_fallback_reason
+    ; hv_notes_hash
     }
 
 let decode_harness_snapshot json =

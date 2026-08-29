@@ -18,6 +18,9 @@ type harness_verdict_item =
   ; verdict : string
   ; evaluator_runtime : string
   ; fallback_reason : string option
+  ; notes_hash : string
+    (** The calibration correlation key: a human label recorded against this
+        hash joins this verdict in {!Eval_calibration.find_divergences}. *)
   }
 
 type pre_compact_event = Keeper_compact_policy.pre_compact_event =
@@ -215,6 +218,7 @@ let verdict_item_json (item : harness_verdict_item) =
     ; "verdict", `String item.verdict
     ; "evaluator_runtime", `String item.evaluator_runtime
     ; "fallback_reason", Json_util.string_opt_to_json item.fallback_reason
+    ; "notes_hash", `String item.notes_hash
     ]
 ;;
 
@@ -231,6 +235,7 @@ let verdict_item_of_json json =
       ; verdict = string_field json "verdict"
       ; evaluator_runtime = string_field json "evaluator_runtime"
       ; fallback_reason = Safe_ops.json_string_opt "fallback_reason" json
+      ; notes_hash = string_field json "notes_hash"
       }
 ;;
 
@@ -1012,4 +1017,63 @@ let () =
     in
     Some mapped_event
   )
+;;
+
+(* ── Operator labels ─────────────────────────────────────────────────── *)
+
+type label_request =
+  { label_notes_hash : string
+  ; label_verdict : Eval_calibration.label_verdict
+  ; label_reason : string
+  }
+
+let notes_hash_hex_length = 64
+
+(* The label is the verdict the human holds, in the calibration vocabulary —
+   not agreement with the machine. Divergence mining compares this against
+   the evaluator's verdict under the same notes hash, so an operator who
+   agrees with a rejection records a reject label. *)
+let parse_label_body body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error message -> Error ("body is not JSON: " ^ message)
+  | `Assoc fields ->
+    let string_of name =
+      match List.assoc_opt name fields with
+      | Some (`String value) -> Ok value
+      | Some _ -> Error (Printf.sprintf "field %S must be a string" name)
+      | None -> Error (Printf.sprintf "missing field %S" name)
+    in
+    let ( let* ) = Result.bind in
+    let* label_notes_hash = string_of "notes_hash" in
+    let* () =
+      if
+        String.length label_notes_hash = notes_hash_hex_length
+        && String.for_all
+             (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+             label_notes_hash
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf "notes_hash must be %d lowercase hex characters"
+             notes_hash_hex_length)
+    in
+    let* label_verdict =
+      match string_of "verdict" with
+      | Ok "approve" -> Ok Eval_calibration.Approve_label
+      | Ok "reject" -> Ok Eval_calibration.Reject_label
+      | Ok other ->
+        Error
+          (Printf.sprintf "verdict must be \"approve\" or \"reject\", got %S"
+             other)
+      | Error _ as e -> e
+    in
+    let* label_reason = Result.map String.trim (string_of "reason") in
+    Ok { label_notes_hash; label_verdict; label_reason }
+  | _ -> Error "body must be a JSON object"
+;;
+
+let record_operator_label ~labeler
+    { label_notes_hash; label_verdict; label_reason } =
+  Eval_calibration.record_human_label ~notes_hash:label_notes_hash
+    ~human_verdict:label_verdict ~labeler ~reason:label_reason
 ;;

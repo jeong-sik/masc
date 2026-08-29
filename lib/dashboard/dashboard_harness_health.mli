@@ -41,6 +41,9 @@ type harness_verdict_item =
   ; verdict : string
   ; evaluator_runtime : string
   ; fallback_reason : string option
+  ; notes_hash : string
+    (** The calibration correlation key: a human label recorded against this
+        hash joins this verdict in {!Eval_calibration.find_divergences}. *)
   }
 
 (** {1 Pre-compact event} *)
@@ -179,3 +182,23 @@ val set_wake_payload_store_for_testing : base_dir:string -> unit
     events, and wake-payload telemetry — clipped to the
     [?since] / [?until] window when provided. *)
 val json : config:Workspace.config -> ?since:string -> ?until:string -> unit -> Yojson.Safe.t
+
+(** {1 Operator labels} *)
+
+type label_request =
+  { label_notes_hash : string
+  ; label_verdict : Eval_calibration.label_verdict
+  ; label_reason : string
+  }
+
+val parse_label_body : string -> (label_request, string) result
+(** Parse the harness-label POST body:
+    [{"notes_hash": <64 hex>, "verdict": "approve" | "reject",
+      "reason": <string>}].
+    The verdict is the one the human holds, not agreement with the machine:
+    divergence mining compares it against the evaluator's verdict under the
+    same notes hash. *)
+
+val record_operator_label : labeler:string -> label_request -> unit
+(** Append the label to the calibration ledger, joined to its verdict by
+    [label_notes_hash]. *)

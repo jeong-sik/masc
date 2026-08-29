@@ -2716,6 +2716,22 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) _request reqd)
+  (* An operator's own verdict on a harness row. The label is ground truth
+     for judge calibration, so it takes the admin permission and the
+     authenticated caller becomes the labeler — no anonymous ground truth. *)
+  |> Http.Router.post "/api/v1/dashboard/harness-label" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match Dashboard_harness_health.parse_label_body body_str with
+             | Error message ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+             | Ok label ->
+               Dashboard_harness_health.record_operator_label
+                 ~labeler:agent_name label;
+               Http.Response.json_value ~request:req
+                 (`Assoc [ "ok", `Bool true ]) reqd))
+         request reqd)
   |> Http.Router.get "/api/v1/dashboard/feature-health" (fun _request reqd ->
        with_public_read (fun _state req reqd ->
          let cache_key = "feature_health" in

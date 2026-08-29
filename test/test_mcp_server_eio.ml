@@ -142,9 +142,14 @@ let next_cursor_of_response response =
   | Some _ -> Alcotest.fail "nextCursor not a string"
   | None -> None
 
+(* Paging facts live under this server's own [_meta] key rather than as bare
+   [_meta] members, where a later spec key could take one of the names. *)
 let tools_list_meta_exn response =
   match List.assoc_opt "_meta" (result_fields_exn response) with
-  | Some (`Assoc fields) -> fields
+  | Some (`Assoc fields) -> (
+    match List.assoc_opt Masc.Mcp_server.list_page_meta_key fields with
+    | Some (`Assoc page) -> page
+    | _ -> Alcotest.fail "list page meta missing")
   | _ -> Alcotest.fail "_meta not an object"
 
 let int_field_exn label fields name =
@@ -256,10 +261,18 @@ let tool_string_field tool field =
       | _ -> Alcotest.failf "tool field missing: %s" field)
   | _ -> Alcotest.fail "tool is not an object"
 
+(* The envelope moved under the server's own [_meta] key: [CallToolResult]
+   defines no member to hang it off. *)
 let result_envelope_exn response =
-  match List.assoc_opt "resultEnvelope" (result_fields_exn response) with
-  | Some (`Assoc fields) -> fields
-  | _ -> Alcotest.fail "resultEnvelope missing"
+  match List.assoc_opt "_meta" (result_fields_exn response) with
+  | Some (`Assoc meta) -> (
+    match List.assoc_opt Masc.Mcp_server.tool_call_meta_key meta with
+    | Some (`Assoc call) -> (
+      match List.assoc_opt "envelope" call with
+      | Some (`Assoc fields) -> fields
+      | _ -> Alcotest.fail "call envelope missing")
+    | _ -> Alcotest.fail "tool call meta missing")
+  | _ -> Alcotest.fail "result _meta missing"
 
 let structured_content_exn response =
   match List.assoc_opt "structuredContent" (result_fields_exn response) with
@@ -827,8 +840,11 @@ let test_handle_request_tools_list_operator_profile () =
                  in
                  Alcotest.(check bool) "snapshot has title" true
                    (Yojson.Safe.Util.member "title" snapshot_tool <> `Null);
-                 Alcotest.(check bool) "snapshot has icons" true
-                   (Yojson.Safe.Util.member "icons" snapshot_tool <> `Null);
+                 (* The tool icon was derived from the read-only capability
+                    asserted two lines down, so it shipped no information the
+                    same object did not already carry. *)
+                 Alcotest.(check bool) "snapshot carries no derived icon" true
+                   (Yojson.Safe.Util.member "icons" snapshot_tool = `Null);
                  Alcotest.(check bool) "snapshot readonly hint" true
                    (snapshot_tool |> Yojson.Safe.Util.member "annotations"
                     |> Yojson.Safe.Util.member "readOnlyHint"
@@ -1459,17 +1475,26 @@ let test_handle_request_tools_list_include_hidden_metadata () =
   let status_tool = find_tool_exn tools "masc_status" in
   Alcotest.(check bool) "standard tools expose title" true
     (tool_string_field status_tool "title" <> "");
-  Alcotest.(check bool) "standard tools expose icons" true
-    (Yojson.Safe.Util.member "icons" status_tool <> `Null);
+  Alcotest.(check bool) "standard tools carry no derived icon" true
+    (Yojson.Safe.Util.member "icons" status_tool = `Null);
   Alcotest.(check bool) "standard tools expose annotations" true
     (Yojson.Safe.Util.member "annotations" status_tool <> `Null);
   Alcotest.(check bool) "standard tools do not advertise outputSchema prematurely"
     true
     (Yojson.Safe.Util.member "outputSchema" status_tool = `Null);
+  (* Catalog facts are this server's own, so they live under its [_meta] key
+     rather than beside the fields [Tool] defines. *)
+  let status_catalog =
+    status_tool
+    |> Yojson.Safe.Util.member "_meta"
+    |> Yojson.Safe.Util.member Masc.Mcp_server.tool_catalog_meta_key
+  in
+  Alcotest.(check bool) "catalog metadata is not a top-level tool field" true
+    (Yojson.Safe.Util.member "visibility" status_tool = `Null);
   Alcotest.(check bool) "visibility metadata exposed" true
-    (Yojson.Safe.Util.member "visibility" status_tool <> `Null);
+    (Yojson.Safe.Util.member "visibility" status_catalog <> `Null);
   Alcotest.(check bool) "implementation status exposed" true
-    (Yojson.Safe.Util.member "implementationStatus" status_tool <> `Null);
+    (Yojson.Safe.Util.member "implementationStatus" status_catalog <> `Null);
   Alcotest.(check bool) "removed ghost tool absent" false
     (List.exists
        (function
@@ -1513,20 +1538,35 @@ let test_handle_request_tools_list_include_usage_metadata () =
   ]) in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   let result_fields = result_fields_exn response in
+  let result_usage =
+    `Assoc result_fields
+    |> Yojson.Safe.Util.member "_meta"
+    |> Yojson.Safe.Util.member Masc.Mcp_server.tool_usage_meta_key
+  in
+  Alcotest.(check bool) "usage counters are not result members" true
+    (not (List.mem_assoc "usageTotalCalls" result_fields));
   Alcotest.(check bool) "usage telemetry availability exposed" true
-    (List.mem_assoc "usageTelemetryAvailable" result_fields);
+    (Yojson.Safe.Util.member "usageTelemetryAvailable" result_usage <> `Null);
   Alcotest.(check bool) "usage total exposed" true
-    (List.mem_assoc "usageTotalCalls" result_fields);
+    (Yojson.Safe.Util.member "usageTotalCalls" result_usage <> `Null);
   let first_tool =
     match tools_from_response response with
     | tool :: _ -> tool
     | [] -> Alcotest.fail "tools list empty"
   in
+  let first_tool_usage =
+    first_tool
+    |> Yojson.Safe.Util.member "_meta"
+    |> Yojson.Safe.Util.member Masc.Mcp_server.tool_usage_meta_key
+  in
   Alcotest.(check bool) "per-tool usage count exposed" true
-    (Yojson.Safe.Util.member "usageCount" first_tool <> `Null);
+    (Yojson.Safe.Util.member "usageCount" first_tool_usage <> `Null);
+  (* Present-but-null when the tool was never called, so this asserts the key
+     rather than the value. *)
   Alcotest.(check bool) "per-tool last-used field present" true
-    (List.mem_assoc "usageLastUsedAt"
-       (match first_tool with `Assoc fields -> fields | _ -> []));
+    (match first_tool_usage with
+     | `Assoc fields -> List.mem_assoc "usageLastUsedAt" fields
+     | _ -> false);
   cleanup_dir base_path
 
 let test_execute_tool_explicit_agent_name_not_overridden () =

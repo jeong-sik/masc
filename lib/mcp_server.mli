@@ -14,10 +14,14 @@
       the HTTP / SSE transport.
 
     Internal helpers stay private at this boundary
-    ([svg_icon_data_uri], [text_icon] / [json_icon] /
-    [doc_icon], [icons_for_mime], [server_icons],
+    ([svg_icon_data_uri], [server_icons],
     [make_resource_template] (callers use the static
-    {!resource_templates} list, not the constructor)). *)
+    {!resource_templates} list, not the constructor)).
+
+    Icons are attached to the server implementation only. Resources, resource
+    templates and tools do not carry one: theirs were derived from [mime_type]
+    and from the read-only tool capability, both of which the client already
+    reads off the same object. *)
 
 (** {1 MCP icons} *)
 
@@ -35,6 +39,50 @@ val themed_icon : label:string -> bg:string -> fg:string -> mcp_icon
 val server_info : Yojson.Safe.t
 val capabilities : Yojson.Safe.t
 
+(** {1 Cache hints}
+
+    [ttlMs] and [cacheScope] are required on every [CacheableResult]
+    (MCP 2026-07-28): [tools/list], [prompts/list], [resources/list],
+    [resources/read], [resources/templates/list] and [server/discover].
+    Handlers pick one of the two hints below rather than writing their own
+    numbers. *)
+
+type cache_scope = Public | Private
+
+type cache_hint = {
+  ttl_ms : int;
+  scope : cache_scope;
+}
+
+val live_state_cache_hint : cache_hint
+(** Workspace state that moves and is scoped to the presented credential. *)
+
+val static_catalogue_cache_hint : cache_hint
+(** Catalogues fixed by the running binary; shared caches may hold them. *)
+
+val cache_hint_fields : cache_hint -> (string * Yojson.Safe.t) list
+(** The [ttlMs] / [cacheScope] pair to splice into a result object. *)
+
+(** {1 Vendor [_meta] keys}
+
+    Tool, Resource and the list results are closed shapes in MCP 2026-07-28:
+    they have no index signature, so this server's own fields live under
+    [_meta] rather than beside the spec's. All keys below share one vendor
+    prefix, the reverse-DNS form of the repository host in
+    [serverInfo.websiteUrl]; the prefix itself stays private to the
+    implementation. *)
+
+val tool_catalog_meta_key : string
+val tool_usage_meta_key : string
+val list_page_meta_key : string
+val tool_call_meta_key : string
+val server_meta_key : string
+
+val meta_field :
+  key:string -> (string * Yojson.Safe.t) list -> (string * Yojson.Safe.t) list
+(** [meta_field ~key fields] is the single-entry [_meta] member carrying
+    [fields], or the empty list when [fields] is empty. *)
+
 (** {1 Resource catalogue} *)
 
 type mcp_resource = {
@@ -43,7 +91,6 @@ type mcp_resource = {
   title : string option;
   description : string;
   mime_type : string;
-  icons : mcp_icon list;
   annotations : Yojson.Safe.t option;
   size : int option;
 }
@@ -54,7 +101,6 @@ type mcp_resource_template = {
   title : string option;
   description : string;
   mime_type : string;
-  icons : mcp_icon list;
   annotations : Yojson.Safe.t option;
 }
 

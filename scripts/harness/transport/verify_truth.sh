@@ -71,8 +71,11 @@ for raw in payload.splitlines():
         continue
     result = obj.get("result") or {}
     envelopes = [result]
-    if isinstance(result.get("resultEnvelope"), dict):
-        envelopes.append(result["resultEnvelope"])
+    # The call envelope sits under the server's own _meta key: CallToolResult
+    # defines no member for it.
+    call_meta = (result.get("_meta") or {}).get("com.github.yousleepwhen.masc/call")
+    if isinstance(call_meta, dict) and isinstance(call_meta.get("envelope"), dict):
+        envelopes.append(call_meta["envelope"])
     for envelope in envelopes:
         for item in envelope.get("content") or []:
             if item.get("type") == "text":

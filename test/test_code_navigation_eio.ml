@@ -42,7 +42,7 @@ let json_get_string obj field =
       "result": {
         "content": [{"type":"text","text":"<tool JSON>"}],
         "isError": bool,
-        "resultEnvelope": {...}
+        "_meta": {"com.github.yousleepwhen.masc/call": {"envelope": {...}}}
       }
     }
     Returns (is_error, text) or fails. *)

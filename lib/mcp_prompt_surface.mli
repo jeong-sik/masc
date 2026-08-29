@@ -44,8 +44,10 @@ type prompt_def = {
 
     The [icons] field is non-optional and currently always populated
     with a single themed icon; the contract permits an empty list,
-    but UI clients have a degraded fallback that operators dislike
-    so the catalogue convention is "always provide at least one icon". *)
+    but UI clients have a degraded fallback that operators dislike.
+    The catalogue is one prompt long, so the inlined SVG costs nothing
+    to repeat -- unlike the per-resource and per-tool icons, which were
+    derived from a neighbouring field and were dropped for that reason. *)
 
 val prompt_defs : prompt_def list
 (** The canonical, ordered prompt catalogue.  Currently contains a

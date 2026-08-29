@@ -39,22 +39,83 @@ let themed_icon ~label ~bg ~fg =
   {
     src = svg_icon_data_uri ~bg ~fg ~label;
     mime_type = Some "image/svg+xml";
-    sizes = [ "64x64" ];
+    (* ["any"] is what the spec spells for a scalable format; ["64x64"] told a
+       client to pick a raster box out of an SVG that has no fixed one. *)
+    sizes = [ "any" ];
   }
 
-let text_icon = themed_icon ~label:"TXT" ~bg:"#0F766E" ~fg:"#F0FDFA"
-let json_icon = themed_icon ~label:"JS" ~bg:"#1D4ED8" ~fg:"#EFF6FF"
-let doc_icon = themed_icon ~label:"MC" ~bg:"#111827" ~fg:"#F9FAFB"
-
-let icons_for_mime mime_type =
-  match String.lowercase_ascii mime_type with
-  | "application/json" -> [ json_icon ]
-  | "text/markdown"
-  | "text/plain; charset=utf-8"
-  | "text/plain" -> [ text_icon ]
-  | _ -> [ doc_icon ]
-
+(* Only the server itself carries an icon. Per-resource and per-tool icons used
+   to be derived -- one palette entry per mimeType, one per read-only tool --
+   so every entry in a 97-resource listing shipped a copy of the same inlined
+   SVG while the field it was derived from (mimeType, annotations.readOnlyHint)
+   sat next to it in the same object. That was 64% of resources/list and 25% of
+   tools/list in bytes, carrying nothing a client could not already read. A
+   client that wants per-entry glyphs picks them from those fields. *)
 let server_icons = [ themed_icon ~label:"MM" ~bg:"#7C3AED" ~fg:"#F5F3FF" ]
+
+(* Every list surface on the wire is a [CacheableResult] (MCP 2026-07-28):
+   [ttlMs] and [cacheScope] are required, not optional hints.  Two hints cover
+   everything this server answers, so they live here rather than as literals at
+   each handler -- [mcp_server_eio_protocol] and [mcp_server_eio_resource] each
+   had their own copy of the field builder and their own 5000/30000 literals. *)
+type cache_scope = Public | Private
+
+type cache_hint = {
+  ttl_ms : int;
+  scope : cache_scope;
+}
+
+(* Workspace state a caller reads to act on: agents, tasks, the tool list a
+   caller's permissions shape.  Private, because the answer is scoped to the
+   presented credential, and short, because the workspace moves. *)
+let live_state_cache_hint = { ttl_ms = 5000; scope = Private }
+
+(* Catalogues that change only when this binary changes: prompts, resource
+   templates, the server's own identity.  Shared caches may hold them. *)
+let static_catalogue_cache_hint = { ttl_ms = 30_000; scope = Public }
+
+let cache_scope_to_string = function
+  | Public -> "public"
+  | Private -> "private"
+
+let cache_hint_fields { ttl_ms; scope } =
+  [ ("ttlMs", `Int ttl_ms); ("cacheScope", `String (cache_scope_to_string scope)) ]
+
+(* Vendor prefix for this server's own [_meta] keys.
+
+   MCP 2026-07-28 defines Tool, Resource and the list results as closed shapes:
+   they carry no index signature, so implementation data belongs under [_meta]
+   rather than beside [name] and [inputSchema]. Every catalog field this server
+   adds used to sit at the top level of each tool object, where a strict client
+   is entitled to reject it and where a future spec field could collide with it.
+
+   The spec reserves any prefix whose second label is [modelcontextprotocol] or
+   [mcp]; this one is the reverse-DNS form of the repository host already named
+   in [serverInfo.websiteUrl], so it cannot collide with a spec key or with
+   another vendor. *)
+let meta_key_prefix = "com.github.yousleepwhen.masc/"
+
+(* Catalog facts about a tool: visibility, lifecycle, implementation status,
+   required permission, and the keeper descriptor that owns the name. *)
+let tool_catalog_meta_key = meta_key_prefix ^ "catalog"
+
+(* Call counters, only present when the caller asked for [include_usage]. *)
+let tool_usage_meta_key = meta_key_prefix ^ "usage"
+
+(* Paging facts about a list result: total before paging, page size. *)
+let list_page_meta_key = meta_key_prefix ^ "page"
+
+(* One tool call's trace: the envelope the TUI renders, plus timing and the
+   failure class when the call failed. *)
+let tool_call_meta_key = meta_key_prefix ^ "call"
+
+(* Facts about the running server that no spec field carries. *)
+let server_meta_key = meta_key_prefix ^ "server"
+
+(* Splice [fields] under [key] inside a result's [_meta], leaving any keys
+   already there -- including the server info the transport injects -- alone. *)
+let meta_field ~key fields =
+  if fields = [] then [] else [ (key, `Assoc fields) ]
 
 (* Name, title, and version come from
    [Mcp_transport_protocol.server_info_meta_value], which every result already
@@ -91,7 +152,6 @@ type mcp_resource = {
   title : string option;
   description : string;
   mime_type : string;
-  icons : mcp_icon list;
   annotations : Yojson.Safe.t option;
   size : int option;
 }
@@ -102,7 +162,6 @@ type mcp_resource_template = {
   title : string option;
   description : string;
   mime_type : string;
-  icons : mcp_icon list;
   annotations : Yojson.Safe.t option;
 }
 
@@ -118,10 +177,6 @@ let resource_to_json (r : mcp_resource) =
     match r.title with
     | Some title -> [ ("title", `String title) ]
     | None -> []
-  in
-  let base =
-    if r.icons = [] then base
-    else base @ [ ("icons", `List (List.map icon_to_json r.icons)) ]
   in
   let base =
     match r.annotations with
@@ -149,10 +204,6 @@ let resource_template_to_json (t : mcp_resource_template) =
     | None -> []
   in
   let base =
-    if t.icons = [] then base
-    else base @ [ ("icons", `List (List.map icon_to_json t.icons)) ]
-  in
-  let base =
     match t.annotations with
     | Some annotations -> base @ [ ("annotations", annotations) ]
     | None -> base
@@ -166,7 +217,6 @@ let make_resource ?title ?annotations ?size ~uri ~name ~description ~mime_type (
     title = (match title with Some _ as value -> value | None -> Some name);
     description;
     mime_type;
-    icons = icons_for_mime mime_type;
     annotations;
     size;
   }
@@ -179,7 +229,6 @@ let make_resource_template ?title ?annotations ~uri_template ~name ~description
     title = (match title with Some _ as value -> value | None -> Some name);
     description;
     mime_type;
-    icons = icons_for_mime mime_type;
     annotations;
   }
 

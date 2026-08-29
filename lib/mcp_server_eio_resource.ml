@@ -25,9 +25,6 @@ let make_error_typed ?data ~id (code : Mcp_error_code.t) message =
 let public_tool_help_schemas () =
   Config.visible_tool_schemas ()
 
-let cache_hint_fields ~scope ~ttl_ms =
-  [ ("ttlMs", `Int ttl_ms); ("cacheScope", `String scope) ]
-
 (* Resource projections use the synchronous Workspace/Fs_compat APIs.  Keep
    those reads off the cooperative Eio domain; Session actor access remains on
    the calling fiber because it may yield through the registry mailbox. *)
@@ -390,7 +387,7 @@ let handle_read_resource_eio state id params =
             make_response ~id
               (`Assoc
                 ([ ("contents", contents) ]
-                @ cache_hint_fields ~scope:"private" ~ttl_ms:5000))
+                @ Mcp_server.(cache_hint_fields live_state_cache_hint)))
       end
   | Some _ ->
       make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params"

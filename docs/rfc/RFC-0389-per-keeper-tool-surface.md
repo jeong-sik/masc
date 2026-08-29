@@ -1,9 +1,9 @@
 ---
 rfc: "0389"
 title: "Keeper 별 도구 표면 — 101개를 전원에게 매 턴 보내는 것을 그만둔다"
-status: Draft
+status: Adopted
 created: 2026-08-22
-updated: 2026-08-27
+updated: 2026-08-29
 author: claude
 supersedes: []
 superseded_by: null
@@ -202,3 +202,26 @@ val model_visible_schemas
 - `tool_calls` 스토어의 호출 수로 도구를 자동 제외하기. §1.2 의 스토어 범위 때문에 외부
   클라이언트 전용 도구가 전부 미사용으로 오분류된다. 표면은 선언으로만 줄어든다.
 - 도구를 동적으로 붙였다 떼기 (§3.3).
+
+## 7. 적용 기록 — 2026-08-29 라이브 선언
+
+§3 의 기계(합타입·TOML 파서·`model_visible_schemas ~surface`·대시보드 투영)는 이 날짜
+이전에 이미 main 에 있었다. 빠져 있던 것은 선언이었다 — 라이브 Keeper 9기 전원이
+`[keeper.tools]` 테이블 없이 돌아 전원 `All` 이었다.
+
+2026-08-29 에 라이브 `<config-root>/keepers/*.toml` 9기 전부에
+`groups = ["execute","search_files","fs","board","workspace","surface","memory","meta","core"]`
+(voice 제외 — 함대 8월 호출 0~7회) 를 선언했다. 관측:
+
+- **재기동 불필요.** 선언형 keeper 발견 루프가 수정된 TOML 을 다음 주기에 집었고,
+  polisher 카나리의 turn surface 가 139개/130,991B → 133개/128,298B 로 떨어졌다
+  (wire-capture request 행, 08:26 UTC). 이후 함대 전체 127개/124,631B 로 수렴.
+- **테이블 위치 함정.** `[keeper.tools]` 를 `[keeper]` 의 bare key 들(특히
+  `instructions`) 앞에 두면 TOML 규칙상 그 키들이 tools 테이블로 붙어
+  `unknown keeper TOML keys: keeper.tools.instructions` 로 로드가 거부된다.
+  파서는 설계대로 fail-closed 였고 keeper 는 이전 meta 로 계속 동작했다.
+  테이블은 파일 끝에 둔다 (config/keepers/ 프리셋 4기에 같은 형태로 반영).
+- **바이트의 본체는 이 축 밖에 있었다.** 같은 날 실측에서 표면 133KB 중 48KB 가
+  부착 서비스(github 44종) 도구였고, 이는 identity 카탈로그
+  (`<base-path>/identity/catalogs/<keeper>/<provider>.json`) 가 정하며 이 RFC 의
+  그룹 선언이 관여하지 않는다. 부착 스코핑은 별도 축이다.

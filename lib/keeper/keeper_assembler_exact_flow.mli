@@ -97,7 +97,11 @@ val prepare
     No provider request, proposal write, or ordinary Tool dispatch occurs. *)
 
 val execute
-  :  net:Eio_context.eio_net
+  :  ?cli_runner:Keeper_lane_cli_oneshot.runner
+       (** Injectable effect edge for the cli lane-slot fallback walked after
+           catalog exhaustion (RFC cli-runtimes-as-lane-slots); [None] spawns
+           the real official client. *)
+  -> net:Eio_context.eio_net
   -> ?clock:_ Eio.Time.clock
   -> ?observation_registry:Exact_lane_run_registry.t
   -> prepared

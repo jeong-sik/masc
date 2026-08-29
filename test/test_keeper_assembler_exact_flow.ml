@@ -136,7 +136,7 @@ let ordered_duplicate_plan_output =
     ]
 ;;
 
-let publish_lane fixtures =
+let publish_lane ?(cli_slot_ids = []) fixtures =
   let snapshot =
     Fixture.resolver_snapshot
       ~supports_response_format_json:true
@@ -146,6 +146,7 @@ let publish_lane fixtures =
   in
   match
     Fixture.publish_registry
+      ~cli_slot_ids
       ~lane_id:Flow.lane_id
       ~slot_ids:
         (List.map (fun (fixture : Fixture.target_fixture) -> fixture.id) fixtures)
@@ -1562,6 +1563,93 @@ let test_model_visible_runtime_reports_missing_net_before_setup () =
      | _ -> None)
 ;;
 
+(* ── CLI lane-slot fallback (RFC cli-runtimes-as-lane-slots) ──────── *)
+
+let test_cli_slot_assembles_after_catalog_exhaustion () =
+  with_eio_base "assembler-cli-summary"
+  @@ fun ~sw:_ ~net ~clock ~base_path ~config ~request ->
+  Fixture.with_official_client_runtimes
+  @@ fun () ->
+  publish_lane
+    ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+    [ { Fixture.id = "assembler-cli-unreachable"; base_url = "http://127.0.0.1:1" } ];
+  let prepared =
+    Flow.prepare ~config ~keeper_name:"assembler-cli" request
+    |> function
+    | Ok prepared -> prepared
+    | Error error ->
+      failf "prepare failed: %s" (Flow.setup_error_to_yojson error |> Yojson.Safe.to_string)
+  in
+  let observations =
+    Exact.create ~path:(Filename.concat base_path "assembler-cli-runs.jsonl") ()
+  in
+  let runner ~runtime_id ~system_prompt:_ ~prompt =
+    check bool
+      "the cli prompt is the rendered assembler prompt"
+      true
+      (String.length prompt > 0);
+    check string "the declared cli slot runs" Fixture.cli_primary_runtime runtime_id;
+    Ok (Yojson.Safe.to_string plan_output)
+  in
+  let result =
+    Flow.execute
+      ~cli_runner:runner
+      ~net
+      ~clock
+      ~observation_registry:observations
+      prepared
+    |> function
+    | Ok success -> success
+    | Error error ->
+      failf "execute failed: %s" (Flow.execution_error_to_yojson error |> Yojson.Safe.to_string)
+  in
+  check string
+    "success records the cli slot"
+    Fixture.cli_primary_runtime
+    result.selected_slot;
+  (match Exact.list_runs observations with
+   | [ { status = Exact.Completed { selected_slot; _ }; _ } ] ->
+     check (option string)
+       "the observation row attributes the run to the cli slot"
+       (Some Fixture.cli_primary_runtime)
+       selected_slot
+   | runs -> failf "expected one completed run, got %d" (List.length runs))
+;;
+
+let test_cli_walk_failure_keeps_the_exact_terminal () =
+  with_eio_base "assembler-cli-exhausted"
+  @@ fun ~sw:_ ~net ~clock ~base_path:_ ~config ~request ->
+  Fixture.with_official_client_runtimes
+  @@ fun () ->
+  publish_lane
+    ~cli_slot_ids:[ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
+    [ { Fixture.id = "assembler-cli-unreachable"; base_url = "http://127.0.0.1:1" } ];
+  let prepared =
+    Flow.prepare ~config ~keeper_name:"assembler-cli-exhausted" request
+    |> function
+    | Ok prepared -> prepared
+    | Error error ->
+      failf "prepare failed: %s" (Flow.setup_error_to_yojson error |> Yojson.Safe.to_string)
+  in
+  let attempts = ref [] in
+  let runner ~runtime_id ~system_prompt:_ ~prompt:_ =
+    attempts := !attempts @ [ runtime_id ];
+    Error "subscription window exhausted"
+  in
+  (match Flow.execute ~cli_runner:runner ~net ~clock prepared with
+   | Error (Flow.Exact_execution_failed _) -> ()
+   | Error error ->
+     failf
+       "cli exhaustion must keep the exact terminal: %s"
+       (Flow.execution_error_to_yojson error |> Yojson.Safe.to_string)
+   | Ok _ -> fail "an exhausted cli walk produced a proposal");
+  check
+    (list string)
+    "every declared cli slot was walked in order"
+    [ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
+    !attempts
+;;
+
 let () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   run
@@ -1607,6 +1695,14 @@ let () =
             "missing net is typed before Assembler setup"
             `Quick
             test_model_visible_runtime_reports_missing_net_before_setup
+        ; test_case
+            "a cli slot assembles after catalog exhaustion"
+            `Quick
+            test_cli_slot_assembles_after_catalog_exhaustion
+        ; test_case
+            "cli walk failure keeps the exact terminal"
+            `Quick
+            test_cli_walk_failure_keeps_the_exact_terminal
         ] )
     ]
 ;;

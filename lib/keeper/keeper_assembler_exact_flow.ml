@@ -76,6 +76,13 @@ type prepared =
   ; keeper_name : string
   ; request : Request.t
   ; attempt : Exact_output.flow_attempt
+  ; prompt : string
+        (* The rendered assembler prompt, retained beside the frozen HTTP
+           attempt because a cli one-shot has no request body: this text is
+           its whole input (RFC cli-runtimes-as-lane-slots). *)
+  ; cli_slots : string list
+        (* Official-client runtime ids walked after every catalog slot is
+           exhausted, carried verbatim from the resolved lane. *)
   }
 
 type success =
@@ -135,6 +142,7 @@ let prepare ~config ~keeper_name request =
       resolved
     |> Result.map_error (fun detail -> Lane_preference_unavailable detail)
   in
+  let cli_slots = resolved.cli_slots in
   let* candidates = flow_candidates resolved.selected_slots in
   match candidates with
   | [] -> Error Lane_resolved_without_candidates
@@ -161,7 +169,7 @@ let prepare ~config ~keeper_name request =
       |> Result.map_error (function
         | Exact_output.Flow_id_generation_failed detail -> Flow_start_failed detail)
     in
-    Ok { config; keeper_name; request; attempt }
+    Ok { config; keeper_name; request; attempt; prompt; cli_slots }
 ;;
 
 let execution_to_string = function
@@ -346,7 +354,7 @@ let exact_execution_failure_to_yojson = function
       ]
 ;;
 
-let execute ~net ?clock ?(observation_registry = Exact_lane_run_registry.global ()) prepared =
+let execute ?cli_runner ~net ?clock ?(observation_registry = Exact_lane_run_registry.global ()) prepared =
   let run_id = Random_id.prefixed ~prefix:"exact-assembler-" ~bytes:16 in
   let started_at = Time_compat.now () in
   Exact_lane_run_registry.register_running
@@ -401,6 +409,112 @@ let execute ~net ?clock ?(observation_registry = Exact_lane_run_registry.global 
        | Error error ->
          Exact_output.Reject_and_advance (Proposal_invalid error))
   in
+  (* Shared by the HTTP success arm and a cli fallback answer: persist the
+     proposal and complete the observation row under whichever slot produced
+     it. Store exceptions keep the exact completion semantics of the HTTP
+     arm they were extracted from. *)
+  let store_and_complete ~slot ~semantic_rejections_json proposal =
+    let store =
+      try `Result (Store.save prepared.config proposal) with
+      | Eio.Cancel.Cancelled _ as cancellation ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        complete Exact_lane_run_registry.Cancelled `Null;
+        Printexc.raise_with_backtrace cancellation backtrace
+      | exn ->
+        complete
+          (Exact_lane_run_registry.Failed
+             { code = "proposal_store_raised"; detail = Printexc.to_string exn })
+          `Null;
+        raise exn
+    in
+    match store with
+    | `Result (Error error) ->
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "proposal_store_failed"
+           ; detail = Store.error_to_yojson error |> Yojson.Safe.to_string
+           })
+        (`Assoc [ "error", Store.error_to_yojson error ]);
+      Error (Proposal_store_failed error)
+    | `Result (Ok store_result) ->
+      let proposal_id = Proposal.id proposal |> Proposal.Proposal_id.to_string in
+      complete
+        Exact_lane_run_registry.Succeeded
+        (`Assoc
+           [ "proposal_id", `String proposal_id
+           ; "proposal_digest", `String (Proposal.digest proposal)
+           ; "store_result", `String (store_result_to_string store_result)
+           ; "semantic_rejections", `List semantic_rejections_json
+           ]);
+      Ok { proposal; store_result; run_id; selected_slot = slot }
+  in
+  (* CLI lane-slot fallback (RFC cli-runtimes-as-lane-slots): engaged only on
+     provider exhaustion. The walk enforces JSON syntax; the same domain chain
+     the validator applies (output_of_yojson -> Proposal.create) runs here,
+     and a domain-invalid cli answer abandons the fallback rather than
+     inventing a proposal. *)
+  let try_cli_slots () =
+    match prepared.cli_slots with
+    | [] -> None
+    | cli_slots ->
+      (match
+         Keeper_lane_cli_oneshot.walk
+           ?runner:cli_runner
+           ~base_dir:prepared.config.Workspace.base_path
+           ~cli_slots
+           ~system_prompt:""
+           ~requirement:
+             (Exact_output.make_output_requirement
+                ~schema:Request.output_schema
+                ~minimum_guarantee:Exact_output.Json_syntax)
+           ~prompt:prepared.prompt
+           ()
+       with
+       | Error failures ->
+         List.iter
+           (fun failure ->
+              Log.Keeper.warn
+                ~keeper_name:prepared.keeper_name
+                "assembler cli lane-slot failed: %s"
+                (Keeper_lane_cli_oneshot.failure_to_string failure))
+           failures;
+         None
+       | Ok (runtime_id, output) ->
+         (match Request.output_of_yojson ~request:prepared.request output with
+          | Error error ->
+            Log.Keeper.warn
+              ~keeper_name:prepared.keeper_name
+              "assembler cli output invalid slot=%s: %s"
+              runtime_id
+              (Request.output_error_to_yojson error |> Yojson.Safe.to_string);
+            None
+          | Ok Request.Cannot_assemble ->
+            Log.Keeper.warn
+              ~keeper_name:prepared.keeper_name
+              "assembler cli slot declined to assemble slot=%s"
+              runtime_id;
+            None
+          | Ok (Request.Plan { plan_json; plan = _ }) ->
+            (match
+               Proposal.create
+                 ~descriptors:(Request.descriptors prepared.request)
+                 ~objective:(Request.objective prepared.request)
+                 ~execution:(Request.execution prepared.request)
+                 ~capability_surface_sha256:
+                   (Request.capability_surface_sha256 prepared.request)
+                 ~ordinary_tool_references:
+                   (Request.ordinary_tool_references prepared.request)
+                 ~plan_json
+             with
+             | Error error ->
+               Log.Keeper.warn
+                 ~keeper_name:prepared.keeper_name
+                 "assembler cli proposal invalid slot=%s: %s"
+                 runtime_id
+                 (Proposal.error_to_yojson error |> Yojson.Safe.to_string);
+               None
+             | Ok proposal -> Some (runtime_id, proposal))))
+  in
   let execution =
     try
       `Flow
@@ -428,91 +542,95 @@ let execute ~net ?clock ?(observation_registry = Exact_lane_run_registry.global 
   match execution with
   | `Flow (Ok flow_success) ->
     let proposal = flow_success.accepted in
-    let selected_slot =
+    let slot =
       flow_success.transport_success
       |> Exact_output.flow_success_candidate
       |> fun candidate -> candidate.visit.identity.candidate_id
     in
-    let store =
-      try `Result (Store.save prepared.config proposal) with
-      | Eio.Cancel.Cancelled _ as cancellation ->
-        let backtrace = Printexc.get_raw_backtrace () in
-        complete Exact_lane_run_registry.Cancelled `Null;
-        Printexc.raise_with_backtrace cancellation backtrace
-      | exn ->
-        complete
-          (Exact_lane_run_registry.Failed
-             { code = "proposal_store_raised"; detail = Printexc.to_string exn })
-          `Null;
-        raise exn
+    let semantic_rejections_json =
+      List.map
+        (fun rejection -> semantic_rejection_to_yojson rejection.Exact_output.rejection)
+        flow_success.prior_rejections
     in
-    (match store with
-     | `Result (Error error) ->
-       complete
-         (Exact_lane_run_registry.Failed
-            { code = "proposal_store_failed"
-            ; detail = Store.error_to_yojson error |> Yojson.Safe.to_string
-            })
-         (`Assoc [ "error", Store.error_to_yojson error ]);
-       Error (Proposal_store_failed error)
-     | `Result (Ok store_result) ->
-       let proposal_id = Proposal.id proposal |> Proposal.Proposal_id.to_string in
-       let semantic_rejections =
-         List.map
-           (fun rejection -> semantic_rejection_to_yojson rejection.Exact_output.rejection)
-           flow_success.prior_rejections
-       in
-       complete
-         Exact_lane_run_registry.Succeeded
-         (`Assoc
-            [ "proposal_id", `String proposal_id
-            ; "proposal_digest", `String (Proposal.digest proposal)
-            ; "store_result", `String (store_result_to_string store_result)
-            ; "semantic_rejections", `List semantic_rejections
-            ]);
-       Ok { proposal; store_result; run_id; selected_slot })
+    store_and_complete ~slot ~semantic_rejections_json proposal
   | `Flow
       (Error
         (Exact_output.Flow_execution_terminal { cause; prior_rejections })) ->
-    let failure = flow_execution_failure cause in
-    let failure_json = exact_execution_failure_to_yojson failure in
-    let prior_semantic_rejections =
-      List.map
-        (fun rejection -> rejection.Exact_output.rejection)
-        prior_rejections
+    let terminal_failure () =
+      let failure = flow_execution_failure cause in
+      let failure_json = exact_execution_failure_to_yojson failure in
+      let prior_semantic_rejections =
+        List.map
+          (fun rejection -> rejection.Exact_output.rejection)
+          prior_rejections
+      in
+      let prior_semantic_rejections_json =
+        List.map semantic_rejection_to_yojson prior_semantic_rejections
+      in
+      let detail = Yojson.Safe.to_string failure_json in
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "exact_execution_failed"; detail })
+        (`Assoc
+           [ "failure", failure_json
+           ; "prior_semantic_rejections", `List prior_semantic_rejections_json
+           ]);
+      Error (Exact_execution_failed { failure; prior_semantic_rejections })
     in
-    let prior_semantic_rejections_json =
-      List.map semantic_rejection_to_yojson prior_semantic_rejections
-    in
-    let detail = Yojson.Safe.to_string failure_json in
-    complete
-      (Exact_lane_run_registry.Failed
-         { code = "exact_execution_failed"; detail })
-      (`Assoc
-         [ "failure", failure_json
-         ; "prior_semantic_rejections", `List prior_semantic_rejections_json
-         ]);
-    Error (Exact_execution_failed { failure; prior_semantic_rejections })
+    (* Only provider exhaustion may fall back to the cli walk: every
+       candidate rejected pre-dispatch, or the last candidate dying
+       post-dispatch with no successor. Infrastructure causes stay
+       terminal. *)
+    (match cause with
+     | Exact_output.Flow_candidates_exhausted _
+     | Exact_output.Flow_exact_execution_failed _ ->
+       (match try_cli_slots () with
+        | Some (runtime_id, proposal) ->
+          selected_slot := Some runtime_id;
+          store_and_complete
+            ~slot:runtime_id
+            ~semantic_rejections_json:
+              (List.map
+                 (fun rejection ->
+                    semantic_rejection_to_yojson rejection.Exact_output.rejection)
+                 prior_rejections)
+            proposal
+        | None -> terminal_failure ())
+     | Exact_output.Flow_attempt_already_started _
+     | Exact_output.Flow_attempt_start_failed _
+     | Exact_output.Flow_measurement_start_failed _
+     | Exact_output.Flow_before_measurement_dispatch_callback_failed _
+     | Exact_output.Flow_measurement_terminal_callback_failed _
+     | Exact_output.Flow_before_dispatch_callback_failed _
+     | Exact_output.Flow_before_advance_callback_failed _ -> terminal_failure ())
   | `Flow
       (Error
         (Exact_output.Flow_semantic_candidates_exhausted
-          { rejections; evidence = _ })) ->
+          { rejections = rejection_trace; evidence = _ })) ->
     let rejections =
-      rejections.first.rejection
+      rejection_trace.first.rejection
       :: List.map
            (fun rejection -> rejection.Exact_output.rejection)
-           rejections.rest
+           rejection_trace.rest
     in
-    complete
-      (Exact_lane_run_registry.Failed
-         { code = "semantic_candidates_exhausted"
-         ; detail = "every frozen Assembler candidate was semantically rejected"
-         })
-      (`Assoc
-         [ ( "semantic_rejections"
-           , `List (List.map semantic_rejection_to_yojson rejections) )
-         ]);
-    Error (Semantic_candidates_exhausted rejections)
+    (match try_cli_slots () with
+     | Some (runtime_id, proposal) ->
+       selected_slot := Some runtime_id;
+       store_and_complete
+         ~slot:runtime_id
+         ~semantic_rejections_json:(List.map semantic_rejection_to_yojson rejections)
+         proposal
+     | None ->
+       complete
+         (Exact_lane_run_registry.Failed
+            { code = "semantic_candidates_exhausted"
+            ; detail = "every frozen Assembler candidate was semantically rejected"
+            })
+         (`Assoc
+            [ ( "semantic_rejections"
+              , `List (List.map semantic_rejection_to_yojson rejections) )
+            ]);
+       Error (Semantic_candidates_exhausted rejections))
 ;;
 
 let setup_error_to_yojson = function

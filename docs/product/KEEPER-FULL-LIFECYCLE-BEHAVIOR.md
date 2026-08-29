@@ -24,7 +24,7 @@ Give MASC a project, let the active declarative Keeper fleet keep working throug
 
 ## 3. North star
 
-The normal path is continuous context maintenance, not emergency bulk compaction.
+The normal path is continuous context maintenance.
 
 ```text
 new turn delta

@@ -173,10 +173,8 @@ stateDiagram-v2
   ToolExecution --> AgentRun : tool 결과 반환
   AgentRun --> UpdateMetrics : Agent.run 완료
   UpdateMetrics --> PostTurnLifecycle : 메트릭 갱신
-  PostTurnLifecycle --> Checkpoint : continuity / checkpoint 정리
-  Checkpoint --> CompactCheck : compaction gate
-  CompactCheck --> HandoffCheck : handoff gate
-  HandoffCheck --> MemoryWrite : librarian extraction (Memory OS)
+  PostTurnLifecycle --> Checkpoint : checkpoint 보존
+  Checkpoint --> MemoryWrite : librarian extraction (Memory OS)
   MemoryWrite --> [*]
 ```
 
@@ -187,17 +185,13 @@ stateDiagram-v2
 3. **AgentRun**: `keeper_agent_run.run_turn`이 agent core `Agent.run`에 위임. tools + hooks + context_reducer를 전달하며 memory object는 전달하지 않는다
 4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_agent_core`가 `agent_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
 5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영하고 `observation.idle_seconds`를 `masc_keeper_idle_seconds{keeper_name}` OTel metric-store gauge로 노출
-6. **PostTurnLifecycle**: `keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles`가 compaction, handoff rollover, typed checkpoint metadata를 single-writer로 처리
-7. **Checkpoint / Compact / Handoff**: checkpoint 저장 후 gate에 따라 compaction 또는 handoff rollover를 실행
-8. **MemoryWrite**: `keeper_agent_run` tail에서 Memory OS librarian extraction을 memory lane에 제출한다 (legacy bank append는 제거됨)
+6. **PostTurnLifecycle / Checkpoint**: `keeper_post_turn.apply_post_turn_lifecycle`이 checkpoint를 보존하고 그 결과를 keeper meta와 대시보드 표면에 반영한다. keeper 자율성은 heartbeat/turn lane이 계속 쥔다
+7. **MemoryWrite**: `keeper_agent_run` tail에서 Memory OS librarian extraction을 memory lane에 제출한다 (legacy bank append는 제거됨)
 
-### 4.1.1 Post-turn Persistence Matrix
+### 4.1.1 Post-turn Persistence
 
-| 경계 | OCaml owner | 저장소 | TLA/FSM |
-|------|-------------|--------|---------|
-| compaction | `keeper_post_turn.ml` | 현재 trace checkpoint | post-turn single-writer |
-| handoff rollover | `keeper_post_turn.ml` + `keeper_rollover.ml` | 새 trace checkpoint + keeper meta generation/trace | keeper FSM `Handoff_*` events |
-| typed checkpoint metadata | `keeper_post_turn.ml` | keeper meta | keeper post-turn contract |
+turn 끝에서 쓰는 것은 typed checkpoint metadata 하나다. `keeper_post_turn.ml`이
+keeper meta에 쓰며, 계약은 keeper post-turn contract가 정한다.
 | Memory OS current snapshot | `keeper_memory_os_current.ml` + `keeper_librarian.ml` | `.masc/keepers/<name>.memory-current.json` | revision-CAS librarian contract |
 | collaboration activity signal | `workspace_task.ml` + `workspace.ml` | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
 
@@ -221,27 +215,7 @@ stateDiagram-v2
 - 재시작에는 fleet-wide 정지나 exponential backoff admission을 두지 않는다.
 - 최근 5건의 crash log 유지
 
-### 4.3 Compaction Runtime
-
-```mermaid
-stateDiagram-v2
-  [*] --> Requested : manual compaction stimulus (masc_keeper_compact)
-  Requested --> LlmPlan : owner Keeper lane
-  LlmPlan --> Apply : configured LLM의 유효한 plan
-  LlmPlan --> Preserve : runtime/plan 오류
-  Apply --> [*] : LLM plan이 만든 context
-  Preserve --> [*] : 원문 checkpoint 유지
-```
-
-MASC에는 message importance scorer나 deterministic reducer fallback이 없다.
-compaction 진입은 명시적 manual stimulus뿐이다: provider overflow가
-compaction을 자동으로 시작하는 경로는 committed compaction을 한 번도 만들지
-못해 제거되었다(#26546). overflow는 일반 typed failure route로 처리된다.
-#26545는 conversation history만 제한하고 전체 요청 provider-fit은 #26551에서
-추적한다. agent core는 model call과 provider 오류를 typed 결과로 전달하며, MASC의
-compaction profile이나 ratio/message/token gate를 알지 않는다.
-
-### 4.4 Deliberation Pipeline
+### 4.3 Deliberation Pipeline
 
 Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute -> RecordDecision
 
@@ -450,7 +424,6 @@ Fusion은 exact-output registry가 아니라 preset이 model topology를 직접 
 
 모든 환경변수는 `MASC_KEEPER_` 접두사를 사용한다. 전체 목록은 `lib/keeper/keeper_config.ml` 참조.
 
-**Compaction**: `COMPACT_RATIO`(0.5), `COMPACT_MAX_MESSAGES`(240), `COMPACT_MAX_TOKENS`(0), `CONTINUITY_COMPACTION_COOLDOWN_SEC`(90)
 
 **Proactive**: `PROACTIVE_TEMP_LOW/MID/HIGH`(0.55/0.75/0.9), `PROACTIVE_SIMILARITY`(0.72), `PROACTIVE_MAX_TOKENS`(1024)
 
@@ -467,7 +440,7 @@ Keeper work budget.
 
 **Evidence budget** (task tooling, `lib/keeper/keeper_tool_task_runtime.ml`): `MASC_EVIDENCE_TOTAL_BYTES_LIMIT`(51200) — `keeper_task_done`이 `artifact:` evidence 전체 합계로 거절하는 상한(바이트). 초과 시 전환 전에 즉시 거절되며 총 바이트 수와 `note:` 대안이 안내된다. 유효하지 않은 값은 기본값으로 회귀한다(fail-open).
 
-**Context capacity**: compaction/handoff decisions are typed capacity signals. They do not classify model text or infer goals; semantic decisions remain at the model boundary.
+**Context capacity**: handoff decisions are typed capacity signals. They do not classify model text or infer goals; semantic decisions remain at the model boundary.
 
 ### 9.2 TOML Configuration
 

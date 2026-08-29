@@ -4,7 +4,6 @@
 val take : int -> 'a list -> 'a list
 
 val opt_string_json : string option -> Yojson.Safe.t
-val opt_bool_json : bool option -> Yojson.Safe.t
 val opt_int_json : int option -> Yojson.Safe.t
 val commit_equal : string -> string -> bool
 val opt_commit_equal : string option -> string option -> bool option

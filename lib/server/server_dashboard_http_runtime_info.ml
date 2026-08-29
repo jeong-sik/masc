@@ -324,7 +324,6 @@ let git_rev_parse_short path =
 ;;
 
 let opt_string_json = Server_dashboard_http_runtime_info_json.opt_string_json
-let opt_bool_json = Server_dashboard_http_runtime_info_json.opt_bool_json
 let opt_commit_equal = Server_dashboard_http_runtime_info_json.opt_commit_equal
 let opt_int_json = Server_dashboard_http_runtime_info_json.opt_int_json
 
@@ -489,15 +488,6 @@ let deployment_state_json
   let binary_commit_known = Option.is_some build.binary_commit in
   let deployed_commit = build.binary_commit in
   let deployed_commit_source = build.binary_commit_source in
-  let deployed_matches_server_repo =
-    opt_commit_equal deployed_commit server_repo_commit
-  in
-  let deployed_matches_upstream =
-    opt_commit_equal deployed_commit upstream_status.upstream_head_commit
-  in
-  let deployed_matches_runtime_repo =
-    opt_commit_equal deployed_commit build.repo_head_commit
-  in
   let runtime_repo_matches_server_repo =
     opt_commit_equal build.repo_head_commit server_repo_commit
   in
@@ -587,23 +577,7 @@ let deployment_state_json
           [ "head_commit", opt_string_json build.repo_head_commit
           ; "head_commit_source", opt_string_json build.repo_head_commit_source
           ] )
-    ; ( "workspace"
-      , `Assoc
-          [ "head_commit", opt_string_json workspace_commit
-          ; "resolved_base_head_commit", opt_string_json resolved_base_commit
-          ] )
-    ; ( "checks"
-      , `Assoc
-          [ "deployed_matches_merged", opt_bool_json deployed_matches_server_repo
-          ; "deployed_matches_upstream", opt_bool_json deployed_matches_upstream
-          ; "deployed_matches_runtime_repo", opt_bool_json deployed_matches_runtime_repo
-          ; "runtime_repo_matches_merged", opt_bool_json runtime_repo_matches_server_repo
-          ; "runtime_repo_matches_upstream", opt_bool_json runtime_repo_matches_upstream
-          ; "built_matches_upstream", opt_bool_json built_matches_upstream
-          ; "built_matches_runtime_repo", opt_bool_json built_matches_runtime_repo
-          ; "server_repo_behind_upstream", `Bool server_repo_behind_upstream
-          ; "source_mismatch", `Bool source_mismatch
-          ] )
+    ; ("checks", `Assoc [ "source_mismatch", `Bool source_mismatch ])
     ]
 ;;
 

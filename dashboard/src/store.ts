@@ -973,8 +973,13 @@ export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
     if (!opts?.force && (wantsLight || !inflightShellRefreshLight)) return inflightShellRefresh
     await inflightShellRefresh
     // Another waiter may have started the required follow-up refresh while
-    // this caller resumed. Join it instead of launching duplicate requests.
-    if (inflightShellRefresh) return inflightShellRefresh
+    // this caller resumed. Join it only when it fetches at least as much as
+    // this caller asked for. A light follow-up does not satisfy a full
+    // request, so a full waiter that joined one would resolve without ever
+    // fetching the full shell surface it asked for.
+    if (inflightShellRefresh && (wantsLight || !inflightShellRefreshLight)) {
+      return inflightShellRefresh
+    }
   }
   if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return true
   inflightShellRefreshLight = wantsLight

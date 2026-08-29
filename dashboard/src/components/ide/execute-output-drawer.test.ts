@@ -3,7 +3,6 @@ import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { tasks } from '../../store'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import {
   ExecuteOutputDrawer,
   executeOutputRouteLinks,
@@ -17,12 +16,6 @@ afterEach(() => {
   if (mounted) render(null, mounted)
   mounted = null
   tasks.value = []
-  cursorOverlaySignal.value = {
-    cursors: new Map(),
-    heatmap: new Map(),
-    collisions: [],
-    active_file: null,
-  }
   window.location.hash = ''
   vi.unstubAllGlobals()
 })
@@ -107,7 +100,7 @@ describe('ExecuteOutputDrawer event mapping', () => {
     })
   })
 
-  it('builds operational routes from Execute output task, goal, cursor, and keeper', () => {
+  it('builds operational routes from Execute output task, goal, and keeper', () => {
     const links = executeOutputRouteLinks({
       keeperName: 'sangsu',
       taskId: 'task-123',
@@ -116,37 +109,14 @@ describe('ExecuteOutputDrawer event mapping', () => {
         title: 'Runtime task',
         goal_id: 'goal-ide',
       }],
-      cursor: {
-        keeper_id: 'sangsu',
-        file_path: 'lib/runtime.ml',
-        line: 42,
-        column: 3,
-        focus_mode: 'editing',
-        last_update: Date.now(),
-        tool_name: 'ocamllsp',
-      },
     })
 
     expect(links.map(link => link.label)).toEqual([
-      'Code',
       'Goal',
       'Task',
       'Telemetry',
       'Keeper',
     ])
-    expect(links.find(link => link.label === 'Code')).toMatchObject({
-      params: {
-        section: 'ide-shell',
-        view: 'source',
-        file: 'lib/runtime.ml',
-        line: '42',
-        surface: 'Terminal',
-        label: 'Execute output task-123',
-        source_id: 'execute-output:sangsu:task-123',
-        keeper: 'sangsu',
-      },
-      evidence: 'Code lib/runtime.ml:42',
-    })
     expect(links.find(link => link.label === 'Telemetry')).toMatchObject({
       params: { section: 'fleet-health', view: 'event-log', q: 'task-123' },
       evidence: 'Fleet telemetry event log · query task-123',
@@ -218,27 +188,13 @@ describe('ExecuteOutputDrawer event mapping', () => {
     expect(mounted.querySelector('[data-status-chip-tone="bad"]')?.textContent).toContain('stderr 1')
   })
 
-  it('renders Execute output context links and routes back into code and task context', async () => {
+  it('renders Execute output context links and routes back into task context', async () => {
     tasks.value = [{
       id: 'task-123',
       title: 'Runtime task',
       goal_id: 'goal-ide',
       status: 'in_progress',
     }]
-    cursorOverlaySignal.value = {
-      cursors: new Map([['sangsu', {
-        keeper_id: 'sangsu',
-        file_path: 'lib/runtime.ml',
-        line: 42,
-        column: 3,
-        focus_mode: 'editing',
-        last_update: Date.now(),
-        tool_name: 'ocamllsp',
-      }]]),
-      heatmap: new Map(),
-      collisions: [],
-      active_file: 'lib/runtime.ml',
-    }
     let resolveFetch: (value: Response) => void = () => undefined
     const fetchPromise = new Promise<Response>(resolve => {
       resolveFetch = resolve
@@ -259,21 +215,17 @@ describe('ExecuteOutputDrawer event mapping', () => {
     await waitFor(() => expect(mounted?.textContent).toContain('task-123'))
     const routeLinks = [...mounted.querySelectorAll<HTMLButtonElement>('.execute-output-context-links button')]
     expect(routeLinks.map(link => link.textContent)).toEqual([
-      'Code',
       'Goal',
       'Task',
       'Telemetry',
       'Keeper',
     ])
     const badge = mounted.querySelector<HTMLElement>('.execute-output-context-badge')
-    expect(badge?.textContent?.trim()).toBe('CTX 5')
-    expect(badge?.getAttribute('data-context-route-count')).toBe('5')
-    expect(badge?.getAttribute('title')).toBe('Linked context: Code, Goal, Task, Telemetry, Keeper')
+    expect(badge?.textContent?.trim()).toBe('CTX 4')
+    expect(badge?.getAttribute('data-context-route-count')).toBe('4')
+    expect(badge?.getAttribute('title')).toBe('Linked context: Goal, Task, Telemetry, Keeper')
     expect(badge?.getAttribute('aria-label'))
-      .toBe('Execute output has 5 linked context routes: Code, Goal, Task, Telemetry, Keeper')
-
-    fireEvent.click(routeLinks.find(link => link.textContent === 'Code')!)
-    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Terminal&label=Execute+output+task-123&source_id=execute-output%3Asangsu%3Atask-123&keeper=sangsu')
+      .toBe('Execute output has 4 linked context routes: Goal, Task, Telemetry, Keeper')
 
     fireEvent.click(routeLinks.find(link => link.textContent === 'Task')!)
     expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=task-123')

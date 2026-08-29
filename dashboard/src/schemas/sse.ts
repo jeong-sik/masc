@@ -69,7 +69,6 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_chat_operation_event',
   'keeper_waiting_inventory_changed',
   'agent_core_telemetry_sample',
-  'ide_cursor_changed',
   'keeper_tool_call',
   'masc/keeper_tool_call',
   'keeper_tool_call_evidence_committed',

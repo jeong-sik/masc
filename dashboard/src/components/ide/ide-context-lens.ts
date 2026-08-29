@@ -6,7 +6,6 @@ import type { TabId } from '../../types'
 import { auditLogRouteParams } from '../cost/cost-types'
 import { KeeperBadge } from '../keeper-badge'
 import type { AnchoredThread } from './anchored-thread-rail-store'
-import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
 import type { RunActivityEvent } from './run-activity-store'
 import { focusIdeContextAnchor, normalizeIdeContextFilePath, normalizeIdeContextLine } from './ide-state'
 import { truncate } from '../../lib/truncate'
@@ -104,7 +103,6 @@ export interface IdeContextLensInput {
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly threads?: ReadonlyArray<AnchoredThread>
   readonly diagnostics?: ReadonlyArray<IdeContextDiagnostic>
-  readonly overlay: KeeperCursorOverlay
 }
 
 
@@ -190,8 +188,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   const fileDiagnostics = (input.diagnostics ?? []).filter(diagnostic =>
     matchesFilePath(diagnostic.file_path),
   )
-  const activeCursors = [...input.overlay.cursors.values()]
-    .filter(cursor => matchesFilePath(cursor.file_path) && cursor.line >= 1)
   const fileThreads = (input.threads ?? []).filter(thread =>
     matchesFilePath(thread.anchor.file_path),
   )
@@ -211,7 +207,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   for (const diagnostic of fileDiagnostics) {
     if (diagnostic.line >= 1) activeLines.add(diagnostic.line)
   }
-  for (const cursor of activeCursors) activeLines.add(cursor.line)
   for (const row of changedRows) {
     if (row.newLine !== null && row.newLine >= 1) activeLines.add(row.newLine)
   }
@@ -231,7 +226,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     filePath ?? input.filePath,
     fileAnnotations,
     fileDiagnostics,
-    activeCursors,
     fileThreads,
     changedRows,
     fileEvents,
@@ -241,7 +235,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     const count = surfaceCount(id, {
       annotations: fileAnnotations,
       diagnostics: fileDiagnostics,
-      activeCursors,
       threads: fileThreads,
       changedLineCount,
       activeLineCount: activeLines.size,
@@ -363,11 +356,10 @@ export function IdeContextLens({
   events,
   threads = [],
   diagnostics = [],
-  overlay,
   onAnchorActivate,
   onRouteLinkActivate,
 }: IdeContextLensProps) {
-  const model = deriveIdeContextLens({ filePath, annotations, diffRows, events, threads, diagnostics, overlay })
+  const model = deriveIdeContextLens({ filePath, annotations, diffRows, events, threads, diagnostics })
   const fileLabel = filePath.split('/').pop() || filePath || '(no file)'
   const activateAnchor = onAnchorActivate ?? activateIdeContextAnchor
   const activateRouteLink = onRouteLinkActivate ?? openIdeContextRouteLink
@@ -536,7 +528,6 @@ function surfaceCount(
   state: {
     readonly annotations: ReadonlyArray<IdeAnnotation>
     readonly diagnostics: ReadonlyArray<IdeContextDiagnostic>
-    readonly activeCursors: ReadonlyArray<{ readonly keeper_id: string }>
     readonly threads: ReadonlyArray<AnchoredThread>
     readonly changedLineCount: number
     readonly activeLineCount: number
@@ -547,7 +538,6 @@ function surfaceCount(
   if (id === 'line') return state.activeLineCount
   if (id === 'keeper') {
     const keepers = new Set(state.events.map(event => event.keeper_id))
-    for (const cursor of state.activeCursors) keepers.add(cursor.keeper_id)
     for (const annotation of state.annotations) keepers.add(annotation.keeper_id)
     for (const thread of state.threads) keepers.add(thread.author_keeper_id)
     return keepers.size
@@ -624,13 +614,6 @@ function buildAnchors(
   filePath: string,
   annotations: ReadonlyArray<IdeAnnotation>,
   diagnostics: ReadonlyArray<IdeContextDiagnostic>,
-  cursors: ReadonlyArray<{
-    readonly keeper_id: string
-    readonly line: number
-    readonly focus_mode: string
-    readonly tool_name?: string
-    readonly turn?: number
-  }>,
   threads: ReadonlyArray<AnchoredThread>,
   changedRows: ReadonlyArray<UnifiedDiffRow>,
   events: ReadonlyArray<RunActivityEvent>,
@@ -685,29 +668,6 @@ function buildAnchors(
         goalId: annotation.goal_id ?? undefined,
         taskId: annotation.task_id ?? undefined,
         keeperId: annotation.keeper_id,
-      }),
-    })
-  }
-
-  for (const cursor of cursors.slice(0, 2)) {
-    anchors.push({
-      id: `cursor-${cursor.keeper_id}-${cursor.line}`,
-      file_path: filePath,
-      surface: 'Line',
-      label: cursor.tool_name ?? cursor.focus_mode,
-      meta: compactMeta([
-        `keeper ${cursor.keeper_id}`,
-        cursor.turn !== undefined ? `turn ${cursor.turn}` : null,
-      ]),
-      line: cursor.line,
-      keeper_id: cursor.keeper_id,
-      route_links: routeLinksForContext({
-        filePath,
-        line: cursor.line,
-        surface: 'Line',
-        label: cursor.tool_name ?? cursor.focus_mode,
-        sourceId: `cursor-${cursor.keeper_id}-${cursor.line}`,
-        keeperId: cursor.keeper_id,
       }),
     })
   }

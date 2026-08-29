@@ -18,7 +18,6 @@ import {
 } from '../goals/goal-helpers'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceSnapshot } from './keeper-presence-store'
-import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
 import {
   IdeContextLens,
   openIdeContextRouteLink,
@@ -514,7 +513,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
 
   useStoreSubscription(store.subscribe)
   useSignalValue(globalPresenceSnapshot)
-  useSignalValue(cursorOverlaySignal)
   useSignalValue(ideConversationThreadSnapshot)
   useSignalValue(lspDiagnosticSnapshot)
 
@@ -522,7 +520,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const events = snapshotMatchesScope ? store.events() : EMPTY_ACTIVITY
   const keepers = snapshotMatchesScope ? store.knownKeepers() : EMPTY_KEEPERS
   const presence = globalPresenceSnapshot.value
-  const overlay = cursorOverlaySignal.value
   const threadSnapshot = ideConversationThreadSnapshot.value
   const threads = threadSnapshot.filePath === activeFile ? threadSnapshot.threads : []
   const activeFilePath = normalizeIdeContextFilePath(activeFile)
@@ -567,7 +564,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
           events=${events}
           threads=${threads}
           diagnostics=${diagnostics}
-          overlay=${overlay}
         />
       `}
       ${compact ? html`
@@ -599,7 +595,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
               events=${events}
               threads=${threads}
               diagnostics=${diagnostics}
-              overlay=${overlay}
             />
           ` : null}
         </div>
@@ -611,7 +606,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
           ? bridgeScoped
             ? html`<li class="ide-rail-empty">no recent activity</li>`
             : html`<li class="ide-rail-empty" data-testid="ide-activity-no-scope">관측 스코프(저장소/keeper)가 선택되지 않았습니다</li>`
-          : events.map(item => html`<${ActivityRow} item=${item} presence=${presence} overlay=${overlay} />`)}
+          : events.map(item => html`<${ActivityRow} item=${item} presence=${presence} />`)}
       </ol>
     </div>
   `
@@ -975,22 +970,14 @@ function activityRefreshTitle(state: ActivityRefreshState, refreshMs: number | n
 const ActivityRow = memo(function ActivityRow({
   item,
   presence,
-  overlay,
 }: {
   item: RunActivityEvent
   presence: KeeperPresenceSnapshot | null
-  overlay: KeeperCursorOverlay
 }) {
   const hue = keeperHueIndex(item.keeper_id)
   const dot = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
   const entry = presenceEntries(presence).find(e => e.keeper_id === item.keeper_id)
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
-  const cursor = overlay.cursors.get(item.keeper_id)
-  // cursor stream normalizes missing line to 0; only render the focus
-  // label when both file_path and a 1-based line are present so we
-  // don't show `filename:0` placeholders.
-  const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
-  const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
   const eventContextFile = item.context?.file_path
   const eventFocusFile = eventContextFile === undefined ? null : normalizeIdeContextFilePath(eventContextFile)
   const eventFocusLine = normalizeIdeContextLine(item.context?.line)
@@ -1063,18 +1050,6 @@ const ActivityRow = memo(function ActivityRow({
             <${ActivityRouteCount} count=${routeLinks.length} />
             ${routeLinks.map(link => ActivityRouteLink(link))}
           </div>
-        ` : null}
-        ${hasFocus ? html`
-          <span style=${{
-            fontSize: 'var(--fs-10)',
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--color-accent-fg)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          title=${cursor.file_path}
-          >↗ ${focusFile}:${cursor.line}</span>
         ` : null}
       </div>
     </li>

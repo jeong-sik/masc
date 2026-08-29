@@ -14,7 +14,6 @@ import {
   routeLinksForContext,
   type IdeContextRouteLink,
 } from './ide-context-lens'
-import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import { IDE_CONTEXT_BADGE_STYLE } from './context-badge-style'
 import { routeLinkLabels } from './ide-context-route-helpers'
 import { errorToString } from '../../lib/format-string'
@@ -50,7 +49,6 @@ export interface ExecuteOutputRouteLinkInput {
   readonly keeperName: string
   readonly taskId: string | null
   readonly taskList: ReadonlyArray<Task>
-  readonly cursor: KeeperCursor | null
 }
 
 function splitChunkLines(chunk: string): string[] {
@@ -164,7 +162,6 @@ export function executeOutputRouteLinks({
   keeperName,
   taskId,
   taskList,
-  cursor,
 }: ExecuteOutputRouteLinkInput): ReadonlyArray<IdeContextRouteLink> {
   const keeperId = nonEmpty(keeperName)
   if (!keeperId) return []
@@ -174,8 +171,6 @@ export function executeOutputRouteLinks({
   const sourceParts = ['execute-output', keeperId, taskId].filter((part): part is string =>
     typeof part === 'string' && part.trim() !== '')
   return routeLinksForContext({
-    filePath: cursor?.file_path,
-    line: cursor?.line,
     surface: 'Terminal',
     label: taskId ? `Execute output ${taskId}` : 'Execute output',
     sourceId: sourceParts.join(':'),
@@ -252,17 +247,14 @@ export function ExecuteOutputDrawer({
   const [lines, setLines] = useState<OutputLine[]>([])
   const [status, setStatus] = useState<ExecuteOutputStatus>('idle')
   const [taskId, setTaskId] = useState<string | null>(null)
-  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
   const [expanded, setExpanded] = useState(true)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const terminalLines = useMemo(() => lines.map(toTerminalLine), [lines])
   const summary = useMemo(() => summarizeOutputLines(lines), [lines])
-  const cursor = resolveKeeperCursor(keeper, overlay.cursors)
   const routeLinks = executeOutputRouteLinks({
     keeperName: keeper,
     taskId,
     taskList: tasks.value,
-    cursor,
   })
 
   const prefersReducedMotion = useMemo(() => {
@@ -319,11 +311,6 @@ export function ExecuteOutputDrawer({
     el.scrollTop = el.scrollHeight
   }, [lines, prefersReducedMotion])
 
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(v => setOverlay(v))
-    return () => unsub()
-  }, [])
-
   return html`
     <aside
       class=${`execute-output-drawer v2-ide-panel border-t border-solid border-[var(--color-border-divider)] bg-[var(--color-bg-page)] ${compact ? 'is-compact' : ''} ${expanded ? 'is-expanded' : 'is-collapsed'}`}
@@ -369,19 +356,6 @@ export function ExecuteOutputDrawer({
       ` : null}
     </aside>
   `
-}
-
-function resolveKeeperCursor(
-  keeperName: string,
-  cursors: ReadonlyMap<string, KeeperCursor>,
-): KeeperCursor | null {
-  const target = keeperName.toLowerCase().trim()
-  if (!target) return null
-  for (const [id, cursor] of cursors) {
-    if (id.toLowerCase() === target) return cursor
-    if (cursor.keeper_id.toLowerCase() === target) return cursor
-  }
-  return null
 }
 
 function nonEmpty(value: string | null | undefined): string | null {

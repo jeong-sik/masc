@@ -166,14 +166,6 @@ export function registerIdeWorkspaceRefresh(fn: () => void): () => void {
   }
 }
 
-const _refreshIdeCursorFns = new Set<() => void>()
-export function registerIdeCursorRefresh(fn: () => void): () => void {
-  _refreshIdeCursorFns.add(fn)
-  return () => {
-    _refreshIdeCursorFns.delete(fn)
-  }
-}
-
 let _refreshBoardHearthsFn: (() => void) | null = null
 export function registerBoardHearthsRefresh(fn: () => void): () => void {
   _refreshBoardHearthsFn = fn
@@ -342,13 +334,6 @@ function scheduleIdeWorkspaceRefresh(): void {
   if (_refreshIdeFns.size === 0) return
   if (!routeWantsRefreshTarget(route.value, 'ide')) return
   scheduleRefresh('ide-workspace', REFRESH_FNS.ide)
-}
-
-function scheduleIdeCursorRefresh(): void {
-  if (_refreshIdeCursorFns.size === 0) return
-  scheduleRefresh('ide-cursors', () => {
-    for (const fn of _refreshIdeCursorFns) fn()
-  }, 0)
 }
 
 // --- Named handlers for complex events ---
@@ -557,7 +542,6 @@ async function hydrateAfterReconnect(): Promise<void> {
     .catch(err =>
       console.warn('[server-push] reconnect keeper chat re-hydration unavailable', err instanceof Error ? err.message : err),
     )
-  for (const fn of _refreshIdeCursorFns) fn()
   void refreshDashboard({ force: true }).catch(err =>
     console.warn('[server-push] reconnect dashboard refresh failed', err instanceof Error ? err.message : err),
   )
@@ -690,10 +674,6 @@ export function routeServerPushEvent(event: SSEEvent): void {
 
   if (IDE_WORKSPACE_REFRESH_EVENTS.has(normalizeMascEventType(routedType))) {
     scheduleIdeWorkspaceRefresh()
-  }
-
-  if (routedType === 'ide_cursor_changed') {
-    scheduleIdeCursorRefresh()
   }
 
   // summary_updated carries the Auto Judge verdict transition (summary

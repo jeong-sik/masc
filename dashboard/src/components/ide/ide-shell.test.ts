@@ -51,7 +51,6 @@ import {
   normalizeIdeTreeWidth,
 } from './ide-shell'
 import { navigate, route } from '../../router'
-import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import {
   activeIdeFile,
@@ -60,7 +59,6 @@ import {
   synchronizeIdeWorkspaceIdentity,
 } from './ide-state'
 import { resetIdeDataWorkspaceStoreForTest } from './ide-workspace-singleton'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import { EMPTY_LSP_STATUS_SNAPSHOT, lspStatusSnapshot } from './ide-lsp-client'
 import { DEFAULT_MOBILE_BREAKPOINT } from '../../hooks/use-is-mobile'
 
@@ -120,12 +118,7 @@ const dashboardFetchHandlers: ReadonlyArray<[
   [/\/api\/v1\/workspace\/file/, () => jsonResponse({ ok: true, content: '{}', language: 'json' })],
   [/\/api\/v1\/git\/blame/, () => jsonResponse([])],
   [/\/api\/v1\/git\/diff/, () => jsonResponse({ unified: [] })],
-  [/\/api\/v1\/ide\/regions/, () => jsonResponse({ ok: true, data: [] })],
   [/\/api\/v1\/ide\/annotations/, () => jsonResponse({ ok: true, data: [] })],
-  [/\/api\/v1\/ide\/cursors/, () => jsonResponse({
-    ok: true,
-    data: { runtime_id: 'masc-runtime', connected: true, cursors: [] },
-  })],
   [/\/api\/v1\/activity\/events/, () => jsonResponse({ events: [] })],
   [/\/api\/v1\/ide\/events/, () => jsonResponse({ ok: true, data: { events: [] } })],
   [/\/state-diagram/, () => jsonResponse({
@@ -199,7 +192,6 @@ describe('IdeShell', () => {
       availability: 'available',
     })
     ideContextFocus.value = null
-    cursorOverlaySignal.value = { cursors: new Map(), heatmap: new Map(), collisions: [], active_file: null }
     lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
     clearTraces()
     clearLocalStorage()
@@ -714,82 +706,6 @@ describe('IdeShell', () => {
     expect(chip.getAttribute('title')).not.toContain('typescript')
   })
 
-  it('focuses active keeper breadcrumb chips into routeable code and keeper context', async () => {
-    // RFC-0378 §5.4: the cursor stream follows the explicit selection.
-    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
-    route.value = {
-      tab: 'code',
-      params: { section: 'ide-shell', view: 'source' },
-      postId: null,
-    }
-    focusIdeFile({
-      path: 'lib/runtime.ml',
-      origin: 'operator',
-      workspace_identity: { kind: 'project' },
-      availability: 'available',
-    })
-    const cursorOverlay: KeeperCursorOverlay = {
-      cursors: new Map([[
-        'sangsu',
-        {
-          keeper_id: 'sangsu',
-          file_path: 'lib/runtime.ml',
-          line: 42,
-          column: 7,
-          focus_mode: 'editing',
-          last_update: Date.parse('2026-05-06T00:00:00Z'),
-          tool_name: 'ocamllsp',
-          turn: 9,
-        },
-      ]]),
-      heatmap: new Map(),
-      collisions: [],
-      active_file: 'lib/runtime.ml',
-    }
-
-    render(h(IdeShell, {}), container)
-    await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('live'))
-    cursorOverlaySignal.value = {
-      ...cursorOverlay,
-      stream: cursorOverlaySignal.value.stream,
-    }
-
-    const keeperButton = await waitFor(() => {
-      const button = container.querySelector<HTMLButtonElement>('.ide-breadcrumb-keeper')
-      expect(button?.getAttribute('aria-label')).toBe('Focus sangsu keeper context at line 42')
-      return button!
-    })
-
-    fireEvent.click(keeperButton)
-
-    expect(ideContextFocus.value).toMatchObject({
-      file_path: 'lib/runtime.ml',
-      line: 42,
-      surface: 'Keeper',
-      label: 'ocamllsp',
-      source_id: 'breadcrumb:sangsu:42',
-      keeper_id: 'sangsu',
-    })
-    expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual(['Code', 'Keeper'])
-    await waitFor(() => expect(container.querySelector('[data-testid="ide-toolbar-context-focus"]')?.textContent)
-      .toContain('ocamllsp'))
-    const routeGroups = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-route-group-action')]
-    expect(routeGroups.map(button => button.textContent)).toEqual(['Code1', 'Runtime1'])
-    await waitFor(() => {
-      const chipLabels = [
-        ...container.querySelectorAll<HTMLElement>('[data-testid^="ide-statusbar-chip-"]'),
-      ].map(chip => chip.textContent)
-      expect(chipLabels).toEqual([
-        'SOURCE',
-        'lib/runtime.ml',
-        'Keeper L42 ocamllsp',
-        'Keeper sangsu',
-      ])
-    })
-    fireEvent.click(routeGroups[1]!)
-    expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=sangsu')
-  })
-
   it('rejects unsafe IDE route file focus params', async () => {
     route.value = {
       tab: 'code',
@@ -1036,7 +952,7 @@ describe('IdeShell', () => {
     expect(rail?.classList.contains('ide-rail')).toBe(true)
     expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
     expect(buttonByText(container, 'Work Context').getAttribute('aria-expanded')).toBe('false')
-    expect(container.querySelectorAll('.ide-rail-tab')).toHaveLength(3)
+    expect(container.querySelectorAll('.ide-rail-tab')).toHaveLength(2)
     expect(container.querySelector('.ide-activity-compact-status')?.getAttribute('role')).toBe('status')
     expect(container.querySelector('.ide-v2-presence-state')?.getAttribute('aria-label')).toBeTruthy()
     expect(container.querySelector('.ide-v2-connection-dot')?.getAttribute('aria-label')).toBeTruthy()
@@ -1051,8 +967,6 @@ describe('IdeShell', () => {
       .toBe('Workspace and keeper activity linked to the active file and repository')
     expect(buttonByText(container, '어노테이션').getAttribute('title'))
       .toBe('File-addressable comments, decisions, questions, and bookmarks')
-    expect(buttonByText(container, '커서').getAttribute('title'))
-      .toBe('Live keeper file focus and cursor stream status')
     expect(container.querySelector('[data-testid="ide-dashboard-connection"]')?.getAttribute('title'))
       .toContain('Dashboard event transport')
     expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
@@ -1060,7 +974,6 @@ describe('IdeShell', () => {
     expect(container.querySelector('[data-testid="ide-right-context-stack"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="ide-primary-conversation-rail"]')).not.toBeNull()
     expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
-    expect(container.querySelector('[data-testid="ide-cursor-rail"]')).toBeNull()
     expect(container.querySelector('[data-testid="execute-output-drawer"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="execute-output-drawer"]')?.textContent)
       .toContain('waiting for an active Execute output task')
@@ -1087,53 +1000,20 @@ describe('IdeShell', () => {
     expect(buttonByText(container, 'Work Context').getAttribute('aria-expanded')).toBe('true')
     expect(buttonByText(container, '활동').getAttribute('title'))
       .toBe('Workspace and keeper activity linked to the active file and repository')
-    expect(buttonByText(container, '커서').getAttribute('title'))
-      .toBe('Live keeper file focus and cursor stream status')
     expect(container.querySelector('[data-testid="ide-dashboard-connection"]')?.getAttribute('title'))
       .toContain('Dashboard event transport')
     expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
-    expect(container.querySelector('[data-testid="ide-cursor-rail"]')).toBeNull()
   })
 
 
-  it('switches the IDE right rail tabs and renders cursor push focus', async () => {
-    // RFC-0378 §5.4: the cursor stream follows the explicit selection.
+  it('switches the IDE right rail tabs', () => {
     window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
       postId: null,
     }
-    const cursorOverlay: KeeperCursorOverlay = {
-      cursors: new Map([[
-        'sangsu',
-        {
-          keeper_id: 'sangsu',
-          file_path: 'lib/scheduler/round.ml',
-          line: 94,
-          column: 4,
-          selection_end: { line: 96, column: 0 },
-          focus_mode: 'editing',
-          last_update: Date.now(),
-          tool_name: 'str_replace',
-          turn: 12,
-        },
-      ]]),
-      heatmap: new Map([[94, 1]]),
-      collisions: [{ line: 94, keeper_ids: ['sangsu', 'nick0cave'] }],
-      active_file: 'lib/scheduler/round.ml',
-    }
     render(h(IdeShell, {}), container)
-    await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('live'))
-    cursorOverlaySignal.value = {
-      ...cursorOverlay,
-      stream: {
-        status: 'degraded',
-        failedCount: 2,
-        lastErrorMs: Date.UTC(2026, 6, 4, 1, 2, 3),
-        error: 'cursor snapshot unavailable',
-      },
-    }
 
     expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
     expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
@@ -1149,61 +1029,6 @@ describe('IdeShell', () => {
     expect(buttonByText(container, '어노테이션').getAttribute('aria-selected')).toBe('true')
     expect(container.querySelector('.ide-plane-activity')).toBeNull()
     expect(container.querySelector('[data-testid="ide-annotation-rail"]')).not.toBeNull()
-
-    fireEvent.click(buttonByText(container, '커서'))
-    expect(buttonByText(container, '커서').getAttribute('aria-selected')).toBe('true')
-    expect(container.querySelector('[data-testid="ide-annotation-rail"]')).toBeNull()
-    const cursorRail = container.querySelector('[data-testid="ide-cursor-rail"]')
-    expect(cursorRail).not.toBeNull()
-    expect(cursorRail?.textContent).toContain('KEEPER CURSORS')
-    expect(cursorRail?.textContent).toContain('sangsu')
-    expect(cursorRail?.textContent).toContain('editing')
-    expect(cursorRail?.textContent).toContain('str_replace')
-    expect(cursorRail?.textContent).toContain('round.ml:94-96')
-    expect(cursorRail?.textContent).toContain('L94')
-    expect(container.querySelector('[data-testid="ide-cursor-stream-status"]')?.textContent)
-      .toBe('stream degraded 2 failed')
-    expect(container.querySelector('[data-testid="ide-cursor-stream-status"]')?.getAttribute('data-state'))
-      .toBe('degraded')
-
-    fireEvent.click(buttonByText(container, 'Focus'))
-    expect(ideContextFocus.value).toMatchObject({
-      file_path: 'lib/scheduler/round.ml',
-      line: 94,
-      surface: 'Keeper',
-      label: 'str_replace',
-      keeper_id: 'sangsu',
-    })
-  })
-
-  it('clears cursor overlays when the selected repository has no codebase', async () => {
-    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
-    repositoryRow.codebase = null
-    cursorOverlaySignal.value = {
-      cursors: new Map([['sangsu', {
-        keeper_id: 'sangsu',
-        file_path: 'lib/stale.ml',
-        line: 7,
-        column: 1,
-        focus_mode: 'editing',
-        last_update: Date.now(),
-      }]]),
-      heatmap: new Map([[7, 1]]),
-      collisions: [{ line: 7, keeper_ids: ['sangsu', 'albini'] }],
-      active_file: 'lib/stale.ml',
-      stream: { status: 'live', failedCount: 0 },
-    }
-
-    try {
-      render(h(IdeShell, {}), container)
-      await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('closed'))
-      expect(cursorOverlaySignal.value.cursors.size).toBe(0)
-      expect(cursorOverlaySignal.value.heatmap.size).toBe(0)
-      expect(cursorOverlaySignal.value.collisions).toEqual([])
-      expect(cursorOverlaySignal.value.active_file).toBeNull()
-    } finally {
-      repositoryRow.codebase = 'github.com_jeong-sik_masc'
-    }
   })
 
   it('hydrates collapsed IDE rails from the route', () => {

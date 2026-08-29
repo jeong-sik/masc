@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   agentsToPresence,
-  presenceContextAnchor,
-  presenceContextSummary,
   prLabel,
   unwrapEnvelope,
   type ApiAgent,
@@ -111,80 +109,5 @@ describe('prLabel', () => {
 
   it('falls back to plain "#N" when state is null', () => {
     expect(prLabel(7, null)).toBe('#7')
-  })
-})
-
-describe('presenceContextAnchor', () => {
-  const entry = {
-    keeper_id: 'nick0cave',
-    workspace_label: 'wt-run-47',
-    role: 'agent',
-    status: 'active',
-    last_seen_ms: 123,
-  } as const
-
-  it('builds code, telemetry, and keeper route links from a focused keeper chip', () => {
-    const anchor = presenceContextAnchor({
-      entry,
-      cursor: {
-        keeper_id: 'nick0cave',
-        file_path: 'lib/runtime.ml',
-        line: 42,
-        column: 7,
-        focus_mode: 'editing',
-        last_update: 123,
-        tool_name: 'ocamllsp',
-      },
-    })
-
-    expect(anchor).toMatchObject({
-      file_path: 'lib/runtime.ml',
-      line: 42,
-      surface: 'Keeper',
-      label: 'nick0cave@wt-run-47',
-      source_id: 'presence:nick0cave',
-      keeper_id: 'nick0cave',
-    })
-    expect(anchor?.route_links?.map(link => link.label)).toEqual([
-      'Code',
-      'Telemetry',
-      'Keeper',
-    ])
-    expect(anchor?.route_links?.find(link => link.label === 'Telemetry')?.params).toMatchObject({
-      section: 'fleet-health',
-      view: 'event-log',
-      q: 'nick0cave',
-    })
-  })
-
-  it('does not create a focus anchor for keepers without cursor file context', () => {
-    expect(presenceContextAnchor({
-      entry,
-      cursor: undefined,
-    })).toBeNull()
-  })
-
-  it('summarizes visible context coverage for keeper presence chips', () => {
-    const anchor = presenceContextAnchor({
-      entry,
-      cursor: {
-        keeper_id: 'nick0cave',
-        file_path: 'lib/runtime.ml',
-        line: 42,
-        column: 7,
-        focus_mode: 'editing',
-        last_update: 123,
-        tool_name: 'ocamllsp',
-      },
-    })
-
-    expect(presenceContextSummary(anchor)).toEqual({
-      label: 'CTX 3',
-      title: 'Linked context: Code, Telemetry, Keeper',
-    })
-  })
-
-  it('omits context coverage when no route links are available', () => {
-    expect(presenceContextSummary(null)).toBeNull()
   })
 })

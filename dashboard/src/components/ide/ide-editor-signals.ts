@@ -19,13 +19,11 @@ export function buildCurrentFileSignals({
   filePath,
   annotations,
   diffRows,
-  activeKeeperCount,
   traceEvents,
 }: {
   readonly filePath: string
   readonly annotations: ReadonlyArray<IdeAnnotation>
   readonly diffRows: ReadonlyArray<UnifiedDiffRow>
-  readonly activeKeeperCount: number
   readonly traceEvents: ReadonlyArray<KeeperTraceEvent>
 }): ReadonlyArray<CurrentFileSignal> {
   const normalizedFile = normalizeIdeContextFilePath(filePath)
@@ -90,12 +88,6 @@ export function buildCurrentFileSignals({
       label: 'Diff',
       count: changedRows.length,
       title: `${changedRows.length} current-file changed row${changedRows.length === 1 ? '' : 's'}`,
-    },
-    {
-      id: 'keepers',
-      label: 'Keepers',
-      count: activeKeeperCount,
-      title: `${activeKeeperCount} keeper${activeKeeperCount === 1 ? '' : 's'} active in this file`,
     },
   ]
 }

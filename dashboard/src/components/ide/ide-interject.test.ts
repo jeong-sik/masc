@@ -6,7 +6,6 @@ import { fireEvent } from '@testing-library/preact'
 import { activeKeeperName } from '../../keeper-state'
 import { IdeInterject, interjectContextRouteLinks } from './ide-interject'
 import { routeHashParams } from './ide-test-helpers'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
 describe('IdeInterject', () => {
   beforeEach(() => {
@@ -15,48 +14,22 @@ describe('IdeInterject', () => {
 
   afterEach(() => {
     activeKeeperName.value = ''
-    cursorOverlaySignal.value = {
-      cursors: new Map(),
-      heatmap: new Map(),
-      collisions: [],
-      active_file: null,
-    }
     window.location.hash = ''
   })
 
-  it('builds code and keeper context routes for the active interject target', () => {
-    const links = interjectContextRouteLinks('sangsu', {
-      keeper_id: 'sangsu',
-      file_path: 'lib/runtime.ml',
-      line: 42,
-      column: 2,
-      focus_mode: 'reviewing',
-      last_update: Date.now(),
-      tool_name: 'ocamllsp',
-    })
+  it('builds keeper context routes for the active interject target', () => {
+    const links = interjectContextRouteLinks('sangsu')
 
-    expect(links.map(link => link.label)).toEqual(['Code', 'Telemetry', 'Keeper'])
-    expect(links.find(link => link.label === 'Code')).toMatchObject({
-      params: {
-        section: 'ide-shell',
-        view: 'source',
-        file: 'lib/runtime.ml',
-        line: '42',
-        surface: 'Interject',
-        label: 'ocamllsp',
-        source_id: 'interject:sangsu',
-        keeper: 'sangsu',
-      },
-      evidence: 'Code lib/runtime.ml:42',
-    })
+    expect(links.map(link => link.label)).toEqual(['Telemetry', 'Keeper'])
     expect(links.find(link => link.label === 'Telemetry')).toMatchObject({
       params: {
         section: 'fleet-health',
         view: 'event-log',
-        q: 'interject keeper:sangsu mode:reviewing tool:ocamllsp',
+        q: 'interject keeper:sangsu',
       },
-      evidence: 'Fleet telemetry event log · query interject keeper:sangsu mode:reviewing tool:ocamllsp',
+      evidence: 'Fleet telemetry event log · query interject keeper:sangsu',
     })
+    expect(interjectContextRouteLinks('   ')).toEqual([])
   })
 
   it('renders the interject store backed active keeper controls', async () => {
@@ -155,35 +128,17 @@ describe('IdeInterject', () => {
     expect((container.querySelector('input') as HTMLInputElement).value).toBe('keep this draft')
   })
 
-  it('renders cursor context links and routes back to the IDE code surface', async () => {
-    cursorOverlaySignal.value = {
-      cursors: new Map([['sangsu', {
-        keeper_id: 'sangsu',
-        file_path: 'lib/runtime.ml',
-        line: 42,
-        column: 2,
-        focus_mode: 'reviewing',
-        last_update: Date.now(),
-        tool_name: 'ocamllsp',
-      }]]),
-      heatmap: new Map(),
-      collisions: [],
-      active_file: 'lib/runtime.ml',
-    }
-
+  it('renders keeper context links and routes into telemetry', async () => {
     const container = document.createElement('div')
     await act(async () => {
       render(h(IdeInterject, { keeperName: 'sangsu' }), container)
     })
 
     const contextButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-interject-context-links button')]
-    expect(container.querySelector('.ide-interject-context-count')?.textContent).toBe('CTX 3')
-    expect(contextButtons.map(button => button.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
-
-    fireEvent.click(contextButtons.find(button => button.textContent === 'Code')!)
-    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Interject&label=ocamllsp&source_id=interject%3Asangsu&keeper=sangsu')
+    expect(container.querySelector('.ide-interject-context-count')?.textContent).toBe('CTX 2')
+    expect(contextButtons.map(button => button.textContent)).toEqual(['Telemetry', 'Keeper'])
 
     fireEvent.click(contextButtons.find(button => button.textContent === 'Telemetry')!)
-    expect(routeHashParams().get('q')).toBe('interject keeper:sangsu mode:reviewing tool:ocamllsp')
+    expect(routeHashParams().get('q')).toBe('interject keeper:sangsu')
   })
 })

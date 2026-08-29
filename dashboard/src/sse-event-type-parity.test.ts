@@ -52,7 +52,6 @@ const BACKEND_EMITTED: Record<string, string> = {
   runtime_param_changed: '../lib/server/server_routes_http_routes_activity.ml',
   keeper_chat_appended: '../lib/keeper/keeper_chat_broadcast.ml',
   keeper_waiting_inventory_changed: '../lib/keeper/keeper_waiting_inventory_broadcast.ml',
-  ide_cursor_changed: '../lib/server/server_ide_http.ml',
   keeper_composite_changed: '../lib/keeper/keeper_registry_broadcast.ml',
   keeper_heartbeat: '../lib/keeper/keeper_heartbeat_snapshot.ml',
   keeper_turn_complete: '../lib/keeper/keeper_hooks_agent_core.ml',

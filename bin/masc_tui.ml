@@ -12752,6 +12752,18 @@ and is loaded on demand through keeper_skill.
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_librarian_input_read ()
+       | Some "p" | Some "P" when state.view = Runtime ->
+           (* The lane view answers what each lane calls and in what order.
+              It cannot answer what this workspace could call: a runtime no
+              lane names is absent from it, which is exactly the runtime an
+              operator is looking for when they go to assign one. Same [p]
+              that moves panes on Tools and Config. *)
+           state.runtime_mode <-
+             (match state.runtime_mode with
+              | Masc_tui_types.Runtime_lanes -> Masc_tui_types.Runtime_all
+              | Masc_tui_types.Runtime_all -> Masc_tui_types.Runtime_lanes);
+           (* The scroll belonged to the other list's length. *)
+           state.runtime_surface_scroll <- 0
        | Some "p" | Some "P" when state.view = Tools ->
            (* Five sections, one at a time. Concatenated they ran to 326 rows
               on this workspace and the terminal draws twenty, so four of

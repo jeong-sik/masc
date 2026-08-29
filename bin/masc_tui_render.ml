@@ -8449,7 +8449,31 @@ let render_runtime (state : state) =
     | None -> []
     | Some snapshot -> snapshot.Masc.Tui_decode.rss_candidates
   in
-  let shown = List.length candidates in
+  (* The roster the lane view cannot show: every runtime the workspace can
+     call, with the lanes that name it. A runtime no lane names has an empty
+     [lanes] and is exactly what an operator is looking for when they ask why
+     a model they configured is nowhere on this screen. *)
+  let all_runtimes =
+    match state.runtime_surface with
+    | None -> []
+    | Some snapshot ->
+        let open Masc.Tui_decode in
+        List.map
+          (fun (runtime : runtime_option) ->
+             let lanes =
+               snapshot.rss_resolved.rrs_lanes
+               |> List.filter (fun (lane : runtime_resolved_lane) ->
+                    List.exists (String.equal runtime.ro_id) lane.rrl_runtime_ids)
+               |> List.map (fun (lane : runtime_resolved_lane) -> lane.rrl_id)
+             in
+             runtime, lanes)
+          snapshot.rss_resolved.rrs_runtimes
+  in
+  let shown =
+    match state.runtime_mode with
+    | Masc_tui_types.Runtime_lanes -> List.length candidates
+    | Masc_tui_types.Runtime_all -> List.length all_runtimes
+  in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
@@ -8475,9 +8499,22 @@ let render_runtime (state : state) =
             (Theme.warn ()) ^ " / read failed" ^ Ansi.reset
           else ""
         in
-        Printf.sprintf "%s (%d lanes, %d candidates)  %s%s  %s  %s"
-          (screen_title " MASC Runtime") lane_count shown probe_status probe_read
-          timestamp (connection_badge state)
+        let tab ~active label =
+          if active then
+            (Theme.info ()) ^ Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
+          else Ansi.dim ^ label ^ Ansi.reset
+        in
+        let all_count =
+          List.length snapshot.rss_resolved.Masc.Tui_decode.rrs_runtimes
+        in
+        let lanes_active = state.runtime_mode = Masc_tui_types.Runtime_lanes in
+        Printf.sprintf "%s  %s  %s  %s%s  %s  %s"
+          (screen_title " MASC Runtime")
+          (tab ~active:lanes_active
+             (Printf.sprintf "Lanes (%d lanes, %d slots)" lane_count shown))
+          (tab ~active:(not lanes_active)
+             (Printf.sprintf "All runtimes (%d)" all_count))
+          probe_status probe_read timestamp (connection_badge state)
   in
   let authority_line =
     match state.runtime_surface with
@@ -8526,8 +8563,16 @@ let render_runtime (state : state) =
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  "
-     ^ runtime_column runtime_lane_width "LANE" ^ " "
-     ^ runtime_column runtime_candidate_width "CANDIDATE" ^ " "
+     ^ runtime_column runtime_lane_width
+         (match state.runtime_mode with
+          | Masc_tui_types.Runtime_lanes -> "LANE"
+          | Masc_tui_types.Runtime_all -> "USED BY")
+     ^ " "
+     ^ runtime_column runtime_candidate_width
+         (match state.runtime_mode with
+          | Masc_tui_types.Runtime_lanes -> "CANDIDATE"
+          | Masc_tui_types.Runtime_all -> "RUNTIME")
+     ^ " "
      ^ runtime_column runtime_identity_width "PROVIDER / MODEL" ^ " "
      ^ runtime_column runtime_status_width "ROUTE / PROBE"
      ^ " DETAIL");
@@ -8550,7 +8595,10 @@ let render_runtime (state : state) =
       with
       | Page_failed -> page_failed_note
       | Page_unread -> page_unread_note
-      | Page_empty -> "  (no runtime lanes configured)"
+      | Page_empty ->
+          (match state.runtime_mode with
+           | Masc_tui_types.Runtime_lanes -> "  (no runtime lanes configured)"
+           | Masc_tui_types.Runtime_all -> "  (no runtimes configured)")
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
@@ -8559,6 +8607,39 @@ let render_runtime (state : state) =
   end
   else
     for index = 0 to content_height - 1 do
+      match state.runtime_mode with
+      | Masc_tui_types.Runtime_all ->
+          (match List.nth_opt all_runtimes (index + scroll) with
+           | None -> box_empty buf cols
+           | Some (runtime, lanes) ->
+               let open Masc.Tui_decode in
+               let used_by =
+                 match lanes with
+                 | [] -> (Theme.recede ()) ^ "unassigned" ^ Ansi.reset
+                 | [ one ] -> one
+                 | many -> Printf.sprintf "%d lanes" (List.length many)
+               in
+               let detail =
+                 String.concat " \xc2\xb7 "
+                   ((if runtime.ro_is_default then [ "default" ] else [])
+                    @ (match
+                         Terminal_text.optional_single_line runtime.ro_blocked_reason
+                       with
+                       | Some reason -> [ "blocked: " ^ reason ]
+                       | None -> [])
+                    @ (match lanes with [] -> [] | l -> [ String.concat ", " l ]))
+               in
+               box_line buf cols
+                 ("  "
+                  ^ runtime_column runtime_lane_width used_by ^ " "
+                  ^ runtime_column runtime_candidate_width
+                      (Terminal_text.single_line runtime.ro_id) ^ " "
+                  ^ runtime_column runtime_identity_width
+                      (Terminal_text.single_line
+                         (runtime.ro_provider ^ " / " ^ runtime.ro_model)) ^ " "
+                  ^ runtime_column runtime_status_width (runtime_route_badge runtime)
+                  ^ " " ^ Ansi.dim ^ detail ^ Ansi.reset))
+      | Masc_tui_types.Runtime_lanes ->
       match List.nth_opt candidates (index + scroll) with
       | None -> box_empty buf cols
       | Some candidate ->
@@ -8622,8 +8703,11 @@ let render_runtime (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf "%sj/k:scroll  Tab:next  q:quit  r:live refresh"
-            scroll_hint));
+         (Printf.sprintf "%sj/k:scroll  p:%s  Tab:next  q:quit  r:live refresh"
+            scroll_hint
+            (match state.runtime_mode with
+             | Masc_tui_types.Runtime_lanes -> "all runtimes"
+             | Masc_tui_types.Runtime_all -> "lanes")));
   finish_surface state ~surface_key:"runtime" ~rows:terminal_rows ~cols buf
 
 (* Two deliberately separate readings: the selected Keeper's exact turn

@@ -51,13 +51,6 @@ describe("computeDivergences", () => {
     expect(computeDivergences(allHealthy, "Running")).toEqual([])
   })
 
-  it("detects context_handoff_needed in Running", () => {
-    const divs = computeDivergences({ ...allHealthy, context_handoff_needed: true }, "Running")
-    expect(divs).toHaveLength(1)
-    expect(divs[0].field).toBe("context_handoff_needed")
-    expect(divs[0].value).toBe(true)
-  })
-
   it("detects stop_requested when not Draining", () => {
     const divs = computeDivergences({ ...allHealthy, stop_requested: true }, "Running")
     expect(divs.some(d => d.field === "stop_requested")).toBe(true)

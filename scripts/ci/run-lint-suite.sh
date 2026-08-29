@@ -112,6 +112,17 @@ blocking_lints() {
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
+  # Wired 2026-08-29: the unwired-audits ratchet listed these nine as guards
+  # no workflow ran; each runs argless and passed on main when wired.
+  run_lint "Code smell audit" bash scripts/audit-code-smell.sh
+  run_lint "OCaml phase-count SSOT" bash scripts/audit-ocaml-phase-count.sh
+  run_lint "OCaml spec-nav line refs" bash scripts/audit-ocaml-spec-nav-line-refs.sh
+  run_lint "RFC closeout lag" bash scripts/audit-rfc-closeout-lag.sh
+  run_lint "TLA annotation drift" bash scripts/audit-tla-annotation-drift.sh
+  run_lint "TLA spec .ml line refs" bash scripts/audit-tla-ml-line-refs.sh
+  run_lint "TLA phase-count SSOT" bash scripts/audit-tla-phase-count.sh
+  run_lint "Release train guard" bash scripts/check-release-train-guard.sh
+  run_lint "ignore justification (full scan)" python3 scripts/lint-ignore-without-comment.py
 }
 
 blocking_pr_lints() {

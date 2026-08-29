@@ -40,6 +40,11 @@ let keeper_observation_current_task_unobservable =
   "keeper.observation.current_task_unobservable"
 ;;
 
+let keeper_observation_rejected_digest_heading =
+  "keeper.observation.rejected_digest_heading"
+;;
+
+let keeper_observation_rejected_digest_row = "keeper.observation.rejected_digest_row"
 let keeper_current_task_skills = "keeper.current_task.skills"
 let keeper_held_task_skills = "keeper.held_task.skills"
 let keeper_held_task_skills_heading = "keeper.held_task.skills_heading"

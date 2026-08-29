@@ -86,7 +86,7 @@ describe('parseKeeperCompositeSnapshot', () => {
   })
 
   // Every phase string the backend can emit, per
-  // `Keeper_state_machine.phase_to_string` (11 ctors, lowercase
+  // `Keeper_state_machine.phase_to_string` (9 ctors, lowercase
   // snake_case). The schema must round-trip each one verbatim.
   it('round-trips every phase the backend can emit', () => {
     for (const phase of [

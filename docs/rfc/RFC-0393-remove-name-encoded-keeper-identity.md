@@ -66,7 +66,7 @@ keeper 하나의 신원이 문자열 인코딩 세 겹으로 표현된다.
 
 ### 4철자 중 3철자는 유령이다
 
-라이브 board 작성자 census (2026-08-27, `~/me/.masc/board_posts.jsonl`):
+라이브 board 작성자 census (2026-08-27, `<base-path>/.masc/board_posts.jsonl`):
 관측된 철자는 `keeper-X-agent` 단일. underscore 계열 3종은 board·agents store 에서 0건.
 codec 의 4철자 표는 존재하지 않는 입력을 방어하고 있다.
 
@@ -142,6 +142,6 @@ codec 의 4철자 표는 존재하지 않는 입력을 방어하고 있다.
 ## 근거 기록
 
 - 확인 명령: 소비 파일 census `rg -l "canonical_keeper_name_from_agent_name|…" lib bin test`
-  (88), 라이브 철자 census `rg -o "keeper[-_]…[-_]agent" ~/me/.masc/board_posts.jsonl`
+  (88), 라이브 철자 census `rg -o "keeper[-_]…[-_]agent" $MASC_BASE_PATH/.masc/board_posts.jsonl`
   (dash 철자만 관측), meta 필드 `jq keys keepers/adm-race-cf-001.json` (`agent_name` 존재).
 - 확인일: 2026-08-27. Confidence: High (전부 이 저장소와 라이브 store 에서 직접 측정).

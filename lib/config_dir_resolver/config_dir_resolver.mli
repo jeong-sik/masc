@@ -160,6 +160,10 @@ val tmp_dir : base_path:string -> string
 val locks_dir : base_path:string -> string
 (** [<base_path>/.masc/locks/]. Process and build lock files. *)
 
+val run_ssh_dir : base_path:string -> string
+(** [<base_path>/.masc/run/ssh/]. SSH ControlMaster sockets for the remote
+    execution lane. *)
+
 val data_dir : base_path:string -> string
 (** [<base_path>/data/]. Bulk tool data (tool-events, tool-metrics).
     Sibling of [.masc/]; callers historically wrote here without going

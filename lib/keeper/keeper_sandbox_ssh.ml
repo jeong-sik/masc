@@ -27,7 +27,11 @@ let resolve_path ~base_path path =
 ;;
 
 let runtime_config_path ~base_path =
-  let workspace_path = Filename.concat base_path ".masc/runtime.toml" in
+  (* Resolver SSOT (RFC-0121). The previous inline concat probed
+     <base>/.masc/runtime.toml — a path the live layout has never used
+     (runtime.toml lives under .masc/config/), so the probe always fell
+     through to [Runtime.config_path]. The resolver names the real file. *)
+  let workspace_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
   if Sys.file_exists workspace_path then Some workspace_path else Runtime.config_path ()
 ;;
 
@@ -145,7 +149,7 @@ let create ?ssh_bin ~base_path ~keeper_name
     | Some path -> path
     | None -> Option.value (Atomic.get ssh_bin_override) ~default:"ssh"
   in
-  let control_path_dir = Filename.concat base_path ".masc/run/ssh" in
+  let control_path_dir = Config_dir_resolver.run_ssh_dir ~base_path in
   let* () = ensure_control_path_dir control_path_dir in
   Ok
     { endpoint

@@ -121,7 +121,7 @@ check_rule "R5-health-path" 0 \
 # The baseline count of 1 is intentional: the match is in documentation that
 # explicitly warn against bare home-anchored .masc roots (e.g. tilde or
 # HOME env expansion). See KEEPER-USER-MANUAL.md. No code or script uses such a root.
-check_rule "R6-home-masc-root" 1 \
+check_rule "R6-home-masc-root" 0 \
   "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
   '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \
   '' \

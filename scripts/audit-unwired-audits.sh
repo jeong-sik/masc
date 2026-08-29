@@ -6,15 +6,21 @@
 # A guard nobody runs is indistinguishable from no guard, and this is how
 # scripts are born — the PR that writes one does not touch ci.yml.
 #
-# Thirteen were wired in this branch and all eleven already passed, so nothing
-# had been blocking them. Twelve remain, each for a stated reason:
+# Thirteen were wired first (#27626), nine more on 2026-08-29 (code-smell,
+# ocaml/tla phase-count and line-ref audits, rfc-closeout-lag, release-train
+# guard, lint-ignore full scan — all argless-clean). Nine remain, each for a
+# stated reason:
 #
-#   - credential and fleet audits read a live .masc runtime through
-#     MASC_BASE_PATH; on a runner they would inspect an empty directory
+#   - credential, credential-uuid, fleet-readiness, and agent-core-payload
+#     audits read a live .masc runtime (MASC_BASE_PATH / traces dir); on a
+#     runner they would inspect an empty directory
 #   - check-memory-leak.sh needs valgrind, absent from the CI image
-#   - a few take required arguments
+#   - check-logging-consistency.sh currently exits 1 on main; wire it when
+#     its findings are burned down
+#   - check-pr-hygiene.sh and check-pr-sync.sh take a PR base/head context
+#   - verify_audit_claim.sh takes required arguments by design
 #
-# The ratchet freezes that 11. Adding a guard without wiring it grows the
+# The ratchet freezes that 9. Adding a guard without wiring it grows the
 # number and fails here; wiring one shrinks it and asks for the baseline to
 # move, so the gain is held.
 set -uo pipefail
@@ -26,7 +32,7 @@ cd "$(git rev-parse --show-toplevel)"
 # and did not match lint-* names, so self-declared gates
 # (check-logging-consistency, lint-cancel-guard) were invisible to it.
 # See #27626.
-UNWIRED_BASELINE=11
+UNWIRED_BASELINE=9
 
 all="$(mktemp)"
 called="$(mktemp)"

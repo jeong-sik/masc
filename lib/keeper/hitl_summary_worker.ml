@@ -216,6 +216,15 @@ type prepared_flow =
   { entry : pending_approval
   ; generated_at : float
   ; attempt : Exact_output.flow_attempt
+  ; cli_slots : string list
+        (* Official-client runtime ids the lane walks after every catalog
+           slot is exhausted, carried from the resolved lane declaration
+           (RFC cli-runtimes-as-lane-slots). *)
+  ; system_prompt : string
+  ; context_bundle : Yojson.Safe.t
+        (* Kept beside the frozen HTTP attempt because a cli one-shot has no
+           request body: its input is the rendered prompt, rebuilt from the
+           same contract and bundle the HTTP messages carry. *)
   }
 
 let registry_error error =
@@ -299,6 +308,9 @@ let prepare_flow
     { entry
     ; generated_at = Time_compat.now ()
     ; attempt
+    ; cli_slots = resolved.Registry.cli_slots
+    ; system_prompt
+    ; context_bundle
     }
 ;;
 
@@ -1089,8 +1101,193 @@ type execution_boundary =
   | Identity_unbound_blocked
   | Exact_rejection_blocked of exact_attempt_rejection
 
+(* ── CLI lane-slot fallback (RFC cli-runtimes-as-lane-slots) ─────────
+   Walked only after the HTTP flow reports candidate exhaustion. Every queue
+   transition stays inside the exact-attempt contract proven above:
+   [release -> bind(new identity)] is the same rebind the HTTP walk uses, a
+   summary completes the bound cli identity exactly like an HTTP success,
+   and a failed walk leaves its last cli binding Exact_dispatch_uncertain so
+   the ordinary quarantine transition can settle the entry. A cli one-shot
+   has no request body; its input is the rendered prompt, so the prompt's
+   sha256 fills both exactness fingerprints of the durable identity. *)
+
+type cli_walk_outcome =
+  | Cli_no_slots
+      (* Nothing declared — the caller keeps its pre-cli behaviour. *)
+  | Cli_summary
+      (* A cli slot answered; the summary is completed and delivered. *)
+  | Cli_settled
+      (* Every cli slot failed and the entry was quarantined under the last
+         cli identity. Nothing left for the caller to settle. *)
+  | Cli_fell_back
+      (* The walk could not take over (release/bind persistence refused);
+         the pre-cli binding state is intact, so the caller settles exactly
+         as it would have without cli slots. *)
+
+let cli_prompt ~context_bundle =
+  canonical_output_contract ^ "\n\n" ^ Yojson.Safe.to_string context_bundle
+;;
+
+let try_cli_slots
+      ~queue_ops
+      ~cli_runner
+      ~(bound : exact_identity option)
+      (prepared : prepared_flow)
+      ~on_summary
+  =
+  match prepared.cli_slots with
+  | [] -> Cli_no_slots
+  | slots ->
+    let entry = prepared.entry in
+    let base_dir = entry.Keeper_approval_queue_rules_types.audit_base_path in
+    let prompt = cli_prompt ~context_bundle:prepared.context_bundle in
+    let prompt_sha = Digestif.SHA256.(digest_string prompt |> to_hex) in
+    let quarantine_cause_of_failure = function
+      | Keeper_lane_cli_oneshot.Invalid_json_output _ -> Exact_domain_invalid_output
+      | Keeper_lane_cli_oneshot.Not_an_official_client _
+      | Keeper_lane_cli_oneshot.Execution_failed _ -> Exact_flow_execution_failed
+    in
+    let release identity =
+      match release_exact_attempt queue_ops entry identity with
+      | Ok { write_outcome = Fsync_completed; _ } -> Ok ()
+      | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } -> Error detail
+      | Error error ->
+        Error (Keeper_approval_queue.exact_attempt_error_to_string error)
+    in
+    let rec walk ~bound ~last_cli_failure = function
+      | [] ->
+        (match bound, last_cli_failure with
+         | Some identity, Some failure ->
+           (* The last failed cli slot is still Exact_dispatch_uncertain, so
+              the entry settles through the ordinary quarantine transition
+              under the identity that actually failed. *)
+           record_outcome "exact_cli_slots_exhausted";
+           log_exact_error
+             entry
+             "cli lane-slot walk"
+             (Keeper_lane_cli_oneshot.failure_to_string failure);
+           quarantine_identity
+             ~queue_ops
+             entry
+             identity
+             (quarantine_cause_of_failure failure);
+           Cli_settled
+         | _, None | None, _ ->
+           (* No cli slot ever reached a binding of its own (every bind was
+              refused): the pre-cli state is what remains, so the caller's
+              ordinary settlement still applies. *)
+           record_outcome "exact_cli_walk_fell_back";
+           Cli_fell_back)
+      | runtime_id :: rest ->
+        (* Rebind discipline: whatever is bound (the exhausted HTTP candidate
+           or the previous cli slot) is released before the next identity
+           binds — the same release-then-bind step the HTTP walk performs. *)
+        (match
+           match bound with
+           | None -> Ok ()
+           | Some identity -> release identity
+         with
+         | Error detail ->
+           record_outcome "exact_cli_release_unconfirmed";
+           log_exact_error entry "cli slot release" detail;
+           Cli_fell_back
+         | Ok () ->
+           let identity =
+             { slot_id = runtime_id
+             ; call_id = Random_id.prefixed ~prefix:"cli-hitl-" ~bytes:16
+             ; plan_fingerprint = "cli-oneshot:" ^ prompt_sha
+             ; request_body_sha256 = prompt_sha
+             }
+           in
+           (match bind_exact_attempt queue_ops entry identity with
+            | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
+              record_outcome "exact_cli_bind_unconfirmed";
+              log_exact_error entry "cli slot bind" detail;
+              (* The binding may not be durable; walking on without a durable
+                 identity would detach the dispatch from the queue record. *)
+              Cli_fell_back
+            | Error error ->
+              record_outcome "exact_cli_bind_failed";
+              log_exact_error
+                entry
+                "cli slot bind"
+                (Keeper_approval_queue.exact_attempt_error_to_string error);
+              (* This slot never bound; the previous binding was already
+                 released, so continue the walk with nothing bound. *)
+              walk ~bound:None ~last_cli_failure rest
+            | Ok { write_outcome = Fsync_completed; _ } ->
+              queue_ops.after_bind ();
+              (match
+                 Keeper_lane_cli_oneshot.run
+                   ?runner:cli_runner
+                   ~base_dir
+                   ~runtime_id
+                   ~system_prompt:prepared.system_prompt
+                   ~requirement:output_requirement
+                   ~prompt
+                   ()
+               with
+               | Error failure ->
+                 log_exact_error
+                   entry
+                   "cli slot execution"
+                   (Keeper_lane_cli_oneshot.failure_to_string failure);
+                 walk ~bound:(Some identity) ~last_cli_failure:(Some failure) rest
+               | Ok output ->
+                 (match
+                    parse_summary
+                      ~generated_at:prepared.generated_at
+                      ~model_run_id:identity.call_id
+                      output
+                  with
+                  | Error detail ->
+                    log_exact_error entry "cli domain validation" detail;
+                    walk
+                      ~bound:(Some identity)
+                      ~last_cli_failure:
+                        (Some
+                           (Keeper_lane_cli_oneshot.Invalid_json_output
+                              { runtime_id; detail }))
+                      rest
+                  | Ok summary ->
+                    (match complete_exact_attempt queue_ops entry identity summary with
+                     | Ok { write_outcome = Fsync_completed; _ } ->
+                       record_outcome "ok_summary_cli";
+                       on_summary summary;
+                       Cli_summary
+                     | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
+                       record_outcome "exact_terminal_sync_unconfirmed";
+                       (* Raises: the surrounding execution boundary treats an
+                          unconfirmed terminal write as persistence
+                          uncertainty, same as the HTTP completion path. *)
+                       signal_terminalization_persistence_failure
+                         entry
+                         "cli completion sync"
+                         detail
+                     | Error error when exact_attempt_source_resolved entry error ->
+                       record_outcome "exact_source_resolved";
+                       Cli_settled
+                     | Error (Exact_attempt_rejected rejection) ->
+                       raise (Exact_terminalization_rejected rejection)
+                     | Error (Exact_attempt_storage_error error) ->
+                       record_outcome "exact_terminal_persistence_failure";
+                       log_exact_error
+                         entry
+                         "cli completion"
+                         (Keeper_approval_queue.storage_error_to_string error);
+                       quarantine_identity
+                         ~queue_ops
+                         entry
+                         identity
+                         Exact_terminal_persistence_failure;
+                       Cli_settled)))))
+    in
+    walk ~bound ~last_cli_failure:None slots
+;;
+
 let execute_prepared_flow_with_queue_ops_current
       ~queue_ops
+      ?cli_runner
       ~net
       ?clock
       ~on_summary
@@ -1150,13 +1347,51 @@ let execute_prepared_flow_with_queue_ops_current
            { cause = (Exact_output.Flow_candidates_exhausted _ as cause); _ }) ->
       (match !bound_candidate with
        | Some candidate ->
-         record_outcome "exact_domain_invalid_output";
-         quarantine_candidate
-           ~queue_ops
-           prepared.entry
-           candidate
-           Exact_domain_invalid_output
+         (match
+            try_cli_slots
+              ~queue_ops
+              ~cli_runner
+              ~bound:(Some (exact_identity_of_candidate candidate))
+              prepared
+              ~on_summary
+          with
+          | Cli_summary | Cli_settled -> ()
+          | Cli_no_slots | Cli_fell_back ->
+            record_outcome "exact_domain_invalid_output";
+            quarantine_candidate
+              ~queue_ops
+              prepared.entry
+              candidate
+              Exact_domain_invalid_output)
        | None ->
+         (match
+            try_cli_slots ~queue_ops ~cli_runner ~bound:None prepared ~on_summary
+          with
+          | Cli_summary | Cli_settled -> ()
+          | Cli_no_slots | Cli_fell_back ->
+            handle_flow_error ~queue_ops prepared cause));
+      Executed
+    | Error
+        (Exact_output.Flow_execution_terminal
+           { cause =
+               Exact_output.Flow_exact_execution_failed { candidate; _ } as cause
+           ; _
+           }) ->
+      (* The last candidate failed post-dispatch with no successor left —
+         provider exhaustion in a different coat (a single-slot lane lands
+         here, never in Flow_candidates_exhausted). Infrastructure causes
+         (callback/measurement failures) stay below: a cli slot answers for
+         missing providers, not for a broken flow. *)
+      (match
+         try_cli_slots
+           ~queue_ops
+           ~cli_runner
+           ~bound:(Some (exact_identity_of_candidate candidate))
+           prepared
+           ~on_summary
+       with
+       | Cli_summary | Cli_settled -> ()
+       | Cli_no_slots | Cli_fell_back ->
          handle_flow_error ~queue_ops prepared cause);
       Executed
     | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
@@ -1165,7 +1400,23 @@ let execute_prepared_flow_with_queue_ops_current
     | Error
         (Exact_output.Flow_semantic_candidates_exhausted
            { rejections; _ }) ->
-      handle_semantic_exhaustion ~queue_ops prepared rejections;
+      (* The rejected candidate is still bound Exact_dispatch_uncertain (the
+         semantic reject happens after dispatch, before any advance), which
+         is exactly the state the cli walk's release-then-bind step expects. *)
+      let bound =
+        rejections
+        |> last_semantic_rejection
+        |> fun rejection ->
+        rejection.transport_success
+        |> Exact_output.flow_success_candidate
+        |> exact_identity_of_candidate
+      in
+      (match
+         try_cli_slots ~queue_ops ~cli_runner ~bound:(Some bound) prepared ~on_summary
+       with
+       | Cli_summary | Cli_settled -> ()
+       | Cli_no_slots | Cli_fell_back ->
+         handle_semantic_exhaustion ~queue_ops prepared rejections);
       Executed
   with
   | Eio.Cancel.Cancelled _ as cancellation ->
@@ -1290,6 +1541,7 @@ let execute_prepared_flow_with_queue_ops_current
 
 let execute_prepared_flow_with_queue_ops
       ~queue_ops
+      ?cli_runner
       ~net
       ?clock
       ~on_summary
@@ -1297,6 +1549,7 @@ let execute_prepared_flow_with_queue_ops
   =
   execute_prepared_flow_with_queue_ops_current
     ~queue_ops
+    ?cli_runner
     ~net
     ?clock
     ~on_summary
@@ -1323,6 +1576,7 @@ type spawn_outcome =
 
 let spawn_with
       ~queue_ops
+      ?cli_runner
       ~prepare_flow
       ~sw
       ~(entry : pending_approval)
@@ -1444,6 +1698,7 @@ let spawn_with
         match
           execute_prepared_flow_with_queue_ops
             ~queue_ops:observed_queue_ops
+            ?cli_runner
             ~net
             ?clock
             ~on_summary
@@ -1538,10 +1793,17 @@ let spawn_with
     Ok Worker_forked
 ;;
 
-let spawn =
+let spawn ~sw ~entry ~on_summary ~on_finish () =
+  (* Eta-expanded so the cli-runner injection stays a test-surface knob:
+     production always spawns the real official client. *)
   spawn_with
     ~queue_ops:production_exact_queue_ops
     ~prepare_flow
+    ~sw
+    ~entry
+    ~on_summary
+    ~on_finish
+    ()
 ;;
 
 module For_testing = struct
@@ -1577,6 +1839,7 @@ module For_testing = struct
 
   let execute_prepared_flow_with_queue_ops
         ~queue_ops
+        ?cli_runner
         ~net
         ?clock
         ~on_summary
@@ -1584,6 +1847,7 @@ module For_testing = struct
     =
     execute_prepared_flow_with_queue_ops
       ~queue_ops
+      ?cli_runner
       ~net
       ?clock
       ~on_summary
@@ -1592,6 +1856,7 @@ module For_testing = struct
 
   let spawn_with_queue_ops
         ~queue_ops
+        ?cli_runner
         ~sw
         ~entry
         ~on_summary
@@ -1600,6 +1865,7 @@ module For_testing = struct
     =
     spawn_with
       ~queue_ops
+      ?cli_runner
       ~prepare_flow
       ~sw
       ~entry

@@ -58,12 +58,10 @@ export function DetailCard({ class: cx, children }: {
 
 export function OperationalHealth({ keeper }: { keeper: Keeper }) {
   const hb = keeper.last_heartbeat
-  const lastCompactionSaved = keeper.last_compaction_saved_tokens
 
   const hbTone: KpiTone = !hb ? 'default' : 'ok'
 
-  const hasAny = hb || lastCompactionSaved != null
-  if (!hasAny) return null
+  if (!hb) return null
 
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 v2-monitoring-panel">
@@ -73,12 +71,6 @@ export function OperationalHealth({ keeper }: { keeper: Keeper }) {
           <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[hbTone]} flex flex-col gap-0.5 v2-monitoring-card">
             <${Eyebrow}>하트비트</${Eyebrow}>
             <span class="text-xs font-mono ${KPI_VALUE_TONE[hbTone]}">${hb.replace('T', ' ').slice(0, 19)}</span>
-          </div>
-        ` : null}
-        ${lastCompactionSaved != null ? html`
-          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE.default} flex flex-col gap-0.5 v2-monitoring-card">
-            <${Eyebrow}>마지막 압축 절약</${Eyebrow}>
-            <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE.default}">${formatTokens(lastCompactionSaved)}</span>
           </div>
         ` : null}
       </div>
@@ -150,10 +142,6 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
             <${StatTile}
               label="토큰"
               value=${formatTokens(keeper.context_tokens)}
-            />
-            <${StatTile}
-              label="압축"
-              value=${String(keeper.compaction_count ?? '-')}
             />
             ${latestCost
               ? html`<${StatTile} label="비용 (USD)" value=${latestCost} />`

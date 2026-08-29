@@ -34,18 +34,19 @@ function metricPoint(overrides: Partial<KeeperMetricPoint>): KeeperMetricPoint {
 }
 
 describe('KpiGrid', () => {
-  it('renders current compaction metadata instead of retired window aggregates', () => {
+  it('renders live heartbeat and no retired compaction aggregates', () => {
     const keeper = {
       name: 'sangsu',
       status: 'active',
       last_heartbeat: '2026-07-29T10:00:00Z',
-      last_compaction_saved_tokens: 120,
     } as Keeper
 
     render(h(KpiGrid, { keeper }))
 
     expect(screen.getByText('하트비트')).toBeInTheDocument()
-    expect(screen.getByText('마지막 압축 절약')).toBeInTheDocument()
+    // The compaction lane is gone; neither the per-turn saving tile nor the
+    // older window aggregate may come back through this grid.
+    expect(screen.queryByText('마지막 압축 절약')).not.toBeInTheDocument()
     expect(screen.queryByText('압축 절감률')).not.toBeInTheDocument()
   })
 

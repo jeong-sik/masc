@@ -24,13 +24,6 @@ type proactive_cycle_outcome =
 
 (* -- Runtime types (moved into agent_runtime_state) -- *)
 
-type compaction_runtime =
-  { count : int
-  ; last_ts : float
-  ; last_before_tokens : int
-  ; last_after_tokens : int
-  }
-
 type proactive_runtime =
   { count_total : int
   ; last_ts : float
@@ -253,7 +246,6 @@ let with_last_reported_usage
 
 type agent_runtime_state =
   { usage : usage_metrics
-  ; compaction_rt : compaction_runtime
   ; proactive_rt : proactive_runtime
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
@@ -555,11 +547,5 @@ let zero_usage : usage_metrics =
 
 let reset_runtime_state (m : keeper_meta) : keeper_meta =
   map_usage (fun _ -> zero_usage) m
-;;
-
-let map_compaction_rt (f : compaction_runtime -> compaction_runtime) (m : keeper_meta)
-  : keeper_meta
-  =
-  { m with runtime = { m.runtime with compaction_rt = f m.runtime.compaction_rt } }
 ;;
 

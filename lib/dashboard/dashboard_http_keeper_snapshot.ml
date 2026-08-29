@@ -290,7 +290,6 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
           ( "last_output_tokens_per_sec",
             tokens_per_sec_json ~tokens:m.runtime.usage.last_output_tokens
               ~latency_ms:m.runtime.usage.last_latency_ms );
-          ("compaction_count", `Int m.runtime.compaction_rt.count);
         ]
       in
       let current_phase =

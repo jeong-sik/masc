@@ -15,7 +15,6 @@ type usage_delta =
 type turn_counter_deltas =
   { proactive_count : int
   ; proactive_visible_count : int
-  ; compaction_count : int
   }
 
 type 'a observed_change =
@@ -30,7 +29,6 @@ type turn_runtime_delta =
   ; next_trace_id : Keeper_id.Trace_id.t
   ; next_trace_history : string list
   ; next_last_handoff_ts : float
-  ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
   ; message_scope_ack_id : string option observed_change
   ; updated_at : string
@@ -94,14 +92,6 @@ type meta_command =
   | Add_usage of usage_delta
   | Set_current_task of
       { task_id : Keeper_id.Task_id.t option
-      ; updated_at : string
-      }
-  | Record_compaction_commit of
-      { trace_id : Keeper_id.Trace_id.t
-      ; commit_count : int
-      ; at : float
-      ; before_bytes : int
-      ; after_bytes : int
       ; updated_at : string
       }
   | Ack_message_scope of
@@ -265,12 +255,6 @@ let turn_runtime_delta_of_snapshots
         before_rt.proactive_rt.visible_count_total
         after_rt.proactive_rt.visible_count_total
     in
-    let* compaction_count =
-      nonnegative_difference
-        "compaction_count"
-        before_rt.compaction_rt.count
-        after_rt.compaction_rt.count
-    in
     let usage =
       { turns
       ; input_tokens
@@ -292,14 +276,11 @@ let turn_runtime_delta_of_snapshots
       ; counters =
           { proactive_count
           ; proactive_visible_count
-          ; compaction_count
           }
       ; next_keeper_id = after.keeper_id
       ; next_trace_id = after_rt.trace_id
       ; next_trace_history = after_rt.trace_history
       ; next_last_handoff_ts = after_rt.last_handoff_ts
-      ; compaction_observation =
-          observed_change before_rt.compaction_rt after_rt.compaction_rt
       ; proactive_observation =
           observed_change before_rt.proactive_rt after_rt.proactive_rt
       ; message_scope_ack_id =
@@ -376,12 +357,6 @@ let apply_turn_runtime_delta
         runtime.proactive_rt.visible_count_total
         counters.proactive_visible_count
     in
-    let* compaction_count =
-      checked_add
-        "compaction_count"
-        runtime.compaction_rt.count
-        counters.compaction_count
-    in
     let proactive_observation =
       apply_observed_change runtime.proactive_rt delta.proactive_observation
     in
@@ -391,18 +366,11 @@ let apply_turn_runtime_delta
       ; visible_count_total = proactive_visible_count_total
       }
     in
-    let compaction_observation =
-      apply_observed_change runtime.compaction_rt delta.compaction_observation
-    in
-    let compaction_rt =
-      { compaction_observation with count = compaction_count }
-    in
     let runtime =
       { runtime with
         trace_id = delta.next_trace_id
       ; trace_history = delta.next_trace_history
       ; last_handoff_ts = delta.next_last_handoff_ts
-      ; compaction_rt
       ; proactive_rt
       ; message_scope_ack_id =
           apply_observed_change runtime.message_scope_ack_id delta.message_scope_ack_id
@@ -505,33 +473,6 @@ let apply_existing (state : state) meta command =
      | Ok meta -> Ok (with_meta state meta))
   | Set_current_task { task_id; updated_at } ->
     Ok (with_meta state { meta with current_task_id = task_id; updated_at })
-  | Record_compaction_commit
-      { trace_id; commit_count; at; before_bytes; after_bytes; updated_at }
-    ->
-    if not (Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id)
-    then Error Identity_mismatch
-    else if commit_count < 0
-    then Error (Invalid_delta "compaction commit count is negative")
-    else if not (Float.is_finite at)
-    then Error (Invalid_delta "compaction at must be finite")
-    else if before_bytes < 0 || after_bytes < 0
-    then Error (Invalid_delta "compaction checkpoint bytes must be non-negative")
-    else
-      (* [count] alone said a compaction happened without saying when or how
-         much it saved, so 136 commits left last_ts at zero and both token
-         fields at zero (#29109). The sizes come from the evidence the
-         preparation already measured on both sides of the checkpoint; the
-         cycle outcome now carries them this far instead of dropping them with
-         the recovery. *)
-      let compaction_rt =
-        { Keeper_meta_contract.count = max meta.runtime.compaction_rt.count commit_count
-        ; last_ts = at
-        ; last_before_tokens = before_bytes
-        ; last_after_tokens = after_bytes
-        }
-      in
-      let meta = Keeper_meta_contract.map_compaction_rt (fun _ -> compaction_rt) meta in
-      Ok (with_meta state { meta with updated_at })
   | Ack_message_scope { message_id; updated_at } ->
     let runtime = { meta.runtime with message_scope_ack_id = message_id } in
     Ok (with_meta state { meta with runtime; updated_at })

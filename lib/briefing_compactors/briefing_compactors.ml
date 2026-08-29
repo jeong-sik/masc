@@ -11,7 +11,6 @@ let compact_keeper_json keeper_json =
       ("generation", int_json (member_assoc "generation" keeper_json));
       ("context_ratio", float_json (member_assoc "context_ratio" keeper_json));
       ("last_turn_ago_s", float_json (member_assoc "last_turn_ago_s" keeper_json));
-      ("compaction_count", int_json (member_assoc "compaction_count" keeper_json));
       ("handoff_count_total", int_json (member_assoc "handoff_count_total" keeper_json));
       ( "current_task"
       , string_json_opt ~max_len:160 (member_assoc "current_task_id" keeper_json) );

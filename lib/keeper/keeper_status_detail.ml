@@ -391,10 +391,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          in
          let trace_history_count = List.length m.runtime.trace_history in
          let runtime_runtime_metrics = `Null in
-         let last_compaction_saved_tokens =
-           max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
-         in
-
          let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
          let session_dir =
            Keeper_types_support.keeper_session_dir
@@ -617,7 +613,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("runtime_runtime_metrics", runtime_runtime_metrics);
            ("trace_history_count", `Int trace_history_count);
            ("handoff_count_total", `Int trace_history_count);
-           ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
            ("sandbox_profile",
              `String (sandbox_profile_to_string m.sandbox_profile));
            ("network_mode",

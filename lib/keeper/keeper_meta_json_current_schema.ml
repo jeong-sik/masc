@@ -34,10 +34,6 @@ type field =
   | Last_output_tokens
   | Last_total_tokens
   | Last_latency_ms
-  | Compaction_count
-  | Last_compaction_ts
-  | Last_compaction_before_tokens
-  | Last_compaction_after_tokens
   | Proactive_count_total
   | Last_proactive_ts
   | Proactive_visible_count_total
@@ -74,10 +70,6 @@ let all_fields =
   ; Last_output_tokens
   ; Last_total_tokens
   ; Last_latency_ms
-  ; Compaction_count
-  ; Last_compaction_ts
-  ; Last_compaction_before_tokens
-  ; Last_compaction_after_tokens
   ; Proactive_count_total
   ; Last_proactive_ts
   ; Proactive_visible_count_total
@@ -115,10 +107,6 @@ let field_name = function
   | Last_output_tokens -> "last_output_tokens"
   | Last_total_tokens -> "last_total_tokens"
   | Last_latency_ms -> "last_latency_ms"
-  | Compaction_count -> "compaction_count"
-  | Last_compaction_ts -> "last_compaction_ts"
-  | Last_compaction_before_tokens -> "last_compaction_before_tokens"
-  | Last_compaction_after_tokens -> "last_compaction_after_tokens"
   | Proactive_count_total -> "proactive_count_total"
   | Last_proactive_ts -> "last_proactive_ts"
   | Proactive_visible_count_total -> "proactive_visible_count_total"

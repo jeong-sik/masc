@@ -386,7 +386,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           let meta_activity_ts =
             List.fold_left max 0.0
               [ m.runtime.usage.last_turn_ts; m.runtime.proactive_rt.last_ts; m.runtime.last_handoff_ts;
-                m.runtime.compaction_rt.last_ts; created_ts ]
+                created_ts ]
           in
           let latest_tool_activity = latest_keeper_tool_activity m.name in
           let pending_approval, approval_audit_state =
@@ -457,10 +457,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              §3.3 sunsets.  No replacement needed: unresolved runtimes
              surface on the canonical JSON field via the Result-returning
              resolver at the other call site below. *)
-          let last_compaction_saved_tokens =
-            max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
-          in
-
           let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
           (* Cap metrics lines to avoid O(n) slowdown as keepers accumulate turns.
              [series_points] is both the read and output bound. *)
@@ -839,8 +835,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 ("total_tokens", `Int m.runtime.usage.last_total_tokens);
               ]);
               ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
-              ("compaction_count", `Int m.runtime.compaction_rt.count);
-              ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);

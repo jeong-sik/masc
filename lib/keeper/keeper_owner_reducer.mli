@@ -21,7 +21,6 @@ type usage_delta =
 type turn_counter_deltas =
   { proactive_count : int
   ; proactive_visible_count : int
-  ; compaction_count : int
   }
 
 type 'a observed_change =
@@ -36,7 +35,6 @@ type turn_runtime_delta =
   ; next_trace_id : Keeper_id.Trace_id.t
   ; next_trace_history : string list
   ; next_last_handoff_ts : float
-  ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
   ; message_scope_ack_id : string option observed_change
   ; updated_at : string
@@ -100,14 +98,6 @@ type meta_command =
   | Add_usage of usage_delta
   | Set_current_task of
       { task_id : Keeper_id.Task_id.t option
-      ; updated_at : string
-      }
-  | Record_compaction_commit of
-      { trace_id : Keeper_id.Trace_id.t
-      ; commit_count : int
-      ; at : float
-      ; before_bytes : int
-      ; after_bytes : int
       ; updated_at : string
       }
   | Ack_message_scope of

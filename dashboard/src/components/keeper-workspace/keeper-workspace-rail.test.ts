@@ -761,7 +761,7 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('renders context metrics as missing when only a zero default exists', () => {
-    const k = mkKeeper({ context_ratio: 0, compaction_count: 0 })
+    const k = mkKeeper({ context_ratio: 0 })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
     // v2 collapses the missing-context state into a single "윈도우 사용률 미측정"
     // empty card (.ctx-empty); no fake usage meter and no usage percentage.
@@ -783,7 +783,6 @@ describe('KeeperWorkspaceRail', () => {
   it('names the typed absence reason from the projection', () => {
     const k = mkKeeper({
       context_ratio: 0,
-      compaction_count: 0,
       context_metrics_unavailable: { kind: 'not_observed', reason: 'turn_record_without_usage' },
     })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)

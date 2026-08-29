@@ -268,29 +268,6 @@ let test_pure_reducer_adds_deltas_and_preserves_pause () =
   check bool "pause latch retained" true (Option.is_some meta.latched_reason)
 ;;
 
-let test_reducer_rejects_invalid_compaction_numbers () =
-  let state =
-    match Reducer.create ~keeper_name:"numbers" (Some (make_meta "numbers")) with
-    | Ok state -> state
-    | Error error -> fail (Reducer.error_to_string error)
-  in
-  let meta = Option.get (Reducer.projection state).meta in
-  let command =
-    Reducer.Record_compaction_commit
-      { trace_id = meta.runtime.trace_id
-      ; commit_count = 1
-      ; at = Float.nan
-      ; before_bytes = 0
-      ; after_bytes = 0
-      ; updated_at = "invalid"
-      }
-  in
-  match Reducer.apply_meta state command with
-  | Error (Reducer.Invalid_delta _) -> ()
-  | Error error -> fail ("wrong numeric error: " ^ Reducer.error_to_string error)
-  | Ok _ -> fail "invalid compaction numbers were accepted"
-;;
-
 let test_profile_update_preserves_owner_runtime_state () =
   let original = make_meta "profile" in
   let state =
@@ -326,64 +303,6 @@ let test_profile_update_preserves_owner_runtime_state () =
     current.runtime.usage.total_turns
     committed.runtime.usage.total_turns;
   check bool "profile update changes autoboot" true committed.autoboot_enabled
-;;
-
-let test_turn_delta_preserves_concurrent_compaction_observation () =
-  let before = make_meta "turn-delta-compaction" in
-  let before_usage = before.runtime.usage in
-  let after =
-    { before with
-      runtime =
-        { before.runtime with
-          usage =
-            ({ total_turns = before_usage.total_turns + 1
-            ; total_input_tokens = before_usage.total_input_tokens + 2
-            ; total_output_tokens = before_usage.total_output_tokens + 3
-            ; total_tokens = before_usage.total_tokens + 5
-            ; total_cost_usd = before_usage.total_cost_usd +. 0.25
-            ; last_turn_ts = 42.0
-            ; last_input_tokens = 2
-            ; last_output_tokens = 3
-            ; last_total_tokens = 5
-            ; last_usage_reported_at = Some 42.0
-            ; last_latency_ms = 7
-            } : Keeper_meta_contract.usage_metrics)
-        }
-    ; updated_at = "turn-finished"
-    }
-  in
-  let delta =
-    match Reducer.turn_runtime_delta_of_snapshots ~before ~after with
-    | Ok delta -> delta
-    | Error error -> fail (Reducer.error_to_string error)
-  in
-  let state =
-    match Reducer.create ~keeper_name:before.name (Some before) with
-    | Ok state -> state
-    | Error error -> fail (Reducer.error_to_string error)
-  in
-  let state =
-    reducer_ok
-      (Reducer.apply_meta
-         state
-         (Record_compaction_commit
-            { trace_id = before.runtime.trace_id
-            ; commit_count = 1
-            ; at = 99.0
-            ; before_bytes = 4096
-            ; after_bytes = 1024
-            ; updated_at = "compacted"
-            }))
-  in
-  let state = reducer_ok (Reducer.apply_meta state (Commit_turn_runtime delta)) in
-  let committed = Option.get (Reducer.projection state).meta in
-  check int "turn delta still commits usage" 1 committed.runtime.usage.total_turns;
-  check int "concurrent compaction count is retained" 1 committed.runtime.compaction_rt.count;
-  check
-    (float 0.0)
-    "stale turn snapshot cannot rewind compaction observation"
-    99.0
-    committed.runtime.compaction_rt.last_ts
 ;;
 
 let test_actor_concurrent_commands_are_exact () =
@@ -2783,7 +2702,6 @@ let () =
         ; test_case
             "invalid compaction numbers are rejected"
             `Quick
-            test_reducer_rejects_invalid_compaction_numbers
           ; test_case
             "profile update preserves runtime state"
             `Quick
@@ -2791,7 +2709,6 @@ let () =
           ; test_case
               "turn delta preserves concurrent observations"
               `Quick
-              test_turn_delta_preserves_concurrent_compaction_observation
         ] )
     ; ( "payload"
       , [ test_case

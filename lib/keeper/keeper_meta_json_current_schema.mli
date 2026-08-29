@@ -24,10 +24,6 @@ type field =
   | Last_output_tokens
   | Last_total_tokens
   | Last_latency_ms
-  | Compaction_count
-  | Last_compaction_ts
-  | Last_compaction_before_tokens
-  | Last_compaction_after_tokens
   | Proactive_count_total
   | Last_proactive_ts
   | Proactive_visible_count_total

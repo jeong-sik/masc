@@ -88,15 +88,11 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Last_output_tokens
         | Schema.Last_total_tokens
         | Schema.Last_latency_ms
-        | Schema.Compaction_count
-        | Schema.Last_compaction_before_tokens
-        | Schema.Last_compaction_after_tokens
         | Schema.Proactive_count_total
         | Schema.Proactive_visible_count_total
         | Schema.Consecutive_noop_count -> `Int 0
         | Schema.Total_cost_usd
         | Schema.Last_turn_ts
-        | Schema.Last_compaction_ts
         | Schema.Last_proactive_ts
         | Schema.Last_visible_proactive_ts -> `Float 0.
         | Schema.Last_proactive_outcome ->

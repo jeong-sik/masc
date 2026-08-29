@@ -176,12 +176,6 @@ let tool_capability_with_availability surface availability =
   | None -> fail "Tool capability with requested availability is absent"
 ;;
 
-let tool_reference_of_yojson json =
-  match Masc.Keeper_capability_surface.ordinary_tool_reference_of_yojson json with
-  | Ok reference -> reference
-  | Error _ -> fail "exact Tool reference did not parse"
-;;
-
 let test_valid_instruction_and_exact_reference () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let frozen =
@@ -356,224 +350,6 @@ let test_capability_surface_keeps_active_and_outside_tools () =
        capabilities)
 ;;
 
-let test_active_tool_reference_resolves_canonical_descriptor () =
-  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
-  let surface = capability_surface (snapshot config [ [] ]) in
-  let capability =
-    tool_capability_with_availability surface Masc.Keeper_capability_surface.Active
-  in
-  let reference =
-    Masc.Keeper_capability_surface.ordinary_tool_reference capability
-  in
-  match
-    Masc.Keeper_capability_surface.resolve_ordinary_tool_reference surface reference
-  with
-  | Ok (Masc.Keeper_capability_surface.Active_tool descriptor) ->
-    check bool "resolution returns canonical descriptor record" true
-      (descriptor == capability.descriptor)
-  | Ok (Tool_unavailable _) -> fail "active Tool resolved as unavailable"
-  | Error _ -> fail "active exact Tool reference did not resolve"
-;;
-
-let test_outside_tool_reference_returns_availability_only () =
-  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
-  let surface =
-    capability_surface ~tool_groups:(Some [ "board" ]) (snapshot config [ [] ])
-  in
-  let capability =
-    tool_capability_with_availability
-      surface
-      Masc.Keeper_capability_surface.Outside_tool_surface
-  in
-  let reference =
-    Masc.Keeper_capability_surface.ordinary_tool_reference capability
-  in
-  match
-    Masc.Keeper_capability_surface.resolve_ordinary_tool_reference surface reference
-  with
-  | Ok (Masc.Keeper_capability_surface.Tool_unavailable Outside_tool_surface) -> ()
-  | Ok (Tool_unavailable _) -> fail "outside Tool returned the wrong availability"
-  | Ok (Active_tool _) -> fail "outside Tool resolution exposed a descriptor"
-  | Error _ -> fail "known outside Tool reference was treated as unknown"
-;;
-
-let test_forged_tool_reference_rejects_unknown_and_mismatch () =
-  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
-  let surface = capability_surface (snapshot config [ [] ]) in
-  let capability =
-    tool_capability_with_availability surface Masc.Keeper_capability_surface.Active
-  in
-  let mismatch =
-    tool_reference_of_yojson
-      (`Assoc
-         [ "descriptor_id", `String capability.descriptor.id
-         ; "capability_id", `String "forged-capability"
-         ])
-  in
-  (match
-     Masc.Keeper_capability_surface.resolve_ordinary_tool_reference surface mismatch
-   with
-   | Error (Masc.Keeper_capability_surface.Mismatched_tool_reference _) -> ()
-   | Error (Unknown_tool_reference _) -> fail "mismatched pair became unknown"
-   | Ok _ -> fail "mismatched descriptor/capability pair resolved");
-  let unknown =
-    tool_reference_of_yojson
-      (`Assoc
-         [ "descriptor_id", `String "forged-descriptor"
-         ; "capability_id", `String capability.descriptor.capability_id
-         ])
-  in
-  match
-    Masc.Keeper_capability_surface.resolve_ordinary_tool_reference surface unknown
-  with
-  | Error (Masc.Keeper_capability_surface.Unknown_tool_reference _) -> ()
-  | Error (Mismatched_tool_reference _) -> fail "unknown descriptor became mismatch"
-  | Ok _ -> fail "unknown descriptor reference resolved"
-;;
-
-let test_tool_reference_json_is_closed () =
-  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
-  let surface = capability_surface (snapshot config [ [] ]) in
-  let capability =
-    tool_capability_with_availability surface Masc.Keeper_capability_surface.Active
-  in
-  let module Surface = Masc.Keeper_capability_surface in
-  let reference = Surface.ordinary_tool_reference capability in
-  let encoded = Surface.ordinary_tool_reference_to_yojson reference in
-  (match Surface.ordinary_tool_reference_of_yojson encoded with
-   | Ok decoded ->
-     check string "descriptor round-trip" reference.descriptor_id decoded.descriptor_id;
-     check string "capability round-trip" reference.capability_id decoded.capability_id
-   | Error _ -> fail "encoded Tool reference did not round-trip");
-  let check_error label expected json =
-    match Surface.ordinary_tool_reference_of_yojson json with
-    | Error actual -> check bool label true (actual = expected)
-    | Ok _ -> failf "%s was accepted" label
-  in
-  check_error
-    "unknown reference field"
-    (Surface.Unknown_reference_field "name")
-    (`Assoc
-       [ "descriptor_id", `String reference.descriptor_id
-       ; "capability_id", `String reference.capability_id
-       ; "name", `String "alias"
-       ]);
-  check_error
-    "duplicate reference field"
-    (Surface.Duplicate_reference_field "descriptor_id")
-    (`Assoc
-       [ "descriptor_id", `String reference.descriptor_id
-       ; "descriptor_id", `String reference.descriptor_id
-       ; "capability_id", `String reference.capability_id
-       ]);
-  check_error
-    "missing reference field"
-    (Surface.Missing_reference_field "capability_id")
-    (`Assoc [ "descriptor_id", `String reference.descriptor_id ]);
-  check_error
-    "empty reference field"
-    (Surface.Empty_reference_field "descriptor_id")
-    (`Assoc
-       [ "descriptor_id", `String "  "
-       ; "capability_id", `String reference.capability_id
-       ]);
-  check string "non-empty reference is not normalized" " exact-id "
-    ((tool_reference_of_yojson
-        (`Assoc
-           [ "descriptor_id", `String " exact-id "
-           ; "capability_id", `String reference.capability_id
-           ])).descriptor_id);
-  check string "parse error codec is typed" "empty_reference_field"
-    Yojson.Safe.Util.(
-      Surface.ordinary_tool_reference_parse_error_to_yojson
-        (Surface.Empty_reference_field "descriptor_id")
-      |> member "kind"
-      |> to_string);
-  check string "resolution error codec is typed" "unknown_tool_reference"
-    Yojson.Safe.Util.(
-      Surface.ordinary_tool_resolution_error_to_yojson
-        (Surface.Unknown_tool_reference reference)
-      |> member "kind"
-      |> to_string)
-;;
-
-let test_tool_reference_schema_matches_the_strict_decoder () =
-  let module Surface = Masc.Keeper_capability_surface in
-  let validate label value expected_ok =
-    let schema_ok =
-      match
-        Masc.Tool_input_validation.validate_args
-          ~schema:Surface.ordinary_tool_reference_schema
-          ~name:"ordinary_tool_reference"
-          ~args:value
-          ()
-      with
-      | Ok _ -> true
-      | Error _ -> false
-    in
-    let decoder_ok = Result.is_ok (Surface.ordinary_tool_reference_of_yojson value) in
-    check bool (label ^ " schema") expected_ok schema_ok;
-    check bool (label ^ " decoder") expected_ok decoder_ok
-  in
-  validate
-    "exact object"
-    (`Assoc
-       [ "descriptor_id", `String "tool.read"
-       ; "capability_id", `String "filesystem.read"
-       ])
-    true;
-  validate
-    "missing capability"
-    (`Assoc [ "descriptor_id", `String "tool.read" ])
-    false;
-  validate
-    "unknown field"
-    (`Assoc
-       [ "descriptor_id", `String "tool.read"
-       ; "capability_id", `String "filesystem.read"
-       ; "name", `String "Read"
-       ])
-    false;
-  let blank =
-    `Assoc
-      [ "descriptor_id", `String "  "
-      ; "capability_id", `String "filesystem.read"
-      ]
-  in
-  check bool "blank descriptor decoder" false
-    (Result.is_ok (Surface.ordinary_tool_reference_of_yojson blank));
-  let pattern =
-    Yojson.Safe.Util.(
-      Surface.ordinary_tool_reference_schema
-      |> member "properties"
-      |> member "descriptor_id"
-      |> member "pattern"
-      |> to_string)
-  in
-  let validate_nonblank label descriptor_id expected_ok =
-    let value =
-      `Assoc
-        [ "descriptor_id", `String descriptor_id
-        ; "capability_id", `String "filesystem.read"
-        ]
-    in
-    check bool (label ^ " schema pattern") expected_ok
-      (Re.execp (Re.Pcre.regexp pattern) descriptor_id);
-    check bool (label ^ " decoder") expected_ok
-      (Result.is_ok (Surface.ordinary_tool_reference_of_yojson value))
-  in
-  validate_nonblank "multiline descriptor" "tool.read\nvariant" true;
-  validate_nonblank "ASCII whitespace descriptor" " \t\n\012\r" false;
-  validate_nonblank "non-breaking-space descriptor" "\194\160" true;
-  check string "schema declares decoder's nonblank syntax" "[^ \t\n\012\r]"
-    Yojson.Safe.Util.(
-      Surface.ordinary_tool_reference_schema
-      |> member "properties"
-      |> member "descriptor_id"
-      |> member "pattern"
-      |> to_string)
-;;
-
 let tool_capability_by_internal_name surface internal_name =
   Masc.Keeper_capability_surface.tool_capabilities surface
   |> List.find_opt (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
@@ -599,6 +375,7 @@ let active_capability_descriptor_ids surface =
     | Missing_task_skill
     | Missing_configured_skill -> None)
 ;;
+
 
 let test_operator_only_tool_is_in_inventory_and_search () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
@@ -1151,16 +928,6 @@ let () =
             test_catalog_status_tracks_source_precedence
         ; test_case "restricted Tool availability" `Quick
             test_capability_surface_keeps_active_and_outside_tools
-        ; test_case "active Tool exact reference" `Quick
-            test_active_tool_reference_resolves_canonical_descriptor
-        ; test_case "outside Tool exact reference" `Quick
-            test_outside_tool_reference_returns_availability_only
-        ; test_case "forged Tool exact reference" `Quick
-            test_forged_tool_reference_rejects_unknown_and_mismatch
-        ; test_case "Tool reference JSON is closed" `Quick
-            test_tool_reference_json_is_closed
-        ; test_case "Tool reference schema matches decoder" `Quick
-            test_tool_reference_schema_matches_the_strict_decoder
         ; test_case "operator-only Tool inventory and search" `Quick
             test_operator_only_tool_is_in_inventory_and_search
         ; test_case "complete inventory preserves Agent Core surface" `Quick

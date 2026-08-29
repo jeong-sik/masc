@@ -254,15 +254,17 @@ let handle_initialize_eio ?(profile = Full) id params =
                     | Operator_remote -> TP.operator_remote_instructions) )
              ; ( "_meta"
                , `Assoc
-                   [ "serverStartedAt", `String (Masc_domain.now_iso ())
-                   ; "serverVersion", `String Runtime_build_version.current
-                   ; ( "profile"
-                     , `String
-                         (match profile with
-                          | Full -> "full"
-                          | Managed_agent -> "managed_agent"
-                          | Operator_remote -> "operator_remote") )
-                   ] )
+                   (Mcp_server.meta_field
+                      ~key:Mcp_server.server_meta_key
+                      [ "serverStartedAt", `String (Masc_domain.now_iso ())
+                      ; "serverVersion", `String Runtime_build_version.current
+                      ; ( "profile"
+                        , `String
+                            (match profile with
+                             | Full -> "full"
+                             | Managed_agent -> "managed_agent"
+                             | Operator_remote -> "operator_remote") )
+                      ]) )
              ]))
 ;;
 
@@ -276,23 +278,24 @@ let handle_server_discover_eio ?(profile = Full) id =
   make_response
     ~id
     (`Assoc
-        [ "resultType", `String "complete"
-        ; ( "supportedVersions"
-          , `List
-              (List.map
-                 (fun version -> `String version)
-                 Mcp_transport_protocol.supported_protocol_versions) )
-        ; "capabilities", Mcp_server.capabilities
-        ; "serverInfo", Mcp_server.server_info
-        ; "instructions", `String (profile_instructions profile)
-        ])
+        ([ "resultType", `String "complete"
+         ; ( "supportedVersions"
+           , `List
+               (List.map
+                  (fun version -> `String version)
+                  Mcp_transport_protocol.supported_protocol_versions) )
+         ; "capabilities", Mcp_server.capabilities
+         ; "serverInfo", Mcp_server.server_info
+         ; "instructions", `String (profile_instructions profile)
+         ]
+         (* DiscoverResult extends CacheableResult, so these are as required
+            here as they are on the list surfaces.  This handler sits above the
+            other five in the file and could not reach the builder while each
+            module defined its own; the hints now come from [Mcp_server]. *)
+         @ Mcp_server.(cache_hint_fields static_catalogue_cache_hint)))
 ;;
 
 let public_tool_help_schemas () = Config.visible_tool_schemas ()
-
-let cache_hint_fields ~scope ~ttl_ms =
-  [ "ttlMs", `Int ttl_ms; "cacheScope", `String scope ]
-;;
 
 let handle_list_tools_eio
       ?(profile = Full)
@@ -352,24 +355,29 @@ let handle_list_tools_eio
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
-      @ cache_hint_fields ~scope:"private" ~ttl_ms:5000
-      @ [ ( "_meta"
-          , `Assoc
-              [ "totalCount", `Int total_count; "pageSize", `Int (TP.list_page_size ()) ]
-          )
-        ]
+      @ Mcp_server.(cache_hint_fields live_state_cache_hint)
     in
-    let result_fields =
-      result_fields
-      @
-      match usage_summary with
-      | Some summary ->
-        [ "usageTelemetryAvailable", `Bool summary.telemetry_available
-        ; "usageTelemetryPath", `String summary.telemetry_path
-        ; "usageTotalCalls", `Int summary.total_calls
-        ]
-      | None -> []
+    (* [ListToolsResult] is as closed as [Tool]: the usage counters used to be
+       result members, and the paging pair sat under an unprefixed [_meta] key
+       that a later spec key could claim. Both now live under this server's own
+       prefix. *)
+    let meta_fields =
+      Mcp_server.(
+        meta_field
+          ~key:list_page_meta_key
+          [ "totalCount", `Int total_count; "pageSize", `Int (TP.list_page_size ()) ])
+      @ Mcp_server.(
+          meta_field
+            ~key:tool_usage_meta_key
+            (match usage_summary with
+             | Some summary ->
+               [ "usageTelemetryAvailable", `Bool summary.telemetry_available
+               ; "usageTelemetryPath", `String summary.telemetry_path
+               ; "usageTotalCalls", `Int summary.total_calls
+               ]
+             | None -> []))
     in
+    let result_fields = result_fields @ [ "_meta", `Assoc meta_fields ] in
     make_response ~id (`Assoc result_fields)
 ;;
 
@@ -400,7 +408,7 @@ let handle_list_resources_eio id cursor =
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
-      @ cache_hint_fields ~scope:"private" ~ttl_ms:5000
+      @ Mcp_server.(cache_hint_fields live_state_cache_hint)
     in
     make_response ~id (`Assoc result_fields)
 ;;
@@ -420,7 +428,7 @@ let handle_list_resource_templates_eio id cursor =
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
-      @ cache_hint_fields ~scope:"public" ~ttl_ms:30000
+      @ Mcp_server.(cache_hint_fields static_catalogue_cache_hint)
     in
     make_response ~id (`Assoc result_fields)
 ;;
@@ -441,7 +449,7 @@ let handle_list_prompts_eio id cursor =
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
-      @ cache_hint_fields ~scope:"public" ~ttl_ms:30000
+      @ Mcp_server.(cache_hint_fields static_catalogue_cache_hint)
     in
     make_response ~id (`Assoc result_fields)
 ;;

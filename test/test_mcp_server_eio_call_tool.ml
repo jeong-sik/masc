@@ -260,7 +260,14 @@ let test_threads_exact_mcp_invocation_identity () =
     | None -> fail "execute callback did not receive invocation identity")
 
 let result_fields response = response |> U.member "result"
-let result_envelope response = result_fields response |> U.member "resultEnvelope"
+(* The envelope and the call's telemetry both sit under this server's own
+   [_meta] key: [CallToolResult] defines no member for either. *)
+let call_meta response =
+  result_fields response
+  |> U.member "_meta"
+  |> U.member Masc.Mcp_server.tool_call_meta_key
+
+let result_envelope response = call_meta response |> U.member "envelope"
 
 let has_field key = function
   | `Assoc fields -> List.mem_assoc key fields
@@ -294,10 +301,7 @@ let test_free_form_failure_text_does_not_control_response () =
          check bool "telemetry trace is outside model envelope" false
            (has_field "trace_id" envelope);
          check string "typed failure class is telemetry metadata" "runtime_failure"
-           (result_fields response
-            |> U.member "_meta"
-            |> U.member "failure_class"
-            |> U.to_string);
+           (call_meta response |> U.member "failure_class" |> U.to_string);
          check string "model text is producer text only" message
            (result_fields response
             |> U.member "content"
@@ -324,7 +328,7 @@ let test_typed_outcome_alone_controls_projection () =
     check string "success remains ok despite prose" "ok"
       (result_envelope success_response |> U.member "status" |> U.to_string);
     check bool "success has no failure metadata" false
-      (has_field "failure_class" (result_fields success_response |> U.member "_meta"));
+      (has_field "failure_class" (call_meta success_response));
     let json_looking_text = {|{"producer":"text-only"}|} in
     let text_success =
       Tool_result.ok
@@ -361,10 +365,7 @@ let test_typed_outcome_alone_controls_projection () =
     in
     let transient_response = call_with_result ~env ~sw state transient in
     check string "typed transient class is preserved" "dependency_unavailable"
-      (result_fields transient_response
-       |> U.member "_meta"
-       |> U.member "failure_class"
-       |> U.to_string))
+      (call_meta transient_response |> U.member "failure_class" |> U.to_string))
 ;;
 
 let test_handle_call_executes_transient_failure_once () =
@@ -419,11 +420,7 @@ let test_handle_call_executes_transient_failure_once () =
       check int
         "response records one attempt"
         1
-        (response
-         |> U.member "result"
-         |> U.member "_meta"
-        |> U.member "attempts"
-        |> U.to_int))
+        (call_meta response |> U.member "attempts" |> U.to_int))
 
 let test_call_captures_admission_scope_across_workspace_switch () =
   Eio_main.run

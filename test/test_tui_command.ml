@@ -145,7 +145,7 @@ let test_the_keeper_message_carries_the_task_id_first () =
    JSON-RPC object on one data line. *)
 let live_answer ~id ~text ~is_error =
   Printf.sprintf
-    "retry: 3000\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"resultType\":\"complete\",\"resultEnvelope\":{\"kind\":\"tool_call\",\"summary\":\"x\",\"status\":\"ok\",\"tool\":\"masc_add_task\"},\"content\":[{\"type\":\"text\",\"text\":%s}],\"isError\":%b,\"_meta\":{}}}\n\n"
+    "retry: 3000\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"resultType\":\"complete\",\"content\":[{\"type\":\"text\",\"text\":%s}],\"isError\":%b,\"_meta\":{\"com.github.yousleepwhen.masc/call\":{\"envelope\":{\"kind\":\"tool_call\",\"summary\":\"x\",\"status\":\"ok\",\"tool\":\"masc_add_task\"}}}}}\n\n"
     id (Yojson.Safe.to_string (`String text)) is_error
 
 let test_a_tool_answer_is_read_off_the_sse_body () =

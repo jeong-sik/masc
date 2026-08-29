@@ -654,7 +654,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # its own authority and re-measures the floor at what the tree now holds.
 # The remainder predates the train and sits outside the skills surface, so
 # it waits for its own reviewed purge rather than a blind sweep here.
-DEAD_EXPORT_BASELINE = 1
+# 1 -> 0, measured on 2026-08-30: the MCP 2026-07-28 conformance pass removed
+# the mime-derived resource icon palette, which held the last one.
+DEAD_EXPORT_BASELINE = 0
 
 
 def run_ratchet(count: int) -> int:

@@ -34,8 +34,15 @@ let tool_json name =
     }
 ;;
 
+(* Descriptor facts are this server's own, so they sit under its [_meta] key
+   rather than beside the fields [Tool] defines. *)
 let json_string_field key json =
-  match Yojson.Safe.Util.member key json with
+  let catalog =
+    json
+    |> Yojson.Safe.Util.member "_meta"
+    |> Yojson.Safe.Util.member Masc.Mcp_server.tool_catalog_meta_key
+  in
+  match Yojson.Safe.Util.member key catalog with
   | `String value -> value
   | other -> failf "field %s was %s" key (Yojson.Safe.to_string other)
 ;;

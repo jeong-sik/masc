@@ -19,8 +19,7 @@
     [managed_agent_passthrough_tool_names] (consumed by
     {!tool_schemas_for_profile} only), [label_words_from_identifier]
     + the [custom_tool_titles] / [custom_title_table] data tables
-    (consumed by {!tool_title_of_name}), [tool_icons_for_name]
-    (consumed by {!tool_json_for_profile}), the parsing helpers
+    (consumed by {!tool_title_of_name}), the parsing helpers
     [strict_assoc_params] / [cursor_param] / [bool_param] /
     [take_list] / [validate_optional_meta], and the raw cursor codec
     [encode_cursor] / [decode_cursor] (callers go through
@@ -96,7 +95,7 @@ val tool_allowed_in_profile :
       managed-agent profile schema list.
     - [Operator_remote]: in [Tool_operator.remote_tool_names]. *)
 
-(** {1 Annotations / titles / icons / output schema} *)
+(** {1 Annotations / titles / output schema} *)
 
 val tool_annotations_for_profile :
   tool_profile -> string -> Yojson.Safe.t option
@@ -115,7 +114,7 @@ val tool_json_for_profile :
   Yojson.Safe.t
 (** [tool_json_for_profile ?usage_summary profile schema] renders
     a tool descriptor object: [name], [title], [description],
-    [icons], [inputSchema], catalog metadata fields,
+    [inputSchema], catalog metadata fields,
     descriptor metadata fields when a descriptor owns the tool name,
     [outputSchema] (currently always omitted), [annotations], plus optional
     usage telemetry from [?usage_summary]. *)

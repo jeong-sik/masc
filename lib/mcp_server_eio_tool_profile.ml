@@ -201,15 +201,6 @@ let tool_title_of_name name =
     in
     String.concat " " (label_words_from_identifier trimmed)
 
-let tool_icons_for_name name =
-  let icon =
-    if Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only name then
-      Mcp_server.themed_icon ~label:"RD" ~bg:"#0F766E" ~fg:"#F0FDFA"
-    else
-      Mcp_server.themed_icon ~label:"WR" ~bg:"#9A3412" ~fg:"#FFF7ED"
-  in
-  [ icon ]
-
 let maybe_assoc_field name = function
   | Some value -> [ (name, value) ]
   | None -> []
@@ -227,23 +218,28 @@ let tool_json_for_profile ?usage_summary profile (schema : Masc_domain.tool_sche
     Tool_catalog.metadata_to_fields schema.name
     |> descriptor_metadata_fields schema.name
   in
+  let usage_fields =
+    match usage_summary with
+    | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name
+    | None -> []
+  in
+  (* Catalog and usage fields used to sit beside [name] and [inputSchema].
+     [Tool] defines no index signature, so a strict client is entitled to
+     reject them there and a later spec field could take one of the names. *)
+  let meta_fields =
+    Mcp_server.(meta_field ~key:tool_catalog_meta_key metadata_fields)
+    @ Mcp_server.(meta_field ~key:tool_usage_meta_key usage_fields)
+  in
   let base =
     [
       ("name", `String schema.name);
       ("title", `String (tool_title_of_name schema.name));
       ("description", `String schema.description);
-      ( "icons",
-        `List
-          (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
     ]
-    @ metadata_fields
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
-    @
-    (match usage_summary with
-    | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name
-    | None -> [])
+    @ (if meta_fields = [] then [] else [ ("_meta", `Assoc meta_fields) ])
   in
   `Assoc base
 

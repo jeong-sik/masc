@@ -829,12 +829,19 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         , `String (Tool_result.tool_failure_class_to_string failure_class) ) ]
     | None -> []
   in
+  (* [CallToolResult] defines [content], [structuredContent], [isError] and
+     [_meta] and nothing else, so the envelope and the call trace go under this
+     server's own [_meta] key rather than beside them. The envelope is what the
+     TUI renders a call as; the rest is timing and failure classification. *)
+  let call_meta =
+    Mcp_server.(
+      meta_field ~key:tool_call_meta_key (("envelope", envelope) :: meta_fields))
+  in
   let result_fields =
     [
-      ("resultEnvelope", envelope);
       ("content", `List content_items);
       ("isError", `Bool (not success));
-      ("_meta", `Assoc meta_fields);
+      ("_meta", `Assoc call_meta);
     ]
     @
     match structured_content with

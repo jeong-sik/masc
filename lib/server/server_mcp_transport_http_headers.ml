@@ -207,31 +207,36 @@ let validate_2026_request_headers request body_str =
    [Auth_error] here, so a client could not tell "your headers disagree" from
    "you are not authorized" from "this server does not speak that revision".
    MCP 2026-07-28 gives two of the three their own codes. *)
+let request_id_of_body body_str =
+  match Yojson.Safe.from_string body_str with
+  | `Assoc fields -> List.assoc_opt "id" fields
+  | _ | (exception Yojson.Json_error _) -> None
+
+(* A rejection raised on a body that parsed answers a request whose id was
+   read, and [Mcp_error_code.allows_null_request_id] already says so for both
+   codes below. Falling back to [Invalid_request] is what carries the "the id
+   itself is missing" case, which is the one JSON-RPC 2.0 §5 lets answer with
+   a null id. *)
+let echoing_request_id body_str code ~message =
+  match request_id_of_body body_str with
+  | Some id -> Mcp_error_code.jsonrpc_error_body_with_id code ~id ~message
+  | None ->
+    Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request ~message
+
 let header_rejection_body body_str = function
-  | Mirrored_header_mismatch msg -> (
-    let id =
-      match Yojson.Safe.from_string body_str with
-      | `Assoc fields -> List.assoc_opt "id" fields
-      | _ | (exception Yojson.Json_error _) -> None
-    in
-    match id with
-    | Some id ->
-      Mcp_error_code.jsonrpc_error_body_with_id Mcp_error_code.Header_mismatch
-        ~id ~message:msg
-    (* No id is not the same as [id: null], and neither is a header
-       disagreement: JSON-RPC 2.0 requires a request to carry an id and
-       2026-07-28 forbids a null one, so such a request is malformed before
-       the header contract applies. *)
-    | None ->
-      Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request
-        ~message:msg)
+  | Mirrored_header_mismatch msg ->
+    echoing_request_id body_str Mcp_error_code.Header_mismatch ~message:msg
   | Unreadable_body msg ->
     Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request ~message:msg
   | Unsupported_version { requested } ->
     Mcp_error_code.unsupported_protocol_version_body ~requested
       ~supported:Mcp_transport_protocol.supported_protocol_versions
+  (* The missing field is read out of a body that parsed, so the id is there
+     to echo -- this arm used to answer [id: null] while
+     [allows_null_request_id Invalid_params] said false, leaving a client with
+     no way to match the rejection to the request it sent. *)
   | Missing_required_meta { key } ->
-    Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_params
+    echoing_request_id body_str Mcp_error_code.Invalid_params
       ~message:(Printf.sprintf "missing required params._meta.%s" key)
 
 let should_use_sse_for_body (request : Httpun.Request.t) body_str accept_mode =

@@ -709,8 +709,3 @@ let reconcile_keepalive_keepers ~load_or_materialize_keeper_meta (ctx : _ contex
     ctx
 ;;
 
-(** Cohort key from structured failure_reason ADT.
-    #10584: delegates to [Keeper_registry.failure_reason_cohort_key] so a
-    new variant in keeper_registry forces a same-PR converter update via
-    the source module's exhaustive-match check, instead of breaking main
-    here on first build (the recurring P0 pattern from #10490 + #10574). *)

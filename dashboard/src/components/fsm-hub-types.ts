@@ -216,9 +216,7 @@ export function displayState(value: string): string {
  *  format `<base>(<detail>)` (e.g. `heartbeat_consecutive_failures(3)`).
  *  The closed-sum bases
  *  match the `failure_reason_to_string` base prefixes (line 104-135).
- *  Note: `failure_reason_cohort_key` (line 146-159) uses shortened
- *  keys (`heartbeat_failures`, `turn_failures`) for metric grouping
- *  and is NOT the wire format. Helper splits the
+ *  Helper splits the
  *  raw string at the first `(`, maps the base to Korean, and reattaches
  *  the `(detail)` portion verbatim so operators retain the parametric
  *  payload while reading a Korean label. Unknown bases fall back to

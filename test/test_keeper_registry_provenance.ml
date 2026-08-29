@@ -113,11 +113,7 @@ let test_fiber_unresolved_failure_reason_is_cause_explicit () =
   (check string)
     "unexpected fiber failure has current explicit cause"
     "fiber_unresolved(unexpected)"
-    (R.failure_reason_to_string (R.Fiber_unresolved R.Unexpected));
-  (check string)
-    "blocker cohort remains the current stable class"
-    "fiber_unresolved"
-    (R.failure_reason_cohort_key (Some (R.Fiber_unresolved R.Unexpected)))
+    (R.failure_reason_to_string (R.Fiber_unresolved R.Unexpected))
 ;;
 
 let test_json_serializer_none () =

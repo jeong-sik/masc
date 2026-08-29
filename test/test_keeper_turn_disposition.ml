@@ -138,9 +138,7 @@ let round_trippable : (string * D.t) list =
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
   ; (* Runtime wires that Code.of_wire_exact recognises losslessly (no payload
      or payload-loss is acceptable per RFC-0042 §5.2). *)
-    "Provider_error/Heartbeat", D.Provider_error Code.Heartbeat_failures
-  ; "Provider_error/Turn_failures", D.Provider_error Code.Turn_failures
-  ; "Provider_error/Storm", D.Provider_error Code.Stale_termination_storm
+    "Provider_error/Storm", D.Provider_error Code.Stale_termination_storm
   ; "Provider_error/TurnOverflow", D.Provider_error Code.Turn_overflow_failure
   ; "Provider_error/Fiber", D.Provider_error Code.Fiber_unresolved
   ]
@@ -189,8 +187,7 @@ let test_round_trip_lossy_payloads () =
 
 let runtime_codes_to_projection : (string * Code.t * D.t) list =
   [ "Healthy", Code.Healthy, D.Success
-  ; "Heartbeat", Code.Heartbeat_failures, D.Provider_error Code.Heartbeat_failures
-  ; "Turn_failures", Code.Turn_failures, D.Provider_error Code.Turn_failures
+
   ; "Storm", Code.Stale_termination_storm, D.Provider_error Code.Stale_termination_storm
   ; "TurnOverflow", Code.Turn_overflow_failure, D.Provider_error Code.Turn_overflow_failure
   ; ( "Provider_runtime"

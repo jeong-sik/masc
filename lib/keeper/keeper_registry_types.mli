@@ -79,7 +79,6 @@ val failure_reason_to_string : failure_reason -> string
     [failure_reason] force a same-PR update of this function via
     OCaml's exhaustive-match check — Option B mitigation for the
     recurring P0 pattern (#10490, #10574). *)
-val failure_reason_cohort_key : failure_reason option -> string
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via

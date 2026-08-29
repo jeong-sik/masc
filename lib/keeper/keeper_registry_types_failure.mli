@@ -20,4 +20,3 @@ type failure_reason =
   | Turn_overflow_failure
   | Operator_interrupt
 val failure_reason_to_string : failure_reason -> string
-val failure_reason_cohort_key : failure_reason option -> string

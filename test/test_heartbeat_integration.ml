@@ -518,12 +518,6 @@ let test_crash_turn_failures () =
      | _ -> fail "expected Turn_consecutive_failures");
     check bool "crash log" true (List.length e.crash_log > 0)
 
-(** Turn failures retain a distinct typed grouping key for crash observation. *)
-let test_cohort_key_turn_failures () =
-  let key = R.failure_reason_cohort_key
-    (Some (R.Turn_consecutive_failures 10)) in
-  check string "turn failure cohort" "turn_failures" key
-
 (** A healthy heartbeat must not erase provider/tool turn failures.
     Regression for live 2026-05-16 evidence where a runtime_exhausted turn
     moved Failing -> Running via a keepalive heartbeat before the next real
@@ -4776,7 +4770,6 @@ let () =
     ];
     "turn_failure", [
       eio_test "turn crash flow" test_crash_turn_failures;
-      test_case "cohort key" `Quick test_cohort_key_turn_failures;
       test_case "fresh presence preserves turn failures" `Quick
         test_fresh_presence_preserves_turn_failures;
       test_case "crashed cycle surfaces as turn failure" `Quick

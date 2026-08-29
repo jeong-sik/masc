@@ -152,11 +152,6 @@ let save_agent_core_checkpoint_if_source_with
        in
        Ok (checkpoint, installation))
 
-let save_agent_core_checkpoint_if_source =
-  save_agent_core_checkpoint_if_source_with
-    ~save_agent_core_history:Keeper_checkpoint_store.save_agent_core_history
-;;
-
 module For_testing = struct
   let save_agent_core_checkpoint_if_source_with_history ~save_agent_core_history =
     save_agent_core_checkpoint_if_source_with ~save_agent_core_history

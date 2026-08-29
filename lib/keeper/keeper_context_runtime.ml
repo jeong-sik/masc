@@ -156,10 +156,6 @@ let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
 type lifecycle_dispatch_error =
   | Transition_rejected of Keeper_state_machine.transition_error
 
-let lifecycle_dispatch_error_to_string = function
-  | Transition_rejected error ->
-    Keeper_state_machine.transition_error_to_string error
-
 let dispatch_keeper_phase_event_result
     ~(config : Workspace.config)
     ?(origin = Keeper_registry.Generic_dispatch)

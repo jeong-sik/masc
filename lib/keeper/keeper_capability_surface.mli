@@ -62,8 +62,6 @@ val descriptors : t -> Keeper_tool_descriptor.t list
 val skill_projection : t -> Keeper_skill_catalog.turn_projection
 val skill_catalog : t -> Keeper_skill_catalog.t
 val tool_capabilities : t -> tool_capability list
-val ordinary_tool_reference : tool_capability -> ordinary_tool_reference
-val ordinary_tool_reference_to_yojson : ordinary_tool_reference -> Yojson.Safe.t
 
 val skill_capabilities : t -> skill_capability list
 (** Exact inventory rows plus configured names that have no matching valid or

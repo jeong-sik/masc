@@ -659,12 +659,12 @@ let test_direct_and_autonomous_share_system_prompt () =
     base_system_prompt;
   check bool "shared contract keeps intended scope" true
     (contains_prose
-       ~needle:"Deliver the current work at its intended scope"
+       ~needle:"지금 맡은 일을 그 일의 범위에서 끝냅니다"
        base_system_prompt);
   check bool "shared contract excludes unrelated work" true
-    (contains_prose ~needle:"Do not add unrelated work" base_system_prompt);
+    (contains_prose ~needle:"범위를 넓히는 판단이 필요하면" base_system_prompt);
   check bool "shared contract leads with the result" true
-    (contains_prose ~needle:"lead with the result" base_system_prompt)
+    (contains_prose ~needle:"결과를 먼저 쓰고" base_system_prompt)
 
 let test_open_goal_store_keeps_one_stable_safety_contract () =
   with_repo_prompt_config @@ fun () ->
@@ -711,7 +711,7 @@ let test_open_goal_store_keeps_one_stable_safety_contract () =
     (contains ~needle:"<system>" base_system_prompt);
   check bool "scope contract is preserved" true
     (contains
-       ~needle:"Deliver the current work at its intended scope"
+       ~needle:"지금 맡은 일을 그 일의 범위에서 끝냅니다"
        base_system_prompt)
 
 (* --- 2. Threaded turn decision --- *)

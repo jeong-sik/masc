@@ -188,22 +188,22 @@ let test_keeper_prompt_keeps_current_contract () =
   let prompt = KP.build_keeper_system_prompt ~instructions:"" () in
   check bool "shared system anchor present" true (has_in prompt "<system>");
   check bool "scope is bounded" true
-    (has_in prompt "Deliver the current work at its intended scope");
+    (has_in prompt "지금 맡은 일을 그 일의 범위에서 끝냅니다");
   check bool "unrelated work is excluded" true
-    (has_in prompt "Do not add unrelated work");
+    (has_in prompt "범위를 넓히는 판단이 필요하면");
   check bool "output leads with the result" true
-    (has_in prompt "lead with the result");
+    (has_in prompt "결과를 먼저 쓰고");
   check bool "past failures are time scoped" true
     (has_in prompt
-       "not permanent proof about the current runtime");
+       "대한 증명은 아닙니다");
   check bool "current read-only probes are preferred" true
-    (has_in prompt "use a bounded, read-only current probe");
+    (has_in prompt "읽기 전용으로 한 번 짚어봅니다");
   check bool "memory and current observation stay separate" true
     (has_in prompt
-       "what this turn observed separately from what memory recalled");
+       "기억이 떠올린 것은 나눠서 적습니다");
   check bool "uncertain effects are never resent" true
     (has_in prompt
-       "applied, ambiguous, indeterminate, or not proven absent")
+       "적용 여부가 불확실하거나, 없다는 것이 증명되지 않았다면")
 
 (* The Librarian retains recurring lessons that current authoritative sources
    have not taught effectively. *)

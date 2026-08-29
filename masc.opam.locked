@@ -171,7 +171,7 @@ depends: [
   "seq" {= "base"}
   "sexplib" {= "v0.17.0"}
   "sexplib0" {= "v0.17.0"}
-  "sqlite3" {= "5.4.1"}
+  "sqlite3" {= "5.4.2"}
   "ssl" {= "0.7.0"}
   "stdio" {= "v0.17.0"}
   "stdlib-shims" {= "0.3.0"}

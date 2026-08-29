@@ -2,6 +2,7 @@ open Alcotest
 
 module Descriptor = Masc.Keeper_tool_descriptor
 module Plan = Masc.Keeper_tool_plan
+module Descriptor_contract = Masc.Keeper_tool_descriptor_contract
 
 let node_id value =
   match Plan.Node_id.make value with
@@ -32,6 +33,74 @@ let descriptor name =
 ;;
 
 let descriptors () = Descriptor.all_descriptors ()
+
+let time_descriptor_contract () =
+  Descriptor_contract.create
+    ~accepted_tool_name:"keeper_time_now"
+    (descriptor "keeper_time_now")
+  |> Result.get_ok
+;;
+
+let test_descriptor_contract_round_trips () =
+  let contract = time_descriptor_contract () in
+  let encoded = Descriptor_contract.to_yojson contract in
+  let decoded = Descriptor_contract.of_yojson encoded |> Result.get_ok in
+  check
+    (testable Yojson.Safe.pp Yojson.Safe.equal)
+    "canonical descriptor contract round-trip"
+    encoded
+    (Descriptor_contract.to_yojson decoded)
+;;
+
+let test_descriptor_contract_rejects_noncanonical_output_schema () =
+  let current = descriptor "keeper_time_now" in
+  let duplicate_schema =
+    `Assoc [ "type", `String "object"; "type", `String "object" ]
+  in
+  let changed =
+    { current with
+      Descriptor.composable_output =
+        Descriptor.Json_output { schema = duplicate_schema }
+    }
+  in
+  match Descriptor_contract.create ~accepted_tool_name:"keeper_time_now" changed with
+  | Error
+      (Descriptor_contract.Non_canonical_schema
+         { location = Descriptor_contract.Composable_output_schema
+         ; error = Descriptor_contract.Duplicate_object_key "type"
+         }) -> ()
+  | Error _ -> fail "non-canonical output schema returned the wrong error"
+  | Ok _ -> fail "non-canonical output schema was captured"
+;;
+
+let test_descriptor_contract_codec_is_closed () =
+  let encoded = Descriptor_contract.to_yojson (time_descriptor_contract ()) in
+  let duplicate =
+    match encoded with
+    | `Assoc fields -> `Assoc (fields @ [ "execution", `String "serial" ])
+    | _ -> fail "descriptor contract encoder returned a non-object"
+  in
+  (match Descriptor_contract.of_yojson duplicate with
+   | Error (Descriptor_contract.Non_canonical_json (Descriptor_contract.Duplicate_object_key "execution")) -> ()
+   | Error _ -> fail "duplicate contract field returned the wrong error"
+   | Ok _ -> fail "duplicate contract field decoded");
+  let invalid =
+    match encoded with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "execution"
+              then name, `String "unordered"
+              else name, value)
+           fields)
+    | _ -> fail "descriptor contract encoder returned a non-object"
+  in
+  match Descriptor_contract.of_yojson invalid with
+  | Error (Descriptor_contract.Invalid_execution "unordered") -> ()
+  | Error _ -> fail "invalid execution returned the wrong error"
+  | Ok _ -> fail "invalid execution decoded"
+;;
 
 let node ?after ~id ~tool_name input =
   Plan.node ~id:(node_id id) ~tool_name ?after ~input ()
@@ -1838,7 +1907,15 @@ let () =
   Eio_main.run @@ fun _env ->
   run
     "keeper_tool_plan"
-    [ ( "request"
+    [ ( "descriptor-contract"
+      , [ test_case "round-trip" `Quick test_descriptor_contract_round_trips
+        ; test_case
+            "non-canonical output schema"
+            `Quick
+            test_descriptor_contract_rejects_noncanonical_output_schema
+        ; test_case "closed codec" `Quick test_descriptor_contract_codec_is_closed
+        ] )
+    ; ( "request"
       , [ test_case "reference chain" `Quick test_request_parses_reference_chain
         ; test_case
             "JSON and TOML plan parity"

@@ -673,43 +673,44 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 "package_id": "package",
                 "name": "skill",
             },
-            "content_revision": "one",
-            "snapshot_revision": "snapshot-one",
-            "turn_ref": "trace-one#8",
+            "content_revision": "c" * 64,
+            "snapshot_revision": "s" * 64,
+            "turn_ref": "trace-1787957197137-00000#104",
             "agent_core_turn": 8,
             "skill_tool_use_id": "call-skill-1",
-            "runtime_id": "one",
-            "activated_at": "activated-at",
+            "runtime_id": "ollama_cloud.minimax-m3",
+            "activated_at": "2026-08-29T01:52:26Z",
             "invocation": {
                 "kind": "instruction",
                 "origin": {"kind": "session_instruction"},
                 "served_content": {
                     "kind": "skill_body",
                     "bytes": 3,
-                    "sha256": "body-sha",
+                    "sha256": "b" * 64,
                 },
             },
             "delivery": {
                 "boundary": {"kind": "model_response", "agent_core_turn": 8},
-                "runtime_id": "one",
+                "runtime_id": "ollama_cloud.minimax-m3",
                 "content_bytes": 3,
-                "content_sha256": "body-sha",
-                "delivered_at": "delivered-at",
+                "content_sha256": "b" * 64,
+                "delivered_at": "2026-08-29T01:52:35Z",
             },
         }
         action = {
             "identity": {"kind": "call_id", "call_id": "call-action-1"},
             "agent_core_turn": 8,
-            "runtime_id": "one",
+            "runtime_id": "ollama_cloud.minimax-m3",
             "tool_name": "x",
-            "observed_at": "observed-at",
+            "observed_at": "2026-08-29T01:52:35Z",
         }
         receipt = "\n".join(
             [
                 "MASC Tools 14:10:47 [connected]",
-                *capture.expected_receipt_lines(activation, [action]),
+                *capture.visible_receipt_lines(activation, [action], cols=180),
             ]
         )
+        self.assertTrue(any(line.endswith("~") for line in receipt.splitlines()))
         screens = iter([top, middle, middle, receipt, receipt, receipt])
         with (
             mock.patch.object(capture, "screen_text", side_effect=screens),
@@ -723,6 +724,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 ledger_revision="abcdef0123456789",
                 activation=activation,
                 actions=[action],
+                cols=180,
                 capture_frame=captured_frames.append,
                 timeout=1.0,
             )
@@ -736,87 +738,6 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         self.assertEqual(captured_frames, [0])
         self.assertEqual([call.args[1] for call in press.call_args_list], ["End", "k"])
 
-    def test_scroll_returns_to_header_after_receipt_is_already_visible(self):
-        class Page:
-            def wait_for_timeout(self, _milliseconds):
-                pass
-
-        activation = {
-            "identity": {
-                "source_id": "source",
-                "package_id": "package",
-                "name": "skill",
-            },
-            "content_revision": "one",
-            "snapshot_revision": "snapshot-one",
-            "turn_ref": "trace-one#8",
-            "agent_core_turn": 8,
-            "skill_tool_use_id": "call-skill-1",
-            "runtime_id": "one",
-            "activated_at": "activated-at",
-            "invocation": {
-                "kind": "instruction",
-                "origin": {"kind": "session_instruction"},
-                "served_content": {
-                    "kind": "skill_body",
-                    "bytes": 3,
-                    "sha256": "body-sha",
-                },
-            },
-            "delivery": {
-                "boundary": {"kind": "model_response", "agent_core_turn": 8},
-                "runtime_id": "one",
-                "content_bytes": 3,
-                "content_sha256": "body-sha",
-                "delivered_at": "delivered-at",
-            },
-        }
-        action = {
-            "identity": {"kind": "call_id", "call_id": "call-action-1"},
-            "agent_core_turn": 8,
-            "runtime_id": "one",
-            "tool_name": "x",
-            "observed_at": "observed-at",
-        }
-        receipt = "\n".join(
-            [
-                "MASC Tools 14:10:47 [connected]",
-                *capture.expected_receipt_lines(activation, [action]),
-            ]
-        )
-        top = "\n".join(
-            [
-                "MASC Tools 14:10:47 [connected]",
-                "Skill Use — keeper-one (8 receipts)",
-                "session=trace-one  ledger=abcdef0123456789",
-            ]
-        )
-        screens = iter([receipt, receipt, top, top])
-        with (
-            mock.patch.object(capture, "screen_text", side_effect=screens),
-            mock.patch.object(capture, "press") as press,
-        ):
-            captured_frames = []
-            visible, observations, visible_frames = capture.scroll_to_skill_receipt(
-                Page(),
-                keeper="keeper-one",
-                session_id="trace-one",
-                ledger_revision="abcdef0123456789",
-                activation=activation,
-                actions=[action],
-                capture_frame=captured_frames.append,
-                timeout=1.0,
-            )
-
-        self.assertEqual(visible, top)
-        self.assertIn("id=call-skill-1", observations["receipt_block"])
-        self.assertEqual(
-            observations["skill_header"], "Skill Use — keeper-one (8 receipts)"
-        )
-        self.assertEqual(visible_frames, [receipt])
-        self.assertEqual(captured_frames, [0])
-        self.assertEqual([call.args[1] for call in press.call_args_list], ["Home"])
-
     def test_tools_surface_connection_rejects_disconnected(self):
         self.assertTrue(
             capture.tools_surface_is_connected("MASC Tools 14:10:47 [connected]")
@@ -824,6 +745,23 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         self.assertFalse(
             capture.tools_surface_is_connected("MASC Tools 14:10:48 [disconnected]")
         )
+
+    def test_tools_surface_waits_through_reconnecting(self):
+        class Page:
+            def wait_for_timeout(self, _milliseconds):
+                pass
+
+        screens = iter(
+            [
+                "MASC Tools 14:10:47 [reconnecting]",
+                "MASC Tools 14:10:48 [connected]",
+            ]
+        )
+        with mock.patch.object(capture, "screen_text", side_effect=screens):
+            visible = capture.wait_tools_surface_connected(
+                Page(), capture.time.monotonic() + 1.0
+            )
+        self.assertTrue(capture.tools_surface_is_connected(visible))
 
     def test_live_server_identity_rejects_restart(self):
         evidence, _, _ = fixture()

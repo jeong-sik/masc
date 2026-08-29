@@ -1129,8 +1129,8 @@ def verify_bundle(
         receipt_matches_activation(receipt_block, durable_activation, proof_actions),
         "TUI exact receipt observation differs",
     )
-    expected_receipt_rows = tui_capture.expected_receipt_lines(
-        durable_activation, proof_actions
+    expected_receipt_rows = tui_capture.visible_receipt_lines(
+        durable_activation, proof_actions, cols=requested_size[0]
     )
     require(
         receipt_rows_are_covered_in_order(frame_texts, expected_receipt_rows),

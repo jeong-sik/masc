@@ -79,7 +79,6 @@ let for_surface = function
   | Keepers Keeper_detail ->
       [ b Navigate "h/l" "pane" ~help:"move between roster and detail"
       ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Settings / Secrets / GitHub"
-      ; b Act "L" "gh login" ~help:"on the GitHub tab: start the gh device-flow login"
       ; b Act "o" "logs" ~help:"open this Keeper's logs"
       ; b Act "Left / Esc" "back"
       ]
@@ -443,10 +442,67 @@ let entries bindings =
    before this argument existed. *)
 let here_marker = " \xc2\xb7 you are here"
 
+(* The Keeper detail tabs. Until 2026-08-30 the renderer drew these as
+   hand-written strings in its own [tab_hint] match, so the detail tabs were
+   a second key list this module did not own -- the exact split the header
+   above says cannot happen. [T] was missing from that string as well as
+   from here, so toggling a provider was undocumented on every screen.
+
+   The tabs' keys are conditional on the tab rather than the surface, which
+   is why they are not in [for_surface]: listing them there would advertise
+   them on the five tabs where they do nothing. *)
+let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
+  match tab with
+  | Detail_github -> [ b Act "L" "login" ~help:"start the gh device-flow login" ]
+  | Detail_sandbox -> [ b Meta "R" "refresh" ]
+  | Detail_instructions ->
+      [ b Act "e" "edit JSON in $EDITOR"
+          ~help:"the settings form; only changed fields are sent"
+      ]
+  | Detail_identity ->
+      [ (* Arrows first: the digits only reach the first nine rows and the
+           list is a declaration directory that can hold more. *)
+        b Navigate "arrows+enter" "connect"
+      ; b Act "T" "toggle" ~help:"turn the provider under the cursor on or off"
+      ; b Act "A" "app" ~help:"open the app-registration form for it"
+      ; b Search "/" "filter"
+      ; b Meta "R" "refresh"
+      ]
+  | Detail_info | Detail_secrets -> []
+
+(* The compact strip beside the tab row. Same [key:label] spelling the
+   footer uses, and the tab switch leads because it is on every tab. *)
+let keeper_detail_tab_hint tab =
+  String.concat "  "
+    ("[ ]:tab"
+     :: List.map
+          (fun binding -> binding.key ^ ":" ^ binding.label)
+          (keeper_detail_tab_bindings tab))
+
 let help_sections ?current () =
   let sections =
     List.map
-      (fun (title, surface) -> (surface, (title, entries (for_surface surface))))
+      (fun (title, surface) ->
+         (* The Keeper detail tabs each own keys the surface list cannot
+            hold, and the sheet is where a reader looks for them. Append
+            them under the surface with the tab named, so [?] answers
+            "what does T do" -- which nothing did before 2026-08-30. *)
+         let tab_entries =
+           match surface with
+           | Keepers Keeper_detail ->
+               List.concat_map
+                 (fun tab ->
+                    List.map
+                      (fun (key, help) ->
+                         ( key
+                         , Printf.sprintf "on the %s tab: %s"
+                             (Masc_tui_types.keeper_detail_tab_label tab)
+                             help ))
+                      (entries (keeper_detail_tab_bindings tab)))
+                 Masc_tui_types.keeper_detail_tabs
+           | _ -> []
+         in
+         (surface, (title, entries (for_surface surface) @ tab_entries)))
       help_surfaces
   in
   let here, rest =

@@ -330,7 +330,10 @@ let with_bundle_tools
            ~publication_recovery
            ~ctx_snapshot
            ~capability_surface
-           ~identity_tools:(identity_tools ())
+           ~identity_surface:
+             { Masc.Keeper_identity_tool_search.offered = identity_tools ()
+             ; agent_cell = ref None
+             }
            ~composition_plan_index
            ?skill_activation_context:
              (if record_activations then Some skill_activation_context else None)
@@ -735,18 +738,15 @@ let test_bundle_names_are_unique () =
 let test_bundle_matches_expected_projection () =
   with_bundle (fun _ names ->
     let snapshot, skill_catalog = skill_snapshot_and_catalog () in
-    let identity_tool_names =
-      List.map
-        (fun (offered : Keeper_identity_tools.offered_tool) ->
-           offered.Keeper_identity_tools.schema.name)
-        (identity_tools ())
-    in
+    (* The attached tools reach the model as this one name; their own names
+       live inside its description, not in the bundle. *)
+    let identity_index_names = [ Masc.Keeper_identity_tool_search.tool_name ] in
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
         (* Named from the same fixture the bundle was handed. Passing [] here
            while the bundle carries them is what this check exists to catch,
            and it did. *)
-        ~identity_tool_names
+        ~identity_index_names
         ~skill_catalog
         ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
         ()
@@ -779,7 +779,7 @@ let test_bundle_matches_expected_projection () =
     | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
     | Ok surface ->
       let effective_names =
-        identity_tool_names
+        identity_index_names
         @ List.map
             (fun (tool : Keeper_effective_tool_surface.tool) -> tool.name)
             surface.tools

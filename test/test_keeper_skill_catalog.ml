@@ -710,7 +710,7 @@ let test_composition_skill_joins_projection () =
   let descriptors = Masc.Keeper_tool_descriptor.model_visible_descriptors () in
   let expected_instruction =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
-        ~identity_tool_names:[]
+        ~identity_index_names:[]
       ~skill_catalog:(skill_catalog_of [ "release-checklist", instruction_document ])
       ~model_visible_descriptors:descriptors
       ()
@@ -722,7 +722,7 @@ let test_composition_skill_joins_projection () =
     (List.mem Catalog.skill_tool_name expected_instruction);
   let expected =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
-        ~identity_tool_names:[]
+        ~identity_index_names:[]
       ~skill_catalog:
         (skill_catalog_of [ "time-memory-query", composition_document ])
       ~model_visible_descriptors:descriptors
@@ -741,7 +741,7 @@ let test_composition_skill_joins_projection () =
      && List.mem Catalog.cancel_tool_name expected);
   let expected_async =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
-        ~identity_tool_names:[]
+        ~identity_index_names:[]
       ~skill_catalog:(skill_catalog_of [ "quiet-clock", async_composition_document ])
       ~model_visible_descriptors:descriptors
       ()

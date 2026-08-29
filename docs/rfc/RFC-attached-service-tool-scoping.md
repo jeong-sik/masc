@@ -227,12 +227,13 @@ tool_schema list` 델타가 이미 있고 `checkpoint_delta.ml:149` 가 도구�
 읽어서 확인한 이 경로다. hook 으로는 안 된다 — `Hooks.hook` 은
 `hook_event -> hook_decision` 이라 agent 가 없다.
 
-| 자리 | 지금 | 바꿀 것 |
+| 자리 | 전 | 후 |
 |---|---|---|
-| `keeper_agent_run.ml:839` | `agent_ref` 를 `prepare_agent_setup`(699) **뒤에** 만든다 | 앞으로 옮겨 setup 에 넘긴다 |
-| `keeper_run_tools.ml` → `keeper_run_tools_setup.ml` | — | 셀을 optional 인자로 통과시킨다 |
-| `keeper_tools_agent_core_bundle.ml:538` | `identity_tools` 전량을 `Keeper_identity_gate.agent_tool` 로 만든다 | 색인 + `tool_search` 로 바꾸고, 핸들러가 셀을 캡처한다 |
-| `keeper_turn_driver_try_provider.ml:948,960` | `~agent_ref:local_agent_ref` | `ctx.agent_ref` 가 있으면 그것을 쓴다 |
+| `keeper_run_tools_setup.ml` | — | 셀을 여기서 만들고 `agent_setup` 레코드에 실어 올린다 |
+| `keeper_agent_run.ml:839` | `agent_ref` 를 `prepare_agent_setup`(699) **뒤에** 만든다 | 올라온 셀을 쓴다 |
+| `keeper_tools_agent_core_bundle.ml:538` | `identity_tools` 전량을 `Keeper_identity_gate.agent_tool` 로 만든다 | 목록 + `keeper_tool_search` 하나를 싣고, 핸들러가 셀을 캡처한다 |
+| `keeper_turn_driver_try_provider.ml:903` | 시도마다 `local_agent_ref` 를 새로 만든다 | `ctx.agent_ref` 가 있으면 그것을 쓴다 |
+| `keeper_tool_approval_policy.ml` | — | `keeper_tool_search` 를 `Control` 갈래에 넣는다 |
 
 마지막 줄이 이 배선의 이음매다. 지금 `ctx.agent_ref` 는 `checkpoint_after_attempt`
 에만 쓰이는 출력 채널이고, 실제 `Agent.t` 를 받는 것은 try_provider 안에서 시도마다
@@ -240,10 +241,29 @@ tool_schema list` 델타가 이미 있고 `checkpoint_delta.ml:149` 가 도구�
 agent 를 만든 직후 채우므로, 도구가 실행될 때는 이미 들어 있다. `checkpoint_after_attempt`
 는 지금도 `!local_agent_ref` 를 받으므로 값이 달라지지 않는다.
 
+*2026-08-29 반영됨.* 계획과 두 군데가 다르다. 셀은 optional 인자로 다섯 자리를
+뚫는 대신 `agent_setup` 레코드에 실어 올렸다 — 도구를 만드는 자리에서 만들고 호출
+자리가 받아 쓴다. 그리고 부착 도구와 셀은 한 레코드(`Keeper_identity_tool_search.surface`)
+로 묶어서, 셀 없이 도구만 넘기는 호출을 타입에서 없앴다. 그 조합은 목록에 이름은
+올라가는데 아무것도 부를 수 없는 턴이 되기 때문이다.
+
+승인 정책 한 줄이 계획에 없었다. `Keeper_tool_approval_policy` 는 descriptor 가
+없는 이름을 만나면 운영자에게 묻는데, 새 도구가 거기 걸려서 매 호출 승인 창을
+띄울 뻔했다. 번들의 기존 가드(`the approval policy can classify every tool in it`)
+가 잡았다. 이름을 읽고 집합을 넓힐 뿐 서비스에 닿지 않으므로 묻지 않고 실행하는
+`Control` 갈래에 넣었고, 부착 도구 자체의 호출은 그대로 Gate 가 판단한다.
+
 **3. 관측 — 발견 실패를 센다**
 
 §4 결정 3 의 관측점. 이것이 없으면 §5 의 세 번째 지표를 읽을 수 없고, 설계가 옳은지
 판정되지 않는다.
+
+2 가 남긴 계측 구멍도 여기서 닫는다. `record_tool_assignment` 와
+`record_requested_tool_names` 는 셋업 때 계산한 `all_tool_names` 를 넘긴다. 턴 중에
+집합이 넓어지면 그 뒤 라운드의 기록은 실제로 실린 것보다 좁다 — 지금은 목록 도구
+하나만 적히고 그 턴에 불러온 부착 도구는 안 적힌다. 관측점을 만들 때 라운드마다
+살아있는 `agent.tools` 를 읽도록 같이 고친다. 따로 고치면 "무엇이 실렸나" 와
+"무엇을 찾았나" 를 두 군데서 따로 세게 된다.
 
 ## 5. 판정 기준
 

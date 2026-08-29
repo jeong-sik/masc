@@ -900,7 +900,16 @@ let run_try_provider
           ; max_tool_rounds = Keeper_config.keeper_max_tool_rounds ()
           }
   in
-  let local_agent_ref : Agent_core.Agent.t option ref = ref None in
+  (* The caller's cell when it has one, because the turn's tools captured it
+     and [Runtime_agent.run] fills it at agent creation -- before any of them
+     can execute. Not reset between attempts: a tool only runs inside an
+     attempt that already filled it, and the value this leaves behind is the
+     same one [checkpoint_after_attempt] wrote before. *)
+  let local_agent_ref : Agent_core.Agent.t option ref =
+    match ctx.agent_ref with
+    | Some cell -> cell
+    | None -> ref None
+  in
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->

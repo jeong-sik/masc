@@ -396,27 +396,8 @@ let active_descriptor_names ~(meta : keeper_meta) =
   active_descriptor_names_for_descriptors descriptors
 ;;
 
-let grouped_active_names active_descriptor_names =
-  let grouped =
-    List.fold_left
-      (fun acc (name, descriptor) ->
-         let cat = "tool" in
-         ignore (descriptor : Keeper_tool_descriptor.t);
-         let list = StringMap.find_opt cat acc |> Option.value ~default:[] in
-         StringMap.add cat (name :: list) acc)
-      StringMap.empty
-      active_descriptor_names
-  in
-  StringMap.fold
-    (fun cat list acc ->
-       (cat, `List (List.map (fun name -> `String name) list)) :: acc)
-    grouped
-    []
-;;
-
 let keeper_tools_list_json ~(meta : keeper_meta) =
   let active_name_set, active_descriptor_names = active_descriptor_names ~meta in
-  let assoc = grouped_active_names active_descriptor_names in
   let descriptor_surface =
     active_descriptor_names
     |> List.map snd
@@ -428,18 +409,14 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
   in
   Yojson.Safe.to_string
     (`Assoc
-       (assoc
-        @ [ "descriptor_surface", `List descriptor_surface
-          ; "search_scope", `String "active_tools_only"
-          ]))
+       [ "descriptor_surface", `List descriptor_surface
+       ; "search_scope", `String "active_tools_only"
+       ])
 ;;
 
 let keeper_tools_list_json_for_surface ~capability_surface =
   let descriptors = Keeper_capability_surface.descriptors capability_surface in
-  let active_name_set, active_descriptor_names =
-    active_descriptor_names_for_descriptors descriptors
-  in
-  let assoc = grouped_active_names active_descriptor_names in
+  let active_name_set, _ = active_descriptor_names_for_descriptors descriptors in
   let descriptor_surface =
     Keeper_capability_surface.tool_capabilities capability_surface
     |> List.map (fun (capability : Keeper_capability_surface.tool_capability) ->
@@ -460,17 +437,16 @@ let keeper_tools_list_json_for_surface ~capability_surface =
   in
   Yojson.Safe.to_string
     (`Assoc
-       (assoc
-        @ [ "schema", `String "masc.keeper.capability_surface.v1"
+       [ "schema", `String "masc.keeper.capability_surface.v1"
           ; ( "skill_snapshot_revision"
             , `String
                 (Keeper_capability_surface.skill_snapshot_revision capability_surface
                  |> Skill_catalog_snapshot.snapshot_revision_to_string) )
           ; ( "surface_digest"
             , `String (Keeper_capability_surface.digest capability_surface) )
-          ; "descriptor_surface", `List descriptor_surface
-          ; "skills", `List skills
-          ]))
+       ; "descriptor_surface", `List descriptor_surface
+       ; "skills", `List skills
+       ])
 ;;
 
 let keeper_capability_search_json_for_surface ~capability_surface ~query =

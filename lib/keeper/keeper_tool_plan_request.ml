@@ -54,6 +54,8 @@ type error =
       }
   | Plan_rejected of Keeper_tool_plan.error
 
+type encode_error = Unsubstituted_param of { name : string }
+
 let kind_name = Json_util.kind_name
 
 let input_schema =
@@ -246,6 +248,79 @@ let composable_tool_names ~descriptors =
 ;;
 
 let ( let* ) = Result.bind
+
+let rec template_to_yojson = function
+  | Plan.Json_template.Literal value ->
+    Ok (`Assoc [ "kind", `String "literal"; "value", value ])
+  | Plan.Json_template.Output { node_id; pointer } ->
+    Ok
+      (`Assoc
+        [ "kind", `String "output"
+        ; "node", `String (Plan.Node_id.to_string node_id)
+        ; "pointer", `String (Plan.Json_pointer.to_string pointer)
+        ])
+  | Plan.Json_template.Param { name } -> Error (Unsubstituted_param { name })
+  | Plan.Json_template.Object fields ->
+    let* fields =
+      List.fold_left
+        (fun encoded (name, value) ->
+           let* encoded = encoded in
+           let* value = template_to_yojson value in
+           Ok (`Assoc [ "name", `String name; "value", value ] :: encoded))
+        (Ok [])
+        fields
+    in
+    Ok
+      (`Assoc
+        [ "kind", `String "object"; "fields", `List (List.rev fields) ])
+  | Plan.Json_template.Array items ->
+    let* items =
+      List.fold_left
+        (fun encoded item ->
+           let* encoded = encoded in
+           let* item = template_to_yojson item in
+           Ok (item :: encoded))
+        (Ok [])
+        items
+    in
+    Ok
+      (`Assoc [ "kind", `String "array"; "items", `List (List.rev items) ])
+;;
+
+let node_to_yojson (node : Plan.node) =
+  let* input = template_to_yojson node.input in
+  let after =
+    match node.after with
+    | [] -> []
+    | dependencies ->
+      [ ( "after"
+        , `List
+            (List.map
+               (fun node_id -> `String (Plan.Node_id.to_string node_id))
+               dependencies) )
+      ]
+  in
+  Ok
+    (`Assoc
+      ([ "id", `String (Plan.Node_id.to_string node.id)
+       ; "tool", `String node.tool_name
+       ]
+       @ after
+       @ [ "input", input ]))
+;;
+
+let to_yojson plan =
+  let* nodes =
+    List.fold_left
+      (fun encoded node ->
+         let* encoded = encoded in
+         let* node = node_to_yojson node in
+         Ok (node :: encoded))
+      (Ok [])
+      (Plan.nodes plan)
+  in
+  Ok (`Assoc [ "nodes", `List (List.rev nodes) ])
+;;
 
 let first_duplicate fields =
   let rec loop seen = function

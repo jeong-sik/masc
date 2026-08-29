@@ -63,6 +63,8 @@ type error =
       }
   | Plan_rejected of Keeper_tool_plan.error
 
+type encode_error = Unsubstituted_param of { name : string }
+
 val input_schema : Yojson.Safe.t
 (** Canonical model-visible schema for the JSON grammar parsed by
     {!plan_of_json}. The nested template shapes are advertised here; semantic
@@ -70,6 +72,14 @@ val input_schema : Yojson.Safe.t
 
 val error_message : error -> string
 val error_to_json : error -> Yojson.Safe.t
+
+val to_yojson
+  :  Keeper_tool_plan.t
+  -> (Yojson.Safe.t, encode_error) result
+(** Encode a validated, parameter-free plan back into the closed request
+    grammar. This is the durable recipe representation: decoding it still
+    revalidates every descriptor and dependency against the supplied frozen
+    capability surface. *)
 
 (** Canonical tool names a plan node may reference as a producer: descriptors
     that declare a composable JSON output. Used to make rejection results

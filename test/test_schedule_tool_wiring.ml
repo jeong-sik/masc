@@ -261,6 +261,51 @@ let test_create_list_get_cancel () =
      |> to_string)
 ;;
 
+(* The checkpoint encoder rejects an object that binds the same key twice,
+   and it runs after the tool has already succeeded: a duplicate key in a
+   schedule result failed the whole turn at
+   [Checkpoint v10 message[_].content[_].json], which is how keeper sangsu
+   lost 12 consecutive turns on 2026-08-29 ("recurrence" was emitted by
+   [schedule_request_to_yojson] and appended a second time by
+   [schedule_request_json]). This asserts the same rule the encoder applies,
+   on every schedule result shape, so the next appended field that shadows a
+   base one fails here instead of on a live keeper. *)
+let check_no_duplicate_keys label json =
+  match Agent_core.Execution_json.validate ~context:label json with
+  | Ok () -> ()
+  | Error error ->
+    fail (Agent_core.Execution_json.validation_error_to_string error)
+;;
+
+let test_results_survive_the_checkpoint_encoder () =
+  with_config
+  @@ fun config ->
+  let create =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (create_args ~schedule_id:"sched-canonical" ())
+  in
+  check_no_duplicate_keys "create result" (Tool_result.data create);
+  let list_result =
+    dispatch_exn config Tool_schemas_schedule.List_requests
+      (`Assoc [ "limit", `Int 10 ])
+  in
+  check_no_duplicate_keys "list result" (Tool_result.data list_result);
+  let get_result =
+    dispatch_exn config Tool_schemas_schedule.Get_request
+      (`Assoc [ "schedule_id", `String "sched-canonical" ])
+  in
+  check_no_duplicate_keys "get result" (Tool_result.data get_result);
+  let cancel_result =
+    dispatch_exn config Tool_schemas_schedule.Cancel_request
+      (`Assoc
+        [ "schedule_id", `String "sched-canonical"
+        ; "cancelled_by_id", `String "operator"
+        ; "reason", `String "superseded"
+        ])
+  in
+  check_no_duplicate_keys "cancel result" (Tool_result.data cancel_result)
+;;
+
 let test_creation_boundary_owns_result_delivery_destination () =
   with_config
   @@ fun config ->
@@ -884,6 +929,8 @@ let () =
     [ ( "wiring"
       , [ test_case "flat tool surface" `Quick test_flat_tool_surface
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
+        ; test_case "results survive the checkpoint encoder" `Quick
+            test_results_survive_the_checkpoint_encoder
         ; test_case "creation boundary owns result delivery destination" `Quick
             test_creation_boundary_owns_result_delivery_destination
         ; test_case "get recurring schedule after accept advance" `Quick

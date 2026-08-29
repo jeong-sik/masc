@@ -44,3 +44,21 @@ val sync_current_task_id_for_agent_name :
   config:Workspace.config ->
   agent_name:string ->
   unit
+
+(** The tool surface a request actually carried, rather than the one the turn
+    was built with.
+
+    Two things separate them. The Agent Core lane is handed a listing in place
+    of the attached-service schemas, and that lane widens its own set mid-turn
+    when the model loads one — so from the round after a load the built list is
+    short by exactly the tools the model just asked for.
+
+    [agent_cell] fills the moment the Agent Core lane creates its agent. At a
+    request boundary [Some] therefore means that lane built the request and its
+    live set is the answer. [None] at the same boundary means an
+    official-client lane did, and those send [built] unchanged: they pin their
+    tool set at process spawn and cannot widen it. *)
+val on_the_wire :
+  agent_cell:Agent_core.Agent.t option ref ->
+  built:Agent_core.Tool.t list ->
+  Agent_core.Tool.t list

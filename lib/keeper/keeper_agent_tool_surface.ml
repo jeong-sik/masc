@@ -38,3 +38,9 @@ let sync_current_task_id_from_backlog =
 
 let sync_current_task_id_for_agent_name =
   Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
+
+let on_the_wire ~agent_cell ~built =
+  match !agent_cell with
+  | Some agent -> Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent)
+  | None -> built
+;;

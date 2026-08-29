@@ -108,7 +108,7 @@ let test_tools_footer_carries_the_keeper_axis () =
 
 let test_repositories_footer_offers_the_code_tree () =
   check str "repositories names the Enter jump"
-    "j/k:scroll  Enter:browse  Esc:overview  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Enter:browse  a:add  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Repositories)
 
 let test_verification_footer_carries_the_verdict_keys () =

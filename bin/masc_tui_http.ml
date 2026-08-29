@@ -1471,6 +1471,12 @@ let post_keeper_up ~(host : string) ~(port : int) ~(keeper_name : string)
          (percent_encode_path_segment keeper_name))
     ~body:declaration_json
 
+(** Register a repository. Same permission boundary as the dashboard's add
+    dialog: the route wants CanAdmin, and [post_json] carries the token. *)
+let post_repository_add ~(host : string) ~(port : int)
+    ~(declaration_json : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/repositories" ~body:declaration_json
+
 (** Fetch /api/v1/dashboard/logs. The server caps [limit] at 3000; the TUI asks
     for a screenful's worth of history rather than the whole ring. *)
 let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :

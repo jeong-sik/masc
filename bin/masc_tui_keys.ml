@@ -209,6 +209,7 @@ let for_surface = function
       [ b Navigate "j/k" "scroll"
       ; b Act "Enter" "browse"
           ~help:"open this repository's tree on the Code surface"
+      ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
       ; b Act "Esc" "overview"
       ]
       @ listing_meta

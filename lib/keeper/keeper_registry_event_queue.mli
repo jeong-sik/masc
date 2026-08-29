@@ -71,12 +71,14 @@ type source_ack_result =
 val peek_when_result :
   base_path:string ->
   string ->
+  now:float ->
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue.stimulus option, string) result
 
 val select_when_result :
   base_path:string ->
   string ->
+  now:float ->
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue_state.pending_selection option, string) result
 

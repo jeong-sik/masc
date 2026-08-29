@@ -387,6 +387,20 @@ val sort_by_urgency : t -> t
     same urgency keep insertion order, so urgency reordering does
     not invalidate per-bucket FIFO. *)
 
+val low_to_normal_aging_threshold_sec : float
+(** How long a [Low] stimulus waits before {!effective_urgency} promotes it
+    to [Normal]. A reasoned default (matches common recurring-schedule
+    cadence in this fleet), not a measured distribution. *)
+
+val effective_urgency : now:float -> stimulus -> urgency
+(** [effective_urgency ~now s] is [s.urgency], except a [Low] stimulus
+    promotes to [Normal] once it has waited at least
+    {!low_to_normal_aging_threshold_sec}. Never promotes into [Immediate]:
+    that tier stays a producer-declared contract (#31597). *)
+
+val effective_urgency_rank : now:float -> stimulus -> int
+(** [urgency_rank (effective_urgency ~now s)]. *)
+
 val summary : t -> string
 (** Short human-readable description for log lines. *)
 

@@ -647,23 +647,25 @@ let defer_pending_result ~base_path name ~selection =
     ()
 ;;
 
-let peek_when_result ~base_path name ~ready =
+let peek_when_result ~base_path name ~now ~ready =
   match Keeper_registry.get ~base_path name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" name)
   | Some _ ->
     Keeper_event_queue_persistence.peek_when_result
       ~base_path
       ~keeper_name:name
+      ~now
       ~ready
 ;;
 
-let select_when_result ~base_path name ~ready =
+let select_when_result ~base_path name ~now ~ready =
   match Keeper_registry.get ~base_path name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" name)
   | Some _ ->
     Keeper_event_queue_persistence.select_when_result
       ~base_path
       ~keeper_name:name
+      ~now
       ~ready
 ;;
 

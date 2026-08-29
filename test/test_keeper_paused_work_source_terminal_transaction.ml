@@ -132,6 +132,7 @@ let with_source_terminal_lane f =
          Persistence.load_state_result ~base_path ~keeper_name
          |> require_ok "load source-terminal incarnation"
          |> State.select_when
+              ~now:(Unix.gettimeofday ())
               ~ready:(Queue.stimulus_identity_equal source)
          |> require_some "select source-terminal event"
          |> fun selection -> selection.admitted_revision
@@ -313,6 +314,7 @@ let test_source_ack_identity_survives_checkpoint_reload () =
     let second_state = State.with_pending (Queue.enqueue Queue.empty second_source) reloaded in
     let second_selection =
       State.select_when
+        ~now:(Unix.gettimeofday ())
         ~ready:(Queue.stimulus_identity_equal second_source)
         second_state
       |> require_some "select second source-terminal event"
@@ -701,6 +703,7 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       { source = second_source
       ; source_incarnation =
           (State.select_when
+             ~now:(Unix.gettimeofday ())
              ~ready:(Queue.stimulus_identity_equal second_source)
              recovered
            |> require_some "select second recovered source")

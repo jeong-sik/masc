@@ -3678,6 +3678,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
            Event_queue_persistence.select_when_result
              ~base_path
              ~keeper_name
+             ~now:(Unix.gettimeofday ())
              ~ready:(fun _ -> true)
          with
        | Ok (Some selection) -> selection
@@ -3789,6 +3790,7 @@ let test_cancelled_delivery_preserves_grant_without_replaying_wake () =
          Event_queue_persistence.select_when_result
            ~base_path
            ~keeper_name
+           ~now:(Unix.gettimeofday ())
            ~ready:(fun _ -> true)
          |> function
          | Ok (Some selection) -> selection

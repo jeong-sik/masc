@@ -132,6 +132,7 @@ let with_source_terminal_lane f =
          Persistence.load_state_result ~base_path ~keeper_name
          |> require_ok "load source-terminal state"
          |> State.select_when
+              ~now:(Unix.gettimeofday ())
               ~ready:(Queue.stimulus_identity_equal source)
          |> require_some "select source-terminal event"
          |> fun selection -> selection.admitted_revision

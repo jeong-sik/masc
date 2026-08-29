@@ -122,12 +122,19 @@ val with_pending : Keeper_event_queue.t -> t -> t
 val with_revision : int64 -> t -> t
 
 val peek_when :
+  now:float ->
   ready:(Keeper_event_queue.stimulus -> bool) ->
   t ->
   Keeper_event_queue.stimulus option
+(** [now] ages a waiting [Low] stimulus into [Normal] priority past
+    {!Keeper_event_queue.low_to_normal_aging_threshold_sec} (#31597). *)
 
 val select_when :
-  ready:(Keeper_event_queue.stimulus -> bool) -> t -> pending_selection option
+  now:float ->
+  ready:(Keeper_event_queue.stimulus -> bool) ->
+  t ->
+  pending_selection option
+(** See {!peek_when} on [now]. *)
 
 val validate_pending_selection :
   selection:pending_selection ->

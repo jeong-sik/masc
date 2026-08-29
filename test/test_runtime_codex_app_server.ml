@@ -2395,6 +2395,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
            Keeper_registry_event_queue.select_when_result
              ~base_path
              keeper_name
+             ~now:(Unix.gettimeofday ())
              ~ready:(fun _ -> true)
          with
          | Ok (Some selection) -> selection
@@ -2551,6 +2552,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
            Keeper_registry_event_queue.select_when_result
              ~base_path
              keeper_name
+             ~now:(Unix.gettimeofday ())
              ~ready:(fun _ -> true)
          with
          | Ok (Some selection) -> selection

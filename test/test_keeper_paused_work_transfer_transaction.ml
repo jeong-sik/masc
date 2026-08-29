@@ -161,6 +161,7 @@ let with_transfer_lane f =
          Persistence.load_state_result ~base_path ~keeper_name:from_keeper
          |> require_ok "load transfer source incarnation"
          |> State.select_when
+              ~now:(Unix.gettimeofday ())
               ~ready:(Queue.stimulus_identity_equal source)
          |> require_some "select transfer source"
          |> fun selection -> selection.admitted_revision
@@ -392,6 +393,7 @@ let test_replay_after_target_consumption_has_no_second_effect () =
       Persistence.select_when_result
         ~base_path
         ~keeper_name:to_keeper
+        ~now:(Unix.gettimeofday ())
         ~ready:(fun _ -> true)
       |> require_ok "peek transferred target source"
       |> require_some "transferred target selection"
@@ -447,6 +449,7 @@ let test_later_identical_source_transfers_as_new_incarnation () =
     Persistence.select_when_result
       ~base_path
       ~keeper_name:to_keeper
+      ~now:(Unix.gettimeofday ())
       ~ready:(Queue.stimulus_identity_equal request.source)
     |> require_ok "select first target incarnation"
     |> require_some "first target incarnation"
@@ -464,6 +467,7 @@ let test_later_identical_source_transfers_as_new_incarnation () =
     Persistence.select_when_result
       ~base_path
       ~keeper_name:from_keeper
+      ~now:(Unix.gettimeofday ())
       ~ready:(Queue.stimulus_identity_equal request.source)
     |> require_ok "select later source incarnation"
     |> require_some "later source incarnation"

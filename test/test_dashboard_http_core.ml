@@ -362,6 +362,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   in
   let selection_for (source : Keeper_event_queue.stimulus) state =
     Keeper_event_queue_state.select_when
+      ~now:(Unix.gettimeofday ())
       ~ready:(Keeper_event_queue.stimulus_identity_equal source)
       state
     |> require_some ("select " ^ source.post_id)

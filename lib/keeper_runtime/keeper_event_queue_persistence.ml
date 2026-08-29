@@ -969,16 +969,16 @@ let persist_snapshot ~base_path ~keeper_name snapshot =
   update ~base_path ~keeper_name (fun _ -> snapshot ())
 ;;
 
-let peek_when_result ~base_path ~keeper_name ~ready =
+let peek_when_result ~base_path ~keeper_name ~now ~ready =
   match load_state_result ~base_path ~keeper_name with
   | Error _ as error -> error
-  | Ok state -> Ok (State.peek_when ~ready state)
+  | Ok state -> Ok (State.peek_when ~now ~ready state)
 ;;
 
-let select_when_result ~base_path ~keeper_name ~ready =
+let select_when_result ~base_path ~keeper_name ~now ~ready =
   match load_state_result ~base_path ~keeper_name with
   | Error _ as error -> error
-  | Ok state -> Ok (State.select_when ~ready state)
+  | Ok state -> Ok (State.select_when ~now ~ready state)
 ;;
 
 let pending_selections_result ~base_path ~keeper_name =

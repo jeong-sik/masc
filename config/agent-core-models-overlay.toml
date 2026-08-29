@@ -300,6 +300,49 @@ supports_response_format_json = false
 supports_structured_output = false
 supports_native_streaming = true
 
+# Every judgement lane leads with glm-coding.glm-5.3 (config/runtime.toml,
+# 2026-08-30), and glm-coding had no row for it, so Model_catalog.lookup_for_provider
+# missed and the identity fell through to the provider base. The live turn
+# records show what that cost: one runtime_profile carrying four different
+# context windows (1,000,000 / 524,288 / 200,000 / 128,000) across 527 turns,
+# because nothing in the catalog answered the question.
+#
+# Every number below was measured against this endpoint on 2026-08-30, not
+# copied from a model card. The coding wire is not the general API, and the
+# glm-4.7 row below shows the two can differ.
+[[models]]
+id_prefix = "glm-5.3"
+provider_name = "glm-coding"
+base = "glm"
+# 1,040,013 prompt tokens were accepted and 1,100,000 refused with
+# "Prompt exceeds max length"; 1048576 is the only round figure in that band
+# and the one Z.AI publishes.
+max_context_tokens = 1048576
+# The API names its own range: max_tokens = 99999999 is refused with
+# "limit range [1,131072]".
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+# Differs from the glm-4.7 row above, which declares false. A named
+# tool_choice returned a tool_call for the named function.
+supports_named_tool_choice = true
+supports_reasoning = true
+supports_extended_thinking = true
+# Both the non-streaming response and the stream spell it reasoning_content,
+# which is what the ollama_cloud row below already predicted for this wire
+# while pointing at a glm-coding row that did not exist.
+reasoning_streaming_format = "delta:reasoning_content"
+# Same provider contract as the glm-4.7 and GLM-5-Turbo rows above; undeclared,
+# the row falls back to No_replay and the model repeats identical tool calls
+# within a turn (task-838 mirror-drift family).
+reasoning_replay = "latest_user_turn_tool_calls"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+# Per-token pricing is deliberately absent: this is a subscription coding plan,
+# and no rate was measured. A guessed rate would be charged to every cost
+# report that reads this row.
+
 # Ollama Cloud published glm-5.3-flash and glm-5.3 in the last week of August
 # 2026. The embedded base catalog stops at glm-5.2, so these two rows are the
 # catalog's only description of them and the seed's max-context would otherwise

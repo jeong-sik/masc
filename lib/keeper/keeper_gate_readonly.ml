@@ -152,10 +152,36 @@ let docker_sandbox input =
   | _ -> false
 ;;
 
-let readonly_sandbox_execute ~operation ~input =
-  String.equal operation "tool_execute"
-  && docker_sandbox input
-  && (match argv_of_gate_input input with
-      | Some argv -> classify_argv argv
-      | None -> false)
+(* ── network_read ────────────────────────────────────────────────────── *)
+
+(* [network_read] with the [web_search] capability is observation-only in
+   the same deterministic sense as the argv table: it runs in the server
+   process, hands the query to a configured search provider, and its only
+   output is the hits payload — no filesystem, no exec, no caller-chosen
+   address. [web_fetch] is deliberately absent: it fetches an arbitrary URL
+   from the host process, so which address it touches is exactly the
+   question the configured judge weighs. Closed on purpose, like the
+   command tables above. *)
+let observation_network_capabilities = [ "web_search" ]
+
+let network_capability_of_gate_input input =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "capability" fields with
+     | Some (`String value) when value <> "" -> Some value
+     | _ -> None)
+  | _ -> None
+;;
+
+let observation_only_request ~operation ~input =
+  (String.equal operation "tool_execute"
+   && docker_sandbox input
+   && (match argv_of_gate_input input with
+       | Some argv -> classify_argv argv
+       | None -> false))
+  || (String.equal operation "network_read"
+      && (match network_capability_of_gate_input input with
+          | Some capability ->
+            List.mem capability observation_network_capabilities
+          | None -> false))
 ;;

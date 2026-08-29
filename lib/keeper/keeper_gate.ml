@@ -1859,12 +1859,14 @@ let decide_from_selected_mode request = function
   | Error detail -> defer request (Mode_state_invalid detail)
   | Ok Keeper_gate_mode.Manual -> defer request Human_requested
   | Ok Keeper_gate_mode.Auto_judge ->
-    (* Observation-only argv inside the docker sandbox has a deterministic
-       safety answer; paying the judge (or the human queue) for it is how a
-       bare `ls` became an approval prompt. Manual mode is untouched: an
-       operator who asked to see everything still sees everything. *)
+    (* Observation-only requests have a deterministic safety answer —
+       docker-sandbox read-only argv, and server-side [web_search] reads;
+       paying the judge (or the human queue) for them is how a bare `ls`
+       became an approval prompt and a keeper stopped searching. Manual
+       mode is untouched: an operator who asked to see everything still
+       sees everything. *)
     if
-      Keeper_gate_readonly.readonly_sandbox_execute
+      Keeper_gate_readonly.observation_only_request
         ~operation:request.operation
         ~input:request.input
     then (

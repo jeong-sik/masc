@@ -9197,6 +9197,11 @@ let tools_display_lines (state : state) =
                  "   begin id="
                  ^ Terminal_text.single_line activation.skill_tool_use_id
                ; Ansi.dim,
+                 "   receipt_sha256="
+                 ^ Masc.Keeper_skill_activation_ledger.receipt_projection_revision
+                     sap_ledger
+                     ~skill_tool_use_id:activation.skill_tool_use_id
+               ; Ansi.dim,
                  "   exact source_id="
                  ^ (activation.identity
                     |> Skill_reference.identity_source_id_to_string

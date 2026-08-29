@@ -436,16 +436,17 @@ def make_bundle(root: Path):
     }
 
     exact_durable_activation = durable["activations"][0]
-    receipt_rows = verifier.tui_capture.expected_receipt_lines(
-        exact_durable_activation, exact_durable_activation["actions"]
+    receipt_sha256 = verifier.tui_capture.receipt_projection_revision(
+        durable["revision"], exact_durable_activation["skill_tool_use_id"]
     )
-    receipt_block = "\n".join(receipt_rows)
-    split_at = len(receipt_rows) // 2
     frame_rows = (
-        ["MASC Tools 14:10:47 [connected]", *receipt_rows[:split_at]],
+        [
+            "MASC Tools 14:10:47 [connected]",
+            f"receipt_sha256={receipt_sha256}",
+        ],
         [
             "MASC Tools 14:10:48 [connected]",
-            *receipt_rows[split_at - 1 :],
+            f"receipt_sha256={receipt_sha256}",
             "q quit  ↑↓ scroll",
         ],
     )
@@ -520,7 +521,7 @@ def make_bundle(root: Path):
         "observations": {
             "skill_header": "Skill Use — keeper-one (1 receipts)",
             "session_line": f"session=trace-one  ledger={durable['revision']}",
-            "receipt_block": receipt_block,
+            "receipt_sha256": receipt_sha256,
         },
         "frames": frames,
     }
@@ -792,7 +793,7 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             with self.assertRaisesRegex(verifier.VerificationError, "TUI proof SHA"):
                 verify(bundle)
 
-    def test_tui_v4_top_level_contract_is_closed(self):
+    def test_tui_v5_top_level_contract_is_closed(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
             bundle["tui"]["unexpected"] = True
@@ -872,7 +873,7 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                 with self.assertRaisesRegex(verifier.VerificationError, message):
                     verify(bundle)
 
-    def test_tui_v4_rejects_removed_single_frame_fields(self):
+    def test_tui_v5_rejects_removed_single_frame_fields(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
             bundle["tui"]["visible_text"] = "legacy"
@@ -881,58 +882,32 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             ):
                 verify(bundle)
 
-    def test_tui_frames_must_cover_receipt_rows_in_order(self):
-        mutations = {
-            "gap": lambda frames: frames[0].update(
-                {
-                    "visible_text": frames[0]["visible_text"].replace(
-                        "package_id=review", "package_id=missing", 1
-                    )
-                }
-            ),
-            "missing_overlap": lambda frames: frames[1].update(
-                {
-                    "visible_text": "\n".join(
-                        [
-                            frames[1]["visible_text"].splitlines()[0],
-                            *frames[1]["visible_text"].splitlines()[2:],
-                        ]
-                    )
-                }
-            ),
-            "reversed": lambda frames: frames.reverse(),
-        }
-        for name, mutate in mutations.items():
-            with self.subTest(name=name), tempfile.TemporaryDirectory() as raw:
-                bundle = make_bundle(Path(raw))
-                frames = bundle["tui"]["frames"]
-                mutate(frames)
-                for frame in frames:
-                    frame["visible_text_sha256"] = verifier.digest(
-                        frame["visible_text"].encode()
-                    )
-                with self.assertRaisesRegex(
-                    verifier.VerificationError, "cover the exact receipt rows in order"
-                ):
-                    verify(bundle)
+    def test_tui_frames_must_contain_exact_receipt_projection_revision(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            for frame in bundle["tui"]["frames"]:
+                frame["visible_text"] = "MASC Tools 14:10:47 [connected]"
+                frame["visible_text_sha256"] = verifier.digest(
+                    frame["visible_text"].encode()
+                )
+            with self.assertRaisesRegex(
+                verifier.VerificationError,
+                "exact receipt projection revision",
+            ):
+                verify(bundle)
 
     def test_verified_artifact_count_tracks_frame_count(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
-            receipt_rows = bundle["tui"]["observations"]["receipt_block"].splitlines()
-            boundaries = (0, len(receipt_rows) // 3, 2 * len(receipt_rows) // 3)
-            slices = (
-                receipt_rows[boundaries[0] : boundaries[1]],
-                receipt_rows[boundaries[1] - 1 : boundaries[2]],
-                receipt_rows[boundaries[2] - 1 :],
+            receipt_line = (
+                "receipt_sha256=" + bundle["tui"]["observations"]["receipt_sha256"]
             )
             frames = []
-            for index, rows in enumerate(slices, start=1):
+            for index in range(1, 4):
                 name = f"tui-three-frame-{index:03d}.png"
                 payload = png(1200, 900 + index)
                 (bundle["tui_root"] / name).write_bytes(payload)
-                visible_text = "\n".join(rows)
-                visible_text = "MASC Tools 14:10:47 [connected]\n" + visible_text
+                visible_text = "MASC Tools 14:10:47 [connected]\n" + receipt_line
                 frames.append(
                     {
                         "visible_text": visible_text,
@@ -1126,49 +1101,32 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             ):
                 verify(bundle)
 
-    def test_visible_text_requires_the_exact_receipt_observation(self):
+    def test_visible_text_requires_the_exact_receipt_projection(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
-            frame = bundle["tui"]["frames"][-1]
-            visible = frame["visible_text"].replace(
-                "call=call-action-1", "call=foreign-action"
-            )
-            frame["visible_text"] = visible
-            frame["visible_text_sha256"] = verifier.digest(visible.encode())
+            for frame in bundle["tui"]["frames"]:
+                visible = frame["visible_text"].replace(
+                    bundle["tui"]["observations"]["receipt_sha256"],
+                    "0" * 64,
+                )
+                frame["visible_text"] = visible
+                frame["visible_text_sha256"] = verifier.digest(visible.encode())
             with self.assertRaisesRegex(
-                verifier.VerificationError, "cover the exact receipt rows in order"
+                verifier.VerificationError, "exact receipt projection revision"
             ):
                 verify(bundle)
 
-    def test_tui_receipt_is_structurally_bound_to_the_durable_activation(self):
-        mutations = (
-            (f"content_revision={CONTENT}", f"content_revision={CONTENT[:1]}"),
-            (f"id={SKILL_ID}", f"id={SKILL_ID}0"),
-            ("turn=7", "turn=999"),
-            ("tool=keeper_status", "tool=foreign_tool"),
-            ("invoked turn=7", "row turn=7"),
-            ("action turn=7", "row turn=7"),
-            (
-                "at=2026-08-27T00:00:01Z",
-                "at=2026-08-27T00:00:01Z turn=999 runtime=evil",
-            ),
-            (
-                "action turn=7 runtime=runtime-one tool=keeper_status call=call-action-1 at=2026-08-27T00:00:03Z",
-                "action turn=7 runtime=runtime-one tool=keeper_status call=call-action-1 at=2026-08-27T00:00:03Z\n"
-                "action turn=9 runtime=evil tool=evil call=foreign at=2099-01-01T00:00:00Z",
-            ),
-            ("served body", "served-removed body"),
-        )
-        for old, new in mutations:
-            with self.subTest(old=old, new=new), tempfile.TemporaryDirectory() as raw:
-                bundle = make_bundle(Path(raw))
-                receipt = bundle["tui"]["observations"]["receipt_block"]
-                mutated = receipt.replace(old, new, 1)
-                bundle["tui"]["observations"]["receipt_block"] = mutated
-                with self.assertRaisesRegex(
-                    verifier.VerificationError, "exact receipt observation"
-                ):
-                    verify(bundle)
+    def test_tui_receipt_revision_is_bound_to_ledger_and_full_identifier(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            observed = bundle["tui"]["observations"]["receipt_sha256"]
+            bundle["tui"]["observations"]["receipt_sha256"] = (
+                "0" if observed[0] != "0" else "1"
+            ) + observed[1:]
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "projection revision differs"
+            ):
+                verify(bundle)
 
     def test_tui_ledger_projection_rejects_abbreviation(self):
         with tempfile.TemporaryDirectory() as raw:

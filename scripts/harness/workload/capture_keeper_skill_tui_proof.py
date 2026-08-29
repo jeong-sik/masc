@@ -1122,6 +1122,23 @@ def expected_receipt_lines(activation: dict[str, Any], actions: list[Any]) -> li
     return lines
 
 
+def receipt_projection_revision(ledger_revision: str, skill_tool_use_id: str) -> str:
+    payload = bytearray()
+    for field, value in (
+        ("ledger_revision", ledger_revision),
+        ("skill_tool_use_id", skill_tool_use_id),
+    ):
+        field_bytes = field.encode()
+        value_bytes = value.encode()
+        payload.extend(str(len(field_bytes)).encode())
+        payload.extend(b":")
+        payload.extend(field_bytes)
+        payload.extend(str(len(value_bytes)).encode())
+        payload.extend(b":")
+        payload.extend(value_bytes)
+    return digest_bytes(bytes(payload))
+
+
 def receipt_matches_activation(
     block: str, activation: dict[str, Any], actions: list[Any]
 ) -> bool:
@@ -1134,6 +1151,18 @@ def tools_surface_is_connected(value: str) -> bool:
         line.strip().startswith("MASC Tools ") and line.rstrip().endswith("[connected]")
         for line in value.splitlines()
     )
+
+
+def wait_tools_surface_connected(page: Any, deadline: float) -> str:
+    visible = screen_text(page)
+    while not tools_surface_is_connected(visible) and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
+        visible = screen_text(page)
+    require(
+        tools_surface_is_connected(visible),
+        "TUI Tools surface did not reconnect before timeout",
+    )
+    return visible
 
 
 def ledger_projection_matches(line: str, session_id: str, ledger_revision: str) -> bool:
@@ -1154,8 +1183,12 @@ def scroll_to_skill_receipt(
 ) -> tuple[str, dict[str, str], list[str]]:
     deadline = time.monotonic() + timeout
     observations: dict[str, str] = {}
-    expected = expected_receipt_lines(activation, actions)
-    next_receipt_index = 0
+    del actions
+    receipt_sha256 = receipt_projection_revision(
+        ledger_revision,
+        string_field(activation, "skill_tool_use_id", "Skill activation"),
+    )
+    receipt_line = f"receipt_sha256={receipt_sha256}"
     frames: list[str] = []
     jumped_to_end = False
     while time.monotonic() < deadline:
@@ -1184,45 +1217,41 @@ def scroll_to_skill_receipt(
             )
             if session_line is not None:
                 observations["session_line"] = session_line
-        progress = (
-            receipt_frame_progress(visible, expected, next_receipt_index)
-            if next_receipt_index < len(expected)
-            else None
-        )
-        if progress is not None:
-            require(
-                tools_surface_is_connected(visible),
-                "TUI Tools surface disconnected before capturing an advancing frame",
-            )
+        if "receipt_sha256" not in observations and receipt_line in normalized_lines:
+            if not tools_surface_is_connected(visible):
+                wait_tools_surface_connected(page, deadline)
+                continue
             capture_frame(len(frames))
             captured_visible = screen_text(page)
             require(
                 tools_surface_is_connected(captured_visible),
                 "TUI Tools surface disconnected while capturing an advancing frame",
             )
-            captured_progress = receipt_frame_progress(
-                captured_visible, expected, next_receipt_index
+            captured_lines = [
+                line.strip(" │") for line in captured_visible.splitlines()
+            ]
+            require(
+                receipt_line in captured_lines,
+                "TUI Skill receipt identity changed while capturing its frame",
             )
-            if captured_progress is None or captured_progress < progress:
-                raise CaptureError(
-                    "TUI Skill receipt changed while capturing an advancing frame"
-                )
             frames.append(captured_visible)
             visible = captured_visible
-            next_receipt_index = captured_progress
-            if next_receipt_index == len(expected):
-                observations["receipt_block"] = "\n".join(expected)
-        if len(observations) == 3 and next_receipt_index == len(expected):
+            observations["receipt_sha256"] = receipt_sha256
+        if len(observations) == 3:
             return visible, observations, frames
         if (
             not jumped_to_end
-            and next_receipt_index == 0
+            and "receipt_sha256" not in observations
             and "skill_header" in observations
             and "session_line" in observations
         ):
             press(page, "End")
             jumped_to_end = True
-        elif jumped_to_end and next_receipt_index == 0:
+        elif "receipt_sha256" in observations and (
+            "skill_header" not in observations or "session_line" not in observations
+        ):
+            press(page, "Home")
+        elif jumped_to_end and "receipt_sha256" not in observations:
             press(page, "k")
         else:
             press(page, "j")
@@ -1231,7 +1260,7 @@ def scroll_to_skill_receipt(
             page.wait_for_timeout(50)
             advanced = screen_text(page)
         if advanced == visible:
-            required = {"skill_header", "session_line", "receipt_block"}
+            required = {"skill_header", "session_line", "receipt_sha256"}
             missing = sorted(required - observations.keys())
             raise CaptureError(f"TUI reached the bottom before observations: {missing}")
     raise CaptureError("TUI Skill receipt observations did not complete before timeout")
@@ -1336,6 +1365,7 @@ def main() -> int:
                     page, selected["keeper"], args.timeout
                 )
                 visited_tools_panes = select_tools_activations(page, args.timeout)
+                wait_tools_surface_connected(page, time.monotonic() + args.timeout)
                 screen = page.locator(".xterm-screen")
 
                 def capture_frame(index: int) -> None:
@@ -1400,7 +1430,7 @@ def main() -> int:
             }
         )
     result = {
-        "schema": "masc.keeper-skill-tui-proof.v4",
+        "schema": "masc.keeper-skill-tui-proof.v5",
         "captured_at": utc_now(),
         "source": {
             "expected_sha": selected["expected_sha"],

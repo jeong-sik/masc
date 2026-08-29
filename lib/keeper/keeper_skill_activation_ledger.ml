@@ -342,6 +342,21 @@ let activations ledger = ledger.activations
 let transition_rejections ledger = ledger.transition_rejections
 let revision ledger = ledger.revision
 let ledger_revision_to_string revision = revision
+
+let receipt_projection_revision ledger ~skill_tool_use_id =
+  let buffer = Buffer.create 160 in
+  let add field value =
+    Buffer.add_string buffer (string_of_int (String.length field));
+    Buffer.add_char buffer ':';
+    Buffer.add_string buffer field;
+    Buffer.add_string buffer (string_of_int (String.length value));
+    Buffer.add_char buffer ':';
+    Buffer.add_string buffer value
+  in
+  add "ledger_revision" ledger.revision;
+  add "skill_tool_use_id" skill_tool_use_id;
+  Digestif.SHA256.(digest_string (Buffer.contents buffer) |> to_hex)
+;;
 let workspace_key ledger = ledger.workspace_key
 let session_id ledger = ledger.session_id
 

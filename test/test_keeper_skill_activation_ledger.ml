@@ -907,6 +907,17 @@ let test_projection_decoder_reuses_all_ledger_invariants () =
   | Ok _ -> fail "invalid projection workspace was accepted"
 ;;
 
+let test_receipt_projection_revision_binds_full_unicode_id () =
+  with_session @@ fun config trace _session_dir ->
+  let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
+  let ledger = Ledger.empty ~workspace_root ~trace_id:trace in
+  let shared = "call-" ^ String.concat "" (List.init 200 (fun _ -> "한")) in
+  let left = Ledger.receipt_projection_revision ledger ~skill_tool_use_id:(shared ^ "A") in
+  let right = Ledger.receipt_projection_revision ledger ~skill_tool_use_id:(shared ^ "B") in
+  check int "digest length" 64 (String.length left);
+  check bool "full identifier changes digest" true (not (String.equal left right))
+;;
+
 (* The ledger write path is read-modify-write: one undecodable row fails
    every later write for the session, so the human string must name the
    decode shape that poisoned it (previously a bare "decode failed"). *)
@@ -964,6 +975,8 @@ let () =
             test_revision_binds_workspace_and_trace
         ; test_case "projection decoder reuses all ledger invariants" `Quick
             test_projection_decoder_reuses_all_ledger_invariants
+        ; test_case "receipt projection binds the full Unicode id" `Quick
+            test_receipt_projection_revision_binds_full_unicode_id
         ; test_case "store error string keeps decode detail" `Quick
             test_store_error_decode_detail_is_kept
         ] )

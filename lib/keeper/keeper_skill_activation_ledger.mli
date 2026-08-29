@@ -235,6 +235,10 @@ val activations : t -> activation list
 val transition_rejections : t -> transition_rejection list
 val revision : t -> ledger_revision
 val ledger_revision_to_string : ledger_revision -> string
+val receipt_projection_revision : t -> skill_tool_use_id:string -> string
+(** Stable SHA-256 identity for one receipt within this exact ledger revision.
+    Length-prefixed UTF-8 fields keep the projection unambiguous without
+    constraining valid Unicode identifiers. *)
 val workspace_key : t -> string
 val session_id : t -> Keeper_id.Trace_id.t
 val summarize : t -> summary

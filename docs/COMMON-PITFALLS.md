@@ -492,7 +492,7 @@ bash scripts/validate-keeper-fsm-graph.sh
 |----------------|-------------|--------------|
 | #8 Feature Flag Registry Duplicates | [ADR-003: Feature Flag Registry Management](ADR-003-FEATURE-FLAG-REGISTRY-MANAGEMENT.md) | Registry는 SSOT, env_name은 전역 고유, concurrent merge는 semantic validation 필요 |
 | Context handoff pattern | Keeper/agent core checkpoint and handoff docs | Historical mitosis runtime and ADR were removed. Context transfer now uses Relay/Handoff plus keeper/agent core checkpoint paths |
-| Dashboard Control Surface | [ADR-002: Dashboard Operator Control Surface](ADR-002-DASHBOARD-OPERATOR-CONTROL-SURFACE.md) | `masc_operator_*` quartet가 canonical, generic tool executor는 admin-only |
+| Dashboard Control Surface | `masc_operator_*` tool 이름이 SSOT (현재 9개) | `masc_operator_*` 가 canonical, generic tool executor는 admin-only |
 
 **Why ADRs?**
 - **Common Pitfalls**: 실무에서 자주 발생하는 실수와 즉시 적용 가능한 회피책

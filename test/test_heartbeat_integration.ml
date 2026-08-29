@@ -429,7 +429,7 @@ let test_reconcile_predicate_stopped_resolved () =
      (* dominated_by_sweep logic: Stopped with resolved → NOT dominated *)
      let dominated = match e.phase with
        | KSM.Running | KSM.Paused | KSM.Crashed -> true
-       | KSM.Failing | KSM.Compacting
+       | KSM.Failing
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
        | KSM.Stopped -> not (R.lane_has_exited e)
@@ -450,7 +450,7 @@ let test_reconcile_predicate_stopped_unresolved () =
        (Option.is_none (Eio.Promise.peek e.done_p));
      let dominated = match e.phase with
        | KSM.Running | KSM.Paused | KSM.Crashed -> true
-       | KSM.Failing | KSM.Compacting
+       | KSM.Failing
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
        | KSM.Stopped -> not (R.lane_has_exited e)
@@ -4560,7 +4560,6 @@ let test_pipeline_stage_of_phase_exhaustive () =
     (KSM.Offline, "offline");
     (KSM.Running, "idle");
     (KSM.Failing, "failing");
-    (KSM.Compacting, "compacting");
     (KSM.Draining, "draining");
     (KSM.Paused, "paused");
     (KSM.Stopped, "offline");
@@ -4622,10 +4621,10 @@ let test_pipeline_stage_unregistered_is_offline () =
 
 (** Sensitivity: pipeline_stage_of_phase DIFFERS from "offline" for
     most active phases. Proves the mapping has teeth — it actually
-    distinguishes running/failing/compacting/etc. *)
+    distinguishes running/failing/etc. *)
 let test_pipeline_stage_sensitivity () =
   let non_offline_phases = [
-    KSM.Running; KSM.Failing; KSM.Compacting;
+    KSM.Running; KSM.Failing;
     KSM.Draining; KSM.Paused; KSM.Crashed; KSM.Restarting;
   ] in
   List.iter (fun phase ->

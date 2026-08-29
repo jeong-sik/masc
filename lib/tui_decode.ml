@@ -72,7 +72,7 @@ let keeper_phase_to_string = Keeper_state_machine.phase_to_string
 let keeper_phase_is_running : keeper_phase -> bool = function
   | Keeper_state_machine.Running -> true
   | Keeper_state_machine.Offline | Keeper_state_machine.Failing
-  | Keeper_state_machine.Compacting | Keeper_state_machine.Draining
+  | Keeper_state_machine.Draining
   | Keeper_state_machine.Paused | Keeper_state_machine.Stopped
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
       false
@@ -97,7 +97,6 @@ type keeper_lane_phase =
   | Lane_phase_offline
   | Lane_phase_running
   | Lane_phase_failing
-  | Lane_phase_compacting
   | Lane_phase_draining
   | Lane_phase_paused
   | Lane_phase_stopped
@@ -110,7 +109,6 @@ type keeper_lane_turn_phase =
   | Lane_turn_prompting
   | Lane_turn_routing
   | Lane_turn_executing
-  | Lane_turn_compacting
   | Lane_turn_finalizing
   | Lane_turn_exhausted
   | Lane_turn_unknown of string
@@ -3535,7 +3533,6 @@ let keeper_lane_phase_of_string raw =
       | Keeper_state_machine.Offline -> Lane_phase_offline
       | Keeper_state_machine.Running -> Lane_phase_running
       | Keeper_state_machine.Failing -> Lane_phase_failing
-      | Keeper_state_machine.Compacting -> Lane_phase_compacting
       | Keeper_state_machine.Draining -> Lane_phase_draining
       | Keeper_state_machine.Paused -> Lane_phase_paused
       | Keeper_state_machine.Stopped -> Lane_phase_stopped
@@ -3546,8 +3543,6 @@ let keeper_lane_phase_to_string = function
   | Lane_phase_offline -> keeper_phase_to_string Keeper_state_machine.Offline
   | Lane_phase_running -> keeper_phase_to_string Keeper_state_machine.Running
   | Lane_phase_failing -> keeper_phase_to_string Keeper_state_machine.Failing
-  | Lane_phase_compacting ->
-      keeper_phase_to_string Keeper_state_machine.Compacting
   | Lane_phase_draining -> keeper_phase_to_string Keeper_state_machine.Draining
   | Lane_phase_paused -> keeper_phase_to_string Keeper_state_machine.Paused
   | Lane_phase_stopped -> keeper_phase_to_string Keeper_state_machine.Stopped
@@ -3561,7 +3556,6 @@ let keeper_lane_turn_phase_of_string = function
   | "prompting" -> Lane_turn_prompting
   | "routing" -> Lane_turn_routing
   | "executing" -> Lane_turn_executing
-  | "compacting" -> Lane_turn_compacting
   | "finalizing" -> Lane_turn_finalizing
   | "exhausted" -> Lane_turn_exhausted
   | raw -> Lane_turn_unknown raw
@@ -3571,7 +3565,6 @@ let keeper_lane_turn_phase_to_string = function
   | Lane_turn_prompting -> "prompting"
   | Lane_turn_routing -> "routing"
   | Lane_turn_executing -> "executing"
-  | Lane_turn_compacting -> "compacting"
   | Lane_turn_finalizing -> "finalizing"
   | Lane_turn_exhausted -> "exhausted"
   | Lane_turn_unknown raw -> raw

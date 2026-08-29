@@ -163,7 +163,6 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
           turnPhase: snapshot.turn_phase,
           decisionStage: snapshot.decision.stage,
           runtimeState: snapshot.runtime.state,
-          compactionStage: snapshot.compaction.stage,
         })
       : null,
     [snapshot],
@@ -189,7 +188,6 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
         <${PhaseBadge}>KTC ${displayState(snapshot.turn_phase)}<//>
         <${PhaseBadge}>KDP ${displayState(snapshot.decision.stage)}<//>
         <${PhaseBadge}>KCL ${displayState(snapshot.runtime.state)}<//>
-        <${PhaseBadge}>KMC ${displayState(snapshot.compaction.stage)}<//>
         ${transitions.length > 0 ? html`
           <${PhaseBadge}>observed ${transitions.length} transitions<//>
         ` : null}

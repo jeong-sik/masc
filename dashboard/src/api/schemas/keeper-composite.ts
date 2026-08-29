@@ -46,10 +46,7 @@ const KeeperCompositeDecisionStageSchema = string()
 
 const KeeperCompositeRuntimeStateSchema = string()
 
-const KeeperCompositeCompactionStageSchema = string()
-
 const KeeperCompositeContextActionsSchema = object({
-  compact: boolean(),
   handoff: boolean(),
 })
 
@@ -59,9 +56,7 @@ const KeeperCompositeMeasurementSchema = object({
 })
 
 const KeeperCompositeInvariantsSchema = object({
-  phase_turn_alignment: boolean(),
   no_runtime_before_measurement: boolean(),
-  compaction_atomicity: boolean(),
   event_priority_monotone: boolean(),
   phase_derivation_agreement: boolean(),
 })
@@ -89,7 +84,6 @@ const KeeperPhaseDiagnosisSchema = object({
     heartbeat_healthy: boolean(),
     turn_healthy: boolean(),
     context_handoff_needed: boolean(),
-    compaction_active: boolean(),
     handoff_active: boolean(),
     operator_paused: boolean(),
     stop_requested: boolean(),
@@ -279,7 +273,6 @@ export const KeeperCompositeSnapshotSchema = object({
   turn_phase: KeeperCompositeTurnPhaseSchema,
   decision: object({ stage: KeeperCompositeDecisionStageSchema }),
   runtime: object({ state: KeeperCompositeRuntimeStateSchema }),
-  compaction: object({ stage: KeeperCompositeCompactionStageSchema }),
   measurement: KeeperCompositeMeasurementSchema,
   invariants: KeeperCompositeInvariantsSchema,
   fsm_guard_violations: number(),
@@ -328,7 +321,6 @@ export type KeeperCompositePhase = InferOutput<typeof KeeperCompositePhaseSchema
 export type KeeperCompositeTurnPhase = InferOutput<typeof KeeperCompositeTurnPhaseSchema>
 export type KeeperCompositeDecisionStage = InferOutput<typeof KeeperCompositeDecisionStageSchema>
 export type KeeperCompositeRuntimeState = InferOutput<typeof KeeperCompositeRuntimeStateSchema>
-export type KeeperCompositeCompactionStage = InferOutput<typeof KeeperCompositeCompactionStageSchema>
 
 export class CompositeSchemaDriftError extends SchemaDriftError {
   constructor(issues: readonly BaseIssue<unknown>[]) {

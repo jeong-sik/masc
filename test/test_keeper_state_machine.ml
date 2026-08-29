@@ -101,11 +101,6 @@ let test_derive_paused () =
   check phase_t "paused" SM.Paused (SM.derive_phase c)
 ;;
 
-let test_derive_compacting () =
-  let c = { running_conditions with compaction_active = true } in
-  check phase_t "compaction active = Compacting" SM.Compacting (SM.derive_phase c)
-;;
-
 let test_derive_failing_heartbeat () =
   let c = { running_conditions with heartbeat_healthy = false } in
   check phase_t "hb unhealthy = Failing" SM.Failing (SM.derive_phase c)
@@ -115,23 +110,6 @@ let test_derive_failing_turn () =
   let c = { running_conditions with turn_healthy = false } in
   check phase_t "turn unhealthy = Failing" SM.Failing (SM.derive_phase c)
 ;;
-
-let test_derive_priority_stop_over_compact () =
-  (* TLA+ fix: Stopped requires no buffer ops in flight.
-     stop + drain_complete + compaction_active → Draining (not Stopped). *)
-  let c =
-    { running_conditions with
-      stop_requested = true
-    ; drain_complete = true
-    ; compaction_active = true
-    }
-  in
-  check phase_t "compaction blocks Stopped → Draining" SM.Draining (SM.derive_phase c);
-  let c2 = { c with compaction_active = false } in
-  check phase_t "no buffer ops → Stopped" SM.Stopped (SM.derive_phase c2)
-;;
-
-(* ── apply_event tests ─────────────────────────────────── *)
 
 let test_apply_heartbeat_ok_stays_running () =
   let tr =
@@ -161,55 +139,6 @@ let test_apply_heartbeat_recover () =
   in
   check phase_t "Failing -> Running" SM.Running tr.new_phase;
   check bool "hb healthy" true tr.updated_conditions.heartbeat_healthy
-;;
-
-let test_apply_compaction_started () =
-  let tr =
-    apply_ok
-      ~current_phase:SM.Running
-      ~conditions:running_conditions
-      ~event:SM.Compaction_started
-  in
-  check phase_t "Running -> Compacting" SM.Compacting tr.new_phase;
-  check bool "compaction_active" true tr.updated_conditions.compaction_active
-;;
-
-let test_apply_compaction_started_from_failing_health_lane () =
-  let failing_conds = { running_conditions with heartbeat_healthy = false } in
-  let tr =
-    apply_ok
-      ~current_phase:SM.Failing
-      ~conditions:failing_conds
-      ~event:SM.Compaction_started
-  in
-  check phase_t "Failing -> Compacting" SM.Compacting tr.new_phase;
-  check bool "compaction_active" true tr.updated_conditions.compaction_active
-;;
-
-let test_apply_compaction_completed () =
-  let compacting_conds = { running_conditions with compaction_active = true } in
-  let tr =
-    apply_ok
-      ~current_phase:SM.Compacting
-      ~conditions:compacting_conds
-      ~event:SM.Compaction_completed
-  in
-  check phase_t "Compacting -> Running" SM.Running tr.new_phase;
-  check bool "compaction done" false tr.updated_conditions.compaction_active
-;;
-
-let test_apply_compaction_completed_returns_to_failing_health_lane () =
-  let compacting_conds =
-    { running_conditions with compaction_active = true; heartbeat_healthy = false }
-  in
-  let tr =
-    apply_ok
-      ~current_phase:SM.Compacting
-      ~conditions:compacting_conds
-      ~event:SM.Compaction_completed
-  in
-  check phase_t "Compacting -> Failing" SM.Failing tr.new_phase;
-  check bool "compaction done" false tr.updated_conditions.compaction_active
 ;;
 
 let test_apply_operator_pause_resume () =
@@ -374,18 +303,6 @@ let test_apply_credential_archived_to_crashed () =
 
 (* ── Transition coverage tests (#5273) ────────────────── *)
 
-let test_apply_compacting_to_crashed () =
-  (* Fiber dies during compaction -> Crashed *)
-  let compacting_conds = { running_conditions with compaction_active = true } in
-  let tr =
-    apply_ok
-      ~current_phase:SM.Compacting
-      ~conditions:compacting_conds
-      ~event:(SM.Fiber_terminated { outcome = "crash during compaction"; provider_id = None; http_status = None })
-  in
-  check phase_t "Compacting + fiber death -> Crashed" SM.Crashed tr.new_phase
-;;
-
 let test_apply_failing_to_draining () =
   (* Failing keeper receives stop request -> Draining *)
   let failing_conds = { running_conditions with heartbeat_healthy = false } in
@@ -463,11 +380,6 @@ let test_can_transition_running_to_buffer_states () =
     (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Failing);
   check
     bool
-    "-> Compacting"
-    true
-    (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Compacting);
-  check
-    bool
     "-> Draining"
     true
     (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Draining);
@@ -530,30 +442,6 @@ let test_can_transition_crashed_only_restart () =
     (SM.can_transition ~from_phase:SM.Crashed ~to_phase:SM.Paused)
 ;;
 
-let test_can_transition_compacting_to_failing () =
-  check
-    bool
-    "-> Failing"
-    true
-    (SM.can_transition ~from_phase:SM.Compacting ~to_phase:SM.Failing)
-;;
-
-let test_can_transition_compacting_to_crashed () =
-  check
-    bool
-    "-> Crashed"
-    true
-    (SM.can_transition ~from_phase:SM.Compacting ~to_phase:SM.Crashed)
-;;
-
-let test_can_transition_compacting_to_paused () =
-  check
-    bool
-    "-> Paused"
-    true
-    (SM.can_transition ~from_phase:SM.Compacting ~to_phase:SM.Paused)
-;;
-
 let test_can_transition_failing_to_draining () =
   check
     bool
@@ -606,7 +494,7 @@ let test_can_execute_turn_work_capable_phases () =
          ("work-capable phase " ^ SM.phase_to_string phase)
          true
          (SM.can_execute_turn phase))
-    [ SM.Running; SM.Failing; SM.Compacting ]
+    [ SM.Running; SM.Failing ]
 ;;
 
 let test_can_execute_turn_blocks_other_phases () =
@@ -673,9 +561,8 @@ let chain_apply ~init_phase ~init_conditions steps =
   go init_phase init_conditions 1000.0 steps
 ;;
 
-(** 1. Happy path: boot -> heartbeats -> compact -> graceful stop.
-    The most common keeper lifecycle in production.
-    9 transitions, 6 distinct phases visited. *)
+(** 1. Happy path: boot -> heartbeats -> graceful stop.
+    The most common keeper lifecycle in production. *)
 let test_chain_happy_path () =
   let init_conds = SM.default_conditions in
   let final_phase, _ =
@@ -685,9 +572,6 @@ let test_chain_happy_path () =
       [ SM.Fiber_started, SM.Running
       ; SM.Heartbeat_ok, SM.Running
       ; SM.Heartbeat_ok, SM.Running
-      ; SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed
-        , SM.Running )
       ; SM.Stop_requested, SM.Draining
       ; SM.Drain_complete, SM.Stopped
       ]
@@ -722,9 +606,6 @@ let test_chain_operator_intervention () =
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
       [ SM.Heartbeat_ok, SM.Running
-      ; SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed
-        , SM.Running )
       ; SM.Operator_pause, SM.Paused
       ; SM.Operator_resume, SM.Running
       ; SM.Heartbeat_ok, SM.Running
@@ -735,46 +616,21 @@ let test_chain_operator_intervention () =
   check phase_t "ends Stopped" SM.Stopped final_phase
 ;;
 
-(** 5. Compaction failure -> recovery.
-    When compaction fails to free enough context the keeper returns to
-    Running and keeps serving. *)
-let test_chain_compaction_fail_recovery () =
-  let final_phase, _ =
-    chain_apply
-      ~init_phase:SM.Running
-      ~init_conditions:running_conditions
-      [ SM.Compaction_started, SM.Compacting
-      ; SM.Compaction_failed { reason = "insufficient reduction" }, SM.Running
-      ; SM.Heartbeat_ok, SM.Running
-      ]
-  in
-  check phase_t "recovered after failed compaction" SM.Running final_phase
-;;
-
-(** 7. Long-running keeper: repeated compaction cycles.
-    Simulates a keeper that runs for hours, going through several
-    context management cycles before a clean shutdown.
-    15 transitions across 5 context management cycles. *)
+(** 5. Long-running keeper survives many health cycles and stops cleanly. *)
 let test_chain_long_running_multi_cycle () =
   let final_phase, _ =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ (* Cycle 1: compaction *)
-        SM.Heartbeat_ok, SM.Running
-      ; SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed
-        , SM.Running )
+      [ (* Cycle 1: health dips and recovers *)
+        SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
       ; SM.Heartbeat_ok, SM.Running
-      ; (* Cycle 2: compaction again *)
-        SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed
-        , SM.Running )
+      ; (* Cycle 2: same again *)
+        SM.Heartbeat_failed { consecutive = 2 }, SM.Failing
       ; SM.Heartbeat_ok, SM.Running
-      ; (* Cycle 4: compaction in new generation *)
-        SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed
-        , SM.Running )
+      ; (* Cycle 3: a turn fails and recovers *)
+        SM.Turn_failed { consecutive = 1 }, SM.Failing
+      ; SM.Turn_succeeded, SM.Running
       ; (* Clean shutdown *)
         SM.Stop_requested, SM.Draining
       ; SM.Drain_complete, SM.Stopped
@@ -783,26 +639,7 @@ let test_chain_long_running_multi_cycle () =
   check phase_t "clean stop after multi-cycle" SM.Stopped final_phase
 ;;
 
-(** 8. Crash during buffer state -> full recovery.
-    Fiber dies mid-compaction and the supervisor recovers it. *)
-let test_chain_crash_during_compaction_recovery () =
-  let final_phase, _ =
-    chain_apply
-      ~init_phase:SM.Running
-      ~init_conditions:running_conditions
-      [ SM.Compaction_started, SM.Compacting
-      ; SM.Fiber_terminated { outcome = "segfault in compactor"; provider_id = None; http_status = None }, SM.Crashed
-      ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
-      ; SM.Fiber_started, SM.Running
-      ; SM.Heartbeat_ok, SM.Running
-      ; SM.Heartbeat_ok, SM.Running
-      ]
-  in
-  check phase_t "fully recovered after compaction crash" SM.Running final_phase
-;;
-
-(** 9. Failing keeper receives stop -> drains -> stops.
-    Even unhealthy keepers should shut down gracefully. *)
+(** 8. Failing keeper stops gracefully. *)
 let test_chain_failing_graceful_stop () =
   let final_phase, _ =
     chain_apply
@@ -851,7 +688,6 @@ let test_chain_terminal_permanence () =
     [ SM.Heartbeat_ok
     ; SM.Fiber_started
     ; SM.Operator_resume
-    ; SM.Compaction_started
     ; SM.Supervisor_restart_attempt { attempt = 1 }
     ; SM.Stop_requested
     ; SM.Drain_complete
@@ -942,25 +778,6 @@ let test_chain_double_failure_recovery () =
   check phase_t "both failures must clear" SM.Running final_phase
 ;;
 
-(** 17. Operator stop during a buffer op.
-    A buffer op is in progress when the operator requests stop.
-    Stop has higher priority -> Draining, the buffer op still finishes. *)
-let test_chain_stop_during_buffer_op () =
-  (* TLA+ fix: the buffer op must finish before Stopped.
-     Drain_complete while compaction_active → stays Draining. *)
-  let final_phase, _ =
-    chain_apply
-      ~init_phase:SM.Running
-      ~init_conditions:running_conditions
-      [ SM.Compaction_started, SM.Compacting
-      ; SM.Operator_stop { remove_meta = false }, SM.Draining
-      ; SM.Drain_complete, SM.Draining
-      ; SM.Compaction_completed, SM.Stopped
-      ]
-  in
-  check phase_t "compaction completes then Stopped" SM.Stopped final_phase
-;;
-
 (** 18. Repeated crashes remain recoverable; Stopped alone is terminal. *)
 let test_chain_triple_restart_survives () =
   let final_phase, _ =
@@ -981,9 +798,6 @@ let test_chain_triple_restart_survives () =
       ; SM.Fiber_started, SM.Running
       ; (* Finally stabilizes *)
         SM.Heartbeat_ok, SM.Running
-      ; SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed
-        , SM.Running )
       ; SM.Heartbeat_ok, SM.Running
       ]
   in
@@ -1010,19 +824,13 @@ let test_chain_pause_while_failing_then_stop () =
 ;;
 
 (** 21. Maximum turbulence: every buffer state visited in one lifecycle.
-    Running -> Compacting -> Running ->
-    Failing -> Running -> Paused -> Running -> Draining -> Stopped.
-    10 transitions touching 7 distinct phases. *)
+    Running -> Failing -> Running -> Paused -> Running -> Draining -> Stopped. *)
 let test_chain_maximum_turbulence () =
   let final_phase, _ =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ (* Compaction cycle *)
-        SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed
-        , SM.Running )
-      ; (* Failure cycle *)
+      [ (* Failure cycle *)
         SM.Heartbeat_failed { consecutive = 2 }, SM.Failing
       ; SM.Heartbeat_ok, SM.Running
       ; (* Pause cycle *)
@@ -1040,7 +848,7 @@ let test_chain_maximum_turbulence () =
     interesting point in a lifecycle chain. This catches subtle condition
     leaks between phases. *)
 let test_chain_condition_snapshot_audit () =
-  (* Step 1: start and compact *)
+  (* Step 1: start *)
   let init_conds = SM.default_conditions in
   let tr1 =
     apply_ok ~current_phase:SM.Offline ~conditions:init_conds ~event:SM.Fiber_started
@@ -1049,7 +857,6 @@ let test_chain_condition_snapshot_audit () =
   check bool "fiber alive" true tr1.updated_conditions.fiber_alive;
   check bool "hb healthy" true tr1.updated_conditions.heartbeat_healthy;
   check bool "turn healthy" true tr1.updated_conditions.turn_healthy;
-  check bool "no compaction" false tr1.updated_conditions.compaction_active;
   check bool "restart request reset" false tr1.updated_conditions.restart_requested;
   (* Step 2: crash *)
   let tr2 =
@@ -1080,7 +887,6 @@ let test_chain_condition_snapshot_audit () =
   check bool "fiber alive (reset)" true tr4.updated_conditions.fiber_alive;
   check bool "hb healthy (reset)" true tr4.updated_conditions.heartbeat_healthy;
   check bool "turn healthy (reset)" true tr4.updated_conditions.turn_healthy;
-  check bool "compaction (reset)" false tr4.updated_conditions.compaction_active;
   check bool "restart request reset" false tr4.updated_conditions.restart_requested;
   check bool "drain (reset)" false tr4.updated_conditions.drain_complete
 ;;
@@ -1099,8 +905,6 @@ let test_invariant_derive_phase_idempotent () =
     ; "hb_fail", { running_conditions with heartbeat_healthy = false }
     ; ( "paused+failing"
       , { running_conditions with operator_paused = true; heartbeat_healthy = false } )
-    ; ( "compacting+paused"
-      , { running_conditions with compaction_active = true; operator_paused = true } )
     ; ( "draining"
       , { running_conditions with stop_requested = true; drain_complete = false } )
     ; "stopped", { running_conditions with stop_requested = true; drain_complete = true }
@@ -1131,26 +935,15 @@ let test_invariant_terminal_absorbing () =
     | `Hb -> { c with heartbeat_healthy = not c.heartbeat_healthy }
     | `Turn -> { c with turn_healthy = not c.turn_healthy }
     | `Hand_need -> { c with context_handoff_needed = not c.context_handoff_needed }
-    | `Comp -> { c with compaction_active = not c.compaction_active }
   in
-  (* Stopped: toggling non-critical fields should keep Stopped.
-     TLA+ fix: compaction_active is NOW critical for
-     Stopped — toggling it ON breaks the Stopped condition (→ Draining).
-     This is correct: buffer ops block terminal entry. *)
+  (* Stopped: toggling non-critical fields should keep Stopped. *)
   let stopped_non_critical = [ `Hb; `Turn; `Hand_need ] in
   List.iter
     (fun field ->
        let mutated = toggle stopped_conds field in
        let p = SM.derive_phase mutated in
        check phase_t "Stopped absorbs field toggle" SM.Stopped p)
-    stopped_non_critical;
-  (* Sensitivity: toggling compaction ON must BREAK Stopped *)
-  let with_comp = toggle stopped_conds `Comp in
-  check
-    phase_t
-    "compaction breaks Stopped → Draining"
-    SM.Draining
-    (SM.derive_phase with_comp)
+    stopped_non_critical
 ;;
 
 (** INV-3: Fiber_started resets are exhaustive.
@@ -1165,7 +958,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
     ; heartbeat_healthy = false
     ; turn_healthy = false
     ; context_handoff_needed = true
-    ; compaction_active = true
     ; operator_paused = true
     ; stop_requested = true
     ; restart_requested = true
@@ -1188,7 +980,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
   check bool "fiber_alive reset" true updated.fiber_alive;
   check bool "hb_healthy reset" true updated.heartbeat_healthy;
   check bool "turn_healthy reset" true updated.turn_healthy;
-  check bool "compaction_active reset" false updated.compaction_active;
   check bool "restart_requested reset" false updated.restart_requested;
   check bool "drain_complete reset" false updated.drain_complete;
   (* TLA+ liveness fix: stop_requested is now RESET on Fiber_started.
@@ -1279,27 +1070,7 @@ let test_invariant_no_cross_life_backoff_leakage () =
   check bool "restart_requested still false" false tr.updated_conditions.restart_requested
 ;;
 
-(** INV-6: No cross-life buffer state leakage.
-    compaction_active from life N must not persist in life N+1. *)
-let test_invariant_no_cross_life_buffer_leakage () =
-  let _, post_restart =
-    chain_apply
-      ~init_phase:SM.Running
-      ~init_conditions:running_conditions
-      [ SM.Compaction_started, SM.Compacting
-      ; SM.Fiber_terminated { outcome = "crash during compaction"; provider_id = None; http_status = None }, SM.Crashed
-      ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
-      ; SM.Fiber_started, SM.Running
-      ]
-  in
-  check bool "compaction not leaked" false post_restart.compaction_active;
-  (* New life starts clean — should be Running, not Compacting *)
-  check phase_t "clean Running" SM.Running (SM.derive_phase post_restart)
-;;
-
-(** INV-7: Operator intent monotonicity.
-    Once stop_requested=true, it NEVER reverts to false through normal events.
-    Only Fiber_started preserves (not clears) it. *)
+(** INV-6: stop_requested is monotonic within a fiber life. *)
 let test_invariant_stop_requested_monotonic () =
   (* TLA+ liveness fix: Fiber_started now resets stop_requested.
      All OTHER events must preserve it (monotonic within a fiber life). *)
@@ -1308,8 +1079,6 @@ let test_invariant_stop_requested_monotonic () =
     ; SM.Heartbeat_failed { consecutive = 1 }
     ; SM.Turn_succeeded
     ; SM.Turn_failed { consecutive = 1 }
-    ; SM.Compaction_started
-    ; SM.Compaction_completed
     ; SM.Operator_pause
     ; SM.Operator_resume
     ; (* Fiber_started intentionally OMITTED — it resets stop *)
@@ -1320,7 +1089,7 @@ let test_invariant_stop_requested_monotonic () =
         { context_ratio = 0.5
         ; message_count = 10
         ; token_count = 5000
-        ; context_actions = { compact = false; handoff = false }
+        ; context_actions = { handoff = false }
         }
     ]
   in
@@ -1376,9 +1145,6 @@ let test_invariant_derive_matches_matrix () =
     ; SM.Heartbeat_failed { consecutive = 5 }
     ; SM.Turn_succeeded
     ; SM.Turn_failed { consecutive = 3 }
-    ; SM.Compaction_started
-    ; SM.Compaction_completed
-    ; SM.Compaction_failed { reason = "test" }
     ; SM.Operator_pause
     ; SM.Operator_resume
     ; SM.Operator_stop { remove_meta = false }
@@ -1403,7 +1169,6 @@ let test_invariant_derive_matches_matrix () =
               | SM.Offline -> SM.default_conditions
               | SM.Running -> running_conditions
               | SM.Failing -> { running_conditions with heartbeat_healthy = false }
-              | SM.Compacting -> { running_conditions with compaction_active = true }
               | SM.Draining ->
                 { running_conditions with stop_requested = true; drain_complete = false }
               | SM.Paused -> { running_conditions with operator_paused = true }
@@ -1452,7 +1217,6 @@ let test_invariant_priority_chain () =
     ; heartbeat_healthy = true
     ; turn_healthy = true
     ; context_handoff_needed = true
-    ; compaction_active = true
     ; operator_paused = true
     ; stop_requested = true
     ; restart_requested = true
@@ -1460,17 +1224,7 @@ let test_invariant_priority_chain () =
     ; credential_archived = false
     }
   in
-  (* TLA+ fix: all_true has compaction active, so Stopped is blocked → Draining.
-     Clear buffer ops to reach Stopped. *)
-  check
-    phase_t
-    "all true: Draining (buffer ops block Stopped)"
-    SM.Draining
-    (SM.derive_phase all_true);
-  let clean_stopped =
-    { all_true with compaction_active = false }
-  in
-  check phase_t "no buffer ops: Stopped" SM.Stopped (SM.derive_phase clean_stopped);
+  check phase_t "all true: Stopped" SM.Stopped (SM.derive_phase all_true);
   (* Remove drain_complete: Draining wins *)
   let no_drain = { all_true with drain_complete = false } in
   check phase_t "no drain_complete: Draining" SM.Draining (SM.derive_phase no_drain);
@@ -1481,15 +1235,12 @@ let test_invariant_priority_chain () =
   let no_paused =
     { no_stop with operator_paused = false }
   in
-  check phase_t "no paused: Compacting" SM.Compacting (SM.derive_phase no_paused);
-  (* Remove compaction: healthy Running *)
-  let no_compact = { no_paused with compaction_active = false } in
-  check phase_t "no compact: Running" SM.Running (SM.derive_phase no_compact)
+  check phase_t "no paused: Running" SM.Running (SM.derive_phase no_paused)
 ;;
 
 (* ── Property: derive_phase x apply_event consistency ──── *)
 
-let test_all_phases_covered () = check int "9 phases" 9 (List.length SM.all_phases)
+let test_all_phases_covered () = check int "8 phases" 8 (List.length SM.all_phases)
 
 (* ── Set/Clear Coverage ────────────────────────────────── *)
 
@@ -1510,7 +1261,6 @@ let test_setclear_coverage () =
     ; ("heartbeat_healthy", fun c -> c.heartbeat_healthy)
     ; ("turn_healthy", fun c -> c.turn_healthy)
     ; ("context_handoff_needed", fun c -> c.context_handoff_needed)
-    ; ("compaction_active", fun c -> c.compaction_active)
     ; ("operator_paused", fun c -> c.operator_paused)
     ; ("stop_requested", fun c -> c.stop_requested)
     ; ("restart_requested", fun c -> c.restart_requested)
@@ -1525,7 +1275,6 @@ let test_setclear_coverage () =
     ; heartbeat_healthy = false
     ; turn_healthy = false
     ; context_handoff_needed = false
-    ; compaction_active = false
     ; operator_paused = false
     ; stop_requested = false
     ; restart_requested = false
@@ -1540,7 +1289,6 @@ let test_setclear_coverage () =
     ; heartbeat_healthy = true
     ; turn_healthy = true
     ; context_handoff_needed = true
-    ; compaction_active = true
     ; operator_paused = true
     ; stop_requested = true
     ; restart_requested = true
@@ -1549,7 +1297,7 @@ let test_setclear_coverage () =
     }
   in
   let context_actions_clean : SM.context_actions =
-    { compact = false; handoff = false }
+    { handoff = false }
   in
   (* Every event variant with representative payloads.
      Context_measured needs two variants to cover both true/false
@@ -1564,7 +1312,7 @@ let test_setclear_coverage () =
           { context_ratio = 0.95
           ; message_count = 100
           ; token_count = 50000
-          ; context_actions = { context_actions_clean with handoff = true }
+          ; context_actions = { SM.handoff = true }
           } )
     ; ( "Context_measured(clean)"
       , SM.Context_measured
@@ -1573,10 +1321,6 @@ let test_setclear_coverage () =
           ; token_count = 1000
           ; context_actions = context_actions_clean
           } )
-    ; "Compaction_started", SM.Compaction_started
-    ; ( "Compaction_completed"
-      , SM.Compaction_completed )
-    ; "Compaction_failed", SM.Compaction_failed { reason = "test" }
     ; "Operator_pause", SM.Operator_pause
     ; "Operator_resume", SM.Operator_resume
     ; "Operator_stop", SM.Operator_stop { remove_meta = true }
@@ -1586,7 +1330,6 @@ let test_setclear_coverage () =
     ; "Fiber_terminated", SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; "Supervisor_restart_attempt", SM.Supervisor_restart_attempt { attempt = 1 }
     ; "Credential_archived", SM.Credential_archived
-    ; "Operator_compact_requested", SM.Operator_compact_requested
     ; ( "Operator_clear_requested"
       , SM.Operator_clear_requested { preserve_system = true; reason = "test" } )
     ]
@@ -1706,13 +1449,8 @@ let () =
         ; test_case "Stopped" `Quick test_derive_stopped
         ; test_case "Draining" `Quick test_derive_draining
         ; test_case "Paused" `Quick test_derive_paused
-        ; test_case "Compacting" `Quick test_derive_compacting
         ; test_case "Failing (heartbeat)" `Quick test_derive_failing_heartbeat
         ; test_case "Failing (turn)" `Quick test_derive_failing_turn
-        ; test_case
-            "priority: Stop > Compact"
-            `Quick
-            test_derive_priority_stop_over_compact
         ] )
     ; ( "apply_event"
       , [ test_case "heartbeat ok stays" `Quick test_apply_heartbeat_ok_stays_running
@@ -1721,16 +1459,6 @@ let () =
             `Quick
             test_apply_heartbeat_fail_to_failing
         ; test_case "heartbeat recover" `Quick test_apply_heartbeat_recover
-        ; test_case "compaction started" `Quick test_apply_compaction_started
-        ; test_case
-            "compaction started from failing health lane"
-            `Quick
-            test_apply_compaction_started_from_failing_health_lane
-        ; test_case "compaction completed" `Quick test_apply_compaction_completed
-        ; test_case
-            "compaction completed returns to failing health lane"
-            `Quick
-            test_apply_compaction_completed_returns_to_failing_health_lane
         ; test_case "pause/resume" `Quick test_apply_operator_pause_resume
         ; test_case
             "paused resume commits latent blockers"
@@ -1759,10 +1487,6 @@ let () =
             "credential archived -> Crashed"
             `Quick
             test_apply_credential_archived_to_crashed
-        ; test_case
-            "Compacting + fiber death -> Crashed"
-            `Quick
-            test_apply_compacting_to_crashed
         ; test_case "Failing + stop -> Draining" `Quick test_apply_failing_to_draining
         ; test_case
             "Restarting + fiber death -> Crashed"
@@ -1788,15 +1512,6 @@ let () =
             "Crashed -> Restarting only"
             `Quick
             test_can_transition_crashed_only_restart
-        ; test_case
-            "Compacting -> Failing"
-            `Quick
-            test_can_transition_compacting_to_failing
-        ; test_case
-            "Compacting -> Crashed"
-            `Quick
-            test_can_transition_compacting_to_crashed
-        ; test_case "Compacting -> Paused" `Quick test_can_transition_compacting_to_paused
         ; test_case "Failing -> Draining" `Quick test_can_transition_failing_to_draining
         ; test_case
             "Restarting -> Crashed"
@@ -1823,7 +1538,7 @@ let () =
         ] )
     ; ( "lifecycle_chain"
       , [ test_case
-            "happy path (boot->compactandoff->stop)"
+            "happy path (boot->handoff->stop)"
             `Quick
             test_chain_happy_path
         ; test_case
@@ -1835,17 +1550,9 @@ let () =
             `Quick
             test_chain_operator_intervention
         ; test_case
-            "compaction fail -> recovery"
-            `Quick
-            test_chain_compaction_fail_recovery
-        ; test_case
             "long-running multi-cycle (5 cycles)"
             `Quick
             test_chain_long_running_multi_cycle
-        ; test_case
-            "crash during compaction -> recovery"
-            `Quick
-            test_chain_crash_during_compaction_recovery
         ; test_case "failing -> graceful stop" `Quick test_chain_failing_graceful_stop
         ; test_case
             "heartbeat flapping (8 oscillations)"
@@ -1866,7 +1573,6 @@ let () =
             "double failure (hb+turn) recovery"
             `Quick
             test_chain_double_failure_recovery
-        ; test_case "operator stop during compaction" `Quick test_chain_stop_during_buffer_op
         ; test_case "triple restart survives" `Quick test_chain_triple_restart_survives
         ; test_case
             "pause while failing then stop"
@@ -1896,10 +1602,6 @@ let () =
             "INV-5: no cross-life backoff leakage"
             `Quick
             test_invariant_no_cross_life_backoff_leakage
-        ; test_case
-            "INV-6: no cross-life buffer leakage"
-            `Quick
-            test_invariant_no_cross_life_buffer_leakage
         ; test_case
             "INV-7: stop_requested monotonic"
             `Quick
@@ -1940,14 +1642,6 @@ let () =
             "no precondition fires from healthy Running"
             `Quick
             KSP.test_no_precondition_fires_from_healthy_running
-        ; test_case
-            "only Operator_compact_requested reacts to buffer-op flags"
-            `Quick
-            KSP.test_only_operator_compact_reacts_to_buffer_flags
-        ; test_case
-            "Operator_compact_requested requires ~compaction_active"
-            `Quick
-            KSP.test_pre_operator_compact_during_compaction
         ; test_case
             "Operator_clear_requested is escape-hatch (no extra precondition)"
             `Quick

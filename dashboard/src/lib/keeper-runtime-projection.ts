@@ -389,7 +389,6 @@ function deriveFsmLanes(
     { axis: 'KTC', source: 'composite.turn_phase', value: compactToken(composite?.turn_phase ?? null, 'turn_phase unknown'), contributesToAttention: false },
     { axis: 'KDP', source: 'composite.decision.stage', value: compactToken(composite?.decision?.stage ?? null, 'decision unknown'), contributesToAttention: false },
     { axis: 'KCL', source: 'composite.runtime.state', value: compactToken(composite?.runtime?.state ?? null, 'runtime unknown'), contributesToAttention: false },
-    { axis: 'KMC', source: 'composite.compaction.stage', value: compactToken(composite?.compaction?.stage ?? null, 'compaction unknown'), contributesToAttention: false },
   ]
 }
 

@@ -606,11 +606,9 @@ let start_supervisor_sweep ctx =
                  variant added to [Keeper_state_machine.phase]. TOML
                  hot-reload only reconciles Running keepers; the other
                  other phases skip (a Stopped/Crashed
-                 keeper has no in-memory meta to update; a Compacting
-                 keeper is mid-transition and reconcile
-                 would race; Offline / Paused / Failing /
-                 Draining / Restarting are all transient or paused
-                 states). A future phase (e.g. Migrating, Healing)
+                 keeper has no in-memory meta to update;
+                 Offline / Paused / Failing / Draining / Restarting
+                 are all transient or paused states). A future phase (e.g. Migrating, Healing)
                  would silently skip reconcile under [_ -> ()] without
                  a review point. Same FSM Sparse Match anti-pattern as
                  PR #14857. *)
@@ -630,7 +628,6 @@ let start_supervisor_sweep ctx =
                          e)
               | Keeper_state_machine.Offline
               | Keeper_state_machine.Failing
-              | Keeper_state_machine.Compacting
               | Keeper_state_machine.Draining
               | Keeper_state_machine.Paused
               | Keeper_state_machine.Stopped

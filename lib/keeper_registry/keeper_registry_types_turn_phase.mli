@@ -7,7 +7,6 @@ type turn_phase =
   | Turn_prompting [@tla.active]
   | Turn_routing [@tla.active]
   | Turn_executing [@tla.active]
-  | Turn_compacting [@tla.active]
   | Turn_finalizing [@tla.active]
   | Turn_exhausted [@tla.terminal]
 [@@deriving tla]
@@ -16,7 +15,6 @@ type turn_idle
 type turn_prompting
 type turn_routing
 type turn_executing
-type turn_compacting
 type turn_finalizing
 type turn_exhausted
 
@@ -25,7 +23,6 @@ type 'a turn_phase_witness =
   | Turn_prompting : turn_prompting turn_phase_witness
   | Turn_routing : turn_routing turn_phase_witness
   | Turn_executing : turn_executing turn_phase_witness
-  | Turn_compacting : turn_compacting turn_phase_witness
   | Turn_finalizing : turn_finalizing turn_phase_witness
   | Turn_exhausted : turn_exhausted turn_phase_witness
 
@@ -47,12 +44,8 @@ module Turn_phase_transition : sig
     | Routing_to_exhausted : (turn_routing, turn_exhausted) t
     | Executing_to_prompting : (turn_executing, turn_prompting) t
     | Executing_to_routing : (turn_executing, turn_routing) t
-    | Executing_to_compacting : (turn_executing, turn_compacting) t
     | Executing_to_finalizing : (turn_executing, turn_finalizing) t
     | Executing_to_exhausted : (turn_executing, turn_exhausted) t
-    | Compacting_to_prompting : (turn_compacting, turn_prompting) t
-    | Compacting_to_finalizing : (turn_compacting, turn_finalizing) t
-    | Compacting_to_exhausted : (turn_compacting, turn_exhausted) t
     | Finalizing_to_prompting : (turn_finalizing, turn_prompting) t
     | Finalizing_to_routing : (turn_finalizing, turn_routing) t
     | Finalizing_to_executing : (turn_finalizing, turn_executing) t
@@ -69,22 +62,14 @@ end
 type turn_phase_transition_spec_violation =
   | Idle_to_routing
   | Idle_to_executing
-  | Idle_to_compacting
   | Idle_to_finalizing
   | Idle_to_exhausted
   | Prompting_to_idle
-  | Prompting_to_compacting
   | Routing_to_idle
-  | Routing_to_compacting
   | Routing_to_finalizing
   | Executing_to_idle
-  | Compacting_to_idle
-  | Compacting_to_routing
-  | Compacting_to_executing
   | Finalizing_to_idle
-  | Finalizing_to_compacting
   | Exhausted_to_idle
-  | Exhausted_to_compacting
   | Exhausted_to_finalizing
 
 val turn_phase_transition_spec_violation_to_tag

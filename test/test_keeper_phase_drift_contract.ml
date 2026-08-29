@@ -26,7 +26,6 @@ let every_phase : KSM.phase list =
   [ Offline
   ; Running
   ; Failing
-  ; Compacting
   ; Draining
   ; Paused
   ; Stopped
@@ -41,7 +40,6 @@ let _phase_is_named : KSM.phase -> unit = function
   | Offline
   | Running
   | Failing
-  | Compacting
   | Draining
   | Paused
   | Stopped

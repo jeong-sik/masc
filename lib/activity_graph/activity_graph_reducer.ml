@@ -32,7 +32,6 @@ let payload_string field json =
 
 let is_generic_status = function
   | Unset | Active | Observed -> true
-  | Compacting
   | Todo | Claimed | In_progress | Done | Cancelled
   | Posted | Discussed | Workspace -> false
 
@@ -140,14 +139,6 @@ let reduce_event ~nodes ~edges (value : event) =
   in
   let set_subject_status status =
     match subject_id with
-    | Some id -> (
-        match Hashtbl.find_opt nodes id with
-        | Some node -> Hashtbl.replace nodes id { node with status }
-        | None -> ())
-    | None -> ()
-  in
-  let set_actor_status status =
-    match actor_id with
     | Some id -> (
         match Hashtbl.find_opt nodes id with
         | Some node -> Hashtbl.replace nodes id { node with status }
@@ -264,5 +255,4 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_edge edges ~source ~target ~kind:"votes_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | "keeper.compaction" -> set_actor_status Compacting
   | _kind -> Log.Misc.debug "reduce_event: unhandled kind=%s" _kind))

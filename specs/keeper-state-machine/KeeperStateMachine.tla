@@ -3,9 +3,9 @@
 \*
 \* This model contains only typed intent and durable lifecycle state.
 \* Runtime observations may select an observable phase, but only explicit
-\* operator intent may pause or stop a Keeper. Failing and
-\* Compacting remain work-capable; they do not grant or deny
-\* effects. External effects are authorized independently by the Gate.
+\* operator intent may pause or stop a Keeper. Failing remains
+\* work-capable; it does not grant or deny effects. External effects
+\* are authorized independently by the Gate.
 \*
 \* Mirrors the lifecycle authority subset of
 \* lib/keeper_registry/keeper_state_machine.{ml,mli}.
@@ -26,7 +26,6 @@ PhaseSet == {
     "Offline",
     "Running",
     "Failing",
-    "Compacting",
     "Draining",
     "Paused",
     "Stopped",
@@ -37,7 +36,7 @@ PhaseSet == {
 \* These phases remain eligible to continue lane-local work. The set has no
 \* effect-authorization meaning; the Gate owns that boundary.
 WorkCapable == {
-    "Running", "Failing", "Compacting"
+    "Running", "Failing"
 }
 
 Terminal == {"Stopped"}
@@ -125,20 +124,6 @@ ContextOverflowObserved ==
     /\ phase \notin Terminal
     /\ UNCHANGED vars
 
-\* Compaction is an explicit lifecycle event. Its phase remains
-\* work-capable and does not suppress unrelated lane activity.
-CompactionStarted ==
-    /\ phase \in WorkCapable
-    /\ phase' = "Compacting"
-    /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested >>
-
-CompactionFinished ==
-    /\ phase = "Compacting"
-    /\ phase' = "Running"
-    /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested >>
-
 TerminalStutter ==
     /\ phase \in Terminal
     /\ UNCHANGED vars
@@ -154,8 +139,6 @@ Next ==
     \/ FailureObserved
     \/ FailureCleared
     \/ ContextOverflowObserved
-    \/ CompactionStarted
-    \/ CompactionFinished
     \/ TerminalStutter
 
 Spec == Init /\ [][Next]_vars

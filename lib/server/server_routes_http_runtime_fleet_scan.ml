@@ -60,7 +60,6 @@ let running_keeper_names ?base_path () =
          if e.meta.paused then None else Some e.name
        | Keeper_state_machine.Offline
        | Keeper_state_machine.Failing
-       | Keeper_state_machine.Compacting
        | Keeper_state_machine.Draining
        | Keeper_state_machine.Paused
        | Keeper_state_machine.Stopped
@@ -433,7 +432,6 @@ let keeper_phase_snapshot ?base_path () =
           | Keeper_state_machine.Failing ->
             acc
           | Keeper_state_machine.Offline
-          | Keeper_state_machine.Compacting
           | Keeper_state_machine.Draining
           | Keeper_state_machine.Paused
           | Keeper_state_machine.Stopped

@@ -10,7 +10,6 @@ export type CompositeObservation = {
   turn: KeeperCompositeSnapshot['turn_phase']
   decision: KeeperCompositeSnapshot['decision']['stage']
   runtime: KeeperCompositeSnapshot['runtime']['state']
-  compaction: KeeperCompositeSnapshot['compaction']['stage']
 }
 
 export type LaneKey = keyof Omit<CompositeObservation, 'ts'>
@@ -24,7 +23,6 @@ export function extractLaneValue(
     case 'turn': return snapshot.turn_phase
     case 'decision': return snapshot.decision.stage
     case 'runtime': return snapshot.runtime.state
-    case 'compaction': return snapshot.compaction.stage
   }
 }
 
@@ -101,9 +99,7 @@ export const MAX_OBSERVATIONS = 30
 export const MAX_TRANSITION_HISTORY = 20
 
 const ZERO_VIOLATIONS: InvariantViolationCounts = {
-  phase_turn_alignment: 0,
   no_runtime_before_measurement: 0,
-  compaction_atomicity: 0,
   event_priority_monotone: 0,
   phase_derivation_agreement: 0,
 }
@@ -137,13 +133,10 @@ export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [
   { field: 'KTC', key: 'turn' },
   { field: 'KDP', key: 'decision' },
   { field: 'KCL', key: 'runtime' },
-  { field: 'KMC', key: 'compaction' },
 ]
 
 export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> = {
-  phase_turn_alignment: '단계 ⇔ 턴',
   no_runtime_before_measurement: 'Runtime 순서',
-  compaction_atomicity: '압축 원자성',
   event_priority_monotone: '이벤트 우선순위',
   phase_derivation_agreement: 'Phase 유도 일치',
 }
@@ -153,19 +146,18 @@ export const LANE_LABELS: Record<LaneKey, string> = {
   turn: '턴 주기',
   decision: '의사결정',
   runtime: '런타임',
-  compaction: '컨텍스트 압축',
 }
 
 /** Korean display names for raw FSM state values.
     Replaces English internals in PipelineStep and Swimlane.
 
-    KSM lifecycle keys (and the shared `compacting` token) source their
-    labels from the fleet-tone PHASE_LABEL_KO SSOT — the PascalCase
+    KSM lifecycle keys source their labels from the fleet-tone
+    PHASE_LABEL_KO SSOT — the PascalCase
     KeeperPhase spellings and the snake_case wire spellings map 1:1 onto
     the lowercase KeeperPhaseToken keys. `offline`/`Offline` have no
     KeeperPhaseToken counterpart (the token union has no 'offline' arm),
     so they keep the local '오프라인' literal. Non-KSM lane keys (KTC /
-    KDP / KCL / KMC) are different axes and keep their own labels. */
+    KDP / KCL) are different axes and keep their own labels. */
 export const STATE_DISPLAY_NAMES: Record<string, string> = {
   // KTC (unique keys — shared keys like idle/exhausted moved below)
   prompting: '프롬프트 구성',
@@ -176,15 +168,12 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   undecided: '대기',
   guard_ok: '가드 통과',
   tool_policy_selected: '도구 목록 적용',
-  // KCL + shared keys (idle, exhausted, compacting, done)
+  // KCL + shared keys (idle, exhausted, done)
   idle: '대기',
   selecting: '선택 중',
   trying: '시도 중',
   done: '완료',
   exhausted: '소진',
-  compacting: PHASE_LABEL_KO.compacting,
-  // KMC
-  accumulating: '수집 중',
   // KSM
   running: PHASE_LABEL_KO.running,
   failing: PHASE_LABEL_KO.failing,
@@ -195,7 +184,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   crashed: PHASE_LABEL_KO.crashed,
   restarting: PHASE_LABEL_KO.restarting,
   Running: PHASE_LABEL_KO.running,
-  Compacting: PHASE_LABEL_KO.compacting,
   Failing: PHASE_LABEL_KO.failing,
   Crashed: PHASE_LABEL_KO.crashed,
   Offline: '오프라인',
@@ -491,7 +479,6 @@ export type StateEntries = {
   turn: number
   decision: number
   runtime: number
-  compaction: number
 }
 
 export type TimeAxisTick = { ts: number; label: string }

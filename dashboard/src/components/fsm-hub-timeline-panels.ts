@@ -48,7 +48,6 @@ const SWIMLANE_LANES: Array<{
   { key: 'turn', label: '턴 주기', short: 'KTC' },
   { key: 'decision', label: '의사결정', short: 'KDP' },
   { key: 'runtime', label: '런타임', short: 'KCL' },
-  { key: 'compaction', label: '컨텍스트 압축', short: 'KMC' },
 ]
 
 // Wire format is lowercase + snake_case for every lane:
@@ -280,8 +279,7 @@ export function SwimlaneTimeline({
                 prev.phase !== obs.phase ||
                 prev.turn !== obs.turn ||
                 prev.decision !== obs.decision ||
-                prev.runtime !== obs.runtime ||
-                prev.compaction !== obs.compaction
+                prev.runtime !== obs.runtime
               )
               const dotCls = hasTransition
                 ? 'bg-[var(--indigo)] ring-1 ring-[var(--indigo-40)]'
@@ -291,7 +289,6 @@ export function SwimlaneTimeline({
                 ...(prev.turn !== obs.turn ? ['KTC'] : []),
                 ...(prev.decision !== obs.decision ? ['KDP'] : []),
                 ...(prev.runtime !== obs.runtime ? ['KCL'] : []),
-                ...(prev.compaction !== obs.compaction ? ['KMC'] : []),
               ]
               const tip = `${fmtAbs(obs.ts)}${changedLanes.length > 0 ? ` · ${changedLanes.join(', ')} changed` : ' · no change'}`
               return html`

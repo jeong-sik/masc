@@ -23,7 +23,6 @@ function obs(overrides: Partial<CompositeObservation> & { ts: number }): Composi
     turn: 'idle',
     decision: 'undecided',
     runtime: 'idle',
-    compaction: 'accumulating',
     ...overrides,
   }
 }
@@ -200,10 +199,6 @@ describe('inferTransitionReason', () => {
     expect(inferTransitionReason('KTC', 'compacting', 'idle')).toBeNull()
   })
 
-  it('returns reason for KTC to compacting', () => {
-    const result = inferTransitionReason('KTC', 'executing', 'compacting')
-    expect(result).toContain('compaction')
-  })
 
 })
 
@@ -330,14 +325,13 @@ describe('deriveStateEntries', () => {
   it('handles all 5 lanes', () => {
     const observations = [
       obs({ ts: 100 }),
-      obs({ ts: 200, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'trying', compaction: 'compacting' }),
+      obs({ ts: 200, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'trying' }),
     ]
     const result = deriveStateEntries(observations)
     expect(result!.phase).toBe(200)
     expect(result!.turn).toBe(200)
     expect(result!.decision).toBe(200)
     expect(result!.runtime).toBe(200)
-    expect(result!.compaction).toBe(200)
   })
 })
 

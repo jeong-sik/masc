@@ -6,7 +6,7 @@
 (* stores in [Keeper_registry.current_turn_observation]. It is not the old *)
 (* "tool_call/side_effect/done" linear storyboard; the current runtime is  *)
 (* a 3-axis machine:                                                        *)
-(*   - turn_phase      : prompting | routing | executing | compacting |    *)
+(*   - turn_phase      : prompting | routing | executing |               *)
 (*                       finalizing | exhausted                            *)
 (*   - decision_stage  : undecided | guard_ok | tool_policy_selected       *)
 (*   - runtime_state   : idle | selecting | trying | done | exhausted      *)
@@ -39,7 +39,6 @@
 (*     line 535   set_turn_decision_stage                                  *)
 (*     line 544   set_turn_runtime_state                                   *)
 (*     line 566   set_turn_selected_model                                  *)
-(*     line 575   prepare_turn_retry_after_compaction                      *)
 (*     line 614   mark_turn_finished                                       *)
 (*                                                                         *)
 (*   lib/keeper/keeper_unified_turn.ml -- top-level turn orchestration     *)
@@ -50,7 +49,6 @@
 (*     now materialised inside the disclosure hook below (atomic group     *)
 (*     with SelectToolPolicy) so the [idle -> trying] jump is avoided.     *)
 (*     line 1813  set_turn_selected_model  (RuntimeDone)                   *)
-(*     line 2052  prepare_turn_retry_after_compaction  (RetryAfterCompaction) *)
 (*                                                                         *)
 (*   lib/keeper/keeper_run_tools.ml -- BeforeTurnParams disclosure hook    *)
 (*     set_turn_decision_stage = Decision_tool_policy_selected             *)
@@ -70,7 +68,6 @@
 (*                                                                         *)
 (*   This spec is the COMPOSITE -- the 3-axis invariants below             *)
 (*     (SelectingRequiresToolPolicy, ExecutingRequiresTrying,              *)
-(*      CompactingRequiresTrying, TerminalRuntimeRequiresFinalizing)       *)
 (*   are CROSS-AXIS and cannot be expressed in any single-axis sibling.    *)
 (*   That is the load-bearing reason this spec is not redundant.           *)
 (*                                                                         *)
@@ -144,7 +141,7 @@ vars ==
 \* cross-axis invariants (SelectingRequiresToolPolicy etc.) are
 \* conditional on specific phase membership and are not affected.
 TurnPhaseSet == {"idle", "prompting", "routing", "executing",
-                 "compacting", "finalizing", "exhausted"}
+                 "finalizing", "exhausted"}
 DecisionSet  == {"undecided", "guard_ok", "tool_policy_selected"}
 RuntimeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
 ActionSet    == {
@@ -155,8 +152,6 @@ ActionSet    == {
     "RuntimeTrying",
     "RuntimeDone",
     "RuntimeExhausted",
-    "EnterCompacting",
-    "RetryAfterCompaction",
     "FinishTurn"
 }
 InvariantSet == {
@@ -164,7 +159,6 @@ InvariantSet == {
     "IdleRequiresNotLive",
     "SelectingRequiresToolPolicy",
     "ExecutingRequiresTrying",
-    "CompactingRequiresTrying",
     "TerminalRuntimeRequiresFinalizing"
 }
 
@@ -263,28 +257,6 @@ RuntimeExhausted ==
     /\ UNCHANGED <<turn_live, decision_stage, measurement_bound,
                     selected_model_bound>>
 
-\* Overflow recovery enters explicit compaction while preserving the trying edge.
-EnterCompacting ==
-    /\ turn_live
-    /\ turn_phase = "executing"
-    /\ runtime_state = "trying"
-    /\ turn_phase' = "compacting"
-    /\ UNCHANGED <<turn_live, decision_stage, runtime_state,
-                    measurement_bound, selected_model_bound>>
-
-\* keeper_unified_turn.ml: prepare_turn_retry_after_compaction
-\* Re-enters prompting with the measurement still bound, but clears the old
-\* runtime attempt and selected model before the next retry.
-RetryAfterCompaction ==
-    /\ turn_live
-    /\ turn_phase = "compacting"
-    /\ runtime_state = "trying"
-    /\ turn_phase' = "prompting"
-    /\ decision_stage' = "guard_ok"
-    /\ runtime_state' = "idle"
-    /\ selected_model_bound' = FALSE
-    /\ UNCHANGED <<turn_live, measurement_bound>>
-
 \* keeper_unified_turn.ml finally block: mark_turn_finished clears live state.
 FinishTurn ==
     /\ turn_live
@@ -304,8 +276,6 @@ Next ==
     \/ RuntimeTrying
     \/ RuntimeDone
     \/ RuntimeExhausted
-    \/ EnterCompacting
-    \/ RetryAfterCompaction
     \/ FinishTurn
 
 \* ── Bug Model: Selecting Without Tool Policy ───────────────
@@ -357,12 +327,6 @@ ExecutingRequiresTrying ==
         /\ runtime_state = "trying"
         /\ decision_stage = "tool_policy_selected"
 
-CompactingRequiresTrying ==
-    turn_phase = "compacting" =>
-        /\ turn_live
-        /\ runtime_state = "trying"
-        /\ decision_stage = "tool_policy_selected"
-
 TerminalRuntimeRequiresFinalizing ==
     runtime_state \in {"done", "exhausted"} =>
         /\ turn_live
@@ -375,7 +339,6 @@ Safety ==
     /\ IdleRequiresNotLive
     /\ SelectingRequiresToolPolicy
     /\ ExecutingRequiresTrying
-    /\ CompactingRequiresTrying
     /\ TerminalRuntimeRequiresFinalizing
 
 (* Wrapper for buggy cfg — must be defined AFTER the invariant it references. *)

@@ -61,12 +61,9 @@ function snapshot(
     turn_phase: 'idle',
     decision: { stage: 'undecided' },
     runtime: { state: 'idle' },
-    compaction: { stage: 'accumulating' },
     measurement: { captured: true },
     invariants: {
-      phase_turn_alignment: allHold,
       no_runtime_before_measurement: allHold,
-      compaction_atomicity: allHold,
       event_priority_monotone: allHold,
       phase_derivation_agreement: allHold,
       ...overrides.violate,
@@ -169,9 +166,7 @@ describe('tallyInvariantViolations', () => {
   it('returns all zeros when every keeper satisfies every invariant', () => {
     const s = [snapshot({ name: 'a' }), snapshot({ name: 'b' })]
     expect(tallyInvariantViolations(s)).toEqual({
-      phase_turn_alignment: 0,
       no_runtime_before_measurement: 0,
-      compaction_atomicity: 0,
       event_priority_monotone: 0,
       phase_derivation_agreement: 0,
     })
@@ -179,22 +174,19 @@ describe('tallyInvariantViolations', () => {
 
   it('counts one per keeper per violated invariant', () => {
     const s = [
-      snapshot({ name: 'a', violate: { phase_turn_alignment: false } }),
-      snapshot({ name: 'b', violate: { phase_turn_alignment: false, compaction_atomicity: false } }),
+      snapshot({ name: 'a', violate: { no_runtime_before_measurement: false } }),
+      snapshot({ name: 'b', violate: { no_runtime_before_measurement: false, event_priority_monotone: false } }),
       snapshot({ name: 'c' }),
     ]
     const t = tallyInvariantViolations(s)
-    expect(t.phase_turn_alignment).toBe(2)
-    expect(t.compaction_atomicity).toBe(1)
-    expect(t.no_runtime_before_measurement).toBe(0)
-    expect(t.event_priority_monotone).toBe(0)
+    expect(t.no_runtime_before_measurement).toBe(2)
+    expect(t.event_priority_monotone).toBe(1)
+    expect(t.phase_derivation_agreement).toBe(0)
   })
 
   it('treats an empty fleet as clean', () => {
     expect(tallyInvariantViolations([])).toEqual({
-      phase_turn_alignment: 0,
       no_runtime_before_measurement: 0,
-      compaction_atomicity: 0,
       event_priority_monotone: 0,
       phase_derivation_agreement: 0,
     })
@@ -568,7 +560,6 @@ describe('pushObservation', () => {
     expect(alpha.turn).toEqual(['idle'])
     expect(alpha.decision).toEqual(['undecided'])
     expect(alpha.runtime).toEqual(['idle'])
-    expect(alpha.compaction).toEqual(['accumulating'])
   })
 
   it('appends new observations while preserving prior ones', () => {

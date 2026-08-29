@@ -659,7 +659,6 @@ type keeper_lane_phase =
   | Lane_phase_offline
   | Lane_phase_running
   | Lane_phase_failing
-  | Lane_phase_compacting
   | Lane_phase_draining
   | Lane_phase_paused
   | Lane_phase_stopped
@@ -675,7 +674,6 @@ type keeper_lane_turn_phase =
   | Lane_turn_prompting
   | Lane_turn_routing
   | Lane_turn_executing
-  | Lane_turn_compacting
   | Lane_turn_finalizing
   | Lane_turn_exhausted
   | Lane_turn_unknown of string

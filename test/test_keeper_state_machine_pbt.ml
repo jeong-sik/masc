@@ -12,10 +12,7 @@ module IC = Masc.Keeper_invariant_check
 let gen_context_actions : SM.context_actions QCheck.Gen.t =
   let open QCheck.Gen in
   let* handoff = bool in
-  let* compact = bool in
-  return SM.{
-    compact; handoff;
-  }
+  return SM.{ handoff }
 
 let gen_event_chaos : SM.event QCheck.Gen.t =
   let open QCheck.Gen in
@@ -31,9 +28,6 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
      return (SM.Context_measured {
        context_ratio = ratio; message_count = 50;
        token_count = 5000; context_actions }));
-    return SM.Compaction_started;
-    return SM.Compaction_completed;
-    return (SM.Compaction_failed { reason = "pbt_test" });
     return SM.Operator_pause;
     return SM.Operator_resume;
     return (SM.Operator_stop { remove_meta = false });
@@ -56,8 +50,7 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Turn_failed { consecutive = 1 };
         SM.Context_measured {
           context_ratio = 0.5; message_count = 50; token_count = 5000;
-          context_actions = { compact = false; handoff = false }};
-        SM.Compaction_started;
+          context_actions = { handoff = false }};
         SM.Operator_pause;
         SM.Stop_requested;
         SM.Operator_stop { remove_meta = false };
@@ -68,20 +61,12 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
         SM.Stop_requested; SM.Operator_pause;
       ]
-    | SM.Compacting ->
-      [ SM.Compaction_completed;
-        SM.Compaction_failed { reason = "test" };
-        SM.Heartbeat_failed { consecutive = 1 };
-        SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
-        SM.Stop_requested;
-      ]
     | SM.Draining ->
       [ SM.Drain_complete;
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
       ]
     | SM.Paused ->
       [ SM.Operator_resume;
-        SM.Operator_compact_requested;
         SM.Operator_clear_requested { preserve_system = true; reason = "pbt" };
         SM.Stop_requested; SM.Operator_stop { remove_meta = false };
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };

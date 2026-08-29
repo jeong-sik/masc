@@ -14,7 +14,6 @@ let phase_to_mermaid_id = function
   | Offline -> "Offline"
   | Running -> "Running"
   | Failing -> "Failing"
-  | Compacting -> "Compacting"
   | Draining -> "Draining"
   | Paused -> "Paused"
   | Stopped -> "Stopped"
@@ -32,7 +31,6 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Offline --> Draining : stop requested\n";
   p "    Offline --> Stopped : stop while not started\n";
   p "    Running --> Failing : hb/turn/reconcile fail\n";
-  p "    Running --> Compacting : compact start\n";
   p "    Running --> Draining : stop requested\n";
   p "    Running --> Paused : operator pause\n";
   p "    Running --> Stopped : stop requested\n";
@@ -41,15 +39,9 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Failing --> Crashed : fiber death\n";
   p "    Failing --> Draining : stop requested\n";
   p "    Failing --> Paused : operator pause\n";
-  p "    Compacting --> Running : compact done\n";
-  p "    Compacting --> Running : compact failed (Lane retry queued)\n";
-  p "    Compacting --> Failing : hb fail\n";
-  p "    Compacting --> Crashed : fiber death\n";
-  p "    Compacting --> Draining : stop requested\n";
   p "    Draining --> Stopped : drain done\n";
   p "    Draining --> Crashed : fiber death\n";
   p "    Paused --> Running : operator resume\n";
-  p "    Paused --> Compacting : operator compact\n";
   p "    Paused --> Draining : stop requested\n";
   p "    Paused --> Stopped : stop requested\n";
   p "    Paused --> Crashed : fiber death\n";
@@ -67,7 +59,7 @@ let phase_to_mermaid ~(current : phase) : string =
   (match current with
    | Stopped ->
      p "    class %s terminal\n" (phase_to_mermaid_id current)
-   | Failing | Compacting | Draining | Restarting | Crashed ->
+   | Failing | Draining | Restarting | Crashed ->
      p "    class %s buffer\n" (phase_to_mermaid_id current)
    | Running | Offline | Paused ->
      p "    class %s active\n" (phase_to_mermaid_id current));

@@ -89,7 +89,6 @@ type turn_phase =
   | Turn_prompting [@tla.active]
   | Turn_routing [@tla.active]
   | Turn_executing [@tla.active]
-  | Turn_compacting [@tla.active]
   | Turn_finalizing [@tla.active]
   | Turn_exhausted [@tla.terminal]
 [@@deriving tla]
@@ -100,7 +99,6 @@ type turn_idle
 type turn_prompting
 type turn_routing
 type turn_executing
-type turn_compacting
 type turn_finalizing
 type turn_exhausted
 
@@ -109,7 +107,6 @@ type 'a turn_phase_witness =
   | Turn_prompting : turn_prompting turn_phase_witness
   | Turn_routing : turn_routing turn_phase_witness
   | Turn_executing : turn_executing turn_phase_witness
-  | Turn_compacting : turn_compacting turn_phase_witness
   | Turn_finalizing : turn_finalizing turn_phase_witness
   | Turn_exhausted : turn_exhausted turn_phase_witness
 
@@ -142,12 +139,8 @@ module Turn_phase_transition : sig
     | Routing_to_exhausted : (turn_routing, turn_exhausted) t
     | Executing_to_prompting : (turn_executing, turn_prompting) t
     | Executing_to_routing : (turn_executing, turn_routing) t
-    | Executing_to_compacting : (turn_executing, turn_compacting) t
     | Executing_to_finalizing : (turn_executing, turn_finalizing) t
     | Executing_to_exhausted : (turn_executing, turn_exhausted) t
-    | Compacting_to_prompting : (turn_compacting, turn_prompting) t
-    | Compacting_to_finalizing : (turn_compacting, turn_finalizing) t
-    | Compacting_to_exhausted : (turn_compacting, turn_exhausted) t
     | Finalizing_to_prompting : (turn_finalizing, turn_prompting) t
     | Finalizing_to_routing : (turn_finalizing, turn_routing) t
     | Finalizing_to_executing : (turn_finalizing, turn_executing) t
@@ -165,22 +158,14 @@ end
 type turn_phase_transition_spec_violation =
   | Idle_to_routing
   | Idle_to_executing
-  | Idle_to_compacting
   | Idle_to_finalizing
   | Idle_to_exhausted
   | Prompting_to_idle
-  | Prompting_to_compacting
   | Routing_to_idle
-  | Routing_to_compacting
   | Routing_to_finalizing
   | Executing_to_idle
-  | Compacting_to_idle
-  | Compacting_to_routing
-  | Compacting_to_executing
   | Finalizing_to_idle
-  | Finalizing_to_compacting
   | Exhausted_to_idle
-  | Exhausted_to_compacting
   | Exhausted_to_finalizing
 
 val turn_phase_transition_spec_violation_to_tag
@@ -283,66 +268,6 @@ module Decision_transition : sig
 
   val to_tag : ('from, 'to_) t -> string
 end
-
-type compaction_stage =
-  | Compaction_accumulating [@tla.idle]
-  | Compaction_compacting [@tla.active]
-  | Compaction_done [@tla.terminal]
-[@@deriving tla]
-
-(** {1 Compaction stage GADT infrastructure (Cycle 21 / Tier B5)} *)
-
-type compaction_accumulating
-type compaction_compacting
-type compaction_done
-
-type 'a compaction_stage_witness =
-  | Compaction_accumulating : compaction_accumulating compaction_stage_witness
-  | Compaction_compacting : compaction_compacting compaction_stage_witness
-  | Compaction_done : compaction_done compaction_stage_witness
-
-type packed_compaction_stage =
-  | Packed : 'a compaction_stage_witness -> packed_compaction_stage
-
-val compaction_stage_to_witness : compaction_stage -> packed_compaction_stage
-val witness_to_compaction_stage : packed_compaction_stage -> compaction_stage
-
-(** Diagnostic label using the constructor name (e.g. ["Compaction_done"]).
-    Used by the [Compaction_transition_violation] [Printexc] printer. *)
-val packed_compaction_stage_label : packed_compaction_stage -> string
-
-(** RFC-0072 Phase 6: typed error for forbidden compaction-stage
-    transitions. *)
-type compaction_transition_spec_violation =
-  | Accumulating_to_done
-  | Done_to_accumulating
-
-val compaction_transition_spec_violation_to_tag
-  :  compaction_transition_spec_violation
-  -> string
-
-(** RFC-0072 Phase 6: raised by [validate_compaction_transition] on a
-    forbidden compaction transition, carrying the typed
-    [compaction_transition_spec_violation] payload (replaces the prior bare
-    [assert] / [Assert_failure]).  [where] is a diagnostic label naming the
-    raising function.  A [Printexc] printer is registered so
-    [Printexc.to_string] renders the labelled message. *)
-exception
-  Compaction_transition_violation of
-    { where : string
-    ; from : packed_compaction_stage
-    ; to_ : packed_compaction_stage
-    ; violation : compaction_transition_spec_violation
-    }
-
-(** Raises [Compaction_transition_violation] with the typed payload.
-    Same rationale as the turn_phase / runtime raise helpers above. *)
-val raise_compaction_transition_violation
-  :  where:string
-  -> from:packed_compaction_stage
-  -> to_:packed_compaction_stage
-  -> violation:compaction_transition_spec_violation
-  -> 'a
 
 type turn_attempt_state = {
   turn_id : int;
@@ -485,7 +410,6 @@ type registry_entry = {
           reason strings ([cooldown_pending], [no_signal],
           [scheduled_autonomous_disabled], etc.) from the last skip;
           [None] until the first skip is observed. *)
-  compaction_stage : packed_compaction_stage;
       (** Explicit KMC projection owned by the runtime, not derived from
           parent phase on read. This lets the observer surface
           [done] without guessing from conditions. *)
@@ -591,21 +515,13 @@ val registry_key_parts : string -> (string * string, string) result
 val completed_turn_outcome_of_observation :
   turn_observation -> Keeper_transition_audit.completed_turn_outcome
 
-(** Dispatch origin for paired post-turn compaction events. The registry
-    rejects the pair from [Generic_dispatch] so keepalive/guard/manual
-    callers cannot emit half of it outside the owner path. *)
+(** Dispatch origin for post-turn lifecycle events. *)
 type lifecycle_event_origin =
   | Generic_dispatch
   | Post_turn_lifecycle
-  | Operator_compact
 
 (** Pure converter for diagnostic / log labels. *)
 val lifecycle_event_origin_to_string : lifecycle_event_origin -> string
-
-(** Pure dispatch-origin gate: returns true iff the (origin, event) pair
-    is allowed under the paired-lifecycle invariant. *)
-val origin_allows_paired_lifecycle_event :
-  lifecycle_event_origin -> Keeper_state_machine.event -> bool
 
 (** Pure: derive the next [pending_turn_measurement] field after observing
     [event] at wall-clock [now], preserving the prior value when the event
@@ -613,7 +529,3 @@ val origin_allows_paired_lifecycle_event :
 val pending_measurement_after_event :
   float -> registry_entry -> Keeper_state_machine.event -> turn_measurement option
 
-(** Pure: derive the next [compaction_stage] after observing [event],
-    preserving the entry's prior stage on non-compaction events. *)
-val compaction_stage_of_event :
-  registry_entry -> Keeper_state_machine.event -> packed_compaction_stage

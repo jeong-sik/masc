@@ -33,7 +33,6 @@
 (*   - mark_turn_started                       -- Decision_undecided          *)
 (*   - mark_turn_measurement                   -- sets measurement_bound      *)
 (*   - set_turn_decision_stage                 -- Decision_guard_ok | _selected *)
-(*   - prepare_turn_retry_after_compaction     -- reset to Decision_guard_ok   *)
 (*   - mark_turn_finished                      -- reset to Decision_undecided  *)
 (*                                                                         *)
 (* Variant exhaustiveness re-export                                         *)
@@ -70,7 +69,7 @@ VARIABLES
 
 vars == <<turn_live, turn_phase, decision_stage, runtime_state, measurement_bound>>
 
-TurnPhaseSet == {"idle", "prompting", "routing", "executing", "compacting", "finalizing", "exhausted"}
+TurnPhaseSet == {"idle", "prompting", "routing", "executing", "finalizing", "exhausted"}
 DecisionSet  == {"undecided", "guard_ok", "tool_policy_selected"}
 RuntimeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
 ActionSet    == {
@@ -79,7 +78,6 @@ ActionSet    == {
     "GuardOk",
     "SelectToolPolicy",
     "RuntimeTrying",
-    "RetryAfterCompaction",
     "FinishTurn"
 }
 InvariantSet == {
@@ -153,16 +151,6 @@ RuntimeTrying ==
     /\ runtime_state' = "trying"
     /\ UNCHANGED <<turn_live, decision_stage, measurement_bound>>
 
-\* Overflow retry resets the decision lane to a fresh post-guard posture.
-RetryAfterCompaction ==
-    /\ turn_live
-    /\ turn_phase = "compacting"
-    /\ decision_stage = "tool_policy_selected"
-    /\ decision_stage' = "guard_ok"
-    /\ runtime_state' = "idle"
-    /\ turn_phase' = "prompting"
-    /\ UNCHANGED <<turn_live, measurement_bound>>
-
 FinishTurn ==
     /\ turn_live
     /\ turn_phase \in (TurnPhaseSet \ {"idle"})
@@ -178,7 +166,6 @@ Next ==
     \/ GuardOk
     \/ SelectToolPolicy
     \/ RuntimeTrying
-    \/ RetryAfterCompaction
     \/ FinishTurn
 
 Spec ==

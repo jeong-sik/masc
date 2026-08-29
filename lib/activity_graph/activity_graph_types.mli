@@ -9,7 +9,7 @@
     @since 7182 *)
 type node_status =
   (* Agent lifecycle *)
-  | Active | Compacting
+  | Active
   (* Task lifecycle *)
   | Todo | Claimed | In_progress | Done | Cancelled
   (* Board *)

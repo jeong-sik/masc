@@ -5,7 +5,6 @@ type turn_phase = Keeper_registry.turn_phase =
   | Turn_prompting
   | Turn_routing
   | Turn_executing
-  | Turn_compacting
   | Turn_finalizing
   | Turn_exhausted
 
@@ -16,22 +15,14 @@ type decision_stage = Keeper_registry.decision_stage =
 
 type runtime_state = string
 
-type compaction_stage = Keeper_registry.compaction_stage =
-  | Compaction_accumulating
-  | Compaction_compacting
-  | Compaction_done
 
 type invariant_key =
-  | Invariant_phase_turn_alignment
   | Invariant_no_runtime_before_measurement
-  | Invariant_compaction_atomicity
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
 
 type invariants_check = {
-  phase_turn_alignment : bool;
   no_runtime_before_measurement : bool;
-  compaction_atomicity : bool;
   event_priority_monotone : bool;
   phase_derivation_agreement : bool;
 }
@@ -97,7 +88,6 @@ type snapshot = {
   ktc_turn_phase : Keeper_registry.packed_turn_phase;
   kdp_decision : Keeper_registry.packed_decision_stage;
   kcl_runtime_state : runtime_state;
-  kmc_compaction : Keeper_registry.packed_compaction_stage;
   shared_measurement : Keeper_state_machine.context_actions option;
   invariants : invariants_check;
   conditions : Keeper_state_machine.conditions;
@@ -154,7 +144,6 @@ let turn_phase_to_string (tp : Keeper_registry.packed_turn_phase) =
   | Keeper_registry.Packed Turn_prompting -> "prompting"
   | Keeper_registry.Packed Turn_routing -> "routing"
   | Keeper_registry.Packed Turn_executing -> "executing"
-  | Keeper_registry.Packed Turn_compacting -> "compacting"
   | Keeper_registry.Packed Turn_finalizing -> "finalizing"
   | Keeper_registry.Packed Turn_exhausted -> "exhausted"
 
@@ -166,16 +155,9 @@ let decision_stage_to_string (s : Keeper_registry.packed_decision_stage) =
 
 let runtime_state_to_string (s : runtime_state) = s
 
-let compaction_stage_to_string (s : Keeper_registry.packed_compaction_stage) =
-  match s with
-  | Keeper_registry.Packed Compaction_accumulating -> "accumulating"
-  | Keeper_registry.Packed Compaction_compacting -> "compacting"
-  | Keeper_registry.Packed Compaction_done -> "done"
 
 let invariant_key_to_string = function
-  | Invariant_phase_turn_alignment -> "PhaseTurnAlignment"
   | Invariant_no_runtime_before_measurement -> "NoRuntimeBeforeMeasurement"
-  | Invariant_compaction_atomicity -> "CompactionAtomicity"
   | Invariant_event_priority_monotone -> "EventPriorityMonotone"
   | Invariant_phase_derivation_agreement -> "PhaseDerivationAgreement"
 
@@ -191,8 +173,6 @@ let live_turn_phase (entry : Keeper_registry.registry_entry) =
   | Some obs -> obs.turn_phase
   | None ->
       (match entry.phase with
-       | Keeper_state_machine.Compacting ->
-           Keeper_registry.Packed Turn_compacting
        | Keeper_state_machine.Draining ->
            Keeper_registry.Packed Turn_finalizing
        | Keeper_state_machine.Running
@@ -214,8 +194,7 @@ let live_runtime_state (entry : Keeper_registry.registry_entry) =
   | Some obs ->
     (match obs.turn_phase with
      | Keeper_registry.Packed Turn_idle
-     | Keeper_registry.Packed Turn_prompting
-     | Keeper_registry.Packed Turn_compacting -> "idle"
+     | Keeper_registry.Packed Turn_prompting -> "idle"
      | Keeper_registry.Packed Turn_routing -> "routing"
      | Keeper_registry.Packed Turn_executing -> "executing"
      | Keeper_registry.Packed Turn_finalizing -> "done"
@@ -250,7 +229,6 @@ let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
          })
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Failing
-  | Keeper_state_machine.Compacting
   | Keeper_state_machine.Draining
   | Keeper_state_machine.Paused
   | Keeper_state_machine.Stopped
@@ -299,32 +277,6 @@ let run_state_to_json (rs : run_state) : Yojson.Safe.t =
 
 (* Invariants *)
 
-let check_phase_turn_alignment
-    (phase : Keeper_state_machine.phase)
-    (turn_phase : Keeper_registry.packed_turn_phase)
-    : bool =
-  match turn_phase with
-  | Keeper_registry.Packed Turn_compacting ->
-      (phase = Keeper_state_machine.Compacting)
-  | Keeper_registry.Packed Turn_idle
-  | Keeper_registry.Packed Turn_prompting
-  | Keeper_registry.Packed Turn_routing
-  | Keeper_registry.Packed Turn_executing
-  | Keeper_registry.Packed Turn_finalizing
-  | Keeper_registry.Packed Turn_exhausted ->
-      not (phase = Keeper_state_machine.Compacting)
-
-let check_compaction_atomicity
-    (phase : Keeper_state_machine.phase)
-    (compaction_stage : Keeper_registry.packed_compaction_stage)
-    : bool =
-  match compaction_stage with
-  | Keeper_registry.Packed Compaction_compacting ->
-      (phase = Keeper_state_machine.Compacting)
-  | Keeper_registry.Packed Compaction_accumulating
-  | Keeper_registry.Packed Compaction_done ->
-      not (phase = Keeper_state_machine.Compacting)
-
 let check_no_runtime_before_measurement
     ~(runtime_state : runtime_state)
     ~(measurement_captured : bool)
@@ -366,16 +318,13 @@ let compute_invariants
     ~(phase : Keeper_state_machine.phase)
     ~(turn_phase : Keeper_registry.packed_turn_phase)
     ~(runtime_state : runtime_state)
-    ~(compaction_stage : Keeper_registry.packed_compaction_stage)
     ~(measurement_captured : bool)
     : invariants_check =
   {
-    phase_turn_alignment = check_phase_turn_alignment phase turn_phase;
     no_runtime_before_measurement =
       check_no_runtime_before_measurement
         ~runtime_state
         ~measurement_captured;
-    compaction_atomicity = check_compaction_atomicity phase compaction_stage;
     event_priority_monotone = check_event_priority_monotone entry;
     phase_derivation_agreement = check_phase_derivation_agreement entry;
   }
@@ -395,9 +344,7 @@ let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
         ]
         ()
   in
-  bump Invariant_phase_turn_alignment inv.phase_turn_alignment;
   bump Invariant_no_runtime_before_measurement inv.no_runtime_before_measurement;
-  bump Invariant_compaction_atomicity inv.compaction_atomicity;
   bump Invariant_event_priority_monotone inv.event_priority_monotone;
   bump Invariant_phase_derivation_agreement inv.phase_derivation_agreement
 
@@ -431,7 +378,6 @@ let observe
   in
   let is_live = entry.current_turn_observation <> None in
   let turn_phase = live_turn_phase entry in
-  let compaction_stage = entry.compaction_stage in
   let decision_stage = live_decision_stage entry in
   let runtime_state = live_runtime_state entry in
   let measurement = live_measurement entry in
@@ -442,7 +388,6 @@ let observe
       ~phase:entry.phase
       ~turn_phase
       ~runtime_state
-      ~compaction_stage
       ~measurement_captured
   in
   bump_invariant_violations ~keeper_name:entry.name invariants;
@@ -460,7 +405,6 @@ let observe
     ktc_turn_phase = turn_phase;
     kdp_decision = decision_stage;
     kcl_runtime_state = runtime_state;
-    kmc_compaction = compaction_stage;
     shared_measurement = measurement;
     invariants;
     conditions = entry.conditions;
@@ -524,9 +468,7 @@ let observe
 
 let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
   `Assoc [
-    "phase_turn_alignment", `Bool inv.phase_turn_alignment;
     "no_runtime_before_measurement", `Bool inv.no_runtime_before_measurement;
-    "compaction_atomicity", `Bool inv.compaction_atomicity;
     "event_priority_monotone", `Bool inv.event_priority_monotone;
     "phase_derivation_agreement", `Bool inv.phase_derivation_agreement;
   ]
@@ -534,7 +476,6 @@ let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
 let measurement_to_json (m : Keeper_state_machine.context_actions) : Yojson.Safe.t =
   `Assoc
     [
-      "compact", `Bool m.compact;
       "handoff", `Bool m.handoff;
     ]
 
@@ -552,8 +493,7 @@ let phase_condition_rows (c : Keeper_state_machine.conditions) : phase_condition
   in
   [
     row "stopped_clean_drain" "Stopped: clean drain complete" 2
-      (c.stop_requested && c.drain_complete
-       && not c.compaction_active)
+      (c.stop_requested && c.drain_complete)
       Keeper_state_machine.Stopped;
     row "offline_launch_pending" "Offline: launch pending without fiber" 3
       (c.launch_pending && not c.fiber_alive)
@@ -570,9 +510,6 @@ let phase_condition_rows (c : Keeper_state_machine.conditions) : phase_condition
     row "paused_operator" "Paused: explicit operator pause" 8
       c.operator_paused
       Keeper_state_machine.Paused;
-    row "compacting_active" "Compacting: compaction active" 10
-      c.compaction_active
-      Keeper_state_machine.Compacting;
     row "failing_unhealthy" "Failing: heartbeat or turn unhealthy" 12
       ((not c.heartbeat_healthy) || not c.turn_healthy)
       Keeper_state_machine.Failing;
@@ -630,9 +567,6 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     ];
     "runtime", `Assoc [
       "state", `String (runtime_state_to_string s.kcl_runtime_state);
-    ];
-    "compaction", `Assoc [
-      "stage", `String (compaction_stage_to_string s.kmc_compaction);
     ];
     "measurement", (match s.shared_measurement with
       | Some m -> `Assoc [

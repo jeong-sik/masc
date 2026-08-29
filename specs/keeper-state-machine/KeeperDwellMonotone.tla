@@ -82,7 +82,6 @@ PhaseSet == {
     "Offline",
     "Running",
     "Failing",
-    "Compacting",
     "Draining",
     "Paused",
     "Stopped",

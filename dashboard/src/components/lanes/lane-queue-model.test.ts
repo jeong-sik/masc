@@ -39,7 +39,6 @@ function observation(ts: number, overrides: Partial<Omit<CompositeObservation, '
     turn: 'idle',
     decision: 'undecided',
     runtime: 'idle',
-    compaction: 'accumulating',
     ...overrides,
   }
 }

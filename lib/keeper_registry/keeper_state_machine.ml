@@ -20,7 +20,6 @@ let is_terminal = function
   | Offline
   | Running
   | Failing
-  | Compacting
   | Draining
   | Paused
   | Crashed
@@ -42,17 +41,10 @@ let derive_phase (c : conditions) : phase =
      the fiber_alive checks fire first and the keeper goes to Crashed.
      This is also correct: the drain did not complete.
 
-     TLA+ model checking (TLC) found a deadlock where Stopped is entered
-     while compaction_active is still TRUE. This is a
-     semantic contradiction: drain_complete means ALL work is finished,
-     which includes buffer operations. Guard Stopped against active buffer
-     ops so the keeper stays in Draining until compaction exits. *)
+     *)
 
-  (* 1. Completed stop — drain succeeded AND no buffer ops in flight *)
-  if
-    c.stop_requested
-    && c.drain_complete
-    && (not c.compaction_active)
+  (* 1. Completed stop — drain succeeded *)
+  if c.stop_requested && c.drain_complete
   then Stopped (* 2. Pre-start registration. This is the only path into Offline. *)
   else if c.launch_pending && not c.fiber_alive
   then Offline (* 3. Fiber lifecycle — Restarting / Crashed *)
@@ -65,9 +57,7 @@ let derive_phase (c : conditions) : phase =
     (* 6. Only an explicit operator action pauses a Keeper. Recovery
        observations and retry counts never synthesize operator authority. *)
   else if c.operator_paused
-  then Paused (* 8. Buffer states: in-progress operations *)
-  else if c.compaction_active
-  then Compacting
+  then Paused
   else if
     (not c.heartbeat_healthy)
     || (not c.turn_healthy)
@@ -98,13 +88,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     { c with turn_healthy = false }
   | Context_measured { context_actions; _ } ->
     { c with context_handoff_needed = context_actions.handoff }
-  | Compaction_started -> { c with compaction_active = true }
-  | Compaction_completed -> { c with compaction_active = false }
-  | Compaction_failed _ ->
-    (* Durable lane settlement owns the retry. The failure remains
-       observable through turn health and receipts while this
-       buffer-operation latch is released. *)
-    { c with compaction_active = false }
   | Operator_pause -> { c with operator_paused = true }
   | Operator_resume -> { c with operator_paused = false }
   | Operator_stop _ -> { c with stop_requested = true }
@@ -112,9 +95,8 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Drain_complete -> { c with drain_complete = true }
   | Fiber_started ->
     (* A new fiber = a new life. Reset health, buffer, backoff, and stop conditions.
-       Previous heartbeat/turn failures, in-progress compaction, context-handoff
-       recommendations, and supervisor backoff state are all irrelevant to the
-       new fiber.
+       Previous heartbeat/turn failures, context-handoff recommendations,
+       and supervisor backoff state are all irrelevant to the new fiber.
 
        TLA+ model checking found that preserving stop_requested across fiber
        restart causes a liveness violation: the new fiber enters Draining
@@ -129,7 +111,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     ; fiber_alive = true
     ; heartbeat_healthy = true
     ; turn_healthy = true
-    ; compaction_active = false
     ; restart_requested = false
     ; drain_complete = false
     ; stop_requested = false
@@ -141,8 +122,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
       fiber_alive = false
     ; credential_archived = true
     }
-  | Operator_compact_requested ->
-    { c with compaction_active = true }
   | Operator_clear_requested _ ->
     (* Last resort: context fully dropped by [masc_keeper_clear]. The
        context payload change is owned by the clear runtime; no lifecycle
@@ -167,7 +146,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
 let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action list =
   let lifecycle name detail = Publish_lifecycle { event_name = name; detail } in
   match new_phase with
-  | Compacting -> [ Start_compaction; lifecycle "compaction_started" "" ]
   | Draining -> [ Start_drain; lifecycle "draining" "" ]
   | Stopped ->
     [ Cleanup_and_unregister
@@ -181,9 +159,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Turn_succeeded
          | Turn_failed _
          | Context_measured _
-         | Compaction_started
-         | Compaction_completed
-         | Compaction_failed _
          | Operator_pause
          | Operator_resume
          | Stop_requested
@@ -191,7 +166,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Fiber_terminated _
          | Supervisor_restart_attempt _
          | Credential_archived
-         | Operator_compact_requested
          | Operator_clear_requested _ -> event_to_string event)
     ]
   | Failing -> [ lifecycle "failing" (event_to_string event) ]
@@ -204,9 +178,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
       | Turn_succeeded
       | Turn_failed _
       | Context_measured _
-      | Compaction_started
-      | Compaction_completed
-      | Compaction_failed _
       | Operator_resume
       | Operator_stop _
       | Stop_requested
@@ -215,7 +186,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
       | Fiber_terminated _
       | Supervisor_restart_attempt _
       | Credential_archived
-      | Operator_compact_requested
       | Operator_clear_requested _ ->
         (* These events should not normally trigger a Paused transition,
            but if they do, label generically rather than mis-attributing
@@ -229,7 +199,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
      | Offline
      | Running
      | Failing
-        | Compacting
      | Draining
      | Paused
      | Stopped
@@ -247,15 +216,12 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
        let detail =
          match event with
          | Operator_resume -> "operator request"
-         | Compaction_completed -> "auto-compact recovered"
          | Fiber_terminated _ -> "fiber recovered"
          | Heartbeat_ok
          | Heartbeat_failed _
          | Turn_succeeded
          | Turn_failed _
          | Context_measured _
-         | Compaction_started
-         | Compaction_failed _
          | Operator_stop _
          | Operator_pause
          | Stop_requested
@@ -263,7 +229,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Fiber_started
          | Supervisor_restart_attempt _
          | Credential_archived
-         | Operator_compact_requested
          | Operator_clear_requested _ ->
            (* These events should not normally trigger a Paused→Running
               transition; label generically via [event_to_string]. *)
@@ -272,15 +237,13 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
        [ lifecycle "resumed" detail ]
      | Offline
      | Running
-        | Compacting
      | Draining
      | Stopped
      | Crashed ->
        (* [register] takes Init → Running without traversing this function
-          (it uses [register_with_state] directly). For other prevs (e.g.
-          Compacting → Running on auto-compact success), the registry
-          runtime publishes its own
-          lifecycle event covering the recovery semantics. Intentional
+          (it uses [register_with_state] directly). For other prevs the
+          registry runtime publishes its own lifecycle event covering the
+          recovery semantics. Intentional
           no-op (matches the pre-refactor catch-all [| _ -> []]). *)
        [])
   | Offline ->
@@ -305,11 +268,9 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
 
    This helper enforces structural buffer-operation preconditions at the
    [apply_event] boundary so silent corruption becomes a typed
-   [Precondition_violation] result:
-     - Operator_compact_requested (operator-driven buffer op
-       exclusivity).  Operator_clear_requested is deliberately *not*
-       arm-enforced beyond the terminal guard — see its arm below for
-       the operator escape-hatch rationale.
+   [Precondition_violation] result.  Operator_clear_requested is
+   deliberately *not* arm-enforced beyond the terminal guard — see its arm
+   below for the operator escape-hatch rationale.
    Other events have no spec preconditions beyond NotTerminal and are
    listed explicitly in the final arm.
 
@@ -326,25 +287,6 @@ let check_event_precondition (c : conditions) (ev : event)
      precondition that failed, while the long explanatory text stays
      in source comments above each branch. *)
   match ev with
-  | Operator_compact_requested ->
-    (* TLA+ §OperatorCompactRequested.  Operator path differs from
-       AutoCompactTriggered: it does NOT require [context_overflow], so
-       an operator can pre-emptively compact a keeper whose context is not
-       yet near its budget
-       keeper. The buffer-op exclusivity precondition still rejects a second
-       compaction while one is active. *)
-    if c.compaction_active
-    then
-      Error
-        (Precondition_violation
-           { event = event_to_string ev
-           ; reason =
-               "TLA+ §OperatorCompactRequested requires ~compaction_active; \
-                stacking operator-driven compaction on top of an in-flight \
-                buffer op duplicates the work and confuses the retry latch \
-                that OperatorCompactRequested clears as a side-effect"
-           })
-    else Ok ()
   | Operator_clear_requested _ ->
     (* TLA+ §OperatorClearRequested deliberately requires only NotTerminal
        (lib §masc_keeper_clear: "Last-resort: operator drops the keeper's
@@ -369,9 +311,6 @@ let check_event_precondition (c : conditions) (ev : event)
   | Turn_succeeded
   | Turn_failed _
   | Context_measured _
-  | Compaction_started
-  | Compaction_completed
-  | Compaction_failed _
   | Operator_pause
   | Operator_resume
   | Operator_stop _
@@ -399,7 +338,6 @@ let apply_event ~current_phase ~conditions ~event ~now =
   | Offline
   | Running
   | Failing
-  | Compacting
   | Draining
   | Paused
   | Crashed

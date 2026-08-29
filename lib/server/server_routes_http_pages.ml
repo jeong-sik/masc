@@ -357,7 +357,7 @@ let bonsai_keeper_status_of_phase phase =
   let open Keeper_state_machine in
   match phase with
   | Running -> K.Live
-  | Failing | Compacting | Draining | Paused
+  | Failing | Draining | Paused
   | Restarting ->
       Warn
   | Offline | Stopped | Crashed -> Dead

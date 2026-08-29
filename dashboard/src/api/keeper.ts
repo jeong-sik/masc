@@ -45,7 +45,6 @@ export type {
   KeeperCompositeTurnPhase,
   KeeperCompositeDecisionStage,
   KeeperCompositeRuntimeState,
-  KeeperCompositeCompactionStage,
   FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
 export type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'

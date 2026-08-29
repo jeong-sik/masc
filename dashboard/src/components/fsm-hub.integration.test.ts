@@ -48,12 +48,9 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
   turn_phase: 'idle',
   decision: { stage: 'undecided' },
   runtime: { state: 'idle' },
-  compaction: { stage: 'accumulating' },
   measurement: { captured: false },
   invariants: {
-    phase_turn_alignment: true,
     no_runtime_before_measurement: true,
-    compaction_atomicity: true,
     event_priority_monotone: true,
     phase_derivation_agreement: true,
   },
@@ -85,12 +82,9 @@ const REAL_COMPOSITE_PAYLOAD = {
   turn_phase: 'idle',
   decision: { stage: 'undecided' },
   runtime: { state: 'idle' },
-  compaction: { stage: 'accumulating' },
   measurement: { captured: false },
   invariants: {
-    phase_turn_alignment: true,
     no_runtime_before_measurement: true,
-    compaction_atomicity: true,
     event_priority_monotone: true,
     phase_derivation_agreement: true,
   },
@@ -133,7 +127,7 @@ describe('FSM Hub integration — API response shape', () => {
       const parsed = parseKeeperCompositeSnapshot(REAL_COMPOSITE_PAYLOAD)
       expect(parsed.phase).toBe('running')
       expect(parsed.collapsed_from).toBeUndefined()
-      expect(parsed.invariants.phase_turn_alignment).toBe(true)
+      expect(parsed.invariants.no_runtime_before_measurement).toBe(true)
       expect(parsed.last_outcome).toBeNull()
     })
 
@@ -181,7 +175,6 @@ describe('FSM Hub integration — API response shape', () => {
       expect(REAL_COMPOSITE_SHAPE.turn_phase).toBeDefined()
       expect(REAL_COMPOSITE_SHAPE.decision.stage).toBeDefined()
       expect(REAL_COMPOSITE_SHAPE.runtime.state).toBeDefined()
-      expect(REAL_COMPOSITE_SHAPE.compaction.stage).toBeDefined()
     })
 
     it('is_live and last_outcome drive StatusBar — fields must be present', () => {
@@ -195,11 +188,9 @@ describe('FSM Hub integration — API response shape', () => {
       }
     })
 
-    it('all 4 invariants are boolean — InvariantsPanel renders 4/4 or partial', () => {
+    it('all invariants are boolean — InvariantsPanel renders full or partial', () => {
       const inv = REAL_COMPOSITE_SHAPE.invariants
-      expect(typeof inv.phase_turn_alignment).toBe('boolean')
       expect(typeof inv.no_runtime_before_measurement).toBe('boolean')
-      expect(typeof inv.compaction_atomicity).toBe('boolean')
       expect(typeof inv.event_priority_monotone).toBe('boolean')
     })
   })
@@ -211,12 +202,11 @@ describe('FSM Hub integration — API response shape', () => {
       turn: snap.turn_phase,
       decision: snap.decision.stage,
       runtime: snap.runtime.state,
-      compaction: snap.compaction.stage,
     })
 
     it('deriveStateEntries returns a structure when given real-shape data', () => {
       const obs1 = obsFromSnapshot(REAL_COMPOSITE_SHAPE, 100)
-      const obs2: CompositeObservation = { ...obs1, ts: 110, phase: 'Compacting' }
+      const obs2: CompositeObservation = { ...obs1, ts: 110, phase: 'Failing' }
       const entries = deriveStateEntries([obs1, obs2])
       expect(entries).not.toBeNull()
       expect(entries?.phase).toBe(110) // phase transitioned at ts=110

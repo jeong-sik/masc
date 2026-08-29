@@ -51,10 +51,9 @@
 \*    the same completed-turn ring."
 \*
 \* Out-of-scope counters (intentionally not modelled here):
-\*   - succ_compactions / fail_compaction / succ_handoffs / fail_handoff
-\*     are tracked separately in the same OCaml function but live on a
-\*     different axis (per-mechanism, not per-turn). They do NOT affect
-\*     observed_turns.
+\*   - succ_handoffs / fail_handoff are tracked separately in the same
+\*     OCaml function but live on a different axis (per-mechanism, not
+\*     per-turn). They do NOT affect observed_turns.
 \*   - keeper_verdicts (pass / fail / unknown from harness verdicts) live
 \*     in a sibling read model.
 

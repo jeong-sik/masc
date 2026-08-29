@@ -435,8 +435,7 @@ export function TurnPipelineStrip({
       <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="턴 파이프라인 단계">
         <${PipelineStep} shortLabel="KTC" label="턴 주기" value=${snapshot.turn_phase} sinceTs=${stateEntries?.turn ?? null} />
         <${PipelineStep} shortLabel="KDP" label="의사결정" value=${snapshot.decision.stage} sinceTs=${stateEntries?.decision ?? null} limited />
-        <${PipelineStep} shortLabel="KCL" label="런타임" value=${snapshot.runtime.state} sinceTs=${stateEntries?.runtime ?? null} limited />
-        <${PipelineStep} shortLabel="KMC" label="컨텍스트 압축" value=${snapshot.compaction.stage} sinceTs=${stateEntries?.compaction ?? null} isLast />
+        <${PipelineStep} shortLabel="KCL" label="런타임" value=${snapshot.runtime.state} sinceTs=${stateEntries?.runtime ?? null} limited isLast />
       </div>
     </div>
   `
@@ -448,13 +447,11 @@ export function CompositeGraphPanel({ snapshot }: { snapshot: KeeperCompositeSna
     turnPhase: snapshot.turn_phase,
     decisionStage: snapshot.decision.stage,
     runtimeState: snapshot.runtime.state,
-    compactionStage: snapshot.compaction.stage,
   }), [
     snapshot.phase,
     snapshot.turn_phase,
     snapshot.decision.stage,
     snapshot.runtime.state,
-    snapshot.compaction.stage,
   ])
 
   return html`<${CytoscapeFsm} spec=${spec} height="320px" />`

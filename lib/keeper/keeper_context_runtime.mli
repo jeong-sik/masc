@@ -109,8 +109,6 @@ val dispatch_keeper_phase_event
 
 type lifecycle_dispatch_error =
   | Transition_rejected of Keeper_state_machine.transition_error
-  | Compaction_invariant_violation of
-      Keeper_registry_types.compaction_transition_spec_violation
 
 val lifecycle_dispatch_error_to_string : lifecycle_dispatch_error -> string
 

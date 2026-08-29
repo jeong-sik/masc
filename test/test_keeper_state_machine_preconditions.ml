@@ -51,9 +51,6 @@ let event_tag : SM.event -> string = function
   | SM.Turn_succeeded -> "turn_succeeded"
   | SM.Turn_failed _ -> "turn_failed"
   | SM.Context_measured _ -> "context_measured"
-  | SM.Compaction_started -> "compaction_started"
-  | SM.Compaction_completed -> "compaction_completed"
-  | SM.Compaction_failed _ -> "compaction_failed"
   | SM.Operator_pause -> "operator_pause"
   | SM.Operator_resume -> "operator_resume"
   | SM.Operator_stop _ -> "operator_stop"
@@ -63,7 +60,6 @@ let event_tag : SM.event -> string = function
   | SM.Fiber_terminated _ -> "fiber_terminated"
   | SM.Supervisor_restart_attempt _ -> "supervisor_restart_attempt"
   | SM.Credential_archived -> "credential_archived"
-  | SM.Operator_compact_requested -> "operator_compact_requested"
   | SM.Operator_clear_requested _ -> "operator_clear_requested"
 ;;
 
@@ -76,11 +72,8 @@ let all_events : SM.event list =
       { context_ratio = 0.1
       ; message_count = 1
       ; token_count = 1
-      ; context_actions = { SM.compact = false; handoff = false }
+      ; context_actions = { SM.handoff = false }
       }
-  ; SM.Compaction_started
-  ; SM.Compaction_completed
-  ; SM.Compaction_failed { reason = "probe" }
   ; SM.Operator_pause
   ; SM.Operator_resume
   ; SM.Operator_stop { remove_meta = false }
@@ -91,15 +84,14 @@ let all_events : SM.event list =
       { outcome = "ok"; provider_id = None; http_status = None }
   ; SM.Supervisor_restart_attempt { attempt = 1 }
   ; SM.Credential_archived
-  ; SM.Operator_compact_requested
   ; SM.Operator_clear_requested { preserve_system = true; reason = "probe" }
   ]
 ;;
 
 (* A coverage list shorter than the variant would silently test less. *)
 let test_event_witnesses_cover_the_variant () =
-  check int "one witness per event constructor" 19 (List.length all_events);
-  check int "witness tags are distinct" 19
+  check int "one witness per event constructor" 15 (List.length all_events);
+  check int "witness tags are distinct" 15
     (List.length (List.sort_uniq String.compare (List.map event_tag all_events)))
 ;;
 
@@ -120,24 +112,6 @@ let test_no_precondition_fires_from_healthy_running () =
       | Some reason ->
         failf "%s hit a precondition from healthy Running: %s" (event_tag event) reason)
     all_events
-;;
-
-(* Operator_compact_requested is the one event with buffer-op preconditions,
-   and it must be the only one that reacts to those flags. *)
-let test_only_operator_compact_reacts_to_buffer_flags () =
-  List.iter
-    (fun (label, conditions) ->
-      List.iter
-        (fun event ->
-          let hit = precondition_reason ~conditions event <> None in
-          let expected = event_tag event = "operator_compact_requested" in
-          if hit && not expected
-          then failf "%s hit a precondition under %s" (event_tag event) label
-          else if expected && not hit
-          then failf "operator_compact_requested did not reject under %s" label)
-        all_events)
-    [ "compaction_active", { running_conditions with SM.compaction_active = true }
-    ]
 ;;
 
 let outcome_kind_of = function
@@ -186,16 +160,16 @@ let test_attribution_invalid_transition_blocked () =
   let err =
     SM.Invalid_transition
       { from_phase = SM.Running
-      ; to_phase = SM.Compacting
-      ; reason = "guard violation: cannot compact while running"
+      ; to_phase = SM.Draining
+      ; reason = "guard violation: cannot drain while running"
       }
   in
-  let attr = SM.attribution_of_transition ~event:SM.Compaction_started (Error err) in
+  let attr = SM.attribution_of_transition ~event:SM.Stop_requested (Error err) in
   match attr.outcome with
   | A.Transition_blocked { from_state; to_state; reason } ->
     check string "from_state" "running" from_state;
-    check string "to_state" "compacting" to_state;
-    check string "reason" "guard violation: cannot compact while running" reason
+    check string "to_state" "draining" to_state;
+    check string "reason" "guard violation: cannot drain while running" reason
   | other -> Alcotest.fail ("expected Transition_blocked, got " ^ outcome_kind_of other)
 ;;
 
@@ -242,10 +216,10 @@ let test_attribution_gate_and_origin_invariant () =
              ~current_phase:SM.Running
              ~conditions:running_conditions
              ~event:SM.Turn_succeeded) )
-    ; ( SM.Compaction_started
+    ; ( SM.Stop_requested
       , Error
           (SM.Invalid_transition
-             { from_phase = SM.Running; to_phase = SM.Compacting; reason = "test" }) )
+             { from_phase = SM.Running; to_phase = SM.Draining; reason = "test" }) )
     ]
   in
   List.iter
@@ -270,17 +244,6 @@ let assert_precondition_violation ~event_name err =
   | other ->
     Alcotest.fail
       ("expected Precondition_violation, got " ^ SM.transition_error_to_string other)
-;;
-
-let test_pre_operator_compact_during_compaction () =
-  let c = { running_conditions with compaction_active = true } in
-  let err =
-    apply_err
-      ~current_phase:SM.Compacting
-      ~conditions:c
-      ~event:SM.Operator_compact_requested
-  in
-  assert_precondition_violation ~event_name:"operator_compact_requested" err
 ;;
 
 let test_pre_operator_clear_no_extra_precondition () =

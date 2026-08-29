@@ -89,20 +89,6 @@ let set_turn_selected_model ~base_path name selected_model =
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-let prepare_turn_retry_after_compaction ~base_path name =
-  (* Routed through [set_turn_phase_with] so the compaction-retry reset uses
-     the same resolver / guard / broadcast pathway as [set_turn_phase]. *)
-  set_turn_phase_with
-    ~base_path
-    name
-    ~event_kind:"retry_after_compaction"
-    ~target:(Packed Turn_prompting)
-    ~update_obs:(fun obs ->
-      { obs with
-        decision_stage = Packed Decision_guard_ok
-      ; selected_model = None
-      })
-;;
 
 let mark_turn_finished ~base_path name =
   (* Terminal turn lifecycle step: freeze [current_turn_observation] into
@@ -248,9 +234,9 @@ let is_running ~base_path name =
      and [Failing] because a keeper in [Failing] may still complete
      its in-flight turn before the recovery transition; [is_running]
      answers the operator-facing question "is this keeper currently
-     running?" and treats only [Running] as such. The 10 other phases
-     (Offline, Failing, Compacting, Draining,
-     Paused, Stopped, Crashed, Restarting) yield [false]
+     running?" and treats only [Running] as such. The other phases
+     (Offline, Failing, Draining, Paused, Stopped, Crashed,
+     Restarting) yield [false]
      here. A future phase variant (e.g. a hypothetical [Migrating] or
      [Healing]) would silently inherit [false] under the previous
      [Some _ -> false] catch-all without a review point on whether
@@ -265,7 +251,6 @@ let is_running ~base_path name =
       { phase =
           ( Offline
           | Failing
-          | Compacting
           | Draining
           | Paused
           | Stopped
@@ -349,7 +334,6 @@ type wakeup_intent =
   | Supervisor_resume
   | Hitl_resolution
   | Broadcast_signal
-  | Compaction_signal
   | Attention_result
   | Runtime_parameter_change
   | Turn_slot_released
@@ -361,7 +345,6 @@ let wakeup_intent_to_wire = function
   | Supervisor_resume -> "supervisor_resume"
   | Hitl_resolution -> "hitl_resolution"
   | Broadcast_signal -> "broadcast_signal"
-  | Compaction_signal -> "compaction_signal"
   | Attention_result -> "attention_result"
   | Runtime_parameter_change -> "runtime_parameter_change"
   | Turn_slot_released -> "turn_slot_released"
@@ -422,7 +405,6 @@ let wakeup_running_entry ~intent (entry : registry_entry) =
      | Keeper_state_machine.Crashed
      | Keeper_state_machine.Restarting
      (* no live fiber to receive the hint *)
-     | Keeper_state_machine.Compacting
      | Keeper_state_machine.Draining
      (* a fiber is mid-operation; waking races it *)
      | Keeper_state_machine.Paused
@@ -533,7 +515,7 @@ let fiber_health_of ~base_path name =
      | Stopped ->
        if lane_has_exited entry then Fiber_unknown else Fiber_alive
      | Offline -> Fiber_unknown
-     | Running | Paused | Failing | Compacting | Draining ->
+     | Running | Paused | Failing | Draining ->
        (match Eio.Promise.peek entry.done_p with
         | None -> Fiber_alive
         | Some `Stopped ->
@@ -724,7 +706,6 @@ let set_tool_usage_entry ~base_path ~name ~tool_name (e : tool_call_entry) =
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)
 
-let validate_paired_lifecycle_origin = Keeper_registry_event_validators.paired_lifecycle_origin
 
 (* Entry-action dispatch observability helpers
    (execute_entry_action_observability / followup_event_of_entry_action /
@@ -740,14 +721,6 @@ let record_followup_dispatch_rejection =
   Keeper_registry_entry_action_dispatch.record_dispatch_rejection
 ;;
 
-let validate_compaction_transition = Keeper_registry_event_validators.compaction_transition
-
-let compaction_stage_after_event entry event =
-  let old_stage = entry.compaction_stage in
-  let new_stage = compaction_stage_of_event entry event in
-  validate_compaction_transition ~from:old_stage ~to_:new_stage;
-  new_stage
-;;
 
 (** Registry mutation is still non-yielding (StringMap lookup + CAS).
     Entry actions run only after [install_entry_if_current], so any
@@ -794,17 +767,8 @@ let rec dispatch_event_with_audit_internal
       | Keeper_state_machine.Context_measured { context_actions; _ } -> Some (now, context_actions)
       | _ -> entry.last_context_actions
     in
-    let origin_result = validate_paired_lifecycle_origin origin event in
     let pending_turn_measurement = pending_measurement_after_event now entry event in
-    let compaction_stage =
-      match origin_result with
-      | Error _ -> entry.compaction_stage
-      | Ok () -> compaction_stage_after_event entry event
-    in
     let result =
-      match origin_result with
-      | Error _ as err -> err
-      | Ok () ->
         Keeper_state_machine.apply_event
           ~current_phase:entry.phase
           ~conditions:entry.conditions
@@ -862,7 +826,6 @@ let rec dispatch_event_with_audit_internal
             ; transition_seq = new_seq
             ; last_context_actions
             ; pending_turn_measurement
-            ; compaction_stage
             }
         with
         | Entry_install_invalid err ->
@@ -1056,7 +1019,6 @@ let rec dispatch_event_with_audit_internal
             ; transition_seq = new_seq
             ; last_context_actions
             ; pending_turn_measurement
-            ; compaction_stage
             }
         with
         | Entry_install_invalid err ->

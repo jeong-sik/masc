@@ -222,12 +222,9 @@ function compositeFixture(
     turn_phase: 'executing',
     decision: { stage: 'undecided' },
     runtime: { state: 'active' },
-    compaction: { stage: 'accumulating' },
     measurement: { captured: false },
     invariants: {
-      phase_turn_alignment: true,
       no_runtime_before_measurement: true,
-      compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },

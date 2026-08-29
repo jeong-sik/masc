@@ -12,12 +12,9 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
     turn_phase: 'idle',
     decision: { stage: 'undecided' },
     runtime: { state: 'idle' },
-    compaction: { stage: 'accumulating' },
     measurement: { captured: false },
     invariants: {
-      phase_turn_alignment: true,
       no_runtime_before_measurement: true,
-      compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },
@@ -48,15 +45,13 @@ describe('invariantRows', () => {
   it('marks broken invariant as not ok', () => {
     const rows = invariantRows(makeSnapshot({
       invariants: {
-        phase_turn_alignment: false,
         no_runtime_before_measurement: true,
-        compaction_atomicity: true,
         event_priority_monotone: true,
         phase_derivation_agreement: true,
       },
     }))
-    expect(rows.find(r => r.key === 'phase_turn_alignment')!.ok).toBe(false)
-    expect(rows.filter(r => r.ok).length).toBe(4)
+    expect(rows.find(r => r.key === 'no_runtime_before_measurement')!.ok).toBe(true)
+    expect(rows.filter(r => r.ok).length).toBe(3)
   })
 
   it('includes labels for each invariant', () => {
@@ -77,28 +72,7 @@ describe('invariantRows', () => {
     })
   })
 
-  it('shows drift detail for broken compaction_atomicity', () => {
-    const rows = invariantRows(makeSnapshot({
-      phase: 'running',
-      invariants: {
-        phase_turn_alignment: true,
-        no_runtime_before_measurement: true,
-        compaction_atomicity: false,
-        event_priority_monotone: true,
-        phase_derivation_agreement: true,
-      },
-    }))
-    const row = rows.find(r => r.key === 'compaction_atomicity')!
-    expect(row.ok).toBe(false)
-    expect(row.detail).toContain('KSM=running')
-  })
 
-  it('shows OK detail for valid phase_turn_alignment', () => {
-    const rows = invariantRows(makeSnapshot())
-    const row = rows.find(r => r.key === 'phase_turn_alignment')!
-    expect(row.ok).toBe(true)
-    expect(row.detail).toContain('agree')
-  })
 })
 
 // ================================================================
@@ -113,9 +87,7 @@ describe('deriveOperationalInsight', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
         invariants: {
-          phase_turn_alignment: false,
           no_runtime_before_measurement: true,
-          compaction_atomicity: true,
           event_priority_monotone: true,
           phase_derivation_agreement: true,
         },
@@ -159,19 +131,6 @@ describe('deriveOperationalInsight', () => {
     )
     expect(insight.tone).toBe('warn')
     expect(insight.headline).toContain('not moving')
-  })
-
-  it('reports info when Compacting', () => {
-    const insight = deriveOperationalInsight(
-      makeSnapshot({
-        phase: 'compacting',
-        compaction: { stage: 'compacting' },
-      }),
-      noObservations,
-      now,
-    )
-    expect(insight.tone).toBe('info')
-    expect(insight.headline).toContain('Compaction')
   })
 
   it('reports warn for Draining phase', () => {

@@ -38,8 +38,6 @@ let compute_outcomes_rollup
   List.iter
     (fun (tr : Keeper_transition_audit.transition_record) ->
       match tr.selected_event with
-      | Keeper_state_machine.Compaction_completed -> incr succ_compactions
-      | Compaction_failed _ -> incr fail_compaction
       | _ -> Log.Dashboard.debug "ignored transition event")
     transitions;
   let observed_turns = List.length completed_turns in

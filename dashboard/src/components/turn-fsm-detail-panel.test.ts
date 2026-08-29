@@ -24,12 +24,9 @@ function keeperCompositeSnapshot(
     turn_phase: "idle",
     decision: { stage: "undecided" },
     runtime: { state: "idle" },
-    compaction: { stage: "accumulating" },
     measurement: { captured: false },
     invariants: {
-      phase_turn_alignment: true,
       no_runtime_before_measurement: true,
-      compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },
@@ -45,7 +42,6 @@ function keeperCompositeSnapshot(
     ...overrides,
     decision: { ...base.decision, ...(overrides.decision ?? {}) },
     runtime: { ...base.runtime, ...(overrides.runtime ?? {}) },
-    compaction: { ...base.compaction, ...(overrides.compaction ?? {}) },
     measurement: { ...base.measurement, ...(overrides.measurement ?? {}) },
     invariants: { ...base.invariants, ...(overrides.invariants ?? {}) },
   }

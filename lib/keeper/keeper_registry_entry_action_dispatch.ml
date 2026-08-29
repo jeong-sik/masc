@@ -32,7 +32,6 @@ let execute_observability
          detail);
     let (_ignore_ts : float) = ts_unix in
     ()
-  | Start_compaction
   | Start_drain
   | Schedule_restart _
   | Cleanup_and_unregister

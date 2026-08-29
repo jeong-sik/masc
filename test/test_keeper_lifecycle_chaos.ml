@@ -41,11 +41,7 @@ let get_phase name =
   | None -> Alcotest.fail ("keeper not found: " ^ name)
   | Some e -> e.phase
 
-let paired_lifecycle_origin = function
-  | KSM.Compaction_started
-  | KSM.Compaction_completed
-  | KSM.Compaction_failed _ -> R.Post_turn_lifecycle
-  | _ -> R.Generic_dispatch
+let paired_lifecycle_origin (_ : KSM.event) = R.Generic_dispatch
 
 let dispatch name event =
   match R.dispatch_event ~base_path:bp ~origin:(paired_lifecycle_origin event) name event with
@@ -107,27 +103,6 @@ let test_supervisor_restart_cycle () =
   restart_keeper "sv-restart" ~attempt:1
 
 
-let test_compaction_crash_recovery () =
-  setup "compact";
-
-  let tr = dispatch "compact" KSM.Compaction_started in
-  check phase_t "compacting" KSM.Compacting tr.new_phase;
-
-  let tr = dispatch "compact"
-    (KSM.Compaction_failed { reason = "OOM during compaction" }) in
-  check phase_t "fail → running" KSM.Running tr.new_phase;
-
-  let tr = dispatch "compact" KSM.Compaction_started in
-  check phase_t "2nd compaction" KSM.Compacting tr.new_phase;
-  let tr = dispatch "compact"
-    KSM.Compaction_completed in
-  check phase_t "2nd compact → running" KSM.Running tr.new_phase;
-
-  let tr = dispatch "compact"
-    (KSM.Fiber_terminated { outcome = "cascading OOM"; provider_id = None; http_status = None }) in
-  check phase_t "fiber death → crashed" KSM.Crashed tr.new_phase;
-  restart_keeper "compact" ~attempt:1
-
 let test_graceful_shutdown () =
   setup "shutdown";
 
@@ -158,15 +133,9 @@ let test_full_chaos_sequence () =
   let tr = dispatch "chaos" KSM.Heartbeat_ok in
   check phase_t "hb ok → running" KSM.Running tr.new_phase;
 
-  let tr = dispatch "chaos" KSM.Compaction_started in
-  check phase_t "compacting" KSM.Compacting tr.new_phase;
-  let tr = dispatch "chaos"
-    KSM.Compaction_completed in
-  check phase_t "post-compact → running" KSM.Running tr.new_phase;
-
   let tr = dispatch "chaos"
     (KSM.Fiber_terminated { outcome = "provider unreachable"; provider_id = None; http_status = None }) in
-  check phase_t "post-compact crash" KSM.Crashed tr.new_phase;
+  check phase_t "crash" KSM.Crashed tr.new_phase;
 
   restart_keeper "chaos" ~attempt:1;
 
@@ -189,12 +158,12 @@ let test_fleet_chaos () =
 
   ignore (dispatch "fleet-a" KSM.Heartbeat_ok);
   crash_keeper "fleet-b";
-  ignore (dispatch "fleet-c" KSM.Compaction_started);
+  ignore (dispatch "fleet-c" (KSM.Turn_failed { consecutive = 1 }));
   ignore (dispatch "fleet-d" KSM.Operator_pause);
 
   check phase_t "A running" KSM.Running (get_phase "fleet-a");
   check phase_t "B crashed" KSM.Crashed (get_phase "fleet-b");
-  check phase_t "C compacting" KSM.Compacting (get_phase "fleet-c");
+  check phase_t "C failing" KSM.Failing (get_phase "fleet-c");
   check phase_t "D paused" KSM.Paused (get_phase "fleet-d");
   check int "1 running" 1 (R.count_running ~base_path:bp ());
 
@@ -221,8 +190,7 @@ let () =
     ; ( "terminal"
       , [ eio_test "graceful shutdown → Stopped" test_graceful_shutdown ] )
     ; ( "buffer_states"
-      , [ eio_test "compaction crash → recovery" test_compaction_crash_recovery
-        ; eio_test "pause and resume" test_pause_resume ] )
+      , [ eio_test "pause and resume" test_pause_resume ] )
     ; ( "chaos"
       , [ eio_test "6-phase interleaved faults" test_full_chaos_sequence
         ; eio_test "fleet: 4 keepers independent faults" test_fleet_chaos ] )

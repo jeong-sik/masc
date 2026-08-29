@@ -4,7 +4,6 @@ type phase =
   | Offline
   | Running
   | Failing
-  | Compacting
   | Draining
   | Paused
   | Stopped

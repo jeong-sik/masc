@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildCompositeFsmSpec,
-  buildCompactionSpec,
   buildTurnFsmSpec,
   normalizeTurnFsmState,
   turnFsmTlaSymbol,
@@ -30,7 +29,6 @@ describe('buildCompositeFsmSpec', () => {
     turnPhase: 'idle',
     decisionStage: 'undecided',
     runtimeState: 'idle',
-    compactionStage: 'accumulating',
   }
 
   it('creates parent nodes for all 5 sub-FSM clusters', () => {
@@ -139,90 +137,6 @@ describe('buildCompositeFsmSpec', () => {
     }
   })
 })
-
-// ================================================================
-// buildCompactionSpec
-// ================================================================
-
-describe('buildCompactionSpec', () => {
-  it('returns 3 nodes for the KMC states', () => {
-    const spec = buildCompactionSpec('accumulating')
-    expect(spec.nodes.map(n => n.id)).toEqual(['accumulating', 'compacting', 'done'])
-  })
-
-  it('returns 3 edges', () => {
-    const spec = buildCompactionSpec('accumulating')
-    expect(spec.edges).toHaveLength(3)
-  })
-
-  it('sets activeNodeId to the active stage', () => {
-    expect(buildCompactionSpec('compacting').activeNodeId).toBe('compacting')
-  })
-
-  it('uses breadthfirst layout and LR direction', () => {
-    const spec = buildCompactionSpec('accumulating')
-    expect(spec.layout).toBe('breadthfirst')
-    expect(spec.direction).toBe('LR')
-  })
-
-  it('marks the compacting active stage as warn', () => {
-    const spec = buildCompactionSpec('compacting')
-    expect(spec.nodes.find(n => n.id === 'compacting')!.type).toBe('warn')
-  })
-
-  it('marks the accumulating active stage as active when the phase is benign', () => {
-    expect(buildCompactionSpec('accumulating').nodes.find(n => n.id === 'accumulating')!.type).toBe('active')
-  })
-
-  it('marks the done active stage as active', () => {
-    expect(buildCompactionSpec('done').nodes.find(n => n.id === 'done')!.type).toBe('active')
-  })
-
-  it('marks the active stage as err when currentPhase is failing', () => {
-    const spec = buildCompactionSpec('accumulating', 'failing')
-    expect(spec.nodes.find(n => n.id === 'accumulating')!.type).toBe('err')
-  })
-
-  it('lets the compacting stage take precedence as warn even with a failing phase', () => {
-    const spec = buildCompactionSpec('compacting', 'failing')
-    expect(spec.nodes.find(n => n.id === 'compacting')!.type).toBe('warn')
-  })
-
-  it('marks inactive states as dim', () => {
-    const spec = buildCompactionSpec('accumulating')
-    expect(spec.nodes.find(n => n.id === 'compacting')!.type).toBe('dim')
-  })
-
-  it('treats a null currentPhase as benign', () => {
-    expect(buildCompactionSpec('accumulating', null).nodes.find(n => n.id === 'accumulating')!.type).toBe('active')
-  })
-
-  it('treats an undefined currentPhase as benign', () => {
-    expect(buildCompactionSpec('accumulating').nodes.find(n => n.id === 'accumulating')!.type).toBe('active')
-  })
-
-  it('uses the typed compaction-start event for the accumulating transition', () => {
-    const spec = buildCompactionSpec('accumulating')
-    const edge = spec.edges.find(e => e.source === 'accumulating' && e.target === 'compacting')
-    expect(edge?.label).toBe('Compaction_started')
-  })
-
-  it('has a recovery edge from compacting to done', () => {
-    const spec = buildCompactionSpec('accumulating')
-    const edge = spec.edges.find(e => e.source === 'compacting' && e.target === 'done')
-    expect(edge?.type).toBe('recovery')
-  })
-
-  it('has an error edge from compacting back to accumulating', () => {
-    const spec = buildCompactionSpec('accumulating')
-    const edge = spec.edges.find(e => e.source === 'compacting' && e.target === 'accumulating')
-    expect(edge?.type).toBe('error')
-  })
-})
-
-// ================================================================
-// buildTurnFsmSpec / normalizeTurnFsmState / turnFsmTlaSymbol
-// ================================================================
 
 describe('buildTurnFsmSpec', () => {
   it('exposes the 8 UI turn-FSM states (7 backend turn_phase ctors + awaiting_tool_result)', () => {

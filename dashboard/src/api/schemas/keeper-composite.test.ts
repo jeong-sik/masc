@@ -21,12 +21,9 @@ const VALID_SNAPSHOT = {
   turn_phase: 'idle',
   decision: { stage: 'undecided' },
   runtime: { state: 'idle' },
-  compaction: { stage: 'accumulating' },
   measurement: { captured: true },
   invariants: {
-    phase_turn_alignment: true,
     no_runtime_before_measurement: true,
-    compaction_atomicity: true,
     event_priority_monotone: true,
     phase_derivation_agreement: true,
   },
@@ -404,13 +401,11 @@ describe('parseKeeperCompositeSnapshot', () => {
       measurement: {
         captured: true,
         context_actions: {
-          compact: true,
           handoff: false,
         },
       },
     })
     expect(result.measurement.context_actions).toBeDefined()
-    expect(result.measurement.context_actions!.compact).toBe(true)
   })
 
   it('parses collapsed_from when Stable hides a raw keeper phase', () => {

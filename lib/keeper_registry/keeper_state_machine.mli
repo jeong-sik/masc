@@ -18,14 +18,13 @@
 (** {1 Phase (10-State Enum)} *)
 
 (** Fine-grained keeper lifecycle phase.
-    Buffer states ([Failing], [Compacting], [Draining], [Restarting])
+    Buffer states ([Failing], [Draining], [Restarting])
     are observable intermediaries between
     stable states. *)
 type phase =
   | Offline       (** Registered but no heartbeat fiber started *)
   | Running       (** Healthy heartbeat loop executing *)
   | Failing       (** Consecutive failures detected, probing recovery *)
-  | Compacting    (** Context compaction in progress *)
   | Draining      (** Graceful shutdown: completing current turn *)
   | Paused        (** Explicitly operator-paused; fiber sleeping *)
   | Stopped       (** Clean exit, terminal *)
@@ -57,8 +56,6 @@ type conditions = {
   turn_healthy : bool;
   (** Result of the latest completed turn observation. *)
   context_handoff_needed : bool;
-  compaction_active : bool;
-  (** Set true on compaction entry, false on exit *)
   operator_paused : bool;
   (** [meta.paused = true] *)
   stop_requested : bool;
@@ -76,42 +73,12 @@ val default_conditions : conditions
 (** {1 Events (Det/NonDet Boundary Output)} *)
 
 (** Auto-rule evaluation summary, captured at the boundary. *)
-type context_actions = {
-  compact : bool;
-  handoff : bool;
-}
+type context_actions = { handoff : bool }
 
 (** Typed events that trigger condition re-evaluation.
     These are the ONLY inputs to the deterministic state machine.
-    Non-deterministic measurements become typed events at the boundary.
+    Non-deterministic measurements become typed events at the boundary. *)
 
-    {2 Paired lifecycle event contract}
-
-    [Compaction_started] and its matching [_completed] / [_failed]
-    events MUST be dispatched with an explicit
-    lifecycle origin through {!Keeper_registry}. Normal turn-owned events
-    use [Post_turn_lifecycle], which runs synchronously at the tail of a
-    keeper turn (inside [Keeper_unified_turn.run_keeper_cycle] or the
-    legacy [Keeper_turn] path). Manual compaction uses the narrower
-    [Operator_compact] origin for compaction events only.
-
-    The keepalive loop ({!Keeper_keepalive.run_heartbeat_loop}) does
-    NOT explicitly gate dispatch on [phase]. It relies on the
-    structural property that [Compaction_started] is always paired with
-    its [_completed] / [_failed] counterpart inside a single
-    [run_keeper_cycle] call, so the next keepalive iteration can never
-    observe the keeper in [Compacting] phase at its dispatch decision
-    point.
-
-    Violating this rule — for example, by emitting [Compaction_started]
-    from a separate async monitor fiber while a turn is still in flight
-    — reopens the {b KeepalivePhaseConsistency} safety bug: the keepalive
-    loop then observes the keeper in [Compacting] at its dispatch
-    decision point, which is exactly what the structural pairing
-    above rules out.
-
-    If a future change needs another origin for these events, add it to
-    the registry origin guard. *)
 type event =
   | Heartbeat_ok
   | Heartbeat_failed of { consecutive : int }
@@ -123,13 +90,6 @@ type event =
       token_count : int;
       context_actions : context_actions;
     }
-  | Compaction_started
-    (** Emit only through the registry lifecycle origin guard. See the
-        paired lifecycle contract above. *)
-  | Compaction_completed
-    (** Must fire after the matching [Compaction_started] and durable save. *)
-  | Compaction_failed of { reason : string }
-    (** Must fire in the same turn as the matching [Compaction_started]. *)
   | Operator_pause
   | Operator_resume
   | Operator_stop of { remove_meta : bool }
@@ -143,13 +103,10 @@ type event =
       }
   | Supervisor_restart_attempt of { attempt : int }
   | Credential_archived
-  | Operator_compact_requested
-    (** Operator invoked [masc_keeper_compact] MCP tool. *)
   | Operator_clear_requested of { preserve_system : bool; reason : string }
     (** Operator invoked [masc_keeper_clear]. Last-resort: drops
-        conversation context entirely. Bypasses [Compacting] buffer
-        state — conditions reset in-place. [reason] is required for
-        audit trail. *)
+        conversation context entirely; conditions reset in-place.
+        [reason] is required for audit trail. *)
 
 val event_to_string : event -> string
 
@@ -162,7 +119,6 @@ val event_to_string : event -> string
     - The remaining variants remain descriptive placeholders for
       supervisor-owned work and are intentionally ignored by the registry. *)
 type entry_action =
-  | Start_compaction
   | Start_drain
   | Schedule_restart of { delay_sec : float }
   | Publish_lifecycle of { event_name : string; detail : string }
@@ -200,17 +156,14 @@ val transition_error_to_string : transition_error -> string
 
     Priority (first match wins) — mirrors the [DerivePhase] action in
     [specs/keeper-state-machine/KeeperStateMachine.tla]:
-    2.  Stopped (stop_requested + drain_complete + ~compaction_active)
+    2.  Stopped (stop_requested + drain_complete)
         -- Checked first because a clean drain wins even if the fiber
-        subsequently exits.  Buffer-state guards prevent a TLC deadlock
-        where Stopped is entered while compaction is still in
-        flight (see comment on [keeper_state_machine.ml:derive_phase]).
+        subsequently exits.
     3.  Offline (launch_pending + ~fiber_alive) -- pre-start registration
     4.  Restarting (~fiber_alive + restart_requested)
     5.  Crashed (~fiber_alive)
     6.  Draining (stop_requested) -- in-progress stop
     7.  Paused (operator_paused)
-    8.  Compacting (compaction_active)
     9.  Failing (latest health failure or structural failure observation)
     10. Running (fiber_alive)
     11. Offline (default fallback for inconsistent zero-state)

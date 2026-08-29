@@ -27,12 +27,9 @@ function snapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperCompo
     turn_phase: 'idle',
     decision: { stage: 'undecided' },
     runtime: { state: 'idle' },
-    compaction: { stage: 'accumulating' },
     measurement: { captured: false },
     invariants: {
-      phase_turn_alignment: true,
       no_runtime_before_measurement: true,
-      compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },
@@ -62,10 +59,6 @@ describe('extractLaneValue', () => {
 
   it('extracts runtime', () => {
     expect(extractLaneValue(snapshot({ runtime: { state: 'trying' } }), 'runtime')).toBe('trying')
-  })
-
-  it('extracts compaction', () => {
-    expect(extractLaneValue(snapshot({ compaction: { stage: 'compacting' } }), 'compaction')).toBe('compacting')
   })
 
   it('handles all valid phase values', () => {

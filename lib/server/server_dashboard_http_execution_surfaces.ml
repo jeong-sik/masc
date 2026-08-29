@@ -668,7 +668,6 @@ let display_of_phase_event = function
     Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = Some true }
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Failing
-  | Keeper_state_machine.Compacting
   | Keeper_state_machine.Draining
   | Keeper_state_machine.Restarting ->
     None
@@ -742,7 +741,6 @@ let control_status_override_of_lifecycle_event row event =
   | Keeper_lifecycle_events.Phase_event
       ( Keeper_state_machine.Offline
       | Keeper_state_machine.Failing
-      | Keeper_state_machine.Compacting
       | Keeper_state_machine.Draining
       | Keeper_state_machine.Paused
       | Keeper_state_machine.Crashed

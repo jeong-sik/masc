@@ -58,12 +58,11 @@ export const LANE_QUEUE_LANES: readonly LaneQueueLaneDef[] = [
   { key: 'turn', devLabel: 'turn-cycle', label: '턴 진행', field: 'turn_state' },
   { key: 'decision', devLabel: 'decision', label: '판단', field: 'decision_state' },
   { key: 'runtime', devLabel: 'runtime', label: '모델 호출', field: 'runtime_state' },
-  { key: 'compaction', devLabel: 'compaction', label: '압축', field: 'compaction_state' },
 ]
 
 /** Design VAL_LBL — operator labels for the closed value vocabulary. */
 const LANE_VALUE_LABELS: Record<string, string> = {
-  running: '실행 중', failing: '문제 발생', compacting: '압축 중', draining: '정리 중',
+  running: '실행 중', failing: '문제 발생', draining: '정리 중',
   idle: '쉬는 중', prompting: '준비 중', executing: '작업 중', finalizing: '마무리', undecided: '미결정', guard_ok: '점검 통과',
   tool_policy_selected: '도구 확정', selecting: '경로 선택', trying: '모델 호출 중', done: '완료', exhausted: '가능한 경로 없음', accumulating: '누적 중',
 }
@@ -76,7 +75,7 @@ export function laneValueLabel(value: string): string {
 export type LaneSegmentTone = 'ok' | 'info' | 'warn' | 'bad' | 'idle'
 
 const LANE_VALUE_TONES: Record<string, LaneSegmentTone> = {
-  running: 'info', failing: 'bad', compacting: 'warn', draining: 'warn',
+  running: 'info', failing: 'bad', draining: 'warn',
   idle: 'idle', prompting: 'info', executing: 'info', finalizing: 'info',
   undecided: 'idle', guard_ok: 'ok', tool_policy_selected: 'info',
   selecting: 'info', trying: 'info', done: 'ok', exhausted: 'bad', accumulating: 'idle',
@@ -92,14 +91,12 @@ const LANE_MEANING: Record<LaneKey, Record<string, (live: boolean) => string>> =
   phase: {
     running: (live) => live ? '정상 동작 중 — 지금 턴을 하나 돌리고 있다' : '정상 동작 중 — 지금 맡은 턴은 없다',
     failing: () => '문제가 걸려 있어 새 턴을 시작하지 못한다',
-    compacting: () => '턴을 마치고 기록을 줄이는 중',
     draining: () => '남은 일을 마무리하고 멈추는 중',
   },
   turn: {
     idle: (live) => live ? '턴은 열려 있지만 지금 하는 일이 없다' : '지금 맡은 턴이 없다',
     prompting: () => '무엇을 할지 정리해 모델에 넘길 준비 중',
     executing: () => '모델을 부르거나 도구를 쓰는 중',
-    compacting: () => '기록 정리가 끝나야 턴을 닫을 수 있다',
     finalizing: () => '결과를 저장하고 턴을 닫는 중',
   },
   decision: {
@@ -114,11 +111,6 @@ const LANE_MEANING: Record<LaneKey, Record<string, (live: boolean) => string>> =
     done: () => '모델 응답을 받아 처리했다',
     exhausted: () => '쓸 수 있는 모델이 없다 — 사람이 손대야 한다',
   },
-  compaction: {
-    accumulating: () => '기록이 쌓이는 중 — 정리는 하지 않는다',
-    compacting: () => '오래된 기록을 줄이는 중',
-    done: () => '기록 정리를 끝냈다',
-  },
 }
 
 /** Design CL_MEANING_DEV — wire-level reading behind the 기술 상세 toggle. */
@@ -126,14 +118,12 @@ const LANE_MEANING_DEV: Record<LaneKey, Record<string, (live: boolean) => string
   phase: {
     running: (live) => live ? 'parent lifecycle 정상 — live turn 진행 중' : 'keeper 는 살아있고 진행 중인 turn 은 없음',
     failing: () => 'parent lifecycle degraded — healthy turn 재개 전 해소 필요',
-    compacting: () => 'post-turn compaction 이 lifecycle 점유 중',
     draining: () => 'in-flight work drain 중 (stop 전)',
   },
   turn: {
     idle: (live) => live ? 'turn context 존재하지만 work 미진행' : '진행 중인 turn 없음',
     prompting: () => 'prompt assembly 가 turn input 준비 중',
     executing: () => 'model/tool execution work 안에 있음',
-    compacting: () => 'turn finalization 이 compaction 종료 대기 중',
     finalizing: () => '결과 seal + 다음 idle snapshot 준비 중',
   },
   decision: {
@@ -147,11 +137,6 @@ const LANE_MEANING_DEV: Record<LaneKey, Record<string, (live: boolean) => string
     trying: () => 'provider execution 진행 중',
     done: () => 'runtime 가 이번 turn 의 provider 결과 수락',
     exhausted: () => 'runtime 옵션 모두 소진 — 사용 가능한 path 없음',
-  },
-  compaction: {
-    accumulating: () => '메모리 누적 중 — compaction 실행 중 아님',
-    compacting: () => 'memory compaction 이 context state 를 rewrite 중',
-    done: () => '관측된 turn 의 compaction 완료',
   },
 }
 

@@ -36,7 +36,6 @@ function observation(
     turn: 'idle',
     decision: 'undecided',
     runtime: 'idle',
-    compaction: 'accumulating',
     ...overrides,
   }
 }
@@ -52,12 +51,9 @@ function snapshot(
     turn_phase: 'idle',
     decision: { stage: 'undecided' },
     runtime: { state: 'idle' },
-    compaction: { stage: 'accumulating' },
     measurement: { captured: false },
     invariants: {
-      phase_turn_alignment: true,
       no_runtime_before_measurement: true,
-      compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },
@@ -78,10 +74,6 @@ function snapshot(
     runtime: {
       ...base.runtime,
       ...(overrides.runtime ?? {}),
-    },
-    compaction: {
-      ...base.compaction,
-      ...(overrides.compaction ?? {}),
     },
     measurement: {
       ...base.measurement,
@@ -204,11 +196,8 @@ describe('fsm-hub derived state', () => {
       snapshot({
         phase: 'Compacting',
         turn_phase: 'executing',
-        compaction: { stage: 'accumulating' },
         invariants: {
-          phase_turn_alignment: false,
           no_runtime_before_measurement: true,
-          compaction_atomicity: true,
           event_priority_monotone: true,
           phase_derivation_agreement: true,
         },
@@ -258,22 +247,6 @@ describe('fsm-hub derived state', () => {
       stalled: true,
       value: 'executing',
     })
-  })
-
-  it('keeps active compaction as compaction work before the stall threshold', () => {
-    const result = deriveOperationalInsight(
-      snapshot({
-        is_live: true,
-        phase: 'Compacting',
-        turn_phase: 'compacting',
-        compaction: { stage: 'compacting' },
-      }),
-      [observation({ ts: 10, phase: 'Compacting', turn: 'compacting', compaction: 'compacting' })],
-      20,
-    )
-
-    expect(result.tone).toBe('info')
-    expect(result.headline).toContain('Compaction 가 현재 턴 소유')
   })
 })
 
@@ -354,20 +327,20 @@ describe('deriveStateEntries', () => {
 
   it('falls back to first observation ts when no transitions', () => {
     const observations = [
-      observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle', compaction: 'accumulating' }),
-      observation({ ts: 105, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle', compaction: 'accumulating' }),
-      observation({ ts: 110, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle', compaction: 'accumulating' }),
+      observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle' }),
+      observation({ ts: 105, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle' }),
+      observation({ ts: 110, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle' }),
     ]
     const entries = deriveStateEntries(observations)
-    expect(entries).toEqual({ phase: 100, turn: 100, decision: 100, runtime: 100, compaction: 100 })
+    expect(entries).toEqual({ phase: 100, turn: 100, decision: 100, runtime: 100 })
   })
 
   it('returns the ts of the latest transition per lane', () => {
     const observations = [
-      observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle', compaction: 'accumulating' }),
-      observation({ ts: 110, phase: 'Running', turn: 'prompting', decision: 'undecided', runtime: 'idle', compaction: 'accumulating' }),
-      observation({ ts: 120, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'selecting', compaction: 'accumulating' }),
-      observation({ ts: 130, phase: 'Compacting', turn: 'executing', decision: 'guard_ok', runtime: 'done', compaction: 'accumulating' }),
+      observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle' }),
+      observation({ ts: 110, phase: 'Running', turn: 'prompting', decision: 'undecided', runtime: 'idle' }),
+      observation({ ts: 120, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'selecting' }),
+      observation({ ts: 130, phase: 'Failing', turn: 'executing', decision: 'guard_ok', runtime: 'done' }),
     ]
     const entries = deriveStateEntries(observations)
     expect(entries).toEqual({
@@ -375,7 +348,6 @@ describe('deriveStateEntries', () => {
       turn: 120,
       decision: 120,
       runtime: 130,
-      compaction: 100,
     })
   })
 

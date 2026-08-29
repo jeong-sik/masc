@@ -193,7 +193,7 @@ describe('LaneQueuePanel', () => {
       <${LaneQueuePanel} fetchFleet=${mocks.fetchFleet} fetchLifecycle=${mocks.fetchKeeperLifecycle} />
     `)
 
-    await waitFor(() => expect(container.querySelectorAll('.sw-row')).toHaveLength(5))
+    await waitFor(() => expect(container.querySelectorAll('.sw-row')).toHaveLength(4))
     expect(container.querySelector('.sw-axis-track')).not.toBeNull()
     expect(container.querySelectorAll('.sw-tick')).toHaveLength(5)
     expect(container.querySelectorAll('.sw-seg').length).toBeGreaterThan(0)

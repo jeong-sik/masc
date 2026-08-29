@@ -45,51 +45,6 @@ include Keeper_registry_types_turn_phase
    [Keeper_registry_types_decision] (500-line decomp). *)
 include Keeper_registry_types_decision
 
-(* Compaction-stage (KMC) FSM types, witnesses, transitions, and spec
-   violations re-homed to [Keeper_registry_types_compaction] (RFC-0206). The
-   runtime selection FSM that shared the deleted [Keeper_registry_types_runtime]
-   module is removed — single-binding Runtime has no Selecting/Trying loop; turn
-   lifecycle is the surviving [turn_phase] FSM. *)
-include Keeper_registry_types_compaction
-
-(* The root interface still exposes the ppx_tla helpers generated for the
-   re-exported [compaction_stage] type. Keep those aliases explicit so the
-   keeper aggregate remains compatible while the implementation delegates the
-   FSM body to [Keeper_registry_types_compaction]. *)
-let to_tla_symbol (stage : compaction_stage) =
-  match stage with
-  | Compaction_accumulating -> "compaction_accumulating"
-  | Compaction_compacting -> "compaction_compacting"
-  | Compaction_done -> "compaction_done"
-;;
-
-let all_states : compaction_stage list =
-  [ Compaction_accumulating; Compaction_compacting; Compaction_done ]
-;;
-
-let all_symbols = List.map to_tla_symbol all_states
-let terminal_symbols = [ to_tla_symbol Compaction_done ]
-let active_symbols = [ to_tla_symbol Compaction_compacting ]
-let idle_symbols = [ to_tla_symbol Compaction_accumulating ]
-
-let is_terminal (stage : compaction_stage) =
-  match stage with
-  | Compaction_done -> true
-  | Compaction_accumulating | Compaction_compacting -> false
-;;
-
-let is_active (stage : compaction_stage) =
-  match stage with
-  | Compaction_compacting -> true
-  | Compaction_accumulating | Compaction_done -> false
-;;
-
-let is_idle (stage : compaction_stage) =
-  match stage with
-  | Compaction_accumulating -> true
-  | Compaction_compacting | Compaction_done -> false
-;;
-
 type turn_attempt_state =
   { turn_id : int
   ; attempts : int
@@ -168,7 +123,6 @@ type registry_entry =
   ; current_turn_observation : turn_observation option
   ; last_completed_turn : completed_turn_observation option
   ; last_skip_observation : (float * string list) option
-  ; compaction_stage : packed_compaction_stage
   }
 
 and turn_observation =
@@ -272,7 +226,6 @@ let completed_turn_outcome_of_observation (obs : turn_observation)
   | Packed Turn_prompting
   | Packed Turn_routing
   | Packed Turn_executing
-  | Packed Turn_compacting
   | Packed Turn_exhausted -> Keeper_transition_audit.Turn_failed
 ;;
 
@@ -280,43 +233,10 @@ let completed_turn_outcome_of_observation (obs : turn_observation)
 type lifecycle_event_origin =
   | Generic_dispatch
   | Post_turn_lifecycle
-  | Operator_compact
 
 let lifecycle_event_origin_to_string = function
   | Generic_dispatch -> "generic_dispatch"
   | Post_turn_lifecycle -> "post_turn_lifecycle"
-  | Operator_compact -> "operator_compact"
-;;
-
-let is_paired_lifecycle_event = function
-  | Keeper_state_machine.Compaction_started
-  | Keeper_state_machine.Compaction_completed
-  | Keeper_state_machine.Compaction_failed _ -> true
-  | _ -> false
-;;
-
-let origin_allows_paired_lifecycle_event origin event =
-  (* This guard only constrains paired compaction lifecycle events. For any
-     other event the gate is outside its
-     domain and returns true unconditionally — the caller's question
-     does not apply. *)
-  if not (is_paired_lifecycle_event event) then true
-  else
-    (* Outer match is exhaustive on [lifecycle_event_origin] so adding a
-       new origin variant forces an explicit arm here instead of silently
-       inheriting the previous [_, _ -> true] default-allow catch-all,
-       which was the FSM-sparse-match anti-pattern called out in
-       instructions/software-development.md §4. *)
-    match origin with
-    | Post_turn_lifecycle -> true
-    | Generic_dispatch -> false
-    | Operator_compact ->
-      (* Operator_compact authorizes only the compaction pair. *)
-      (match event with
-       | Keeper_state_machine.Compaction_started
-       | Keeper_state_machine.Compaction_completed
-       | Keeper_state_machine.Compaction_failed _ -> true
-       | _ -> false)
 ;;
 
 let pending_measurement_after_event now entry event =
@@ -326,11 +246,3 @@ let pending_measurement_after_event now entry event =
   | _ -> entry.pending_turn_measurement
 ;;
 
-let compaction_stage_of_event entry event =
-  match event with
-  | Keeper_state_machine.Compaction_started
-  | Keeper_state_machine.Operator_compact_requested -> Packed Compaction_compacting
-  | Keeper_state_machine.Compaction_completed -> Packed Compaction_done
-  | Keeper_state_machine.Compaction_failed _ -> Packed Compaction_accumulating
-  | _ -> entry.compaction_stage
-;;

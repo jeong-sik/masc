@@ -46,7 +46,6 @@ let reconcile_keepalive_keepers
          | Keeper_state_machine.Paused -> true
          | Keeper_state_machine.Crashed -> true
          | Keeper_state_machine.Failing
-         | Keeper_state_machine.Compacting
          | Keeper_state_machine.Draining
          | Keeper_state_machine.Restarting -> true
          | Keeper_state_machine.Offline -> false

@@ -524,13 +524,10 @@ let offline_keeper_composite_json ~config name (m : Keeper_meta_contract.keeper_
     ; "turn_phase", `String "idle"
     ; "decision", `Assoc [ "stage", `String "idle" ]
     ; "runtime", `Assoc [ "state", `String "offline" ]
-    ; "compaction", `Assoc [ "stage", `String "accumulating" ]
     ; "measurement", `Assoc [ "captured", `Bool false ]
     ; ( "invariants"
       , `Assoc
-          [ "phase_turn_alignment", `Bool true
-          ; "no_runtime_before_measurement", `Bool true
-          ; "compaction_atomicity", `Bool true
+          [ "no_runtime_before_measurement", `Bool true
           ; "event_priority_monotone", `Bool true
           ; "phase_derivation_agreement", `Bool true
           ] )
@@ -1629,24 +1626,6 @@ let handle_keeper_get_subroutes state req request reqd =
       let runtime_fsm_mermaid =
         state_diagram_runtime_fsm_mermaid runtime_projection
       in
-      (* Compaction sub-FSM: only emit a diagram when the keeper is in
-         the [Compacting] phase. *)
-      let compaction_submachine_mermaid =
-        match current with
-        | Keeper_state_machine.Compacting ->
-          let b = Buffer.create 256 in
-          Buffer.add_string b "stateDiagram-v2\n";
-          Buffer.add_string b "    [*] --> Accumulating\n";
-          Buffer.add_string b "    Accumulating --> Compacting: Compaction_started\n";
-          Buffer.add_string b "    Compacting --> Done: Compaction_completed\n";
-          Buffer.add_string b "    Compacting --> Accumulating: Compaction_failed\n";
-          Buffer.add_string b "    Done --> [*]\n";
-          Buffer.add_string b
-            "    classDef active fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n";
-          Buffer.add_string b "    class Compacting active\n";
-          `String (Buffer.contents b)
-        | _ -> `Null
-      in
       let runtime_projection_fields =
         match state_diagram_runtime_projection_json runtime_projection with
         | `Assoc fields -> fields
@@ -1658,7 +1637,6 @@ let handle_keeper_get_subroutes state req request reqd =
            ; "current_phase", `String phase_str
            ; "mermaid", `String mermaid
            ; "runtime_fsm_mermaid", `String runtime_fsm_mermaid
-           ; "compaction_submachine_mermaid", compaction_submachine_mermaid
            ]
            @ runtime_projection_fields)
       in

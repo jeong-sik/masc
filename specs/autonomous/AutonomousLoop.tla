@@ -2,8 +2,8 @@
 \* Non-invasive autonomous tick projection.
 \*
 \* An autonomous tick may update only its own typed state and metadata. It must
-\* not mutate Keeper lifecycle authority. Failing, Compacting, and
-\* Compacting remains work-capable alongside Running.
+\* not mutate Keeper lifecycle authority. Failing remains work-capable
+\* alongside Running.
 
 EXTENDS TLC, Naturals
 
@@ -12,13 +12,13 @@ CONSTANTS
     MaxAutoTicks
 
 KeeperPhases == {
-    "Offline", "Running", "Failing", "Compacting",
+    "Offline", "Running", "Failing",
     "Draining", "Paused", "Stopped", "Crashed",
     "Restarting"
 }
 
 WorkCapable == {
-    "Running", "Failing", "Compacting"
+    "Running", "Failing"
 }
 
 AutoPhases == {

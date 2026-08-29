@@ -74,7 +74,6 @@ let keeper_metric_producer_active ~base_path =
        | Keeper_state_machine.Failing -> Atomic.get entry.cadence_sleeping
        | Keeper_state_machine.Offline
        | Keeper_state_machine.Running
-       | Keeper_state_machine.Compacting
        | Keeper_state_machine.Draining
        | Keeper_state_machine.Paused
        | Keeper_state_machine.Stopped
@@ -492,7 +491,6 @@ let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   | Keeper_state_machine.Offline -> "offline"
   | Keeper_state_machine.Running -> "idle"
   | Keeper_state_machine.Failing -> "failing"
-  | Keeper_state_machine.Compacting -> "compacting"
   | Keeper_state_machine.Draining -> "draining"
   | Keeper_state_machine.Paused -> "paused"
   | Keeper_state_machine.Stopped -> "offline"
@@ -507,7 +505,6 @@ let pipeline_stage_detail_of_phase (phase : Keeper_state_machine.phase) : string
   | Keeper_state_machine.Offline -> "launch_pending_no_fiber"
   | Keeper_state_machine.Running -> "phase_running_idle"
   | Keeper_state_machine.Failing -> "health_or_turn_failure_probe"
-  | Keeper_state_machine.Compacting -> "context_compaction_in_progress"
   | Keeper_state_machine.Draining -> "graceful_shutdown_draining"
   | Keeper_state_machine.Paused -> "operator_paused"
   | Keeper_state_machine.Stopped -> "clean_stop_terminal"

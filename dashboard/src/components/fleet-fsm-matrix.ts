@@ -52,13 +52,12 @@ export const FLEET_HISTORY_LEN = 30
 // (KeeperCompositeLifecycle.tla): KSM → KTC → KDP → KCL → KMC.
 // Keep it identical to TRANSITION_FIELDS so an operator scanning
 // left-to-right sees "lifecycle → turn → decision → runtime →
-// compaction" — the natural causal order of a turn.
+// runtime" — the natural causal order of a turn.
 const AXES: Array<{ key: LaneKey; label: string; acronym: string }> = [
   { key: 'phase',      label: '생명주기',   acronym: 'KSM' },
   { key: 'turn',       label: '턴',        acronym: 'KTC' },
   { key: 'decision',   label: '결정',      acronym: 'KDP' },
   { key: 'runtime',    label: 'Runtime',   acronym: 'KCL' },
-  { key: 'compaction', label: '압축',      acronym: 'KMC' },
 ]
 
 const INVARIANT_KEYS = Object.keys(INVARIANT_LABELS) as Array<
@@ -120,7 +119,7 @@ export function sparkClassFor(value: string): string {
 /** Per-axis observation ring keyed by keeper name. */
 export type KeeperFleetHistory = Record<string, Record<LaneKey, string[]>>
 
-const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'runtime', 'compaction']
+const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'runtime']
 
 export type FleetRuntimeAttentionLevel = 'ok' | 'stale' | 'idle' | 'blocked'
 
@@ -240,7 +239,6 @@ function isIdleComposite(snapshot: KeeperCompositeSnapshot): boolean {
   return snapshot.turn_phase === 'idle'
     && snapshot.decision.stage === 'undecided'
     && snapshot.runtime.state === 'idle'
-    && snapshot.compaction.stage === 'accumulating'
 }
 
 function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
@@ -447,7 +445,7 @@ export function buildRuntimeAssistPrompt(
     `next_hint=${attention.nextStep}`,
     `evidence=${attention.reason}`,
     `is_live=${String(snapshot.is_live)}`,
-    `KSM=${snapshot.phase} KTC=${snapshot.turn_phase} KDP=${snapshot.decision.stage} KCL=${snapshot.runtime.state} KMC=${snapshot.compaction.stage}`,
+    `KSM=${snapshot.phase} KTC=${snapshot.turn_phase} KDP=${snapshot.decision.stage} KCL=${snapshot.runtime.state}`,
     `last_receipt=${receipt}`,
     '',
     '응답 형식:',
@@ -654,7 +652,6 @@ export function pushObservation(
       turn:       prev?.turn       ? prev.turn.slice()       : [],
       decision:   prev?.decision   ? prev.decision.slice()   : [],
       runtime:    prev?.runtime    ? prev.runtime.slice()    : [],
-      compaction: prev?.compaction ? prev.compaction.slice() : [],
     }
     for (const axis of AXIS_KEYS) {
       perAxis[axis].push(extractLaneValue(snap, axis))

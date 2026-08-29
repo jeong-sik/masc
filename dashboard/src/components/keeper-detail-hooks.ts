@@ -25,7 +25,7 @@ export type KeeperDetailEvidenceState<T> = EvidenceState<T>
 /**
  * RFC-0046 §7 follow-up #1: single composite snapshot fetch shared
  * across the detail surface. Before this hook KeeperStateDiagramPanel
- * and KeeperCompactionPanel each issued their own /composite call;
+ * each issued their own /composite call;
  * now keeper-detail owns the fetch and threads the snapshot down via
  * the snapshot prop introduced in PR #14226.
  *

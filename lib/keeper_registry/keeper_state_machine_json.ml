@@ -20,7 +20,6 @@ let conditions_to_json (c : conditions) =
     ; "heartbeat_healthy", `Bool c.heartbeat_healthy
     ; "turn_healthy", `Bool c.turn_healthy
     ; "context_handoff_needed", `Bool c.context_handoff_needed
-    ; "compaction_active", `Bool c.compaction_active
     ; "operator_paused", `Bool c.operator_paused
     ; "stop_requested", `Bool c.stop_requested
     ; "restart_requested", `Bool c.restart_requested
@@ -46,13 +45,8 @@ let event_to_json (ev : event) : Yojson.Safe.t =
       ; "token_count", `Int r.token_count
       ; ( "context_actions"
         , `Assoc
-            [ "compact", `Bool r.context_actions.compact
-            ; "handoff", `Bool r.context_actions.handoff
-            ] )
+            [ "handoff", `Bool r.context_actions.handoff ] )
       ]
-  | Compaction_started -> obj "compaction_started" []
-  | Compaction_completed -> obj "compaction_completed" []
-  | Compaction_failed r -> obj "compaction_failed" [ "reason", `String r.reason ]
   | Operator_pause -> obj "operator_pause" []
   | Operator_resume -> obj "operator_resume" []
   | Operator_stop r -> obj "operator_stop" [ "remove_meta", `Bool r.remove_meta ]
@@ -75,7 +69,6 @@ let event_to_json (ev : event) : Yojson.Safe.t =
   | Supervisor_restart_attempt r ->
     obj "supervisor_restart_attempt" [ "attempt", `Int r.attempt ]
   | Credential_archived -> obj "credential_archived" []
-  | Operator_compact_requested -> obj "operator_compact_requested" []
   | Operator_clear_requested r ->
     obj
       "operator_clear_requested"

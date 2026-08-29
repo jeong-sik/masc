@@ -5,7 +5,7 @@
     @since 7182 *)
 type node_status =
   (* Agent lifecycle *)
-  | Active | Compacting
+  | Active
   (* Task lifecycle *)
   | Todo | Claimed | In_progress | Done | Cancelled
   (* Board *)
@@ -14,7 +14,7 @@ type node_status =
   | Observed | Workspace | Unset
 
 let node_status_to_string = function
-  | Active -> "active" | Compacting -> "compacting"
+  | Active -> "active"
   | Todo -> "todo" | Claimed -> "claimed" | In_progress -> "in_progress"
   | Done -> "done" | Cancelled -> "cancelled"
   | Posted -> "posted" | Discussed -> "discussed"

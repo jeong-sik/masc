@@ -282,28 +282,15 @@ val set_turn_phase :
     [validate_turn_phase_transition] dispatches through
     [resolve_turn_phase_transition] and raises the typed
     [Turn_phase_transition_violation] on a forbidden pair (RFC-0072
-    Phase 4b + 5).  [validate_compaction_transition] is an exhaustive
-    3×3 match raising the typed [Compaction_transition_violation] on a
-    forbidden pair (RFC-0072 Phase 6 — no GADT/resolver indirection,
-    the axis has 3 states and a single consumer).  Both bump
+    Phase 4b + 5).  It bumps
     [Otel_metric_store.metric_fsm_guard_violation] via
     [Keeper_fsm_guard_runtime.wrap_unit]. *)
 val validate_turn_phase_transition :
   from:packed_turn_phase -> to_:packed_turn_phase -> unit
 
-val validate_compaction_transition :
-  from:packed_compaction_stage -> to_:packed_compaction_stage -> unit
-
 (** Record the surface model selected for the current turn. No-op if idle. *)
 val set_turn_selected_model :
   base_path:string -> string -> string option -> unit
-
-(** Reset a live turn into the post-compaction retry posture used by
-    overflow recovery. Preserves the bound measurement, but clears the
-    previous runtime attempt and selected model so the next retry starts
-    from [Prompting + Guard_ok + Runtime_idle]. *)
-val prepare_turn_retry_after_compaction :
-  base_path:string -> string -> unit
 
 (** Mark the end of a keeper turn. Clears [current_turn_observation]
     so the composite observer reverts to idle and stamps
@@ -434,7 +421,6 @@ type wakeup_intent =
   | Supervisor_resume
   | Hitl_resolution
   | Broadcast_signal
-  | Compaction_signal
   | Attention_result
   | Runtime_parameter_change
   | Turn_slot_released

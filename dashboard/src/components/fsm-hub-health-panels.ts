@@ -9,10 +9,6 @@ import type { InvariantViolationCounts } from './fsm-hub-types'
     Indexed by rule name -> { on: "this fires next turn", off: "nothing
     pending" } so the tooltip reflects the active half of the flag. */
 const MEASUREMENT_FLAG_DESCRIPTIONS: Record<string, { on: string; off: string }> = {
-  compact: {
-    on: '컨텍스트 압축 예약됨 — 오래된 메시지를 요약해 토큰 예산을 회수합니다.',
-    off: '예약된 압축 없음 — 컨텍스트 윈도우에 여유가 있습니다.',
-  },
   handoff: {
     on: '키퍼가 동일 정체성을 유지하며 새 trace/generation 으로 이관됩니다.',
     off: '예약된 handoff 없음 — 현재 generation 이 같은 trace 에서 계속 실행됩니다.',
@@ -29,7 +25,6 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
       ${m.captured && m.context_actions ? html`
         <div class="flex flex-col gap-1.5 text-2xs text-[var(--color-fg-primary)]">
           <div class="flex flex-wrap gap-1.5 font-mono">
-            <${Flag} label="compact" on=${m.context_actions.compact} />
             <${Flag} label="handoff" on=${m.context_actions.handoff} />
           </div>
         </div>
@@ -64,12 +59,8 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
 
 /** Plain-english safety-property descriptions per invariant key. */
 const INVARIANT_DESCRIPTIONS: Record<string, string> = {
-  phase_turn_alignment:
-    'KSM phase (Running / Compacting / Draining / …) 와 KTC turn lane 이 일치해야 함. drift 가 발생하면 두 state machine 이 keeper mode 에 대해 의견 불일치.',
   no_runtime_before_measurement:
     'Runtime selection 은 measurement phase 가 auto-rule 을 capture 하기 전에 시작되면 안 됨. violation 은 보통 guardrail/drift check 없이 provider call 이 발사된 경우.',
-  compaction_atomicity:
-    'Compaction 은 atomic 해야 함 — turn 이 old context 또는 new context 만 보고 half-compacted state 는 안 봄. break 시 message ordering 손상 또는 content 중복.',
   event_priority_monotone:
     'Event_bus priority 는 monotone 해야 함 (higher priority 먼저 delivered). break 시 critical event 가 lower priority 뒤에 도착해 keeper decision 왜곡.',
   phase_derivation_agreement:

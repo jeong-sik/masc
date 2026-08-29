@@ -13,7 +13,6 @@ import {
 import { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
 import {
   isFailingAfterRuntimeExhausted,
-  isCompactionActive,
 } from '../lib/keeper-operational-state'
 
 function brokenInvariantKey(
@@ -30,18 +29,10 @@ function invariantDetail(
   ok: boolean,
 ): string {
   switch (key) {
-    case 'phase_turn_alignment':
-      return ok
-        ? 'KSM/KTC/KMC agree — 지금 누가 compaction 을 소유하는지 일치.'
-        : `KSM=${snapshot.phase}, KTC=${snapshot.turn_phase}, KMC=${snapshot.compaction.stage} 가 일치하지 않음.`
     case 'no_runtime_before_measurement':
       return ok
         ? 'measurement 가 captured 된 뒤에만 runtime work 가 진행됨.'
         : `measurement.captured=${String(snapshot.measurement.captured)} 인데 KCL=${snapshot.runtime.state}.`
-    case 'compaction_atomicity':
-      return ok
-        ? 'compaction 은 parent Compacting phase 밖에서 실행되지 않음.'
-        : `KMC=${snapshot.compaction.stage} 인데 KSM=${snapshot.phase}.`
     case 'event_priority_monotone':
       return ok
         ? '이 turn 은 경쟁 measurement snapshot 을 emit 하지 않았음.'
@@ -77,9 +68,6 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   if (isFailingAfterRuntimeExhausted(snapshot)) {
     return '정상 provider path 또는 명시적 recovery clearance 가 failing 을 해제해야 running 재개 가능.'
   }
-  if (isCompactionActive(snapshot)) {
-    return 'KMC 가 done 에 도달한 뒤 KSM 이 running 으로 control 을 반환해야 함.'
-  }
   if (snapshot.phase === 'draining') {
     return 'lifecycle 가 stopped 로 정착되기 전에 draining 이 완료되어야 함.'
   }
@@ -92,9 +80,7 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
     case 'routing':
       return 'runtime routing 이 완료되면 KCL 이 trying 으로 진행해야 함.'
     case 'executing':
-      return 'execution 은 turn 을 finalize 하거나 runtime/compaction transition 을 유도해야 함.'
-    case 'compacting':
-      return 'turn finalization 이 compaction 종료를 대기 중.'
+      return 'execution 은 turn 을 finalize 하거나 runtime transition 을 유도해야 함.'
     case 'finalizing':
       return '다음 stable state 는 last_outcome 갱신된 idle 이어야 함.'
     case 'exhausted':
@@ -149,18 +135,6 @@ export function deriveOperationalInsight(
       evidence: [
         `${stalledLane.field} ${stalledLane.value}`,
         `${stalledLane.transitionCount} observed changes`,
-      ],
-    }
-  }
-  if (isCompactionActive(snapshot)) {
-    return {
-      tone: 'info',
-      headline: 'Compaction 가 현재 턴 소유',
-      detail: 'parent lifecycle 과 memory lane 모두 post-turn compaction 이 active workspace point 임을 가리킴.',
-      nextStep: nextExpectedStep(snapshot),
-      evidence: [
-        `KSM ${snapshot.phase}`,
-        `KMC ${snapshot.compaction.stage}`,
       ],
     }
   }

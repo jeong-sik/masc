@@ -27,12 +27,9 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
     turn_phase: 'idle',
     decision: { stage: 'idle' },
     runtime: { state: 'idle' },
-    compaction: { stage: 'idle' },
     measurement: { captured: true },
     invariants: {
-      phase_turn_alignment: true,
       no_runtime_before_measurement: true,
-      compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },
@@ -48,7 +45,6 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
         heartbeat_healthy: true,
         turn_healthy: true,
         context_handoff_needed: false,
-        compaction_active: false,
         handoff_active: false,
         operator_paused: false,
         stop_requested: false,
@@ -171,7 +167,6 @@ describe('deriveKeeperRuntimeProjection', () => {
         turn_phase: 'executing',
         decision: { stage: 'tool_optional' },
         runtime: { state: 'degraded_retry' },
-        compaction: { stage: 'idle' },
       }),
       runtimeTrace: runtimeTrace(),
       runtimeResolution: {

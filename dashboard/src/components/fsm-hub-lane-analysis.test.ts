@@ -71,20 +71,6 @@ describe('isObservedStall', () => {
     expect(isObservedStall('runtime', 'selecting', 29)).toBe(false)
   })
 
-  // --- compaction lane ---
-
-  it('detects compacting stall at 60s', () => {
-    expect(isObservedStall('compaction', 'compacting', 60)).toBe(true)
-  })
-
-  it('does not detect compaction stall below 60s', () => {
-    expect(isObservedStall('compaction', 'compacting', 59)).toBe(false)
-  })
-
-  it('does not detect compaction stall for non-compacting value', () => {
-    expect(isObservedStall('compaction', 'idle', 120)).toBe(false)
-  })
-
   // --- unknown lane ---
 
   it('returns false for unknown lane key', () => {

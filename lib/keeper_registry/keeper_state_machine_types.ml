@@ -6,7 +6,6 @@ type phase = Keeper_state_machine_phase.phase =
   | Offline
   | Running
   | Failing
-  | Compacting
   | Draining
   | Paused
   | Stopped
@@ -25,7 +24,6 @@ type conditions =
   ; heartbeat_healthy : bool
   ; turn_healthy : bool
   ; context_handoff_needed : bool
-  ; compaction_active : bool
   ; operator_paused : bool
   ; stop_requested : bool
   ; restart_requested : bool
@@ -39,7 +37,6 @@ let default_conditions =
   ; heartbeat_healthy = true
   ; turn_healthy = true
   ; context_handoff_needed = false
-  ; compaction_active = false
   ; operator_paused = false
   ; stop_requested = false
   ; restart_requested = false
@@ -50,10 +47,7 @@ let default_conditions =
 
 (* ── Events ────────────────────────────────────────────── *)
 
-type context_actions =
-  { compact : bool
-  ; handoff : bool
-  }
+type context_actions = { handoff : bool }
 
 type event =
   | Heartbeat_ok
@@ -68,9 +62,6 @@ type event =
       ; token_count : int
       ; context_actions : context_actions
       }
-  | Compaction_started
-  | Compaction_completed
-  | Compaction_failed of { reason : string }
   | Operator_pause
   | Operator_resume
   | Operator_stop of { remove_meta : bool }
@@ -84,7 +75,6 @@ type event =
       }
   | Supervisor_restart_attempt of { attempt : int }
   | Credential_archived
-  | Operator_compact_requested
   | Operator_clear_requested of
       { preserve_system : bool
       ; reason : string
@@ -96,9 +86,6 @@ let event_to_string = function
   | Turn_succeeded -> "turn_succeeded"
   | Turn_failed r -> Printf.sprintf "turn_failed(%d)" r.consecutive
   | Context_measured r -> Printf.sprintf "context_measured(ratio=%.3f)" r.context_ratio
-  | Compaction_started -> "compaction_started"
-  | Compaction_completed -> "compaction_completed"
-  | Compaction_failed r -> Printf.sprintf "compaction_failed(%s)" r.reason
   | Operator_pause -> "operator_pause"
   | Operator_resume -> "operator_resume"
   | Operator_stop r -> Printf.sprintf "operator_stop(remove_meta=%b)" r.remove_meta
@@ -120,7 +107,6 @@ let event_to_string = function
   | Supervisor_restart_attempt r ->
     Printf.sprintf "supervisor_restart_attempt(%d)" r.attempt
   | Credential_archived -> "credential_archived"
-  | Operator_compact_requested -> "operator_compact_requested"
   | Operator_clear_requested r ->
     Printf.sprintf
       "operator_clear_requested(preserve_system=%b,reason=%s)"
@@ -136,7 +122,6 @@ let event_to_string = function
     - The remaining variants describe runtime-owned work and remain
       explicit phase-entry intent until that integration is unified. *)
 type entry_action =
-  | Start_compaction
   | Start_drain
   | Schedule_restart of { delay_sec : float }
   | Publish_lifecycle of
@@ -211,49 +196,35 @@ let can_transition ~from_phase ~to_phase =
   | ( Offline
     , ( Offline
       | Failing
-          | Compacting
       | Paused
       | Crashed
       | Restarting ) ) -> false
   (* Running -> buffer states, Paused, Stopped, Crashed (fiber death). *)
   | ( Running
     , ( Failing
-      | Compacting
       | Draining
       | Paused
       | Stopped
       | Crashed ) ) -> true
   | Running, (Offline | Running | Restarting) -> false
   (* Failing -> Running (recovery) | Crashed (threshold) | Draining (stop)
-     | Paused (operator can pause for investigation)
-     | Compacting (post-turn compaction can run while the keeper remains in
-     the health-failing lane; completion returns to Failing if the health latch
-     is still set). *)
-  | Failing, (Running | Compacting | Crashed | Draining | Paused) -> true
+     | Paused (operator can pause for investigation). *)
+  | Failing, (Running | Crashed | Draining | Paused) -> true
   | ( Failing
     , (Offline | Failing | Stopped | Restarting) ) ->
     false
-  (* Compacting -> Running (done or failed; the durable Keeper Lane owns any
-     exact-source retry after failure)
-     | Paused (operator pause during compaction)
-     | Failing (hb fail / guardrail during)
-     | Crashed (fatal) | Draining (operator stop during). *)
-  | Compacting, (Running | Failing | Crashed | Draining | Paused) -> true
-  | Compacting, (Offline | Compacting | Stopped | Restarting) -> false
   (* Draining -> Stopped (done) | Crashed (fatal during drain) *)
   | Draining, (Stopped | Crashed) -> true
   | ( Draining
     , ( Offline
       | Running
       | Failing
-          | Compacting
       | Draining
       | Paused
       | Restarting ) ) -> false
   (* Paused -> Running (resume) | latent states exposed by resume
      (Failing/Restarting/Offline) | Draining (stop)
-     | Stopped (remove) | Crashed (fiber can die while keeper is paused)
-     | Compacting (operator invoked masc_keeper_compact on a paused keeper).
+     | Stopped (remove) | Crashed (fiber can die while keeper is paused).
 
      Operator_resume only clears [operator_paused]; it intentionally does not
      erase already-observed launch, health, or restart conditions.
@@ -264,7 +235,6 @@ let can_transition ~from_phase ~to_phase =
   | ( Paused
     , ( Running
       | Failing
-          | Compacting
       | Draining
       | Stopped
       | Crashed
@@ -277,7 +247,6 @@ let can_transition ~from_phase ~to_phase =
     , ( Offline
       | Running
       | Failing
-          | Compacting
       | Draining
       | Paused
       | Stopped
@@ -286,12 +255,12 @@ let can_transition ~from_phase ~to_phase =
      | Draining (stop_requested persists) | Paused (operator_paused persists) *)
   | Restarting, (Running | Crashed | Draining | Paused) -> true
   | ( Restarting
-    , (Offline | Failing | Compacting | Stopped | Restarting) )
+    , (Offline | Failing | Stopped | Restarting) )
     -> false
 ;;
 
 let can_execute_turn = function
-  | Running | Failing | Compacting -> true
+  | Running | Failing -> true
   | Offline
   | Draining
   | Paused

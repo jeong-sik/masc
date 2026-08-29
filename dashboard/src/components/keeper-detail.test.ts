@@ -105,9 +105,6 @@ vi.mock('./keeper-state-diagram', () => ({
   KeeperStateDiagramPanel: () => null,
 }))
 
-vi.mock('./keeper-compaction-panel', () => ({
-  KeeperCompactionPanel: () => null,
-}))
 
 vi.mock('./keeper-tool-telemetry', () => ({
   KeeperToolTelemetry: () => null,

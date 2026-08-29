@@ -36,9 +36,6 @@ export function isObservedStall(
     if (value === 'trying') return observedForSec >= 45
     return false
   }
-  if (key === 'compaction') {
-    return value === 'compacting' && observedForSec >= 60
-  }
   return false
 }
 
@@ -112,17 +109,6 @@ function laneMeaning(
           return { tone: 'error', meaning: 'runtime 옵션 모두 소진 — 사용 가능한 path 없음' }
         default:
           return { tone: 'info', meaning: 'runtime state 관측됨' }
-      }
-    case 'compaction':
-      switch (value) {
-        case 'accumulating':
-          return { tone: 'ok', meaning: '메모리 누적 중 — compaction 실행 중 아님' }
-        case 'compacting':
-          return { tone: 'warn', meaning: 'memory compaction 이 context state 를 rewrite 중' }
-        case 'done':
-          return { tone: 'ok', meaning: '관측된 turn 의 compaction 완료' }
-        default:
-          return { tone: 'info', meaning: 'compaction state 관측됨' }
       }
     }
   })()

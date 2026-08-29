@@ -17,22 +17,20 @@ import { toKeeperPhase } from '../keeper-store-normalize'
 // sub-FSMs is captured by the invariants panel, not the graph edges.
 
 interface CompositeFsmParams {
-  phase: string            // KSM — offline | running | failing | compacting | draining | paused | stopped | crashed | restarting
-  turnPhase: string        // KTC — idle | prompting | routing | executing | compacting | finalizing | exhausted
+  phase: string            // KSM — offline | running | failing | draining | paused | stopped | crashed | restarting
+  turnPhase: string        // KTC — idle | prompting | routing | executing | finalizing | exhausted
   decisionStage: string    // KDP — undecided | guard_ok | tool_policy_selected
   runtimeState: string     // KCL — idle | selecting | trying | done | exhausted
-  compactionStage: string  // KMC — accumulating | compacting | done
 }
 
 const KSM_STATES = [
-  'offline', 'running', 'failing', 'compacting',
+  'offline', 'running', 'failing',
   'draining', 'paused', 'stopped', 'crashed',
   'restarting',
 ]
-const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted']
+const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'finalizing', 'exhausted']
 const KDP_STATES = ['undecided', 'guard_ok', 'tool_policy_selected']
 const KCL_STATES = ['idle', 'selecting', 'trying', 'done', 'exhausted']
-const KMC_STATES = ['accumulating', 'compacting', 'done']
 
 export const TURN_FSM_STATES = [
   'idle',
@@ -44,7 +42,6 @@ export const TURN_FSM_STATES = [
   // `normalizeTurnFsmState` maps the raw `awaiting_tool` backend phase
   // onto this UI state, and `turnFsmTlaSymbol` translates it back.
   'awaiting_tool_result',
-  'compacting',
   'finalizing',
   'exhausted',
 ] as const
@@ -57,7 +54,6 @@ const TURN_FSM_TLA_SYMBOLS: Record<KeeperTurnFsmState, string> = {
   routing: 'routing',
   executing: 'executing',
   awaiting_tool_result: 'awaiting_tool',
-  compacting: 'compacting',
   finalizing: 'finalizing',
   exhausted: 'exhausted',
 }
@@ -76,7 +72,7 @@ const TURN_FSM_STATE_ALIASES: Readonly<Record<string, KeeperTurnFsmState>> = {
 // edge here; adding a new constructor in OCaml must be paired with a new
 // edge in this list, otherwise the dashboard visualization hides a real
 // transition the runtime can take. The previous list omitted the four
-// `* -> exhausted` arms from prompting/routing/compacting/finalizing,
+// `* -> exhausted` arms from prompting/routing/finalizing,
 // surfacing only the `executing -> exhausted` path even though runtime
 // exhaustion can be entered from any non-terminal turn phase.
 const TURN_FSM_EDGES: FsmEdge[] = [
@@ -91,22 +87,17 @@ const TURN_FSM_EDGES: FsmEdge[] = [
   { source: 'routing', target: 'prompting', label: 'Retry' },
   { source: 'routing', target: 'executing', label: 'RuntimeRouted', type: 'runtime' },
   { source: 'routing', target: 'exhausted', label: 'Exhausted', type: 'error' },
-  // From Executing (5): retry-back / re-entry / compacting / completion / exhausted.
+  // From Executing (4): retry-back / re-entry / completion / exhausted.
   { source: 'executing', target: 'prompting', label: 'Retry' },
   { source: 'executing', target: 'routing', label: 'Retry' },
-  { source: 'executing', target: 'compacting', label: 'CompactionGate' },
   { source: 'executing', target: 'finalizing', label: 'Complete' },
   { source: 'executing', target: 'exhausted', label: 'Exhausted', type: 'error' },
-  // From Compacting (3): retry / completion / exhausted.
-  { source: 'compacting', target: 'prompting', label: 'CompactionRetry' },
-  { source: 'compacting', target: 'finalizing', label: 'CompactionDone', type: 'recovery' },
-  { source: 'compacting', target: 'exhausted', label: 'Exhausted', type: 'error' },
   // From Finalizing (4): degraded retry across phases / exhausted.
   { source: 'finalizing', target: 'prompting', label: 'NextTurn' },
   { source: 'finalizing', target: 'routing', label: 'NextTurnSkip' },
   { source: 'finalizing', target: 'executing', label: 'NextTurnDirect' },
   { source: 'finalizing', target: 'exhausted', label: 'Exhausted', type: 'error' },
-  // From Exhausted (3): retry after compaction.
+  // From Exhausted (3): retry.
   { source: 'exhausted', target: 'prompting', label: 'RetryAfterExhausted' },
   { source: 'exhausted', target: 'routing', label: 'RetryAfterExhausted' },
   { source: 'exhausted', target: 'executing', label: 'RetryAfterExhausted' },
@@ -152,7 +143,6 @@ export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec 
     ...clusterNodes('KDP', 'KDP · decision pipeline', KDP_STATES, params.decisionStage, 'active'),
     ...clusterNodes('KCL', 'KCL · runtime state', KCL_STATES, params.runtimeState,
       params.runtimeState === 'exhausted' ? 'err' : 'active'),
-    ...clusterNodes('KMC', 'KMC · memory compaction', KMC_STATES, params.compactionStage, 'warn'),
   ]
 
   // Edges left empty by design: the compound visual encodes "what sub-FSMs
@@ -169,34 +159,6 @@ export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec 
   }
 }
 
-export function buildCompactionSpec(
-  activeStage: string,
-  currentPhase?: string | null,
-): FsmGraphSpec {
-  const normalizedPhase = currentPhase ?? null
-  const tone: 'active' | 'warn' | 'err' =
-    activeStage === 'compacting'
-      ? 'warn'
-      : normalizedPhase === 'failing'
-        ? 'err'
-        : 'active'
-
-  return {
-    nodes: KMC_STATES.map(state => ({
-      id: state,
-      label: state,
-      type: nodeType(state, activeStage, tone),
-    })),
-    edges: [
-      { source: 'accumulating', target: 'compacting', label: 'Compaction_started', type: 'runtime' },
-      { source: 'compacting', target: 'done', label: 'Compaction_completed', type: 'recovery' },
-      { source: 'compacting', target: 'accumulating', label: 'Compaction_failed', type: 'error' },
-    ],
-    activeNodeId: activeStage,
-    layout: 'breadthfirst',
-    direction: 'LR',
-  }
-}
 
 export function normalizeTurnFsmState(turnPhase: string | null | undefined): KeeperTurnFsmState | null {
   if (!turnPhase) return null

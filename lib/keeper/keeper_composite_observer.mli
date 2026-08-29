@@ -1,7 +1,7 @@
 (** Keeper Composite Lifecycle Observer — pure projection.
 
     Projects a [Keeper_registry.registry_entry] into a composite snapshot
-    spanning Decision / Runtime / Memory / Compaction sub-FSMs as
+    spanning Decision / Runtime / Memory sub-FSMs as
     specified in RFC-0003.
 
     Contract:
@@ -14,7 +14,7 @@
 
     Current scope: all projected sub-FSM live states are written directly
     into [Keeper_registry.registry_entry]. The observer no longer infers
-    decision/runtime/compaction state from coarse parent conditions.
+    decision/runtime state from coarse parent conditions.
 
     @since RFC-0003 — Composite observer v0. *)
 
@@ -23,7 +23,6 @@ type turn_phase = Keeper_registry.turn_phase =
   | Turn_prompting
   | Turn_routing
   | Turn_executing
-  | Turn_compacting
   | Turn_finalizing
   | Turn_exhausted
 
@@ -34,16 +33,10 @@ type decision_stage = Keeper_registry.decision_stage =
 
 type runtime_state = string
 
-type compaction_stage = Keeper_registry.compaction_stage =
-  | Compaction_accumulating
-  | Compaction_compacting
-  | Compaction_done
 
 (** Named composite invariants, one variant per {!invariants_check} field. *)
 type invariant_key =
-  | Invariant_phase_turn_alignment
   | Invariant_no_runtime_before_measurement
-  | Invariant_compaction_atomicity
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
 
@@ -52,9 +45,7 @@ type invariant_key =
     snapshot. A [false] value signals a composite-level safety violation
     that the dashboard should surface to the operator. *)
 type invariants_check = {
-  phase_turn_alignment : bool;
   no_runtime_before_measurement : bool;
-  compaction_atomicity : bool;
   event_priority_monotone : bool;
   phase_derivation_agreement : bool;
 }
@@ -236,7 +227,6 @@ type snapshot = {
   ktc_turn_phase : Keeper_registry.packed_turn_phase;
   kdp_decision : Keeper_registry.packed_decision_stage;
   kcl_runtime_state : runtime_state;
-  kmc_compaction : Keeper_registry.packed_compaction_stage;
   shared_measurement : Keeper_state_machine.context_actions option;
   invariants : invariants_check;
   conditions : Keeper_state_machine.conditions;
@@ -336,8 +326,6 @@ val turn_phase_to_string : Keeper_registry.packed_turn_phase -> string
 
 (** Stringify [decision_stage]. Mirrors KeeperDecisionPipeline.tla. *)
 (** Stringify the runtime-state compatibility field. *)
-(** Stringify [compaction_stage]. *)
-val compaction_stage_to_string : Keeper_registry.packed_compaction_stage -> string
 
 (** Serialise a snapshot as the [/api/keepers/:name/composite] payload
     documented in RFC-0003 §7. *)

@@ -3,7 +3,6 @@ type phase =
     Offline
   | Running
   | Failing
-  | Compacting
   | Draining
   | Paused
   | Stopped
@@ -19,7 +18,6 @@ type conditions = {
   heartbeat_healthy : bool;
   turn_healthy : bool;
   context_handoff_needed : bool;
-  compaction_active : bool;
   operator_paused : bool;
   stop_requested : bool;
   restart_requested : bool;
@@ -28,7 +26,6 @@ type conditions = {
 }
 val default_conditions : conditions
 type context_actions = {
-  compact : bool;
   handoff : bool;
 }
 type event =
@@ -39,9 +36,6 @@ type event =
   | Context_measured of { context_ratio : float; message_count : int;
       token_count : int; context_actions : context_actions;
     }
-  | Compaction_started
-  | Compaction_completed
-  | Compaction_failed of { reason : string; }
   | Operator_pause
   | Operator_resume
   | Operator_stop of { remove_meta : bool; }
@@ -53,12 +47,10 @@ type event =
     }
   | Supervisor_restart_attempt of { attempt : int; }
   | Credential_archived
-  | Operator_compact_requested
   | Operator_clear_requested of { preserve_system : bool; reason : string; }
 val event_to_string : event -> string
 type entry_action =
-    Start_compaction
-  | Start_drain
+    Start_drain
   | Schedule_restart of { delay_sec : float; }
   | Publish_lifecycle of { event_name : string; detail : string; }
   | Cleanup_and_unregister

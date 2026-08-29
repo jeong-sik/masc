@@ -195,175 +195,12 @@ let test_dispatch_keeper_phase_event_uses_workspace_base_path () =
         ~config
         ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
-        KST.Compaction_started;
-      match KR.get ~base_path:config.base_path meta.name with
-      | Some entry ->
-          check string "compaction start reaches registry" "compacting"
-            (KST.phase_to_string entry.phase)
-      | None -> fail "expected registered keeper after compaction dispatch")
-
-let test_compaction_runs_from_failing_health_lane () =
-  let base_dir = temp_dir "keeper_lifecycle_registry_failing_compaction" in
-  Fun.protect
-    ~finally:(fun () ->
-      KR.For_testing.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.For_testing.clear ();
-      let config = Masc.Workspace.default_config base_dir in
-      let meta = make_keeper_meta ~name:"keeper-failing-compaction" () in
-      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
-      KEC.dispatch_keeper_phase_event
-        ~config
-        ~keeper_name:meta.name
         (KST.Heartbeat_failed { consecutive = 1 });
-      (match KR.get ~base_path:config.base_path meta.name with
-       | Some entry ->
-           check string "heartbeat failure reaches failing" "failing"
-             (KST.phase_to_string entry.phase)
-       | None -> fail "expected registered keeper after heartbeat dispatch");
-      KEC.dispatch_keeper_phase_event
-        ~config
-        ~origin:KR.Post_turn_lifecycle
-        ~keeper_name:meta.name
-        KST.Compaction_started;
-      (match KR.get ~base_path:config.base_path meta.name with
-       | Some entry ->
-           check string "post-turn compaction starts while failing" "compacting"
-             (KST.phase_to_string entry.phase)
-       | None -> fail "expected registered keeper after compaction start");
-      KEC.dispatch_keeper_phase_event_result
-        ~config
-        ~origin:KR.Post_turn_lifecycle
-        ~keeper_name:meta.name
-        KST.Compaction_completed
-      |> Result.get_ok;
       match KR.get ~base_path:config.base_path meta.name with
       | Some entry ->
-          check string "compaction completion preserves failing health lane" "failing"
+          check string "phase event reaches registry" "failing"
             (KST.phase_to_string entry.phase)
-      | None -> fail "expected registered keeper after compaction completion")
-
-let test_compaction_completion_without_started_is_nonfatal () =
-  let base_dir = temp_dir "keeper_lifecycle_registry_missing_start" in
-  Fun.protect
-    ~finally:(fun () ->
-      KR.For_testing.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.For_testing.clear ();
-      let config = Masc.Workspace.default_config base_dir in
-      let meta = make_keeper_meta ~name:"keeper-missing-compaction-start" () in
-      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
-      let labels =
-        [ ("keeper", meta.name); ("event", "compaction_completed") ]
-      in
-      let before =
-        Masc.Otel_metric_store.get_metric_value
-          Keeper_metrics.(to_string LifecycleDispatchRejections)
-          ~labels ()
-        |> Option.value ~default:0.0
-      in
-      KEC.dispatch_keeper_phase_event_result
-        ~config
-        ~origin:KR.Post_turn_lifecycle
-        ~keeper_name:meta.name
-        KST.Compaction_completed
-      |> ignore;
-      let after =
-        Masc.Otel_metric_store.get_metric_value
-          Keeper_metrics.(to_string LifecycleDispatchRejections)
-          ~labels ()
-        |> Option.value ~default:0.0
-      in
-      check bool "missing-start completion rejection is counted" true (after > before);
-      match KR.get ~base_path:config.base_path meta.name with
-      | Some entry ->
-          check string "missing-start completion leaves phase unchanged" "running"
-            (KST.phase_to_string entry.phase)
-      | None -> fail "expected registered keeper after rejected completion")
-
-let test_compaction_restarts_after_done_stage () =
-  let base_dir = temp_dir "keeper_lifecycle_registry_repeat_compaction" in
-  Fun.protect
-    ~finally:(fun () ->
-      KR.For_testing.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.For_testing.clear ();
-      let config = Masc.Workspace.default_config base_dir in
-      let meta = make_keeper_meta ~name:"keeper-repeat-compaction" () in
-      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
-      let run_compaction label =
-        KEC.dispatch_keeper_phase_event
-          ~config
-          ~origin:KR.Post_turn_lifecycle
-          ~keeper_name:meta.name
-          KST.Compaction_started;
-        (match KR.get ~base_path:config.base_path meta.name with
-         | Some entry ->
-             check string (label ^ " start reaches compacting") "compacting"
-               (KST.phase_to_string entry.phase)
-         | None -> fail "expected registered keeper after compaction start");
-        KEC.dispatch_keeper_phase_event_result
-          ~config
-          ~origin:KR.Post_turn_lifecycle
-          ~keeper_name:meta.name
-          KST.Compaction_completed
-        |> Result.get_ok;
-        match KR.get ~base_path:config.base_path meta.name with
-        | Some entry ->
-            check string (label ^ " completion returns running") "running"
-              (KST.phase_to_string entry.phase)
-        | None -> fail "expected registered keeper after compaction completion"
-      in
-      run_compaction "first";
-      run_compaction "second")
-
-let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
-  let base_dir = temp_dir "keeper_lifecycle_registry_origin_guard" in
-  Fun.protect
-    ~finally:(fun () ->
-      KR.For_testing.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.For_testing.clear ();
-      let config = Masc.Workspace.default_config base_dir in
-      let meta = make_keeper_meta ~name:"keeper-origin-guard" () in
-      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
-      let labels =
-        [ ("keeper", meta.name); ("event", "compaction_started") ]
-      in
-      let before =
-        Masc.Otel_metric_store.get_metric_value
-          Keeper_metrics.(to_string LifecycleDispatchRejections)
-          ~labels ()
-        |> Option.value ~default:0.0
-      in
-      KEC.dispatch_keeper_phase_event
-        ~config
-        ~keeper_name:meta.name
-        KST.Compaction_started;
-      let after =
-        Masc.Otel_metric_store.get_metric_value
-          Keeper_metrics.(to_string LifecycleDispatchRejections)
-          ~labels ()
-        |> Option.value ~default:0.0
-      in
-      check bool "origin guard rejection metric increments" true (after > before);
-      match KR.get ~base_path:config.base_path meta.name with
-      | Some entry ->
-          check string "unscoped compaction start is rejected" "running"
-            (KST.phase_to_string entry.phase)
-      | None -> fail "expected registered keeper after rejected lifecycle dispatch")
+      | None -> fail "expected registered keeper after phase dispatch")
 
 let test_dispatch_keeper_phase_event_rejection_increments_metric () =
   let base_dir = temp_dir "keeper_lifecycle_registry_rejection" in
@@ -374,7 +211,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Masc.Workspace.default_config base_dir in
       let labels =
-        [ ("keeper", "missing-keeper"); ("event", "compaction_started") ]
+        [ ("keeper", "missing-keeper"); ("event", "heartbeat_ok") ]
       in
       let before =
         Masc.Otel_metric_store.get_metric_value
@@ -386,11 +223,9 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
          KEC.dispatch_keeper_phase_event_result
            ~config
            ~keeper_name:"missing-keeper"
-           KST.Compaction_started
+           KST.Heartbeat_ok
        with
        | Error (KEC.Transition_rejected _) -> ()
-       | Error (KEC.Compaction_invariant_violation _) ->
-         fail "missing keeper must be a transition rejection"
        | Ok () -> fail "missing keeper lifecycle dispatch unexpectedly succeeded");
       let after =
         Masc.Otel_metric_store.get_metric_value
@@ -437,7 +272,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       KHS.dispatch_keepalive_event
         ~ctx
         ~keeper_name:"missing-keeper"
-        KST.Compaction_started;
+        KST.Heartbeat_ok;
       let after =
         Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string DispatchEventFailures)
@@ -607,14 +442,6 @@ let () =
         [
           test_case "phase event uses workspace base_path" `Quick
             test_dispatch_keeper_phase_event_uses_workspace_base_path;
-          test_case "compaction runs from failing health lane" `Quick
-            test_compaction_runs_from_failing_health_lane;
-          test_case "compaction completion without started is nonfatal" `Quick
-            test_compaction_completion_without_started_is_nonfatal;
-          test_case "compaction restarts after done stage" `Quick
-            test_compaction_restarts_after_done_stage;
-          test_case "unscoped lifecycle event is rejected" `Quick
-            test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event;
           test_case "phase event rejection increments metric" `Quick
             test_dispatch_keeper_phase_event_rejection_increments_metric;
           test_case "keepalive event rejection increments metric" `Quick

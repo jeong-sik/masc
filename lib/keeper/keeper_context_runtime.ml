@@ -155,14 +155,10 @@ let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
 
 type lifecycle_dispatch_error =
   | Transition_rejected of Keeper_state_machine.transition_error
-  | Compaction_invariant_violation of
-      Keeper_registry_types.compaction_transition_spec_violation
 
 let lifecycle_dispatch_error_to_string = function
   | Transition_rejected error ->
     Keeper_state_machine.transition_error_to_string error
-  | Compaction_invariant_violation violation ->
-    Keeper_registry_types.compaction_transition_spec_violation_to_tag violation
 
 let dispatch_keeper_phase_event_result
     ~(config : Workspace.config)
@@ -184,15 +180,6 @@ let dispatch_keeper_phase_event_result
         event
         ~error:(Keeper_state_machine.transition_error_to_string err);
       Error (Transition_rejected err)
-  | exception
-      (Keeper_registry_types.Compaction_transition_violation
-         { violation; _ } as exn) ->
-      record_lifecycle_dispatch_rejection
-        ~keeper_name
-        ~origin
-        event
-        ~error:(Printexc.to_string exn);
-      Error (Compaction_invariant_violation violation)
 
 let dispatch_keeper_phase_event ~config ?origin ~keeper_name event =
   dispatch_keeper_phase_event_result ~config ?origin ~keeper_name event

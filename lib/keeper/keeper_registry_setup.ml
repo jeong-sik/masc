@@ -490,7 +490,6 @@ let register_with_state_result
     ; current_turn_observation = None
     ; last_completed_turn = None
     ; last_skip_observation = None
-    ; compaction_stage = Packed Compaction_accumulating
     }
   in
   (* Runs with the lifecycle key lock already held, so it never suspends. *)
@@ -744,7 +743,6 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; current_turn_observation = None
     ; last_completed_turn = None
     ; last_skip_observation = None
-    ; compaction_stage = Packed Compaction_accumulating
     }
   in
   let rec loop () =
@@ -1085,8 +1083,7 @@ let mark_turn_started ~base_path ~wake name =
       in
       { e with
         current_turn_observation = Some obs
-      ; compaction_stage = Packed Compaction_accumulating
-      }, true)
+        }, true)
   in
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;

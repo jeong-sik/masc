@@ -16,7 +16,6 @@ type phase =
   | Offline
   | Running
   | Failing
-  | Compacting
   | Draining
   | Paused
   | Stopped
@@ -27,7 +26,6 @@ let phase_to_string = function
   | Offline -> "offline"
   | Running -> "running"
   | Failing -> "failing"
-  | Compacting -> "compacting"
   | Draining -> "draining"
   | Paused -> "paused"
   | Stopped -> "stopped"
@@ -39,7 +37,6 @@ let phase_of_string = function
   | "offline" -> Some Offline
   | "running" -> Some Running
   | "failing" -> Some Failing
-  | "compacting" -> Some Compacting
   | "draining" -> Some Draining
   | "paused" -> Some Paused
   | "stopped" -> Some Stopped
@@ -52,7 +49,6 @@ let all_phases =
   [ Offline
   ; Running
   ; Failing
-  ; Compacting
   ; Draining
   ; Paused
   ; Stopped

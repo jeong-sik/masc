@@ -26,7 +26,6 @@ export function observeSnapshot(
     turn: snapshot.turn_phase,
     decision: snapshot.decision.stage,
     runtime: snapshot.runtime.state,
-    compaction: snapshot.compaction.stage,
   }
 }
 
@@ -38,7 +37,6 @@ function sameObservation(
     && left.turn === right.turn
     && left.decision === right.decision
     && left.runtime === right.runtime
-    && left.compaction === right.compaction
 }
 
 export function appendCompositeObservation(
@@ -129,12 +127,10 @@ export function inferTransitionReason(field: string, from: string, to: string): 
   if (field === 'KTC') {
     if (from === 'idle' && to === 'executing') return '턴이 시작되었습니다 — runtime 호출 진행'
     if (from === 'executing' && to === 'idle') return '턴이 정상 종료되어 대기 상태로 복귀'
-    if (to === 'compacting') return 'KMC 가 compaction 단계를 시작 — 컨텍스트 압축 중'
     if (to === 'finalizing') return '턴 마무리 — checkpoint/메트릭 emit'
     if (from === 'idle' && to === 'prompting') return '프롬프트 구성 시작'
   }
   if (field === 'KSM') {
-    if (to === 'Compacting') return 'KSM 이 lifecycle 차원에서 compaction 진입'
     if (to === 'Failing') return '연속 실패 임계 도달 — 다음 fail 시 Crashed 가능'
     if (isCrashedPhase(to)) return '비정상 종료 — restart 정책 확인'
   }
@@ -211,26 +207,24 @@ export function deriveStateEntries(
     turn: first.ts,
     decision: first.ts,
     runtime: first.ts,
-    compaction: first.ts,
   }
   const seen: Record<keyof StateEntries, boolean> = {
     phase: false,
     turn: false,
     decision: false,
     runtime: false,
-    compaction: false,
   }
   for (let index = observations.length - 1; index > 0; index -= 1) {
     const prev = observations[index - 1]
     const next = observations[index]
     if (!prev || !next) continue
-    for (const key of ['phase', 'turn', 'decision', 'runtime', 'compaction'] as const) {
+    for (const key of ['phase', 'turn', 'decision', 'runtime'] as const) {
       if (!seen[key] && prev[key] !== next[key]) {
         result[key] = next.ts
         seen[key] = true
       }
     }
-    if (seen.phase && seen.turn && seen.decision && seen.runtime && seen.compaction) break
+    if (seen.phase && seen.turn && seen.decision && seen.runtime) break
   }
   return result
 }

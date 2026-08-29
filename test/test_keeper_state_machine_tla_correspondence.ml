@@ -35,7 +35,6 @@ let tla_phase_names =
   [ "Offline"
   ; "Running"
   ; "Failing"
-  ; "Compacting"
   ; "Draining"
   ; "Paused"
   ; "Stopped"
@@ -51,7 +50,6 @@ let phase_to_tla_name : SM.phase -> string = function
   | Offline -> "Offline"
   | Running -> "Running"
   | Failing -> "Failing"
-  | Compacting -> "Compacting"
   | Draining -> "Draining"
   | Paused -> "Paused"
   | Stopped -> "Stopped"
@@ -81,7 +79,7 @@ let test_state_set_parity () =
      future OCaml-only phase (e.g. an internal substate not yet modelled
      in the spec) must not break the smoke.  When such drift appears,
      the spec gap should be tracked separately, not enforced here. *)
-  check int "TLA+ phase count" 9 (List.length tla_sorted);
+  check int "TLA+ phase count" 8 (List.length tla_sorted);
   (* OCaml ≥ TLA+ is implied by the per-name check above; we re-state it
      as an explicit inequality for readability. *)
   check
@@ -147,18 +145,6 @@ let test_running_to_draining_via_stop_requested () =
     ~expected:Draining
 ;;
 
-(* Running → Compacting via Compaction_started.
-   Mirrors TLA+ §CompactionStarted: [compaction_active' = TRUE] under
-   [~compaction_active]; DerivePhase priority 10
-   then derives "Compacting". *)
-let test_running_to_compacting_via_compaction_started () =
-  check_transition
-    ~label:"Running --Compaction_started--> Compacting"
-    ~from_phase:Running
-    ~event:SM.Compaction_started
-    ~expected:Compacting
-;;
-
 let () =
   Alcotest.run
     "KeeperStateMachine TLA+ correspondence smoke"
@@ -173,10 +159,6 @@ let () =
             "Running -> Draining via Stop_requested"
             `Quick
             test_running_to_draining_via_stop_requested
-        ; test_case
-            "Running -> Compacting via Compaction_started"
-            `Quick
-            test_running_to_compacting_via_compaction_started
         ] )
     ]
 ;;

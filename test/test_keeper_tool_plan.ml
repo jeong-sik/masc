@@ -1044,7 +1044,7 @@ let recipe_plan () =
   | Error error -> failf "recipe plan rejected: %s" (Request.error_message error)
 ;;
 
-let recipe_with_origin origin =
+let recipe_with_origin_and_checkpoint origin accepted_checkpoint =
   match
     Recipe.create
       ~composition_run_id:(Plan.Composition_run_id.fresh ())
@@ -1052,7 +1052,7 @@ let recipe_with_origin origin =
       ~accepted_surface_digest:(accepted_surface_digest ())
       ~plan:(recipe_plan ())
       ~invocation:(recipe_invocation ())
-      ~accepted_checkpoint:(recipe_checkpoint ())
+      ~accepted_checkpoint
   with
   | Ok recipe -> recipe
   | Error (Recipe.Unbound_plan (Request.Unsubstituted_param { name })) ->
@@ -1067,23 +1067,41 @@ let recipe_with_origin origin =
     fail "recipe fixture did not produce canonical JSON"
 ;;
 
-let encoded_recipe origin =
-  match Recipe.to_yojson (recipe_with_origin origin) with
+let recipe_with_origin origin =
+  recipe_with_origin_and_checkpoint origin (recipe_checkpoint ())
+;;
+
+let encode_recipe recipe =
+  match Recipe.to_yojson recipe with
   | Ok json -> json
-  | Error (Request.Unsubstituted_param { name }) ->
+  | Error (Recipe.Encode_plan (Request.Unsubstituted_param { name })) ->
     failf "accepted recipe retained parameter %S" name
+  | Error (Recipe.Encode_invalid_checkpoint error) ->
+    failf "accepted recipe retained an invalid checkpoint: %s" (Agent_core.Error.to_string error)
+  | Error (Recipe.Encode_non_canonical_json _) ->
+    fail "accepted recipe retained non-canonical JSON"
+;;
+
+let encoded_recipe origin =
+  recipe_with_origin origin |> encode_recipe
 ;;
 
 let decode_recipe json =
   Recipe.of_yojson ~descriptors:(descriptors ()) json
 ;;
 
+let accepted_checkpoint recipe =
+  match Recipe.accepted_checkpoint recipe with
+  | Ok checkpoint -> checkpoint
+  | Error error -> fail ("accepted checkpoint did not decode: " ^ Agent_core.Error.to_string error)
+;;
+
 let test_async_recipe_round_trips_full_accepted_values () =
   let reference = recipe_skill_reference () in
   let original = recipe_with_origin (Recipe.Skill_composition reference) in
-  let encoded = Recipe.to_yojson original |> Result.get_ok in
+  let encoded = encode_recipe original in
   let decoded = decode_recipe encoded |> Result.get_ok in
-  let reencoded = Recipe.to_yojson decoded |> Result.get_ok in
+  let reencoded = encode_recipe decoded in
   (match encoded with
    | `Assoc fields ->
      check
@@ -1139,15 +1157,43 @@ let test_async_recipe_round_trips_full_accepted_values () =
    | Agent_core.Tool_contract.Continue_after_success -> ()
    | Agent_core.Tool_contract.Terminal_after_success _ ->
      fail "invocation completion changed");
-  let checkpoint = Recipe.accepted_checkpoint decoded in
+  let checkpoint = accepted_checkpoint decoded in
   check string "checkpoint session" "accepted-session" checkpoint.session_id;
   check string "checkpoint agent" "keeper-recipe" checkpoint.agent_name;
   check int "checkpoint turn count" 7 checkpoint.turn_count;
   check
     (testable Yojson.Safe.pp Yojson.Safe.equal)
     "full checkpoint"
-    (Agent_core.Checkpoint.to_json (Recipe.accepted_checkpoint original))
-    (Agent_core.Checkpoint.to_json checkpoint)
+    (Agent_core.Checkpoint.to_json_result (accepted_checkpoint original) |> Result.get_ok)
+    (Agent_core.Checkpoint.to_json_result checkpoint |> Result.get_ok)
+;;
+
+let poison_checkpoint_context (checkpoint : Agent_core.Checkpoint.t) =
+  Agent_core.Context.set checkpoint.context "non_finite" (`Float Float.nan);
+  Agent_core.Context.set
+    checkpoint.context
+    "duplicate"
+    (`Assoc [ "same", `Int 1; "same", `Int 2 ])
+;;
+
+let test_async_recipe_checkpoint_snapshot_is_immutable () =
+  let origin = Recipe.Skill_composition (recipe_skill_reference ()) in
+  let source_checkpoint = recipe_checkpoint () in
+  let recipe = recipe_with_origin_and_checkpoint origin source_checkpoint in
+  let accepted_json = encode_recipe recipe in
+  let accepted_bytes = Yojson.Safe.to_string accepted_json in
+  let check_bytes label candidate =
+    check string label accepted_bytes (encode_recipe candidate |> Yojson.Safe.to_string)
+  in
+  poison_checkpoint_context source_checkpoint;
+  check_bytes "source checkpoint mutation" recipe;
+  let exposed_checkpoint = accepted_checkpoint recipe in
+  poison_checkpoint_context exposed_checkpoint;
+  check_bytes "decoded accessor mutation" recipe;
+  let loaded = decode_recipe accepted_json |> Result.get_ok in
+  let loaded_checkpoint = accepted_checkpoint loaded in
+  poison_checkpoint_context loaded_checkpoint;
+  check_bytes "loaded checkpoint mutation" loaded
 ;;
 
 let test_async_recipe_rejects_an_unbound_plan () =
@@ -1839,6 +1885,10 @@ let () =
             "full accepted values round-trip"
             `Quick
             test_async_recipe_round_trips_full_accepted_values
+        ; test_case
+            "accepted checkpoint snapshot is immutable"
+            `Quick
+            test_async_recipe_checkpoint_snapshot_is_immutable
         ; test_case
             "unbound plans are rejected"
             `Quick

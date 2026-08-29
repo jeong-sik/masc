@@ -58,6 +58,17 @@ let editor_stem json =
 
 let editable_field_names = List.map editable_field_name editable_fields
 
+(* Control key, not a setting: the server refuses a patch that lowers
+   [max_context_override] unless it carries this flag, and its refusal tells
+   the operator to re-send with it. Without accepting the key here that
+   instruction was impossible to follow — [patch_of_edit] answered
+   "unknown keeper setting(s): confirm_context_shrink" and the TUI had no way
+   at all to shrink a keeper's context window. It stays out of
+   [editable_fields] so it never appears in the editor stem or the view: the
+   operator types it only when the server has asked for it. SSOT for the name
+   is the server's [confirm_context_shrink_field]. *)
+let confirm_context_shrink_field = "confirm_context_shrink"
+
 let is_lowercase_sha256 = String_util.is_lowercase_sha256_hex
 
 let exact_keys expected fields =
@@ -263,7 +274,10 @@ let patch_of_edit ~before ~after =
       let unknown =
         edited_fields
         |> List.filter_map (fun (key, _) ->
-               if List.mem key editable_field_names then None else Some key)
+               if List.mem key editable_field_names
+                  || String.equal key confirm_context_shrink_field
+               then None
+               else Some key)
       in
       if unknown <> [] then
         Error ("unknown keeper setting(s): " ^ String.concat ", " unknown)
@@ -276,11 +290,20 @@ let patch_of_edit ~before ~after =
         let changed =
           edited_fields
           |> List.filter (fun (key, value) ->
+                 String.equal key confirm_context_shrink_field
+                 ||
                  match List.assoc_opt key before_fields with
                  | Some old_value -> not (Yojson.Safe.equal value old_value)
                  | None -> true)
         in
-        if changed = []
+        (* The confirm flag alone is not an edit. Sending it on its own would
+           post a patch that changes nothing and still burn a revision. *)
+        let settings_changed =
+          List.filter
+            (fun (key, _) -> not (String.equal key confirm_context_shrink_field))
+            changed
+        in
+        if settings_changed = []
         then Ok (`Assoc [])
         else
           Result.map

@@ -1850,8 +1850,10 @@ let render_approvals (state : state) =
   (* Both Gate lanes, always on screen here — exactly one row, so the body
      arithmetic below can subtract it as a constant. The durable rows obey
      the external lane, and an operator deciding them needs to see which
-     switch they are under. The [e] that cycles the external lane lives in
-     the footer with every other key. *)
+     switch they are under. The [e] that cycles the external lane is a
+     footer key like any other -- it reaches the footer and the [?] help
+     through the Approvals row of Masc_tui_keys, which is where it was
+     missing until 2026-08-29. *)
   box_line buf cols
     (match state.gate_modes, Terminal_text.optional_single_line state.gate_error with
      | Some modes, _ ->

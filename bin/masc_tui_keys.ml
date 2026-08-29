@@ -111,7 +111,12 @@ let for_surface = function
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->
-      [ b Navigate "j/k" "move"; b Act "Enter" "choose"; b Act "Esc" "back" ]
+      [ b Navigate "j/k" "move"
+      ; b Act "Enter" "choose"
+      ; b Act "d" "use the default"
+          ~help:"drop this Keeper's own binding and follow [runtime].default"
+      ; b Act "Esc" "back"
+      ]
   | Lanes ->
       [ b Navigate "j/k" "move" ~help:"move the lane cursor"
       ; b Act "Right / Enter" "detail"
@@ -141,6 +146,9 @@ let for_surface = function
       ; b Act "Enter" "read the whole ask" ~help:"j/k scrolls it; Esc goes back"
       ; b Act "y" "confirm"
       ; b Act "n" "deny"
+      ; b Act "e" "external Gate lane"
+          ~help:"cycle manual / auto_judge / always_allow for calls into \
+                 attached outside services"
       ]
       @ listing_meta
   | Planning ->

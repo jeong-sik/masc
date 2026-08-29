@@ -158,6 +158,34 @@ let test_unknown_field_is_rejected () =
       Alcotest.(check string) "actionable error"
         "unknown keeper setting(s): mystery" detail
 
+(* The server refuses a patch that lowers [max_context_override] unless it
+   carries [confirm_context_shrink], and says so in its refusal. The editor
+   has to let the operator follow that instruction: the key is not a setting,
+   so it never appears in the stem, but typing it must reach the patch. *)
+let test_context_shrink_confirmation_reaches_the_patch () =
+  let shrink =
+    `Assoc
+      [ "max_context_override", `Int 100_000
+      ; "confirm_context_shrink", `Bool true
+      ]
+  in
+  (match patch_of_edit ~before:observed ~after:shrink with
+   | Error detail -> Alcotest.fail ("shrink confirmation was refused: " ^ detail)
+   | Ok (`Assoc fields) ->
+       Alcotest.(check bool) "carries the confirmation" true
+         (List.assoc_opt "confirm_context_shrink" fields = Some (`Bool true));
+       Alcotest.(check bool) "carries the new window" true
+         (List.assoc_opt "max_context_override" fields = Some (`Int 100_000))
+   | Ok _ -> Alcotest.fail "patch was not an object");
+  (* On its own the flag changes nothing, so it must not post a patch. *)
+  match
+    patch_of_edit ~before:observed
+      ~after:(`Assoc [ "confirm_context_shrink", `Bool true ])
+  with
+  | Ok (`Assoc []) -> ()
+  | Ok _ -> Alcotest.fail "the bare confirmation posted a patch"
+  | Error detail -> Alcotest.fail ("bare confirmation errored: " ^ detail)
+
 let test_view_explains_effective_values_and_sources () =
   let rendered = rendered_of observed in
   List.iter
@@ -552,6 +580,8 @@ let () =
             test_skill_selection_patch_modes
         ; Alcotest.test_case "skill selection view modes" `Quick
             test_skill_selection_view_modes
+        ; Alcotest.test_case "context shrink confirmation reaches the patch"
+            `Quick test_context_shrink_confirmation_reaches_the_patch
         ; Alcotest.test_case "reject unknown" `Quick
             test_unknown_field_is_rejected
         ; Alcotest.test_case "view meaning" `Quick

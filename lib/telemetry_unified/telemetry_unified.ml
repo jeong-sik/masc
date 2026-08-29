@@ -878,6 +878,128 @@ let reset_trajectory_summary_cache_for_testing () =
   Stdlib.Mutex.protect trajectory_summary_cache_mu (fun () ->
     Hashtbl.reset trajectory_summary_cache)
 
+(* Same restart problem [Dated_jsonl]'s count cache had: this table makes
+   [trajectory_file_summary] incremental, and it lived only in process
+   memory, so every boot re-read the whole trajectories store. On 2026-08-29
+   that store was 654MB, masc bootstrapped 24 times, and telemetry_summary's
+   first call after a boot was the heavy one every time.
+
+   Persisting the same (path, boundary, tool_calls, latest_ts) rows keeps the
+   incremental read across a restart. The file is a cache and never an
+   authority: each row is still checked against its file's current size
+   before use, so growth behind a restored boundary is read, a boundary past
+   the size falls back to the full rescan, and a missing or unreadable file
+   costs exactly what a cold boot costs today. *)
+
+let trajectory_summary_rows () =
+  Stdlib.Mutex.protect trajectory_summary_cache_mu (fun () ->
+    Hashtbl.fold
+      (fun path entry acc -> (path, entry) :: acc)
+      trajectory_summary_cache
+      [])
+;;
+
+(* Merged, not replaced: a row this process already advanced past the loaded
+   boundary is the one measured against a size this process saw. *)
+let install_trajectory_summary_rows rows =
+  Stdlib.Mutex.protect trajectory_summary_cache_mu (fun () ->
+    List.iter
+      (fun (path, entry) ->
+         if String.length path > 0
+            && entry.tfs_boundary >= 0
+            && entry.tfs_tool_calls >= 0
+         then (
+           match Hashtbl.find_opt trajectory_summary_cache path with
+           | Some existing when existing.tfs_boundary >= entry.tfs_boundary -> ()
+           | Some _ | None -> Hashtbl.replace trajectory_summary_cache path entry))
+      rows)
+;;
+
+let trajectory_summary_to_json rows =
+  `List
+    (List.map
+       (fun (path, entry) ->
+          `Assoc
+            [ "path", `String path
+            ; "boundary", `Int entry.tfs_boundary
+            ; "tool_calls", `Int entry.tfs_tool_calls
+            ; ( "latest_ts"
+              , match entry.tfs_latest_ts with
+                | None -> `Null
+                | Some ts -> `Float ts )
+            ])
+       rows)
+;;
+
+let trajectory_summary_of_json = function
+  | `List entries ->
+    List.filter_map
+      (function
+        | `Assoc fields ->
+          (match
+             ( List.assoc_opt "path" fields
+             , List.assoc_opt "boundary" fields
+             , List.assoc_opt "tool_calls" fields )
+           with
+           | Some (`String path), Some (`Int boundary), Some (`Int tool_calls) ->
+             let latest =
+               match List.assoc_opt "latest_ts" fields with
+               | Some (`Float ts) -> Some ts
+               | Some (`Int ts) -> Some (float_of_int ts)
+               | Some `Null | Some _ | None -> None
+             in
+             Some
+               ( path
+               , { tfs_boundary = boundary
+                 ; tfs_tool_calls = tool_calls
+                 ; tfs_latest_ts = latest
+                 } )
+           | _ -> None)
+        | _ -> None)
+      entries
+  | _ -> []
+;;
+
+let save_trajectory_summary_cache ~path =
+  match trajectory_summary_rows () with
+  | [] -> Ok ()
+  | rows ->
+    (try
+       Fs_compat.mkdir_p (Filename.dirname path);
+       let tmp = path ^ ".tmp" in
+       let oc = open_out tmp in
+       Fun.protect
+         ~finally:(fun () -> close_out_noerr oc)
+         (fun () ->
+            output_string
+              oc
+              (Yojson.Safe.to_string (trajectory_summary_to_json rows)));
+       Sys.rename tmp path;
+       Ok ()
+     with
+     | Sys_error detail -> Error detail
+     | Unix.Unix_error (err, op, arg) ->
+       Error (Printf.sprintf "%s(%s): %s" op arg (Unix.error_message err)))
+;;
+
+let load_trajectory_summary_cache ~path =
+  if not (Sys.file_exists path)
+  then Ok 0
+  else (
+    try
+      let rows =
+        trajectory_summary_of_json
+          (Yojson.Safe.from_string (Fs_compat.load_file path))
+      in
+      install_trajectory_summary_rows rows;
+      Ok (List.length rows)
+    with
+    | Yojson.Json_error detail -> Error detail
+    | Sys_error detail -> Error detail
+    | Unix.Unix_error (err, op, arg) ->
+      Error (Printf.sprintf "%s(%s): %s" op arg (Unix.error_message err)))
+;;
+
 let trajectory_file_summary path : trajectory_file_summary option =
   match Unix.stat path with
   | exception (Unix.Unix_error _ | Sys_error _) -> None

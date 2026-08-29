@@ -467,11 +467,37 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      Log.Server.warn
        "dated-jsonl count cache load failed (counting from scratch): %s"
        detail);
+  (* The trajectories store has its own incremental table with the same
+     restart problem: 654MB re-read on every boot, and telemetry_summary's
+     first call after one was the heavy call every time. Same contract as
+     the count cache above -- rows are re-validated against file size on
+     use, so a missing or stale file costs a cold read and nothing else. *)
+  let trajectory_cache_path =
+    Filename.concat
+      (Workspace.masc_root_dir config)
+      "trajectory-summary-cache.json"
+  in
+  (match
+     Telemetry_unified.load_trajectory_summary_cache ~path:trajectory_cache_path
+   with
+   | Ok 0 -> ()
+   | Ok rows ->
+     Log.Server.info "trajectory summary cache restored: rows=%d" rows
+   | Error detail ->
+     Log.Server.warn
+       "trajectory summary cache load failed (reading from scratch): %s"
+       detail);
   let save_count_cache () =
-    match Dated_jsonl.save_count_cache ~path:count_cache_path with
+    (match Dated_jsonl.save_count_cache ~path:count_cache_path with
+     | Ok () -> ()
+     | Error detail ->
+       Log.Server.warn "dated-jsonl count cache save failed: %s" detail);
+    match
+      Telemetry_unified.save_trajectory_summary_cache ~path:trajectory_cache_path
+    with
     | Ok () -> ()
     | Error detail ->
-      Log.Server.warn "dated-jsonl count cache save failed: %s" detail
+      Log.Server.warn "trajectory summary cache save failed: %s" detail
   in
   fork_logged_fiber
     ~sw

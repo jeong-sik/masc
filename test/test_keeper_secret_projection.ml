@@ -130,7 +130,7 @@ let test_missing_secret_dir_is_noop () =
   match
     Keeper_secret_projection.docker_args_for_keeper
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
       ~container_name:"container"
       ()
   with
@@ -313,7 +313,7 @@ let test_local_env_missing_secret_dir_is_scrubbed () =
     Keeper_secret_projection.local_env_for_keeper
       ~host_env
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
       ()
   with
   | Error err -> Alcotest.fail err
@@ -431,12 +431,12 @@ let test_invalid_env_name_rejects () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
-  let root = secret_root_default ~base ~keeper_name:"minjae" in
+  let root = secret_root_default ~base ~keeper_name:"acme-sandbox" in
   write_file (Filename.concat (Filename.concat root "env") "BAD-NAME") "x";
   match
     Keeper_secret_projection.docker_args_for_keeper
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
       ~container_name:"container"
       ()
   with
@@ -450,7 +450,7 @@ let test_symlink_file_rejects () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
-  let root = secret_root_default ~base ~keeper_name:"minjae" in
+  let root = secret_root_default ~base ~keeper_name:"acme-sandbox" in
   let outside = Filename.concat base "outside-secret" in
   write_file outside "x";
   let link_path =
@@ -461,7 +461,7 @@ let test_symlink_file_rejects () =
   match
     Keeper_secret_projection.docker_args_for_keeper
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
       ~container_name:"container"
       ()
   with
@@ -481,14 +481,14 @@ let test_symlink_env_dir_rejects () =
     (fun () ->
        with_env "MASC_SECRET_DIR" "" @@ fun () ->
        write_file (Filename.concat outside "SERVICE_TOKEN") "x";
-       let root = secret_root_default ~base ~keeper_name:"minjae" in
+       let root = secret_root_default ~base ~keeper_name:"acme-sandbox" in
        let env_root = Filename.concat root "env" in
        ensure_dir root;
        Unix.symlink outside env_root;
        match
          Keeper_secret_projection.docker_args_for_keeper
            ~base_path:base
-           ~keeper_name:"minjae"
+           ~keeper_name:"acme-sandbox"
            ~container_name:"container"
            ()
        with
@@ -505,7 +505,7 @@ let test_dashboard_status_absent_root () =
   let json =
     Keeper_secret_projection.dashboard_status_json
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
   in
   Alcotest.(check string) "status" "absent" (json_string "status" json);
   Alcotest.(check int) "env count" 0 (json_int "env_count" json);
@@ -520,7 +520,7 @@ let test_dashboard_status_absent_root () =
        (json_string "root" base_root);
      Alcotest.(check string)
        "keeper root path"
-       (secret_root_default ~base ~keeper_name:"minjae")
+       (secret_root_default ~base ~keeper_name:"acme-sandbox")
        (json_string "root" keeper_root);
      Alcotest.(check string) "base root absent" "absent"
        (json_string "status" base_root);
@@ -534,7 +534,7 @@ let test_dashboard_status_redacts_values () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let base_root = base_secret_root_default ~base in
-  let root = secret_root_default ~base ~keeper_name:"minjae" in
+  let root = secret_root_default ~base ~keeper_name:"acme-sandbox" in
   let shared_token_path = Filename.concat (Filename.concat base_root "env") "SECOND_SERVICE_TOKEN" in
   let token_path = Filename.concat (Filename.concat root "env") "SERVICE_TOKEN" in
   let ssh_path =
@@ -548,7 +548,7 @@ let test_dashboard_status_redacts_values () =
   let json =
     Keeper_secret_projection.dashboard_status_json
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
   in
   let raw = Yojson.Safe.to_string json in
   Alcotest.(check string) "status" "ready" (json_string "status" json);
@@ -579,12 +579,12 @@ let test_dashboard_status_reports_projection_error () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
-  let root = secret_root_default ~base ~keeper_name:"minjae" in
+  let root = secret_root_default ~base ~keeper_name:"acme-sandbox" in
   write_file (Filename.concat (Filename.concat root "env") "BAD-NAME") "x";
   let json =
     Keeper_secret_projection.dashboard_status_json
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
   in
   Alcotest.(check string) "status" "error" (json_string "status" json);
   Alcotest.(check bool) "mentions invalid env name" true
@@ -596,13 +596,13 @@ let test_set_and_delete_env_entry_updates_projection () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let base_root = base_secret_root_default ~base in
-  let keeper_root = secret_root_default ~base ~keeper_name:"minjae" in
+  let keeper_root = secret_root_default ~base ~keeper_name:"acme-sandbox" in
   let shared_path = Filename.concat (Filename.concat base_root "env") "SERVICE_TOKEN" in
   let keeper_path = Filename.concat (Filename.concat keeper_root "env") "SERVICE_TOKEN" in
   (match
      Keeper_secret_projection.set_env_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Shared_secret
        ~name:"SERVICE_TOKEN"
        ~value:"ghs_shared_from_ui\n"
@@ -612,7 +612,7 @@ let test_set_and_delete_env_entry_updates_projection () =
   (match
      Keeper_secret_projection.set_env_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~name:"SERVICE_TOKEN"
        ~value:"ghs_keeper_from_ui"
@@ -626,7 +626,7 @@ let test_set_and_delete_env_entry_updates_projection () =
   let json =
     Keeper_secret_projection.dashboard_status_json
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
   in
   Alcotest.(check string) "status" "ready" (json_string "status" json);
   Alcotest.(check int) "effective env count" 1 (json_int "env_count" json);
@@ -637,7 +637,7 @@ let test_set_and_delete_env_entry_updates_projection () =
   (match
      Keeper_secret_projection.delete_env_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~name:"SERVICE_TOKEN"
    with
@@ -647,13 +647,13 @@ let test_set_and_delete_env_entry_updates_projection () =
   let inherited_json =
     Keeper_secret_projection.dashboard_status_json
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
   in
   Alcotest.(check int) "inherits shared env" 1 (json_int "env_count" inherited_json);
   (match
      Keeper_secret_projection.delete_env_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Shared_secret
        ~name:"SERVICE_TOKEN"
    with
@@ -669,7 +669,7 @@ let test_set_env_entry_rejects_invalid_inputs () =
   (match
      Keeper_secret_projection.set_env_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~name:"BAD-NAME"
        ~value:"secret"
@@ -681,7 +681,7 @@ let test_set_env_entry_rejects_invalid_inputs () =
   (match
      Keeper_secret_projection.set_env_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~name:"SERVICE_TOKEN"
        ~value:"line1\nline2"
@@ -697,7 +697,7 @@ let test_set_and_delete_file_entry_updates_projection () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let base_root = base_secret_root_default ~base in
-  let keeper_root = secret_root_default ~base ~keeper_name:"minjae" in
+  let keeper_root = secret_root_default ~base ~keeper_name:"acme-sandbox" in
   let container_path = "/home/keeper/.ssh/id_ed25519" in
   let shared_path =
     Filename.concat
@@ -712,7 +712,7 @@ let test_set_and_delete_file_entry_updates_projection () =
   (match
      Keeper_secret_projection.set_file_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Shared_secret
        ~container_path
        ~value:"SHARED\nPRIVATE\nKEY\n"
@@ -722,7 +722,7 @@ let test_set_and_delete_file_entry_updates_projection () =
   (match
      Keeper_secret_projection.set_file_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~container_path
        ~value:"KEEPER\nPRIVATE\nKEY\n"
@@ -736,7 +736,7 @@ let test_set_and_delete_file_entry_updates_projection () =
   let json =
     Keeper_secret_projection.dashboard_status_json
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
   in
   Alcotest.(check string) "status" "ready" (json_string "status" json);
   Alcotest.(check int) "effective file count" 1 (json_int "file_count" json);
@@ -747,7 +747,7 @@ let test_set_and_delete_file_entry_updates_projection () =
   (match
      Keeper_secret_projection.docker_args_for_keeper
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~container_name:"container"
        ()
    with
@@ -762,7 +762,7 @@ let test_set_and_delete_file_entry_updates_projection () =
   (match
      Keeper_secret_projection.delete_file_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~container_path
    with
@@ -772,13 +772,13 @@ let test_set_and_delete_file_entry_updates_projection () =
   let inherited_json =
     Keeper_secret_projection.dashboard_status_json
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
   in
   Alcotest.(check int) "inherits shared file" 1 (json_int "file_count" inherited_json);
   (match
      Keeper_secret_projection.docker_args_for_keeper
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~container_name:"container"
        ()
    with
@@ -791,7 +791,7 @@ let test_set_and_delete_file_entry_updates_projection () =
   (match
      Keeper_secret_projection.delete_file_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Shared_secret
        ~container_path
    with
@@ -807,7 +807,7 @@ let test_set_file_entry_rejects_invalid_inputs () =
   (match
      Keeper_secret_projection.set_file_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~container_path:"relative"
        ~value:"secret"
@@ -819,7 +819,7 @@ let test_set_file_entry_rejects_invalid_inputs () =
   (match
      Keeper_secret_projection.set_file_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~container_path:"/home/../secret"
        ~value:"secret"
@@ -831,7 +831,7 @@ let test_set_file_entry_rejects_invalid_inputs () =
   (match
      Keeper_secret_projection.set_file_entry
        ~base_path:base
-       ~keeper_name:"minjae"
+       ~keeper_name:"acme-sandbox"
        ~scope:Keeper_secret_projection.Keeper_secret
        ~container_path:"/home/keeper/secret"
        ~value:"abc\000def"
@@ -845,12 +845,12 @@ let test_env_value_leading_hash_rejects () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
-  let root = secret_root_default ~base ~keeper_name:"minjae" in
+  let root = secret_root_default ~base ~keeper_name:"acme-sandbox" in
   write_file (Filename.concat (Filename.concat root "env") "SERVICE_TOKEN") "#starts_with_hash";
   match
     Keeper_secret_projection.docker_args_for_keeper
       ~base_path:base
-      ~keeper_name:"minjae"
+      ~keeper_name:"acme-sandbox"
       ~container_name:"container"
       ()
   with

@@ -61,7 +61,7 @@ let make_config () =
   (tmp, Workspace.default_config tmp)
 
 let make_meta ~name ~sandbox =
-  (* allowed_paths=["*"] mirrors the production minjae config that lets
+  (* allowed_paths=["*"] mirrors the production acme-sandbox config that lets
      the resolver permit any path under project_root. The B-1.5
      containment fires AFTER the resolver but BEFORE I/O. *)
   let json =
@@ -157,7 +157,7 @@ let blocked_by_sandbox_boundary raw =
       starts_with "path_outside_sandbox" err
 
 let test_docker_keeper_blocks_rg_outside () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
+  setup ~keeper_name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
@@ -261,7 +261,7 @@ let test_local_keeper_rg_invalid_type_surfaces_stderr () =
    the execution boundary. Regex/glob validity is owned by the actual rg
    invocation so Docker keepers do not depend on host rg availability. *)
 let test_docker_keeper_invalid_type_rejects_before_docker_spawn () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
+  setup ~keeper_name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground:_ ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let raw =
@@ -291,7 +291,7 @@ let test_docker_keeper_invalid_type_rejects_before_docker_spawn () =
       false
       (String_util.contains_substring err "docker image is not configured")
 let test_docker_keeper_blocks_second_rg_outside () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
+  setup ~keeper_name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
@@ -319,7 +319,7 @@ let test_docker_keeper_blocks_second_rg_outside () =
     (blocked_by_sandbox_boundary raw)
 
 let test_docker_keeper_allows_inside_playground () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
+  setup ~keeper_name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let demo = Filename.concat playground "demo.txt" in
   ignore (Fs_compat.save_file_atomic demo "hello inside playground");

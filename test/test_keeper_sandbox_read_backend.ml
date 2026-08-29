@@ -108,7 +108,7 @@ let test_legacy_keeper_never_routes () =
 
 let test_docker_keeper_routes () =
   let meta =
-    make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
+    make_meta ~name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
   in
   Alcotest.(check bool) "docker keeper routes through docker"
     true
@@ -172,7 +172,7 @@ let fake_docker_log_path () =
     "docker.log"
 
 let test_container_path_root_maps () =
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let croot = Keeper_sandbox.container_root meta.name in
@@ -186,7 +186,7 @@ let test_container_path_root_maps () =
   | Error e -> Alcotest.fail e
 
 let test_container_path_nested_maps_with_suffix () =
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_path = Filename.concat host_root "scratch/scratch.md" in
@@ -202,7 +202,7 @@ let test_container_path_nested_maps_with_suffix () =
   | Error e -> Alcotest.fail e
 
 let test_container_path_outside_playground_errors () =
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let outside = "/etc/passwd" in
   match
@@ -218,7 +218,7 @@ let test_container_path_outside_playground_errors () =
    (exercised without invoking docker) ──────────────────────────── *)
 
 let test_read_outside_playground_returns_mapping_error () =
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_sandbox_read_backend.read_file ~config ~meta
@@ -238,7 +238,7 @@ let test_read_outside_playground_returns_mapping_error () =
          loop 0)
 
 let test_read_missing_file_preflight_errors () =
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_path = Filename.concat host_root "scratch/x" in
@@ -265,7 +265,7 @@ let test_read_missing_file_preflight_errors () =
    Execute ls. Guards against the message regressing to a phantom-tool
    reference. *)
 let test_read_directory_names_a_real_listing_tool () =
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let dir_path = Filename.concat host_root "scratch/somedir" in
@@ -288,7 +288,7 @@ let test_read_directory_names_a_real_listing_tool () =
 
 let test_run_command_empty_argv_errors () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command ~config ~meta
@@ -308,7 +308,7 @@ let test_run_command_empty_argv_errors () =
          loop 0)
 
 let test_run_command_empty_image_errors () =
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let meta = { meta with sandbox_image = Some "" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
@@ -1126,7 +1126,7 @@ let test_docker_nofile_args_follow_config () =
 
 let test_docker_masc_config_binding_pins_container_runtime_paths () =
   let base = "/tmp/masc-base" in
-  let container_root = "/home/keeper/playground/minjae" in
+  let container_root = "/home/keeper/playground/acme-sandbox" in
   let expected_host_config =
     Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config"
   in
@@ -1160,7 +1160,7 @@ let test_docker_config_mount_and_env_args () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let config_root = Filename.concat base ".masc/config" in
   ensure_dir config_root;
-  let container_root = "/home/keeper/playground/minjae" in
+  let container_root = "/home/keeper/playground/acme-sandbox" in
   with_env "MASC_CONFIG_DIR" "" @@ fun () ->
   Alcotest.(check string) "default host config root"
     config_root
@@ -1236,7 +1236,7 @@ let test_docker_workspace_state_mounts_follow_the_cluster () =
   let specs =
     Keeper_sandbox_runtime.docker_workspace_state_mount_specs
       ~base_path:base
-      ~container_root:"/home/keeper/playground/minjae"
+      ~container_root:"/home/keeper/playground/acme-sandbox"
   in
   Alcotest.(check bool) "mounts the cluster's board posts" true
     (List.mem
@@ -1259,7 +1259,7 @@ let test_docker_workspace_state_mount_args_expose_safe_subset () =
   write_file (Filename.concat masc_root "board_posts.jsonl") "";
   ensure_dir (Filename.concat masc_root "auth");
   write_file (Filename.concat (Filename.concat masc_root "auth") "keeper.token") "secret";
-  let container_root = "/home/keeper/playground/minjae" in
+  let container_root = "/home/keeper/playground/acme-sandbox" in
   let specs =
     Keeper_sandbox_runtime.docker_workspace_state_mount_specs
       ~base_path:base
@@ -1563,7 +1563,7 @@ let test_docker_preflight_classifies_image_inspect_timeout () =
 let test_run_command_nonzero_exit_errors_by_default () =
   with_fake_docker fake_docker_exit_1_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
@@ -1587,7 +1587,7 @@ let test_run_command_nonzero_exit_errors_by_default () =
 let test_run_command_allows_configured_nonzero_exit () =
   with_fake_docker fake_docker_exit_1_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status
@@ -1610,12 +1610,12 @@ let test_run_command_allows_configured_nonzero_exit () =
 let test_run_command_preserves_bare_command_argv () =
   with_fake_docker fake_docker_echo_command_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
       ~command_argv:
-        [ "head"; "-n"; "1"; "/home/keeper/playground/minjae/scratch/demo.txt" ]
+        [ "head"; "-n"; "1"; "/home/keeper/playground/acme-sandbox/scratch/demo.txt" ]
       ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
   | Error msg ->
@@ -1628,7 +1628,7 @@ let test_run_command_preserves_bare_command_argv () =
          | Unix.WSIGNALED code -> ("signaled", code)
          | Unix.WSTOPPED code -> ("stopped", code));
       Alcotest.(check string) "preserves bare head argv"
-        "head -n 1 /home/keeper/playground/minjae/scratch/demo.txt\n" out
+        "head -n 1 /home/keeper/playground/acme-sandbox/scratch/demo.txt\n" out
 
 let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
   with_fake_docker fake_docker_slow_run_script @@ fun () ->
@@ -1636,7 +1636,7 @@ let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let result = ref None in
@@ -1647,7 +1647,7 @@ let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
               (Keeper_sandbox_read_backend.run_command_with_status
                  ~config ~meta
                  ~command_argv:
-                   [ "cat"; "/home/keeper/playground/minjae/scratch/demo.txt" ]
+                   [ "cat"; "/home/keeper/playground/acme-sandbox/scratch/demo.txt" ]
                  ~max_bytes:4096 ~timeout_sec:5.0 ()));
       let run_started () =
         Sys.file_exists log_path
@@ -1679,7 +1679,7 @@ let test_run_command_projects_keeper_secret_dir () =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let secret_root =
@@ -1726,7 +1726,7 @@ let test_run_command_scrubs_sensitive_env () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "GH_TOKEN" "ghp_secret" @@ fun () ->
   with_env "ANTHROPIC_API_KEY" "sk-ant-secret" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
@@ -1749,7 +1749,7 @@ let test_turn_runtime_reuses_single_container () =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let log_path = fake_docker_log_path () in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
@@ -1766,7 +1766,7 @@ let test_turn_runtime_reuses_single_container () =
       Keeper_sandbox_read_backend.run_command_with_status
         ~turn_sandbox_factory:factory
         ~config ~meta
-        ~command_argv:[ "cat"; "/home/keeper/playground/minjae/scratch/demo.txt" ]
+        ~command_argv:[ "cat"; "/home/keeper/playground/acme-sandbox/scratch/demo.txt" ]
         ~max_bytes:4096 ~timeout_sec:5.0 ()
     with
     | Error msg -> Alcotest.failf "expected turn runtime command success, got %s" msg
@@ -1828,7 +1828,7 @@ let test_streaming_exec_validates_cached_container_before_retry () =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let inspect_count_path = Filename.concat base "inspect.count" in
   let exec_count_path = Filename.concat base "exec.count" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
@@ -1879,7 +1879,7 @@ let test_streaming_exec_preserves_split_stderr () =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
     Filename.concat (Filename.concat base Common.masc_dirname) "config"
@@ -1921,7 +1921,7 @@ let test_streaming_exec_forwards_timeout_to_split_exec () =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
     Filename.concat (Filename.concat base Common.masc_dirname) "config"
@@ -1960,7 +1960,7 @@ let test_streaming_pipeline_forwards_timeout_to_split_exec () =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
     Filename.concat (Filename.concat base Common.masc_dirname) "config"
@@ -2010,7 +2010,7 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
     Filename.concat (Filename.concat base Common.masc_dirname) "config"
@@ -2057,7 +2057,7 @@ let test_streaming_exec_surfaces_process_failure_once () =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let count_path =
     Filename.concat
       (Filename.dirname (Sys.getenv "MASC_TEST_FAKE_DOCKER_PATH"))
@@ -2108,7 +2108,7 @@ let test_streaming_exec_keeps_successful_progress_live () =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
     Filename.concat (Filename.concat base Common.masc_dirname) "config"
@@ -2162,7 +2162,7 @@ let test_streaming_exec_keeps_sparse_progress_live () =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
     Filename.concat (Filename.concat base Common.masc_dirname) "config"
@@ -2260,7 +2260,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "true" @@ fun () ->
-  let base, config, meta = setup_config "minjae" in
+  let base, config, meta = setup_config "acme-sandbox" in
   let log_path = fake_docker_log_path () in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir host_root;
@@ -2272,7 +2272,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
      Keeper_sandbox_read_backend.run_command_with_status
        ~turn_sandbox_factory:factory
        ~config ~meta
-       ~command_argv:[ "cat"; "/home/keeper/playground/minjae/scratch/demo.txt" ]
+       ~command_argv:[ "cat"; "/home/keeper/playground/acme-sandbox/scratch/demo.txt" ]
        ~max_bytes:4096 ~timeout_sec:5.0 ()
    with
    | Error msg -> Alcotest.failf "expected turn runtime command success, got %s" msg

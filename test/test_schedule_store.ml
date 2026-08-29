@@ -522,6 +522,52 @@ let test_fail_due_candidate_records_failed_wake () =
        wake.finished_at)
 ;;
 
+(* Terminal wakes are history the runner never reads back, and every mutation
+   rewrites the whole store under its lock. Left unbounded they reached 6,534
+   records / 5.3 MB against 64 schedules (2026-08-29) and two runner ticks died
+   acquiring that lock on 2026-08-28. The bound is per schedule_id: a broken
+   schedule out-writes a healthy one by two orders of magnitude, so a global cap
+   would be spent on the broken one and erase every other schedule's history. *)
+let test_terminal_wakes_are_bounded_per_schedule () =
+  with_workspace
+  @@ fun config ->
+  let run_occurrences ~schedule_id ~count =
+    let req =
+      make_request ~schedule_id ~recurrence:(Interval { interval_sec = 60 }) ()
+    in
+    ignore (insert_ok config req);
+    let rec turn n now =
+      if n <= 0
+      then ()
+      else (
+        (match refresh_due config ~now with
+         | Ok _ -> ()
+         | Error err -> fail (store_error_to_string err));
+        (match start_due_candidate config ~now:(now +. 1.0) ~schedule_id with
+         | Ok _ -> ()
+         | Error err -> fail (store_error_to_string err));
+        (match accept_running config ~now:(now +. 2.0) ~schedule_id () with
+         | Ok _ -> ()
+         | Error err -> fail (store_error_to_string err));
+        turn (n - 1) (now +. 60.0))
+    in
+    turn count 201.0
+  in
+  (* Well past the per-schedule bound, so the trim has to engage. *)
+  run_occurrences ~schedule_id:"noisy-1" ~count:40;
+  (* A quiet schedule whose history must survive the noisy one. *)
+  run_occurrences ~schedule_id:"quiet-1" ~count:3;
+  let wakes = (read_state config).wakes in
+  let for_schedule id =
+    List.length
+      (List.filter
+         (fun (wake : wake_record) -> String.equal wake.schedule_id id)
+         wakes)
+  in
+  check int "noisy schedule is trimmed to the bound" 32 (for_schedule "noisy-1");
+  check int "quiet schedule keeps every wake" 3 (for_schedule "quiet-1")
+;;
+
 let test_recurring_occurrences_remain_dispatchable () =
   with_workspace
   @@ fun config ->
@@ -1025,6 +1071,8 @@ let () =
             test_fail_due_candidate_records_failed_wake;
           test_case "recurring occurrences remain dispatchable" `Quick
             test_recurring_occurrences_remain_dispatchable;
+          test_case "terminal wakes are bounded per schedule" `Quick
+            test_terminal_wakes_are_bounded_per_schedule;
           test_case "prune deletes terminal request and wake receipt"
             `Quick test_prune_deletes_terminal_request_and_wake_receipt;
           test_case

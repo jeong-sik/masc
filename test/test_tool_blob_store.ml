@@ -89,6 +89,53 @@ let test_stored_roundtrip () =
   | O.Invalid_marker { detail } ->
       Alcotest.failf "expected Decoded, got Invalid_marker: %s" detail
 
+(* The marker format reads mime with [%s@ ], which stops at a space, so a
+   mime carrying a parameter -- text/plain; charset=utf-8 -- encodes fine and
+   then fails to come back: the scan reads "text/plain;" and looks for the
+   literal " preview=" where "charset=..." stands.
+
+   No caller passes such a mime today (both put sites hand over a literal
+   without spaces), so this pins a boundary rather than reporting a live
+   defect. It is here because the same file already knows content types
+   carry parameters -- [content_type_base] in tool_misc_web_fetch strips
+   them -- so the day one reaches this codec, the failure should land in a
+   test rather than in a keeper's tool result. #25499. *)
+let test_mime_with_a_space_does_not_survive_the_round_trip () =
+  let artifact_ref =
+    ref_exn ~sha256:(String.make 64 'b') ~bytes:12 ~preview:"hi"
+      ~mime:"text/plain; charset=utf-8"
+  in
+  let encoded = O.encode_for_agent_core (O.Stored artifact_ref) in
+  Alcotest.(check bool) "encoding still produces a marker" true
+    (O.is_marker encoded);
+  match O.decode_from_agent_core encoded with
+  | O.Invalid_marker _ -> ()
+  | O.Decoded { mime; _ } ->
+      Alcotest.failf
+        "decode unexpectedly succeeded with mime %S -- if the codec now reads \
+         mime up to the next literal, this test should assert the round trip \
+         instead of the rejection"
+        mime
+  | O.Not_marker -> Alcotest.fail "expected Invalid_marker, got Not_marker"
+
+(* [Scanf.sscanf] stops when the format is satisfied; it does not require the
+   input to be spent. Trailing bytes after the closing bracket are therefore
+   ignored rather than rejected. Same standing as above: pinned, not live. *)
+let test_trailing_bytes_after_the_marker_are_ignored () =
+  let artifact_ref =
+    ref_exn ~sha256:(String.make 64 'c') ~bytes:7 ~preview:"hi"
+      ~mime:"text/plain"
+  in
+  let encoded = O.encode_for_agent_core (O.Stored artifact_ref) in
+  match O.decode_from_agent_core (encoded ^ "trailing bytes") with
+  | O.Decoded { bytes; _ } ->
+      Alcotest.(check int) "decoded the marker and dropped the tail" 7 bytes
+  | O.Invalid_marker _ ->
+      (* A codec that grew a full-consumption requirement would land here;
+         that is the better behaviour, and this test should then assert it. *)
+      ()
+  | O.Not_marker -> Alcotest.fail "expected a marker"
+
 let test_normalized_artifact_ref_roundtrip () =
   let reference =
     ref_exn
@@ -1228,6 +1275,10 @@ let () =
         [
           Alcotest.test_case "inline" `Quick test_inline_roundtrip;
           Alcotest.test_case "stored" `Quick test_stored_roundtrip;
+          Alcotest.test_case "mime with a space does not survive" `Quick
+            test_mime_with_a_space_does_not_survive_the_round_trip;
+          Alcotest.test_case "trailing bytes after the marker are ignored"
+            `Quick test_trailing_bytes_after_the_marker_are_ignored;
           Alcotest.test_case
             "normalized artifact reference"
             `Quick

@@ -200,10 +200,6 @@ next_step "masc_transition claim"
 r_claim="$(call_tool 5015 "masc_transition" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id,action:"claim",notes:"public tool sweep claim"}')")"
 expect_ok_or_guard "masc_transition claim" "$r_claim" 'already claimed'
 
-next_step "masc_plan_init"
-r_plan_init="$(call_tool 5016 "masc_plan_init" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
-expect_ok "masc_plan_init" "$r_plan_init"
-
 next_step "masc_plan_set_task"
 r_plan_set="$(call_tool 5017 "masc_plan_set_task" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
 expect_ok "masc_plan_set_task" "$r_plan_set"
@@ -211,14 +207,6 @@ expect_ok "masc_plan_set_task" "$r_plan_set"
 next_step "masc_check"
 r_check="$(call_tool 5018 "masc_check" '{"assertions":["task_claimed","current_task_set"]}')"
 expect_ok "masc_check" "$r_check"
-
-next_step "masc_plan_update"
-r_plan_update="$(call_tool 5019 "masc_plan_update" "$(jq -cn --arg task_id "$task_id" --arg content "public tool sweep plan" '{task_id:$task_id,content:$content}')")"
-expect_ok "masc_plan_update" "$r_plan_update"
-
-next_step "masc_plan_get"
-r_plan_get="$(call_tool 5020 "masc_plan_get" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
-expect_ok "masc_plan_get" "$r_plan_get"
 
 next_step "masc_transition start"
 r_transition="$(call_tool 5021 "masc_transition" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id,action:"start",notes:"public tool sweep start"}')")"

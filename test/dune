@@ -2302,6 +2302,8 @@
 
 (include stanzas/test_keeper_decision_audit_dated_store.inc)
 
+(include stanzas/test_keeper_deferred_tool_index.inc)
+
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 
 (include stanzas/test_keeper_tool_name.inc)

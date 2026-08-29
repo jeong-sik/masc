@@ -31,6 +31,8 @@ type gate_replay_delivery =
 
 type tool_bundle =
   { tools : Agent_core.Tool.t list
+  ; always_loaded : Agent_core.Tool.t list
+  ; deferrable : (Agent_core.Types.tool_schema * Agent_core.Tool.t) list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option

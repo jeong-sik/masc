@@ -697,6 +697,26 @@ let test_a_revisionless_ask_is_taught_the_exact_reference () =
            taught))
 ;;
 
+(* The search tool is not in the bundle: the Agent Core lane builds it when it
+   swaps attached-service schemas for an index, because only that lane can
+   widen a running turn. The gate above therefore never walks it, and an
+   unclassified name here would ask the operator a question with no reason
+   they can act on. *)
+let test_the_deferred_tool_search_is_classifiable () =
+  let tool_name = Keeper_deferred_tool_index.search_tool_name in
+  check
+    bool
+    "the approval policy places the deferred tool search"
+    true
+    (Policy.classifies ~composition_plan_index:None ~tool_name);
+  match
+    Policy.verdict_for ~composition_plan_index:None ~tool_name ~input:(`Assoc [])
+  with
+  | Policy.Run _ -> ()
+  | Policy.Ask { because } ->
+    failf "handing over a carried tool schema asked the operator: %s" because
+;;
+
 let test_every_bundle_tool_is_classifiable () =
   with_bundle (fun composition_plan_index names ->
     let unclassifiable =
@@ -815,6 +835,8 @@ let () =
     ; ( "the approval policy"
       , [ test_case "can classify every tool in it" `Quick
             test_every_bundle_tool_is_classifiable
+        ; test_case "places the deferred tool search" `Quick
+            test_the_deferred_tool_search_is_classifiable
         ] )
     ]
 ;;

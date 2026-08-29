@@ -72,6 +72,7 @@ type try_provider_ctx =
   ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
+  ; deferred_tool_surface : Keeper_deferred_tool_index.surface option
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
   ; stream_idle_timeout_s : float option
@@ -808,12 +809,40 @@ let run_try_provider
     | Some sink -> sink snapshot
     | None -> Ok ()
   in
+  let local_agent_ref : Agent_core.Agent.t option ref = ref None in
+  (* Only this lane can widen a running turn's tool set, so only this lane is
+     handed an index. The official-client lanes pin their tool set at spawn
+     and make it part of a resumable session's identity; they take [ctx.tools]
+     whole from their own branch of the driver. *)
+  let lane_tools =
+    match ctx.deferred_tool_surface with
+    | None -> ctx.tools
+    | Some { Keeper_deferred_tool_index.always_loaded; deferred } ->
+      (match deferred with
+       | [] -> ctx.tools
+       | deferred ->
+         let extend tools =
+           match !local_agent_ref with
+           | Some agent ->
+             Agent_core.Agent.extend_tools agent tools;
+             Ok ()
+           | None ->
+             Error
+               "this turn has no running agent to widen; the tool surface was \
+                asked for a schema before the agent was published"
+         in
+         always_loaded
+         @ [ Keeper_deferred_tool_index.search_tool
+               (Keeper_deferred_tool_index.create deferred)
+               ~extend
+           ])
+  in
   let config_result =
     let base_config =
       Runtime_candidate.default_config
         ~name:ctx.name
         ~system_prompt:ctx.system_prompt
-        ~tools:ctx.tools
+        ~tools:lane_tools
         candidate
     in
     (* The gate's pre_tool_use runs before whatever hooks the turn brought:
@@ -900,7 +929,6 @@ let run_try_provider
           ; max_tool_rounds = Keeper_config.keeper_max_tool_rounds ()
           }
   in
-  let local_agent_ref : Agent_core.Agent.t option ref = ref None in
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->

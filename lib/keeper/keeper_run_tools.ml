@@ -52,6 +52,8 @@ let freeze = Keeper_run_tools_hook_accumulator.freeze
     at the AGENT_CORE call site. *)
 type agent_setup = Keeper_run_tools_hooks.agent_setup =
   { tools : Agent_core.Tool.t list
+  ; always_loaded : Agent_core.Tool.t list
+  ; deferrable : (Agent_core.Types.tool_schema * Agent_core.Tool.t) list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string

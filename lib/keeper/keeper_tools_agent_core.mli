@@ -36,6 +36,19 @@ type gate_replay_delivery =
 
 type tool_bundle =
   { tools : Agent_core.Tool.t list
+    (** Every tool this turn can run, always-loaded first. The official-client
+        lanes take this list whole: their tool set is pinned at process spawn
+        or thread start and is part of a resumable session's identity, so a
+        set widened mid-turn is one they cannot accept. *)
+  ; always_loaded : Agent_core.Tool.t list
+    (** What is sent as schemas on every lane. Built-in tools: the day the
+        index was measured, every tool a Keeper actually called was one of
+        these, so hiding them behind an index would add a round trip and save
+        nothing. *)
+  ; deferrable : (Agent_core.Types.tool_schema * Agent_core.Tool.t) list
+    (** Attached-service tools, which the Agent Core lane may carry as an
+        index instead. [tools] is [always_loaded] followed by these, so the
+        three cannot disagree about what the turn holds. *)
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option

@@ -112,6 +112,14 @@ and undescribed_kind ?composition_plan_index tool_name =
   then
     Control
       (Run { because = "reads one instruction skill this keeper already carries" })
+  else if String.equal tool_name Keeper_deferred_tool_index.search_tool_name
+  then
+    (* Hands over the schema of a tool this keeper already carries. Revealing
+       a schema reaches nothing outside masc; the revealed tool is asked about
+       on its own terms when it is called, which for an attached service means
+       the durable Gate. *)
+    Control
+      (Run { because = "reads the schema of a tool this keeper already carries" })
   else
     match
       Option.bind composition_plan_index (fun index ->

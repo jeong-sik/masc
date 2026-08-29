@@ -60,6 +60,12 @@ val freeze : hook_accumulator -> hook_outputs
     at the AGENT_CORE call site. *)
 type agent_setup =
   { tools : Agent_core.Tool.t list
+    (** Every tool this turn can run. The official-client lanes take it
+        whole; see {!Keeper_tools_agent_core.tool_bundle}. *)
+  ; always_loaded : Agent_core.Tool.t list
+  ; deferrable : (Agent_core.Types.tool_schema * Agent_core.Tool.t) list
+    (** Carried through from the bundle so the Agent Core lane can send an
+        index in place of these schemas. *)
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string

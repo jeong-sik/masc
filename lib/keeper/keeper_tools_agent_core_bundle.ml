@@ -537,17 +537,21 @@ let make_tool_bundle_for_descriptors_with_policy
      spent in the woken cycle. *)
   let identity_agent_tools =
     List.map
-      (fun offered ->
-         Keeper_identity_gate.agent_tool
-           ~config
-           ~meta
-           ?continuation_channel
-           ?gate_context:gate_context_provider
-           ?gate_grant
-           offered)
+      (fun (offered : Keeper_identity_tools.offered_tool) ->
+         ( offered.schema
+         , Keeper_identity_gate.agent_tool
+             ~config
+             ~meta
+             ?continuation_channel
+             ?gate_context:gate_context_provider
+             ?gate_grant
+             offered ))
       identity_tools
   in
-  { tools = descriptor_tools @ composition_tools @ identity_agent_tools
+  let always_loaded = descriptor_tools @ composition_tools in
+  { tools = always_loaded @ List.map snd identity_agent_tools
+  ; always_loaded
+  ; deferrable = identity_agent_tools
   ; cleanup =
       (fun () ->
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)

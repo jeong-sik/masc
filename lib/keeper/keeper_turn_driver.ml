@@ -555,6 +555,7 @@ let run_named
     ?session_id
     ?(system_prompt = "")
     ?(tools = [])
+    ?deferred_tool_surface
     ?(initial_messages = [])
     ?model_input_projection
     ?stream_idle_timeout_s
@@ -1269,6 +1270,7 @@ let run_named
             ; session_id
             ; system_prompt
             ; tools
+            ; deferred_tool_surface
             ; initial_messages
             ; model_input_projection
             ; stream_idle_timeout_s

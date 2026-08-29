@@ -34,6 +34,10 @@ type try_provider_ctx =
   ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
+  ; deferred_tool_surface : Keeper_deferred_tool_index.surface option
+    (** When present, this lane sends [always_loaded] plus one search
+        tool carrying the index instead of every schema. Absent is the
+        behaviour every other lane and caller keeps: send [tools]. *)
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
   ; stream_idle_timeout_s : float option

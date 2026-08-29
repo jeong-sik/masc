@@ -88,6 +88,7 @@ val run_named :
   ?session_id:string ->
   ?system_prompt:string ->
   ?tools:Agent_core.Tool.t list ->
+  ?deferred_tool_surface:Keeper_deferred_tool_index.surface ->
   ?initial_messages:Agent_core.Types.message list ->
   ?model_input_projection:Agent_core.Agent.model_input_projection ->
   ?stream_idle_timeout_s:float ->

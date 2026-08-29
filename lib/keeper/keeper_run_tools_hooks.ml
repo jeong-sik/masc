@@ -30,6 +30,8 @@ let create_tool_observer_serialization () : tool_observer_serialization =
 
 type agent_setup =
   { tools : Agent_core.Tool.t list
+  ; always_loaded : Agent_core.Tool.t list
+  ; deferrable : (Agent_core.Types.tool_schema * Agent_core.Tool.t) list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
@@ -95,6 +97,8 @@ type ctx =
       (Keeper_hooks_agent_core.tool_stream_observation -> unit) option
   ; skill_activation_context : Keeper_skill_activation_recorder.t
   ; tools : Agent_core.Tool.t list
+  ; always_loaded : Agent_core.Tool.t list
+  ; deferrable : (Agent_core.Types.tool_schema * Agent_core.Tool.t) list
   }
 
 let relax_strict_tool_choice_for_keeper = function
@@ -1020,6 +1024,8 @@ let assemble_hooks
     in
     Ok
       { tools
+      ; always_loaded = ctx.always_loaded
+      ; deferrable = ctx.deferrable
       ; cleanup = keeper_tools_cleanup
       ; terminal_effect_state
       ; user_message

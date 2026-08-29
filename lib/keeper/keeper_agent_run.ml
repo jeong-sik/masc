@@ -834,6 +834,11 @@ let run_turn
     Turn_helpers.run_with_setup_cleanup ~cleanup:cleanup_agent_setup
     @@ fun () ->
     let tools = s.Keeper_run_tools.tools in
+    let deferred_tool_surface =
+      { Keeper_deferred_tool_index.always_loaded = s.Keeper_run_tools.always_loaded
+      ; deferred = s.Keeper_run_tools.deferrable
+      }
+    in
     let hooks = s.Keeper_run_tools.hooks in
     let acc = s.Keeper_run_tools.acc in
     let agent_ref : Agent_core.Agent.t option ref = ref None in
@@ -1068,6 +1073,7 @@ let run_turn
                       ?raw_trace
                       ~system_prompt:turn_system_prompt
                       ~tools
+                      ~deferred_tool_surface
                       ~checkpoint_sink
                       ~initial_messages
                       ~model_input_projection

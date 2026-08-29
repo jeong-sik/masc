@@ -25,7 +25,7 @@ val normalize_path_for_check : string -> string
 (** [normalize_path_for_check] with trailing slashes stripped. *)
 val normalize_path_for_check_stripped : string -> string
 
-(** Normalize an allowed-paths entry against [root], returning [None]
+(** Normalize a sandbox-root entry against [root], returning [None]
     when blank or unresolvable. *)
 val normalize_sandbox_root_for_check :
   root:string -> string -> string option

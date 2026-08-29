@@ -33,7 +33,6 @@ autoboot_enabled = true
 proactive_enabled = true
 sandbox_profile = "docker"
 mention_targets = ["operator"]
-allowed_paths = ["workspace/yousleepwhen/masc"]
 ```
 
 Current `[keeper]` fields:
@@ -42,7 +41,6 @@ Current `[keeper]` fields:
 - `autoboot_enabled`
 - `mention_targets`
 - `proactive_enabled`
-- `allowed_paths`
 - `sandbox_profile`
 - `sandbox_image`
 - `network_mode`

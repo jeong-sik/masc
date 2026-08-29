@@ -61,8 +61,7 @@ let make_config () =
   (tmp, Workspace.default_config tmp)
 
 let make_meta ~name ~sandbox =
-  (* allowed_paths=["*"] mirrors the production acme-sandbox config that lets
-     the resolver permit any path under project_root. The B-1.5
+  (* The resolver permits any path under project_root; the B-1.5 sandbox
      containment fires AFTER the resolver but BEFORE I/O. *)
   let json =
     `Assoc

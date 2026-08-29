@@ -150,7 +150,6 @@ function keeperConfig(k) {
     access: {
       fs: grant.fs, git: !!grant.git, net: !!grant.net, tools: [...grant.tools],
       sandbox: 'local', network: 'inherit',
-      allowedPaths: `.masc/keepers/${slug}/`,
       effectivePath: `.masc/playground/${slug}/`,
       denyCount: 0, destructiveTool: 'dynamic_guard',
     },

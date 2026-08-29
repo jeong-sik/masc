@@ -343,6 +343,15 @@ type pane_focus =
   | Left_pane
   | Right_pane
 
+(** Runtime surface sub-mode. [Runtime_lanes] answers "what is each lane
+    going to call, in what order" — the failover view. [Runtime_all] answers
+    "what can this workspace call at all", which the lane view cannot: a
+    runtime no lane names is absent from it entirely, and the roster is where
+    an operator finds one to assign. Same snapshot, two questions. *)
+type runtime_mode =
+  | Runtime_lanes
+  | Runtime_all
+
 (** Planning surface sub-mode *)
 type planning_mode =
   | Planning_list
@@ -1631,6 +1640,7 @@ type state = {
   mutable planning_error: string option;
   mutable planning_cursor: int;
   mutable planning_scroll: int;
+  mutable runtime_mode: runtime_mode;
   mutable planning_mode: planning_mode;
   (* Client-side over the already-loaded goals: [f]/[s] re-render without a
      refetch. *)
@@ -2256,6 +2266,7 @@ let create_state
   planning_error = None;
   planning_cursor = 0;
   planning_scroll = 0;
+  runtime_mode = Runtime_lanes;
   planning_mode = Planning_list;
   planning_filter = Planning_filter_active;
   planning_sort = Planning_sort_phase_priority;

@@ -2921,10 +2921,10 @@ let commit_keeper_approval_resolution
            (Printexc.to_string exn))
   with
   | Ok () -> Ok ()
-  | Error (Keeper_registry_event_queue.Hitl_recipient_retired _) as error ->
-    (* The recipient Keeper was removed by a finalized shutdown. That is a
-       terminal disposition the caller settles, not a delivery failure, so it
-       gets neither the failure counter nor an ERROR log here. *)
+  | Error Keeper_registry_event_queue.Hitl_recipient_absent as error ->
+    (* No Keeper exists with the addressed name. That is a terminal
+       disposition the caller settles, not a delivery failure, so it gets
+       neither the failure counter nor an ERROR log here. *)
     error
   | Error (Keeper_registry_event_queue.Hitl_enqueue_failed reason) as error ->
     record_resolution_delivery_failure ~keeper_name ~approval_id reason;
@@ -3418,22 +3418,20 @@ let complete_delivery delivery =
     then Ok { remembered_rule = None; audit_receipts = [] }
     else
       (match deliver_resolution ~base_path delivery.entry delivery.decision with
-       | Error (Keeper_registry_event_queue.Hitl_recipient_retired operation_id)
-         ->
-         (* The addressed Keeper was removed by a finalized shutdown, so this
-            resolution has no consumer — ever. Record the resolution evidence
-            and retire the durable delivery; keeping it would replay the same
-            permanent failure at every boot. No always-allow rule is written:
-            the operator approved a grant for the removed incarnation. *)
+       | Error Keeper_registry_event_queue.Hitl_recipient_absent ->
+         (* No Keeper exists with the addressed name, so this resolution has
+            no consumer — ever. Record the resolution evidence and retire the
+            durable delivery; keeping it would replay the same permanent
+            failure at every boot. No always-allow rule is written: the
+            operator approved a grant for a Keeper that is gone. *)
          (match remove_delivery_from_store delivery with
           | Error storage_error ->
             Error (Persistence_failed { approval_id = id; storage_error })
           | Ok () ->
             Log.Keeper.info
               ~keeper_name:delivery.entry.keeper_name
-              "hitl delivery retired: recipient removed by shutdown approval=%s operation=%s"
-              id
-              (Keeper_shutdown_types.Operation_id.to_string operation_id);
+              "hitl delivery retired: no such keeper approval=%s"
+              id;
             let actor =
               match delivery.created_by with
               | Some actor when String.trim actor <> "" -> Some actor

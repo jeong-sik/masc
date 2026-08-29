@@ -235,22 +235,10 @@ let test_finalized_operation_settles_when_keeper_removed () =
         ~cleanup_intent:
           { reason = Operator_stop_remove_meta; remove_session = true }
     in
-    (* Live finalize records the retirement before it publishes [Finalized];
-       the fixture mirrors that durable state as of the crash. *)
-    (match
-       Keeper_retirement_store.record
-         ~config
-         ~keeper_name:name
-         { Keeper_retirement_store.trace_id = operation.trace_id
-         ; operation_id = operation.operation_id
-         }
-     with
-     | Ok () -> ()
-     | Error detail -> failf "retirement record failed: %s" detail);
     persist_exn ~config operation;
     check_settled "finalized" ~config operation;
-    (* Retirement lives in [Keeper_retirement_store] now, so settlement
-       reclaims the operation record instead of keeping it as a fence... *)
+    (* Durable intake follows current metadata alone, so settlement
+       reclaims the operation record instead of keeping it as a fence. *)
     (match
        Keeper_shutdown_store.path
          ~config
@@ -264,30 +252,7 @@ let test_finalized_operation_settles_when_keeper_removed () =
          false
          (Sys.file_exists record_path)
      | Error error ->
-       failf "path: %s" (Keeper_shutdown_store.error_to_string error));
-    (* ...and durable intake stays closed for the removed name without it. *)
-    let late_stimulus : Keeper_event_queue.stimulus =
-      { post_id = "ownerless-finalized-late-stimulus"
-      ; urgency = Keeper_event_queue.Normal
-      ; arrived_at = 1.0
-      ; payload = Keeper_event_queue.Bootstrap
-      }
-    in
-    match
-      Keeper_registry_event_queue.enqueue_durable_result
-        ~base_path:config.base_path
-        name
-        late_stimulus
-    with
-    | Error detail ->
-      check
-        string
-        "durable intake reports the recorded retirement"
-        (Printf.sprintf
-           "keeper durable intake rejected because Keeper was removed by shutdown operation=%s"
-           (Operation_id.to_string operation.operation_id))
-        detail
-    | Ok () -> fail "reclaimed record reopened durable intake")
+       failf "path: %s" (Keeper_shutdown_store.error_to_string error)))
 ;;
 
 (* A finalization that retained metadata leaves nothing for any reader: the

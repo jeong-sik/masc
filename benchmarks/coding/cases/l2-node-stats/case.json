@@ -1,0 +1,9 @@
+{
+  "id": "l2-node-stats",
+  "level": "L2",
+  "lang": "node",
+  "timeout_sec": 900,
+  "verify": "verify.sh",
+  "prompt": "check.sh fails because stats.js exports stubs. Implement minOf, maxOf and meanOf over a non-empty array of numbers so the check passes. Do not modify check.sh or check.js. Reply DONE once `bash check.sh` prints PASS.",
+  "description": "Small feature: implement min/max/mean in stats.js to satisfy check.js."
+}

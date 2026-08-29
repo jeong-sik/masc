@@ -41,7 +41,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , `String (proactive_cycle_outcome_to_string rt.proactive_rt.last_outcome) )
     ; Last_proactive_reason, `String rt.proactive_rt.last_reason
     ; Last_proactive_preview, `String rt.proactive_rt.last_preview
-    ; Consecutive_noop_count, `Int rt.proactive_rt.consecutive_noop_count
     ; ( Message_scope_ack_id
       , match rt.message_scope_ack_id with
         | Some id -> `String id

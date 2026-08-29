@@ -335,7 +335,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     proactive_count_total: 0, last_proactive_ts: 0.0,
     proactive_visible_count_total: 0, last_visible_proactive_ts: 0.0,
     last_proactive_outcome: "never_started", last_proactive_reason: "",
-    last_proactive_preview: "", consecutive_noop_count: 0,
+    last_proactive_preview: "",
     message_scope_ack_id: null, last_runtime_attempt: null, paused: false,
     latched_reason: null, current_task_id: null, keeper_id: null,
     agent_core_env: {}

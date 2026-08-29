@@ -338,7 +338,6 @@ let decode_current_meta fields =
   let* last_proactive_outcome = parse_proactive_outcome fields in
   let* last_proactive_reason = string_field fields "last_proactive_reason" in
   let* last_proactive_preview = string_field fields "last_proactive_preview" in
-  let* consecutive_noop_count = int_field fields "consecutive_noop_count" in
   let* message_scope_ack_id = nullable_string_field fields "message_scope_ack_id" in
   let* last_runtime_attempt = parse_last_runtime_attempt fields in
   let* paused = bool_field fields "paused" in
@@ -384,7 +383,6 @@ let decode_current_meta fields =
       ; last_outcome = last_proactive_outcome
       ; last_reason = last_proactive_reason
       ; last_preview = last_proactive_preview
-      ; consecutive_noop_count
       }
     in
     let runtime : agent_runtime_state =

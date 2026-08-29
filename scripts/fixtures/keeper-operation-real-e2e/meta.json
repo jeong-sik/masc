@@ -26,7 +26,6 @@
   "last_proactive_outcome": "never_started",
   "last_proactive_reason": "",
   "last_proactive_preview": "",
-  "consecutive_noop_count": 0,
   "active_goal_ids": [],
   "message_scope_ack_id": null,
   "last_blocker": null,

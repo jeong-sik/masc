@@ -90,7 +90,6 @@ let ready_meta () =
         proactive_rt =
           { meta.runtime.proactive_rt with
             last_ts = now -. 120.0
-          ; consecutive_noop_count = 0
           }
       }
   }

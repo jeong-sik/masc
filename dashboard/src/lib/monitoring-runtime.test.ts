@@ -192,19 +192,6 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.hint).not.toContain('운영자')
   })
 
-  it('ignores stale last_blocker text when no live runtime blocker is present', () => {
-    const summary = summarizeKeeperMonitoring({
-      name: 'keeper-a',
-      status: 'idle',
-      phase: 'Running',
-      last_heartbeat: new Date().toISOString(),
-      last_blocker: 'old blocker',
-    } as Keeper)
-
-    expect(summary.band.key).toBe('active')
-    expect(summary.hint).toBeNull()
-  })
-
   it('keeps runtime blockers as live attention signals', () => {
     const summary = summarizeKeeperMonitoring({
       name: 'keeper-a',

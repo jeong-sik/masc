@@ -1214,7 +1214,6 @@ export interface Keeper {
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
   last_proactive_preview?: string | null
-  last_blocker?: string | null
   last_drift_reason?: string | null
   drift_count_total?: number
   runtime_warning_ctx_ratio?: number | null

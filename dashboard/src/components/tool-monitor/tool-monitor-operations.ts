@@ -20,7 +20,6 @@ import { MISSING_DATA_DASH } from '../../lib/format-string'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { formatMsCompact, formatNumber } from '../../lib/format-number'
 import { refreshShell, shellRuntimeResolution } from '../../store'
-import type { DashboardPausedKeeperDetail } from '../../types'
 import {
   cancelSharedToolQuality,
   refreshSharedToolQuality,
@@ -130,12 +129,6 @@ function KeeperOperatorFactsSection() {
   `
 }
 
-function blockerKlassText(row: DashboardPausedKeeperDetail): string | null {
-  const klass = row.last_blocker?.klass
-  if (typeof klass === 'string') return klass
-  return klass?.name ?? null
-}
-
 function PausedKeeperDiagnosticsSection() {
   const pausedHealth = shellRuntimeResolution.value?.fleet_safety?.paused_keepers_health
   const details = pausedHealth?.details ?? []
@@ -153,14 +146,11 @@ function PausedKeeperDiagnosticsSection() {
               </thead>
               <tbody>
                 ${details.map(row => {
-                  const klass = blockerKlassText(row)
-                  const detail = row.last_blocker?.detail ?? null
                   return html`
                     <tr key=${row.name}>
                       <td class="mono">${row.name}</td>
-                      <td title=${detail ?? ''}>
-                        ${row.pause_kind ?? 'unknown'}${klass ? ` · blocker=${klass}` : ''}
-                        ${detail ? html`<div class="mono dim tm-sub">${detail}</div>` : null}
+                      <td>
+                        ${row.pause_kind ?? 'unknown'}
                       </td>
                       <td class="mono r dim">${elapsedText(row.paused_elapsed_sec)}</td>
                     </tr>

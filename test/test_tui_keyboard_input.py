@@ -782,7 +782,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "last_proactive_ts",
         "proactive_visible_count_total",
         "last_visible_proactive_ts",
-        "consecutive_noop_count",
     ):
         metadata[field] = 0
     return metadata

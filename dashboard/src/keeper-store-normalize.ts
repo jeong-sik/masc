@@ -748,7 +748,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         live_activity: normalizeKeeperLiveActivity(row.live_activity),
         current_gate: normalizeKeeperCurrentGate(row.current_gate),
         last_proactive_preview: asString(row.last_proactive_preview) ?? null,
-        last_blocker: asString(row.last_blocker) ?? null,
         runtime_warning_ctx_ratio: asNumber(row.runtime_warning_ctx_ratio) ?? null,
         context_ratio: contextRatio,
         context_tokens: topContextMeasured ? asNumber(row.context_tokens) ?? null : null,

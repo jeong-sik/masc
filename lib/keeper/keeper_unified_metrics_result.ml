@@ -167,12 +167,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
                ~response_text:result.response_text
                ~validated_evidence_preview:
                  (Option.map validated_evidence_preview validated_evidence));
-        consecutive_noop_count =
-          (if is_scheduled_autonomous_cycle then
-             if is_noop_cycle ~has_text ~tools_used:tool_names
-             then rt.proactive_rt.consecutive_noop_count + 1
-             else 0
-           else rt.proactive_rt.consecutive_noop_count);
       };
       (* A successful turn means the keeper is not blocked.
          Clear unconditionally so stale error strings from previous

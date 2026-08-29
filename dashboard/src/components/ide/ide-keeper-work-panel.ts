@@ -346,7 +346,7 @@ export function keeperWorkSummary(
     ),
   )
   const runtimeBlocker = normalizeKeeperBlockerText(
-    firstNonEmptyString(keeper?.runtime_blocker_summary, keeper?.last_blocker),
+    keeper?.runtime_blocker_summary,
   )
   return {
     displayName,

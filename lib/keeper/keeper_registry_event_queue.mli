@@ -156,13 +156,9 @@ val terminalize_pending_turn_completed_result :
     reaction evidence before another source can settle. *)
 
 (** Enqueue a stimulus on the keeper's event queue. An owner not registered yet
-    may receive durable work so a later lane can replay it. A finalized
-    remove-meta shutdown record rejects intake while metadata is absent,
-    preventing a removed Keeper's runtime directory from being recreated. The
-    same record also rejects metadata that still carries the retired
-    trace/generation identity; a genuinely new identity supersedes the
-    retirement. A surrounding durable-intake fence supplies [intake_token];
-    otherwise this function acquires the Keeper fence itself. *)
+    may receive durable work so a later lane can replay it. A surrounding
+    durable-intake fence supplies [intake_token]; otherwise this function
+    acquires the Keeper fence itself. *)
 val enqueue :
   ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   base_path:string -> string -> Keeper_event_queue.stimulus -> unit

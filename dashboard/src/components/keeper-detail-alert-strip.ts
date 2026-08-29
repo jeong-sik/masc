@@ -3,7 +3,6 @@ import { signal } from '@preact/signals'
 import { ActionButton } from './common/button'
 import {
   keeperActivityDisplay,
-  normalizeKeeperBlockerText,
   keeperRuntimeBlockerLabel,
   keeperRuntimeBlockerHint,
 } from '../lib/keeper-runtime-display'
@@ -114,7 +113,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const sandboxTarget = keeper.sandbox_target?.trim() || keeper.sandbox_profile?.trim() || null
   const goalLinkedTasks = keeper.goal_progress?.linked_task_count
   const goalConvergence = keeper.goal_progress?.convergence
-  const blocker = normalizeKeeperBlockerText(keeper.last_blocker)
   const pendingFirst = keeper.trust?.approval_state?.pending_first ?? null
   const pendingApprovalId = pendingFirst?.id?.trim() || null
   const pendingApprovalTool = pendingFirst?.tool_name?.trim() || null
@@ -257,7 +255,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     }
   }
 
-  const toneClass = isPaused || runtimeBlocker || blocker || hbStale
+  const toneClass = isPaused || runtimeBlocker || hbStale
     ? 'border-[var(--warn-24)] bg-[var(--warn-8)]'
     : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
   const runtimeBlockerLabelText = keeperRuntimeBlockerLabel(runtimeBlockerClass)
@@ -328,9 +326,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${runtimeBlocker
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">${pausedRuntimeBlocker ? '일시정지 원인' : '런타임 차단'}</strong> · ${runtimeBlocker}</span>`
-          : null}
-        ${blocker
-          ? html`<span><${StrongSecondary}>차단 요인</${StrongSecondary}> · ${blocker}</span>`
           : null}
         ${attentionReason === 'approval_pending' && isBlockedBeforeWorktree
           ? html`<${RuntimeBadge} tone="warn">워크트리 전 차단</${RuntimeBadge}>`

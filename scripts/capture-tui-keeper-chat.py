@@ -106,7 +106,7 @@ def current_keeper_meta() -> dict[str, object]:
         "total_turns", "total_input_tokens", "total_output_tokens", "total_tokens",
         "last_input_tokens", "last_output_tokens", "last_total_tokens",
         "last_latency_ms", "proactive_count_total",
-        "proactive_visible_count_total", "consecutive_noop_count",
+        "proactive_visible_count_total",
         "autonomous_action_count", "autonomous_turn_count",
         "autonomous_text_turn_count", "autonomous_tool_turn_count",
         "board_reactive_turn_count", "mention_reactive_turn_count", "noop_turn_count",

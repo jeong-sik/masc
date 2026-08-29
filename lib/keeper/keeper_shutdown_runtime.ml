@@ -575,10 +575,8 @@ let recover_operation
 
 (* Recovery has just confirmed the admission transition for a settled
    operation. Reclaim its record so the next boot does not walk the same
-   settled operation again; [delete_terminal] keeps a
-   [Finalized { meta_removed = true }] retirement fence untouched. A reclaim
-   failure only means the record survives until the next boot, so it never
-   fails the recovery. *)
+   settled operation again. A reclaim failure only means the record survives
+   until the next boot, so it never fails the recovery. *)
 let reclaim_settled_record ~config (recovered : Keeper_shutdown_types.t) =
   match
     Keeper_shutdown_store.delete_terminal

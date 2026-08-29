@@ -321,7 +321,6 @@ export function isKeeperAutoRecoverPause(keeper: Keeper | null | undefined): boo
   if (blockerClass === 'provider_runtime_error') {
     return (
       transientProviderRuntimeText(keeper.runtime_blocker_summary)
-      || transientProviderRuntimeText(keeper.last_blocker)
       || transientProviderRuntimeText(keeper.attention_reason)
     )
   }
@@ -521,12 +520,9 @@ export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | n
     if (paused && autoRecover) return `자동 재시도 대기 · ${runtimeBlocker}`
     return paused ? `일시정지 원인 · ${runtimeBlocker}` : runtimeBlocker
   }
-  const blocker = normalizeKeeperBlockerText(keeper.last_blocker)
-  if (paused && autoRecover) return blocker ? `자동 재시도 대기 · ${blocker}` : '자동 재시도 대기'
-  if (paused && blocker) return `일시정지 · ${blocker}`
+  if (paused && autoRecover) return '자동 재시도 대기'
   if (paused && keeper.keepalive_running) return '일시정지 · 하트비트만 유지 중'
   if (paused) return '일시정지됨'
-  if (blocker) return `차단 요인 · ${blocker}`
   return null
 }
 

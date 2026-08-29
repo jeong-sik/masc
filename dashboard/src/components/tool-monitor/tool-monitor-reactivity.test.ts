@@ -60,7 +60,6 @@ describe('ToolMonitorReactivityBoard', () => {
             autoboot_enabled: true,
             pause_kind: 'blocked',
             paused_elapsed_sec: 265,
-            last_blocker: { klass: 'gate_wait', detail: 'H-041 HITL 응답 대기' },
             missing_pause_root_cause: false,
           }],
         },
@@ -140,7 +139,6 @@ describe('ToolMonitorReactivityBoard', () => {
       expect(container.querySelector('.tm-paused-card')).toBeTruthy()
     })
     expect(container.textContent).toContain('⏸ nick0cave')
-    expect(container.querySelector('.tm-blk')?.textContent).toBe('H-041 HITL 응답 대기')
   })
 
   it('renders the all-clear treatment when no keeper is paused', async () => {

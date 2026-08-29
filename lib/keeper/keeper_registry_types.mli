@@ -407,8 +407,8 @@ type registry_entry = {
           proactive skip counter aggregates skip reasons over time, but
           operators need recent skip verdict context when diagnosing
           idle/quiet keepers. [Some (ts, reasons)] = wall clock + verdict
-          reason strings ([cooldown_pending], [no_signal],
-          [scheduled_autonomous_disabled], etc.) from the last skip;
+          reason strings ([keeper_paused], [reactive_disabled],
+          [scheduled_autonomous_disabled]) from the last skip;
           [None] until the first skip is observed. *)
       (** Explicit KMC projection owned by the runtime, not derived from
           parent phase on read. This lets the observer surface

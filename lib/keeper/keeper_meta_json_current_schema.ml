@@ -40,7 +40,6 @@ type field =
   | Last_proactive_outcome
   | Last_proactive_reason
   | Last_proactive_preview
-  | Consecutive_noop_count
   | Message_scope_ack_id
   | Last_runtime_attempt
   | Paused
@@ -75,7 +74,6 @@ let all_fields =
   ; Last_proactive_outcome
   ; Last_proactive_reason
   ; Last_proactive_preview
-  ; Consecutive_noop_count
   ; Message_scope_ack_id
   ; Last_runtime_attempt
   ; Paused
@@ -111,7 +109,6 @@ let field_name = function
   | Last_proactive_outcome -> "last_proactive_outcome"
   | Last_proactive_reason -> "last_proactive_reason"
   | Last_proactive_preview -> "last_proactive_preview"
-  | Consecutive_noop_count -> "consecutive_noop_count"
   | Message_scope_ack_id -> "message_scope_ack_id"
   | Last_runtime_attempt -> "last_runtime_attempt"
   | Paused -> "paused"

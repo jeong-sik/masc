@@ -45,12 +45,6 @@ type proactive_runtime = {
   last_outcome : proactive_cycle_outcome;
   last_reason : string;
   last_preview : string;
-  consecutive_noop_count : int;
-      (** Consecutive autonomous cycles where only observation
-          tools were used with no substantive action.  Used by
-          [effective_scheduled_autonomous_cooldown] for
-          exponential backoff: cooldown *= 2^min(n, 2),
-          capping at 4x.  Resets on any productive cycle. *)
 }
 
 type usage_metrics = {
@@ -247,10 +241,8 @@ type keeper_meta = {
   agent_core_env : (string * string) list;
 }
 
-(** Sanctioned generic unpause transform. Clears ordinary/operator/dead
-    latches with the pause bit. A
-    [Transcript_corruption_reset_required] latch is returned unchanged, so
-    generic resume cannot replay a poisoned checkpoint. *)
+(** Sanctioned generic unpause transform. Clears the pause bit together
+    with any latched reason. *)
 val mark_resumed : keeper_meta -> keeper_meta
 
 (** Overlay Keeper configuration defaults onto persisted runtime meta for

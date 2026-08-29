@@ -159,7 +159,6 @@ describe('FleetHealthPanel', () => {
             autoboot_enabled: true,
             pause_kind: 'operator_paused',
             paused_elapsed_sec: 12,
-            last_blocker: null,
             missing_pause_root_cause: false,
           }],
         },

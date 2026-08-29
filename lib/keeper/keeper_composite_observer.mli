@@ -136,8 +136,8 @@ type live_turn = {
 
 (** Most recent deliberate skip verdict, mirrored from
     [registry_entry.last_skip_observation]. Surfaces {i why} an idle keeper
-    is quiet ([cooldown_pending], [no_signal],
-    [scheduled_autonomous_disabled], ...) without reading the aggregate
+    is quiet ([keeper_paused], [reactive_disabled],
+    [scheduled_autonomous_disabled]) without reading the aggregate
     Otel skip counter. [None] until the first skip is observed. *)
 type last_skip = {
   ls_ts : float;
@@ -280,11 +280,6 @@ type snapshot = {
           wake signal is queued; the next [interruptible_sleep] chunk
           will return early. Stale [true] points at a wake source
           that was set but never consumed. *)
-  consecutive_noop_count : int;
-      (** Lifetime [consecutive_noop_count] from the proactive runtime.
-          Increments per cycle that produced no text and only used
-          observation-only tools; resets on substantive output. Reaching
-          ≥2 caps the noop backoff multiplier at 4x. *)
   idle_seconds : int;
       (** Wall-clock seconds since the keeper last did something the
           metrics layer treated as substantive. Observation only. *)

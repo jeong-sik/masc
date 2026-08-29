@@ -147,7 +147,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
             last_outcome = Proactive_never_started;
             last_reason = "";
             last_preview = "";
-            consecutive_noop_count = 0;
           };
           trace_id = trace_id_t;
           trace_history = [];

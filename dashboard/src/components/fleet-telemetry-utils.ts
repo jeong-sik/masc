@@ -402,7 +402,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           const toolCalls = keeperToolCallCount(keeper, toolQualityForKeeper?.calls)
           const activity = keeperActivityDisplay(keeper)
           const runtimeBlockerSummary = normalizeKeeperBlockerText(
-            firstNonEmptyString(keeper.runtime_blocker_summary, keeper.last_blocker),
+            keeper.runtime_blocker_summary,
           )
           const stopCause = keeper.stop_cause ?? normalizeStopCause({
             runtime_blocker_class: keeper.runtime_blocker_class ?? null,

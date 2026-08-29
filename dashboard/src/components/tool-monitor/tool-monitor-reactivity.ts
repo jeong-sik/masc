@@ -9,12 +9,11 @@
 //   - health grid + paused view → `keepers` store (dashboard keeper registry)
 //   - phase transitions        → /api/v1/keepers/:name/transitions
 //   - lifecycle events         → /api/v1/keepers/:name/lifecycle
-//   - paused blocker detail    → shellRuntimeResolution.fleet_safety
 
 import { html } from 'htm/preact'
 import { signal, useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { keepers, refreshShell, shellRuntimeResolution } from '../../store'
+import { keepers, refreshShell } from '../../store'
 import {
   fetchKeeperLifecycle,
   fetchKeeperTransitions,
@@ -190,16 +189,13 @@ function PausedKeepers() {
   if (paused.length === 0) {
     return html`<div class="tm-ok">✓ 일시정지된 키퍼 없음 — 모든 키퍼가 정상 운영 중입니다</div>`
   }
-  const details = shellRuntimeResolution.value?.fleet_safety?.paused_keepers_health?.details ?? []
   return html`
     <div class="tm-paused-list">
       ${paused.map(k => {
-        const detail = details.find(d => d.name === k.name)?.last_blocker?.detail ?? null
         return html`
           <div key=${k.name} class="tm-paused-card">
             <span class="mono">⏸ ${k.name}</span>
             <span class="dim">${k.lifecycle_phase ?? k.phase ?? '—'}</span>
-            ${detail ? html`<span class="tm-blk">${detail}</span>` : null}
           </div>
         `
       })}

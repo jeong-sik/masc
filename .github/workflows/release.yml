@@ -112,6 +112,22 @@ jobs:
             bin/masc_tui.exe \
             bin/deployment_preflight_helper.exe
 
+      # The Build step above compiles only the OCaml binaries. The server reads
+      # the dashboard SPA from assets/dashboard/ at runtime, so without this the
+      # freshly built server answers /dashboard with 503 and quickstart-smoke
+      # fails — which is exactly why the v0.26.0 release build failed on every
+      # platform. Mirror ci.yml's dashboard toolchain (node 22 + pnpm 10.31.0).
+      - name: Set up Node for dashboard assets
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Build dashboard assets
+        run: |
+          corepack enable && corepack prepare pnpm@10.31.0 --activate
+          (cd dashboard && pnpm install --frozen-lockfile)
+          scripts/build-dashboard-if-needed.sh --force
+
       - name: Source quickstart onboarding smoke
         run: scripts/quickstart-smoke.sh
 

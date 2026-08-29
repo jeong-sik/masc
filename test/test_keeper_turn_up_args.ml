@@ -1206,7 +1206,7 @@ let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
     "an explicit request creates without a TOML default"
     true
     (A.resolve_sandbox_profile ~requested:"docker" ~fallback:None ()
-     = Keeper_types_profile_toml_io.Docker);
+     = Some Keeper_types_profile_toml_io.Docker);
   check
     bool
     "an explicit request overrides the TOML default"
@@ -1215,7 +1215,7 @@ let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
        ~requested:"local"
        ~fallback:(Some Keeper_types_profile_toml_io.Docker)
        ()
-     = Keeper_types_profile_toml_io.Local);
+     = Some Keeper_types_profile_toml_io.Local);
   check
     bool
     "no request keeps the TOML default"
@@ -1223,7 +1223,7 @@ let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
     (A.resolve_sandbox_profile
        ~fallback:(Some Keeper_types_profile_toml_io.Docker)
        ()
-     = Keeper_types_profile_toml_io.Docker);
+     = Some Keeper_types_profile_toml_io.Docker);
   (* Unparseable is treated as absent rather than mapped to a profile: the tool gate
      rejects it before this point, and inventing an isolation boundary here would hide
      that rejection if the gate were ever bypassed. *)
@@ -1235,14 +1235,15 @@ let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
        ~requested:"chroot"
        ~fallback:(Some Keeper_types_profile_toml_io.Docker)
        ()
-     = Keeper_types_profile_toml_io.Docker);
-  (* Nothing stated gets the narrow local + playground-only bootstrap profile. *)
+     = Some Keeper_types_profile_toml_io.Docker);
+  (* Nothing stated is not a profile. It used to resolve to [Local], so every
+     omission came back as "local is disabled" -- a refusal naming a value the
+     caller never wrote. The caller now reports the missing field. *)
   check
     bool
-    "neither stated resolves to the local sandbox default"
+    "neither stated resolves to no profile at all"
     true
-    (A.resolve_sandbox_profile ~fallback:None ()
-     = Keeper_types_profile_toml_io.Local)
+    (A.resolve_sandbox_profile ~fallback:None () = None)
 ;;
 
 let contains needle haystack =

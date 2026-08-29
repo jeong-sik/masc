@@ -61,13 +61,20 @@ val resolve_sandbox_profile :
   ?requested:string ->
   fallback:sandbox_profile option ->
   unit ->
-  sandbox_profile
-(** An explicit [requested] profile wins over the TOML [fallback].
+  sandbox_profile option
+(** An explicit [requested] profile wins over the TOML [fallback]; [None] means
+    neither source named one.
 
-    When neither source states a profile, the fallback resolves to [Local],
-    which keeper-up validation (create/update) rejects unless the dev/test
-    hatch [MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1] is set; config-load gating
-    follows in the same fail-closed plan.  Under [Local] a fresh keeper's
+    Omission is not a profile, so it does not collapse into [Local].  It used
+    to: keeper-up then refused the substituted value with "local is disabled",
+    naming a profile the caller never chose, and the message sent operators
+    looking for a playground switch instead of the missing field.  Callers
+    turn [None] into
+    [Keeper_meta_contract.missing_required_sandbox_profile_error], which names
+    the field and the allowed values.
+
+    A caller that wants the playground states [local] and keeps the
+    [MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1] hatch; under [Local] a fresh keeper's
     writes stay inside [.masc/playground/<keeper_name>/].
 
     [requested] is the caller's raw string; an unparseable one is treated as absent,

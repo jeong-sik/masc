@@ -145,6 +145,7 @@ let for_surface = function
       @ listing_meta
   | Planning ->
       [ b Navigate "j/k" "move"
+      ; b Navigate "v" "Task Review" ~help:"open the task verdict queue"
       ; b Act "Right / Enter" "detail"
       ; b Act "Left / Esc" "back"
       ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
@@ -165,6 +166,7 @@ let for_surface = function
       @ listing_meta
   | Verification ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
+      ; b Navigate "v" "Goals" ~help:"return to Planning goals"
       ; b Act "Right / Enter" "details" ~help:"read the request and evidence"
       ; b Act "Left / Esc" "back" ~help:"back to the verification queue"
       ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
@@ -399,9 +401,9 @@ let help_surfaces : (string * surface) list =
   ; "Lanes", Lanes
   ; "Board", Board
   ; "Approvals", Approvals
-  ; "Planning", Planning
+  ; "Planning / Goals", Planning
+  ; "Planning / Task Review", Verification
   ; "Schedules", Schedules
-  ; "Verify", Verification
   ; "Harness", Harness
   ; "Fusion", Fusion
   ; "Repos", Repositories

@@ -714,6 +714,11 @@ let surface_strip (state : state) ~cols =
         (match List.length (Masc_tui_types.approval_items state) with
          | 0 -> ""
          | pending -> Printf.sprintf "\xc2\xb7%d" pending)
+    | Planning ->
+        (match state.verification with
+         | Some snapshot when snapshot.Masc.Tui_decode.vs_total > 0 ->
+             Printf.sprintf "\xc2\xb7%d" snapshot.Masc.Tui_decode.vs_total
+         | Some _ | None -> "")
     | _ -> ""
   in
   let label i =
@@ -2692,6 +2697,27 @@ let planning_phase_color = function
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> Ansi.gray
 
+(* Planning is one operator workspace with two different authorities behind
+   it: Goal lifecycle and the Task verdict queue. Keep their APIs separate,
+   but make the hierarchy visible in the title instead of presenting two
+   unrelated top-level destinations. *)
+let planning_workspace_title (state : state) ~task_review =
+  let review_count =
+    match state.verification with
+    | Some snapshot when snapshot.vs_total > 0 ->
+        Printf.sprintf "\xc2\xb7%d" snapshot.vs_total
+    | Some _ | None -> ""
+  in
+  let tab ~active label =
+    if active then
+      (Theme.info ()) ^ Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
+    else Ansi.dim ^ label ^ Ansi.reset
+  in
+  Printf.sprintf "%s  %s  %s"
+    (screen_title " MASC Planning")
+    (tab ~active:(not task_review) "Goals")
+    (tab ~active:task_review ("Task Review" ^ review_count))
+
 (* Where the goal stands with the completion judge, in one column. The phase
    reads [executing] both for a goal nobody asked about and for one the judge
    refused; without this the two are the same row. Idle is a blank rather than
@@ -2778,7 +2804,7 @@ let render_planning_list (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf "%s  order:%s  show:%s  %s  %s"
-    (screen_title " MASC Planning")
+    (planning_workspace_title state ~task_review:false)
     (planning_sort_label state.planning_sort)
     (planning_filter_label state.planning_filter)
     timestamp
@@ -2898,7 +2924,9 @@ let render_planning_list (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:"j/k:move  f:filter  s:sort  right/Enter:detail  r:refresh  Tab:next");
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints state.view));
 
   finish_surface state ~surface_key:"planning-list" ~rows:terminal_rows
       ~cols buf
@@ -2926,7 +2954,7 @@ let planning_detail_pane (state : state)
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
   let header = Printf.sprintf "%s  %s[%s]%s  %s"
-    (screen_title " MASC Planning")
+    (planning_workspace_title state ~task_review:false)
     status_color (fit_width status_label planning_phase_column) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
@@ -3128,7 +3156,7 @@ let render_planning_detail (state : state)
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         "j/k:scroll  f:filter  s:sort  Y:copy link  left/Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
+         (Masc_tui_keys.footer_hints state.view));
   finish_surface state ~clamped:(Planning_detail_scroll scroll)
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
 
@@ -6528,13 +6556,13 @@ let render_verification_list (state : state) =
     match state.verification with
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Verification") timestamp
+          (planning_workspace_title state ~task_review:true) timestamp
           (connection_badge state)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them". *)
         Printf.sprintf "%s (%d of %d)  %s  %s"
-          (screen_title " MASC Verification") shown
+          (planning_workspace_title state ~task_review:true) shown
           snapshot.Masc.Tui_decode.vs_total timestamp
           (connection_badge state)
   in
@@ -6659,8 +6687,7 @@ let render_verification_list (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:
-         "j/k:move  PgUp/PgDn:page  right/Enter:details  a:approve  x:reject  r:refresh  Tab:next");
+       ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
 let verification_detail_lines ~width
@@ -6774,7 +6801,7 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s"
-       (screen_title " MASC Verification \xe2\x96\xb8 details")
+       (planning_workspace_title state ~task_review:true ^ " \xe2\x96\xb8 details")
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
   let width = max 1 (framed_inner_width cols) in
@@ -6815,7 +6842,7 @@ let render_verification_detail (state : state) request =
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
-      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Verify"
+      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Task Review"
         ~focused:false ~labels ~selected:state.verification_cursor;
       let answer =
         verification_detail_pane state ~rows ~cols:(cols - left_cols) request
@@ -6828,9 +6855,8 @@ let render_verification_detail (state : state) request =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf
-            "j/k:scroll (%d/%d)  PgUp/PgDn:page  left/Esc:list  a:approve  x:reject  r:refresh"
-            scroll max_scroll));
+         (Printf.sprintf "%s  (%d/%d)"
+            (Masc_tui_keys.footer_hints state.view) scroll max_scroll));
   finish_surface state
     ~clamped:(Verification_detail_scroll scroll)
     ~surface_key:"verification-detail" ~rows:terminal_rows ~cols buf

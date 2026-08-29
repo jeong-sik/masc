@@ -3817,7 +3817,7 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
              Alcotest.failf "seeded raw token should verify: %s"
                (Masc_domain.masc_error_to_string err)))
 
-let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
+let test_sync_bootable_keeper_credentials_mints_keeper_token () =
   with_temp_dir "startup-keeper-credential-sync" (fun dir ->
       with_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
@@ -3842,15 +3842,15 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
         | _ -> Alcotest.fail "missing internal keeper token after startup sync"
       in
       let raw_token_path =
-        Filename.concat (Auth.auth_dir dir) "keeper-omicron-improver-agent.token"
+        Filename.concat (Auth.auth_dir dir) "omicron-improver.token"
       in
       let raw_token = String.trim (read_file raw_token_path) in
       let credential =
-        match Auth.load_credential dir "keeper-omicron-improver-agent" with
+        match Auth.load_credential dir "omicron-improver" with
         | Some cred -> cred
         | None ->
             Alcotest.fail
-              "missing keeper-omicron-improver-agent credential after startup sync"
+              "missing omicron-improver credential after startup sync"
       in
       Alcotest.(check bool) "internal keeper token hash persisted" true
         (Sys.file_exists (Auth.internal_keeper_token_hash_file dir));
@@ -3859,12 +3859,12 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
       Alcotest.(check bool) "keeper bearer separated from internal token" false
         (String.equal raw_token internal_raw_token);
       match
-        Auth.verify_token dir ~agent_name:"keeper-omicron-improver-agent"
+        Auth.verify_token dir ~agent_name:"omicron-improver"
           ~token:raw_token
       with
-      | Ok alias_cred ->
+      | Ok resolved_cred ->
           Alcotest.(check string) "keeper credential resolves exact agent"
-            "keeper-omicron-improver-agent" alias_cred.agent_name
+            "omicron-improver" resolved_cred.agent_name
       | Error err ->
           Alcotest.failf "bootable keeper token should verify exactly: %s"
             (Masc_domain.masc_error_to_string err))
@@ -3920,8 +3920,8 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
             Alcotest.failf "failed to seed shared credential for %s: %s"
               agent_name (Masc_domain.masc_error_to_string err)
       in
-      seed "keeper-delta-agent";
-      seed "keeper-omega-agent";
+      seed "delta";
+      seed "omega";
       Alcotest.(check int) "seeded one duplicate group"
         1 (List.length (Auth.audit_token_uniqueness dir));
       Eio_main.run @@ fun env ->
@@ -3937,20 +3937,20 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
       Server_runtime_bootstrap.bootstrap_server_state_blocking state;
       Server_runtime_bootstrap.sync_bootable_keeper_credentials state;
       let delta =
-        match Auth.load_credential dir "keeper-delta-agent" with
+        match Auth.load_credential dir "delta" with
         | Some cred -> cred
-        | None -> Alcotest.fail "missing keeper-delta-agent credential"
+        | None -> Alcotest.fail "missing delta credential"
       in
       let executor =
-        match Auth.load_credential dir "keeper-omega-agent" with
+        match Auth.load_credential dir "omega" with
         | Some cred -> cred
-        | None -> Alcotest.fail "missing keeper-omega-agent credential"
+        | None -> Alcotest.fail "missing omega credential"
       in
       Alcotest.(check bool) "boot repair made keeper tokens unique" false
         (String.equal delta.token executor.token);
       Alcotest.(check int) "audit clean after boot repair"
         0 (List.length (Auth.audit_token_uniqueness dir));
-      [ "keeper-delta-agent"; "keeper-omega-agent" ]
+      [ "delta"; "omega" ]
       |> List.iter (fun agent_name ->
              let raw_token_path =
                Filename.concat (Auth.auth_dir dir) (agent_name ^ ".token")
@@ -4529,7 +4529,7 @@ let () =
             `Slow test_main_eio_preserves_cli_agent_mcp_token_file;
           Alcotest.test_case
             "startup sync mints bootable keeper credentials"
-            `Quick test_sync_bootable_keeper_credentials_mints_keeper_alias_token;
+            `Quick test_sync_bootable_keeper_credentials_mints_keeper_token;
           Alcotest.test_case
             "startup admin env sync repairs raw token file"
             `Quick test_sync_admin_token_env_repairs_raw_token_file;

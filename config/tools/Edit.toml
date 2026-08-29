@@ -6,6 +6,12 @@ leading whitespace, indentation, and newlines; the match is exact and \
 byte-sensitive. On 'old_string not found', re-Read the file to get the \
 current text instead of retrying the same string."""
 
+# Closed: the translator pins mode=patch, and the patch runtime reads exactly
+# these four keys. An undeclared 'content' key used to flip the call into a
+# whole-file overwrite through translator mode inference — silent, and in the
+# destructive direction (masc#31573).
+additional_properties = false
+
 [[params]]
 name = "file_path"
 type = "string"

@@ -7,11 +7,12 @@
     declaration that does not decode refuses the boot instead of advertising a
     partial filesystem surface.
 
-    Read is the one closed object of the four: its runtime handler reads
-    exactly the four declared keys, so a fifth would be a silent no-op. The
-    other three were open before this move and stay open —
-    [test_filesystem_tool_toml_parity] pins both halves against the literals
-    this module replaced. *)
+    Read and Edit are the closed objects of the four. Read's runtime handler
+    reads exactly the four declared keys, so a fifth would be a silent no-op.
+    Edit is patch-only and its translator used to infer overwrite from an
+    undeclared 'content' key — closing the schema rejects that key instead of
+    silently escalating to a whole-file overwrite (masc#31573). Write and Grep
+    were open before this move and stay open. *)
 
 open Masc_domain
 

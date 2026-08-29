@@ -391,18 +391,19 @@ let translate_read_file input =
   | _ -> input
 ;;
 
+(* Edit is patch-only: mode is pinned here, never inferred from the input. The
+   closed Edit schema rejects an undeclared 'content' key before translation;
+   inferring overwrite from its presence turned a mistaken key into a silent
+   whole-file overwrite (masc#31573). *)
 let translate_edit_file input =
   match input with
   | `Assoc fields ->
-    let has_content = List.exists (fun (k, _) -> k = "content") fields in
-    let mode = if has_content then "overwrite" else "patch" in
-    let out = ref [ "mode", `String mode ] in
+    let out = ref [ "mode", `String "patch" ] in
     List.iter
       (fun (k, v) ->
          match k with
          | "file_path" -> out := ("path", v) :: !out
-         | "old_string" | "new_string" | "replace_all" | "content" ->
-           out := (k, v) :: !out
+         | "old_string" | "new_string" | "replace_all" -> out := (k, v) :: !out
          | "mode" -> ()
          | _ -> out := (k, v) :: !out)
       fields;

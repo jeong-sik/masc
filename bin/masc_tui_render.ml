@@ -9485,10 +9485,12 @@ let tools_display_lines (state : state) =
     match state.skills_catalog with
     | None ->
         [ Ansi.dim, " Skill Usage — loading workspace catalog…" ]
-    | Some { Masc.Tui_decode.sc_state; _ } when not (String.equal sc_state "ready") ->
+    | Some { Masc.Tui_decode.sc_state; _ }
+      when sc_state <> Masc.Tui_decode.Skills_ready ->
         [ Ansi.dim,
           Printf.sprintf " Skill Usage — catalog %s"
-            (Terminal_text.single_line sc_state) ]
+            (Terminal_text.single_line
+               (Masc.Tui_decode.skills_catalog_state_to_string sc_state)) ]
     | Some { Masc.Tui_decode.sc_surfaces; sc_rejections; _ } ->
         let used =
           List.filter
@@ -9550,7 +9552,7 @@ let tools_display_lines (state : state) =
                                Printf.sprintf
                                  "     %s: %s"
                                  (Masc.Tui_decode.skill_diagnostic_code_to_string
-                                    diagnostic.srd_code)
+                                    diagnostic.srd_diagnostic)
                                  (Terminal_text.single_line diagnostic.srd_message) ))
                           diagnostics
                       | Skill_document_unreadable ->

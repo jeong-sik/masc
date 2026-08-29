@@ -1551,6 +1551,18 @@ let test_decode_tool_snapshot_reads_the_live_shape () =
              t.Tui_decode.tl_direct_call
        | ts -> Alcotest.failf "expected one tool, got %d" (List.length ts))
 
+let skill_snapshot_json ?(rejections = []) () =
+  `Assoc
+    [ "snapshot_revision", `String "snapshot-rev1"
+    ; "catalog_revision", `String "catalog-rev1"
+    ; "config", `Assoc [ "kind", `String "unreadable" ]
+    ; "sources", `List []
+    ; "skills", `List []
+    ; "effective_skills", `List []
+    ; "shadows", `List []
+    ; "rejections", `List rejections
+    ]
+
 let skills_catalog_json ?(usage = true) ?(flow = true) () =
   let usage_json =
     if usage then
@@ -1596,7 +1608,7 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
   `Assoc
     [ ("schema", `String "masc.skill-snapshot/v1")
     ; ("state", `String "ready")
-    ; ("snapshot", `Assoc [ ("rejections", `List []) ])
+    ; ("snapshot", skill_snapshot_json ())
     ; ( "surfaces",
         `List
           [ `Assoc
@@ -1620,7 +1632,8 @@ let test_decode_skills_catalog_reads_usage_and_flow () =
   match Tui_decode.decode_skills_catalog (skills_catalog_json ()) with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok catalog ->
-      Alcotest.(check string) "state" "ready" catalog.Tui_decode.sc_state;
+      Alcotest.(check bool) "state" true
+        (catalog.Tui_decode.sc_state = Tui_decode.Skills_ready);
       (match catalog.Tui_decode.sc_surfaces with
        | [ surface ] ->
            Alcotest.(check string) "skill name" "work-intake"
@@ -1688,8 +1701,9 @@ let test_decode_skills_catalog_rejects_a_wrong_kind_type () =
   match
     Tui_decode.decode_skills_catalog
       (`Assoc
-         [ ("state", `String "ready")
-         ; ("snapshot", `Assoc [ ("rejections", `List []) ])
+         [ ("schema", `String "masc.skill-snapshot/v1")
+         ; ("state", `String "ready")
+         ; ("snapshot", skill_snapshot_json ())
          ; ("surfaces", `List [ bad_surface ])
          ])
   with
@@ -1701,46 +1715,115 @@ let test_decode_skills_catalog_rejects_a_wrong_kind_type () =
 let test_decode_skills_catalog_keeps_invalid_only_rejections () =
   let payload =
     `Assoc
-      [ "state", `String "ready"
+      [ "schema", `String "masc.skill-snapshot/v1"
+      ; "state", `String "ready"
       ; "surfaces", `List []
       ; ( "snapshot"
-        , `Assoc
-            [ ( "rejections"
-              , `List
-                  [ `Assoc
-                      [ "source_id", `String "workspace"
-                      ; "package_id", `String "broken"
-                      ; "content_revision", `String "abcdef0123456789"
-                      ; ( "reason"
-                        , `Assoc
-                            [ "kind", `String "document_rejected"
-                            ; ( "diagnostics"
-                              , `List
-                                  [ `Assoc
-                                      [ "code", `String "name_mismatch"
-                                      ; "message", `String "raw names differ"
-                                      ; "declared", `String "declared"
-                                      ; "directory", `String "broken"
-                                      ]
-                                  ] )
-                            ] )
-                      ]
-                  ] )
-            ] )
+        , skill_snapshot_json
+            ~rejections:
+              [ `Assoc
+                  [ "source_index", `Int 3
+                  ; "source_id", `String "workspace"
+                  ; "package_id", `String "broken"
+                  ; "content_revision", `String "abcdef0123456789"
+                  ; ( "reason"
+                    , `Assoc
+                        [ "kind", `String "document_rejected"
+                        ; ( "diagnostics"
+                          , `List
+                              [ `Assoc
+                                  [ "code", `String "name_mismatch"
+                                  ; "message", `String "raw names differ"
+                                  ; "declared", `String "declared"
+                                  ; "directory", `String "broken"
+                                  ]
+                              ] )
+                        ] )
+                  ]
+              ]
+            () )
       ]
   in
   match Tui_decode.decode_skills_catalog payload with
   | Error error -> Alcotest.failf "invalid-only catalog rejected: %s" error
   | Ok { Tui_decode.sc_surfaces = []; sc_rejections = [ rejection ]; _ } ->
+    Alcotest.(check int) "source index" 3 rejection.scr_source_index;
     Alcotest.(check string) "source" "workspace" rejection.scr_source_id;
     Alcotest.(check (option string)) "package" (Some "broken")
       rejection.scr_package_id;
     (match rejection.scr_reason with
      | Tui_decode.Skill_document_rejected
-         [ { srd_code = Tui_decode.Skill_name_mismatch; srd_message } ] ->
+         [ { srd_diagnostic = Agent_core.Skill_document.Name_mismatch
+                 { declared; directory }
+             ; srd_message
+             } ] ->
        Alcotest.(check string) "message" "raw names differ" srd_message
+       ; Alcotest.(check string) "declared" "declared" declared
+       ; Alcotest.(check string) "directory" "broken" directory
      | _ -> Alcotest.fail "typed name-mismatch diagnostic was not retained")
   | Ok _ -> Alcotest.fail "invalid-only rejection was dropped"
+
+let test_decode_skills_catalog_closes_schema_and_state () =
+  let expect_error label payload =
+    match Tui_decode.decode_skills_catalog payload with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s must be rejected" label
+  in
+  expect_error
+    "missing schema"
+    (`Assoc [ "state", `String "not_registered" ]);
+  expect_error
+    "future schema"
+    (`Assoc
+       [ "schema", `String "masc.skill-snapshot/v2"
+       ; "state", `String "not_registered"
+       ]);
+  expect_error
+    "unknown state"
+    (`Assoc
+       [ "schema", `String "masc.skill-snapshot/v1"
+       ; "state", `String "warming"
+       ]);
+  expect_error
+    "thin ready snapshot"
+    (`Assoc
+       [ "schema", `String "masc.skill-snapshot/v1"
+       ; "state", `String "ready"
+       ; "snapshot", `Assoc [ "rejections", `List [] ]
+       ; "surfaces", `List []
+       ]);
+  expect_error
+    "wrong invalid-workspace reason"
+    (`Assoc
+       [ "schema", `String "masc.skill-snapshot/v1"
+       ; "state", `String "invalid_workspace"
+       ; "reason", `Assoc [ "code", `String "workspace_missing" ]
+       ])
+
+let test_decode_skills_catalog_reads_each_unready_state () =
+  let decode expected payload =
+    match Tui_decode.decode_skills_catalog payload with
+    | Error error -> Alcotest.failf "unready catalog rejected: %s" error
+    | Ok catalog ->
+      Alcotest.(check bool) "typed state" true (catalog.sc_state = expected);
+      Alcotest.(check bool) "no surfaces" true (catalog.sc_surfaces = []);
+      Alcotest.(check bool) "no rejections" true (catalog.sc_rejections = [])
+  in
+  let simple state =
+    `Assoc
+      [ "schema", `String "masc.skill-snapshot/v1"
+      ; "state", `String state
+      ]
+  in
+  decode Tui_decode.Skills_not_registered (simple "not_registered");
+  decode Tui_decode.Skills_uninitialized (simple "uninitialized");
+  decode
+    Tui_decode.Skills_invalid_workspace
+    (`Assoc
+       [ "schema", `String "masc.skill-snapshot/v1"
+       ; "state", `String "invalid_workspace"
+       ; "reason", `Assoc [ "code", `String "invalid_workspace" ]
+       ])
 
 (* The server answers a cold cache with its warming placeholder: the same
    envelope, an empty inventory, and a flag saying so. Reading only the list
@@ -5621,6 +5704,10 @@ let () =
           test_decode_skills_catalog_rejects_a_wrong_kind_type;
         Alcotest.test_case "keeps invalid-only typed rejections" `Quick
           test_decode_skills_catalog_keeps_invalid_only_rejections;
+        Alcotest.test_case "closes schema and state" `Quick
+          test_decode_skills_catalog_closes_schema_and_state;
+        Alcotest.test_case "reads every unready state" `Quick
+          test_decode_skills_catalog_reads_each_unready_state;
       ] );
     ( "skill_evidence",
       [ Alcotest.test_case "reads exact v5 coverage" `Quick

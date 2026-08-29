@@ -40,7 +40,14 @@ open Alcotest
    $ref); nothing in this repository sends a $ref to a model yet, so whether
    every provider resolves one is unverified and not a thing to guess at on the
    surface every turn carries. Verify it, then collapse the repeats and bring
-   this number back down. *)
+   this number back down.
+
+   Verification progress (2026-08-29): ollama-cloud minimax-m3 and
+   zai glm-4.6 both resolve $defs/$ref tool schemas correctly (live
+   probe: 200 + exact tool_call args). antigravity gemini lanes are
+   unverified — no direct API key on hand — and codex lanes are
+   unprobed, so a collapse must either expand for unverified
+   providers or wait until they are probed. *)
 let ceiling_bytes = 85_000
 
 let schema_json (schema : Masc_domain.tool_schema) =

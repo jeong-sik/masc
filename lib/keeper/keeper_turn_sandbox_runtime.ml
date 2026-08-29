@@ -947,6 +947,8 @@ let start_container ?timeout_sec (t : t) =
               (* No [--rm]: the container outlives the turn, and auto-remove
                  on stop would destroy state a later turn expects to adopt.
                  Removal is the keeper's teardown, not the daemon's. *)
+              Keeper_sandbox_runtime_setup.refuse_real_daemon_under_test
+                ~what:"start a persistent container";
               let argv =
                 Keeper_sandbox_runtime.docker_command_argv ()
                 @ [ "run"; "-d"; "--name"; container_name ]

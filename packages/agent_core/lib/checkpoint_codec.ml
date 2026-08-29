@@ -498,14 +498,18 @@ let checkpoint_to_json cp =
     ]
 ;;
 
-let validate_checkpoint cp =
-  Checkpoint_v10_contract.validate_v10_json (checkpoint_to_json cp)
+let checkpoint_json_result cp =
+  let json = checkpoint_to_json cp in
+  let+ () = Checkpoint_v10_contract.validate_v10_json json in
+  json
 ;;
 
+let validate_checkpoint cp = Result.map ignore (checkpoint_json_result cp)
+let to_json_result = checkpoint_json_result
+
 let validated_checkpoint_json_exn ~scope cp =
-  let json = checkpoint_to_json cp in
-  match Checkpoint_v10_contract.validate_v10_json json with
-  | Ok () -> json
+  match to_json_result cp with
+  | Ok json -> json
   | Error error -> invalid_arg (scope ^ ": " ^ Error.to_string error)
 ;;
 

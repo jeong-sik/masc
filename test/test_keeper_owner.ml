@@ -2700,15 +2700,9 @@ let () =
             `Quick
             test_pure_reducer_adds_deltas_and_preserves_pause
         ; test_case
-            "invalid compaction numbers are rejected"
-            `Quick
-          ; test_case
             "profile update preserves runtime state"
             `Quick
             test_profile_update_preserves_owner_runtime_state
-          ; test_case
-              "turn delta preserves concurrent observations"
-              `Quick
         ] )
     ; ( "payload"
       , [ test_case

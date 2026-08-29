@@ -576,6 +576,11 @@ type keeper_phase
 val keeper_phase_of_string : string -> keeper_phase option
 val keeper_phase_to_string : keeper_phase -> string
 
+val keeper_phase_is_running : keeper_phase -> bool
+(** Whether the phase is the normal running lifecycle. The Keepers table
+    silences the word for it and spells out every other phase; exhaustive in
+    the implementation so a new phase cannot silently count as not-running. *)
+
 type keeper_health
 (** A validated keeper health reading — whether the keeper is reporting on
     time. Behind the decoder boundary for the same reason as {!keeper_phase}:

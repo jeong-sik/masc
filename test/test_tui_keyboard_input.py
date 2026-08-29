@@ -1659,7 +1659,7 @@ def keeper_runtime_phase_and_identity_interaction(
         master_fd,
         output,
         b"2",
-        b"running anthropic.claude-opus-5",
+        b"anthropic.claude-opus-5",
     )
     wait_for_output(
         process,
@@ -1700,7 +1700,7 @@ def keeper_long_runtime_identity_interaction(
         master_fd,
         output,
         b"2",
-        b"running antigrav\xe2\x80\xa6.gemini-3-7-flash",
+        b"antigrav\xe2\x80\xa6.gemini-3-7-flash",
     )
     wait_for_output(
         process,
@@ -5285,7 +5285,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             b"2",
-            b"running anthropic.claude-opus-5",
+            b"anthropic.claude-opus-5",
         )
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")

@@ -63,13 +63,13 @@ default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
 # deepseek.deepseek-v4-pro target (live boot ERROR "retired target ref(s)
 # ignored"); the live lanes run glm + kimi since the 2026-08-28 swap.
 [runtime.exact_output_lanes.librarian_exact]
-slots = ["glm-coding.glm-5-turbo", "kimi_coding.kimi-for-coding"]
+slots = ["glm-coding.glm-5-3", "kimi_coding.kimi-for-coding"]
 
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
+slots = ["glm-coding.glm-5-3", "glm-coding.glm-4-7-coding"]
 
 [runtime.exact_output_lanes.board_attention_exact]
-slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
+slots = ["glm-coding.glm-5-3", "glm-coding.glm-4-7-coding"]
 
 # Verifier/completion-authority judgement lane (RFC-0361 D7(a)). Judgement
 # calls resolve only this lane and fail over in declared slot order, the same
@@ -77,7 +77,7 @@ slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 # retirement as librarian_exact: deepseek.deepseek-v4-pro left the deployed
 # exact-output catalog, so the seed mirrors the live glm + kimi slots.
 [runtime.exact_output_lanes.verifier_exact]
-slots = ["glm-coding.glm-5-turbo", "kimi_coding.kimi-for-coding"]
+slots = ["glm-coding.glm-5-3", "kimi_coding.kimi-for-coding"]
 
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
 # docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).
@@ -656,6 +656,33 @@ supports-structured-output = false
 # So this is not "524288 is the right size". It is: one value fails on
 # ordinary history, the other fails only on an envelope overshoot the retry
 # path now absorbs.
+max-request-body-bytes = 524288
+
+# GLM-5.3 — primary slot of the exact-output judgement lanes (Z.AI 2026-08-14).
+# Mirrors the glm-5-turbo judge row it replaces at the head of each lane. The
+# api-name is the exact z.ai coding-plan id, confirmed against
+# GET /coding/paas/v4/models on 2026-08-30 (glm-5.3 present; a json_object
+# completion answered on that wire). Window mirrors the AGENT_CORE catalog like
+# the glm-5-turbo row above.
+[models.glm-5-3]
+max-context = 200000
+api-name = "glm-5.3"
+tools-support = true
+thinking-support = true
+# Non-preserved reasoning by default, same contract as the glm-5-turbo judge row.
+preserve-thinking = false
+streaming = true
+
+[models.glm-5-3.capabilities]
+max-output-tokens = 128000
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-response-format-json = true
+supports-structured-output = false
+
+[glm-coding.glm-5-3]
+# Working-set ceiling mirrors the glm-5-turbo sibling (same 200000 window); see
+# that binding's note on why 524288 is the chosen value.
 max-request-body-bytes = 524288
 
 # Kimi For Coding — second slot of the exact-output judgement lanes since the

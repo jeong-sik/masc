@@ -147,9 +147,12 @@ val reconcile_spent_selection
     RFC-0377's routing boundary remains: only the first ready
     [Connector_attention] conversation is admitted, but all of its pending
     members are included. Other connector conversations remain queued; every
-    ready non-connector source is included. [consumed_stimuli] and
-    [consumed_selections] carry the full batch, while [pending_selection] is
-    the first admitted selection for legacy primary-source diagnostics.
+    ready non-connector source is included except that at most one
+    [Hitl_resolved] is admitted because a turn carries one exact cycle grant.
+    Later ready HITL resolutions remain queued for their own replay turns.
+    [consumed_stimuli] and [consumed_selections] carry the full batch, while
+    [pending_selection] is the first admitted selection for legacy
+    primary-source diagnostics.
 
     The selected observations are merged with the [pending_board_events]
     already accumulated by the caller, deduplicating by [post_id] (the durable

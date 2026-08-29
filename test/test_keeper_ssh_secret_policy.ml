@@ -70,7 +70,9 @@ instructions = "remote secret policy test"
 sandbox_profile = "remote_ssh"
 remote_endpoint = "fixture"
 |};
-    write_file (Filename.concat base_path ".masc/runtime.toml")
+    (* RFC-0121: the endpoint resolver reads .masc/config/runtime.toml — the
+       live layout — not the .masc root this fixture used to write to. *)
+    write_file (Filename.concat base_path ".masc/config/runtime.toml")
       {|[exec.ssh.endpoints.fixture]
 host = "fixture.invalid"
 user = "masc"

@@ -12,7 +12,7 @@ import {
 
 describe('isAgentCoreEventType', () => {
   it('agent_core 네임스페이스를 알아본다', () => {
-    expect(isAgentCoreEventType('agent_core:context_compacted')).toBe(true)
+    expect(isAgentCoreEventType('agent_core:turn_completed')).toBe(true)
     expect(isAgentCoreEventType('agent_core:masc:harness:handoff')).toBe(true)
   })
 
@@ -26,7 +26,7 @@ describe('isAgentCoreEventType', () => {
 
 describe('agentCoreEventSuffix', () => {
   it('payload reader 를 찾을 이름만 남긴다', () => {
-    expect(agentCoreEventSuffix('agent_core:context_compacted')).toBe('context_compacted')
+    expect(agentCoreEventSuffix('agent_core:turn_completed')).toBe('turn_completed')
     expect(agentCoreEventSuffix('agent_core:masc:harness:handoff')).toBe('masc:harness:handoff')
   })
 

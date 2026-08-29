@@ -59,18 +59,6 @@ export type HandoffCompletedPayload = {
   elapsed_s: number;
 }
 
-export type ContextCompactedPayload = {
-  agent_name: string;
-  before_tokens: number /*int*/;
-  after_tokens: number /*int*/;
-  phase: string;
-}
-
-export type ContextCompactStartedPayload = {
-  agent_name: string;
-  trigger: string;
-}
-
 export type ContentReplacementReplacedPayload = {
   tool_use_id: string;
   preview: string;
@@ -248,38 +236,6 @@ export function readHandoffCompletedPayload(x: any, context: any = x): HandoffCo
     from_agent: _atd_read_required_field('HandoffCompletedPayload', 'from_agent', _atd_read_string, x['from_agent'], x),
     to_agent: _atd_read_required_field('HandoffCompletedPayload', 'to_agent', _atd_read_string, x['to_agent'], x),
     elapsed_s: _atd_read_required_field('HandoffCompletedPayload', 'elapsed_s', _atd_read_float, x['elapsed_s'], x),
-  };
-}
-
-export function writeContextCompactedPayload(x: ContextCompactedPayload, context: any = x): any {
-  return {
-    'agent_name': _atd_write_required_field('ContextCompactedPayload', 'agent_name', _atd_write_string, x.agent_name, x),
-    'before_tokens': _atd_write_required_field('ContextCompactedPayload', 'before_tokens', _atd_write_int, x.before_tokens, x),
-    'after_tokens': _atd_write_required_field('ContextCompactedPayload', 'after_tokens', _atd_write_int, x.after_tokens, x),
-    'phase': _atd_write_required_field('ContextCompactedPayload', 'phase', _atd_write_string, x.phase, x),
-  };
-}
-
-export function readContextCompactedPayload(x: any, context: any = x): ContextCompactedPayload {
-  return {
-    agent_name: _atd_read_required_field('ContextCompactedPayload', 'agent_name', _atd_read_string, x['agent_name'], x),
-    before_tokens: _atd_read_required_field('ContextCompactedPayload', 'before_tokens', _atd_read_int, x['before_tokens'], x),
-    after_tokens: _atd_read_required_field('ContextCompactedPayload', 'after_tokens', _atd_read_int, x['after_tokens'], x),
-    phase: _atd_read_required_field('ContextCompactedPayload', 'phase', _atd_read_string, x['phase'], x),
-  };
-}
-
-export function writeContextCompactStartedPayload(x: ContextCompactStartedPayload, context: any = x): any {
-  return {
-    'agent_name': _atd_write_required_field('ContextCompactStartedPayload', 'agent_name', _atd_write_string, x.agent_name, x),
-    'trigger': _atd_write_required_field('ContextCompactStartedPayload', 'trigger', _atd_write_string, x.trigger, x),
-  };
-}
-
-export function readContextCompactStartedPayload(x: any, context: any = x): ContextCompactStartedPayload {
-  return {
-    agent_name: _atd_read_required_field('ContextCompactStartedPayload', 'agent_name', _atd_read_string, x['agent_name'], x),
-    trigger: _atd_read_required_field('ContextCompactStartedPayload', 'trigger', _atd_read_string, x['trigger'], x),
   };
 }
 

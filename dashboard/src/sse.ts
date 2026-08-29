@@ -760,23 +760,6 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'agent_core:context_compacted': {
-      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
-      if (!parsed || parsed.kind !== 'context_compacted') break
-      const { payload } = parsed
-      addTypedJournalEntry(
-        payload.agent_name,
-        `Agent Core compact · ${payload.before_tokens}→${payload.after_tokens} · ${payload.phase}`,
-        'agentCore',
-        'agent_core_context',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText: `${actorLabel(payload.agent_name)} Agent Core context compact (${payload.phase})`,
-        },
-      )
-      break
-    }
     case 'agent_core:durable:llm_request': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent

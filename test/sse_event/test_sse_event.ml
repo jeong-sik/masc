@@ -314,45 +314,6 @@ let baseline_handoff_completed ~from_agent ~to_agent ~elapsed_s =
     ()
 ;;
 
-let baseline_context_compacted
-      ~agent_name
-      ~before_tokens
-      ~after_tokens
-      ~phase
-  =
-  let payload =
-    `Assoc
-      [ "agent_name", `String agent_name
-      ; "before_tokens", `Int before_tokens
-      ; "after_tokens", `Int after_tokens
-      ; "phase", `String phase
-      ]
-  in
-  baseline_wrap_event
-    ~ts:common_ts
-    ~correlation_id:common_corr
-    ~run_id:common_run
-    ~event_type:"context_compacted"
-    ~payload
-    ~agent_name
-    ()
-;;
-
-let baseline_context_compact_started ~agent_name ~trigger =
-  let payload =
-    `Assoc
-      [ "agent_name", `String agent_name; "trigger", `String trigger ]
-  in
-  baseline_wrap_event
-    ~ts:common_ts
-    ~correlation_id:common_corr
-    ~run_id:common_run
-    ~event_type:"context_compact_started"
-    ~payload
-    ~agent_name
-    ()
-;;
-
 let baseline_content_replacement_replaced
       ~tool_use_id
       ~preview
@@ -457,49 +418,6 @@ let test_handoff_completed_byte_equal () =
          ~elapsed_s:1.25)
   in
   Alcotest.(check string) "handoff_completed typed == baseline" baseline typed
-;;
-
-let test_context_compacted_byte_equal () =
-  let baseline =
-    Yojson.Safe.to_string
-      (baseline_context_compacted
-         ~agent_name:"alpha"
-         ~before_tokens:120000
-         ~after_tokens:42000
-         ~phase:"post_compact")
-  in
-  let typed =
-    Yojson.Safe.to_string
-      (Sse_event.context_compacted
-         ~ts_unix:common_ts
-         ~correlation_id:common_corr
-         ~run_id:common_run
-         ~agent_name:"alpha"
-         ~before_tokens:120000
-         ~after_tokens:42000
-         ~phase:"post_compact")
-  in
-  Alcotest.(check string) "context_compacted typed == baseline" baseline typed
-;;
-
-let test_context_compact_started_byte_equal () =
-  let baseline =
-    Yojson.Safe.to_string
-      (baseline_context_compact_started ~agent_name:"alpha" ~trigger:"manual")
-  in
-  let typed =
-    Yojson.Safe.to_string
-      (Sse_event.context_compact_started
-         ~ts_unix:common_ts
-         ~correlation_id:common_corr
-         ~run_id:common_run
-         ~agent_name:"alpha"
-         ~trigger:"manual")
-  in
-  Alcotest.(check string)
-    "context_compact_started typed == baseline"
-    baseline
-    typed
 ;;
 
 let test_content_replacement_replaced_byte_equal () =
@@ -769,10 +687,6 @@ let () =
             test_handoff_requested_byte_equal
         ; Alcotest.test_case "handoff_completed" `Quick
             test_handoff_completed_byte_equal
-        ; Alcotest.test_case "context_compacted" `Quick
-            test_context_compacted_byte_equal
-        ; Alcotest.test_case "context_compact_started" `Quick
-            test_context_compact_started_byte_equal
         ; Alcotest.test_case "content_replacement_replaced" `Quick
             test_content_replacement_replaced_byte_equal
         ; Alcotest.test_case "content_replacement_kept" `Quick

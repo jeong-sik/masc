@@ -1061,6 +1061,10 @@ let recipe_with_origin origin =
     failf "recipe fixture has negative turn %d" turn
   | Error (Recipe.Create_invalid_invocation_schedule detail) ->
     failf "recipe fixture has invalid schedule: %s" detail
+  | Error (Recipe.Create_invalid_checkpoint error) ->
+    failf "recipe fixture has invalid checkpoint: %s" (Agent_core.Error.to_string error)
+  | Error (Recipe.Create_non_canonical_json _) ->
+    fail "recipe fixture did not produce canonical JSON"
 ;;
 
 let encoded_recipe origin =
@@ -1179,6 +1183,10 @@ let test_async_recipe_rejects_an_unbound_plan () =
     fail "unbound plan returned an invocation turn error"
   | Error (Recipe.Create_invalid_invocation_schedule _) ->
     fail "unbound plan returned a schedule error"
+  | Error (Recipe.Create_invalid_checkpoint _) ->
+    fail "unbound plan returned a checkpoint error"
+  | Error (Recipe.Create_non_canonical_json _) ->
+    fail "unbound plan returned a canonical JSON error"
   | Ok _ -> fail "recipe admitted an unbound plan"
 ;;
 
@@ -1261,6 +1269,79 @@ let update_recipe_schedule update =
 ;;
 
 let replace_field name value = update_field name (fun _ -> value)
+
+let recipe_plan_with_literal value =
+  Plan.create
+    ~descriptors:(descriptors ())
+    [ Plan.node
+        ~id:(node_id "clock")
+        ~tool_name:"keeper_time_now"
+        ~input:(Plan.Json_template.literal value)
+        ()
+    ]
+  |> Result.get_ok
+;;
+
+let create_recipe_with_plan plan =
+  Recipe.create
+    ~composition_run_id:(Plan.Composition_run_id.fresh ())
+    ~origin:(Recipe.Skill_composition (recipe_skill_reference ()))
+    ~accepted_surface_digest:(accepted_surface_digest ())
+    ~plan
+    ~invocation:(recipe_invocation ())
+    ~accepted_checkpoint:(recipe_checkpoint ())
+;;
+
+let replace_recipe_literal value =
+  update_field
+    "plan"
+    (update_field "nodes" (function
+       | `List [ node ] ->
+         `List [ update_field "input" (replace_field "value" value) node ]
+       | json -> json))
+;;
+
+let test_async_recipe_rejects_duplicate_literal_keys_on_create_and_load () =
+  let duplicate = `Assoc [ "same", `Int 1; "same", `Int 2 ] in
+  let plan = recipe_plan_with_literal duplicate in
+  (match create_recipe_with_plan plan with
+   | Error
+       (Recipe.Create_non_canonical_json
+          (Recipe.Duplicate_object_key "same")) -> ()
+   | Error _ -> fail "duplicate literal key returned the wrong create error"
+   | Ok _ -> fail "create accepted a duplicate literal key");
+  let encoded =
+    encoded_recipe (Recipe.Skill_composition (recipe_skill_reference ()))
+    |> replace_recipe_literal duplicate
+  in
+  match decode_recipe encoded with
+  | Error (Recipe.Non_canonical_json (Recipe.Duplicate_object_key "same")) -> ()
+  | Error _ -> fail "duplicate literal key returned the wrong load error"
+  | Ok _ -> fail "load accepted a duplicate literal key"
+;;
+
+let test_async_recipe_rejects_non_finite_literals_on_create_and_load () =
+  List.iter
+    (fun (label, value) ->
+       let plan = recipe_plan_with_literal (`Float value) in
+       (match create_recipe_with_plan plan with
+        | Error
+            (Recipe.Create_non_canonical_json Recipe.Non_finite_float) -> ()
+        | Error _ -> failf "%s returned the wrong create error" label
+        | Ok _ -> failf "create accepted %s" label);
+       let encoded =
+         encoded_recipe (Recipe.Skill_composition (recipe_skill_reference ()))
+         |> replace_recipe_literal (`Float value)
+       in
+       match decode_recipe encoded with
+       | Error (Recipe.Non_canonical_json Recipe.Non_finite_float) -> ()
+       | Error _ -> failf "%s returned the wrong load error" label
+       | Ok _ -> failf "load accepted %s" label)
+    [ "NaN", Float.nan
+    ; "positive infinity", Float.infinity
+    ; "negative infinity", Float.neg_infinity
+    ]
+;;
 
 let test_async_recipe_uses_canonical_invocation_schedule_validation () =
   let base = encoded_recipe (Recipe.Skill_composition (recipe_skill_reference ())) in
@@ -1814,6 +1895,14 @@ let () =
             "nested strict decoders remain authoritative"
             `Quick
             test_async_recipe_delegates_nested_strict_decoders
+        ; test_case
+            "duplicate literal keys fail on create and load"
+            `Quick
+            test_async_recipe_rejects_duplicate_literal_keys_on_create_and_load
+        ; test_case
+            "non-finite literals fail on create and load"
+            `Quick
+            test_async_recipe_rejects_non_finite_literals_on_create_and_load
         ] )
     ; ( "typed-values"
       , [ test_case "node id" `Quick test_node_id_rejects_empty

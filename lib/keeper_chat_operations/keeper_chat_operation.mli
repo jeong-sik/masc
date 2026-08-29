@@ -60,6 +60,17 @@ type t =
 val state_to_string : state -> string
 val is_terminal : state -> bool
 val to_json : t -> Yojson.Safe.t
+
+type canonical_json_error =
+  | Duplicate_object_key of string
+  | Non_finite_float
+
+val canonical_json
+  :  Yojson.Safe.t
+  -> (Yojson.Safe.t, canonical_json_error) result
+(** Recursively sort object keys while rejecting duplicate object keys and
+    non-finite floats. *)
+
 val canonical_json_string : Yojson.Safe.t -> (string, string) result
 val admission_digest : source:Yojson.Safe.t -> input:Yojson.Safe.t -> (string, string) result
 val execution_digest : Yojson.Safe.t -> (string, string) result

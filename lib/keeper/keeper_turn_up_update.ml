@@ -389,13 +389,24 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     =
   match
     match p.sandbox_profile_opt with
-    | None -> Ok old.sandbox_profile
+    (* Same precedence as [effective_meta_of_profile_defaults]: the TOML owns
+       this field, and [old.sandbox_profile] is only a fallback. Reading [old]
+       first meant a keeper whose meta came back from JSON carried the
+       decoder's placeholder [Local] -- so updating a keeper that states
+       "microvm" in its TOML was refused with "local is disabled". *)
+    | None ->
+      (match p.profile_defaults.sandbox_profile with
+       | Some profile -> Ok profile
+       | None -> Ok old.sandbox_profile)
     | Some raw ->
       match sandbox_profile_of_string raw with
       | Some sp -> Ok sp
       | None ->
         Error
-          (Printf.sprintf "invalid sandbox_profile: %S (expected: local or docker)" raw)
+          (Printf.sprintf
+             "invalid sandbox_profile: %S (expected: %s)"
+             raw
+             (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings))
   with
   | Error msg -> tool_result_error ~class_:Tool_result.Policy_rejection msg
   | Ok sandbox_profile ->

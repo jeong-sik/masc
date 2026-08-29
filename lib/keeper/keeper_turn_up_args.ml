@@ -342,17 +342,15 @@ let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
   in
   raw |> List.filter_map String_util.trim_nonempty |> dedupe_keep_order
 
-(* An explicit request wins over the TOML default. Without either source, the
-   fallback resolves to [Local] — which keeper-up create/update validation
-   rejects fail-closed unless the MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1 dev/test
-   hatch is set (config-load gating follows in the same plan). *)
+(* An explicit request wins over the TOML default. Neither source stating one
+   returns [None] rather than [Local]: omission is not a choice of isolation
+   boundary. Substituting [Local] here sent every omission through the
+   playground gate, which answered "local is disabled" about a profile the
+   caller never named. Callers report the missing field instead. *)
 let resolve_sandbox_profile ?requested ~fallback () =
   match Option.bind requested sandbox_profile_of_string with
-  | Some stated -> stated
-  | None ->
-    (match fallback with
-     | Some stated -> stated
-     | None -> default_sandbox_profile)
+  | Some stated -> Some stated
+  | None -> fallback
 
 (* Fail-closed gate: the local playground is off unless the operator sets the
    hatch.  See [Env_config_sandbox.Gate] for the SSOT. *)

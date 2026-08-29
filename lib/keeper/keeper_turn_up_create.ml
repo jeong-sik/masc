@@ -48,26 +48,28 @@ let create_keeper ~expected_config_revision (ctx : _ context)
     Dashboard_utils.first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
     |> Option.value ~default:true
   in
-  let sandbox_profile =
-    resolve_sandbox_profile
-      ?requested:p.sandbox_profile_opt
-      ~fallback:p.profile_defaults.sandbox_profile
-      ()
-  in
-  let network_mode =
-    resolve_network_mode
-      ~sandbox_profile
-      ~fallback:p.profile_defaults.network_mode
-  in
-  let mention_targets =
-    resolve_mention_targets
-      ~mention_targets_opt:p.mention_targets_opt
-      ~fallback_targets:p.profile_defaults.mention_targets
-      ~name:p.name
-  in
+  (* Two ways to have no usable profile, kept apart because they send the
+     operator to different places: nobody named one, or someone named [local]
+     while the playground is gated off. Folding the first into the second is
+     what produced "local is disabled" for callers who never wrote "local". *)
+  let sandbox_profile_res =
     match
-      validate_sandbox_settings_with_profile ~sandbox_profile
+      resolve_sandbox_profile
+        ?requested:p.sandbox_profile_opt
+        ~fallback:p.profile_defaults.sandbox_profile
+        ()
     with
+    | None ->
+      Error
+        (Keeper_meta_contract.missing_required_sandbox_profile_error
+           ~keeper_name:p.name
+           p.profile_defaults)
+    | Some sandbox_profile ->
+      Result.map
+        (fun () -> sandbox_profile)
+        (validate_sandbox_settings_with_profile ~sandbox_profile)
+  in
+    match sandbox_profile_res with
     | Error err ->
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string LifecycleDispatchRejections)
@@ -76,7 +78,18 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         Log.Keeper.warn "create_keeper failed sandbox validation for %s: %s"
           p.name err;
         tool_result_error ~class_:Tool_result.Policy_rejection err
-    | Ok () ->
+    | Ok sandbox_profile ->
+            let network_mode =
+              resolve_network_mode
+                ~sandbox_profile
+                ~fallback:p.profile_defaults.network_mode
+            in
+            let mention_targets =
+              resolve_mention_targets
+                ~mention_targets_opt:p.mention_targets_opt
+                ~fallback_targets:p.profile_defaults.mention_targets
+                ~name:p.name
+            in
             let proactive_enabled =
                 Option.value
                   ~default:

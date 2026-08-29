@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## [0.27.0] - 2026-08-29
+
+- **A page's own tools reach a Keeper — WebMCP.** The dashboard registers a
+  closed read-only set on `document.modelContext`, so a browser agent reads
+  masc status, tasks, keepers, goals, and board through the page instead of
+  scraping it (#31601). A Keeper consumes the other direction: `keeper_webmcp_list`
+  and `keeper_webmcp_call` drive an operator-run Chrome over CDP through an
+  embedded bridge, so a Keeper calls the tools a page registered, with every
+  missing prerequisite a typed refusal (#31626). Three further lanes are designed
+  with explicit gates — an ecosystem sensor that watches for external sites
+  turning WebMCP on, a userscript framework for credential-delegated reads, and
+  a human-armed mutating surface (#31673). `docs/rfc/RFC-webmcp-*.md`.
+- **The coding-outcome eval is wired end to end.** A corpus, runner, and report
+  CLI score a Keeper's coding outcome (#31592), the judge reads its calibration
+  examples before ruling (#31598), an operator labels a verdict from the TUI to
+  close the judge's loop (#31619), and the first virtual-project mission
+  reproduces a paper's claim (#31591).
+- **Validated plans and async recipes persist durably.** Composition encodes
+  validated plans (#31604) and a durable async-recipe codec (#31624), and
+  accepted descriptor drift is typed rather than guessed (#31656, #31662).
+- **Tool definitions move out of OCaml into TOML.** The last three OCaml tool
+  schemas become TOML (#31674), continuing the migration so a tool's name,
+  description, and schema live in one editable file.
+- **TUI.** Each goal row shows its open work (#31659), Acting folds a turn's
+  lifecycle into one row (#31559), and task review nests under planning (#31578).
+- **The manual compaction subsystem is removed.** The compaction executor and
+  its observation residue are gone (#31582, #31623, #31666) — compaction is
+  reactive survival, not an operator entry point.
+
 ## [0.26.0] - 2026-08-29
 
 - **A Keeper can carry its own outside identity.** Attaching Jira, Slack,

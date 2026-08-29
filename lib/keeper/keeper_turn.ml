@@ -863,7 +863,9 @@ let run_keeper_invocation_turn_admitted_inner
                     ]
                   | Some
                       (Keeper_tool_execution.Memory_write_completed { revision }) ->
-                    [ "memory_revision", `Int revision ]
+                    [ Keeper_tool_execution.memory_revision_wire_key
+                    , `Int revision
+                    ]
                   | None -> []
                 in
                 `Assoc ([

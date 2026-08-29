@@ -11,6 +11,8 @@ type terminal_effect_receipt =
   | Surface_post_completed of Keeper_surface_post.post_target
   | Memory_write_completed of { revision : int }
 
+let memory_revision_wire_key = "memory_revision"
+
 type t =
   { raw_output : string
   ; data : Yojson.Safe.t option

@@ -201,7 +201,6 @@ type inventory_freshness =
 type effective_tool = {
   et_name : string;
   et_origin : string;
-  et_group : string option;
   et_skill_source : string option;
 }
 

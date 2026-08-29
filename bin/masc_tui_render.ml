@@ -8922,10 +8922,9 @@ let tools_display_lines (state : state) =
           List.map
             (fun (tool : Masc.Tui_decode.effective_tool) ->
                let source =
-                 match tool.et_skill_source, tool.et_group with
-                 | Some source, _ -> tool.et_origin ^ ":" ^ source
-                 | None, Some group -> tool.et_origin ^ ":" ^ group
-                 | None, None -> tool.et_origin
+                 match tool.et_skill_source with
+                 | Some source -> tool.et_origin ^ ":" ^ source
+                 | None -> tool.et_origin
                in
                Ansi.dim,
                Printf.sprintf "   %-34s %s"

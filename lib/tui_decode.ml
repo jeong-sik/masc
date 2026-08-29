@@ -1540,7 +1540,6 @@ type inventory_freshness =
 type effective_tool = {
   et_name : string;
   et_origin : string;
-  et_group : string option;
   et_skill_source : string option;
 }
 
@@ -1848,9 +1847,8 @@ let decode_effective_tool json =
   let* et_name = required_string_field json "name" in
   let* origin = required_object_field json "origin" in
   let* et_origin = required_string_field origin "kind" in
-  let* et_group = optional_string_field origin "group" in
   let* et_skill_source = optional_string_field origin "skill_source" in
-  Ok { et_name; et_origin; et_group; et_skill_source }
+  Ok { et_name; et_origin; et_skill_source }
 
 let decode_skill_reference_list json field =
   let* values = required_list_field json field in

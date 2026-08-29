@@ -17,7 +17,7 @@ type backend =
 
 type sandbox =
   | No_sandbox
-  | Host_allowed_paths
+  | Host_sandbox_roots
   | Turn_sandbox
   | Docker_profile
   | Backend_selected

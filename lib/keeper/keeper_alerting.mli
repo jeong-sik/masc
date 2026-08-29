@@ -19,21 +19,20 @@ open Keeper_memory
 
 val project_root_of_config : Workspace.config -> string
 val normalize_path_for_check : string -> string
-val normalize_allowed_path_for_check :
+val normalize_sandbox_root_for_check :
   root:string -> string -> string option
 val is_within_root_norm : root_norm:string -> string -> bool
 val resolve_keeper_target_path :
   config:Workspace.config ->
-  allowed_paths:string list ->
+  sandbox_roots:string list ->
   raw_path:string ->
   (string, Keeper_alerting_path.keeper_path_rejection) result
 val sanitize_keeper_name : string -> string
 val playground_path_of_keeper : string -> string
-val effective_allowed_paths : meta:keeper_meta -> string list
-val effective_write_allowed_paths : meta:keeper_meta -> string list
+val sandbox_roots : meta:keeper_meta -> string list
 val resolve_keeper_read_path :
   config:Workspace.config ->
-  allowed_paths:string list ->
+  sandbox_roots:string list ->
   raw_path:string ->
   (string, Keeper_alerting_path.keeper_path_rejection) result
 val process_status_to_json : Unix.process_status -> Yojson.Safe.t

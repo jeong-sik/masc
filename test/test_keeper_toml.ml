@@ -1101,7 +1101,7 @@ AGENT_CORE_OPENAI_BASE_URL = "http://127.0.0.1:1"
        ~path
        [ "proactive_enabled", TL.Set (TL.Toml_bool false)
        ; "sandbox_image", TL.Set (TL.Toml_string "keeper:test")
-       ; "allowed_paths", TL.Set (TL.Toml_string_array [ "/tmp/a"; "/tmp/b" ])
+       ; "mention_targets", TL.Set (TL.Toml_string_array [ "/tmp/a"; "/tmp/b" ])
        ; "max_context_override", TL.Remove
        ]
    with
@@ -1122,7 +1122,7 @@ AGENT_CORE_OPENAI_BASE_URL = "http://127.0.0.1:1"
     check (option string) "sandbox image inserted" (Some "keeper:test")
       (TL.toml_string_opt doc "keeper.sandbox_image");
     check (list string) "list inserted" [ "/tmp/a"; "/tmp/b" ]
-      (TL.toml_string_list doc "keeper.allowed_paths");
+      (TL.toml_string_list doc "keeper.mention_targets");
     check (option int) "context override removed" None
       (TL.toml_int_opt doc "keeper.max_context_override");
     check (option string) "unrelated table survives"
@@ -1183,7 +1183,7 @@ let test_keeper_toml_writer_edits_multiline_assignments () =
     ^ "line one\n"
     ^ "line two\n"
     ^ "\"\"\"\n"
-    ^ "allowed_paths = [\n"
+    ^ "mention_targets = [\n"
     ^ "  \"/tmp/old-a\",\n"
     ^ "  \"/tmp/old-b\",\n"
     ^ "]\n"
@@ -1194,7 +1194,7 @@ let test_keeper_toml_writer_edits_multiline_assignments () =
      TL.edit_keeper_toml_fields_strict_staged
        ~path:update_path
        [ "instructions", TL.Set (TL.Toml_string "updated\ninstructions")
-       ; "allowed_paths", TL.Set (TL.Toml_string_array [ "/tmp/new-a" ])
+       ; "mention_targets", TL.Set (TL.Toml_string_array [ "/tmp/new-a" ])
        ]
    with
    | Error error -> fail (Fs_compat.atomic_replace_failure_to_string error)
@@ -1209,7 +1209,7 @@ let test_keeper_toml_writer_edits_multiline_assignments () =
          (Some "updated\ninstructions")
          (TL.toml_string_opt doc "keeper.instructions");
        check (list string) "multiline array replaced" [ "/tmp/new-a" ]
-         (TL.toml_string_list doc "keeper.allowed_paths"));
+         (TL.toml_string_list doc "keeper.mention_targets"));
   let remove_path = Filename.concat dir "remove.toml" in
   write_file remove_path (fixture ());
   (match

@@ -16,7 +16,6 @@ open Keeper_types_profile
 type parsed_args =
   { name : string
   ; runtime_id_opt : string option
-  ; allowed_paths_opt : string list option
   ; autoboot_enabled_opt : bool option
   ; mention_targets_opt : string list option
   ; max_context_override_opt : int option
@@ -84,9 +83,8 @@ val resolve_sandbox_profile :
     When neither source states a profile, the fallback resolves to [Local],
     which keeper-up validation (create/update) rejects unless the dev/test
     hatch [MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1] is set; config-load gating
-    follows in the same fail-closed plan.  Fresh keepers still default to an
-    empty [allowed_paths] list, which under [Local] restricts writes to
-    [.masc/playground/<keeper_name>/].
+    follows in the same fail-closed plan.  Under [Local] a fresh keeper's
+    writes stay inside [.masc/playground/<keeper_name>/].
 
     [requested] is the caller's raw string; an unparseable one is treated as absent,
     since the gate rejects those first. *)
@@ -102,14 +100,7 @@ val validate_sandbox_profile_allowed :
   profile:sandbox_profile ->
   (unit, string) result
 
-(** Validate allowed_paths without changing behavior by sandbox backend. *)
-val validate_sandbox_settings :
-  allowed_paths:string list ->
-  (unit, string) result
-
-(** [validate_sandbox_settings] with the profile gate
-    ([validate_sandbox_profile_allowed]) running first. *)
+(** The sandbox-profile gate ([validate_sandbox_profile_allowed]). *)
 val validate_sandbox_settings_with_profile :
   sandbox_profile:sandbox_profile ->
-  allowed_paths:string list ->
   (unit, string) result

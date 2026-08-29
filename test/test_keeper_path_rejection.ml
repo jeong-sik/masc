@@ -13,8 +13,8 @@ let test_messages_are_direct_projections () =
     (R.rejection_to_user_message
        (R.Invalid_normalized_path_projection { path = "/tmp/../target" }));
   check string "invalid allowed roots"
-    "allowed_paths_normalized_empty: 2 entries provided, none resolved to a valid path"
-    (R.rejection_to_user_message (R.Allowed_paths_normalized_empty { count = 2 }));
+    "sandbox_roots_normalized_empty: 2 entries provided, none resolved to a valid path"
+    (R.rejection_to_user_message (R.Sandbox_roots_normalized_empty { count = 2 }));
   check string "outside roots" "path_outside_sandbox: /tmp/x"
     (R.rejection_to_user_message (R.Outside_sandbox { raw = "/tmp/x" }))
 ;;

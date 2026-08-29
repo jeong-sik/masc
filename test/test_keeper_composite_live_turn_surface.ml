@@ -29,7 +29,6 @@ let make_meta name =
         [
           ("name", `String name);
           ("trace_id", `String ("trace-" ^ name));
-          ("allowed_paths", `List [ `String "*" ]);
         ])
   with
   | Ok meta -> meta

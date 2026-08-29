@@ -44,8 +44,7 @@ let make_meta name =
   | Error error -> fail error
   | Ok meta ->
     { meta with
-      Keeper_meta_contract.allowed_paths = [ "*" ]
-    ; sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
+      Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
     ; always_allow = Some true
     }
 ;;

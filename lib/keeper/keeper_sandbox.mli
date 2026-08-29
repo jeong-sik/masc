@@ -157,12 +157,12 @@ val of_meta :
 
 (** Relative roots that tools may touch inside [meta]'s backend-scoped
     sandbox. Currently a single-element list. *)
-val allowed_path_roots_of_meta :
+val sandbox_roots_of_meta :
   meta:Keeper_meta_contract.keeper_meta ->
   string list
 
 (** Single backend-scoped relative root for [meta]. *)
-val allowed_root_rel_of_meta :
+val sandbox_root_rel_of_meta :
   meta:Keeper_meta_contract.keeper_meta ->
   string
 

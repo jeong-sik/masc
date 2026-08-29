@@ -31,7 +31,6 @@ let make_meta name =
         [
           ("name", `String name);
           ("trace_id", `String ("trace-" ^ name));
-          ("allowed_paths", `List [ `String "*" ]);
           ("autoboot_enabled", `Bool false);
         ])
   with
@@ -45,7 +44,6 @@ let make_goal_reconciler_meta () =
       (`Assoc
         [ "name", `String "goal-reconciler"
         ; "trace_id", `String "trace-goal-reconciler"
-        ; "allowed_paths", `List [ `String "*" ]
         ; "autoboot_enabled", `Bool false
         ])
   with
@@ -724,13 +722,16 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
        Eio_main.run @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Masc.Workspace.default_config dir in
-       let meta =
-         { (make_meta "fallback-keeper") with
-           allowed_paths = [ config.base_path ]
-         }
-       in
+       let meta = make_meta "fallback-keeper" in
        let evidence = "exact-turn-meta-evidence" in
-       let evidence_path = Filename.concat config.base_path "exact-meta.txt" in
+       (* Inside the keeper sandbox: the sandbox root is the whole read
+          boundary, so the evidence file lives in the keeper playground. *)
+       let playground_rel =
+         Masc.Keeper_alerting_path.playground_path_of_keeper meta.name
+       in
+       let playground_abs = Filename.concat config.base_path playground_rel in
+       ignore (Masc.Keeper_fs.ensure_dir playground_abs : string);
+       let evidence_path = Filename.concat playground_abs "exact-meta.txt" in
        Out_channel.with_open_bin evidence_path (fun channel ->
          Out_channel.output_string channel evidence);
        let ctx_work =
@@ -761,9 +762,7 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
                      failure)
             in
             let replacement_meta =
-              { meta with
-                allowed_paths = [ Filename.concat config.base_path "other" ]
-              }
+              { meta with mention_targets = [ "replacement-marker" ] }
             in
             let replacement =
               KR.For_testing.register

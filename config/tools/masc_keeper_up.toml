@@ -84,14 +84,6 @@ description = """
 Optional opaque runtime id. Writes the keeper assignment to runtime.toml."""
 
 [[params]]
-name = "allowed_paths"
-type = "array"
-items = { type = "string" }
-description = """
-Restrict file writes to these path prefixes. Empty list means \
-playground-only (.masc/playground/<name>/)."""
-
-[[params]]
 name = "skills"
 type = "object"
 additional_properties = false

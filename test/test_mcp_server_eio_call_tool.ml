@@ -664,7 +664,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check bool "model populated" true (String.trim ctx.model <> "");
       check bool "sandbox profile present" true (Option.is_some ctx.sandbox_profile);
       check bool "sandbox root present" true (Option.is_some ctx.sandbox_root);
-      check bool "allowed paths present" true (Option.is_some ctx.allowed_paths);
+      check bool "sandbox roots present" true (Option.is_some ctx.sandbox_roots);
       check bool "network mode present" true (Option.is_some ctx.network_mode))
 
 let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =

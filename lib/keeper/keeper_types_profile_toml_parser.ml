@@ -28,7 +28,6 @@ let keeper_toml_fields =
   ; "autoboot_enabled", Field_bool
   ; "mention_targets", Field_string_array
   ; "proactive_enabled", Field_bool
-  ; "allowed_paths", Field_string_array
   ; "sandbox_profile", Field_string
   ; "sandbox_image", Field_string
   ; "network_mode", Field_string
@@ -365,9 +364,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         autoboot_enabled = bool_ "autoboot_enabled";
         mention_targets = strs "mention_targets";
         proactive_enabled = bool_ "proactive_enabled";
-        allowed_paths =
-          if has "allowed_paths" then Some (strs "allowed_paths")
-          else None;
         sandbox_profile =
           Option.bind (str "sandbox_profile") sandbox_profile_of_string;
         sandbox_image = str "sandbox_image";
@@ -421,7 +417,6 @@ let merge_keeper_profile_defaults
     mention_targets =
       merge_string_list ~base:base.mention_targets overlay.mention_targets;
     proactive_enabled = prefer overlay.proactive_enabled base.proactive_enabled;
-    allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;

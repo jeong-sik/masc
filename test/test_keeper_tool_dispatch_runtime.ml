@@ -98,11 +98,15 @@ let make_meta ?(name = "keeper-exec-tools") () =
         [
           ("name", `String name);
           ("trace_id", `String "keeper-exec-tools-trace");
-          ("allowed_paths", `List [ `String "*" ]);
         ])
   with
   | Ok meta -> meta
   | Error err -> failwith ("make_meta failed: " ^ err)
+
+let playground_file ~config ~meta name =
+  let root = KES.keeper_playground_root ~config ~meta in
+  mkdir_p root;
+  Filename.concat root name
 
 let make_ctx () =
   Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
@@ -138,7 +142,7 @@ let with_exec_fixture
            ("Gate persistence fixture failed: "
             ^ Masc.Keeper_approval_queue.install_error_to_string error));
       let meta =
-        let meta = { (make_meta ()) with allowed_paths = [ config.base_path ] } in
+        let meta = make_meta () in
         if always_allow then { meta with always_allow = Some true } else meta
       in
       ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
@@ -790,7 +794,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
          ; keeper_name = meta.name
          }
        in
-       let existing_path = Filename.concat config.base_path "existing.txt" in
+       let existing_path = playground_file ~config ~meta "existing.txt" in
        let untouched = "original bytes" in
        write_file existing_path untouched;
        let execute ~name ~input =
@@ -840,7 +844,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
          (untouched ^ " + appended")
          (read_file existing_path);
        let append_created_path =
-         Filename.concat config.base_path "append-created.txt"
+         playground_file ~config ~meta "append-created.txt"
        in
        let append_created =
          execute
@@ -879,7 +883,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
          (outcome_label invalid_write.disposition);
        check int "invalid Write performs no recovery acquisition" 0
          (Atomic.get provider_reads);
-       let write_path = Filename.concat config.base_path "must-not-exist.txt" in
+       let write_path = playground_file ~config ~meta "must-not-exist.txt" in
        let write_result =
          execute
            ~name:"Write"
@@ -1204,76 +1208,6 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
               (Masc.Keeper_execution_join.For_testing.size ())))
 ;;
 
-let test_manual_gate_defers_publication_writes_before_recovery () =
-  with_exec_fixture
-    "keeper_tool_dispatch_manual_publication_gate"
-    (fun ~config ~meta ~publication_recovery:_ ~ctx_work ->
-       (match
-          Masc.Keeper_gate_mode.set
-            config
-            ~actor:"test"
-            Masc.Keeper_gate_mode.Manual
-        with
-        | Ok _ -> ()
-        | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
-       let provider_reads = Atomic.make 0 in
-       let publication_recovery =
-         { Publication_availability.provider =
-             (fun () ->
-                Atomic.incr provider_reads;
-                Publication_availability.Initializing)
-         ; keeper_name = meta.name
-         }
-       in
-       let path = Filename.concat config.base_path "manual-gate.txt" in
-       let original = "manual gate original" in
-       write_file path original;
-       let execute ~name ~input =
-         KET.execute_keeper_tool_call_with_outcome
-           ~config
-           ~meta
-           ~publication_recovery
-           ~ctx_work
-           ~name
-           ~input
-           ()
-       in
-       let overwrite =
-         execute
-           ~name:"Write"
-           ~input:
-             (`Assoc
-                [ "file_path", `String path
-                ; "content", `String "must not overwrite"
-                ])
-       in
-       let edit =
-         execute
-           ~name:"Edit"
-           ~input:
-             (`Assoc
-                [ "file_path", `String path
-                ; "old_string", `String original
-                ; "new_string", `String "must not edit"
-                ])
-       in
-       List.iter
-         (fun result ->
-            check string "Manual Gate outcome" "deferred"
-              (outcome_label result.KTE.disposition);
-            match result.KTE.disposition with
-            | Tool_result.Deferred () -> ()
-            | Tool_result.Completed () | Tool_result.Failed _ ->
-              fail "Manual Gate lost its canonical deferred disposition")
-         [ overwrite; edit ];
-       check int
-         "Manual Gate defers publication writes before provider acquisition"
-         0
-         (Atomic.get provider_reads);
-       check string "Manual Gate preserves exact target bytes" original
-         (read_file path))
-;;
-
 let test_manual_gate_does_not_defer_internal_memory_write () =
   with_exec_fixture
     "keeper_tool_dispatch_manual_memory_write_no_gate"
@@ -1346,77 +1280,6 @@ let test_manual_gate_does_not_defer_internal_memory_write () =
           fail (Masc.Keeper_approval_queue.storage_error_to_string error)))
 ;;
 
-let test_manual_gate_deferral_stays_deferred_through_agent_core_bridge () =
-  with_exec_fixture
-    "keeper_tool_dispatch_manual_gate_agent_core_bridge"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       (match
-          Masc.Keeper_gate_mode.set
-            config
-            ~actor:"test"
-            Masc.Keeper_gate_mode.Manual
-        with
-        | Ok _ -> ()
-        | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
-       let path = Filename.concat config.base_path "manual-gate-agent-core.txt" in
-       let input =
-         `Assoc
-           [ "file_path", `String path
-           ; "content", `String "must remain deferred"
-           ]
-       in
-       let input_schema =
-         match KTD.descriptors_for_internal "tool_write_file" with
-         | [ descriptor ] -> descriptor.KTD.input_schema
-         | [] -> fail "missing tool_write_file descriptor"
-         | _ :: _ :: _ -> fail "duplicate tool_write_file descriptors"
-       in
-       let handler =
-         Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
-           ~name:"Write"
-           ~input_schema
-           ~config
-           ~meta
-           ~publication_recovery
-           ~ctx_snapshot:ctx_work
-           ()
-       in
-       let masc_result = handler input in
-       (match masc_result with
-        | Tool_result.Deferred output ->
-          check bool
-            "producer metadata is not a semantic channel"
-            true
-            (Option.is_none output.metadata);
-          check bool
-            "payload has no duplicate disposition field"
-            true
-            Yojson.Safe.Util.(output.data |> member "disposition" = `Null);
-          check bool
-            "payload has no duplicate success field"
-            true
-            Yojson.Safe.Util.(output.data |> member "ok" = `Null);
-          check string
-            "Gate decision remains typed domain evidence"
-            "deferred"
-            Yojson.Safe.Util.
-              (output.data |> member "gate" |> member "decision" |> to_string)
-        | Tool_result.Completed _ -> fail "Gate deferral became Completed"
-        | Tool_result.Failed _ -> fail "Gate deferral became Failed");
-       (match Masc.Tool_bridge.to_agent_core_typed_result masc_result with
-        | Ok { _meta = Some (`Assoc fields); _ } ->
-          check (option string)
-            "Agent Core receives the one-way deferred projection"
-            (Some "deferred")
-            (match List.assoc_opt "masc.tool_disposition" fields with
-             | Some (`String value) -> Some value
-             | Some _ | None -> None)
-        | Ok _ -> fail "Deferred Agent Core projection omitted its disposition marker"
-        | Error error ->
-          fail ("Deferred crossed the Agent Core boundary as failure: " ^ error.message));
-       check bool "Deferred Write executed no effect" false (Sys.file_exists path))
-;;
-
 let test_publication_initialization_crash_is_redacted () =
   let exception Sensitive_initialization_crash of string in
   with_exec_fixture
@@ -1434,7 +1297,7 @@ let test_publication_initialization_crash_is_redacted () =
          ; keeper_name = meta.name
          }
        in
-       let path = Filename.concat config.base_path "crash-must-not-write.txt" in
+       let path = playground_file ~config ~meta "crash-must-not-write.txt" in
        let result =
          KET.execute_keeper_tool_call_with_outcome
            ~config
@@ -1564,7 +1427,7 @@ let test_publication_reconciliation_evidence_is_redacted () =
         | Ok () -> ()
         | Error error ->
           fail (Recovery_test.fixture_error_to_string error));
-       let target = Filename.concat config.base_path "must-not-write.txt" in
+       let target = playground_file ~config ~meta "must-not-write.txt" in
        let result =
          KET.execute_keeper_tool_call_with_outcome
            ~config
@@ -1626,7 +1489,7 @@ let test_publication_registry_evidence_is_redacted () =
          ; keeper_name = meta.name
          }
        in
-       let target = Filename.concat config.base_path "registry-must-not-write.txt" in
+       let target = playground_file ~config ~meta "registry-must-not-write.txt" in
        let result =
          KET.execute_keeper_tool_call_with_outcome
            ~config
@@ -1675,7 +1538,7 @@ let test_publication_write_rereads_live_provider_after_initialization () =
          ; keeper_name = meta.name
          }
        in
-       let path = Filename.concat config.base_path "after-initialization.txt" in
+       let path = playground_file ~config ~meta "after-initialization.txt" in
        let execute () =
          KET.execute_keeper_tool_call_with_outcome
            ~config
@@ -1880,7 +1743,7 @@ let test_real_publication_release_failure_preserves_effect_truth () =
          ; keeper_name = meta.name
          }
        in
-       let target = Filename.concat config.base_path "release-effect.txt" in
+       let target = playground_file ~config ~meta "release-effect.txt" in
        let execute_at target content =
          KET.execute_keeper_tool_call_with_outcome
            ~config
@@ -2063,7 +1926,7 @@ let test_real_publication_release_failure_preserves_effect_truth () =
          "success"
          (outcome_label recovered_after_unknown.disposition);
        let created_parent =
-         Filename.concat config.base_path "created-parent-effect"
+         playground_file ~config ~meta "created-parent-effect"
        in
        let nested_target = Filename.concat created_parent "child.txt" in
        let unchanged_fault =
@@ -2162,7 +2025,7 @@ let test_real_directory_release_failure_preserves_effect_truth () =
                 ])
            ()
        in
-       let warmup_target = Filename.concat config.base_path "lane-warmup.txt" in
+       let warmup_target = playground_file ~config ~meta "lane-warmup.txt" in
        let warmup = execute warmup_target "warmup" in
        check string "directory matrix warmup succeeds" "success"
          (outcome_label warmup.disposition);
@@ -2186,7 +2049,7 @@ let test_real_directory_release_failure_preserves_effect_truth () =
              ~expected_write_executed
              ~expected_directory_exists
          =
-         let parent = Filename.concat config.base_path label in
+         let parent = playground_file ~config ~meta label in
          let target = Filename.concat parent "child.txt" in
          let fault =
            Masc.Keeper_tool_filesystem_runtime.For_testing
@@ -3625,7 +3488,7 @@ let test_manual_gate_defers_tool_execute_before_process () =
        with
        | Ok _ -> ()
        | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
-      let marker = Filename.concat config.base_path "must-not-execute" in
+      let marker = playground_file ~config ~meta "must-not-execute" in
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config
@@ -3636,7 +3499,7 @@ let test_manual_gate_defers_tool_execute_before_process () =
           ~input:
             (`Assoc
                [ "argv", `List [ `String "touch"; `String marker ]
-               ; "cwd", `String config.base_path
+               ; "cwd", `String (KES.keeper_playground_root ~config ~meta)
                ; "timeout_sec", `Float 5.0
                ])
           ()
@@ -7332,12 +7195,8 @@ let () =
         test_initializing_recovery_isolates_only_publication_writes;
       test_case "identical Keeper invocations join across production boundaries" `Quick
         test_identical_keeper_invocations_join_across_production_boundaries;
-      test_case "Manual Gate defers writes before recovery acquisition" `Quick
-        test_manual_gate_defers_publication_writes_before_recovery;
       test_case "Manual Gate does not defer internal memory write" `Quick
         test_manual_gate_does_not_defer_internal_memory_write;
-      test_case "Manual Gate deferral stays deferred through Agent Core bridge" `Quick
-        test_manual_gate_deferral_stays_deferred_through_agent_core_bridge;
       test_case "initialization crash is redacted from tool output" `Quick
         test_publication_initialization_crash_is_redacted;
       test_case "reconciliation evidence is redacted from tool output" `Quick

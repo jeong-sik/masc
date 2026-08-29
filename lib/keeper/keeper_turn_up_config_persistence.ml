@@ -338,7 +338,6 @@ let full_fields
     ; ( "network_mode"
       , Keeper_toml_loader.Toml_string
           (network_mode_to_string meta.network_mode) )
-    ; "allowed_paths", Keeper_toml_loader.Toml_string_array meta.allowed_paths
     ; "mention_targets", Keeper_toml_loader.Toml_string_array meta.mention_targets
     ; "proactive_enabled", Keeper_toml_loader.Toml_bool meta.proactive.enabled
     ; "autoboot_enabled", Keeper_toml_loader.Toml_bool meta.autoboot_enabled
@@ -403,7 +402,6 @@ let explicit_edits
   |> append_optional "instructions" set_string parsed.instructions_arg
   |> append_optional "sandbox_profile" set_string parsed.sandbox_profile_opt
   |> append_optional "network_mode" set_string parsed.network_mode_opt
-  |> append_optional "allowed_paths" set_strings parsed.allowed_paths_opt
   |> append_optional "mention_targets" set_strings parsed.mention_targets_opt
   |> append_optional "proactive_enabled" set_bool parsed.proactive_enabled_opt
   |> append_optional "autoboot_enabled" set_bool parsed.autoboot_enabled_opt

@@ -43,7 +43,6 @@ type profile_update =
   ; sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
   ; network_mode : Keeper_types_profile.network_mode
-  ; allowed_paths : string list
   ; mention_targets : string list
   ; proactive_enabled : bool
   ; max_context_override : int option
@@ -433,7 +432,6 @@ let apply_existing (state : state) meta command =
          ; sandbox_profile = update.sandbox_profile
          ; sandbox_image = update.sandbox_image
          ; network_mode = update.network_mode
-         ; allowed_paths = update.allowed_paths
          ; mention_targets = update.mention_targets
          ; proactive = { enabled = update.proactive_enabled }
          ; max_context_override = update.max_context_override

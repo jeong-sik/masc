@@ -475,7 +475,7 @@ describe('keeper tool telemetry fetchers', () => {
               goal_ids: [],
               sandbox_profile: 'local',
               sandbox_root: '/sandbox/keeper-alpha/',
-              allowed_paths: ['.masc/playground/keeper-alpha/'],
+              sandbox_roots: ['.masc/playground/keeper-alpha/'],
               path_resolution: {
                 read_implicit_cwd: false,
                 read_explicit_cwd_supported: true,
@@ -538,7 +538,7 @@ describe('keeper tool telemetry fetchers', () => {
       keeper_name: 'keeper-alpha',
       generation: 1,
       sandbox_root: '/sandbox/keeper-alpha/',
-      allowed_paths: ['.masc/playground/keeper-alpha/'],
+      sandbox_roots: ['.masc/playground/keeper-alpha/'],
       network_mode: 'inherit',
       runtime_profile: 'ollama_cloud.example-model',
     })
@@ -3154,8 +3154,7 @@ describe('fetchKeeperConfig', () => {
       sandbox_profile: 'docker',
       network_mode: 'none',
       keeper_last_error: 'sandbox docker exec failed',
-      allowed_paths: '/tmp/workspace',
-      effective_allowed_paths: ['/tmp/workspace'],
+      sandbox_roots: '/tmp/workspace',
       prompt: {
         instructions: 'Prefer direct remediation',
         system_prompt_blocks: {
@@ -3244,7 +3243,7 @@ describe('fetchKeeperConfig', () => {
 
     const result = await fetchKeeperConfig('keeper-sangsu')
 
-    expect(result.allowed_paths).toEqual(['/tmp/workspace'])
+    expect(result.sandbox_roots).toEqual(['/tmp/workspace'])
     expect(result.autoboot_enabled).toBe(false)
     expect(result.max_context_override).toBe(64000)
     expect(result.autonomous_wake_prompt).toBe('백로그를 확인하고 하나 진행해.')

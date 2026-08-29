@@ -4,7 +4,7 @@ type keeper_path_rejection =
   | Path_required
   | Invalid_lexical_endpoint
   | Invalid_normalized_path_projection of { path : string }
-  | Allowed_paths_normalized_empty of { count : int }
+  | Sandbox_roots_normalized_empty of { count : int }
   | Outside_sandbox of { raw : string }
 
 let rejection_to_user_message = function
@@ -15,9 +15,9 @@ let rejection_to_user_message = function
     Printf.sprintf
       "invalid_normalized_path_projection: normalized path cannot be projected into lexical components: %s"
       path
-  | Allowed_paths_normalized_empty { count } ->
+  | Sandbox_roots_normalized_empty { count } ->
     Printf.sprintf
-      "allowed_paths_normalized_empty: %d entries provided, none resolved to a \
+      "sandbox_roots_normalized_empty: %d entries provided, none resolved to a \
        valid path"
       count
   | Outside_sandbox { raw } ->

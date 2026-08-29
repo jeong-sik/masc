@@ -1,10 +1,10 @@
 (** Keeper_sandbox_containment — see .mli for contract. *)
 
-let check_target ~config ~allowed_paths ~target =
+let check_target ~config ~sandbox_roots ~target =
   match
     Keeper_alerting_path.resolve_keeper_target_path
       ~config
-      ~allowed_paths
+      ~sandbox_roots
       ~raw_path:target
   with
   | Ok _ -> Ok ()
@@ -14,6 +14,6 @@ let check_target ~config ~allowed_paths ~target =
 let check_read_target ~config ~meta ~target =
   check_target
     ~config
-    ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
+    ~sandbox_roots:(Keeper_alerting_path.sandbox_roots ~meta)
     ~target
 

@@ -666,7 +666,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode",
                `String (network_mode_to_string m.network_mode));
-             ("allowed_paths", Json_util.json_string_list m.allowed_paths);
            ]);
            ("auto_execution_session", auto_execution_session_surface_json ());
         ] @ runtime_blocker_fields @ attention_fields @ [
@@ -740,7 +739,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("keeper_last_error",
                Json_util.string_opt_to_json keeper_last_error);
              ("sandbox_live", sandbox_live);
-             ("allowed_paths", Json_util.json_string_list m.allowed_paths);
              ("repository_checkouts",
                Keeper_sandbox_control.repository_checkouts_json
                  ~config:config ~meta:m);

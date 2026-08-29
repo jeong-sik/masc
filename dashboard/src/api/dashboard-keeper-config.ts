@@ -348,8 +348,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     keeper_last_error: asNullableString(data.keeper_last_error),
-    allowed_paths: normalizeStringList(data.allowed_paths),
-    effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),
+    sandbox_roots: normalizeStringList(data.sandbox_roots),
     prompt: {
       instructions: asNullableString(prompt.instructions) ?? '',
       system_prompt_blocks: {
@@ -446,7 +445,6 @@ export type KeeperConfigUpdatePayload = {
   max_context_override?: number | null
   // null clears the keeper override (falls back to fleet autonomous.wake_prompt)
   autonomous_wake_prompt?: string | null
-  allowed_paths?: string[]
   // Sandbox
   sandbox_profile?: SandboxProfile
   network_mode?: SandboxNetworkMode

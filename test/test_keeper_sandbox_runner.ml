@@ -32,7 +32,6 @@ let make_meta ~sandbox : Keeper_meta_contract.keeper_meta =
     `Assoc
       [ "name", `String "runner-test"
       ; "trace_id", `String "runner-test-trace"
-      ; "allowed_paths", `List [ `String "*" ]
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

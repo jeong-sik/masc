@@ -147,7 +147,7 @@ let handle ~config ~meta ~start_time ~args =
     let resolved =
       Keeper_alerting_path.resolve_keeper_read_path
         ~config
-        ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
+        ~sandbox_roots:(Keeper_alerting_path.sandbox_roots ~meta)
         ~raw_path
     in
     (match resolved with

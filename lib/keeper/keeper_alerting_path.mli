@@ -27,7 +27,7 @@ val normalize_path_for_check_stripped : string -> string
 
 (** Normalize an allowed-paths entry against [root], returning [None]
     when blank or unresolvable. *)
-val normalize_allowed_path_for_check :
+val normalize_sandbox_root_for_check :
   root:string -> string -> string option
 
 (** [true] iff [path] resolves under [root_norm]. *)
@@ -177,7 +177,7 @@ val atomic_replace_recovery_target :
 
 val resolve_keeper_confined_path :
   config:Workspace.config ->
-  allowed_paths:string list ->
+  sandbox_roots:string list ->
   endpoint:confined_path_endpoint ->
   raw_path:string ->
   (confined_path, keeper_path_rejection) result
@@ -201,7 +201,7 @@ val resolve_keeper_confined_path :
     exact. Explicit allowed roots may be outside the project root. *)
 val resolve_keeper_target_path :
   config:Workspace.config ->
-  allowed_paths:string list ->
+  sandbox_roots:string list ->
   raw_path:string ->
   (string, keeper_path_rejection) result
 
@@ -227,21 +227,15 @@ val ensure_sandbox_bundle_for_profile :
   sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
   string list
 
-(** Effective READ allowed_paths from keeper meta — sandbox root +
-    explicit [allowed_paths]. *)
-val effective_allowed_paths :
-  meta:Keeper_meta_contract.keeper_meta -> string list
-
-(** Effective WRITE allowed_paths from keeper meta — currently the
-    same shape as [effective_allowed_paths]. *)
-val effective_write_allowed_paths :
+(** The roots a keeper may read and write: its sandbox, nothing else. *)
+val sandbox_roots :
   meta:Keeper_meta_contract.keeper_meta -> string list
 
 (** Resolve a path for read-only access using the same objective containment
     rule as writes. Existence and I/O errors belong to the leaf operation. *)
 val resolve_keeper_read_path :
   config:Workspace.config ->
-  allowed_paths:string list ->
+  sandbox_roots:string list ->
   raw_path:string ->
   (string, keeper_path_rejection) result
 

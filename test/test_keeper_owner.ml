@@ -282,7 +282,6 @@ let test_profile_update_preserves_owner_runtime_state () =
     ; sandbox_profile = current.sandbox_profile
     ; sandbox_image = current.sandbox_image
     ; network_mode = current.network_mode
-    ; allowed_paths = [ "/tmp/profile" ]
     ; mention_targets = [ "profile-target" ]
     ; proactive_enabled = true
     ; max_context_override = Some 32_000

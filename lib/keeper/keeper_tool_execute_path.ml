@@ -22,7 +22,7 @@ let execute_cwd_resolution_error_code = function
       ( Path_required
       | Invalid_lexical_endpoint
       | Invalid_normalized_path_projection _
-      | Allowed_paths_normalized_empty _ ) ->
+      | Sandbox_roots_normalized_empty _ ) ->
     "cwd_invalid"
 
 let execute_cwd_resolution_error_public_message = function
@@ -35,7 +35,7 @@ let execute_cwd_resolution_error_public_message = function
       ( Path_required
       | Invalid_lexical_endpoint
       | Invalid_normalized_path_projection _
-      | Allowed_paths_normalized_empty _ ) ->
+      | Sandbox_roots_normalized_empty _ ) ->
     "Requested cwd is invalid."
 
 let execute_cwd_resolution_error_private_message = function
@@ -132,7 +132,7 @@ let normalize_for_containment path =
 
 let in_playground ~root ~cwd ~meta =
   let cwd_canonical = normalize_for_containment cwd in
-  let playground_rel = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
+  let playground_rel = Keeper_sandbox.sandbox_root_rel_of_meta ~meta in
   let playground_abs = normalize_for_containment (Filename.concat root playground_rel) in
   String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
   || String.equal playground_abs cwd_canonical

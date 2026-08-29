@@ -323,7 +323,6 @@ export type RuntimeDraft = {
   sandbox_profile: SandboxProfile
   mention_targets_text: string
   network_mode: SandboxNetworkMode
-  allowed_paths_text: string
   proactive_enabled: boolean
   // Keeper-level autonomous wake prompt; '' = inherit fleet (sent as null)
   autonomous_wake_prompt: string
@@ -520,7 +519,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
     mention_targets_text: c.workspace.mention_targets.join('\n'),
     network_mode: coerceNetworkMode(c.network_mode),
-    allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: proactiveConfigValue(c),
     autonomous_wake_prompt: c.autonomous_wake_prompt ?? '',
     skill_selection: c.skills.names === null
@@ -555,9 +553,6 @@ export function rebaseRuntimeDraftOnFreshConfig(
     rebased.mention_targets_text = draft.mention_targets_text
   }
   if (draft.network_mode !== base.network_mode) rebased.network_mode = draft.network_mode
-  if (draft.allowed_paths_text !== base.allowed_paths_text) {
-    rebased.allowed_paths_text = draft.allowed_paths_text
-  }
   if (draft.proactive_enabled !== base.proactive_enabled) {
     rebased.proactive_enabled = draft.proactive_enabled
   }
@@ -866,14 +861,13 @@ export function keeperConfigControlInventory(
           c,
           tab,
           'kcf-access-sandbox',
-          'Sandbox, network, allowed paths',
-          `${configApiSource} sandbox_profile/network_mode/allowed_paths + ${manifestSource}`,
+          'Sandbox and network',
+          `${configApiSource} sandbox_profile/network_mode + ${manifestSource}`,
           'PATCH /api/v1/keepers/:name/config sandbox/network/path fields',
           'sandbox/network/path fields',
           [
             'sandbox_profile',
             'network_mode',
-            'allowed_paths',
             'sources.default_manifest_path',
             'sources.default_source_kind',
           ],
@@ -897,9 +891,9 @@ export function keeperConfigControlInventory(
           tab,
           label: 'Effective scope',
           kind: 'live-read',
-          source: `${configApiSource} effective_allowed_paths + workspace.bound_workspace_ids`,
+          source: `${configApiSource} sandbox_roots + workspace.bound_workspace_ids`,
           action: 'read-only computed access projection',
-          contracts: configReadContracts(['effective_allowed_paths', 'workspace.bound_workspace_ids']),
+          contracts: configReadContracts(['sandbox_roots', 'workspace.bound_workspace_ids']),
         },
         {
           id: 'kcf-access-github-identity',
@@ -1016,9 +1010,7 @@ export function buildRuntimePayloadResult(
   const wakePrompt = parseAutonomousWakePromptDraft(draft.autonomous_wake_prompt)
   if (!wakePrompt.ok) return wakePrompt
   const payload: KeeperConfigUpdatePayload = {}
-  const newPaths = listTextToStrings(draft.allowed_paths_text)
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
-  const origPaths = orig.allowed_paths ?? []
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
   if (maxContextOverride.value !== orig.max_context_override) {
@@ -1028,7 +1020,6 @@ export function buildRuntimePayloadResult(
     payload.autonomous_wake_prompt = wakePrompt.value
   }
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
-  if (!sameStringArray(newPaths, origPaths)) payload.allowed_paths = newPaths
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
   if (draft.proactive_enabled !== proactiveConfigValue(orig)) payload.proactive_enabled = draft.proactive_enabled
@@ -1123,7 +1114,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
       ? 'autonomous_wake_prompt' in payload
       : rd.autonomous_wake_prompt.trim() !== (c.autonomous_wake_prompt ?? ''),
     mention_targets: 'mention_targets' in payload,
-    allowed_paths: 'allowed_paths' in payload,
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
@@ -2268,7 +2258,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   `
 
-  // access ⚿ — sandbox / network / allowed_paths + mention targets + bound namespaces
+  // access ⚿ — sandbox / network + mention targets + bound namespaces
   const accessTab = html`
     ${runtimeWriteUnsupportedNotice}
     <${MajorSectionHeader} title="실행 범위 · 샌드박스" />
@@ -2297,17 +2287,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         dirty=${dirtyFlags.network_mode}
       />
       <div class="kcf-paths">
-        <div class="kcf-tf-h">
-          <label>allowed_paths${dirtyFlags.allowed_paths ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</label>
-          <span class="kcf-tf-hint">한 줄에 하나 · 명시 경로만 허용</span>
-        </div>
-        <textarea aria-label="allowed_paths" class="kcf-text mono"
-          rows=${4}
-          value=${rd.allowed_paths_text}
-          placeholder=".masc/keepers/<name>/"
-          onInput=${(e: Event) => updateRuntimeDraft('allowed_paths_text', (e.target as HTMLTextAreaElement).value)}
-        ></textarea>
-        <span class="kcf-path-eff mono">effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}</span>
+        <span class="kcf-path-eff mono">sandbox: ${(c.sandbox_roots ?? []).join(', ')}</span>
       </div>
       ${rd.sandbox_profile === 'docker' || rd.sandbox_profile === 'microvm' ? html`
         <${SetupGuideCard} connectorId="sandbox_hardened" />
@@ -2319,16 +2299,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           tone="warn"
         />
       ` : null}
-      <${Callout}
-        title="기본 경로 앵커"
-        body="상대 allowed_paths는 keeper 작업 경로 기준으로 해석됩니다."
-      />
     ` : html`
       <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
       <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
 
-      <${ConfigRow} label="allowed_paths" value=${(c.allowed_paths ?? []).join(', ') || '(computed default)'} />
-      <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />
+      <${ConfigRow} label="sandbox_roots" value=${(c.sandbox_roots ?? []).join(', ')} />
     `}
 
     ${c.keeper_last_error ? html`

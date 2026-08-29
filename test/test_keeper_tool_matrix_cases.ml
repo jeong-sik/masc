@@ -119,7 +119,6 @@ let make_meta ?(name = keeper_matrix_owner) () =
         [
           ("name", `String name);
           ("trace_id", `String "keeper-tool-matrix-trace");
-          ("allowed_paths", `List [ `String "*" ]);
         ])
   with
   | Ok meta -> meta

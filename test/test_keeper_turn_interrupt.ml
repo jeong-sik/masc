@@ -33,7 +33,6 @@ let make_meta name =
              prefix: this fixture drifted and the suite has been failing at
              construction, unnoticed because it is not in the CI list. *)
           ("trace_id", `String ("trace-" ^ name));
-          ("allowed_paths", `List [ `String "*" ]);
         ])
   with
   | Ok meta -> meta

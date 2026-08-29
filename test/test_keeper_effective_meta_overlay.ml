@@ -406,7 +406,6 @@ let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
 instructions = "Improve MASC autonomously"
 sandbox_profile = "docker"
 proactive_enabled = true
-allowed_paths = ["workspace/yousleepwhen/masc"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -421,7 +420,6 @@ allowed_paths = ["workspace/yousleepwhen/masc"]
       persisted with
       instructions = "stale instructions";
       proactive = { enabled = false };
-      allowed_paths = [ "/tmp/stale-local-path" ];
     }
   in
   (match Store.replace_snapshot config stale with
@@ -460,10 +458,6 @@ allowed_paths = ["workspace/yousleepwhen/masc"]
     "returned sandbox_profile is TOML canonical"
     "docker"
     (Profile.sandbox_profile_to_string returned.sandbox_profile);
-  Alcotest.(check (list string))
-    "returned allowed_paths is TOML canonical"
-    [ "workspace/yousleepwhen/masc" ]
-    returned.allowed_paths;
   ()
 
 let test_ensure_keeper_meta_preserves_live_usage_during_reconcile () =
@@ -710,7 +704,6 @@ let test_keeper_up_materializes_missing_profile_source () =
       [ "name", `String name
       ; "instructions", `String "durable direct instructions"
       ; "sandbox_profile", `String "docker"
-      ; "allowed_paths", `List [ `String "/tmp/nosourceup" ]
       ; "mention_targets", `List [ `String "operator" ]
       ; "proactive_enabled", `Bool false
       ; "autoboot_enabled", `Bool false
@@ -727,7 +720,6 @@ let test_keeper_up_materializes_missing_profile_source () =
     { runtime_meta with
       instructions = "durable direct instructions"
     ; sandbox_profile = Profile.Docker
-    ; allowed_paths = [ "/tmp/nosourceup" ]
     ; mention_targets = [ "operator" ]
     ; proactive = { enabled = false }
     ; autoboot_enabled = false
@@ -764,10 +756,7 @@ let test_keeper_up_materializes_missing_profile_source () =
       "context override persisted"
       (Some 128_001)
       defaults.max_context_override;
-    Alcotest.(check (option (list string)))
-      "allowed paths persisted"
-      (Some [ "/tmp/nosourceup" ])
-      defaults.allowed_paths
+    ()
 
 let test_missing_profile_source_rejects_implicit_local () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->

@@ -68,7 +68,6 @@ let make_meta ~name ~sandbox =
     `Assoc
       [
         ("name", `String name);
-        ("allowed_paths", `List [ `String "*" ]);
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

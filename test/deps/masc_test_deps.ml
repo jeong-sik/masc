@@ -33,8 +33,7 @@ let init_unified_tool_registry () =
     production parser sees it. *)
 let meta_of_json_fixture (json : Yojson.Safe.t) =
   let fixture_config_keys =
-    [ "allowed_paths"
-    ; "mention_targets"
+    [ "mention_targets"
     ; "proactive_enabled"
     ; "always_allow"
     ; "autoboot_enabled"
@@ -159,8 +158,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     in
     Ok
       { meta with
-        allowed_paths = apply_string_list "allowed_paths" meta.allowed_paths
-      ; mention_targets = apply_string_list "mention_targets" meta.mention_targets
+        mention_targets = apply_string_list "mention_targets" meta.mention_targets
       ; proactive =
           (match bool_opt "proactive_enabled" with
            | Some enabled -> { enabled }

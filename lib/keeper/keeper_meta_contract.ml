@@ -270,7 +270,6 @@ type keeper_meta =
     sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
   ; network_mode : Keeper_types_profile.network_mode
-  ; allowed_paths : string list
   ; mention_targets : string list
   ; proactive : proactive_policy
   ; (* -- Lifecycle -- *)
@@ -416,9 +415,6 @@ let effective_meta_of_profile_defaults
           network_mode;
           (* RFC vision-delegation §2.4: TOML profile overrides the carried
              value; absent -> keep [meta]'s (defaults to Inherit). *)
-          allowed_paths =
-            apply_profile_default defaults.allowed_paths
-              (if has_profile_source then [] else meta.allowed_paths);
           telemetry_feedback_enabled =
             apply_profile_default_opt defaults.telemetry_feedback_enabled
               meta.telemetry_feedback_enabled;

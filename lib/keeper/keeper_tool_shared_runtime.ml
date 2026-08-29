@@ -58,13 +58,10 @@ let assoc_override_string (key : string) (value : string) = function
   | other -> other
 ;;
 
-let keeper_effective_allowed_paths ~(meta : keeper_meta) =
-  Keeper_alerting_path.effective_allowed_paths ~meta
+let keeper_sandbox_roots ~(meta : keeper_meta) =
+  Keeper_alerting_path.sandbox_roots ~meta
 ;;
 
-let keeper_effective_write_allowed_paths ~(meta : keeper_meta) =
-  Keeper_alerting_path.effective_write_allowed_paths ~meta
-;;
 
 let keeper_playground_root ~(config : Workspace.config) ~(meta : keeper_meta) =
   ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
@@ -173,13 +170,13 @@ let resolve_projected_keeper_read_path
       Keeper_alerting_path.Invalid_normalized_path_projection { path = raw_for_error }
     | ( Keeper_alerting_path.Path_required
       | Keeper_alerting_path.Invalid_lexical_endpoint
-      | Keeper_alerting_path.Allowed_paths_normalized_empty _ ) as carries_no_path ->
+      | Keeper_alerting_path.Sandbox_roots_normalized_empty _ ) as carries_no_path ->
       carries_no_path
   in
   match
     Keeper_alerting_path.resolve_keeper_read_path
       ~config
-      ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+      ~sandbox_roots:(keeper_sandbox_roots ~meta)
       ~raw_path:projected_path
   with
   | Ok path -> Ok path
@@ -192,12 +189,12 @@ let resolve_keeper_confined_write_path
       ~(endpoint : Keeper_alerting_path.confined_path_endpoint)
       ~(raw_path : string)
   =
-  let allowed_paths = keeper_effective_write_allowed_paths ~meta in
+  let sandbox_roots = keeper_sandbox_roots ~meta in
   let projected_path = project_keeper_logical_path ~config ~meta raw_path in
   match
     Keeper_alerting_path.resolve_keeper_confined_path
       ~config
-      ~allowed_paths
+      ~sandbox_roots
       ~endpoint
       ~raw_path:projected_path
   with
@@ -211,12 +208,12 @@ let resolve_keeper_read_path
       ~(meta : keeper_meta)
       ~(raw_path : string)
   =
-  let allowed_paths = keeper_effective_allowed_paths ~meta in
+  let sandbox_roots = keeper_sandbox_roots ~meta in
   let projected_path = project_keeper_logical_path ~config ~meta raw_path in
   match
     Keeper_alerting_path.resolve_keeper_read_path
       ~config
-      ~allowed_paths
+      ~sandbox_roots
       ~raw_path:projected_path
   with
   | Error rejection -> user_message_error rejection
@@ -234,11 +231,11 @@ let resolve_keeper_read_cwd
       ~(meta : keeper_meta)
       ~(raw_path : string)
   =
-  let allowed_paths = keeper_effective_allowed_paths ~meta in
+  let sandbox_roots = keeper_sandbox_roots ~meta in
   match
     Keeper_alerting_path.resolve_keeper_read_path
       ~config
-      ~allowed_paths
+      ~sandbox_roots
       ~raw_path:(String.trim raw_path)
   with
   | Error rejection -> user_message_error rejection
@@ -250,11 +247,11 @@ let resolve_keeper_execute_cwd_typed
       ~(meta : keeper_meta)
       ~(raw_path : string)
   =
-  let allowed_paths = keeper_effective_write_allowed_paths ~meta in
+  let sandbox_roots = keeper_sandbox_roots ~meta in
   match
     Keeper_alerting_path.resolve_keeper_confined_path
       ~config
-      ~allowed_paths
+      ~sandbox_roots
       ~endpoint:Keeper_alerting_path.Follow_referent
       ~raw_path:(String.trim raw_path)
   with

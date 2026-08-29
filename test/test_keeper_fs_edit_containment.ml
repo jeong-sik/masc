@@ -1,7 +1,7 @@
 (** Focused standalone regression for Docker-profile tool_edit_file writes.
 
     This avoids the large shared [tests] stanza while still exercising the
-    real handler path that used to rely only on allowed_paths resolution. *)
+    real handler path that resolves against the keeper sandbox roots. *)
 
 module Workspace = Masc.Workspace
 module Fs_compat = Fs_compat
@@ -140,7 +140,6 @@ let parse_ok raw =
 let test_docker_write_defers_explicit_root () =
   setup
   @@ fun ~config ~meta ~playground:_ ~publication_recovery ->
-  let meta = { meta with allowed_paths = [ config.base_path ] } in
   let path = Filename.concat config.base_path "root-write.txt" in
   let raw =
     handle_file_write

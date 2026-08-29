@@ -49,7 +49,6 @@ type profile_update =
   ; sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
   ; network_mode : Keeper_types_profile.network_mode
-  ; allowed_paths : string list
   ; mention_targets : string list
   ; proactive_enabled : bool
   ; max_context_override : int option

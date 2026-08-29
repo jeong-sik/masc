@@ -11,7 +11,7 @@ let rejection_to_telemetry (r : keeper_path_rejection) : unit =
     | Path_required -> "path_required"
     | Invalid_lexical_endpoint -> "invalid_lexical_endpoint"
     | Invalid_normalized_path_projection _ -> "invalid_normalized_path_projection"
-    | Allowed_paths_normalized_empty _ -> "allowed_paths_normalized_empty"
+    | Sandbox_roots_normalized_empty _ -> "sandbox_roots_normalized_empty"
     | Outside_sandbox _ -> "out_of_roots"
   in
   Otel_metric_store.inc_counter
@@ -35,7 +35,7 @@ let normalize_path_for_check_stripped path =
   normalize_path_for_check path |> strip_trailing_slashes
 ;;
 
-let allowed_path_projection ~(root : string) (path : string) =
+let sandbox_root_projection ~(root : string) (path : string) =
   let raw = String.trim path in
   if raw = ""
   then None
@@ -46,8 +46,8 @@ let allowed_path_projection ~(root : string) (path : string) =
     if normalized = "" then None else Some (candidate, normalized))
 ;;
 
-let normalize_allowed_path_for_check ~root path =
-  allowed_path_projection ~root path |> Option.map snd
+let normalize_sandbox_root_for_check ~root path =
+  sandbox_root_projection ~root path |> Option.map snd
 ;;
 
 let valid_child_name = Fs_compat.is_capability_leaf
@@ -596,7 +596,7 @@ let normalize_confined_endpoint endpoint candidate =
 
 let resolve_keeper_confined_path
       ~(config : Workspace.config)
-      ~(allowed_paths : string list)
+      ~(sandbox_roots : string list)
       ~(endpoint : confined_path_endpoint)
       ~(raw_path : string)
   : (confined_path, keeper_path_rejection) result
@@ -616,11 +616,11 @@ let resolve_keeper_confined_path
          Error
            (Invalid_normalized_path_projection { path = project_root_norm })
        | Some project_root_components ->
-         let allowed_roots =
+         let sandbox_roots =
            let projected_roots =
-             if allowed_paths = []
+             if sandbox_roots = []
              then [ project_root_norm, project_root_norm ]
-             else List.filter_map (allowed_path_projection ~root) allowed_paths
+             else List.filter_map (sandbox_root_projection ~root) sandbox_roots
            in
            List.filter_map
              (fun (capability_path, normalized_path) ->
@@ -636,7 +636,7 @@ let resolve_keeper_confined_path
                     | Error
                         ( Path_required
                         | Invalid_normalized_path_projection _
-                        | Allowed_paths_normalized_empty _
+                        | Sandbox_roots_normalized_empty _
                         | Outside_sandbox _ ) ->
                       normalized_path
                   in
@@ -652,11 +652,11 @@ let resolve_keeper_confined_path
                     })
              projected_roots
          in
-         (match allowed_roots with
+         (match sandbox_roots with
           | [] ->
             Error
-              (Allowed_paths_normalized_empty
-                 { count = List.length allowed_paths })
+              (Sandbox_roots_normalized_empty
+                 { count = List.length sandbox_roots })
           | _ ->
             (match absolute_path_components target_norm with
              | None ->
@@ -671,7 +671,7 @@ let resolve_keeper_confined_path
                          ~target:endpoint_absolute
                        |> Option.map (fun endpoint_components ->
                          root_projection, endpoint_components))
-                    allowed_roots
+                    sandbox_roots
                 with
                 | None -> Error (Outside_sandbox { raw })
                 | Some (root_projection, endpoint_components) ->
@@ -686,7 +686,7 @@ let resolve_keeper_confined_path
                       | Error
                           ( Path_required
                           | Invalid_normalized_path_projection _
-                          | Allowed_paths_normalized_empty _
+                          | Sandbox_roots_normalized_empty _
                           | Outside_sandbox _ ) ->
                         endpoint_components
                       | Ok lexical_norm ->
@@ -747,16 +747,16 @@ let resolve_keeper_confined_path
                       })))))
 ;;
 
-let resolve_keeper_path_within_allowed_roots ~config ~allowed_paths ~raw_path =
+let resolve_keeper_path_within_sandbox_roots ~config ~sandbox_roots ~raw_path =
   resolve_keeper_confined_path
     ~config
-    ~allowed_paths
+    ~sandbox_roots
     ~endpoint:Follow_referent
     ~raw_path
   |> Result.map confined_host_path
 ;;
 
-let resolve_keeper_target_path = resolve_keeper_path_within_allowed_roots
+let resolve_keeper_target_path = resolve_keeper_path_within_sandbox_roots
 
 (* Playground path SSOT lives in [Playground_paths] (masc_config). These
    names preserve the historical keeper-facing API. Do not re-implement
@@ -766,7 +766,7 @@ let sanitize_keeper_name = Playground_paths.sanitize_keeper_name
 let playground_path_of_keeper = Playground_paths.bundle_root
 
 let sandbox_path_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
-  Keeper_sandbox.allowed_root_rel_of_meta ~meta
+  Keeper_sandbox.sandbox_root_rel_of_meta ~meta
 ;;
 
 (* The workspace root, and nothing under it. A [repos/] directory used to be
@@ -803,22 +803,11 @@ let ensure_sandbox_bundle_for_profile
   |> List.map Keeper_fs.ensure_dir
 ;;
 
-(** Compute effective read allowed_paths from keeper meta.
-    Returns the single sandbox root plus any explicit [allowed_paths]
-    entries. Every additional path must be listed explicitly in
-    [allowed_paths]. *)
-let effective_allowed_paths ~(meta : Keeper_meta_contract.keeper_meta) : string list =
-  let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
-  sandbox_paths @ meta.allowed_paths
-;;
-
-(** Compute effective write allowed_paths from keeper meta.
-    Returns the single sandbox root plus any explicit [allowed_paths]
-    entries. Every additional path must be listed explicitly in
-    [allowed_paths]. *)
-let effective_write_allowed_paths ~(meta : Keeper_meta_contract.keeper_meta) : string list =
-  let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
-  sandbox_paths @ meta.allowed_paths
+(** The roots a keeper may read and write: its sandbox, nothing else.
+    The sandbox is the whole boundary — there is no per-keeper path
+    allowlist on top of it. *)
+let sandbox_roots ~(meta : Keeper_meta_contract.keeper_meta) : string list =
+  Keeper_sandbox.sandbox_roots_of_meta ~meta
 ;;
 
 (** Resolve a path for read-only access within the keeper's effective
@@ -826,11 +815,11 @@ let effective_write_allowed_paths ~(meta : Keeper_meta_contract.keeper_meta) : s
     plus any explicit custom paths. *)
 let resolve_keeper_read_path
       ~(config : Workspace.config)
-      ~(allowed_paths : string list)
+      ~(sandbox_roots : string list)
       ~(raw_path : string)
   : (string, keeper_path_rejection) result
   =
-  resolve_keeper_path_within_allowed_roots ~config ~allowed_paths ~raw_path
+  resolve_keeper_path_within_sandbox_roots ~config ~sandbox_roots ~raw_path
 ;;
 
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =

@@ -39,12 +39,11 @@ let with_tmp_base f =
       rmrf dir)
     (fun () -> f dir)
 
-let make_meta ?(allowed_paths = []) ~name ~sandbox () =
+let make_meta ~name ~sandbox () =
   let json =
     `Assoc
       [
         ("name", `String name);
-        ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -65,25 +64,6 @@ let test_local_profile_uses_same_containment () =
     (Result.is_error
        (Keeper_sandbox_containment.check_read_target
           ~config ~meta ~target:outside))
-
-let test_explicit_external_root_is_allowed () =
-  with_tmp_base @@ fun base ->
-  let config = Workspace.default_config base in
-  let meta =
-    make_meta
-      ~allowed_paths:[ "/etc" ]
-      ~name:"alice"
-      ~sandbox:Keeper_types_profile_sandbox.Local
-      ()
-  in
-  Alcotest.(check bool)
-    "explicit external root"
-    true
-    (Result.is_ok
-       (Keeper_sandbox_containment.check_read_target
-          ~config
-          ~meta
-          ~target:"/etc/passwd"))
 
 let test_docker_keeper_blocks_outside () =
   with_tmp_base @@ fun base ->
@@ -152,8 +132,6 @@ let () =
         [
           Alcotest.test_case "local profile uses same containment" `Quick
             test_local_profile_uses_same_containment;
-          Alcotest.test_case "explicit root outside base is allowed" `Quick
-            test_explicit_external_root_is_allowed;
           Alcotest.test_case "docker keeper blocks /etc/passwd" `Quick
             test_docker_keeper_blocks_outside;
           Alcotest.test_case "docker keeper allows inside playground"

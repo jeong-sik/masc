@@ -307,7 +307,6 @@ let profile_update_command (meta : keeper_meta) =
     ; sandbox_profile = meta.sandbox_profile
     ; sandbox_image = meta.sandbox_image
     ; network_mode = meta.network_mode
-    ; allowed_paths = meta.allowed_paths
     ; mention_targets = meta.mention_targets
     ; proactive_enabled = meta.proactive.enabled
     ; max_context_override = meta.max_context_override
@@ -390,9 +389,6 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args)
     (old : keeper_meta) : tool_result
     =
-  let allowed_paths =
-    Option.value ~default:old.allowed_paths p.allowed_paths_opt
-  in
   match
     match p.sandbox_profile_opt with
     | None -> Ok old.sandbox_profile
@@ -445,7 +441,6 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                   else Option.value ~default:"" p.profile_defaults.instructions)
                p.instructions_opt);
     autonomous_instructions = p.autonomous_instructions_opt;
-    allowed_paths;
     sandbox_profile;
     network_mode;
     autoboot_enabled;
@@ -478,7 +473,7 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     updated_at = now_iso ();
   } in
   match
-    validate_sandbox_settings_with_profile ~sandbox_profile ~allowed_paths
+    validate_sandbox_settings_with_profile ~sandbox_profile
   with
   | Error err ->
       Otel_metric_store.inc_counter

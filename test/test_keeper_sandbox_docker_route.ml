@@ -220,8 +220,7 @@ let make_meta ~name ~sandbox () =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
     { meta with
-      allowed_paths = ["*"]
-    ; sandbox_profile = sandbox
+      sandbox_profile = sandbox
     ; always_allow = Some true
     }
   | Error e -> Alcotest.fail e

@@ -1,15 +1,11 @@
 // Live Monitor tab — derived signals and filter state
 
 import { signal, computed, type ReadonlySignal } from '@preact/signals'
-import { isAgentActive, isAgentOffline, isAgentPresent } from './lib/agent-status'
 import type { JournalEntry } from './types'
+import { keepers, staleKeepers } from './store'
 import type { PipelineStage } from './types/core'
 import type { AuditEntry } from './api/dashboard'
-import { journal } from './sse'
-import { agents, agentMotionMap, keepers, staleKeepers } from './store'
 import { contextThresholds } from './config/context-thresholds'
-import { AGENT_HEARTBEAT_STALE_MS } from './config/constants'
-import type { AgentMotionSnapshot } from './components/common/agent-motion'
 import type { StatusChipTone } from './components/common/status-chip'
 
 // --- Filter toggles ---
@@ -20,128 +16,9 @@ export const liveFilters = signal<Set<LiveFilterKind>>(
   new Set(['broadcast', 'tasks', 'keepers', 'system']),
 )
 
-export function toggleLiveFilter(kind: LiveFilterKind): void {
-  const next = new Set(liveFilters.value)
-  if (next.has(kind)) {
-    next.delete(kind)
-  } else {
-    next.add(kind)
-  }
-  liveFilters.value = next
-}
-
-// --- Selected agent for focus sidebar highlight ---
-
 export const selectedAgent = signal<string | null>(null)
 
-// --- Map journal kind to filter kind ---
-
-function journalKindToFilter(entry: JournalEntry): LiveFilterKind {
-  if (entry.kind === 'board') return 'broadcast'
-  if (entry.kind === 'tasks') return 'tasks'
-  if (entry.kind === 'keepers') return 'keepers'
-  return 'system'
-}
-
-// --- Filtered journal entries ---
-
-export const filteredJournal: ReadonlySignal<JournalEntry[]> = computed(() => {
-  const filters = liveFilters.value
-  return journal.value.filter(entry => filters.has(journalKindToFilter(entry)))
-})
-
-// --- Agent pulse data ---
-
 export type PulseState = 'working' | 'idle' | 'stale'
-
-const STALE_THRESHOLD_MS = AGENT_HEARTBEAT_STALE_MS
-
-interface AgentPulse {
-  name: string
-  emoji: string
-  koreanName: string | null
-  state: PulseState
-  currentTask: string | null
-  motion: AgentMotionSnapshot | null
-}
-
-export const agentPulses: ReadonlySignal<AgentPulse[]> = computed(() => {
-  const motionMap = agentMotionMap.value
-  const now = Date.now()
-
-  return agents.value.map(agent => {
-    const key = agent.name.trim().toLowerCase()
-    const motion = motionMap.get(key) ?? null
-
-    let state: PulseState = 'idle'
-    if (isAgentActive(agent)) {
-      const lastAt = motion?.lastActivityAt
-      if (lastAt) {
-        const elapsed = now - new Date(lastAt).getTime()
-        state = elapsed > STALE_THRESHOLD_MS ? 'stale' : 'working'
-      } else {
-        state = 'working'
-      }
-    } else if (isAgentOffline(agent)) {
-      state = 'stale'
-    }
-
-    return {
-      name: agent.name,
-      emoji: agent.emoji ?? '',
-      koreanName: agent.koreanName ?? null,
-      state,
-      currentTask: agent.current_task,
-      motion,
-    }
-  })
-})
-
-// --- Focus sidebar data ---
-
-interface FocusAgent {
-  name: string
-  emoji: string
-  koreanName: string | null
-  currentTask: string | null
-  lastActivityAt: string | null
-  lastActivityText: string | null
-  assignedCount: number
-  pressure: 'calm' | 'normal' | 'hot'
-}
-
-export const focusAgents: ReadonlySignal<FocusAgent[]> = computed(() => {
-  const motionMap = agentMotionMap.value
-
-  return agents.value
-    .filter(a => isAgentPresent(a))
-    .map(agent => {
-      const key = agent.name.trim().toLowerCase()
-      const motion = motionMap.get(key)
-      const assignedCount = motion?.activeAssignedCount ?? 0
-
-      let pressure: 'calm' | 'normal' | 'hot' = 'calm'
-      if (assignedCount >= 3) pressure = 'hot'
-      else if (assignedCount >= 1) pressure = 'normal'
-
-      return {
-        name: agent.name,
-        emoji: agent.emoji ?? '',
-        koreanName: agent.koreanName ?? null,
-        currentTask: agent.current_task,
-        lastActivityAt: motion?.lastActivityAt ?? null,
-        lastActivityText: motion?.lastActivityText ?? null,
-        assignedCount,
-        pressure,
-      }
-    })
-    .sort((a, b) => {
-      const pressureOrder = { hot: 0, normal: 1, calm: 2 }
-      return pressureOrder[a.pressure] - pressureOrder[b.pressure]
-    })
-})
-
-// --- Keeper health summary for Live Monitor ---
 
 export interface KeeperPressure {
   name: string

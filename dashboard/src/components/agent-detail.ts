@@ -38,7 +38,6 @@ import {
   closeAgentDetail,
   refreshAgentDetail,
   submitMention,
-  setKeeperRedirect,
   agentFitness,
   type TaskHistoryRow,
 } from './agent-detail-state'
@@ -51,16 +50,6 @@ import { showToast } from './common/toast'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
 import { purgeAgent } from '../api/actions'
 import { ringFocusClasses } from './common/ring'
-
-// Wire keeper redirect: keeper-linked agents open the keeper detail overlay
-setKeeperRedirect((agentName: string) => {
-  const keeper = findKeeper(agentName)
-  if (keeper) {
-    openKeeperDetail(keeper)
-    return true
-  }
-  return false
-})
 
 /**
  * Pure filter for owned tasks.

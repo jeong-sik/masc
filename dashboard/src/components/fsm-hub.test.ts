@@ -127,14 +127,14 @@ describe('fsm-hub derived state', () => {
   it('derives newest-first transition entries from observation changes', () => {
     const observations = [
       observation({ ts: 1 }),
-      observation({ ts: 2, phase: 'Compacting', turn: 'executing' }),
-      observation({ ts: 3, phase: 'Compacting', turn: 'executing', runtime: 'trying' }),
+      observation({ ts: 2, phase: 'Failing', turn: 'executing' }),
+      observation({ ts: 3, phase: 'Failing', turn: 'executing', runtime: 'trying' }),
     ]
 
     expect(deriveTransitionHistory(observations)).toEqual([
       { ts: 3, from: 'idle', to: 'trying', field: 'KCL' },
       { ts: 2, from: 'idle', to: 'executing', field: 'KTC' },
-      { ts: 2, from: 'Running', to: 'Compacting', field: 'KSM' },
+      { ts: 2, from: 'Running', to: 'Failing', field: 'KSM' },
     ])
   })
 
@@ -145,7 +145,7 @@ describe('fsm-hub derived state', () => {
       observation({ ts: 3, turn: 'idle' }),
       observation({ ts: 4, turn: 'prompting' }),
       observation({ ts: 5, turn: 'executing' }),
-      observation({ ts: 6, phase: 'Compacting', turn: 'compacting' }),
+      observation({ ts: 6, phase: 'Failing', turn: 'executing' }),
     ]
 
     const top = deriveTopTransitions(observations, 5)
@@ -156,8 +156,8 @@ describe('fsm-hub derived state', () => {
       to: 'prompting',
       count: 2,
     })
-    expect(top.find((t) => t.from === 'Running' && t.to === 'Compacting'))
-      .toEqual({ field: 'KSM', from: 'Running', to: 'Compacting', count: 1 })
+    expect(top.find((t) => t.from === 'Running' && t.to === 'Failing'))
+      .toEqual({ field: 'KSM', from: 'Running', to: 'Failing', count: 1 })
     expect(top.length).toBeLessThanOrEqual(5)
   })
 
@@ -169,7 +169,7 @@ describe('fsm-hub derived state', () => {
   it('respects the limit parameter and breaks ties by lane order then alpha', () => {
     const observations = [
       observation({ ts: 1, phase: 'Running', turn: 'idle', decision: 'undecided' }),
-      observation({ ts: 2, phase: 'Compacting', turn: 'prompting', decision: 'guard_ok' }),
+      observation({ ts: 2, phase: 'Failing', turn: 'prompting', decision: 'guard_ok' }),
     ]
 
     const limited = deriveTopTransitions(observations, 2)
@@ -194,21 +194,21 @@ describe('fsm-hub derived state', () => {
   it('derives spec-drift insight from broken invariants', () => {
     const result = deriveOperationalInsight(
       snapshot({
-        phase: 'Compacting',
+        phase: 'Failing',
         turn_phase: 'executing',
         invariants: {
-          no_runtime_before_measurement: true,
+          no_runtime_before_measurement: false,
           event_priority_monotone: true,
           phase_derivation_agreement: true,
         },
       }),
-      [observation({ ts: 10, phase: 'Compacting', turn: 'executing' })],
+      [observation({ ts: 10, phase: 'Failing', turn: 'executing' })],
       20,
     )
 
     expect(result.tone).toBe('error')
     expect(result.headline).toContain('Spec drift')
-    expect(result.detail).toContain('KSM=Compacting')
+    expect(result.detail).toContain('measurement.captured=false')
   })
 
   it('interprets idle snapshots as stable placeholders, not live work', () => {
@@ -272,7 +272,7 @@ describe('deriveLaneDwellHistograms', () => {
     const observations = [
       observation({ ts: 100, phase: 'Running', turn: 'idle' }),
       observation({ ts: 110, phase: 'Running', turn: 'executing' }),
-      observation({ ts: 130, phase: 'Compacting', turn: 'compacting' }),
+      observation({ ts: 130, phase: 'Failing', turn: 'finalizing' }),
     ]
     const histograms = deriveLaneDwellHistograms(observations, 150)
 
@@ -280,7 +280,7 @@ describe('deriveLaneDwellHistograms', () => {
     expect(ksm).toBeDefined()
     expect(ksm!.entries).toHaveLength(2)
     expect(ksm!.entries[0]).toEqual({ value: 'Running', seconds: 30, pct: 60 })
-    expect(ksm!.entries[1]).toEqual({ value: 'Compacting', seconds: 20, pct: 40 })
+    expect(ksm!.entries[1]).toEqual({ value: 'Failing', seconds: 20, pct: 40 })
 
     const ktc = histograms.find((h) => h.field === 'KTC')
     expect(ktc).toBeDefined()
@@ -523,7 +523,7 @@ describe('laneTransitionCount', () => {
     const observations = [
       observation({ ts: 100, turn: 'idle', phase: 'Running' }),
       observation({ ts: 110, turn: 'prompting', phase: 'Running' }),
-      observation({ ts: 120, turn: 'prompting', phase: 'Compacting' }),
+      observation({ ts: 120, turn: 'prompting', phase: 'Failing' }),
     ]
     expect(laneTransitionCount(observations, 'turn')).toBe(1)
     expect(laneTransitionCount(observations, 'phase')).toBe(1)
@@ -533,15 +533,15 @@ describe('laneTransitionCount', () => {
 
 describe('flagTooltip', () => {
   it('returns the on-description when the flag is active', () => {
-    const tip = flagTooltip('compact', true)
-    expect(tip).toContain('compact (active)')
-    expect(tip).toContain('압축')
+    const tip = flagTooltip('handoff', true)
+    expect(tip).toContain('handoff (active)')
+    expect(tip).toContain('이관')
   })
 
   it('returns the off-description when the flag is inactive', () => {
-    const tip = flagTooltip('compact', false)
-    expect(tip).toContain('compact (inactive)')
-    expect(tip).toContain('예약된 압축 없음')
+    const tip = flagTooltip('handoff', false)
+    expect(tip).toContain('handoff (inactive)')
+    expect(tip).toContain('예약된 handoff 없음')
   })
 
   it('falls back to a generic tooltip for unknown labels', () => {
@@ -553,9 +553,7 @@ describe('flagTooltip', () => {
 describe('invariantDescription', () => {
   it('returns domain-specific prose for each known invariant key', () => {
     const keys = [
-      'phase_turn_alignment',
       'no_runtime_before_measurement',
-      'compaction_atomicity',
       'event_priority_monotone',
     ]
     for (const key of keys) {
@@ -566,9 +564,7 @@ describe('invariantDescription', () => {
   })
 
   it('mentions the specific contract each invariant guards', () => {
-    expect(invariantDescription('phase_turn_alignment')).toMatch(/KSM|KTC|drift/i)
     expect(invariantDescription('no_runtime_before_measurement')).toMatch(/runtime|measurement/i)
-    expect(invariantDescription('compaction_atomicity')).toMatch(/atomic|half-compacted/i)
     expect(invariantDescription('event_priority_monotone')).toMatch(/priority|priorit/i)
   })
 

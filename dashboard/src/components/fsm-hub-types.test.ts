@@ -63,7 +63,7 @@ describe('extractLaneValue', () => {
 
   it('handles all valid phase values', () => {
     const phases: KeeperCompositeSnapshot['phase'][] = [
-      'Running', 'Failing', 'Compacting', 'Draining', 'Stable',
+      'Running', 'Failing', 'Draining', 'Stable',
     ]
     for (const phase of phases) {
       expect(extractLaneValue(snapshot({ phase }), 'phase')).toBe(phase)
@@ -72,7 +72,7 @@ describe('extractLaneValue', () => {
 
   it('handles all valid turn values', () => {
     const turns: KeeperCompositeSnapshot['turn_phase'][] = [
-      'idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted',
+      'idle', 'prompting', 'routing', 'executing', 'finalizing', 'exhausted',
     ]
     for (const turn of turns) {
       expect(extractLaneValue(snapshot({ turn_phase: turn }), 'turn')).toBe(turn)
@@ -132,21 +132,19 @@ describe('fmtDuration', () => {
 })
 
 describe('constants', () => {
-  it('TRANSITION_FIELDS has 5 entries', () => {
-    expect(TRANSITION_FIELDS).toHaveLength(5)
-    expect(TRANSITION_FIELDS.map(f => f.field)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC'])
+  it('TRANSITION_FIELDS has 4 entries', () => {
+    expect(TRANSITION_FIELDS).toHaveLength(4)
+    expect(TRANSITION_FIELDS.map(f => f.field)).toEqual(['KSM', 'KTC', 'KDP', 'KCL'])
   })
 
-  it('LANE_LABELS has all 5 lanes', () => {
+  it('LANE_LABELS has all 4 lanes', () => {
     const keys = Object.keys(LANE_LABELS)
-    expect(keys).toEqual(['phase', 'turn', 'decision', 'runtime', 'compaction'])
+    expect(keys).toEqual(['phase', 'turn', 'decision', 'runtime'])
   })
 
-  it('INVARIANT_LABELS has all 5 invariants', () => {
+  it('INVARIANT_LABELS has all 3 invariants', () => {
     const keys = Object.keys(INVARIANT_LABELS)
-    expect(keys).toHaveLength(5)
-    expect(keys).toContain('phase_turn_alignment')
-    expect(keys).toContain('compaction_atomicity')
+    expect(keys).toHaveLength(3)
     expect(keys).toContain('phase_derivation_agreement')
   })
 

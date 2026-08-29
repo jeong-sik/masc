@@ -93,7 +93,20 @@ let outcome_label = function
   | Crashed -> "crashed"
 ;;
 
+(* The branch a flow last took, kept per fiber so concurrent workers cannot
+   read each other's. A flow that ends without a judgment summary knows only
+   that it produced none; this is how the run registry gets to say which
+   branch it was standing on when that happened. Fiber-local rather than a
+   parameter because [record_outcome] is called from top-level helpers that
+   have no flow value to thread. *)
+let outcome_sink_key : flow_outcome option ref Eio.Fiber.key = Eio.Fiber.create_key ()
+
+let with_outcome_sink sink f = Eio.Fiber.with_binding outcome_sink_key sink f
+
 let record_outcome outcome =
+  (match Eio.Fiber.get outcome_sink_key with
+   | Some sink -> sink := Some outcome
+   | None -> ());
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string HitlSummaryOutcomes)
     ~labels:[ "outcome", outcome_label outcome ]
@@ -1033,17 +1046,24 @@ let last_semantic_rejection
    summary reaches [on_summary] only after domain validation, provenance
    verification and fsync (see the .mli), so its absence is the failure, not a
    shape to synthesise an output for. *)
-let run_outcome_of_observed_summary = function
+let run_outcome_of_observed_summary ~last_outcome = function
   | Some summary ->
     Exact_lane_run_registry.Succeeded, hitl_context_summary_to_yojson summary
   | None ->
-    ( Exact_lane_run_registry.Failed
-        { code = "no_summary_produced"
-        ; detail =
+    let code, detail =
+      match last_outcome with
+      | Some outcome ->
+        ( outcome_label outcome
+        , Printf.sprintf
             "exact flow terminalized without a judgment summary; the candidate \
-             was quarantined"
-        }
-    , `Null )
+             was quarantined on %s"
+            (outcome_label outcome) )
+      | None ->
+        ( "no_branch_recorded"
+        , "exact flow terminalized without a judgment summary and without \
+           recording a branch" )
+    in
+    Exact_lane_run_registry.Failed { code; detail }, `Null
 ;;
 
 let handle_semantic_exhaustion ~queue_ops (prepared : prepared_flow) trace =
@@ -1698,6 +1718,7 @@ let spawn_with
     let run_id = Random_id.prefixed ~prefix:"exact-hitl-judge-" ~bytes:16 in
     let started_at = Time_compat.now () in
     let observed_summary = ref None in
+    let observed_outcome = ref None in
     let selected_slot = ref None in
     let bind
           ~id
@@ -1795,6 +1816,8 @@ let spawn_with
     in
     Eio.Fiber.fork ~sw (fun () ->
     let execution_outcome =
+      with_outcome_sink observed_outcome
+      @@ fun () ->
       try
         match
           execute_prepared_flow_with_queue_ops
@@ -1842,7 +1865,9 @@ let spawn_with
 
          [on_finish] is unchanged: whether an exhausted flow should still
          permit draining later owner work is a separate contract question. *)
-      let outcome, output = run_outcome_of_observed_summary !observed_summary in
+      let outcome, output = run_outcome_of_observed_summary
+          ~last_outcome:!observed_outcome
+          !observed_summary in
       complete outcome output;
       on_finish Conclusive_terminalization
     | `Cancelled (cancellation, cancellation_backtrace) ->
@@ -1908,6 +1933,7 @@ let spawn ~sw ~entry ~on_summary ~on_finish () =
 ;;
 
 module For_testing = struct
+  let with_outcome_sink = with_outcome_sink
   let run_outcome_of_observed_summary = run_outcome_of_observed_summary
 
   type nonrec prepared_flow = prepared_flow

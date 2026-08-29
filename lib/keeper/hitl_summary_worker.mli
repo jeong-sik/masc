@@ -87,8 +87,13 @@ val spawn
 
 module For_testing : sig
   val run_outcome_of_observed_summary
-    :  Keeper_approval_queue_rules_types.hitl_context_summary option
+    :  last_outcome:flow_outcome option
+    -> Keeper_approval_queue_rules_types.hitl_context_summary option
     -> Exact_lane_run_registry.outcome * Yojson.Safe.t
+  (** [last_outcome] is the branch the flow last recorded. A flow that ends
+      with no summary reports that branch as the run's failure code, which is
+      the only thing distinguishing a candidate exhaustion from a provider
+      failure once the summary is absent. *)
 
   val system_prompt : unit -> (string, string) result
 
@@ -103,6 +108,12 @@ module For_testing : sig
     -> (Keeper_approval_queue_rules_types.hitl_context_summary, string) result
 
   type prepared_flow
+
+  val with_outcome_sink : flow_outcome option ref -> (unit -> 'a) -> 'a
+  (** Run [f] with a sink bound, so a test can execute a real flow and read
+      back the branch it recorded. This is the binding the worker itself
+      installs around every flow; exposing it is how the suite proves the
+      sink is filled by the flow rather than only by a direct call. *)
 
   val prepare_flow
     :  entry:Keeper_approval_queue_rules_types.pending_approval

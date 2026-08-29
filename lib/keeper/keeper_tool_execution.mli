@@ -15,6 +15,13 @@ type terminal_effect_receipt =
   | Memory_write_completed of { revision : int }
 (** Producer-owned proof of the concrete terminal effect that completed. *)
 
+val memory_revision_wire_key : string
+(** JSON field name carrying a [Memory_write_completed] receipt's revision in
+    the keeper reply payload: ["memory_revision"]. Shared by the producer
+    ({!Keeper_turn} reply_json) and the stream decoder so the wire name cannot
+    drift; it is the memory-write counterpart of
+    {!Keeper_surface_post.delivery_target_wire_key}. *)
+
 (** [disposition] uses the canonical {!Tool_result.disposition}; this module
     deliberately defines no parallel outcome enum.  [raw_output] is opaque
     text. [data] and [metadata] exist only when the producer supplied them. *)

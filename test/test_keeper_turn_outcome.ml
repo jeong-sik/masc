@@ -194,6 +194,88 @@ let test_canonical_payload_carries_delivery_target () =
          error)
   | Ok _ -> fail "unknown delivery target kind must reject the payload"
 
+let test_canonical_payload_carries_memory_revision () =
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"memory-write" ~absolute_turn:4 in
+  let body_for outcome effect_json =
+    `Assoc
+      ([ "reply", `String ""
+       ; TO.wire_key, `String (TO.to_label outcome)
+       ; TO.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref
+       ]
+       @ effect_json)
+    |> Yojson.Safe.to_string
+  in
+  let body_with = body_for TO.External_effect_completed in
+  let revision_key = Masc.Keeper_tool_execution.memory_revision_wire_key in
+  (* A memory-write completion is the other receipt shape for this outcome:
+     it proves the effect through its revision and has no delivery target
+     (keeper_turn.ml terminal_effect_fields), so the decoder admits it and
+     the projection stays [None]. *)
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_with [ revision_key, `Int 12 ])
+   with
+   | Ok canonical ->
+     (match canonical.external_effect_target with
+      | None -> ()
+      | Some _ -> fail "a memory-write completion carries no delivery target")
+   | Error error ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          error));
+  (* Exactly one receipt proof: both at once is a producer that cannot
+     exist. *)
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_with
+          [ ( Masc.Keeper_surface_post.delivery_target_wire_key
+            , `Assoc [ "kind", `String "dashboard" ] )
+          ; revision_key, `Int 12
+          ])
+   with
+   | Error (Stream.Invalid_external_effect_target _) -> ()
+   | Error error ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          error)
+   | Ok _ -> fail "both receipt proofs at once must reject the payload");
+  (* The revision on any other outcome is rejected, mirroring the
+     delivery-target direction. *)
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_for TO.Visible_reply [ revision_key, `Int 12 ])
+   with
+   | Error (Stream.Invalid_external_effect_target _) -> ()
+   | Error error ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          error)
+   | Ok _ -> fail "a memory revision on a visible reply must reject the payload");
+  (* Same closed decode as every payload field: wrong type and duplicates
+     are named errors, not repairs. *)
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_with [ revision_key, `String "12" ])
+   with
+   | Error (Stream.Invalid_payload_field_type field) ->
+     check string "the mistyped field is named" revision_key field
+   | Error error ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          error)
+   | Ok _ -> fail "a non-integer memory revision must reject the payload");
+  match
+    Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+      (body_with [ revision_key, `Int 12; revision_key, `Int 13 ])
+  with
+  | Error (Stream.Duplicate_payload_field field) ->
+    check string "the duplicated field is named" revision_key field
+  | Error error ->
+    fail
+      (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+         error)
+  | Ok _ -> fail "a duplicated memory revision must reject the payload"
+
 let test_external_effect_status_survives_server_projection () =
   let turn_outcome =
     TO.of_result_surface
@@ -896,6 +978,8 @@ let () =
             test_external_effect_status_survives_server_projection;
           test_case "canonical payload carries the delivery target" `Quick
             test_canonical_payload_carries_delivery_target;
+          test_case "canonical payload carries the memory revision" `Quick
+            test_canonical_payload_carries_memory_revision;
           test_case "external effect status becomes persisted chat block" `Quick
             test_external_effect_status_becomes_persisted_chat_block;
           test_case "terminal effect defer kinds remain distinct" `Quick

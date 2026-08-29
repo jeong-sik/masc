@@ -1595,29 +1595,19 @@ let test_cancellation_after_dispatch_is_terminal () =
             } ->
           ()
         | _ -> fail "post-dispatch cancellation was not terminally quarantined");
-       (* #31474 routed this row to worker activation at boot, but the
-          reservation underneath refuses it: [reserve_summary_attempt_retry]
-          documents that a terminal exact quarantine is never retried, and a
-          cancellation quarantine is terminal. So recovery requests the row,
-          the reservation declines, and no worker runs.
-
-          What this pins is that the report says so. Collapsing the declined
-          reservation into [Started] made the boot log read
-          "requested=1 started=1" for an approval nothing had picked up, and
-          the same row came back on the next restart. *)
+       (* Boot recovery leaves this row alone. A cancelled judgment reached
+          no verdict and nothing re-runs one: [reserve_summary_attempt_retry]
+          has no arm for a bound quarantined row. The row stays pending and
+          an operator decides it. *)
        install_queue base_path;
        let recovery = Gate.resume_persisted_auto_judges ~base_path in
-       check int "boot recovery requests the cancelled row" 1 recovery.requested;
-       check
-         (list string)
-         "but it must not claim a worker started"
-         []
-         recovery.started_ids;
+       check int "boot recovery does not request the cancelled row" 0 recovery.requested;
+       check (list string) "and starts no worker for it" [] recovery.started_ids;
        check bool
-         "it is reported skipped"
-         true
+         "nor reports it skipped"
+         false
          (List.mem entry.id recovery.skipped_ids);
-       check int "and not as a failure" 0 (List.length recovery.failures))
+       check int "and records no failure" 0 (List.length recovery.failures))
 ;;
 
 let test_spawn_preserves_cancellation_origin_backtrace () =

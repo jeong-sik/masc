@@ -557,6 +557,10 @@ let with_exact_status (entry : Rule_types.pending_approval) status =
     released_recovery_required;
   check_ready "quarantined binding is not worker-ready" false quarantined;
   check_ready
+    "cancellation quarantine is not worker-ready either"
+    false
+    cancellation_quarantined;
+  check_ready
     "restart-quarantined binding is terminal"
     false
     restart_quarantined;
@@ -589,14 +593,14 @@ let with_exact_status (entry : Rule_types.pending_approval) status =
           ; completed
           ])
   in
-  (* Pre-existing red on main: the concurrency default moved to 4, so the
-     "only the FIFO head" assertion (count=1) was already failing at 2
-     before this change. Assert what the FIFO window actually exposes —
-     the head first, bounded by available slots — and that the ordering
-     is FIFO. *)
-  check int "operator recovery exposes the FIFO window" 3 (List.length ready);
+  (* The window is the FIFO head onwards, bounded by the owner's available
+     slots. Every bound shape in the input is excluded, cancellation
+     included: a judgment the server died under reached no verdict and
+     nothing re-runs it, so the row waits for an operator like any other
+     quarantine. *)
+  check int "operator recovery exposes the FIFO window" 2 (List.length ready);
   check (list string) "operator recovery starts from the FIFO head in order"
-    [ not_requested.id; pending.id; cancellation_quarantined.id ]
+    [ not_requested.id; pending.id ]
     (List.map (fun (entry : Rule_types.pending_approval) -> entry.id) ready)
 ;;
 

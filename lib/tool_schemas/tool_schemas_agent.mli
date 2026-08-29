@@ -1,18 +1,18 @@
-(** Tool_schemas_agent — MCP tool schemas for [masc_agent*] family.
+(** Tool_schemas_agent — MCP tool schemas for the [masc_agent*] family.
 
-    [masc_tool_schemas] only depends on [masc_types], so enum strings
-    that must stay in sync with {!Tool_agent} (which lives higher up
-    the dep tree) are hand-mirrored here. The
-    [test_agent_card_action_mirror] catches
-    drift between the two sides.
+    Read from [config/tools/*.toml] (RFC
+    prompts-and-tool-definitions-outside-ocaml §2.2) rather than built here.
+
+    [masc_tool_schemas] only depends on [masc_types], so it cannot reach
+    {!Tool_agent} for the [masc_agent_card] action values. They are still
+    mirrored, now as the enum line in [config/tools/masc_agent_card.toml],
+    and [test_agent_card_action_mirror] still reads the published schema and
+    compares it against the owner's list, so drift fails there.
 
     Issues: #8501 (mirror pattern), #8372 (agent_status enum derivation),
     #8467/#8480/#8484/#8490/#8493 (related mirror+sync pattern). *)
 
-(** Allowed values for [masc_agent_card] [action].  Mirror of
-    [Tool_agent.valid_agent_card_action_strings]. *)
-val agent_card_action_enum_strings : string list
-
 (** Tool schemas: [masc_agent_fitness], [masc_get_metrics], and
-    [masc_agent_card]. *)
+    [masc_agent_card]. Decoding refuses the boot on a missing or malformed
+    declaration rather than publishing a partial surface. *)
 val schemas : Masc_domain.tool_schema list

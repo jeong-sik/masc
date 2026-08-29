@@ -1,76 +1,31 @@
-open Masc_domain
+(** The three agent tools, read from [config/tools/*.toml] (RFC
+    prompts-and-tool-definitions-outside-ocaml §2.2).
 
-(** Issue #8501: hand-mirrored from
-    [Tool_agent.valid_agent_card_action_strings]. masc_tool_schemas
-    only depends on masc_types so it cannot derive directly.
-    [test_agent_card_action_mirror] compares the published
-    [masc_agent_card] enum against the owner's list, so drift fails there.
-    Same shape as #8467/#8480/#8484/#8490/#8493 mirror+sync pattern. *)
+    Decoded once at module initialization. A missing file or a declaration that
+    does not decode refuses the boot rather than advertising a partial agent
+    surface, so a reader never has to ask whether the schema loaded.
 
-let agent_card_action_enum_strings = [ "get"; "refresh" ]
+    The [masc_agent_card] action enum used to be hand-mirrored here from
+    [Tool_agent.valid_agent_card_action_strings] (#8501), because
+    masc_tool_schemas only depends on masc_types and cannot reach the owner.
+    The mirror still exists -- it is now the enum line in
+    [config/tools/masc_agent_card.toml] -- and
+    [test_agent_card_action_mirror] still compares the published values
+    against the owner's list, so drift fails there as before. *)
 
-let schemas : tool_schema list = [
-  {
-    name = "masc_agent_fitness";
-    description = "Get fitness scores for agents based on completion rate, reliability, and speed metrics.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: Get fitness for specific agent. If omitted, returns all agents.");
-        ]);
-        ("days", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Number of days to analyze (default: 7)");
-          ("default", `Int 7);
-        ]);
-      ]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-  {
-    name = "masc_get_metrics";
-    description = "Fetch raw performance metrics for an agent: task completion, timing, error rates, collaboration history.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Agent name to get metrics for");
-        ]);
-        ("days", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Number of days of history (default: 7)");
-          ("default", `Int 7);
-          ("minimum", `Int 1);
-          ("maximum", `Int 90);
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
+let schema_of_name name : Masc_domain.tool_schema =
+  let rel = "tools/" ^ name ^ ".toml" in
+  match Embedded_config.read rel with
+  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
+  | Some contents ->
+    (match Tool_definition_toml.load ~name ~contents with
+     | Ok { Tool_definition_toml.schema; _ } -> schema
+     | Error message -> failwith message)
+;;
 
-  {
-    name = "masc_agent_card";
-    description = "Return the MASC server agent card and optional live agent summary.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("action", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) agent_card_action_enum_strings));
-          ("description", `String "Card action: get or refresh.");
-          ("default", `String "get");
-        ]);
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional live agent name to include in the card.");
-        ]);
-      ]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-
-]
+let schemas : Masc_domain.tool_schema list =
+  [ schema_of_name "masc_agent_fitness"
+  ; schema_of_name "masc_get_metrics"
+  ; schema_of_name "masc_agent_card"
+  ]
+;;

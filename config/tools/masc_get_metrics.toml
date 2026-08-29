@@ -1,0 +1,19 @@
+name = "masc_get_metrics"
+description = """
+Fetch raw performance metrics for an agent: task completion, timing, error \
+rates, collaboration history."""
+additional_properties = false
+
+[[params]]
+name = "agent_name"
+type = "string"
+required = true
+description = "Agent name to get metrics for"
+
+[[params]]
+name = "days"
+type = "integer"
+description = "Number of days of history (default: 7)"
+default = 7
+minimum = 1
+maximum = 90

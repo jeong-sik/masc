@@ -99,7 +99,7 @@ let gate_causal_initial
 
 let expected_model_tool_names
       ~skill_catalog
-      ~identity_index_names
+      ~identity_names
       ~model_visible_descriptors
       ()
   =
@@ -129,14 +129,14 @@ let expected_model_tool_names
          @ composition_names
          @ instruction_names
          @ control_names
-         (* What the work services this Keeper is attached to offer. They
-            reach the model as one listing tool rather than as themselves, so
-            the surface carries that one name and the attached names appear
-            only inside its description. Named here from the same list the
-            bundle was handed, so the projection check keeps meaning "the
-            surface is what it was built from" rather than being widened
+         (* What the work services this Keeper is attached to offer, as this
+            surface names them: the official-client lanes carry the tools
+            themselves, the Agent Core lane carries the one listing tool that
+            hands them over on request. Named by the caller from the same
+            list the bundle was handed, so the projection check keeps meaning
+            "the surface is what it was built from" rather than being widened
             into always passing. *)
-         @ identity_index_names)
+         @ identity_names)
 ;;
 
 let prepare_agent_setup
@@ -491,33 +491,49 @@ let prepare_agent_setup
   let all_tool_names =
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
-  let expected_model_names =
-    expected_model_tool_names ~skill_catalog
-      ~identity_index_names:
-        (match identity_offering.Keeper_identity_tools.offered with
-         | [] -> []
-         | _ :: _ -> [ Keeper_identity_tool_search.tool_name ])
-      ~model_visible_descriptors:turn_model_visible_descriptors
-      ()
+  let attached_names =
+    List.map
+      (fun (offered : Keeper_identity_tools.offered_tool) ->
+         offered.Keeper_identity_tools.schema.name)
+      identity_offering.Keeper_identity_tools.offered
   in
-  let actual_model_names = List.sort_uniq String.compare all_tool_names in
-  let all_model_eligible_tools_visible =
-    expected_model_names = actual_model_names
-    && List.length actual_model_names = List.length all_tool_names
+  (* Two surfaces now, and each is checked against the names it carries. One
+     check over one of them would leave the other free to drift: they differ
+     only in how the attached tools appear, which is exactly the part being
+     changed. *)
+  let check_projection ~surface ~identity_names tools =
+    let actual = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
+    let expected =
+      expected_model_tool_names
+        ~skill_catalog
+        ~identity_names
+        ~model_visible_descriptors:turn_model_visible_descriptors
+        ()
+    in
+    let deduped = List.sort_uniq String.compare actual in
+    if not (expected = deduped && List.length deduped = List.length actual)
+    then
+      Log.Keeper.emit
+        Log.Error
+        ~keeper_name:meta.name
+        ~category:Log.Tool
+        ~details:
+          (`Assoc
+             [ "error_kind", `String "keeper_model_tool_projection_mismatch"
+             ; "surface", `String surface
+             ; "expected_names", Json_util.json_string_list expected
+             ; "actual_names", Json_util.json_string_list actual
+             ])
+        "Keeper model tool bundle differs from the descriptor projection"
   in
-  if not all_model_eligible_tools_visible
-  then
-    Log.Keeper.emit
-      Log.Error
-      ~keeper_name:meta.name
-      ~category:Log.Tool
-      ~details:
-        (`Assoc
-           [ "error_kind", `String "keeper_model_tool_projection_mismatch"
-           ; "expected_names", Json_util.json_string_list expected_model_names
-           ; "actual_names", Json_util.json_string_list all_tool_names
-           ])
-      "Keeper model tool bundle differs from the descriptor projection";
+  check_projection ~surface:"tools" ~identity_names:attached_names keeper_tools;
+  check_projection
+    ~surface:"agent_core_tools"
+    ~identity_names:
+      (match attached_names with
+       | [] -> []
+       | _ :: _ -> [ Keeper_identity_tool_search.tool_name ])
+    keeper_agent_core_tools;
   Log.Keeper.routine
     "keeper:%s tool visibility: registered=%d visible=%d transport_alias=%d \
      operator_only=%d invalid_schema=%d unexplained=%d"

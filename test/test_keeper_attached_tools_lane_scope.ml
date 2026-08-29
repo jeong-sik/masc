@@ -160,6 +160,30 @@ let test_the_agent_core_lane_gets_the_listing_instead () =
     check int "and gains exactly one tool in their place" 1 (List.length gained))
 ;;
 
+(* [Keeper_run_tools_setup] compares the bundle against what the descriptor
+   projection says the surface should hold, and logs [Log.Error] every turn
+   when they disagree. There are two surfaces now and they name the attached
+   tools differently, so a check written for one of them passes while the
+   other drifts. This pins the shape the Agent Core lane is checked against;
+   [test_keeper_tool_bundle_classifiable] pins the other. *)
+let test_the_agent_core_shape_is_what_the_projection_expects () =
+  with_bundle (fun bundle ->
+    let expected =
+      Keeper_run_tools_setup.expected_model_tool_names
+        ~skill_catalog:Keeper_skill_catalog.empty
+        ~identity_names:[ Keeper_identity_tool_search.tool_name ]
+        ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
+        ()
+    in
+    check
+      (list string)
+      "the listing stands for every attached tool and nothing else moved"
+      expected
+      (List.sort_uniq
+         String.compare
+         (tool_names bundle.Keeper_tools_agent_core.agent_core_tools)))
+;;
+
 let () =
   run
     "attached tools lane scope"
@@ -172,6 +196,10 @@ let () =
             "hands the agent core lane the listing instead"
             `Quick
             test_the_agent_core_lane_gets_the_listing_instead
+        ; test_case
+            "builds the agent core shape the projection expects"
+            `Quick
+            test_the_agent_core_shape_is_what_the_projection_expects
         ] )
     ]
 ;;

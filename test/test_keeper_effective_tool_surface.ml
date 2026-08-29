@@ -285,7 +285,7 @@ let test_projection_names_equal_turn_surface_authority () =
     check int "snapshot projection diagnostics" 0 (List.length diagnostics);
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
-        ~identity_index_names:[]
+        ~identity_names:[]
         ~skill_catalog:catalog
         ~model_visible_descriptors:descriptors
         ()

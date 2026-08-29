@@ -191,3 +191,6 @@ memory/
 *.cmti
 
 # End of .gitignore
+
+# remote-ssh shim binaries (built by scripts/remote-ssh/build-shim.sh)
+/dist/

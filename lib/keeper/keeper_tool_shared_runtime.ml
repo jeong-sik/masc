@@ -392,11 +392,7 @@ let active_descriptor_names_for_descriptors descriptors =
 ;;
 
 let active_descriptor_names ~(meta : keeper_meta) =
-  let descriptors =
-    Keeper_tool_descriptor.tool_groups_to_surface meta.tool_groups
-    |> fun surface ->
-    Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
-  in
+  let descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
   active_descriptor_names_for_descriptors descriptors
 ;;
 
@@ -404,10 +400,8 @@ let grouped_active_names active_descriptor_names =
   let grouped =
     List.fold_left
       (fun acc (name, descriptor) ->
-         let cat =
-           Keeper_tool_descriptor.keeper_tool_group_to_string
-             descriptor.Keeper_tool_descriptor.keeper_tool_group
-         in
+         let cat = "tool" in
+         ignore (descriptor : Keeper_tool_descriptor.t);
          let list = StringMap.find_opt cat acc |> Option.value ~default:[] in
          StringMap.add cat (name :: list) acc)
       StringMap.empty

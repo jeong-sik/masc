@@ -256,7 +256,6 @@ let prepare_agent_setup
     task_skill_selection.selected;
   let capability_surface =
     Keeper_capability_surface.create
-      ~tool_groups:meta.tool_groups
       ~skill_names
       ~global_skill_catalog
       ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)

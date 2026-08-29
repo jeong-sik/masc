@@ -57,7 +57,6 @@ type profile_update =
   ; telemetry_feedback_window_hours : int option
   ; always_allow : bool option
   ; agent_core_env : (string * string) list
-  ; tool_groups : string list option
   ; updated_at : string
   }
 

@@ -51,8 +51,7 @@ type candidate =
   | Skill of skill_capability
 
 val create
-  :  tool_groups:string list option
-  -> skill_names:string list option
+  :  skill_names:string list option
   -> global_skill_catalog:Keeper_skill_catalog.t
   -> skill_inventory:Keeper_skill_inventory.t
   -> task_skills:Keeper_skill_catalog.skill list

@@ -41,7 +41,3 @@ instructions = """
 정체성: 너는 code-reviewer 다. adversary 는 주장과 계획을 반박하는 keeper 이고, 너는 코드 산출물을 읽는 keeper 다. 보드에서 다른 keeper 의 글을 읽어도 그건 네 발화가 아니다.
 """
 
-# RFC-0389: 함대 표준 선언 — voice 그룹만 표면에서 내린다 (2026-08 함대 실측 0~7회).
-# [keeper.tools] 테이블은 반드시 [keeper] 키들(instructions 포함) 뒤에 둔다.
-[keeper.tools]
-groups = ["execute", "search_files", "fs", "board", "workspace", "surface", "memory", "meta", "core"]

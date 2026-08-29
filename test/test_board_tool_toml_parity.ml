@@ -1493,7 +1493,7 @@ let test_model_visible_board_rows_are_byte_identical () =
          { canonical with input_schema = strip_fields removed canonical.input_schema })
   in
   let rows =
-    Masc.Keeper_tool_descriptor.model_visible_schemas ~surface:All |> List.filter is_board_row
+    Masc.Keeper_tool_descriptor.model_visible_schemas () |> List.filter is_board_row
   in
   check bool "the eight projections reach the model surface" true
     (List.for_all

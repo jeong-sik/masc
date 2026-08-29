@@ -158,7 +158,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
 	        };
       keeper_id = Some (Keeper_id.Uid.generate ());
       agent_core_env = p.profile_defaults.agent_core_env;
-      tool_groups = p.profile_defaults.tool_groups;
       } in
       let system_prompt =
         Keeper_run_context.build_base_system_prompt

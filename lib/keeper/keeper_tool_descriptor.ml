@@ -23,22 +23,12 @@ type keeper_model_projection =
   | Operator_only
   | Transport_alias of { projected_by : string }
 
-(* RFC-0389: the group vocabulary lives in [Keeper_tool_group], a leaf under
-   both this descriptor and the TOML parser, so the parser can reject an
-   unknown group at load time instead of this module stringly re-parsing it
-   at the consumer. The alias keeps every existing constructor use working. *)
-type keeper_tool_group = Keeper_tool_group.t
 
-open Keeper_tool_group
 
 (** Per-Keeper model tool surface (RFC-0389). [All] is the current behavior:
     every model-visible descriptor. [Declared] narrows the surface to the
     declared groups; [Core_group] and [Meta_group] are always retained so a
     Keeper can always introspect its own surface. *)
-type tool_surface =
-  | All
-  | Declared of { groups : keeper_tool_group list }
-
 type input_schema_source =
   | Descriptor_owned
   | Canonical_registry
@@ -164,7 +154,6 @@ type t =
   { id : string
   ; capability_id : string
   ; keeper_model_projection : keeper_model_projection
-  ; keeper_tool_group : keeper_tool_group
   ; input_schema_source : input_schema_source
   ; public_name : string
   ; internal_name : string
@@ -214,39 +203,6 @@ let keeper_model_projection_to_string = function
 
 ;;
 
-let keeper_tool_group_to_string = Keeper_tool_group.to_string
-;;
-
-(* RFC-0389: strict inverse of [keeper_tool_group_to_string]. Unknown strings
-   are [None], never a silent fallback — the TOML loader rejects them at
-   load time; this reader is for rows that predate a rename. *)
-let keeper_tool_group_of_string = Keeper_tool_group.of_string
-;;
-
-(* RFC-0389: convert raw TOML group names to a [tool_surface].
-   [None] or empty list → [All] (inherit, no narrowing).
-   Unknown names are logged as warnings and silently excluded (fail-open).
-   Validation at TOML load time is impossible due to the dependency cycle
-   between Keeper_types_profile_defaults and Keeper_tool_descriptor. *)
-let tool_groups_to_surface (groups : string list option) : tool_surface =
-  match groups with
-  | None | Some [] -> All
-  | Some raw ->
-    let parsed =
-      List.filter_map
-        (fun name ->
-          match keeper_tool_group_of_string name with
-          | Some g -> Some g
-          | None ->
-            Log.Keeper.warn
-              "tool_groups: unknown group name %S ignored"
-              name;
-            None)
-        raw
-    in
-    if parsed = [] then All
-    else Declared { groups = parsed }
-;;
 
 let input_schema_source_to_string = function
   | Descriptor_owned -> "descriptor_owned"
@@ -298,50 +254,6 @@ let runtime_handler_to_string = function
   | Tool_analyze_image -> "tool_analyze_image"
 ;;
 
-let keeper_tool_group_of_runtime_handler = function
-  | Tool_execute -> Execute_group
-  (* WebMCP consumption runs an external browser bridge, so it rides the
-     execute opt-in group rather than adding an eleventh group. *)
-  | Tool_keeper_webmcp_dispatch -> Execute_group
-  (* A code query answers the question Grep answers -- where is this name --
-     from the compiler's view of the code rather than the text's, so it
-     belongs to the same group and not to the filesystem tools. *)
-  | Tool_search_files | Tool_keeper_code_query_dispatch -> Search_files_group
-  | Tool_read_file | Tool_edit_file | Tool_write_file -> Filesystem_group
-  | Tool_board_dispatch -> Board_group
-  | Tool_voice_dispatch -> Voice_group
-  | Tool_task_dispatch | Tool_masc_task_dispatch | Tool_masc_plan_dispatch ->
-    Workspace_group
-  | Tool_masc_run_dispatch
-  | Tool_masc_agent_dispatch
-  | Tool_masc_workspace_dispatch
-  | Tool_masc_control_dispatch
-  | Tool_masc_agent_timeline_dispatch
-  | Tool_masc_schedule_dispatch
-  (* Spawn starts a process, so it answers to the same group Execute does
-     rather than to the workspace tools it sits beside alphabetically. *)
-  | Tool_keeper_spawn_dispatch
-  | Tool_masc_keeper_dispatch
-  | Tool_masc_fusion_dispatch
-  | Tool_masc_fusion_status
-  | Tool_masc_misc_dispatch
-  | Tool_web_search
-  | Tool_web_fetch
-  | Tool_masc_local_runtime_dispatch
-  | Tool_artifact_read
-  | Tool_analyze_image -> Core_group
-  | Tool_surface_read | Tool_surface_post | Tool_person_note_set -> Surface_group
-  | Tool_memory_search
-  | Tool_memory_write
-  | Tool_library_search
-  | Tool_library_read
-  | Tool_masc_library_dispatch -> Memory_group
-  | Tool_time_now
-  | Tool_tools_list
-  | Tool_capability_search
-  | Tool_context_status
-  | Tool_ide_annotate -> Meta_group
-;;
 
 let discovery_example ~label ?cwd ~argv () =
   let input =
@@ -575,9 +487,6 @@ let descriptor
     ; "runtime_handler", runtime_handler_to_string runtime_handler
     ; "execution", execution_to_string execution
     ; "composable_output", composable_output_kind composable_output
-    ; ( "keeper_tool_group"
-      , keeper_tool_group_to_string
-          (keeper_tool_group_of_runtime_handler runtime_handler) )
     ; "input_schema_source", input_schema_source_to_string input_schema_source
     ]
     @ (match keeper_model_projection with
@@ -588,7 +497,6 @@ let descriptor
   { id
   ; capability_id
   ; keeper_model_projection
-  ; keeper_tool_group = keeper_tool_group_of_runtime_handler runtime_handler
   ; input_schema_source
   ; public_name
   ; internal_name
@@ -2475,29 +2383,10 @@ let model_visible_descriptors () =
     | [], _ :: _ -> true)
 ;;
 
-(* RFC-0389: [Core_group] and [Meta_group] are always retained so a Keeper can
-   always introspect its own surface (self-describing tools). *)
-let always_retained_groups = [ Core_group; Meta_group ]
 
-let descriptor_in_surface ~surface descriptor =
-  match surface with
-  | All -> true
-  | Declared { groups } ->
-    List.mem descriptor.keeper_tool_group (groups @ always_retained_groups)
-;;
 
-(* RFC-0389: the model-visible descriptors narrowed to [surface]. [All] returns
-   every model-visible descriptor (the pre-feature behaviour); [Declared]
-   keeps only the declared groups plus the always-retained Core/Meta. This is
-   the descriptor-level projection that [make_tool_bundle] consumes so a
-   declared Keeper's actual turn payload narrows, not just its discovery JSON. *)
-let model_visible_descriptors_for_surface ~surface =
+let model_visible_schemas () =
   model_visible_descriptors ()
-  |> List.filter (descriptor_in_surface ~surface)
-;;
-
-let model_visible_schemas ~surface =
-  model_visible_descriptors_for_surface ~surface
   |> List.concat_map (fun descriptor ->
     keeper_model_names descriptor
     |> List.map (fun name ->
@@ -2625,7 +2514,6 @@ let discovery_fields d =
    ; "capability_id", `String d.capability_id
    ; ( "keeper_model_projection"
      , `String (keeper_model_projection_to_string d.keeper_model_projection) )
-    ; "keeper_tool_group", `String (keeper_tool_group_to_string d.keeper_tool_group)
    ; "input_schema_source", `String (input_schema_source_to_string d.input_schema_source)
    ; "public_name", `String d.public_name
    ; "internal_name", `String d.internal_name

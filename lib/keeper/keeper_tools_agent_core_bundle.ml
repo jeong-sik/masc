@@ -610,13 +610,7 @@ let make_tool_bundle_with_policy
       ?turn_ctx_cell
       ()
   =
-  (* RFC-0389: a declared [meta.tool_groups] narrows the model-visible surface
-     to those groups (Core/Meta always retained). [None]/empty keeps [All], so
-     an undeclared Keeper's turn payload is byte-identical to before. *)
-  let surface = Keeper_tool_descriptor.tool_groups_to_surface meta.tool_groups in
-  let descriptors =
-    Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
-  in
+  let descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
   make_tool_bundle_for_descriptors_with_policy
     ~config
     ~meta

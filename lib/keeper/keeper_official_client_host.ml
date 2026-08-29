@@ -1132,58 +1132,7 @@ let persist_pre_tool_rejects ~session_dir ~session_id rejects =
         | Error detail -> Error detail))
 ;;
 
-(* A loaded settings layer can carry skills and hooks — code the CLI executes
-   inside the vendor loop, outside the MASC approval gate — so a non-empty
-   declaration needs the same admission bar as [Native_full]. *)
-let admit_claude_setting_sources ~sources ~approval_mode ~client_label =
-  match sources with
-  | [] -> Ok ()
-  | _ :: _ ->
-    (match (approval_mode : Keeper_tool_approval_mode.mode) with
-     | Yolo -> Ok ()
-     | Auto ->
-       Error
-         (Printf.sprintf
-            "claude-setting-sources loads %s settings layers (skills/hooks) \
-             outside the approval gate; set the keeper's tool-approval mode \
-             to yolo first"
-            client_label))
-;;
 
-(* Same degrade-not-fail posture as [resolve_native_posture]: an admission
-   refusal keeps the turn alive on the safe value (no settings layer) and
-   says so in the log, because the approval mode is turn state an operator
-   can flip mid-run. Profile load failures stay fail-closed. *)
-let resolve_claude_setting_sources ~base_path ~keeper_name ~client_label =
-  match
-    Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
-      ~base_path
-      keeper_name
-  with
-  | Error load_error ->
-    Error
-      (config_error
-         ~field:"keeper.tools.claude-setting-sources"
-         (Keeper_types_profile.keeper_toml_load_error_to_string load_error))
-  | Ok defaults ->
-    let declared = Option.value defaults.claude_setting_sources ~default:[] in
-    let approval_mode =
-      Keeper_tool_approval_mode.resolve
-        (Keeper_tool_approval_mode.shared ())
-        ~keeper_name
-    in
-    (match
-       admit_claude_setting_sources ~sources:declared ~approval_mode ~client_label
-     with
-     | Ok () -> Ok declared
-     | Error detail ->
-       Log.Keeper.warn
-         ~keeper_name
-         "%s setting sources downgraded to none for this turn: %s"
-         client_label
-         detail;
-       Ok [])
-;;
 
 let admit_native_posture ~posture ~approval_mode ~none_supported ~client_label =
   match (posture : Runtime_native_tools.posture), none_supported with

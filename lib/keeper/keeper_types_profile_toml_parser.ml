@@ -43,7 +43,6 @@ let keeper_toml_fields =
        [tools.nativ] and leave the runtime on its default posture without a
        word, which is what naming them here prevents. *)
   ; "tools.native", Field_string
-  ; "tools.claude-setting-sources", Field_string_array
   ; "tools.groups", Field_string_array
   ; "skills.names", Field_string_array
   ]
@@ -167,41 +166,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                 (String.concat ", " names)))
     | Some _ -> Ok None
   in
-  (* Closed vocabulary, duplicates rejected: a repeated layer would render a
-     repeated CLI token, and a typo must fail the load rather than silently
-     select no layer. *)
-  let claude_setting_sources_result =
-    match List.assoc_opt "keeper.tools.claude-setting-sources" doc with
-    | None -> Ok None
-    | Some (Keeper_toml_loader.Toml_string_array raw_sources) ->
-      let parsed =
-        List.map
-          (fun raw ->
-             match Runtime_native_tools.claude_setting_source_of_string raw with
-             | Some source -> Ok source
-             | None ->
-               Error
-                 (Printf.sprintf
-                    "invalid keeper.tools.claude-setting-sources entry '%s' \
-                     (allowed: %s)"
-                    raw
-                    (String.concat
-                       ", "
-                       Runtime_native_tools.valid_claude_setting_source_strings)))
-          raw_sources
-      in
-      (match List.find_map (function Error e -> Some e | Ok _ -> None) parsed with
-       | Some error -> Error error
-       | None ->
-         let sources =
-           List.filter_map (function Ok s -> Some s | Error _ -> None) parsed
-         in
-         let distinct = List.sort_uniq compare sources in
-         if List.length distinct <> List.length sources
-         then Error "keeper.tools.claude-setting-sources must not repeat a layer"
-         else Ok (Some sources))
-    | Some _ -> Ok None
-  in
   let result =
     match detect_unknown_keeper_toml_keys doc with
     | [] -> Ok ()
@@ -217,22 +181,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         | Ok _ -> Ok ()
         | Error error -> Error error)
   in
-  let result =
-    Result.bind result (fun () ->
-        match claude_setting_sources_result with
-        | Ok _ -> Ok ()
-        | Error error -> Error error)
-  in
   (* The record is built from the checked value; on [Error] the parse below
      never escapes to a caller anyway, so the fallback here is unreachable
      bookkeeping rather than a silent pass-through. *)
   let tool_groups =
     match tool_groups_result with Ok groups -> groups | Error _ -> None
-  in
-  let claude_setting_sources =
-    match claude_setting_sources_result with
-    | Ok sources -> sources
-    | Error _ -> None
   in
   (* Do not use [strs] alone here: it maps an absent array and an explicit []
      to the same value. The profile contract gives those opposite meanings. *)
@@ -381,7 +334,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         always_allow = bool_ "always_allow";
         native_tool_posture =
           Option.bind (str "tools.native") Runtime_native_tools.of_string;
-        claude_setting_sources;
         tool_groups;
         skill_names;
         agent_core_env;
@@ -436,8 +388,6 @@ let merge_keeper_profile_defaults
     always_allow = prefer overlay.always_allow base.always_allow;
     native_tool_posture =
       prefer overlay.native_tool_posture base.native_tool_posture;
-    claude_setting_sources =
-      prefer overlay.claude_setting_sources base.claude_setting_sources;
     tool_groups = prefer overlay.tool_groups base.tool_groups;
     skill_names = prefer overlay.skill_names base.skill_names;
     agent_core_env =

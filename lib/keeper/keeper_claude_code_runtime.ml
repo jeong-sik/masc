@@ -476,12 +476,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~default:Runtime_native_tools.claude_code_default
         ~none_supported:true
     in
-    let* setting_sources =
-      Host.resolve_claude_setting_sources
-        ~base_path
-        ~keeper_name
-        ~client_label:"Claude Code"
-    in
+    (* The keeper TOML surface no longer declares setting sources — the
+       fleet never used the field. The safe value the old admission rule
+       degraded to is now the only value. *)
+    let setting_sources = [] in
     (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256 ~native_posture tools

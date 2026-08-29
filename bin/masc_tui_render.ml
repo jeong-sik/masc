@@ -3586,6 +3586,24 @@ let keeper_health_word (health : Tui_decode.keeper_health option) =
   | None -> "unread"
   | Some value -> Tui_decode.keeper_health_to_string value
 
+(* The table's variant: the normal state is silent. On a healthy fleet every
+   row said "healthy" while the heading counted "11 healthy" and the summary
+   said "fleet ok" — the same fact four times, and the glyph beside the word
+   already carries the health colour. Only a deviation earns a word, so the
+   one stale row is the only row with text in the column. The single-keeper
+   chat header keeps {!keeper_health_word}: alone, the word is identity, not
+   repetition. *)
+let keeper_health_deviation_word (health : Tui_decode.keeper_health option) =
+  match health with
+  | None -> "unread"
+  | Some value -> (
+      match Tui_decode.keeper_health_reading value with
+      | Tui_decode.Health_running -> ""
+      | Tui_decode.Health_idle | Tui_decode.Health_offline
+      | Tui_decode.Health_stale | Tui_decode.Health_degraded
+      | Tui_decode.Health_zombie ->
+          Tui_decode.keeper_health_to_string value)
+
 (* [runtime_id] is the producer-owned runtime identity. Keep it whole instead
    of deriving a model by splitting its spelling: the phase is a separate
    typed reading, while the sanitized id is the exact identity the gate named. *)
@@ -3609,7 +3627,13 @@ let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
   match runtime with
   | None -> fit_width "\xe2\x80\x94" width
   | Some row ->
-      let phase = Tui_decode.keeper_phase_to_string row.kr_phase ^ " " in
+      (* Running is the normal lifecycle and stays silent — eleven rows all
+         reading "running" said nothing any row could act on; the cells go to
+         the runtime identity instead. Every other phase keeps its word. *)
+      let phase =
+        if Tui_decode.keeper_phase_is_running row.kr_phase then ""
+        else Tui_decode.keeper_phase_to_string row.kr_phase ^ " "
+      in
       let runtime_id = Terminal_text.single_line row.kr_runtime_id in
       let phase_width = Message_layout.display_width phase in
       if phase_width >= width then fit_width (keeper_runtime_label runtime) width
@@ -3772,7 +3796,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     | Some (Tui_decode.Keeper_turn_unavailable _)
     | None ->
       ( keeper_state_glyph ~paused ~health
-      , keeper_health_word health
+      , keeper_health_deviation_word health
       , status_color )
   in
   (* Selection is the full-row band the caller draws (box_line_selected over

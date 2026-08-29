@@ -67,6 +67,16 @@ let keeper_next_action_of_string =
   Keeper_status_runtime.keeper_next_action_path_of_string_opt
 let keeper_phase_to_string = Keeper_state_machine.phase_to_string
 
+(* Exhaustive on purpose, like [keeper_health_reading]: a tenth phase stops
+   the build here instead of silently counting as not-running on screen. *)
+let keeper_phase_is_running : keeper_phase -> bool = function
+  | Keeper_state_machine.Running -> true
+  | Keeper_state_machine.Offline | Keeper_state_machine.Failing
+  | Keeper_state_machine.Compacting | Keeper_state_machine.Draining
+  | Keeper_state_machine.Paused | Keeper_state_machine.Stopped
+  | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
+      false
+
 type keeper_runtime = {
   kr_name : string;
   kr_health : keeper_health;

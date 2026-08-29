@@ -548,6 +548,12 @@
  (modules masc_tui_render_schedule))
 
 (library
+ (name masc_tui_frame_timing)
+ (wrapped false)
+ (modules masc_tui_frame_timing)
+ (libraries mtime.clock.os))
+
+(library
  (name masc_tui_help)
  (wrapped false)
  (modules masc_tui_help)
@@ -755,6 +761,7 @@
   masc_tui_answering
   masc_tui_ask_projection
   masc_tui_frame
+  masc_tui_frame_timing
   masc_tui_attachment
   masc_tui_browser
   masc_tui_clipboard

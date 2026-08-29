@@ -2219,11 +2219,17 @@ let required_nonempty_string_field json key =
   then Error (Printf.sprintf "field '%s' must be a non-empty string" key)
   else Ok value
 
-let optional_nonempty_string_field json key =
-  let* value = optional_string_field json key in
-  match value with
-  | Some "" -> Error (Printf.sprintf "field '%s' must be non-empty or null" key)
-  | Some _ | None -> Ok value
+let required_nullable_nonempty_string_field json key =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | None -> missing_field key
+     | Some `Null -> Ok None
+     | Some (`String "") ->
+       Error (Printf.sprintf "field '%s' must be non-empty or null" key)
+     | Some (`String value) -> Ok (Some value)
+     | Some bad -> field_type_error key "a non-empty string or null" bad)
+  | bad -> field_type_error "skill snapshot rejection" "an object" bad
 
 let required_nonnegative_int_field json key =
   let* value = required_int_field json key in
@@ -2234,7 +2240,7 @@ let required_nonnegative_int_field json key =
 let decode_skill_document_field json =
   let* () = validate_closed_object ~label:"diagnostic.field" ~allowed:[ "kind"; "name" ] json in
   let* kind = required_string_field json "kind" in
-  let* name = required_nonempty_string_field json "name" in
+  let* name = required_string_field json "name" in
   match kind, name with
   | "standard", "name" -> Ok (Skill_document.Standard Skill_document.Name)
   | "standard", "description" ->
@@ -2330,11 +2336,11 @@ let decode_skill_rejection_diagnostic json =
       Ok (Skill_document.Duplicate_field field)
     | "duplicate_metadata_key" ->
       let* () = closed [ "key" ] in
-      let* key = required_nonempty_string_field json "key" in
+      let* key = required_string_field json "key" in
       Ok (Skill_document.Duplicate_metadata_key key)
     | "unexpected_frontmatter_field" ->
       let* () = closed [ "field" ] in
-      let* field = required_nonempty_string_field json "field" in
+      let* field = required_string_field json "field" in
       Ok (Skill_document.Unexpected_frontmatter_field field)
     | "missing_name" ->
       let* () = closed [] in
@@ -2378,7 +2384,7 @@ let decode_skill_rejection_diagnostic json =
       Ok (Skill_document.Compatibility_too_long { length })
     | "invalid_metadata_value" ->
       let* () = closed [ "key" ] in
-      let* key = required_nonempty_string_field json "key" in
+      let* key = required_string_field json "key" in
       Ok (Skill_document.Invalid_metadata_value { key })
     | unknown ->
       Error (Printf.sprintf "skill diagnostic code has unknown value %S" unknown)
@@ -2433,9 +2439,11 @@ let decode_skill_catalog_rejection json =
   in
   let* scr_source_index = required_nonnegative_int_field json "source_index" in
   let* scr_source_id = required_nonempty_string_field json "source_id" in
-  let* scr_package_id = optional_nonempty_string_field json "package_id" in
+  let* scr_package_id =
+    required_nullable_nonempty_string_field json "package_id"
+  in
   let* scr_content_revision =
-    optional_nonempty_string_field json "content_revision"
+    required_nullable_nonempty_string_field json "content_revision"
   in
   let* reason = required_object_field json "reason" in
   let* kind = required_string_field reason "kind" in

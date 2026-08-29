@@ -1763,6 +1763,47 @@ let test_decode_skills_catalog_keeps_invalid_only_rejections () =
      | _ -> Alcotest.fail "typed name-mismatch diagnostic was not retained")
   | Ok _ -> Alcotest.fail "invalid-only rejection was dropped"
 
+let test_decode_skills_catalog_keeps_empty_invalid_identifiers () =
+  let rejection =
+    `Assoc
+      [ "source_index", `Int 0
+      ; "source_id", `String "workspace"
+      ; "package_id", `Null
+      ; "content_revision", `Null
+      ; ( "reason"
+        , `Assoc
+            [ "kind", `String "document_rejected"
+            ; ( "diagnostics"
+              , `List
+                  [ `Assoc
+                      [ "code", `String "unexpected_frontmatter_field"
+                      ; "message", `String "empty YAML key is not specified"
+                      ; "field", `String ""
+                      ]
+                  ] )
+            ] )
+      ]
+  in
+  let payload =
+    `Assoc
+      [ "schema", `String "masc.skill-snapshot/v1"
+      ; "state", `String "ready"
+      ; "snapshot", skill_snapshot_json ~rejections:[ rejection ] ()
+      ; "surfaces", `List []
+      ]
+  in
+  match Tui_decode.decode_skills_catalog payload with
+  | Error error -> Alcotest.failf "empty invalid identifier was lost: %s" error
+  | Ok { sc_rejections = [ rejection ]; _ } ->
+    (match rejection.scr_reason with
+     | Tui_decode.Skill_document_rejected
+         [ { srd_diagnostic =
+                 Agent_core.Skill_document.Unexpected_frontmatter_field ""
+             ; _
+             } ] -> ()
+     | _ -> Alcotest.fail "empty invalid field was not preserved")
+  | Ok _ -> Alcotest.fail "empty-key rejection was dropped"
+
 let test_decode_skills_catalog_closes_schema_and_state () =
   let expect_error label payload =
     match Tui_decode.decode_skills_catalog payload with
@@ -1798,6 +1839,22 @@ let test_decode_skills_catalog_closes_schema_and_state () =
        [ "schema", `String "masc.skill-snapshot/v1"
        ; "state", `String "invalid_workspace"
        ; "reason", `Assoc [ "code", `String "workspace_missing" ]
+       ]);
+  let missing_nullable_rejection =
+    `Assoc
+      [ "source_index", `Int 0
+      ; "source_id", `String "workspace"
+      ; "reason", `Assoc [ "kind", `String "document_unreadable" ]
+      ]
+  in
+  expect_error
+    "missing nullable rejection fields"
+    (`Assoc
+       [ "schema", `String "masc.skill-snapshot/v1"
+       ; "state", `String "ready"
+       ; ( "snapshot"
+         , skill_snapshot_json ~rejections:[ missing_nullable_rejection ] () )
+       ; "surfaces", `List []
        ])
 
 let test_decode_skills_catalog_reads_each_unready_state () =
@@ -5704,6 +5761,8 @@ let () =
           test_decode_skills_catalog_rejects_a_wrong_kind_type;
         Alcotest.test_case "keeps invalid-only typed rejections" `Quick
           test_decode_skills_catalog_keeps_invalid_only_rejections;
+        Alcotest.test_case "keeps empty invalid identifiers" `Quick
+          test_decode_skills_catalog_keeps_empty_invalid_identifiers;
         Alcotest.test_case "closes schema and state" `Quick
           test_decode_skills_catalog_closes_schema_and_state;
         Alcotest.test_case "reads every unready state" `Quick

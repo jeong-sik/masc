@@ -338,8 +338,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_clear_task", broadcast_tool);
     ("masc_config", read_state_tool);
     ("masc_check", read_state_tool);
-    ("masc_web_search", read_state_tool);
-    ("masc_web_fetch", read_state_tool);
     ("masc_agent_fitness", read_state_tool);
     ("masc_agent_timeline", read_state_tool);
     ("masc_get_metrics", read_state_tool);
@@ -481,7 +479,6 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_broadcast", keeper_shard_write);
     ("keeper_handoff", keeper_shard_write);
     ("keeper_task_create", keeper_shard_add_task);
-    ("keeper_analyze_image", keeper_shard_read);
     ("tool_edit_file", keeper_shard_write);
     ("tool_write_file", keeper_shard_write);
     ( "tool_execute",

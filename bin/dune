@@ -235,6 +235,16 @@
  (modules masc_tui_operator_projection)
  (libraries masc masc.operator masc.masc_core yojson))
 
+;; RFC tui-server-lifecycle: opt-in on-demand server start from the TUI.
+;; Own library so the pure discovery/argv/health-wait logic unit-tests
+;; without a TTY (task-550 pattern). Depends only on the detached-spawn
+;; primitives in masc.masc_process.
+(library
+ (name masc_tui_server_lifecycle)
+ (wrapped false)
+ (modules masc_tui_server_lifecycle)
+ (libraries masc.masc_process))
+
 (library
  (name masc_tui_ask_projection)
  (wrapped false)

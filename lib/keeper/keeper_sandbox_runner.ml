@@ -123,10 +123,9 @@ include Make (Docker_backend)
 let uses_backend ~config:_ ~meta ~cwd:_ =
   match effective_sandbox_profile ~meta with
   | Keeper_types_profile_sandbox.Docker, _ -> true
-  (* Routed away from the host like Docker. The refusal itself lives at the
-     surfaces that would otherwise run docker for a VM keeper: the factory
-     resolves [Micro_vm] to [Backend_unimplemented], and the docker shell
-     entrypoints refuse the profile before building an argv. *)
+  (* Routed away from the host like Docker: the factory hands a VM keeper
+     the same turn runtime, which builds Apple [container] argv for every
+     CLI it starts (#31225, #31178). *)
   | Keeper_types_profile_sandbox.Micro_vm, _ -> true
   | Keeper_types_profile_sandbox.Local, _ -> false
   (* remote_ssh does not route through the (Docker) sandbox backend —

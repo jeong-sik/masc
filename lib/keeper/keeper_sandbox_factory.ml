@@ -2,7 +2,6 @@ type resolve_result =
   | Runtime of Keeper_turn_sandbox_runtime.t
   | No_factory
   | Local_profile
-  | Backend_unimplemented of Keeper_types_profile_sandbox.sandbox_profile
   | Remote_ssh_profile
 
 type t = {

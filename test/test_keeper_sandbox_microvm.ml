@@ -166,10 +166,6 @@ let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
         it, which the argv pins below and the docker-entrypoint refusals
         keep honest. *)
      ()
-   | Backend_unimplemented _ ->
-     Alcotest.fail
-       "factory still refuses Micro_vm; the turn runtime now carries the \
-        profile and must be resolved"
    | No_factory | Local_profile ->
      Alcotest.fail "expected a runtime for Micro_vm"
    | Remote_ssh_profile ->

@@ -36,10 +36,8 @@ val ensure_fresh :
   -> (outcome, string) result
 (** Fail-closed only when it must: a stale (or absent) token with a failed
     mint is an [Error]; a token that is still fresh never touches the
-    network. Freshness means more than {!refresh_margin_sec} of lifetime
+    network. Freshness means more than five minutes of lifetime
     left. *)
-
-val refresh_margin_sec : float
 
 val default_http_post : http_post
 (** Production transport: the shared local-runtime curl client, 10s

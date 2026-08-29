@@ -4,6 +4,11 @@ let ( let* ) = Result.bind
 let ( let+ ) value f = Result.map f value
 let content_to_yojson block = Checkpoint_codec.checkpoint_content_block_to_json block
 
+let validate_json ~context json =
+  Execution_json.validate ~context json
+  |> Result.map_error Execution_json.validation_error_to_string
+;;
+
 let content_of_yojson json =
   let decoded =
     try
@@ -50,7 +55,7 @@ let optional_field name decode fields =
 ;;
 
 let of_yojson json =
-  let* () = Execution_json.validate ~context:"provider response snapshot" json in
+  let* () = validate_json ~context:"provider response snapshot" json in
   let* fields =
     Execution_json.object_fields
       ~context:"provider response snapshot"
@@ -96,7 +101,7 @@ let validate response =
       Error ("provider response snapshot encoding failed: " ^ Printexc.to_string exn)
   in
   let* encoded = encoded in
-  let* () = Execution_json.validate ~context:"provider response snapshot" encoded in
+  let* () = validate_json ~context:"provider response snapshot" encoded in
   let* decoded = of_yojson encoded in
   if response = decoded
   then Ok ()

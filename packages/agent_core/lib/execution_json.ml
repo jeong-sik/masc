@@ -1,5 +1,42 @@
 open Result_syntax
 
+type path_segment =
+  | Object_field of string
+  | Array_index of int
+
+type validation_reason =
+  | Duplicate_object_key
+  | Non_finite_float
+  | Invalid_integer_literal of string
+
+type validation_error =
+  { context : string
+  ; path : path_segment list
+  ; reason : validation_reason
+  }
+
+module String_set = Set.Make (String)
+
+let path_to_string path =
+  path
+  |> List.map (function
+    | Object_field name -> Printf.sprintf "[%S]" name
+    | Array_index index -> Printf.sprintf "[%d]" index)
+  |> String.concat ""
+  |> fun suffix -> "$" ^ suffix
+;;
+
+let validation_error_to_string error =
+  let reason =
+    match error.reason with
+    | Duplicate_object_key -> "has a duplicate object key"
+    | Non_finite_float -> "contains a non-finite float"
+    | Invalid_integer_literal value ->
+      Printf.sprintf "contains invalid integer literal %S" value
+  in
+  Printf.sprintf "%s at %s %s" error.context (path_to_string error.path) reason
+;;
+
 let is_finite_number value =
   match classify_float value with
   | FP_normal | FP_subnormal | FP_zero -> true
@@ -7,35 +44,59 @@ let is_finite_number value =
 ;;
 
 let validate ~context json =
-  let invalid detail = Error (context ^ " is not serializable JSON: " ^ detail) in
-  let validate_intlit value =
+  let invalid rev_path reason =
+    Error { context; path = List.rev rev_path; reason }
+  in
+  let validate_intlit rev_path value =
     try
       match Yojson.Safe.from_string value with
       | `Int _ | `Intlit _ -> Ok ()
       | `Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _ ->
-        invalid "Intlit is not an integer JSON literal"
+        invalid rev_path (Invalid_integer_literal value)
     with
-    | Yojson.Json_error detail -> invalid ("invalid Intlit: " ^ detail)
+    | Yojson.Json_error _ -> invalid rev_path (Invalid_integer_literal value)
   in
   let rec loop = function
     | [] -> Ok ()
-    | value :: rest ->
+    | (rev_path, value) :: rest ->
       (match value with
        | `Null | `Bool _ | `Int _ | `String _ -> loop rest
        | `Intlit value ->
-         let* () = validate_intlit value in
+         let* () = validate_intlit rev_path value in
          loop rest
        | `Float value ->
          if is_finite_number value
          then loop rest
-         else Error (context ^ " contains a non-finite float")
-       | `List values -> loop (List.rev_append values rest)
-       | `Assoc fields -> loop (List.rev_append (List.map snd fields) rest))
+         else invalid rev_path Non_finite_float
+       | `List values -> enqueue_list rev_path 0 [] values rest
+       | `Assoc fields -> enqueue_fields rev_path String_set.empty [] fields rest)
+  and enqueue_list rev_path index pending values rest =
+    match values with
+    | [] -> loop (List.rev_append pending rest)
+    | value :: values ->
+      enqueue_list
+        rev_path
+        (index + 1)
+        ((Array_index index :: rev_path, value) :: pending)
+        values
+        rest
+  and enqueue_fields rev_path seen pending fields rest =
+    match fields with
+    | [] -> loop (List.rev_append pending rest)
+    | (name, value) :: fields ->
+      let field_path = Object_field name :: rev_path in
+      if String_set.mem name seen
+      then invalid field_path Duplicate_object_key
+      else
+        enqueue_fields
+          rev_path
+          (String_set.add name seen)
+          ((field_path, value) :: pending)
+          fields
+          rest
   in
-  loop [ json ]
+  loop [ [], json ]
 ;;
-
-module String_set = Set.Make (String)
 
 let object_fields ~context ~required ~optional = function
   | `Assoc fields ->

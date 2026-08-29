@@ -102,6 +102,7 @@
   test_eval_stats
   test_event_bus
   test_event_envelope
+  test_execution_json
   test_schema_surface_index
   test_fs_result
   test_gemini_edge_cases
@@ -240,6 +241,7 @@
   test_eval_stats
   test_event_bus
   test_event_envelope
+  test_execution_json
   test_schema_surface_index
   test_fs_result
   test_gemini_edge_cases

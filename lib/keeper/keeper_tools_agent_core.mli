@@ -36,6 +36,15 @@ type gate_replay_delivery =
 
 type tool_bundle =
   { tools : Agent_core.Tool.t list
+    (** Every tool this turn can run, attached-service tools included as
+        schemas. The official-client lanes take this: they cannot widen a
+        running turn, so a listing would name tools they can never make
+        callable. *)
+  ; agent_core_tools : Agent_core.Tool.t list
+    (** The same turn for the Agent Core lane, with the attached-service
+        schemas replaced by one listing tool that hands them over on request
+        (RFC-attached-service-tool-scoping). Only this lane can widen a
+        running turn's tool set. *)
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option

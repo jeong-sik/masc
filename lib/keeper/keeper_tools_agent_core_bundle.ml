@@ -555,9 +555,35 @@ let make_tool_bundle_for_descriptors_with_policy
             offered)
         surface
   in
-  { tools =
-      descriptor_tools
-      @ composition_tools
+  (* The listing can only be turned back into callable tools by
+     [Agent_core.Agent.extend_tools], and only the Agent Core lane can do that:
+     the official-client lanes pin their tool set at process spawn or thread
+     start, and the surface is part of a resumable session's identity. A
+     Keeper on one of those lanes that was handed the listing would read a
+     name and be told there is no agent to make it callable in, with no other
+     way to reach the service.
+
+     So both shapes are built and the lane picks. The wrapped tools are built
+     twice, which costs a closure each: only one shape reaches a given turn,
+     so no call can observe the difference. *)
+  let identity_agent_tools =
+    List.map
+      (fun offered ->
+         Keeper_identity_gate.agent_tool
+           ~config
+           ~meta
+           ?continuation_channel
+           ?gate_context:gate_context_provider
+           ?gate_grant
+           offered)
+      (match identity_surface with
+       | None -> []
+       | Some surface -> surface.Keeper_identity_tool_search.offered)
+  in
+  let always_loaded = descriptor_tools @ composition_tools in
+  { tools = always_loaded @ identity_agent_tools
+  ; agent_core_tools =
+      always_loaded
       @ (match identity_listing with
          | None -> []
          | Some listing -> [ listing.Keeper_identity_tool_search.tool ])

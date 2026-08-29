@@ -261,7 +261,7 @@ let test_the_boot_projection_keeps_all_four () =
   let empty_catalog = Masc.Keeper_skill_catalog.empty in
   let projected =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
-        ~identity_index_names:[]
+        ~identity_names:[]
       ~skill_catalog:empty_catalog
       ~model_visible_descriptors:(TD.model_visible_descriptors ())
       ()

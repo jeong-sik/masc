@@ -60,6 +60,10 @@ val freeze : hook_accumulator -> hook_outputs
     than at the AGENT_CORE call site because the turn's tools capture it. *)
 type agent_setup =
   { tools : Agent_core.Tool.t list
+  ; agent_core_tools : Agent_core.Tool.t list
+    (** See {!Keeper_tools_agent_core.tool_bundle}: the Agent Core lane
+        sends this instead, with attached-service schemas behind a
+        listing. *)
   ; agent_cell : Agent_core.Agent.t option ref
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state

@@ -559,7 +559,6 @@ export type DashboardEffectiveKeeperSurface =
       official_client_kind: string
       tool_delivery: DashboardToolDelivery
       native_posture: string | null
-      tool_groups: string[]
       skill_selection:
         | { mode: 'all' }
         | { mode: 'names'; names: string[] }

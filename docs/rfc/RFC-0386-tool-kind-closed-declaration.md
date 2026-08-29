@@ -50,7 +50,7 @@ constitution feature_surface 용어와의 1:1 매핑:
 
 parity matrix B6("Batch/Multitool 실행 개념 부재")의 선행 조사 결론:
 실행 기계는 존재하지만, "이 툴이 합성/배치 실행 단위다" 를 선언하는 닫힌
-합타입이 descriptor/카탈로그 수준에 없었다. `keeper_tool_group` 은
+합타입이 descriptor/카탈로그 수준에 없었다. 도구 분류는
 discovery 전용 분류라 실행 의미를 얹을 수 없다. 이 RFC 가 그 선언층을
 추가한다.
 
@@ -95,7 +95,6 @@ parse 는 strict 하다. `tool_kind_of_string` 은 알 수 없는 문자열을
 - 새 실행 엔진 — 금지. 기존 기계를 재사용한다.
 - keeper 툴의 `Concurrent` 선언 확대 — 별도 PR.
 - MCP 경로 배치 실행 — 이 RFC 의 대상이 아니다.
-- `keeper_tool_group` 의미 변경 — discovery 전용 분류를 유지한다.
 
 ## 6. 검증
 

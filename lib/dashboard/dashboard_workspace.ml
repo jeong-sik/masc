@@ -148,7 +148,6 @@ let mention_inbox_json ?me (msg : Masc_domain.message) =
           ; "ts", `String msg.timestamp
           ; "sender", `String msg.from_agent
           ; "snippet", `String (snippet msg.content)
-          ; "ack_at", `Null
           ])
 ;;
 

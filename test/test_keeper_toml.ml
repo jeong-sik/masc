@@ -667,9 +667,6 @@ let test_profile_rejects_unknown_tools_sibling_key () =
        check bool "names unknown key" true
          (String_util.contains_substring detail "keeper.tools.group"))
 
-(* RFC-0389: a typo in [keeper.tools.groups] must fail the load. All-unknown
-   used to fall back to All, which quietly cancelled the narrowing the
-   declaration existed to make. *)
 
 
 let test_skill_names_preserve_absent_empty_and_exact_values () =

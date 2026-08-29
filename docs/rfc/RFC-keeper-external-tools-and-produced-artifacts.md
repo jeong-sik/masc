@@ -5,7 +5,7 @@ status: Draft
 created: 2026-08-25
 updated: 2026-08-25
 author: codex
-related: ["prompts-and-tool-definitions-outside-ocaml", "0389", "0390"]
+related: ["prompts-and-tool-definitions-outside-ocaml", "0390"]
 implementation_prs: []
 ---
 
@@ -32,7 +32,7 @@ native tool은 이미 프로세스와 네트워크 접근 경로를 제공한다
 
 - `config/tools/<name>.toml`은 모델에 보이는 description과 input schema를 소유한다.
   `Tool_definition_toml`은 모르는 키를 부팅 오류로 거부한다.
-- `Keeper_tool_descriptor.runtime_handler`와 `Keeper_tool_group.t`는 닫힌 합타입이고,
+- `Keeper_tool_descriptor.runtime_handler`는 닫힌 합타입이고,
   handler에서 group으로 가는 match는 exhaustive하다.
 - `Keeper_vision_ingest`는 대화로 들어온 이미지를
   `Keeper_vision_tool.store_artifact`로 저장한다. vision store는 살아 있는 경로다.
@@ -139,7 +139,6 @@ effect = "network_read"
 - `effect`는 `Network_read | Connector_post`의 닫힌 값으로 decode한다.
   `network_read`는 read gate를, `connector_post`는 exact approved payload와 one-shot
   소비 계약을 사용한다. 선언과 실제 gate가 다르면 부팅 또는 테스트에서 실패한다.
-- `group = "connector"`는 `Keeper_tool_group.Connector_group`으로 decode한다. RFC-0389의
   `[keeper.tools].groups`가 이 그룹의 노출 여부를 결정한다. 모르는 group은 기존처럼
   profile load를 실패시킨다.
 

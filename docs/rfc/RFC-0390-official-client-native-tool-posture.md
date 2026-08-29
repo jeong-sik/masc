@@ -7,7 +7,7 @@ updated: 2026-08-24
 author: claude
 supersedes: []
 superseded_by: null
-related: ["0389"]
+related: []
 ---
 
 # RFC-0390: Official client 네이티브 도구를 keeper 별로 켜고 끈다
@@ -39,7 +39,7 @@ offer a decision the other refused"). 그 수렴은 지킨다. 문제는 두 가
 
 ## 결정
 
-keeper profile TOML 의 `[keeper.tools]` (RFC-0389 의 `groups` 가 사는
+keeper profile TOML 의 `[keeper.tools]` (
 자리)에 키 하나를 추가한다.
 
 ```toml
@@ -58,7 +58,7 @@ native = "read"   # "none" | "read" | "full"
 - 키가 없으면 **각 런타임의 현행 자세 유지** (Claude Code = `none`,
   Codex = `read`, Antigravity = `read`). 기본값을 하나로 통일하면
   어느 레인의 동작이 조용히 바뀐다 — 그 방식은 택하지 않는다.
-- 알 수 없는 값은 TOML 로드를 실패시킨다 (RFC-0389 의 값 검증과 같은
+- 알 수 없는 값은 TOML 로드를 실패시킨다 (같은
   결). 그 런타임이 실현할 수 없는 값(`none` on Codex/Antigravity — 두
   CLI 는 내장 도구를 끄는 스위치가 없다)은 profile 로드를 실패시키지
   않는다 — keeper↔runtime 배정은 runtime.toml 소관이라 profile 로드

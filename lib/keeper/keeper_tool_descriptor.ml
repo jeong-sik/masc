@@ -25,10 +25,6 @@ type keeper_model_projection =
 
 
 
-(** Per-Keeper model tool surface (RFC-0389). [All] is the current behavior:
-    every model-visible descriptor. [Declared] narrows the surface to the
-    declared groups; [Core_group] and [Meta_group] are always retained so a
-    Keeper can always introspect its own surface. *)
 type input_schema_source =
   | Descriptor_owned
   | Canonical_registry

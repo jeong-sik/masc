@@ -34,7 +34,7 @@ let keeper_toml_fields =
   ; "telemetry_feedback_enabled", Field_bool
   ; "telemetry_feedback_window_hours", Field_int
   ; "always_allow", Field_bool
-    (* RFC-0390 and RFC-0389. Both [keeper.tools] keys are declared, so any
+    (* RFC-0390. The [keeper.tools] key is declared, so any
        other key in that table is unknown and fails the load rather than
        being a silently ignored sibling. A prefix rule would accept
        [tools.nativ] and leave the runtime on its default posture without a

@@ -392,7 +392,6 @@ val low_to_normal_aging_threshold_sec : float
     to [Normal]. A reasoned default (matches common recurring-schedule
     cadence in this fleet), not a measured distribution. *)
 
-val effective_urgency : now:float -> stimulus -> urgency
 (** [effective_urgency ~now s] is [s.urgency], except a [Low] stimulus
     promotes to [Normal] once it has waited at least
     {!low_to_normal_aging_threshold_sec}. Never promotes into [Immediate]:

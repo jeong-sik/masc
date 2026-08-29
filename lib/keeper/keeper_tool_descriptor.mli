@@ -36,10 +36,6 @@ type keeper_model_projection =
 
 (** Typed display group for Keeper capability discovery. *)
 
-(** Per-Keeper model tool surface (RFC-0389). [All] is the current behavior:
-    every model-visible descriptor. [Declared] narrows the surface to the
-    declared groups; [Core_group] and [Meta_group] are always retained so a
-    Keeper can always introspect its own surface. *)
 (** Provenance of the descriptor input schema. A missing canonical cluster
     schema excludes that descriptor from model projection and is reported by
     the schema injection boundary. *)
@@ -231,17 +227,7 @@ val model_schema_errors : t -> string list
 val model_visible_descriptors : unit -> t list
 val model_visible_schemas : unit -> Masc_domain.tool_schema list
 
-(** RFC-0389: the model-visible descriptors narrowed to [surface]. [All]
-    returns every model-visible descriptor (pre-feature behaviour); [Declared]
-    keeps only the declared groups plus the always-retained Core/Meta. This is
-    the descriptor-level projection [make_tool_bundle] consumes so a declared
-    Keeper's actual turn payload narrows. *)
 
-(** Exact schema projection admitted by the Keeper model surface.
-
-    [All] returns every model-visible descriptor (the current behavior).
-    [Declared { groups }] narrows the surface to the declared groups, always
-    retaining [Core_group] and [Meta_group] (RFC-0389). *)
 
 (** The sole active Keeper model name. Empty only for an exact
     [Operator_only], [Transport_alias], or a descriptor without a resolved

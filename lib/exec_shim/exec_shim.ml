@@ -92,21 +92,46 @@ let trailer_of_status ~timed_out status : Exec_ssh_protocol.trailer =
 
 (* {1 Path jail} *)
 
-let check_cwd_jail ~root ~cwd =
+(* Both jail checks are containment, so they are one function; what differs is
+   which mistake the caller has to name. *)
+let resolve_within ~root ~path =
   try
     let rroot = Unix.realpath root in
-    let rcwd = Unix.realpath cwd in
-    if rcwd = rroot || String.starts_with ~prefix:(rroot ^ "/") rcwd
+    let rpath = Unix.realpath path in
+    if rpath = rroot || String.starts_with ~prefix:(rroot ^ "/") rpath
     then Ok ()
-    else
-      Error
-        (Printf.sprintf "%s: cwd %s (resolved %s) escapes remote_root %s"
-           jail_error_code cwd rcwd rroot)
+    else Error (`Escapes (rpath, rroot))
   with
-  | Unix.Unix_error (e, _, _) ->
+  | Unix.Unix_error (e, _, _) -> Error (`Unresolvable (Unix.error_message e))
+
+let check_cwd_jail ~root ~cwd =
+  match resolve_within ~root ~path:cwd with
+  | Ok () -> Ok ()
+  | Error (`Escapes (rcwd, rroot)) ->
     Error
-      (Printf.sprintf "%s: cannot resolve cwd %s: %s" jail_error_code cwd
-         (Unix.error_message e))
+      (Printf.sprintf "%s: cwd %s (resolved %s) escapes remote_root %s"
+         jail_error_code cwd rcwd rroot)
+  | Error (`Unresolvable message) ->
+    Error
+      (Printf.sprintf "%s: cannot resolve cwd %s: %s" jail_error_code cwd message)
+
+(* The config states the widest root this host will ever hand out; the request
+   names the one it wants for this call. Checking the second inside the first
+   is what lets one host serve endpoints whose roots differ -- and keeps a
+   request from choosing its own jail, which would be no jail at all. *)
+let check_request_root_jail ~config_root ~request_root =
+  match resolve_within ~root:config_root ~path:request_root with
+  | Ok () -> Ok ()
+  | Error (`Escapes (rrequest, rconfig)) ->
+    Error
+      (Printf.sprintf
+         "%s: request remote_root %s (resolved %s) escapes this host's \
+          remote_root %s"
+         jail_error_code request_root rrequest rconfig)
+  | Error (`Unresolvable message) ->
+    Error
+      (Printf.sprintf "%s: cannot resolve request remote_root %s: %s"
+         jail_error_code request_root message)
 
 (* {1 Config file} *)
 
@@ -493,6 +518,23 @@ let shim_fail msg =
                       ; shim_error = Some msg };
   exit 1
 
+(* The jail this one call runs in, decided from what the host allows and what
+   the request asked for.
+
+   Named and reachable rather than inline in [run]: the two checks it composes
+   each had a passing unit test while the dispatcher still handed
+   [check_cwd_jail] the config's root, so every endpoint but one read as an
+   escape. A decision only reachable through stdin is a decision no test
+   pins. *)
+let jail_for_request ~(config : config) ~(request : Exec_ssh_protocol.request) =
+  Result.bind
+    (check_request_root_jail ~config_root:config.remote_root
+       ~request_root:request.Exec_ssh_protocol.remote_root)
+    (fun () ->
+      check_cwd_jail ~root:request.Exec_ssh_protocol.remote_root
+        ~cwd:request.Exec_ssh_protocol.cwd)
+;;
+
 let run () =
   match read_frame Unix.stdin with
   | Error e -> shim_fail e
@@ -500,9 +542,7 @@ let run () =
     (match load_config () with
      | Error e -> shim_fail e
      | Ok config ->
-       (match
-          check_cwd_jail ~root:config.remote_root ~cwd:req.Exec_ssh_protocol.cwd
-        with
+       (match jail_for_request ~config ~request:req with
         | Error e -> shim_fail e
         | Ok () ->
           (match req.Exec_ssh_protocol.argv with

@@ -189,6 +189,102 @@ let test_jail_rejects_escape () =
         check bool "named jail violation" true
           (contains Exec_shim.jail_error_code e))
 
+(* The shape #31554 hit: one sshd, two Keepers, two roots. Before the request
+   carried its own root the shim checked every call against one global value,
+   so the second endpoint's own directory read as an escape from the first. *)
+let test_request_root_inside_host_root_is_allowed () =
+  with_tmp_tree (fun root ->
+      let request_root = Filename.concat root "sub" in
+      match Exec_shim.check_request_root_jail ~config_root:root ~request_root with
+      | Ok () -> ()
+      | Error e -> fail e)
+
+let test_sibling_endpoint_root_is_not_an_escape () =
+  with_tmp_tree (fun root ->
+      let a = Filename.concat root "playground" in
+      let b = Filename.concat root "playground-sangsu" in
+      Unix.mkdir a 0o755;
+      Unix.mkdir b 0o755;
+      (* Each endpoint declares its own root; the host allows both. *)
+      (match Exec_shim.check_request_root_jail ~config_root:root ~request_root:b with
+       | Error e -> fail ("sibling endpoint root rejected: " ^ e)
+       | Ok () -> ());
+      (* And a cwd is judged against the root that call asked for, not the
+         other endpoint's. *)
+      match Exec_shim.check_cwd_jail ~root:b ~cwd:b with
+      | Ok () -> ()
+      | Error e -> fail ("cwd in its own root rejected: " ^ e))
+
+(* A request must not be able to widen its own jail: the config stays the
+   upper bound. *)
+let test_request_root_outside_host_root_is_rejected () =
+  with_tmp_tree (fun root ->
+      let outside = Filename.dirname root in
+      match
+        Exec_shim.check_request_root_jail ~config_root:root ~request_root:outside
+      with
+      | Ok () -> fail "a request widened its own jail past the host's root"
+      | Error e ->
+        check bool "named jail violation" true
+          (contains Exec_shim.jail_error_code e))
+
+(* The composition, at the point the bug lived. Testing the two halves apart
+   from each other is what let #31554 sit here: both passed while the
+   dispatcher still judged the cwd against the host's single root. *)
+let request_for ~remote_root ~cwd =
+  { Exec_ssh_protocol.v = Exec_ssh_protocol.protocol_version
+  ; argv = [ "/bin/true" ]
+  ; env = []
+  ; cwd
+  ; remote_root
+  ; timeout_sec = 1.0
+  ; stdin_len = 0L
+  }
+
+let config_for root =
+  match
+    Exec_shim.parse_config (Printf.sprintf "remote_root=%s\nenv_allowlist=\n" root)
+  with
+  | Ok config -> config
+  | Error e -> fail ("config fixture rejected: " ^ e)
+
+let test_dispatch_uses_the_request_root_not_the_host_root () =
+  with_tmp_tree (fun root ->
+      let mine = Filename.concat root "playground-sangsu" in
+      Unix.mkdir mine 0o755;
+      let config = config_for root in
+      let request = request_for ~remote_root:mine ~cwd:mine in
+      match Exec_shim.jail_for_request ~config ~request with
+      | Ok () -> ()
+      | Error e -> fail ("a second endpoint's own root read as an escape: " ^ e))
+
+let test_dispatch_rejects_a_cwd_outside_the_request_root () =
+  with_tmp_tree (fun root ->
+      let mine = Filename.concat root "playground-sangsu" in
+      let theirs = Filename.concat root "playground-rondo" in
+      Unix.mkdir mine 0o755;
+      Unix.mkdir theirs 0o755;
+      let config = config_for root in
+      (* Both roots are inside the host's, so only the cwd check can refuse
+         this: one endpoint must not reach into another's directory. *)
+      let request = request_for ~remote_root:mine ~cwd:theirs in
+      match Exec_shim.jail_for_request ~config ~request with
+      | Ok () -> fail "one endpoint reached into another endpoint's root"
+      | Error e ->
+        check bool "named jail violation" true
+          (contains Exec_shim.jail_error_code e))
+
+let test_dispatch_rejects_a_request_root_outside_the_host_root () =
+  with_tmp_tree (fun root ->
+      let outside = Filename.dirname root in
+      let config = config_for root in
+      let request = request_for ~remote_root:outside ~cwd:outside in
+      match Exec_shim.jail_for_request ~config ~request with
+      | Ok () -> fail "a request widened its own jail past the host's root"
+      | Error e ->
+        check bool "named jail violation" true
+          (contains Exec_shim.jail_error_code e))
+
 let test_jail_rejects_dotdot_escape () =
   with_tmp_tree (fun root ->
       let cwd = Filename.concat root "sub/../.." in
@@ -262,6 +358,18 @@ let () =
               ; test_case "allows descendant" `Quick test_jail_allows_descendant
               ; test_case "rejects escape" `Quick test_jail_rejects_escape
               ; test_case "rejects dotdot escape" `Quick test_jail_rejects_dotdot_escape
+              ; test_case "request root inside the host root is allowed" `Quick
+                  test_request_root_inside_host_root_is_allowed
+              ; test_case "a sibling endpoint root is not an escape" `Quick
+                  test_sibling_endpoint_root_is_not_an_escape
+              ; test_case "request root outside the host root is rejected" `Quick
+                  test_request_root_outside_host_root_is_rejected
+              ; test_case "dispatch uses the request root" `Quick
+                  test_dispatch_uses_the_request_root_not_the_host_root
+              ; test_case "dispatch rejects a cwd outside the request root" `Quick
+                  test_dispatch_rejects_a_cwd_outside_the_request_root
+              ; test_case "dispatch rejects a request root outside the host root" `Quick
+                  test_dispatch_rejects_a_request_root_outside_the_host_root
               ; test_case "rejects missing cwd" `Quick test_jail_rejects_missing_cwd ]
     ; "io", [ test_case "drain_fd" `Quick test_drain_fd ]
     ; "probe", [ test_case "identity" `Quick test_probe_identity ] ]

@@ -37,6 +37,16 @@ type request =
   ; env : (string * string) list
     (** environment overlay; names and values base64 on the wire *)
   ; cwd : string  (** remote working directory; base64 on the wire *)
+  ; remote_root : string
+    (** the jail this one call runs inside; base64 on the wire.
+
+        The shim's own config states the widest root that host will ever
+        allow, and this narrows it for this request. It is carried rather
+        than read from the shim's config because one host runs endpoints for
+        several Keepers, each with its own root, and a single global value
+        makes every root but one read as an escape. Required, not optional:
+        an absent jail has no safe reading, and the protocol version is
+        matched exactly so there is no older client to keep working. *)
   ; timeout_sec : float
     (** payload wall-clock budget, enforced server-side by the shim *)
   ; stdin_len : int64

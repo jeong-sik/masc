@@ -5,10 +5,11 @@ let contains needle haystack =
   let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
   scan 0
 
-let req = Exec_ssh_protocol.{ v = 1
+let req = Exec_ssh_protocol.{ v = 2
                             ; argv = ["/bin/echo"; "hello"]
                             ; env = [("FOO", "bar")]
                             ; cwd = "/srv/masc/playground/keeper-a"
+                            ; remote_root = "/srv/masc/playground"
                             ; timeout_sec = 300.0
                             ; stdin_len = 0L }
 
@@ -43,8 +44,14 @@ let test_hostile_bytes_roundtrip () =
        check string "stdin bytes" stdin stdin')
 
 let test_frame_version_gated () =
-  (* v <> 1 on the wire is a named version error, never a silent parse *)
-  match Exec_ssh_protocol.encode_request { req with v = 2 } ~stdin:"" with
+  (* A version this build does not speak is a named version error, never a
+     silent parse. Derived from the current one so a later bump cannot turn
+     this case into the accepted version. *)
+  match
+    Exec_ssh_protocol.encode_request
+      { req with v = Exec_ssh_protocol.protocol_version + 1 }
+      ~stdin:""
+  with
   | Error e -> fail e
   | Ok framed ->
     (match Exec_ssh_protocol.decode_request framed with
@@ -57,7 +64,7 @@ let test_frame_stdin_len_mismatch_is_transport_error () =
   (* declare 5, send 3; hand-built because encode_request rejects the
      inconsistency at the source *)
   let json =
-    {|{"v":1,"argv":[],"env":[],"cwd":"","timeout_sec":1.0,"stdin_len":5}|}
+    {|{"v":2,"argv":[],"env":[],"cwd":"","remote_root":"","timeout_sec":1.0,"stdin_len":5}|}
   in
   let stdin = "abc" in
   let n = String.length json + String.length stdin in
@@ -73,7 +80,7 @@ let test_frame_stdin_len_mismatch_is_transport_error () =
     check bool "stdin_len mismatch" true (contains "stdin_len mismatch" msg)
 
 let test_trailer_roundtrip () =
-  let t = Exec_ssh_protocol.{ v = 1; exit = Some 3; signal = None
+  let t = Exec_ssh_protocol.{ v = 2; exit = Some 3; signal = None
                             ; timed_out = false; shim_error = None } in
   let rendered = Exec_ssh_protocol.render_trailer t in
   check bool "starts with RS" true (String.length rendered > 2 && rendered.[0] = '\x1e');
@@ -98,7 +105,7 @@ let test_trailer_last_match_wins () =
      emitted by the payload; the LAST well-formed \x1e...\x1e pair is the
      trailer, an earlier malformed pair must not poison it *)
   let real = Exec_ssh_protocol.render_trailer
-      Exec_ssh_protocol.{ v = 1; exit = Some 7; signal = None
+      Exec_ssh_protocol.{ v = 2; exit = Some 7; signal = None
                         ; timed_out = false; shim_error = None } in
   let tail = "payload says \x1e{not the result}\x1e then more stderr " ^ real in
   match Exec_ssh_protocol.parse_trailer tail with
@@ -106,8 +113,10 @@ let test_trailer_last_match_wins () =
   | Ok t' -> check (option int) "last trailer wins" (Some 7) t'.exit
 
 let test_trailer_version_gated () =
-  (* v <> 1 in a trailer is a named version error, same as the frame *)
-  let t = Exec_ssh_protocol.{ v = 2; exit = Some 0; signal = None
+  (* A version this build does not speak, in a trailer: same error as the
+     frame. *)
+  let t = Exec_ssh_protocol.{ v = Exec_ssh_protocol.protocol_version + 1
+                            ; exit = Some 0; signal = None
                             ; timed_out = false; shim_error = None } in
   match Exec_ssh_protocol.parse_trailer (Exec_ssh_protocol.render_trailer t) with
   | Ok _ -> fail "expected version error"
@@ -118,7 +127,7 @@ let test_trailer_version_gated () =
 let test_exit_zero_is_a_real_exit () =
   (* exit 0 round-trips as data: the codec never fabricates or
      special-cases it *)
-  let t = Exec_ssh_protocol.{ v = 1; exit = Some 0; signal = None
+  let t = Exec_ssh_protocol.{ v = 2; exit = Some 0; signal = None
                             ; timed_out = false; shim_error = None } in
   match Exec_ssh_protocol.parse_trailer (Exec_ssh_protocol.render_trailer t) with
   | Error e -> fail e
@@ -126,7 +135,7 @@ let test_exit_zero_is_a_real_exit () =
 
 let test_trailer_exclusivity_violation_is_transport_error () =
   (* exit and signal both set is malformed, not ambiguously "exit 1" *)
-  let t = Exec_ssh_protocol.{ v = 1; exit = Some 1; signal = Some 9
+  let t = Exec_ssh_protocol.{ v = 2; exit = Some 1; signal = Some 9
                             ; timed_out = false; shim_error = None } in
   match Exec_ssh_protocol.parse_trailer (Exec_ssh_protocol.render_trailer t) with
   | Ok _ -> fail "expected transport error"
@@ -134,7 +143,7 @@ let test_trailer_exclusivity_violation_is_transport_error () =
     check bool "mutually exclusive" true (contains "mutually exclusive" msg)
 
 let test_signal_vs_exit () =
-  let t = Exec_ssh_protocol.{ v = 1; exit = None; signal = Some 9
+  let t = Exec_ssh_protocol.{ v = 2; exit = None; signal = Some 9
                             ; timed_out = false; shim_error = None } in
   match Exec_ssh_protocol.parse_trailer (Exec_ssh_protocol.render_trailer t) with
   | Error e -> fail e

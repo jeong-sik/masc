@@ -7,6 +7,7 @@ type request =
   ; argv : string list
   ; env : (string * string) list
   ; cwd : string
+  ; remote_root : string
   ; timeout_sec : float
   ; stdin_len : int64
   }
@@ -25,7 +26,7 @@ type probe =
   ; capabilities : string list
   }
 
-let protocol_version = 1
+let protocol_version = 2
 
 let trailer_wrapper_key = "masc_exec_result"
 
@@ -62,6 +63,7 @@ let json_of_request (r : request) : Yojson.Safe.t =
              (fun (k, v) -> `List [ `String (b64_encode k); `String (b64_encode v) ])
              r.env) )
     ; "cwd", `String (b64_encode r.cwd)
+    ; "remote_root", `String (b64_encode r.remote_root)
     ; "timeout_sec", `Float r.timeout_sec
     ; "stdin_len", `Intlit (Int64.to_string r.stdin_len)
     ]
@@ -220,6 +222,10 @@ let request_of_json (json : Yojson.Safe.t) : (request, string) result =
   in
   let* cwd_json = member ~what "cwd" fields >>= expect_string ~what "cwd" in
   let* cwd = b64_decode ~what:"cwd" cwd_json in
+  let* remote_root_json =
+    member ~what "remote_root" fields >>= expect_string ~what "remote_root"
+  in
+  let* remote_root = b64_decode ~what:"remote_root" remote_root_json in
   let* timeout_sec = member ~what "timeout_sec" fields >>= expect_float ~what "timeout_sec" in
   let* stdin_len = member ~what "stdin_len" fields >>= expect_int64 ~what "stdin_len" in
   (match classify_float timeout_sec with
@@ -229,7 +235,7 @@ let request_of_json (json : Yojson.Safe.t) : (request, string) result =
      if Int64.compare stdin_len 0L < 0 then
        transport_error "request stdin_len is negative (%Ld)" stdin_len
      else
-       Ok { v; argv; env; cwd; timeout_sec; stdin_len })
+       Ok { v; argv; env; cwd; remote_root; timeout_sec; stdin_len })
 
 let decode_request (frame : string) : (request * string, string) result =
   let n = String.length frame in

@@ -135,6 +135,18 @@ val jail_error_code : string
 (** [= "remote_ssh_path_jail_violation"]. *)
 
 val check_cwd_jail : root:string -> cwd:string -> (unit, string) result
+
+val check_request_root_jail
+  :  config_root:string
+  -> request_root:string
+  -> (unit, string) result
+(** Whether the jail a request asked for is inside the widest one this host
+    allows.
+
+    One host runs endpoints for several Keepers and each has its own root, so
+    the shim cannot read the jail from its own config -- doing that makes
+    every root but one read as an escape. The request names the jail and this
+    keeps it from naming one the host never granted. *)
 (** [Ok ()] iff [cwd] — after [realpath] normalization of both paths —
     equals [root] or is a descendant of it (component-boundary aware).
     [Error] carries a message starting with {!jail_error_code} when [cwd]
@@ -163,6 +175,18 @@ type config =
   { remote_root : string
   ; env_allowlist : string list
   }
+
+val jail_for_request
+  :  config:config
+  -> request:Exec_ssh_protocol.request
+  -> (unit, string) result
+(** The jail one request runs in: its own root must sit inside the host's, and
+    its cwd inside its own.
+
+    Exposed so the composition is testable, not only the two halves. Those
+    halves passed their tests while the dispatcher still judged every cwd
+    against the host's single root, which is what made a second endpoint's own
+    directory read as an escape. *)
 
 val parse_config : string -> (config, string) result
 val load_config : unit -> (config, string) result

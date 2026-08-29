@@ -200,6 +200,14 @@ let () =
               | other -> other
             in
             check bool "is error" true (Result.is_error (Checkpoint.of_json bad)))
+        ; test_case "to_json_result rejects a malformed public checkpoint" `Quick (fun () ->
+            let malformed =
+              { (make_checkpoint ()) with version = Checkpoint.checkpoint_version - 1 }
+            in
+            match Checkpoint.to_json_result malformed with
+            | Error (Error.Serialization _) -> ()
+            | Error error -> fail ("unexpected error: " ^ Error.to_string error)
+            | Ok _ -> fail "invalid current checkpoint was serialized")
         ; test_case "old version 4 is rejected" `Quick (fun () ->
             match Checkpoint.of_json (`Assoc [ "version", `Int 4 ]) with
             | Error (Error.Serialization (Error.VersionMismatch { got = 4; _ })) -> ()

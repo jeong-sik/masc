@@ -92,6 +92,7 @@ let checkpoint_version = Checkpoint_types.checkpoint_version
 let usage_to_json = Checkpoint_codec.usage_to_json
 let usage_of_json = Checkpoint_codec.usage_of_json
 let to_json = Checkpoint_codec.to_json
+let to_json_result = Checkpoint_codec.to_json_result
 let of_json = Checkpoint_codec.of_json
 let to_string = Checkpoint_codec.to_string
 let of_string = Checkpoint_codec.of_string

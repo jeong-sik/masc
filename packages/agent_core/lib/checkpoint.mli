@@ -101,6 +101,10 @@ type delta =
     when a manually constructed value violates the v10 contract. *)
 val to_json : t -> Yojson.Safe.t
 
+(** Serialize an exact current checkpoint to JSON without raising when a
+    manually constructed value violates the v10 contract. *)
+val to_json_result : t -> (Yojson.Safe.t, Error.t) result
+
 (** Deserialize only the exact current v10 checkpoint schema. Every other
     version is rejected. *)
 val of_json : Yojson.Safe.t -> (t, Error.t) result

@@ -55,6 +55,23 @@ let record_success ~keeper_name ~runtime_id ~capacity_bytes =
       Capacity_map.add key capacity_bytes global.last_successful_capacity_bytes)
 ;;
 
+(* A remembered capacity is a claim that this (keeper, runtime) pair
+   completed a turn at that size. An overflow at that same size disproves the
+   claim: the reserve this turn has to transmit -- tool schemas, system
+   prompt, pinned messages -- grew past what that capacity can carry, and no
+   later turn shrinks it back on its own. Keeping the disproved value would
+   start every following turn below the runtime's declared cap and refuse
+   there, which is what #31684 measured on a live keeper: capacity 131072
+   against a 469638-byte reserve, every turn, until the process restarted.
+   Forgetting returns the pair to [max_capacity_bytes] on the next turn, so
+   the discovery runs again against the reserve that exists now. *)
+let forget ~keeper_name ~runtime_id =
+  let key = { Key.keeper_name; runtime_id } in
+  Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
+    global.last_successful_capacity_bytes <-
+      Capacity_map.remove key global.last_successful_capacity_bytes)
+;;
+
 module For_testing = struct
   let reset () =
     Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->

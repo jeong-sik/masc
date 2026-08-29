@@ -17,6 +17,13 @@ val record_success :
     [capacity_bytes] as the windowing capacity that last completed a turn
     for this (keeper, runtime) pair. Overwrites any prior value. *)
 
+val forget : keeper_name:string -> runtime_id:string -> unit
+(** [forget ~keeper_name ~runtime_id] drops the remembered capacity for this
+    (keeper, runtime) pair, so the next turn starts from the runtime's
+    declared cap again. Call it when a turn overflowed at the remembered
+    capacity: that outcome disproves the memory, and keeping it would repeat
+    the same refusal every turn for the life of the process. *)
+
 module For_testing : sig
   val reset : unit -> unit
 end

@@ -1104,6 +1104,7 @@ let context_overflow_shrink_sequence
       ?(final_shrink_capacity = fun ~capacity_bytes:_ -> None)
       ~starting_capacity_bytes
       ~same_run_retry_authorized
+      ~shrink_admits_history
       ~record_success
       ~on_shrink_retry
       ~(attempt : capacity_bytes:int -> ('ok, Agent_core.Error.t) result)
@@ -1134,7 +1135,18 @@ let context_overflow_shrink_sequence
               ~default:ordinary_capacity_bytes
           else ordinary_capacity_bytes
         in
+        (* Halving is a bet that the same request fits once less history
+           rides along. The bet is void when the part that cannot be cut --
+           tool schemas, system prompt, and the unmeasured-field allowance --
+           already fills the smaller capacity: every atom would be dropped and
+           the window would still refuse, one size lower. #31684 measured that
+           on a live keeper: a 469638-byte reserve against capacities of
+           131072 then 65536, three refusals per turn, none of which could
+           have succeeded. Returning the original failure here hands the turn
+           to the declared-lane walk, where a candidate with a larger
+           request-body cap is the thing that can actually carry it. *)
         if shrunk_capacity_bytes >= capacity_bytes
+           || not (shrink_admits_history ~capacity_bytes:shrunk_capacity_bytes)
         then failed
         else (
           on_shrink_retry
@@ -1179,6 +1191,16 @@ let run_try_provider_with_context_overflow_shrink
       ~starting_capacity_bytes
       ~same_run_retry_authorized:(fun () ->
         same_run_retry_allowed ctx.checkpoint_stage_observed)
+      ~shrink_admits_history:(fun ~capacity_bytes ->
+        (* The same reserve account the window itself charges, measured at the
+           capacity being proposed. Below it the window has nothing left for
+           history and refuses whatever the conversation looks like. *)
+        offload_model_input_cpu (fun () ->
+          declared_request_reserve_bytes
+            ~capacity_bytes
+            ~system_prompt:ctx.system_prompt
+            ~tools:ctx.tools)
+        < capacity_bytes)
       ~record_success:(fun ~capacity_bytes ->
         Keeper_context_overflow_shrink_state.record_success
           ~keeper_name:ctx.keeper_name
@@ -1202,6 +1224,20 @@ let run_try_provider_with_context_overflow_shrink
         attempt_result)
       ()
   in
+  (* An overflow that survived every admissible shrink says the remembered
+     starting capacity no longer carries a turn here. Dropping it lets the
+     next turn start from the runtime's declared cap and measure again,
+     instead of re-entering at a size this turn just disproved. Any other
+     failure -- network, auth, a stall -- says nothing about capacity, so the
+     memory stands. *)
+  (match result with
+   | Ok _ -> ()
+   | Error error ->
+     if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
+     then
+       Keeper_context_overflow_shrink_state.forget
+         ~keeper_name:ctx.keeper_name
+         ~runtime_id:ctx.runtime_id);
   result, !checkpoint_after, !success_sample
 ;;
 

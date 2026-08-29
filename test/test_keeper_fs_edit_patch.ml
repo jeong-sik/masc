@@ -1243,27 +1243,28 @@ let test_int_mode_is_rejected () =
   check_invalid_mode_json_is_rejected ~label:"int-mode" ~mode_json:value
     ~expected_error:(expected_mode_error value)
 
-(* The other half of the contract: absence still takes the documented
-   Overwrite default. A present null is not absence; the schema permits only a
-   string when [mode] is present, so it follows the rejection path above. *)
-let check_mode_defaults_to_overwrite ~label ~args_extra =
+(* The other half of the contract (masc#31573): absence used to take a silent
+   Overwrite default — the destructive mode — while every explicit-but-wrong
+   mode was rejected. Translators and Gate replay always inject a mode, so
+   only a translation-bypassing internal-name call ever omitted one; it now
+   follows the same rejection path. A present null is not absence; the schema
+   permits only a string when [mode] is present, so it follows the rejection
+   path above. *)
+let test_absent_mode_is_rejected () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
-  let path = Filename.concat playground (label ^ ".txt") in
+  let path = Filename.concat playground "absent-mode.txt" in
   let raw =
     handle_file_write ~turn_sandbox_factory:None ~config
       ~meta
       ~publication_recovery
-      ~args:
-        (`Assoc
-          ([ ("path", `String path); ("content", `String "fresh") ] @ args_extra))
+      ~args:(`Assoc [ ("path", `String path); ("content", `String "fresh") ])
       ()
   in
-  Alcotest.(check bool) (label ^ " ok=true") true (parse_ok raw);
-  Alcotest.(check bool) "file written" true (Fs_compat.file_exists path);
-  Alcotest.(check string) "overwrite content" "fresh" (Fs_compat.load_file path)
-
-let test_absent_mode_defaults_to_overwrite () =
-  check_mode_defaults_to_overwrite ~label:"absent-mode" ~args_extra:[]
+  Alcotest.(check bool) "ok=false" false (parse_ok raw);
+  Alcotest.(check (option string)) "absent mode rejected"
+    (Some "mode must be one of [overwrite, append, patch], got \"(absent)\".")
+    (parse_error raw);
+  Alcotest.(check bool) "file not written" false (Fs_compat.file_exists path)
 
 let test_null_mode_is_rejected () =
   check_invalid_mode_json_is_rejected ~label:"null-mode" ~mode_json:`Null
@@ -1526,8 +1527,8 @@ let () =
             test_list_mode_is_rejected;
           Alcotest.test_case "int mode rejected" `Quick
             test_int_mode_is_rejected;
-          Alcotest.test_case "absent mode defaults to overwrite" `Quick
-            test_absent_mode_defaults_to_overwrite;
+          Alcotest.test_case "absent mode rejected" `Quick
+            test_absent_mode_is_rejected;
           Alcotest.test_case "null mode rejected" `Quick
             test_null_mode_is_rejected;
           Alcotest.test_case "public Edit uses explicit repo path" `Quick

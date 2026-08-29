@@ -2247,8 +2247,11 @@ let handle_file_write_with_outcome
      misspelled {"mode": "apend"} was rejected below — a type error was handled
      more permissively than a value error, in the destructive direction. Read
      the member so a non-string is rejected on the same path as a bad string.
-     Keep absence distinct from an explicit JSON null: the schema permits an
-     omitted optional member, but a present member must be a string. *)
+     Absence follows that same rejection path (masc#31573): every model-facing
+     translator injects mode explicitly and Gate replay reconstructs it from
+     the recorded effect, so an absent mode only reaches this handler through
+     an internal-name call that bypassed translation — and defaulting that to
+     Overwrite turned a missing member into a whole-file write. *)
   let mode_member =
     match args with
     | `Assoc members -> List.assoc_opt "mode" members
@@ -2256,13 +2259,13 @@ let handle_file_write_with_outcome
   in
   let mode_raw =
     match mode_member with
-    | None -> fs_write_mode_to_string Overwrite
+    | None -> "(absent)"
     | Some (`String s) -> s
     | Some other -> Yojson.Safe.to_string other
   in
   let mode_opt =
     match mode_member with
-    | None -> Some Overwrite
+    | None -> None
     | Some (`String s) -> fs_write_mode_of_string_opt s
     | Some _ -> None
   in

@@ -1,9 +1,9 @@
 name = "tool_write_file"
 description = """
-Write or append a file. path is required. For mode='overwrite' (default) or \
-'append', content is required and non-empty. Good overwrite: \
-path='lib/foo.ml', content='let x = 1'. Bad: path='', content=''. Creates \
-parent dirs."""
+Write or append a file. path and mode are required; an absent mode is \
+rejected instead of defaulting to overwrite. content is required and \
+non-empty. Good overwrite: path='lib/foo.ml', mode='overwrite', \
+content='let x = 1'. Bad: path='', content=''. Creates parent dirs."""
 
 [[params]]
 name = "path"
@@ -20,5 +20,6 @@ description = "File content to write"
 [[params]]
 name = "mode"
 type = "string"
+required = true
 enum = ["overwrite", "append"]
-description = "Write mode (default: overwrite)"
+description = "Write mode; absence is rejected"

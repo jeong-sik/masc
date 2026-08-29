@@ -12,7 +12,7 @@ status: reference
 ## Related Documents
 
 - `../spec/13-agent-core-integration.md`
-- `../agent core-MASC-BOUNDARY.md`
+- `../AGENT-CORE-BOUNDARY.md`
 - `../KEEPER-STATE-OWNERSHIP.md`
 - `./delta-checkpoint-read-path.md`
 - `../KEEPER-CONTINUITY-VALIDATION.md`
@@ -222,18 +222,18 @@ Replay rule:
 
 ## Invariants
 
-- **INV-agent core-CHK-001**: keeper runtime reconstruction starts from agent core checkpoint truth, not keeper summary text
-- **INV-agent core-CHK-002**: replay judges typed facts, not exact model prose
-- **INV-agent core-CHK-003**: class D side effects are never auto-replayed
-- **INV-agent core-CHK-004**: fork never overwrites the source checkpoint lineage
-- **INV-agent core-CHK-005**: domain read models may summarize checkpoint truth but may not supersede it
+- **INV-AC-CHK-001**: keeper runtime reconstruction starts from agent core checkpoint truth, not keeper summary text
+- **INV-AC-CHK-002**: replay judges typed facts, not exact model prose
+- **INV-AC-CHK-003**: class D side effects are never auto-replayed
+- **INV-AC-CHK-004**: fork never overwrites the source checkpoint lineage
+- **INV-AC-CHK-005**: domain read models may summarize checkpoint truth but may not supersede it
 
 ## Implementation Landing Points
 
 Primary spec / contract:
 
 - `docs/spec/13-agent-core-integration.md`
-- `docs/agent core-MASC-BOUNDARY.md`
+- `docs/AGENT-CORE-BOUNDARY.md`
 - `docs/KEEPER-STATE-OWNERSHIP.md`
 
 Primary code anchors:
@@ -283,7 +283,7 @@ Secondary design touchpoints:
   https://docs.langchain.com/oss/python/langgraph/use-time-travel ;
   확인일시 2026-04-12 ; 신뢰도 High
 - [근거] current MASC boundary state:
-  `docs/agent core-MASC-BOUNDARY.md` ,
+  `docs/AGENT-CORE-BOUNDARY.md` ,
   `docs/spec/13-agent-core-integration.md` ;
   확인일시 2026-04-12 ; 신뢰도 High
 - [근거] current keeper state ownership and validation contracts:

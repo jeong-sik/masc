@@ -122,7 +122,7 @@ status: reference
   - observatory investigation graph
 - `GET /api/v1/dashboard/telemetry/summary`, `GET /api/v1/dashboard/telemetry?source=tool_call_io`
   - Tool Monitor evidence-log lens and source freshness metadata
-- `GET /api/v1/dashboard/agent core/telemetry/recent`, `GET /api/v1/dashboard/agent core/telemetry/summary`
+- `GET /api/v1/dashboard/agent_core/telemetry/recent`, `GET /api/v1/dashboard/agent_core/telemetry/summary`
   - in-process agent core runtime-lane sample cache; payloads expose `dashboard_surface`, `source`, and `retention.durable_replay_surface` so operators can distinguish cache state from durable `agent_core_event` replay
 - `GET /api/v1/dashboard/memory-subsystems`
   - cognition memory sub-view read model

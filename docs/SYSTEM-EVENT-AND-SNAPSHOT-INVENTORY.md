@@ -319,7 +319,7 @@ Meaning:
 ## What is already typed
 
 - Dashboard-side SSE names are modeled as a TypeScript string union in `dashboard/src/types/sse.ts`.
-- Dashboard agent core monitor types are separately modeled in `dashboard/src/types/agent core.ts`.
+- Dashboard agent core monitor types are separately modeled in `dashboard/src/types/agent-core.ts`.
 - Composite observer internals are variantized:
   - TLA action names mirrored as OCaml variants
   - invariant keys mirrored as OCaml variants

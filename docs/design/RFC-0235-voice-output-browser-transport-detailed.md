@@ -262,7 +262,7 @@ subscriber registry에서 keeper_name match 필터.
 11. 테스트: §3 케이스 10-11, 12-14 수동.
 
 ### 건드리지 않을 것 (보호)
-- agent core (`lib/agent core*`) — voice는 MASC 개념, 경계 유지.
+- agent core (`lib/agent_core*`) — voice는 MASC 개념, 경계 유지.
 - 기존 dedup (`is_dedup_hit`), duration probe (`audio_duration_seconds`) — 동작 변경 없음.
 - `cleanup_old_audio_files` TTL 값 (1h) — 그대로.
 - keeper_chat JSONL 스키마 — audio는 SSE 전용 페이로드, 디스크에 별도 저장 안 함.

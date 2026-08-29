@@ -7000,8 +7000,8 @@ let render_harness_list (state : state) =
    | None -> ()
    | Some note -> box_line_styled buf cols ~style:(Theme.warn ()) note);
   let col_hdr =
-    Printf.sprintf "  %-8s %-14s %-9s %-9s %s" "Time" "Task \xe2\x86\x92 Overview" "Gate" "Verdict"
-      "Evaluator"
+    Printf.sprintf "  %-8s %-14s %-9s %-9s %-24s %s" "Time"
+      "Task \xe2\x86\x92 Overview" "Gate" "Verdict" "Evaluator" "Reason"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -7045,14 +7045,40 @@ let render_harness_list (state : state) =
                 Printf.sprintf "%s (fallback: %s)" v.hv_evaluator reason
           in
           let verdict = Terminal_text.single_line v.hv_verdict in
+          (* A rejection arrives as "reject:<why>", and the why runs to a
+             couple of hundred characters. Poured into the nine-column
+             verdict cell it pushed Evaluator off the right edge, so the
+             column that says who judged was readable on approvals and
+             missing on exactly the rows an operator opens: the rejections.
+
+             The ruling holds the cell; the reason follows the evaluator and
+             takes what width is left. The detail pane wraps it whole. *)
+          let ruling, reason =
+            match String.index_opt verdict ':' with
+            | None -> verdict, ""
+            | Some at ->
+                ( String.sub verdict 0 at
+                , String.trim
+                    (String.sub verdict (at + 1)
+                       (String.length verdict - at - 1)) )
+          in
+          let evaluator_width = 24 in
+          let reason_width =
+            (* 2 gutter + 8 time + 14 task + 9 gate + 9 ruling + evaluator,
+               and one space between each. *)
+            cols - (2 + 8 + 1 + 14 + 1 + 9 + 1 + 9 + 1 + evaluator_width + 1)
+          in
           let line =
-            Printf.sprintf "  %-8s %-14s %-9s %s%-9s%s %s"
+            Printf.sprintf "  %-8s %-14s %-9s %s%-9s%s %-*s %s"
               (Terminal_text.clock_timestamp
                  (Masc_domain.iso8601_of_unix_seconds v.hv_at))
               (Terminal_text.single_line v.hv_task_id)
               (Terminal_text.single_line v.hv_gate)
-              (semantic_status_color verdict) verdict Ansi.reset
-              (Terminal_text.single_line evaluator)
+              (semantic_status_color verdict) ruling Ansi.reset
+              evaluator_width
+              (fit_width (Terminal_text.single_line evaluator) evaluator_width)
+              (if reason = "" || reason_width <= 0 then ""
+               else fit_width reason reason_width)
           in
           let style =
             match v.hv_fallback_reason with
@@ -7163,6 +7189,15 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
         [ (Theme.warn ()), "  FALLBACK EVALUATION" ]
         @ wrapped "Why the requested evaluator did not run" reason
   in
+  let ruling, reason =
+    let whole = Terminal_text.single_line verdict.hv_verdict in
+    match String.index_opt whole ':' with
+    | None -> whole, ""
+    | Some at ->
+        ( String.sub whole 0 at
+        , String.trim
+            (String.sub whole (at + 1) (String.length whole - at - 1)) )
+  in
   [ Ansi.bold, "  HARNESS VERDICT"
   ; field "Task link" (Link.reference Task verdict.hv_task_id)
   ; field "Task" verdict.hv_task_id
@@ -7171,14 +7206,18 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
   @ [ field "Agent" verdict.hv_agent
     ; Ansi.dim, ""
     ; Ansi.bold, "  DECISION"
-    ; field ~style:(semantic_status_color verdict.hv_verdict) "Verdict"
-        verdict.hv_verdict
+    ; field ~style:(semantic_status_color verdict.hv_verdict) "Verdict" ruling
     ; field "Gate" verdict.hv_gate
     ; field "Evaluator" verdict.hv_evaluator
     ; field "Recorded"
         (Masc_domain.iso8601_of_unix_seconds verdict.hv_at)
-    ; Ansi.dim, ""
     ]
+  (* The reason a task was rejected is the sentence the operator came here to
+     read, and it runs long. [field] is one [single_line], so it was cut at
+     the pane's width and the rest existed nowhere on the surface. The title
+     above already wraps for the same reason. *)
+  @ (if reason = "" then [] else wrapped "Reason" reason)
+  @ [ Ansi.dim, "" ]
   @ fallback
 
 let harness_detail_pane (state : state) ~rows ~cols verdict buf =

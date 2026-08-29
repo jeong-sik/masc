@@ -424,7 +424,7 @@ function FeedbackRow({ value, onChange, onInspect, onRegenerate, onCopy, verifie
       {showVote ? <button className={cx('fbk-btn', 'down', v === 'down' && 'on')} onClick={() => set('down')}>{L.down} {L.poor}</button> : null}
       {showRegen ? <button className="fbk-btn" onClick={onRegenerate}>{'↻'} {L.regen}</button> : null}
       <button className="fbk-btn inspect" onClick={onInspect}>{ko ? '⊙ ' : ''}{L.inspect}</button>
-      {verified ? <span className="fbk-verify" title="cross-verifier 통과 — 다른 모델이 이 응답의 사실성·정합성을 교차 검증함 (runtime.toml [runtime].cross_verifier)">{L.vk} {L.verify}</span> : null}
+      {verified ? <span className="fbk-verify" title="교차 검증 통과 — 다른 모델이 이 응답의 사실성·정합성을 확인했다">{L.vk} {L.verify}</span> : null}
       {noted ? <span className="fbk-noted">{'✓'} {L.noted}</span> : null}
     </div>
   );

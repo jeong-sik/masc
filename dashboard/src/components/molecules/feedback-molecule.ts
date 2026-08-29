@@ -6,9 +6,12 @@
 //     component: a host passes value/onChange to persist, otherwise the toggle
 //     is transient UI state only and nothing is recorded. Do not wire it to a
 //     store that discards silently.
-//   - `verified` (fbk-verify) marks cross-verifier passage; no turn payload
-//     carries that flag yet, so the chip renders only when a host passes
-//     verified={true} from a real verification verdict.
+//   - `verified` (fbk-verify) marks a cross-verification verdict; no turn
+//     payload carries that flag yet, so the chip renders only when a host
+//     passes verified={true} from a real verification verdict. The tooltip
+//     names no config path: it used to point at `[runtime].cross_verifier`,
+//     which #29197 removed, and a chip that cites a key an operator cannot
+//     find is worse than one that cites none.
 //   - RegenTag: KeeperConversationEntry has no "regenerated" marker — render
 //     only where a host knows a reply was regenerated.
 
@@ -87,7 +90,7 @@ export function MoleculeFeedbackRow({
       ${verified
         ? html`<span
             class="fbk-verify"
-            title="cross-verifier 통과 — 다른 모델이 이 응답의 사실성·정합성을 교차 검증함 (runtime.toml [runtime].cross_verifier)"
+            title="교차 검증 통과 — 다른 모델이 이 응답의 사실성·정합성을 확인했다"
           >◈ 검증 통과</span>`
         : null}
       ${noted ? html`<span class="fbk-noted">✓ 피드백 기록됨</span>` : null}

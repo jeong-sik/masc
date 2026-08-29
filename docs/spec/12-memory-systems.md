@@ -130,5 +130,5 @@ no reply-derived short-term cache and no prose replay sidecar.
 See:
 
 - [Keeper State Ownership](../KEEPER-STATE-OWNERSHIP.md)
-- [agent core/MASC Boundary](../agent core-MASC-BOUNDARY.md)
+- [agent core/MASC Boundary](../AGENT-CORE-BOUNDARY.md)
 - [Keeper Continuity Validation](../KEEPER-CONTINUITY-VALIDATION.md)

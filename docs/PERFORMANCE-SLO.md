@@ -41,7 +41,7 @@ agent core `Streaming_summary.ttft_ms`(Time To First Token)는 MASC가 직접 �
 - `gen_ai.response.time_to_first_chunk` — OpenTelemetry GenAI semconv TTFRC
 
 **TTFT-to-client**(= provider TTFT + transport overhead)는 현재 측정되지 않는다.
-agent core RFC-agent core-020이 요구하는 consumer SLO를 추가하려면 agent core `Streaming_summary`를
+agent core RFC-AC-020이 요구하는 consumer SLO를 추가하려면 agent core `Streaming_summary`를
 파싱하거나 `Metrics.t` 콜백 계약에 TTFT 필드를 추가해야 한다.
 
 ## 측정 방법

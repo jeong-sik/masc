@@ -26,7 +26,7 @@ This design treats connector rendering as a MASC-owned surface projection layer:
 ## 2. System Context
 
 - **MASC repo:** `~/me/workspace/yousleepwhen/masc`
-- **agent core repo:** `~/me/workspace/yousleepwhen/agent core`
+- **agent core repo:** `~/me/workspace/yousleepwhen/agent_core` (현재는 masc 안 `packages/agent_core` 로 들어옴)
 - **Live runtime root:** `<base-path>/.masc` for the active `MASC_BASE_PATH` or `--base-path`.
 - **MASC role:** parallel multi-agent execution, keeper/runtime orchestration, board/fusion/dashboard surfaces, connector gates, operational monitoring, and MASC-specific turn projection.
 - **agent core role:** OCaml Agent SDK public library: provider/model handling, transport, generic Agent turn lifecycle, hooks, sync/async/batch tool-use systems, and provider-neutral content types.

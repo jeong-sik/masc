@@ -203,13 +203,13 @@ let run_command_with_status ?turn_sandbox_factory
        through the SSH path above, not through here. The match below fails
        closed on it before the image guard or any Docker fallback can claim
        the call. *)
-    | Backend_unimplemented _ | No_factory | Local_profile | Remote_ssh_profile -> true
+    | No_factory | Local_profile | Remote_ssh_profile -> true
   in
   match resolve_result with
   | Remote_ssh_profile ->
     Error
       "remote_ssh_read_internal_error: SSH profile reached Docker backend resolution"
-  | Runtime _ | Backend_unimplemented _ | No_factory | Local_profile ->
+  | Runtime _ | No_factory | Local_profile ->
   if no_runtime && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else
@@ -220,12 +220,6 @@ let run_command_with_status ?turn_sandbox_factory
     | Runtime runtime ->
       Keeper_turn_sandbox_runtime.run_command_with_status
         ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
-    (* Refuse rather than fall through to the docker image path: the keeper
-       asked for a backend this build cannot start, and running its command
-       anywhere else is the silent-substitution failure of #31178. *)
-    | Backend_unimplemented profile ->
-      Error
-        (Keeper_types_profile_sandbox.backend_unimplemented_message profile)
     | Remote_ssh_profile ->
       Error
         "remote_ssh_read_internal_error: SSH profile reached Docker backend dispatch"

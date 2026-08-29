@@ -1253,7 +1253,7 @@ let check_invariant_sandbox_isolation
         would run. No turn runtime exists to scope the isolation invariant to
         ([Remote_ssh_profile] included: its calls are scoped on the remote
         side, not against a local guest root). *)
-     | Backend_unimplemented _ | No_factory | Local_profile | Remote_ssh_profile -> Ok ()
+     | No_factory | Local_profile | Remote_ssh_profile -> Ok ()
      | Runtime runtime ->
        let host_root = Keeper_turn_sandbox_runtime.host_root runtime in
        Keeper_invariant.sandbox_isolation

@@ -73,15 +73,6 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
     Error
       (target_error
          "typed Shell IR Docker dispatch requires a turn sandbox factory (sandbox profile is Local)")
-  | Backend_unimplemented profile ->
-    Error
-      (target_error
-         ~fields:
-           [ ( "requested_sandbox"
-             , `String
-                 (Keeper_types_profile_sandbox.sandbox_profile_to_string profile) )
-           ]
-         (Keeper_types_profile_sandbox.backend_unimplemented_message profile))
   | Remote_ssh_profile ->
     (* Unreachable from typed dispatch (the Remote_ssh arm there fails
        closed first), but fail closed here too: never improvise a Docker

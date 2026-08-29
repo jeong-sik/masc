@@ -397,12 +397,12 @@ let handle_tool_execute_typed
                     ; github_secret_files = (fun () -> Ok [])
                     ; cleanup = Fun.id
                     }))
-          (* Both guest profiles enter the same target constructor, but a
-             [Micro_vm] keeper never reaches a docker runtime: the factory
-             resolves it to [Backend_unimplemented] and the constructor
-             surfaces that refusal. The labels below are still read off the
-             profile rather than written as "docker" — a keeper that asked
-             for a VM must not be told docker ran its command (#31225). *)
+          (* Both guest profiles enter the same target constructor, and the
+             factory hands both the same turn runtime, which builds Apple
+             [container] argv for a VM keeper (#31225, #31178). The labels
+             below are still read off the profile rather than written as
+             "docker" — a keeper that asked for a VM must not be told docker
+             ran its command. *)
           | Docker | Micro_vm ->
             if typed_input_has_env input
             then

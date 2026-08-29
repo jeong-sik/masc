@@ -30,6 +30,47 @@ type finish_outcome =
 type spawn_outcome =
   | Worker_forked
 
+(** Every terminal disposition of the HITL exact-output flow.
+
+    Closed on purpose: these were 27 string literals across 37 call sites,
+    so a branch added later reached the metric without the compiler asking.
+    Each derivation is now an exhaustive match. *)
+type flow_outcome =
+  | Ok_summary
+  | Ok_summary_cli
+  | Source_resolved
+  | Identity_unbound
+  | Identity_unbound_source_changed
+  | Terminal_sync_unconfirmed
+  | Terminal_persistence_failure
+  | Terminal_rejected
+  | Provenance_mismatch
+  | Domain_invalid_output
+  | Attempt_replay
+  | Attempt_start_failed
+  | Measurement_start_failed
+  | Measurement_callback_failed
+  | Candidates_exhausted
+  | Bind_failed
+  | Release_failed
+  | Execution_failed
+  | Cli_slots_exhausted
+  | Cli_released_without_binding
+  | Cli_walk_fell_back
+  | Cli_release_unconfirmed
+  | Cli_bind_unconfirmed
+  | Cli_bind_failed
+  | Cancellation
+  | Cancellation_settlement_failed
+  | Crashed
+
+val outcome_label : flow_outcome -> string
+(** The metric label for an outcome. The text is the contract with anything
+    reading the [HitlSummaryOutcomes] counter, so it is derived here rather
+    than restated at each recording site; [test_hitl_summary_worker] pins
+    every pair. *)
+
+
 val spawn
   :  sw:Eio.Switch.t
   -> entry:Keeper_approval_queue_rules_types.pending_approval

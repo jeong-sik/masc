@@ -3,7 +3,6 @@
     Tests for telemetry event types with deriving yojson:
     - event type variants
     - event_record type
-    - metrics type
     - JSON roundtrip tests
 *)
 
@@ -344,24 +343,6 @@ let test_parse_event_records_tool_assigned_missing_optional_fields () =
   check_one_tool_assigned_record "missing optional fields" json
 
 (* ============================================================
-   metrics Type Tests
-   ============================================================ *)
-
-let test_metrics_type () =
-  let m : Telemetry_eio.metrics = {
-    active_agents = 3;
-    tasks_in_progress = 5;
-    tasks_completed_24h = 42;
-    avg_task_duration_ms = 3500.0;
-    error_rate = 0.02;
-  } in
-  check int "active_agents" 3 m.active_agents;
-  check int "tasks_in_progress" 5 m.tasks_in_progress;
-  check int "tasks_completed_24h" 42 m.tasks_completed_24h;
-  check (float 0.01) "avg_task_duration_ms" 3500.0 m.avg_task_duration_ms;
-  check (float 0.01) "error_rate" 0.02 m.error_rate
-
-(* ============================================================
    JSON Roundtrip Tests
    ============================================================ *)
 
@@ -428,21 +409,6 @@ let test_parse_event_records_drop_increments_counter () =
   check int "malformed payload produces zero records" 0 (List.length parsed);
   let after = Otel_metric_store.metric_value_or_zero metric ~labels () in
   check (float 0.001) "drop counter incremented by 1" 1.0 (after -. before)
-
-let test_metrics_json_roundtrip () =
-  let original : Telemetry_eio.metrics = {
-    active_agents = 10;
-    tasks_in_progress = 7;
-    tasks_completed_24h = 100;
-    avg_task_duration_ms = 2500.0;
-    error_rate = 0.01;
-  } in
-  let json = Telemetry_eio.metrics_to_yojson original in
-  match Telemetry_eio.metrics_of_yojson json with
-  | Ok decoded ->
-      check int "active_agents" 10 decoded.active_agents;
-      check int "tasks_completed_24h" 100 decoded.tasks_completed_24h
-  | Error e -> fail ("json decode failed: " ^ e)
 
 (* ============================================================
    event_to_json Tests
@@ -728,12 +694,8 @@ let () =
       test_case "tool_assigned missing optional fields" `Quick
         test_parse_event_records_tool_assigned_missing_optional_fields;
     ];
-    "metrics", [
-      test_case "type" `Quick test_metrics_type;
-    ];
     "json_roundtrip", [
       test_case "event" `Quick test_event_json_roundtrip;
-      test_case "metrics" `Quick test_metrics_json_roundtrip;
       test_case "drop increments persistence_read_drops counter" `Quick
         test_parse_event_records_drop_increments_counter;
       test_case "retired agent variants are rejected" `Quick

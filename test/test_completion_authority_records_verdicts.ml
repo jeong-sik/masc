@@ -24,10 +24,27 @@ let test_the_review_records_its_verdict () =
       binding n
 ;;
 
+(* The other half of the loop: operator disagreement labels return to the
+   judge as few-shot examples. The prompt slot sat unfed for a month while
+   the selection machinery had only its own tests as callers. *)
+let test_the_review_carries_the_calibration_examples () =
+  let n =
+    Ast_grep.count_calls_in_value_binding ~module_path ~binding_name:binding
+      ~callee:"Eval_calibration.format_few_shot_block"
+  in
+  if n <> 1 then
+    Alcotest.failf
+      "%s must hand the judge its calibration few-shot block exactly once; \
+       Eval_calibration.format_few_shot_block is called %d time(s)"
+      binding n
+;;
+
 let () =
   Alcotest.run "completion authority records verdicts"
     [ ( "wiring"
       , [ Alcotest.test_case "the review records its verdict" `Quick
             test_the_review_records_its_verdict
+        ; Alcotest.test_case "the review carries the calibration examples"
+            `Quick test_the_review_carries_the_calibration_examples
         ] )
     ]

@@ -12,6 +12,12 @@ open Result.Syntax
    actor; run identity stays with the per-review [verification_id]. *)
 let authority_actor = Runtime.verifier_exact_lane_id
 
+(* How many operator-disagreement examples ride along in the judge's prompt.
+   Few-shot selection puts false positives first, so the examples that cost
+   the most (an approve a human overturned) are the ones that survive the
+   cut. *)
+let judge_few_shot_examples = 3
+
 type runtime =
   { config : Workspace_utils_backend_setup.config
   ; sw : Eio.Switch.t
@@ -604,11 +610,23 @@ let process_task_once
                 ; root_layout
                 }
             in
+            (* Human labels close the judge's own loop: where an operator
+               disagreed with a past verdict, the divergence returns to the
+               judge as a few-shot example, false positives first. The prompt
+               slot has existed since the calibration design; this passes it.
+               With no labels recorded the block is empty and the prompt is
+               byte-identical to before. *)
+            let few_shot_block =
+              Eval_calibration.format_few_shot_block
+                (Eval_calibration.select_examples
+                   ~max_examples:judge_few_shot_examples)
+            in
             let result =
               Task.Anti_rationalization.review
                 ~base_path:runtime.config.base_path
                 ~sw:(Some runtime.sw)
                 ~lookup
+                ~few_shot_block
                 ?completion_contract:prepared.completion_contract
                 ~required_evidence:prepared.required_artifacts
                 ~on_tool_result

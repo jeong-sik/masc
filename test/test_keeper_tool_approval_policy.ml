@@ -180,6 +180,30 @@ let test_the_control_names_are_the_catalogue_s () =
      && not (mentions Catalog.cancel_tool_name "keeper_compose_"))
 ;;
 
+(* #31728 removed the tool group, and with it the split between a write that
+   moves masc's own rows and one that leaves. Every non-read became Ask, which
+   would have put keeper_memory_write — 230 calls on 2026-08-29 alone — behind
+   an operator prompt. These pin the split on its own axis so the next sweep
+   has to see it. *)
+let test_an_in_process_write_runs () =
+  match Policy.verdict_for ~composition_plan_index:None
+          ~tool_name:"keeper_memory_write" ~input:no_input
+  with
+  | Policy.Run _ -> ()
+  | Policy.Ask { because } ->
+    failf "keeper_memory_write must run without asking, got Ask: %s" because
+;;
+
+let test_a_write_that_leaves_masc_is_asked_about () =
+  match Policy.verdict_for ~composition_plan_index:None
+          ~tool_name:"tool_edit_file"
+          ~input:(`Assoc [ "file_path", `String "lib/a.ml" ])
+  with
+  | Policy.Ask _ -> ()
+  | Policy.Run { because } ->
+    failf "tool_edit_file must be asked about, got Run: %s" because
+;;
+
 let () =
   run "keeper_tool_approval_policy"
     [ ( "the split"
@@ -193,6 +217,12 @@ let () =
     ; ( "unknowns"
       , [ test_case "an unclassifiable tool is asked about" `Quick
             test_an_unclassifiable_tool_is_asked_about
+        ] )
+    ; ( "in-process writes"
+      , [ test_case "a write inside masc runs" `Quick
+            test_an_in_process_write_runs
+        ; test_case "a write that leaves masc is asked about" `Quick
+            test_a_write_that_leaves_masc_is_asked_about
         ] )
     ; ( "compositions"
       , [ test_case "a plan of reads runs unasked" `Quick

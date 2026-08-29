@@ -144,6 +144,15 @@ type policy =
   ; readonly_hint : bool option
   ; cwd_scope : string option
   ; polling_read : bool
+  ; leaves_masc : bool
+      (** Whether a call that is not a read reaches past masc's own stores —
+          the sandbox filesystem, a process, a service. A write that only
+          moves masc's durable rows (a memory entry, a board post, a surface
+          row) is visible and undoable inside the workspace, so the approval
+          policy runs it; anything that leaves is asked about. Declared per
+          descriptor rather than derived from [cwd_scope], which answers a
+          different question and would make this gate quietly wrong the day
+          a sandbox-scoped read-only tool appears. *)
   }
 
 type t =
@@ -263,7 +272,8 @@ let discovery_example ~label ?cwd ~argv () =
   `Assoc [ "label", `String label; "input", input ]
 ;;
 
-let policy ?readonly ?readonly_of_input ?cwd_scope ?(polling_read = false) ()
+let policy ?readonly ?readonly_of_input ?cwd_scope ?(polling_read = false)
+      ?(leaves_masc = false) ()
   =
   let readonly_of_input =
     match readonly_of_input with
@@ -274,6 +284,7 @@ let policy ?readonly ?readonly_of_input ?cwd_scope ?(polling_read = false) ()
   ; readonly_hint = readonly
   ; cwd_scope
   ; polling_read
+  ; leaves_masc
   }
 ;;
 
@@ -612,6 +623,7 @@ let public_descriptors =
       ~policy:
         (policy
            ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
            ())
       ~executor:Shell_ir
       ~backend:Sandbox_process
@@ -645,6 +657,7 @@ let public_descriptors =
            ~readonly:true
            ~readonly_of_input:search_files_readonly_of_input
            ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
            ())
       ~executor:Shell_ir
       ~backend:Sandbox_process
@@ -673,6 +686,7 @@ let public_descriptors =
         (policy
            ~readonly:true
            ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
            ())
       ~executor:Filesystem
       ~backend:Sandbox_process
@@ -697,6 +711,7 @@ let public_descriptors =
         (policy
            ~readonly:false
            ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
            ())
       ~executor:Filesystem
       ~backend:Sandbox_process
@@ -721,6 +736,7 @@ let public_descriptors =
         (policy
            ~readonly:false
            ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
            ())
       ~executor:Filesystem
       ~backend:Sandbox_process

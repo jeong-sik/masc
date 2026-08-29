@@ -148,6 +148,15 @@ type policy =
   ; readonly_hint : bool option
   ; cwd_scope : string option
   ; polling_read : bool
+  ; leaves_masc : bool
+      (** Whether a call that is not a read reaches past masc's own stores —
+          the sandbox filesystem, a process, a service. A write that only
+          moves masc's durable rows (a memory entry, a board post, a surface
+          row) is visible and undoable inside the workspace, so the approval
+          policy runs it; anything that leaves is asked about. Declared per
+          descriptor rather than derived from [cwd_scope], which answers a
+          different question and would make this gate quietly wrong the day
+          a sandbox-scoped read-only tool appears. *)
   }
 
 type t =

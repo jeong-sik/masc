@@ -18,24 +18,8 @@ val prune_keeper_scoped_stores :
 
 val prune_flat_jsonl_older_than : days:int -> string -> int
 
-val prune_flat_json_older_than : days:int -> string -> int
-(** Mtime prune for flat [.json] stores (messages/ holds one
-    [<seq>_<agent>_<id>_broadcast.json] per message, no month dirs, so
-    [Dated_jsonl.prune] was a provable no-op on it). *)
 
-val keeper_scoped_versioned_stores : string list
 
-val prune_keeper_scoped_versioned_stores :
-  prune_dir:(string -> int) -> masc_root:string -> int
-(** Fold [prune_dir] over every generation dir of every
-    [Keeper_scoped_versioned] store ([keepers/<name>/<store>/<generation>/
-    YYYY-MM/DD.jsonl] — reaction-ledger). *)
-(** Delete regular [*.jsonl] files — and their numeric rotation siblings
-    [*.jsonl.<n>] — directly under the given directory whose mtime is older
-    than [days]; returns the number of files removed.
-    Used for stores with a flat layout (e.g. [trajectories/<keeper>/])
-    where [Dated_jsonl.prune] finds no [YYYY-MM] month dirs and is a no-op.
-    Exposed for unit tests. *)
 
 val keeper_scoped_flat_stores : string list
 (** Flat-JSONL stores pruned keeper-scoped ([keepers/<name>/<store>]) by

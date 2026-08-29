@@ -1,12 +1,13 @@
 name = "tool_edit_file"
 description = """
-Write, append, or patch a file. path is required. For mode='overwrite' \
-(default) or 'append', content is required and non-empty. For mode='patch', \
-old_string and new_string are required; old_string must match exactly once \
-unless replace_all=true. Good overwrite: path='lib/foo.ml', content='let x = \
-1'. Good patch: path='lib/foo.ml', mode='patch', old_string='old', \
-new_string='new'. Bad: path='', content=''. Bad: mode='create' (use \
-overwrite). Creates parent dirs."""
+Write, append, or patch a file. path and mode are required; an absent mode \
+is rejected instead of defaulting to overwrite. For mode='overwrite' or \
+'append', content is required and non-empty. For mode='patch', old_string \
+and new_string are required; old_string must match exactly once unless \
+replace_all=true. Good overwrite: path='lib/foo.ml', mode='overwrite', \
+content='let x = 1'. Good patch: path='lib/foo.ml', mode='patch', \
+old_string='old', new_string='new'. Bad: path='', content=''. Bad: \
+mode='create' (use overwrite). Creates parent dirs."""
 
 [[params]]
 name = "path"
@@ -37,5 +38,6 @@ description = "Patch every occurrence instead of exactly one"
 [[params]]
 name = "mode"
 type = "string"
+required = true
 enum = ["overwrite", "append", "patch"]
-description = "Write mode (default: overwrite)"
+description = "Write mode; absence is rejected"

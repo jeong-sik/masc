@@ -444,6 +444,77 @@ let test_patch_no_match_errors () =
          in
          loop 0)
 
+(* The three miss-diagnosis shapes pinned byte-for-byte: a whitespace-only
+   mismatch names the range and echoes the file's real bytes, a matching
+   first line names where to re-Read, and a vanished needle says the file
+   moved on. None of them modify the file — the decision stays with the
+   model (masc#31640 measured 7/23 Edit calls missing in the W3 run). *)
+let patch_miss_error ~config ~meta ~publication_recovery ~playground ~content
+    ~old_string
+  =
+  let path = Filename.concat playground "diagnosed.ml" in
+  Fs_compat.save_file path content;
+  let raw =
+    handle_file_write
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+          [
+            ("path", `String path);
+            ("mode", `String "patch");
+            ("old_string", `String old_string);
+            ("new_string", `String "REPLACED");
+          ])
+      ()
+  in
+  Alcotest.(check bool) "ok=false" false (parse_ok raw);
+  Alcotest.(check string) "file untouched" content (Fs_compat.load_file path);
+  match parse_error raw with
+  | Some msg -> msg
+  | None -> Alcotest.fail "expected error message"
+
+let test_patch_miss_names_whitespace_only_range () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let msg =
+    patch_miss_error ~config ~meta ~publication_recovery ~playground
+      ~content:"def f():\n\treturn 2 - 3\n"
+      ~old_string:"def f():\n    return 2 - 3"
+  in
+  Alcotest.(check string) "whitespace diagnosis"
+    "old_string not found in file. mode=patch matches exact bytes, and lines \
+     1-2 contain the same text with different whitespace; line 1 is \
+     \"def f():\". Re-Read that range and copy it verbatim."
+    msg
+
+let test_patch_miss_names_matching_first_line () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let msg =
+    patch_miss_error ~config ~meta ~publication_recovery ~playground
+      ~content:"let x = 1\nlet y = 2\n"
+      ~old_string:"let x = 1\nlet z = 9"
+  in
+  Alcotest.(check string) "anchor diagnosis"
+    "old_string not found in file. Its first line matches line(s) 1 ignoring \
+     whitespace, but the following bytes differ; re-Read from there and copy \
+     the current text verbatim."
+    msg
+
+let test_patch_miss_says_when_nothing_resembles () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let msg =
+    patch_miss_error ~config ~meta ~publication_recovery ~playground
+      ~content:"let x = 1\n"
+      ~old_string:"def gone():"
+  in
+  Alcotest.(check string) "absent diagnosis"
+    "old_string not found in file. Its first line does not occur anywhere, \
+     even ignoring whitespace; the file may have changed since it was read. \
+     Re-Read it and build old_string from the current bytes."
+    msg
+
 let test_patch_multiple_matches_without_replace_all_errors () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
@@ -1378,6 +1449,12 @@ let () =
             test_file_change_evidence_crosses_handler_and_hook_on_exact_invocation;
           Alcotest.test_case "no match returns error" `Quick
             test_patch_no_match_errors;
+          Alcotest.test_case "miss diagnosis names whitespace-only range" `Quick
+            test_patch_miss_names_whitespace_only_range;
+          Alcotest.test_case "miss diagnosis names matching first line" `Quick
+            test_patch_miss_names_matching_first_line;
+          Alcotest.test_case "miss diagnosis says when nothing resembles" `Quick
+            test_patch_miss_says_when_nothing_resembles;
           Alcotest.test_case "multi match without replace_all rejected"
             `Quick test_patch_multiple_matches_without_replace_all_errors;
           Alcotest.test_case "replace_all applies to every occurrence"

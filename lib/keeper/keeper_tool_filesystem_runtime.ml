@@ -520,6 +520,98 @@ let handle_owned_read_file_with_outcome
                     @ optional_fields)))))
 ;;
 
+(* Blank-run collapse for the miss diagnosis below: the only difference this
+   comparison forgives is whitespace shape, so tabs-vs-spaces and indent
+   depth land in the same bucket while any content byte keeps lines apart.
+   '\r' counts as blank so CRLF files diagnose the same as LF files. *)
+let normalize_line_whitespace line =
+  let buf = Buffer.create (String.length line) in
+  let pending_blank = ref false in
+  String.iter
+    (fun ch ->
+       if ch = ' ' || ch = '\t' || ch = '\r'
+       then pending_blank := true
+       else (
+         if !pending_blank && Buffer.length buf > 0 then Buffer.add_char buf ' ';
+         pending_blank := false;
+         Buffer.add_char buf ch))
+    line;
+  Buffer.contents buf
+;;
+
+(* Diagnose a zero-occurrence patch with byte facts the model can act on —
+   never by applying anything itself (docs/spec/04-turn-lifecycle.md keeps
+   decisions with the model). The 2026-08-29 W3 collection measured 7/23
+   Edit calls missing, several recovering only by rewriting the whole file
+   with Write; the dominant shapes are the same text with different
+   whitespace and a right anchor line with changed surrounding bytes. *)
+let patch_miss_diagnosis ~old_string text =
+  let file_lines = Array.of_list (String.split_on_char '\n' text) in
+  let file_norm = Array.map normalize_line_whitespace file_lines in
+  let needle_norm =
+    Array.of_list
+      (List.map normalize_line_whitespace (String.split_on_char '\n' old_string))
+  in
+  let k = Array.length needle_norm in
+  let n = Array.length file_norm in
+  let window_matches start =
+    let rec go i =
+      i >= k || (String.equal file_norm.(start + i) needle_norm.(i) && go (i + 1))
+    in
+    go 0
+  in
+  let ws_windows = ref [] in
+  if k >= 1 && k <= n
+  then
+    for start = n - k downto 0 do
+      if window_matches start then ws_windows := start :: !ws_windows
+    done;
+  match !ws_windows with
+  | start :: rest ->
+    let suffix =
+      match rest with
+      | [] -> ""
+      | _ -> Printf.sprintf " (first of %d such ranges)" (List.length rest + 1)
+    in
+    Printf.sprintf
+      "old_string not found in file. mode=patch matches exact bytes, and lines \
+       %d-%d contain the same text with different whitespace%s; line %d is %S. \
+       Re-Read that range and copy it verbatim."
+      (start + 1)
+      (start + k)
+      suffix
+      (start + 1)
+      file_lines.(start)
+  | [] ->
+    let anchor = Array.find_opt (fun line -> line <> "") needle_norm in
+    (match anchor with
+     | None ->
+       "old_string not found in file. It is only whitespace once normalized; \
+        re-Read the file and build old_string from its current bytes."
+     | Some anchor ->
+       let hits = ref [] in
+       Array.iteri
+         (fun i line -> if String.equal line anchor then hits := (i + 1) :: !hits)
+         file_norm;
+       (match List.rev !hits with
+        | [] ->
+          "old_string not found in file. Its first line does not occur anywhere, \
+           even ignoring whitespace; the file may have changed since it was \
+           read. Re-Read it and build old_string from the current bytes."
+        | line_numbers ->
+          let listed =
+            line_numbers
+            |> List.filteri (fun i _ -> i < 3)
+            |> List.map string_of_int
+            |> String.concat ", "
+          in
+          Printf.sprintf
+            "old_string not found in file. Its first line matches line(s) %s \
+             ignoring whitespace, but the following bytes differ; re-Read from \
+             there and copy the current text verbatim."
+            listed))
+;;
+
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
    [replace_all=false], requires exactly one occurrence so accidental
    multi-edits are rejected (mirrors Edit semantics). *)
@@ -550,7 +642,7 @@ let apply_patch ~old_string ~new_string ~replace_all text =
     in
     let occurrence_count = count_occurrences ~needle:old_string text in
     if occurrence_count = 0
-    then Error "old_string not found in file. Patch did not match anything."
+    then Error (patch_miss_diagnosis ~old_string text)
     else if (not replace_all) && occurrence_count > 1
     then
       Error

@@ -167,6 +167,7 @@ type t =
   ; runtime_id : string
   ; runtime_selected_model : string option
   ; runtime_attempt_count : int
+  ; runtime_lane_attempt_count : int
   ; runtime_fallback_applied : bool
   ; runtime_outcome : runtime_outcome
   ; agent_core_internal_runtime_allowed : bool

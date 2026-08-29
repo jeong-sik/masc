@@ -3162,8 +3162,8 @@ let schedule_delivery_summary (row : schedule_row) =
     | None -> "reaction:\xe2\x80\x94"
     | Some status -> "reaction:" ^ status
   in
-  ( Printf.sprintf "%s \xc2\xb7 dispatch:%s" row.sch_schedule_id
-      row.sch_dispatch_status
+  ( Printf.sprintf "%s \xc2\xb7 status:%s" row.sch_schedule_id
+      row.sch_status
   , Printf.sprintf "%s \xc2\xb7 %s" queue reaction )
 
 (** Render the Schedules surface: the scheduled-automation list, with an
@@ -3401,8 +3401,6 @@ let schedule_detail_lines ~width (row : schedule_row) =
   ; field "Schedule" row.sch_schedule_id
   ; field "Instance" row.sch_schedule_instance_id
   ; field ~style:(schedule_status_color row.sch_status) "Status" row.sch_status
-  ; field ~style:(schedule_status_color row.sch_dispatch_status) "Dispatch"
-      row.sch_dispatch_status
   ; field "Source" row.sch_source
   ; field "Requested by" row.sch_requested_by
   ; field "Scheduled by" row.sch_scheduled_by

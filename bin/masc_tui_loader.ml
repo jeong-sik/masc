@@ -522,7 +522,6 @@ let decode_schedule_row json =
   in
   let* sch_schedule_id = required_string_field json "schedule_id" in
   let* sch_status = required_string_field json "status" in
-  let* sch_dispatch_status = required_string_field json "dispatch_status" in
   let* sch_source = required_string_field json "source" in
   let* sch_requested_by = decode_schedule_actor json "requested_by" in
   let* sch_scheduled_by = decode_schedule_actor json "scheduled_by" in
@@ -568,7 +567,6 @@ let decode_schedule_row json =
     { sch_schedule_instance_id
     ; sch_schedule_id
     ; sch_status
-    ; sch_dispatch_status
     ; sch_source
     ; sch_requested_by
     ; sch_scheduled_by

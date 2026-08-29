@@ -7701,7 +7701,6 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
                     "schedule_instance_id": "instance-proof-701",
                     "schedule_id": "schedule-proof-701",
                     "status": "running",
-                    "dispatch_status": "running",
                     "source": "operator",
                     "requested_by": {
                         "id": "operator-701",

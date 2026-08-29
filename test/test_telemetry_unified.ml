@@ -1526,6 +1526,135 @@ let test_trajectory_summary_incremental () =
   Alcotest.(check int) "cold recomputation agrees" count2 count3;
   Alcotest.(check (option (float 0.001))) "cold latest agrees" latest2 latest3
 
+
+(* The table above is what makes the trajectory read incremental, and it
+   lived only in process memory: every boot re-read the whole store (654MB on
+   2026-08-29), which is why telemetry_summary's first call after a restart
+   was the heavy one -- 23 of 28 heavy-refresh warnings that day landed
+   within five minutes of one of the 24 bootstraps.
+   [reset_trajectory_summary_cache_for_testing] stands in for the restart:
+   it is exactly the state a fresh process has. *)
+let test_trajectory_summary_cache_survives_a_restart () =
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  let dir = tmpdir "telem_traj_persist" in
+  let root = masc_root dir in
+  let keeper_dir = Filename.concat root "trajectories/alice" in
+  Fs_compat.mkdir_p keeper_dir;
+  let trace = Filename.concat keeper_dir "trace-1.jsonl" in
+  Fs_compat.append_file trace (trajectory_row ~ts:100.0 ~tool_name:"tool_a");
+  Fs_compat.append_file trace (trajectory_row ~ts:200.0 ~tool_name:"tool_b");
+  let warm, _ =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "warm count" 2 warm;
+  let cache_file = Filename.concat dir "trajectory-cache.json" in
+  (match Telemetry_unified.save_trajectory_summary_cache ~path:cache_file with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "save failed: %s" detail);
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  (match Telemetry_unified.load_trajectory_summary_cache ~path:cache_file with
+   | Ok rows -> Alcotest.(check bool) "rows restored" true (rows >= 1)
+   | Error detail -> Alcotest.failf "load failed: %s" detail);
+  (* Growth behind a restored boundary still has to be read: the row is a
+     boundary claim, not a count the store no longer has. *)
+  Fs_compat.append_file trace (trajectory_row ~ts:300.0 ~tool_name:"tool_c");
+  let after, latest =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "growth behind a restored boundary is counted" 3 after;
+  Alcotest.(check (option (float 0.001))) "and latest advances" (Some 300.0)
+    latest
+
+(* The test above would pass on a load that installed nothing: recounting
+   returns the same number. This one edits the saved tool_calls to a value
+   the file cannot produce while leaving its boundary alone, so a count that
+   still matches the file proves the load did nothing. It is also the honest
+   shape of the risk: a matching boundary is trusted, and the size check is
+   the only thing between a stale row and a wrong number. *)
+let test_a_restored_trajectory_row_is_actually_used () =
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  let dir = tmpdir "telem_traj_consumed" in
+  let root = masc_root dir in
+  let keeper_dir = Filename.concat root "trajectories/alice" in
+  Fs_compat.mkdir_p keeper_dir;
+  let trace = Filename.concat keeper_dir "trace-1.jsonl" in
+  Fs_compat.append_file trace (trajectory_row ~ts:100.0 ~tool_name:"tool_a");
+  let warm, _ =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "warm count" 1 warm;
+  let cache_file = Filename.concat dir "trajectory-cache.json" in
+  (match Telemetry_unified.save_trajectory_summary_cache ~path:cache_file with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "save failed: %s" detail);
+  let saved = Fs_compat.load_file cache_file in
+  let replace_first ~needle ~replacement haystack =
+    let nlen = String.length needle and hlen = String.length haystack in
+    let rec scan i =
+      if i + nlen > hlen
+      then haystack
+      else if String.equal (String.sub haystack i nlen) needle
+      then
+        String.sub haystack 0 i
+        ^ replacement
+        ^ String.sub haystack (i + nlen) (hlen - i - nlen)
+      else scan (i + 1)
+    in
+    scan 0
+  in
+  let tampered =
+    replace_first ~needle:"\"tool_calls\":1" ~replacement:"\"tool_calls\":77"
+      saved
+  in
+  Alcotest.(check bool) "the fixture edited the saved count" true
+    (not (String.equal tampered saved));
+  Fs_compat.save_file cache_file tampered;
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  (match Telemetry_unified.load_trajectory_summary_cache ~path:cache_file with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "load failed: %s" detail);
+  let after, _ =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "the restored row is the one that answers" 77 after
+
+(* Absent and unreadable cache files are the cold path, which is correct --
+   just slower. Neither may break a count. *)
+let test_missing_and_corrupt_trajectory_cache_are_survivable () =
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  let dir = tmpdir "telem_traj_absent" in
+  let root = masc_root dir in
+  let keeper_dir = Filename.concat root "trajectories/alice" in
+  Fs_compat.mkdir_p keeper_dir;
+  let trace = Filename.concat keeper_dir "trace-1.jsonl" in
+  Fs_compat.append_file trace (trajectory_row ~ts:100.0 ~tool_name:"tool_a");
+  (match
+     Telemetry_unified.load_trajectory_summary_cache
+       ~path:(Filename.concat dir "absent.json")
+   with
+   | Ok rows -> Alcotest.(check int) "a missing cache restores nothing" 0 rows
+   | Error detail -> Alcotest.failf "a missing cache must not error: %s" detail);
+  let count, _ =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "and the count is exact" 1 count;
+  let corrupt = Filename.concat dir "corrupt.json" in
+  Fs_compat.save_file corrupt "{not json";
+  (match Telemetry_unified.load_trajectory_summary_cache ~path:corrupt with
+   | Ok _ -> Alcotest.fail "a corrupt cache must report the failure"
+   | Error _ -> ());
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  let count2, _ =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "a corrupt cache leaves counting correct" 1 count2
+
 (* ── Runner ──────────────────────────────────────── *)
 
 let () =
@@ -1614,6 +1743,12 @@ let () =
             test_summary_counts_all_entries_beyond_recent_cap;
           Alcotest.test_case "trajectory summary cache is incremental" `Quick
             test_trajectory_summary_incremental;
+          Alcotest.test_case "trajectory cache survives a restart" `Quick
+            test_trajectory_summary_cache_survives_a_restart;
+          Alcotest.test_case "a restored trajectory row is actually used" `Quick
+            test_a_restored_trajectory_row_is_actually_used;
+          Alcotest.test_case "missing and corrupt trajectory caches survive"
+            `Quick test_missing_and_corrupt_trajectory_cache_are_survivable;
           Alcotest.test_case "replay retention selected sources" `Quick
             test_replay_retention_lists_selected_sources;
         ] );

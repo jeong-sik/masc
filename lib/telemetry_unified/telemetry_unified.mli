@@ -146,6 +146,18 @@ val replay_retention_json :
     provenance block for the dashboard telemetry replay endpoint, including
     the selected source list and durable stores read for each source. *)
 
+val save_trajectory_summary_cache : path:string -> (unit, string) result
+(** Writes the per-file (path, boundary, tool_calls, latest_ts) trajectory
+    cache to [path] via a temp-file rename. The cache is never an authority:
+    every row is still validated against its file's current size when used,
+    so a stale or absent file only costs the full read it costs today. *)
+
+val load_trajectory_summary_cache : path:string -> (int, string) result
+(** Loads a cache written by {!save_trajectory_summary_cache}, returning how
+    many rows were read. Rows merge into the in-memory table and never
+    overwrite an entry this process has already advanced further. A missing
+    file is [Ok 0]. *)
+
 module For_testing : sig
   val trajectory_tool_call_summary_stats :
     masc_root:string -> int * float option

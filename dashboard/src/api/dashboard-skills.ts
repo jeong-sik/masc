@@ -116,7 +116,9 @@ export type SkillSurfaceProfile = Omit<SkillProfile, 'reference' | 'kind'>
 export interface SkillEvidenceCoverage {
   composition_scan_limit: number
   composition_rows_scanned: number
-  instruction_ledgers_loaded: number
+  coverage_complete: false
+  activation_scope: 'current_keeper_sessions'
+  activation_ledgers_loaded: number
   unavailable: readonly string[]
 }
 
@@ -131,8 +133,8 @@ export interface SkillCompositionEvidence {
 }
 
 export interface SkillEvidenceResponse {
-  schema: 'masc.skill-evidence/v1'
-  status: 'observed' | 'never_observed'
+  schema: 'masc.skill-evidence/v2'
+  status: 'observed' | 'not_observed_in_current_coverage'
   reference: SkillReference
   activation: SkillActivationEvidence | null
   composition: SkillCompositionEvidence | null
@@ -333,8 +335,8 @@ const UnknownRecordSchema = Schema.Record({
 })
 
 const SkillEvidenceResponseSchema = Schema.Struct({
-  schema: Schema.Literal('masc.skill-evidence/v1'),
-  status: Schema.Literal('observed', 'never_observed'),
+  schema: Schema.Literal('masc.skill-evidence/v2'),
+  status: Schema.Literal('observed', 'not_observed_in_current_coverage'),
   reference: SkillReferenceSchema,
   activation: Schema.NullOr(Schema.Struct({
     keeper: Schema.NonEmptyString,
@@ -347,7 +349,9 @@ const SkillEvidenceResponseSchema = Schema.Struct({
   coverage: Schema.Struct({
     composition_scan_limit: PositiveSafeIntegerSchema,
     composition_rows_scanned: NonNegativeSafeIntegerSchema,
-    instruction_ledgers_loaded: NonNegativeSafeIntegerSchema,
+    coverage_complete: Schema.Literal(false),
+    activation_scope: Schema.Literal('current_keeper_sessions'),
+    activation_ledgers_loaded: NonNegativeSafeIntegerSchema,
     unavailable: Schema.Array(Schema.String),
   }),
 })

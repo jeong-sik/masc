@@ -4782,6 +4782,129 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "an unknown evidence kind decoded"
 
+let skill_evidence_fixture () =
+  `Assoc
+    [ "schema", `String "masc.skill-evidence/v2"
+    ; "status", `String "not_observed_in_current_coverage"
+    ; ( "reference"
+      , `Assoc
+          [ ( "identity"
+            , `Assoc
+                [ "source_id", `String "workspace"
+                ; "package_id", `String "proof"
+                ; "name", `String "proof"
+                ] )
+          ; "content_revision", `String (String.make 64 'a')
+          ] )
+    ; "activation", `Null
+    ; "composition", `Null
+    ; ( "coverage"
+      , `Assoc
+          [ "composition_scan_limit", `Int 5000
+          ; "composition_rows_scanned", `Int 17
+          ; "coverage_complete", `Bool false
+          ; "activation_scope", `String "current_keeper_sessions"
+          ; "activation_ledgers_loaded", `Int 2
+          ; "unavailable", `List [ `String "keeper: ledger_unreadable" ]
+          ] )
+    ]
+;;
+
+let test_decode_skill_evidence_reads_exact_v2_coverage () =
+  match Tui_decode.decode_skill_evidence (skill_evidence_fixture ()) with
+  | Error detail -> Alcotest.fail detail
+  | Ok evidence ->
+    (match evidence.se_status with
+     | Tui_decode.Skill_evidence_not_observed_in_current_coverage -> ()
+     | Tui_decode.Skill_evidence_observed ->
+       Alcotest.fail "bounded absence decoded as observed");
+    Alcotest.(check int)
+      "activation ledgers"
+      2
+      evidence.se_coverage.sec_activation_ledgers_loaded;
+    Alcotest.(check (list string))
+      "unavailable details"
+      [ "keeper: ledger_unreadable" ]
+      evidence.se_coverage.sec_unavailable
+;;
+
+let test_decode_skill_evidence_rejects_v1_and_status_disagreement () =
+  let replace field value = function
+    | `Assoc fields ->
+      `Assoc (List.map (fun (name, old) -> name, if name = field then value else old) fields)
+    | json -> json
+  in
+  Alcotest.(check bool)
+    "v1 rejected"
+    true
+    (skill_evidence_fixture ()
+     |> replace "schema" (`String "masc.skill-evidence/v1")
+     |> Tui_decode.decode_skill_evidence
+     |> Result.is_error);
+  Alcotest.(check bool)
+    "observed without evidence rejected"
+    true
+    (skill_evidence_fixture ()
+     |> replace "status" (`String "observed")
+     |> Tui_decode.decode_skill_evidence
+     |> Result.is_error)
+;;
+
+let test_decode_skill_evidence_requires_observation_fields () =
+  List.iter
+    (fun omitted ->
+       let without = function
+         | `Assoc fields -> `Assoc (List.remove_assoc omitted fields)
+         | json -> json
+       in
+       Alcotest.(check bool)
+         (omitted ^ " required")
+         true
+         (skill_evidence_fixture ()
+          |> without
+          |> Tui_decode.decode_skill_evidence
+          |> Result.is_error))
+    [ "activation"; "composition" ]
+;;
+
+let test_decode_skill_evidence_requires_every_coverage_field () =
+  let required =
+    [ "composition_scan_limit"
+    ; "composition_rows_scanned"
+    ; "coverage_complete"
+    ; "activation_scope"
+    ; "activation_ledgers_loaded"
+    ; "unavailable"
+    ]
+  in
+  List.iter
+    (fun omitted ->
+       let without = function
+         | `Assoc fields ->
+           `Assoc
+             (List.map
+                (fun (name, value) ->
+                   if name = "coverage"
+                   then
+                     ( name
+                     , match value with
+                       | `Assoc coverage ->
+                         `Assoc (List.remove_assoc omitted coverage)
+                       | _ -> value )
+                   else name, value)
+                fields)
+         | json -> json
+       in
+       Alcotest.(check bool)
+         (omitted ^ " required")
+         true
+         (skill_evidence_fixture ()
+          |> without
+          |> Tui_decode.decode_skill_evidence
+          |> Result.is_error))
+    required
+;;
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_verification_evidence",
@@ -5217,5 +5340,15 @@ let () =
           test_decode_skills_catalog_tolerates_empty_usage_and_flow;
         Alcotest.test_case "rejects a non-string kind" `Quick
           test_decode_skills_catalog_rejects_a_wrong_kind_type;
+      ] );
+    ( "skill_evidence",
+      [ Alcotest.test_case "reads exact v2 coverage" `Quick
+          test_decode_skill_evidence_reads_exact_v2_coverage
+      ; Alcotest.test_case "rejects v1 and status disagreement" `Quick
+          test_decode_skill_evidence_rejects_v1_and_status_disagreement
+      ; Alcotest.test_case "requires observation fields" `Quick
+          test_decode_skill_evidence_requires_observation_fields
+      ; Alcotest.test_case "requires every coverage field" `Quick
+          test_decode_skill_evidence_requires_every_coverage_field
       ] );
   ]

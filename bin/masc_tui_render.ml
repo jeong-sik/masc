@@ -8910,13 +8910,32 @@ let render_tools (state : state) =
             in
             (match state.tools_skill_evidence with
              | Some (observed_key, json) when String.equal key observed_key ->
+              (match Tui_decode.decode_skill_evidence json with
+               | Error _ ->
+                 [ Theme.bad (), "     Latest evidence response is malformed" ]
+               | Ok _ ->
+               let has_evidence_field name =
+                 match json_assoc_member_opt name json with
+                 | None | Some `Null -> false
+                 | Some _ -> true
+               in
+               let has_evidence =
+                 has_evidence_field "activation"
+                 || has_evidence_field "composition"
+               in
                let evidence_lines =
-                 match json_assoc_member_opt "status" json with
-                | Some (`String "never_observed") ->
+                 match
+                   json_assoc_member_opt "schema" json,
+                   json_assoc_member_opt "status" json
+                 with
+                | ( Some (`String "masc.skill-evidence/v2")
+                  , Some (`String "not_observed_in_current_coverage") )
+                  when not has_evidence ->
                   [ Theme.warn (),
-                    "     Latest evidence: no exact-revision activation or composition run"
+                    "     Latest evidence: not found in current coverage (not proof of never)"
                   ]
-                | Some (`String "observed") ->
+                | Some (`String "masc.skill-evidence/v2"), Some (`String "observed")
+                  when has_evidence ->
                   let activation_lines =
                     match json_assoc_member_opt "activation" json with
                     | Some (`Assoc _ as evidence) ->
@@ -9009,7 +9028,11 @@ let render_tools (state : state) =
                in
                let coverage_lines =
                  match json_assoc_member_opt "coverage" json with
-                 | Some (`Assoc _ as coverage) ->
+                 | Some (`Assoc _ as coverage)
+                   when json_assoc_member_opt "coverage_complete" coverage
+                        = Some (`Bool false)
+                        && json_assoc_member_opt "activation_scope" coverage
+                           = Some (`String "current_keeper_sessions") ->
                    let int_field name =
                      match json_assoc_member_opt name coverage with
                      | Some (`Int value) -> value
@@ -9017,21 +9040,34 @@ let render_tools (state : state) =
                    in
                    let unavailable =
                      match json_assoc_member_opt "unavailable" coverage with
-                     | Some (`List values) -> List.length values
-                     | Some _ | None -> 0
+                     | Some (`List values) ->
+                       List.filter_map
+                         (function
+                           | `String value ->
+                             Some (Terminal_text.single_line value)
+                           | _ -> None)
+                         values
+                     | Some _ | None -> []
                    in
                    [ Ansi.dim,
                      Printf.sprintf
-                       "       coverage ledgers=%d log_rows=%d/%d unavailable=%d"
-                       (int_field "instruction_ledgers_loaded")
+                       "       coverage current_ledgers=%d bounded_log_rows=%d/%d incomplete unavailable=%d"
+                       (int_field "activation_ledgers_loaded")
                        (int_field "composition_rows_scanned")
                        (int_field "composition_scan_limit")
-                       unavailable
+                       (List.length unavailable)
                    ]
+                   @
+                   (match unavailable with
+                    | [] -> []
+                    | values ->
+                      [ Theme.warn (),
+                        "       unavailable: " ^ String.concat " · " values
+                      ])
                  | Some _ | None ->
                    [ Theme.warn (), "       evidence coverage is unavailable" ]
                in
-               evidence_lines @ coverage_lines
+               evidence_lines @ coverage_lines)
              | Some _ | None ->
                [ Ansi.dim, "     Latest evidence: Enter to load this exact revision" ])
         in

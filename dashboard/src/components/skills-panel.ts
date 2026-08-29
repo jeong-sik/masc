@@ -216,10 +216,11 @@ function runOutput(value: unknown): string {
 
 function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null }) {
   if (!result) return html`<div class="ss-muted">Load the latest exact-revision result.</div>`
-  if (result.status === 'never_observed') {
+  if (result.status === 'not_observed_in_current_coverage') {
     return html`
-      <div class="text-[var(--color-status-warn)]">No exact-revision activation or composition run was observed.</div>
-      <div class="ss-muted text-3xs">${result.coverage.instruction_ledgers_loaded} ledgers · ${result.coverage.composition_rows_scanned}/${result.coverage.composition_scan_limit} log rows</div>
+      <div class="text-[var(--color-status-warn)]">No exact-revision run was found in the current coverage. This is not proof that it never ran.</div>
+      <div class="ss-muted text-3xs">${result.coverage.activation_ledgers_loaded} current-session activation ledgers · ${result.coverage.composition_rows_scanned}/${result.coverage.composition_scan_limit} bounded log rows · incomplete coverage</div>
+      ${result.coverage.unavailable.length > 0 ? html`<div class="text-[var(--color-status-warn)] text-3xs">Unavailable: ${result.coverage.unavailable.join(' · ')}</div>` : null}
     `
   }
   const activation = result.activation?.activation ?? null
@@ -247,7 +248,7 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
         </div>
       ` : null}
       <div class="ss-muted text-3xs">
-        coverage ${result.coverage.instruction_ledgers_loaded} ledgers · ${result.coverage.composition_rows_scanned}/${result.coverage.composition_scan_limit} log rows
+        coverage ${result.coverage.activation_ledgers_loaded} current-session activation ledgers · ${result.coverage.composition_rows_scanned}/${result.coverage.composition_scan_limit} bounded log rows · incomplete
         ${result.coverage.unavailable.length > 0 ? html` · ⚠ ${result.coverage.unavailable.join(' · ')}` : null}
       </div>
     </div>

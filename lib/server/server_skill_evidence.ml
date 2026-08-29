@@ -34,7 +34,7 @@ let latest_activation ~config reference =
          | Ok None -> latest, loaded, unavailable
          | Ok (Some meta) ->
            (match
-              Keeper_skill_activation_ledger.load
+              Keeper_skill_activation_ledger.load_existing
                 ~config
                 ~trace_id:meta.runtime.trace_id
             with
@@ -45,7 +45,8 @@ let latest_activation ~config reference =
                  ^ ": "
                  ^ Keeper_skill_activation_ledger.store_error_code error)
                 :: unavailable )
-            | Ok ledger ->
+            | Ok None -> latest, loaded, unavailable
+            | Ok (Some ledger) ->
               let observed =
                 Keeper_skill_activation_ledger.activations ledger
                 |> List.filter (fun activation ->
@@ -125,13 +126,12 @@ let to_yojson
            ])
       activation
   in
+  let observed = Option.is_some activation || Option.is_some composition in
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v1"
+    [ "schema", `String "masc.skill-evidence/v2"
     ; ( "status"
       , `String
-          (if Option.is_some activation || Option.is_some composition
-           then "observed"
-           else "never_observed") )
+          (if observed then "observed" else "not_observed_in_current_coverage") )
     ; "reference", Skill_reference.to_yojson reference
     ; "activation", Option.value ~default:`Null activation
     ; "composition", Option.value ~default:`Null composition
@@ -139,7 +139,9 @@ let to_yojson
       , `Assoc
           [ "composition_scan_limit", `Int scan_limit
           ; "composition_rows_scanned", `Int (List.length rows)
-          ; "instruction_ledgers_loaded", `Int ledgers_loaded
+          ; "coverage_complete", `Bool false
+          ; "activation_scope", `String "current_keeper_sessions"
+          ; "activation_ledgers_loaded", `Int ledgers_loaded
           ; "unavailable", `List (List.map (fun value -> `String value) unavailable)
           ] )
     ]

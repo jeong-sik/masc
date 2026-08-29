@@ -4221,17 +4221,31 @@ let test_skill_evidence_joins_activation_and_composition () =
       ~unavailable:[ "sangsu: ledger_unreadable" ]
   in
   let open Yojson.Safe.Util in
-  check string "evidence schema" "masc.skill-evidence/v1"
+  check string "evidence schema" "masc.skill-evidence/v2"
     (json |> member "schema" |> to_string);
   check string "observed status" "observed" (json |> member "status" |> to_string);
   check string "activation keeper" "rondo"
     (json |> member "activation" |> member "keeper" |> to_string);
   check int "composition node count" 1
     (json |> member "composition" |> member "nodes" |> to_list |> List.length);
-  check int "ledger coverage" 2
-    (json |> member "coverage" |> member "instruction_ledgers_loaded" |> to_int);
+  check int "activation ledger coverage" 2
+    (json |> member "coverage" |> member "activation_ledgers_loaded" |> to_int);
+  check bool "bounded evidence coverage is incomplete" false
+    (json |> member "coverage" |> member "coverage_complete" |> to_bool);
   check int "unavailable coverage" 1
     (json |> member "coverage" |> member "unavailable" |> to_list |> List.length)
+  ;
+  let not_observed =
+    Server_skill_evidence.For_testing.to_yojson
+      ~reference
+      ~rows:[]
+      ~activation:None
+      ~ledgers_loaded:0
+      ~unavailable:[]
+  in
+  check string "bounded absence is not proof of never"
+    "not_observed_in_current_coverage"
+    (not_observed |> member "status" |> to_string)
 ;;
 
 let () =

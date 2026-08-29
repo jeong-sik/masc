@@ -611,19 +611,46 @@ let matches_filters ?(kinds = []) (value : event) =
    needs — the read already loads the whole log, so a caller that filtered
    later had to inflate [limit] and still lost its oldest events to a busier
    agent. *)
-let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ~keep
+(* [keep] is optional so the unfiltered callers can say so. The three default
+   dashboard projections ask for the whole store with no kind, no cursor and
+   no time bound; running [List.filter] for them rebuilt the retained list,
+   cons by cons, to hand back the same events. With nothing to filter the
+   page is a suffix of the cached list and [List.drop] shares that list's
+   tail, so the rebuild is gone: [List.length] still walks but allocates
+   nothing, and [max_event_seq] reuses the value computed above because the
+   list is the same one.
+
+   Sizing this honestly: at 440,068 retained events the copy is roughly 10MB
+   of list cells, which is not where activity_events_default's 2,909MB comes
+   from. That figure is a cold parse -- the per-file parse caches are process
+   memory, so the first read after a restart re-parses the whole store, and
+   the warning lands exactly once per boot (measured across 8 consecutive
+   boots on 2026-08-29/30, 2,905MB to 2,920MB, one per boot). masc#31722
+   carries that. This removes a copy that had no reason to exist; it does not
+   remove the parse. *)
+let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ?keep
     ?since_ms () =
   let stored = read_all_events config in
-  let latest_store_seq = max (read_current_seq config) (max_event_seq stored) in
+  let stored_max_seq = max_event_seq stored in
+  let latest_store_seq = max (read_current_seq config) stored_max_seq in
+  let filtered =
+    after_seq > 0
+    || kinds <> []
+    || Option.is_some keep
+    || Option.is_some since_ms
+  in
   let all =
-    stored
-    |> List.filter (fun value ->
-           value.seq > after_seq
-           && matches_filters ~kinds value
-           && keep value
-           && (match since_ms with
-               | None -> true
-               | Some ms -> value.ts_ms >= ms))
+    if not filtered then
+      stored
+    else
+      stored
+      |> List.filter (fun value ->
+             value.seq > after_seq
+             && matches_filters ~kinds value
+             && (match keep with None -> true | Some keep -> keep value)
+             && (match since_ms with
+                 | None -> true
+                 | Some ms -> value.ts_ms >= ms))
   in
   let total = List.length all in
   let page =
@@ -632,15 +659,15 @@ let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ~keep
     else
       all |> List.drop (max 0 (total - limit))
   in
-  (page, total, latest_store_seq, max_event_seq all)
+  let latest_matching_seq = if filtered then max_event_seq all else stored_max_seq in
+  (page, total, latest_store_seq, latest_matching_seq)
 
 (** Returns [(page, total_matching)] where [total_matching] is the count
     of all events matching filters before [limit] is applied. *)
 let list_events_with_total config ?(kinds = []) ~after_seq ~limit
     ?since_ms () =
   let page, total, _latest_store_seq, _latest_matching_seq =
-    list_events_with_meta config ~kinds ~after_seq ~limit
-      ~keep:(fun _ -> true) ?since_ms ()
+    list_events_with_meta config ~kinds ~after_seq ~limit ?since_ms ()
   in
   (page, total)
 
@@ -716,8 +743,7 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
 
 let json_response config ?(kinds = []) ~after_seq ~limit () =
   let events, total_matching, latest_store_seq, latest_matching_seq =
-    list_events_with_meta config ~kinds ~after_seq ~limit
-      ~keep:(fun _ -> true) ()
+    list_events_with_meta config ~kinds ~after_seq ~limit ()
   in
   let next_after_seq =
     match List.rev events with

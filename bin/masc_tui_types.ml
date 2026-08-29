@@ -348,6 +348,33 @@ type pane_focus =
     "what can this workspace call at all", which the lane view cannot: a
     runtime no lane names is absent from it entirely, and the roster is where
     an operator finds one to assign. Same snapshot, two questions. *)
+(* The order a failover picker should offer runtimes in. What the lane needs
+   is a candidate that fails independently of the ones it already has, so a
+   different provider outranks a faster model from the same one: two slots on
+   one provider go down together, which is the state this picker exists to
+   fix. Blocked runtimes sink rather than disappear — a blocked id is a fact
+   about the workspace an operator may be looking for, and hiding it answers
+   "why is it not in the list" with silence. *)
+let rank_runtime_for_lane ~(lane_providers : string list)
+      ~(already : string list) (runtime : Tui_decode.runtime_option) =
+  let open Tui_decode in
+  ( (if List.exists (String.equal runtime.ro_id) already then 1 else 0)
+  , (if not runtime.ro_dispatchable then 1 else 0)
+  , (if List.exists (String.equal runtime.ro_provider) lane_providers then 1
+     else 0)
+  , runtime.ro_id )
+;;
+
+let runtimes_for_lane_picker ~(lane_providers : string list)
+      ~(already : string list) (catalog : Tui_decode.runtime_option list) =
+  List.stable_sort
+    (fun a b ->
+       compare
+         (rank_runtime_for_lane ~lane_providers ~already a)
+         (rank_runtime_for_lane ~lane_providers ~already b))
+    catalog
+;;
+
 type runtime_mode =
   | Runtime_lanes
   | Runtime_all

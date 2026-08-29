@@ -8596,17 +8596,70 @@ let render_runtime (state : state) =
          (Printf.sprintf
             "  adding a failover candidate to %s \xe2\x80\x94 j/k move, Enter append, e cancel"
             (Terminal_text.single_line lane));
-       (match
-          List.nth_opt state.runtime_catalog state.runtime_lane_pick_cursor
-        with
-        | None -> box_line_styled buf cols ~style:(Theme.recede ())
-                    "  (runtime catalogue unread)"
-        | Some runtime ->
-            box_line buf cols
-              (Printf.sprintf "  > %s   %s / %s"
-                 (Terminal_text.single_line runtime.Masc.Tui_decode.ro_id)
-                 (Terminal_text.single_line runtime.Masc.Tui_decode.ro_provider)
-                 (Terminal_text.single_line runtime.Masc.Tui_decode.ro_model)));
+       (* Three rows of the ranked list, not one: a picker that shows only the
+          highlighted entry gives no reason to move, and the reason to move is
+          that the next one is a different provider. *)
+       let already =
+         match state.runtime_surface with
+         | None -> []
+         | Some snapshot ->
+             snapshot.Masc.Tui_decode.rss_resolved.Masc.Tui_decode.rrs_lanes
+             |> List.find_opt (fun (l : Masc.Tui_decode.runtime_resolved_lane) ->
+                  String.equal l.Masc.Tui_decode.rrl_id lane)
+             |> (function
+                  | Some l -> l.Masc.Tui_decode.rrl_runtime_ids
+                  | None -> [])
+       in
+       let lane_providers =
+         already
+         |> List.filter_map (fun id ->
+              List.find_opt
+                (fun (r : Masc.Tui_decode.runtime_option) ->
+                   String.equal r.Masc.Tui_decode.ro_id id)
+                state.runtime_catalog
+              |> Option.map (fun (r : Masc.Tui_decode.runtime_option) ->
+                   r.Masc.Tui_decode.ro_provider))
+       in
+       let ranked =
+         Masc_tui_types.runtimes_for_lane_picker ~lane_providers ~already
+           state.runtime_catalog
+       in
+       if ranked = [] then
+         box_line_styled buf cols ~style:(Theme.recede ())
+           "  (runtime catalogue unread)"
+       else
+         List.iteri
+           (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
+              let index = state.runtime_lane_pick_cursor + offset in
+              match List.nth_opt ranked index with
+              | None -> ()
+              | Some _ ->
+                  let note =
+                    if List.exists
+                         (String.equal runtime.Masc.Tui_decode.ro_id) already
+                    then "  (already a candidate)"
+                    else if not runtime.Masc.Tui_decode.ro_dispatchable then
+                      "  (blocked)"
+                    else if
+                      List.exists
+                        (String.equal runtime.Masc.Tui_decode.ro_provider)
+                        lane_providers
+                    then "  (same provider as a current candidate)"
+                    else ""
+                  in
+                  box_line buf cols
+                    (Printf.sprintf "  %s %s   %s / %s%s"
+                       (if offset = 0 then ">" else " ")
+                       (Terminal_text.single_line runtime.Masc.Tui_decode.ro_id)
+                       (Terminal_text.single_line
+                          runtime.Masc.Tui_decode.ro_provider)
+                       (Terminal_text.single_line runtime.Masc.Tui_decode.ro_model)
+                       (Ansi.dim ^ note ^ Ansi.reset)))
+           (List.filteri
+              (fun i _ ->
+                 i >= state.runtime_lane_pick_cursor
+                 && i < state.runtime_lane_pick_cursor + 3)
+              ranked);
        box_divider buf cols);
   let chrome_rows = runtime_listing_chrome ~error:state.runtime_surface_error in
   let content_height = max 1 (rows - chrome_rows) in

@@ -1198,6 +1198,20 @@
  (modules test_fusion_metrics)
  (libraries masc_test_deps masc.fusion_core))
 
+; RFC cli-runtimes-as-lane-slots — the per-slot cli one-shot executor:
+; schema sentence parity with Agent Core, strict JSON parse, ordered walk.
+
+(test
+ (name test_keeper_lane_cli_oneshot)
+ (modules test_keeper_lane_cli_oneshot)
+ (libraries
+  masc_test_deps
+  masc
+  masc.runtime
+  masc.masc_eio_context
+  agent_core
+  eio_main))
+
 ; RFC-0252 §8 — judge_meta/panel_meta structured serialization. Needs
 ; masc.fusion_core for Fusion_types constructors (Answer/Recommend/Insufficient,
 ; judge_synthesis record) + Masc.Fusion_sink for the public meta serializers.

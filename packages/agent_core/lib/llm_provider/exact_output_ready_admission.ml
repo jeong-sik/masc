@@ -237,16 +237,21 @@ let response_format (target : request_target) requirement =
        Error Provider_schema_unavailable)
 ;;
 
-let text_json_instruction (Domain_schema schema) : Types.message =
+let domain_schema_instruction_text (Domain_schema schema) =
   let schema = canonical_json schema |> Yojson.Safe.to_string in
+  Printf.sprintf
+    "Return exactly one JSON value matching this JSON Schema. Do not use Markdown \
+     code fences or include any explanation. JSON Schema: %s"
+    schema
+;;
+
+let schema_instruction_text (requirement : output_requirement) =
+  domain_schema_instruction_text requirement.schema
+;;
+
+let text_json_instruction schema : Types.message =
   { role = Types.User
-  ; content =
-      [ Types.Text
-          (Printf.sprintf
-             "Return exactly one JSON value matching this JSON Schema. Do not use \
-              Markdown code fences or include any explanation. JSON Schema: %s"
-             schema)
-      ]
+  ; content = [ Types.Text (domain_schema_instruction_text schema) ]
   ; name = None
   ; tool_call_id = None
   ; metadata = []

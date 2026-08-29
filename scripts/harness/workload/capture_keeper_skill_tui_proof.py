@@ -947,181 +947,6 @@ def select_exact_keeper(page: Any, keeper: str, timeout: float) -> list[str]:
     return visited
 
 
-def exact_receipt_block(value: str, skill_tool_use_id: str) -> str | None:
-    lines = value.splitlines()
-    normalized_lines = [line.strip(" │") for line in lines]
-    begin_marker = f"begin id={skill_tool_use_id}"
-    end_marker = f"end id={skill_tool_use_id}"
-    starts = [
-        index for index, line in enumerate(normalized_lines) if line == begin_marker
-    ]
-    if len(starts) != 1:
-        return None
-    start = starts[0]
-    ends = [
-        index
-        for index in range(start + 1, len(lines))
-        if normalized_lines[index] == end_marker
-    ]
-    if len(ends) != 1:
-        return None
-    return "\n".join(lines[start : ends[0] + 1])
-
-
-def receipt_frame_progress(
-    value: str, expected_lines: list[str], next_index: int
-) -> int | None:
-    require(expected_lines != [], "expected TUI Skill receipt is empty")
-    require(
-        0 <= next_index < len(expected_lines),
-        "TUI Skill receipt progress is outside the expected rows",
-    )
-    visible_lines = [line.strip(" │") for line in value.splitlines()]
-    furthest: int | None = None
-    overlap_index = 0 if next_index == 0 else next_index - 1
-    for visible_start, visible_line in enumerate(visible_lines):
-        for expected_start in range(overlap_index + 1):
-            if visible_line != expected_lines[expected_start]:
-                continue
-            visible_index = visible_start
-            expected_index = expected_start
-            while (
-                visible_index < len(visible_lines)
-                and expected_index < len(expected_lines)
-                and visible_lines[visible_index] == expected_lines[expected_index]
-            ):
-                visible_index += 1
-                expected_index += 1
-            if expected_start <= overlap_index and next_index < expected_index:
-                furthest = (
-                    expected_index
-                    if furthest is None
-                    else max(furthest, expected_index)
-                )
-    return furthest
-
-
-def expected_receipt_lines(activation: dict[str, Any], actions: list[Any]) -> list[str]:
-    identity = object_field(activation, "identity", "Skill activation")
-    invocation = object_field(activation, "invocation", "Skill activation")
-    invocation_kind = string_field(invocation, "kind", "Skill invocation")
-    origin = object_field(invocation, "origin", "Skill invocation")
-    origin_kind = string_field(origin, "kind", "Skill invocation origin")
-    if invocation_kind == "instruction":
-        if origin_kind == "session_instruction":
-            origin_text = "session_instruction"
-        elif origin_kind == "task_instruction":
-            task_ids = list_field(origin, "task_ids", "Skill invocation origin")
-            require(
-                all(isinstance(task_id, str) for task_id in task_ids),
-                "Skill invocation task_ids are not strings",
-            )
-            origin_text = "task_instruction tasks=" + ",".join(task_ids)
-        else:
-            raise CaptureError("Skill instruction origin is unsupported")
-        served = object_field(invocation, "served_content", "Skill invocation")
-        served_kind = string_field(served, "kind", "Skill served content")
-        if served_kind == "skill_body":
-            served_text = (
-                f"body bytes={integer_field(served, 'bytes', 'Skill served content')} "
-                f"sha256={string_field(served, 'sha256', 'Skill served content')}"
-            )
-        elif served_kind == "skill_resource":
-            served_text = (
-                f"resource={string_field(served, 'relative_path', 'Skill served content')} "
-                f"bytes={integer_field(served, 'bytes', 'Skill served content')} "
-                f"sha256={string_field(served, 'sha256', 'Skill served content')}"
-            )
-        else:
-            raise CaptureError("Skill served content is unsupported")
-    elif invocation_kind == "composition":
-        tool_name = string_field(invocation, "tool_name", "Skill invocation")
-        if origin_kind == "session_composition":
-            origin_text = f"session_composition tool={tool_name}"
-        elif origin_kind == "task_composition":
-            task_ids = list_field(origin, "task_ids", "Skill invocation origin")
-            require(
-                all(isinstance(task_id, str) for task_id in task_ids),
-                "Skill invocation task_ids are not strings",
-            )
-            origin_text = (
-                f"task_composition tasks={','.join(task_ids)} tool={tool_name}"
-            )
-        else:
-            raise CaptureError("Skill composition origin is unsupported")
-        served_text = f"composition invocation tool={tool_name}"
-    else:
-        raise CaptureError("Skill invocation kind is unsupported")
-
-    delivery_value = activation.get("delivery")
-    if delivery_value is None:
-        delivery_text = "pending"
-    else:
-        require(isinstance(delivery_value, dict), "Skill delivery is not an object")
-        boundary = object_field(delivery_value, "boundary", "Skill delivery")
-        boundary_kind = string_field(boundary, "kind", "Skill delivery boundary")
-        boundary_turn = integer_field(
-            boundary, "agent_core_turn", "Skill delivery boundary"
-        )
-        if boundary_kind == "model_response":
-            delivery_kind = "provider_delivery"
-            proof = ""
-        elif boundary_kind == "official_client_result_handoff":
-            delivery_kind = "official_client_result_handoff"
-            proof = (
-                " proof=complete_later_action"
-                if actions
-                else " proof=incomplete_no_later_action"
-            )
-        else:
-            raise CaptureError("Skill delivery boundary is unsupported")
-        delivery_text = (
-            f"{delivery_kind} turn={boundary_turn} "
-            f"runtime={string_field(delivery_value, 'runtime_id', 'Skill delivery')} "
-            f"bytes={integer_field(delivery_value, 'content_bytes', 'Skill delivery')} "
-            f"sha256={string_field(delivery_value, 'content_sha256', 'Skill delivery')} "
-            f"at={string_field(delivery_value, 'delivered_at', 'Skill delivery')}{proof}"
-        )
-
-    skill_tool_use_id = string_field(
-        activation, "skill_tool_use_id", "Skill activation"
-    )
-    lines = [
-        "begin id=" + skill_tool_use_id,
-        "exact source_id="
-        + string_field(identity, "source_id", "Skill activation identity"),
-        "package_id="
-        + string_field(identity, "package_id", "Skill activation identity"),
-        "name=" + string_field(identity, "name", "Skill activation identity"),
-        "content_revision="
-        + string_field(activation, "content_revision", "Skill activation"),
-        (
-            f"invoked turn={integer_field(activation, 'agent_core_turn', 'Skill activation')} "
-            f"id={skill_tool_use_id} "
-            f"runtime={string_field(activation, 'runtime_id', 'Skill activation')} "
-            f"at={string_field(activation, 'activated_at', 'Skill activation')}"
-        ),
-        "served " + served_text,
-        "delivered " + delivery_text,
-        (
-            f"snapshot={string_field(activation, 'snapshot_revision', 'Skill activation')} "
-            f"keeper_turn={string_field(activation, 'turn_ref', 'Skill activation')} "
-            f"origin={origin_text}"
-        ),
-    ]
-    for index, action_value in enumerate(actions):
-        require(isinstance(action_value, dict), f"action {index} is not an object")
-        lines.append(
-            f"action turn={integer_field(action_value, 'agent_core_turn', f'action {index}')} "
-            f"runtime={string_field(action_value, 'runtime_id', f'action {index}')} "
-            f"tool={string_field(action_value, 'tool_name', f'action {index}')} "
-            f"{action_marker(action_value)} "
-            f"at={string_field(action_value, 'observed_at', f'action {index}')}"
-        )
-    lines.append("end id=" + skill_tool_use_id)
-    return lines
-
-
 def receipt_projection_revision(ledger_revision: str, skill_tool_use_id: str) -> str:
     payload = bytearray()
     for field, value in (
@@ -1137,13 +962,6 @@ def receipt_projection_revision(ledger_revision: str, skill_tool_use_id: str) ->
         payload.extend(b":")
         payload.extend(value_bytes)
     return digest_bytes(bytes(payload))
-
-
-def receipt_matches_activation(
-    block: str, activation: dict[str, Any], actions: list[Any]
-) -> bool:
-    lines = [line.strip(" │") for line in block.splitlines()]
-    return lines == expected_receipt_lines(activation, actions)
 
 
 def tools_surface_is_connected(value: str) -> bool:
@@ -1452,8 +1270,6 @@ def main() -> int:
             "session_id": selected["session_id"],
             "ledger_revision": selected["ledger_revision"],
             "skill_tool_use_id": selected["skill_tool_use_id"],
-            "action_markers": selected["action_markers"],
-            "captured_action_marker": selected["action_markers"][0],
         },
         "server": server_identity,
         "selection": {

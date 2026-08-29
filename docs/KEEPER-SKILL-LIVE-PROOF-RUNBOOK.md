@@ -23,7 +23,7 @@ Keeper, `Turn_ref`, and `skill_tool_use_id`.
 | later model-selected actions | at least 1 | activation actions |
 | invalid transitions | 0 | ledger scoped summary |
 | Dashboard exact-row screenshots | 1 | collector artifact manifest |
-| TUI exact-row screenshots | at least 1 | ordered TUI frame manifest |
+| TUI receipt-identity screenshots | at least 1 | exact ledger-bound receipt digest in every TUI frame |
 | source/server/process identity changes during proof | 0 | source and `/health?full=1` snapshots |
 | `INCOMPLETE` markers after success | 0 | every evidence directory |
 
@@ -44,7 +44,7 @@ exact historical projection remains typed and stable.
 | t4 | runtime | record activation, delivery, and later actions | session Skill ledger |
 | t5 | join | load t3's trace through the OCaml typed decoder and compare raw bytes | exact 0/1/many result |
 | t6 | collector | require one exact id, delivery, action, and zero invalid transitions | proof JSON + Dashboard PNG |
-| t7 | TUI capture | select the exact Keeper and accumulate the receipt rows in order | TUI JSON + one PNG per advancing frame |
+| t7 | TUI capture | select the exact Keeper and observe its ledger-bound receipt identity | TUI JSON + connected PNG carrying the exact digest |
 | t8 | verifier | compare all manifest hashes and identity tuples | pass/fail matrix |
 
 ## Inputs
@@ -151,9 +151,10 @@ PROOF_SUMMARY=$(python3 "$REPO/scripts/harness/workload/keeper_skill_use_proof.p
 PROOF_SHA=$(jq -er '.sha256' <<<"$PROOF_SUMMARY")
 ```
 
-Finally capture the same exact receipt in the TUI. A receipt that exceeds one
-viewport is accumulated only from overlapping, ordered exact-row frames; each
-advancing frame has its own PNG and text digest:
+Finally capture the same exact receipt in the TUI. The fixed-width
+`receipt_sha256` binds the full UTF-8 `skill_tool_use_id` to the exact ledger
+revision, so truncated human-readable detail rows cannot make two receipts
+look equivalent. Every counted PNG must visibly carry that identity:
 
 ```sh
 TUI_SUMMARY=$(python3 "$REPO/scripts/harness/workload/capture_keeper_skill_tui_proof.py" \

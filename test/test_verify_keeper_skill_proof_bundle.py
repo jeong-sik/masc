@@ -487,8 +487,6 @@ def make_bundle(root: Path):
             "session_id": "trace-one",
             "ledger_revision": durable["revision"],
             "skill_tool_use_id": SKILL_ID,
-            "action_markers": ["call=call-action-1"],
-            "captured_action_marker": "call=call-action-1",
         },
         "server": {**server(), "binary_commit_source": "embedded"},
         "selection": {
@@ -597,7 +595,7 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
         self.assertEqual(result["matrix"]["natural_keeper_messages"], 1)
         self.assertEqual(result["matrix"]["exact_turn_skill_activations"], 1)
         self.assertEqual(result["matrix"]["later_model_selected_actions"], 1)
-        self.assertEqual(result["matrix"]["tui_exact_row_screenshots"], 2)
+        self.assertEqual(result["matrix"]["tui_receipt_identity_screenshots"], 2)
         self.assertEqual(result["matrix"]["incomplete_markers"], 0)
 
     def test_each_exact_identity_field_tamper_is_rejected(self):
@@ -919,7 +917,7 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
 
             result = verify(bundle)
 
-            self.assertEqual(result["matrix"]["tui_exact_row_screenshots"], 3)
+            self.assertEqual(result["matrix"]["tui_receipt_identity_screenshots"], 3)
             self.assertEqual(result["artifacts"]["verified_count"], 20)
             self.assertEqual(len(result["artifacts"]["tui"]), 3)
 

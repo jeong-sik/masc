@@ -316,12 +316,37 @@ let remote_cwd t cwd =
       ~endpoint:t.endpoint ~keeper:t.keeper_name cwd
 ;;
 
+let remote_keeper_root t =
+  Filename.concat t.endpoint.remote_root
+    (Playground_paths.sanitize_keeper_name t.keeper_name)
+;;
+
+let remote_gh_config_dir t = Filename.concat (remote_keeper_root t) ".config/gh"
+
+(* Server-authored env for every exec frame, deliberately outside the endpoint
+   env_allowlist (which governs caller-supplied values). GH_CONFIG_DIR names
+   the endpoint-resident identity preflight already proved
+   (remote_github_identity_missing); without it every gh/git call in a frame
+   runs identity-blind. A frame has no tty, so a git that wants to prompt for
+   credentials must fail instead of hanging the call. *)
+let injected_env t =
+  [ "GH_CONFIG_DIR", remote_gh_config_dir t; "GIT_TERMINAL_PROMPT", "0" ]
+;;
+
 let runner ~timeout_sec t =
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     let endpoint_name = t.endpoint.name in
     match wire_env t.endpoint env with
     | Error error -> Unix.WEXITED 1, "", error
     | Ok env ->
+      let injected = injected_env t in
+      let env =
+        (* Injected values are the only writers of their names: an
+           allowlisted caller copy would otherwise depend on libc getenv
+           duplicate order. *)
+        injected
+        @ List.filter (fun (name, _) -> not (List.mem_assoc name injected)) env
+      in
       let stdin = Option.value stdin_content ~default:"" in
       let cwd = Option.value cwd ~default:t.endpoint.remote_root in
       (match remote_cwd t cwd with
@@ -580,10 +605,7 @@ let perform_preflight t =
     run_preflight_command t ~error_code:"remote_ssh_root_missing"
       [ "test"; "-d"; t.endpoint.remote_root ]
   in
-  let keeper_root =
-    Filename.concat t.endpoint.remote_root
-      (Playground_paths.sanitize_keeper_name t.keeper_name)
-  in
+  let keeper_root = remote_keeper_root t in
   let* _ =
     run_preflight_command t ~error_code:"remote_ssh_keeper_root_missing"
       [ "test"; "-d"; keeper_root ]
@@ -607,10 +629,9 @@ let perform_preflight t =
            "remote_ssh_disk_probe_failed: endpoint %s returned unparseable df output"
            t.endpoint.name)
   in
-  let gh_config_dir = Filename.concat keeper_root ".config/gh" in
   let* _ =
     run_preflight_command t ~error_code:"remote_github_identity_missing"
-      [ "env"; "GH_CONFIG_DIR=" ^ gh_config_dir; "gh"; "auth"; "status" ]
+      [ "env"; "GH_CONFIG_DIR=" ^ remote_gh_config_dir t; "gh"; "auth"; "status" ]
   in
   Ok ()
 ;;

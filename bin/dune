@@ -191,6 +191,28 @@
   eio
   eio_main))
 
+;; Lane CLI slot probe.  A declared [cli_slots] runtime is the one transport an
+;; operator cannot reach with curl: masc admits the subscription, spawns the
+;; client, carries the lane schema as prompt text and parses the reply with no
+;; fence stripping.  This runs Keeper_lane_cli_oneshot itself so a measurement
+;; describes what the lane would actually receive.
+(executable
+ (name masc_lane_cli_probe)
+ (modules masc_lane_cli_probe)
+ (public_name masc-lane-cli-probe)
+ (package masc)
+ (libraries
+  masc
+  masc.server
+  masc.runtime
+  masc.fusion_core
+  masc_eio_context
+  agent_core
+  unix
+  yojson
+  eio
+  eio_main))
+
 ;; Deployment preflight helper.  The shell gate delegates runtime lease
 ;; ownership and schedule signal decoding to the same OCaml authorities used
 ;; by the server instead of reimplementing either contract in shell.

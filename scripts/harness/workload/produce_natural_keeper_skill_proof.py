@@ -37,6 +37,9 @@ OPERATION_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 OPERATION_SCHEMA = "masc.keeper_chat_operation.v1"
 RECEIPT_SCHEMA = "masc.natural-keeper-skill-proof-producer/v1"
+# Where a tool call's trace sits in the result: CallToolResult is a closed
+# shape, so the server hangs its own fields off _meta under this vendor key.
+CALL_META_KEY = "com.github.yousleepwhen.masc/call"
 TERMINAL_STATES = frozenset({"Succeeded", "Failed", "Cancelled"})
 NONTERMINAL_STATES = frozenset({"Queued", "Running"})
 
@@ -469,10 +472,18 @@ class McpClient:
         meta = result.get("_meta")
         require(isinstance(meta, dict), f"tool {name} _meta is not an object")
         meta = cast(dict[str, Any], meta)
-        observed_agent_id = meta.get("agent_id")
+        # The call's trace lives under this server's own _meta key:
+        # CallToolResult defines no member for it.
+        call_meta = meta.get(CALL_META_KEY)
+        require(
+            isinstance(call_meta, dict),
+            f"tool {name} _meta has no {CALL_META_KEY} entry",
+        )
+        call_meta = cast(dict[str, Any], call_meta)
+        observed_agent_id = call_meta.get("agent_id")
         require(
             isinstance(observed_agent_id, str) and observed_agent_id != "",
-            f"tool {name} _meta.agent_id is empty",
+            f"tool {name} call meta agent_id is empty",
         )
         require(
             self.caller_agent_id in (None, observed_agent_id),

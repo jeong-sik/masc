@@ -93,10 +93,13 @@ let check_tool_failure label ~failure_class response =
        (Yojson.Safe.to_string response));
   let actual_failure_class =
     match List.assoc_opt "_meta" fields with
-    | Some (`Assoc meta_fields) ->
-      (match List.assoc_opt "failure_class" meta_fields with
-       | Some (`String value) -> value
-       | _ -> failf "%s omitted _meta.failure_class" label)
+    | Some (`Assoc meta_fields) -> (
+      match List.assoc_opt Masc.Mcp_server.tool_call_meta_key meta_fields with
+      | Some (`Assoc call_fields) -> (
+        match List.assoc_opt "failure_class" call_fields with
+        | Some (`String value) -> value
+        | _ -> failf "%s omitted the call meta's failure_class" label)
+      | _ -> failf "%s omitted the call meta entry" label)
     | _ -> failf "%s omitted result._meta" label
   in
   check string (label ^ " failure class") failure_class actual_failure_class

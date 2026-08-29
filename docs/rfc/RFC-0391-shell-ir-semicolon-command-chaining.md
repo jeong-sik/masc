@@ -29,6 +29,7 @@ MASC는 임의의 셸 스크립트를 `/bin/bash`에 무검증으로 넘기지 �
   | └ 이 RFC가 못 푸는 것 — `for`/`while`/`if`/`case`를 낀 것 | 37 | 2% |
 
   - 두 번째 줄과 세 번째 줄을 갈라 적은 이유가 있다. 태그는 **무엇인지가 아니라 처음 걸린 것**을 말한다. `for f in a b; do echo $f; done`은 `;`에서 먼저 걸리므로 `control_flow`가 아니라 `command_separator`로 세어진다 (출처 RFC `execute-subset-dispositions` §6이 이 편향을 미리 적어 두었다). `;`를 통과시키면 이 37건은 풀리는 게 아니라 `parse_error`로 옮겨 간다. `test_shell_costume`이 그 이동을 고정한다.
+    - 2026-08-30 갱신: 태그가 렉서가 실제로 거절한 자리를 말하도록 바뀌었다. 그래서 이 37건은 `parse_error`가 아니라 스크립트가 정말 담고 있는 것으로 옮겨 간다 — `for f in a b; do echo $f; done` 은 `$f` 때문에 `param_expansion` 이다. `for`/`while`/`if` 는 여전히 낱말로 읽히므로 `control_flow` 로 세어지지는 않는다. 위 표의 비율은 측정 당시 값 그대로 둔다.
   - 기존에는 `&&`나 `||`만 조건부 `Sequence`로 허용되고, 무조건 순차 실행인 `;`가 결여되어 모델이 불필요하게 `sh -c` 우회를 시도하거나 호출 실패를 겪음.
 
 ---

@@ -123,46 +123,20 @@ let to_shell_ir
   | Ok ir -> Parsed.Parsed ir
   | Error e -> Parsed.Parse_error e
 
-(* Post-hoc [reason_too_complex] classifier.  Runs only after the
-   Menhir grammar (or lexer) has rejected the input — so the input is
-   already outside the A1-PR-1 simple-command subset.  Inspects the
-   raw source for the dominant shell metachar and returns the most
-   specific [reason_too_complex] variant it can.
+(* Two ways to be outside the subset, told apart by which stage refused.
 
-   The scan is deliberately substring-based (not quote-aware): callers
-   who quote metachars through single or double quotes land on
-   [Parsed.Parsed] before this path runs, so anything reaching here
-   has an unquoted metachar somewhere.  False-positive precision
-   matters less than differentiating between "couldn't parse at all"
-   (the old [Parse_error] bucket) and "rejected because a specific
-   shell feature is subset-excluded" — the latter is what the corpus
-   tap aggregates to drive future grammar expansion priority.
+   The lexer refuses a lexeme it has no token for, and names the construct as
+   it matches it ([Bash_lexer.Excluded_construct]). The parser refuses an
+   arrangement of tokens that all lexed, and there is no construct to name --
+   [echo hi | | grep x] is two pipes, not a shell feature -- so that is
+   [Parse_error], carrying the position and token.
 
-   Order matters: multi-char markers ([<<<], [<<], [>>], [&&], [||],
-   [$(], [$((], [<(], [>(]) are checked before their single-char
-   prefixes.  First match wins. *)
-let classify_too_complex (source : string) : Parsed.reason_too_complex option =
-  let has sub = String_util.contains_substring source sub in
-  if has "$((" then Some `Arith_expansion
-  else if has "<<<" then Some `Here_string
-  else if has "<<" then Some `Heredoc
-  (* [&&], [||] and [;] are in the subset now, so reaching here with one means
-     the input failed for another reason -- an operand the grammar could not
-     read. *)
-  else if has "$(" || has "`" then Some `Cmd_subst
-  else if has "<(" || has ">(" then Some `Proc_subst
-  else if has ">>" || has ">" || has "<" then Some `Redirect
-  else if has "(" || has ")" then Some `Subshell
-  else if has "&" then Some `Background
-  else if has "{" || has "}" then Some `Glob_brace
-  else None
-
-let map_error_or_classify (source : string) (lexbuf : Lexing.lexbuf)
-    : Shell_ir.t Parsed.t =
-  match classify_too_complex source with
-  | Some reason -> Parsed.Too_complex reason
-  | None -> Parsed.Parse_error (make_parse_error lexbuf)
-
+   Neither answer is inferred from the source text. An earlier version
+   scanned the whole string for the first metacharacter off an ordered list
+   after either failure; it had no case for [$], so an expansion next to a
+   redirect was reported as the redirect. RFC execute-subset-dispositions §6
+   recorded the same shape from the other end -- a tag naming the first trip
+   rather than the construct -- and this is where that is closed. *)
 let parse_string (source : string) : Shell_ir.t Parsed.t =
   Bash_lexer.reset_tokens ();
   let lexbuf = Lexing.from_string source in
@@ -171,5 +145,9 @@ let parse_string (source : string) : Shell_ir.t Parsed.t =
     to_shell_ir raw
   with
   | Bash_lexer.Token_limit_exceeded -> Parsed.Parse_aborted `Token_limit_50k
-  | Bash_subset.Error -> map_error_or_classify source lexbuf
-  | Failure _ -> map_error_or_classify source lexbuf
+  | Bash_lexer.Excluded_construct reason -> Parsed.Too_complex reason
+  | Bash_subset.Error -> Parsed.Parse_error (make_parse_error lexbuf)
+  (* [int_of_string] on a descriptor the rule matched but no machine has, as
+     in [99999999999999999999>out]. The token is well formed and unusable,
+     which is what a parse error says. *)
+  | Failure _ -> Parsed.Parse_error (make_parse_error lexbuf)

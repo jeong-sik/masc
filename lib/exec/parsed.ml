@@ -14,6 +14,7 @@ type reason_too_complex =
   | `Proc_subst
   | `Subshell
   | `Arith_expansion
+  | `Param_expansion
   | `Control_flow
   | `Function_def
   | `Glob_brace

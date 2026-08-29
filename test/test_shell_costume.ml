@@ -87,14 +87,46 @@ let test_measured_dispositions () =
   case "echo $(date)" "cmd_subst";
   case "sleep 5 &" "background";
   case "cat <<'EOF'\nbody\nEOF" "heredoc";
-  (* A loop is still reported by the first thing it trips on rather than by
-     what it is, but that is no longer [;]: with the separator in the subset
-     (RFC-0391) the loop reaches the classifier, which has no arm for [for],
-     [while], or [if] at all, so it falls through to [parse_error].
-     [`Control_flow] has no producer anywhere -- naming a loop as one is not
-     something this build can do, and a count grouped by tag still does not
-     see control flow. *)
-  case "for f in a b; do echo $f; done" "parse_error"
+  (* A loop has no rule of its own -- [for], [while] and [if] lex as words --
+     so it is reported by the excluded lexeme it does reach, here the [$f].
+     [`Control_flow] still has no producer, and a count grouped by tag still
+     does not see control flow; what changed is that the tag now names a
+     construct the text contains. *)
+  case "for f in a b; do echo $f; done" "param_expansion"
+;;
+
+(* The tag names what the lexer refused, not the first metacharacter someone
+   found by scanning the source.
+
+   Every case here but the [$(date)] one was reported as [redirect] before --
+   that one had [$(] to find, which the scan checked before [>]. The advice
+   attached to [redirect] told the caller to move the script into the [stdin]
+   field, which is not an answer for [>] under any reading, and it pointed at
+   redirects that were all fine. The expansion beside them was not, and that
+   is now what the tag says. *)
+let test_a_tag_names_the_refused_lexeme_not_a_neighbour () =
+  let case script expected = Alcotest.(check string) script expected (tag_of script) in
+  case "echo $HOME > out.txt" "param_expansion";
+  case "echo exit=$? >> out.txt" "param_expansion";
+  case "echo \"$HOME\" > out.txt" "param_expansion";
+  case "echo $(date) > out.txt" "cmd_subst";
+  (* The witness, as the keeper sent it. *)
+  case
+    "echo cmd=build > ev.txt && git rev-parse HEAD >> ev.txt 2>&1; dune build \
+     >> ev.txt 2>&1; echo exit=$? >> ev.txt"
+    "param_expansion"
+;;
+
+(* [redirect] survives as a tag, and now means only what it says: the redirect
+   operators the grammar does not spell. Everything the subset does spell --
+   [>], [>>], [<], [n>&m] -- parses. *)
+let test_redirect_now_means_only_the_forms_the_subset_lacks () =
+  let case script expected = Alcotest.(check string) script expected (tag_of script) in
+  case "echo hi > out.txt" "representable";
+  case "echo hi >> out.txt" "representable";
+  case "dune build >> out.txt 2>&1" "representable";
+  case "dune build &> out.txt" "redirect";
+  case "echo hi >| out.txt" "redirect"
 ;;
 
 let () =
@@ -106,6 +138,16 @@ let () =
             "leaves everything else alone"
             `Quick
             test_leaves_everything_else_alone
+        ] )
+    ; ( "tags name the refused lexeme"
+      , [ Alcotest.test_case
+            "a tag names the refused lexeme, not a neighbour"
+            `Quick
+            test_a_tag_names_the_refused_lexeme_not_a_neighbour
+        ; Alcotest.test_case
+            "redirect means only the forms the subset lacks"
+            `Quick
+            test_redirect_now_means_only_the_forms_the_subset_lacks
         ] )
     ; ( "classifier"
       , [ Alcotest.test_case

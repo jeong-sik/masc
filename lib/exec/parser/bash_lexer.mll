@@ -15,6 +15,21 @@
   let token_count = ref 0
   let token_limit = 50_000
   exception Token_limit_exceeded
+
+  (* Raised by the rule that matched a construct outside the subset, carrying
+     the name of what that rule matched.
+
+     This used to be inferred instead: the parser failed, and a separate pass
+     scanned the whole source for the first metacharacter off an ordered list.
+     That pass had no case for [$], so every script that combined an expansion
+     with a redirect was reported as a redirect -- and told to use the [stdin]
+     field, which is not an answer for [>] under any reading. Naming the
+     construct here makes the reason a fact about the lexeme that stopped the
+     lex, and lets ocamllex's longest match settle [<<<] against [<<] against
+     [<], which the ordered list was hand-simulating. *)
+  exception Excluded_construct of Parsed.reason_too_complex
+
+  let excluded reason = raise (Excluded_construct reason)
   let reset_tokens () = token_count := 0
   let incr_tokens () =
     incr token_count;
@@ -80,7 +95,7 @@ rule token = parse
   | '\n'           { incr_tokens (); Lexing.new_line lexbuf; token lexbuf }
   (* Before [PIPE] and the fd-redirect rules so the two-character
      operators win their own lexemes. A lone [&] stays out of the subset
-     and still reaches [classify_too_complex] as `Background. *)
+     and is named `Background by its own rule below. *)
   | "&&"           { incr_tokens (); AND_IF }
   | "||"           { incr_tokens (); OR_IF }
   | ';'            { incr_tokens (); SEMICOLON }
@@ -105,6 +120,41 @@ rule token = parse
                     { incr_tokens (); FILE_REDIRECT_OP (int_of_string fd, Masc_exec.Redirect_scope.Read) }
   | "<"
                     { incr_tokens (); FILE_REDIRECT_OP (0, Masc_exec.Redirect_scope.Read) }
+
+  (* Constructs outside the subset, each named by the rule that matches it.
+     Longest match orders these against the operators above: [<<<] beats [<<]
+     beats [<] without anyone writing that order down. Text that matches
+     none of them is not given the name of a neighbouring character; it
+     reaches the catch-all at the bottom and becomes a parse error. *)
+  | "$(("           { excluded `Arith_expansion }
+  | "$("            { excluded `Cmd_subst }
+  | '`'             { excluded `Cmd_subst }
+  | '$'             { excluded `Param_expansion }
+  | "<<<"           { excluded `Here_string }
+  | "<<"            { excluded `Heredoc }
+  | "<("            { excluded `Proc_subst }
+  | ">("            { excluded `Proc_subst }
+  (* The redirect forms the grammar above does not spell. [&>] and [&>>] join
+     two streams in one operator, [>|] overrides noclobber, [<>] opens for
+     both, and [>&-] closes. *)
+  | "&>>"           { excluded `Redirect }
+  | "&>"            { excluded `Redirect }
+  | ">|"            { excluded `Redirect }
+  | "<>"            { excluded `Redirect }
+  | ">&-"           { excluded `Redirect }
+  | "<&-"           { excluded `Redirect }
+  | '&'             { excluded `Background }
+  | '('             { excluded `Subshell }
+  | ')'             { excluded `Subshell }
+  | '{'             { excluded `Glob_brace }
+  | '}'             { excluded `Glob_brace }
+  (* A double-quoted body stops at the first char bash would expand, so the
+     quote rules below cannot close and the [$] never reaches the rule above
+     on its own. Matching the opening quote through to that char reports the
+     expansion instead of the quote that failed to close around it. *)
+  | '"' dq_char* '$' { excluded `Param_expansion }
+  | '"' dq_char* '`' { excluded `Cmd_subst }
+
   | "/dev/null"    { incr_tokens (); DEV_NULL }
   | '\'' "/dev/null" '\'' { incr_tokens (); DEV_NULL }
   | '"' "/dev/null" '"' { incr_tokens (); DEV_NULL }
@@ -114,4 +164,9 @@ rule token = parse
   | '"' (dq_body as s) '"' { incr_tokens (); WORD (s, { Shell_ir.quoted = true; glob = false; escaped = false }) }
   | word as w      { incr_tokens (); WORD (w, meta_of_string w) }
   | eof            { EOF }
+  (* No rule matched. This is not [`Unknown_construct]: the rules above each
+     name a shell feature the tool does not implement, and what arrives here
+     is text that is not a command line -- [echo 'unterminated] reaches it on
+     a quote the subset does take, just never closed. Saying "this tool does
+     not run [']" would be false. [Parse_error] carries the position. *)
   | _ as c         { raise (Failure (Printf.sprintf "unexpected char %c" c)) }

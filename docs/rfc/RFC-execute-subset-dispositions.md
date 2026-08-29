@@ -506,6 +506,19 @@ Closed by reading and by running, 2026-08-24:
 - `pipeline_status` already folds to failure if any stage fails, and
   `dispatch_sequence` matches connector x status exhaustively with no catch-all.
 
+Closed by building, 2026-08-30:
+
+- **A tag named the first trip, not the construct.** The reason was inferred
+  after the fact by scanning the whole source for the first metacharacter off
+  an ordered list. The list had no case for `$`, so any script combining an
+  expansion with a redirect was reported as `redirect` — and `redirect`'s
+  disposition sent the caller to the `stdin` field, which is not a move for
+  `>`. The lexer now raises the reason from the rule that matched the
+  offending lexeme, so a tag is an observation. Longest match orders `<<<`
+  against `<<` against `<`, which the list was hand-simulating. `redirect`
+  survives, meaning only the operators the grammar does not spell (`&>`,
+  `>|`, `<>`, `>&-`), and its disposition is `Spell_it_as "> file 2>&1"`.
+
 Open:
 
 - **Should `Cmd_subst` be resolved at all?** It makes gating effectful, which is
@@ -515,10 +528,12 @@ Open:
 - **Does expansion belong in the gate or between gate and dispatch?** Expansion
   must not run before `apply_policy`, or policy would inspect an unexpanded argv.
   Placement needs to be pinned before step 2.
-- **A tag names the first trip, not the construct.** Measured: `for f in a b;
-  do echo $f; done` classifies as `command_separator`, not `control_flow`, so
-  any distribution grouped by tag under-reports control flow. Step 1's counts
-  must be read with this in mind, or the staging decision inherits the bias.
+- **Does control flow deserve rules of its own?** `for`, `while` and `if` lex
+  as ordinary words, so `for f in a b; do echo $f; done` is now tagged
+  `param_expansion` — the construct it does contain, named where it stops. A
+  distribution grouped by tag still does not see control flow, and
+  `` `Control_flow `` and `` `Function_def `` still have no producer. Reading
+  a loop as a loop needs grammar, not another tag.
 - **What does `wait_until`'s `probe` cost?** A probe is itself a gated dispatch
   per poll. Poll interval and a maximum probe count need numbers, not defaults.
 

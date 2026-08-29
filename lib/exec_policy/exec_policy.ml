@@ -97,12 +97,14 @@ let block_reason_of_exec_too_complex
       ( `Cmd_subst
       | `Subshell
       | `Arith_expansion
+      | `Param_expansion
       | `Control_flow
       | `Function_def
       | `Glob_brace
       | `Background
-      (* A separated list, not a redirect: it used to land in the arm above
-         because the classifier found a supported [2>/dev/null] first. *)
+      (* A character no token class claims. Nothing is known about it beyond
+         that the lexer refused it, so it takes the strictest class rather
+         than the nearest-looking one. *)
       | `Unknown_construct _ ) -> Injection
 ;;
 

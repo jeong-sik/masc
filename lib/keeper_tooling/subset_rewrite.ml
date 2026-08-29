@@ -18,6 +18,14 @@ type t =
       call : call;
       because : string;
     }
+  | Spell_it_as of {
+      spelling : string;
+      because : string;
+    }
+      (** The same call, written the way this tool spells it. Separate from
+          {!Call_this_instead} because nothing about which call to make
+          changes, and from {!Move_to_field} because the construct is not
+          something a field carries. *)
   | Unrepresentable of {
       construct : Masc_exec.Parsed.reason_too_complex;
       because : string;
@@ -70,10 +78,25 @@ let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
           "a shell expands this before the command runs. List the arguments, \
            or produce them with a first call"
       }
+  | `Param_expansion ->
+    Call_this_instead
+      { call = Execute_twice
+      ; because =
+          "a shell would expand this before the command runs, and this tool \
+           runs no shell. Read the value with a first call and pass it as an \
+           argument -- and for [$?], this call already reports whether the \
+           command succeeded"
+      }
   | `Redirect ->
-    Move_to_field
-      { field = Stdin
-      ; because = "a redirection is a stream attachment, and each stage owns its own"
+    (* [>], [>>], [<] and [n>&m] are in the subset, so what reaches here is one
+       of the forms that are not: [&>], [>|], [<>], [>&-]. The move is the
+       same call spelled differently, which is why this is not a field or
+       another tool. *)
+    Spell_it_as
+      { spelling = "> file 2>&1"
+      ; because =
+          "this tool takes [>], [>>], [<] and [n>&m]. It has no operator that \
+           joins two streams, overrides noclobber, or closes a descriptor"
       }
   | `Unknown_construct _ as construct ->
     Unrepresentable
@@ -123,6 +146,7 @@ let call_instruction = function
 let tag = function
   | Move_to_field { field; _ } -> "move_to_field:" ^ field_name field
   | Call_this_instead { call; _ } -> "call_this_instead:" ^ call_name call
+  | Spell_it_as _ -> "spell_it_as"
   | Unrepresentable _ -> "unrepresentable"
 ;;
 
@@ -131,5 +155,7 @@ let to_string = function
     Printf.sprintf "use the %s field: %s" (field_name field) because
   | Call_this_instead { call; because } ->
     Printf.sprintf "call %s instead: %s" (call_instruction call) because
+  | Spell_it_as { spelling; because } ->
+    Printf.sprintf "write it as [%s]: %s" spelling because
   | Unrepresentable { construct = _; because } -> because
 ;;

@@ -256,13 +256,13 @@ let test_env_prefix_dispatch_overlay () =
   | _ -> assert false
 
 let test_heredoc_rejected () =
-  (* "<<" must out-rank single "<" — order check in classify_too_complex. *)
+  (* "<<" must out-rank single "<" — ocamllex longest match, no ordered list. *)
   match Bash.parse_string "cat <<EOF" with
   | Parsed.Too_complex `Heredoc -> ()
   | _ -> assert false
 
 let test_here_string_rejected () =
-  (* "<<<" must out-rank "<<" — order check in classify_too_complex. *)
+  (* "<<<" must out-rank "<<" — ocamllex longest match, no ordered list. *)
   match Bash.parse_string "cat <<<payload" with
   | Parsed.Too_complex `Here_string -> ()
   | _ -> assert false
@@ -278,7 +278,7 @@ let test_cmd_subst_backtick_rejected () =
   | _ -> assert false
 
 let test_arith_expansion_rejected () =
-  (* "$((" must out-rank "$(" — order check in classify_too_complex. *)
+  (* "$((" must out-rank "$(" — ocamllex longest match, no ordered list. *)
   match Bash.parse_string "echo $((1 + 2))" with
   | Parsed.Too_complex `Arith_expansion -> ()
   | _ -> assert false
@@ -441,10 +441,15 @@ let test_word_with_double_quoted_suffix () =
 
 let test_double_quote_with_dollar_rejected () =
   (* Variable expansion is subset-excluded at the A1 layer — any '$'
-     inside "..." breaks the lex so Parse_error surfaces rather than
-     silently treating the literal as expanded. *)
+     inside "..." breaks the lex, so the literal is never treated as
+     expanded.  It is named rather than left opaque: the double-quote
+     rule cannot close over a '$', and the rule that matches the opening
+     quote through to it reports the expansion, not the quote.  The
+     backtick case below has said this since it was written; the '$' said
+     Parse_error only because the scan it went through had no case for
+     '$' at all. *)
   match Bash.parse_string "echo \"value $FOO here\"" with
-  | Parsed.Parse_error _ -> ()
+  | Parsed.Too_complex `Param_expansion -> ()
   | _ -> assert false
 
 let test_double_quote_with_backslash_rejected () =
@@ -455,13 +460,10 @@ let test_double_quote_with_backslash_rejected () =
   | _ -> assert false
 
 let test_double_quote_with_backtick_rejected () =
-  (* Command substitution ('`cmd`') is subset-excluded.  Post-hoc
-     classifier now mints Too_complex `Cmd_subst rather than the
-     opaque Parse_error the earlier skeleton produced — the substring
-     scan does not distinguish between backticks inside vs outside
-     quotes, which is acceptable because anything reaching this arm
-     has already been rejected by the grammar and the more-specific
-     tag is strictly better for corpus-tap telemetry. *)
+  (* Command substitution ('`cmd`') is subset-excluded, inside quotes as
+     much as outside.  A rule matches the opening quote through to the
+     backtick, so the tag is the construct rather than the quote that
+     could not close around it. *)
   match Bash.parse_string "echo \"now `date`\"" with
   | Parsed.Too_complex `Cmd_subst -> ()
   | _ -> assert false

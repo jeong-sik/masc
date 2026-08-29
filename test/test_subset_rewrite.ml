@@ -15,12 +15,36 @@ let every_construct : Masc_exec.Parsed.reason_too_complex list =
   ; `Proc_subst
   ; `Subshell
   ; `Arith_expansion
+  ; `Param_expansion
   ; `Control_flow
   ; `Function_def
   ; `Glob_brace
   ; `Background
   ; `Redirect
   ]
+;;
+
+(* [every_construct] is written by hand, so an arm added to the reason type
+   would be checked everywhere the compiler looks and skipped here, which is
+   the one place that claims to cover all of them. This witness makes that a
+   compile error: add the arm below and to the list above together. *)
+let _every_construct_is_listed : Masc_exec.Parsed.reason_too_complex -> unit
+  = function
+  | `Heredoc
+  | `Here_string
+  | `Cmd_subst
+  | `Proc_subst
+  | `Subshell
+  | `Arith_expansion
+  | `Param_expansion
+  | `Control_flow
+  | `Function_def
+  | `Glob_brace
+  | `Background
+  | `Redirect
+  (* Deliberately not in [every_construct]: the test below asserts it is the
+     one construct with no rewrite, so it is applied separately. *)
+  | `Unknown_construct _ -> ()
 ;;
 
 let rewrite_of construct = Rewrite.of_reason (Gate.Unsupported_construct construct)
@@ -58,8 +82,35 @@ let test_each_rewrite_names_the_right_move () =
   tag_is `Subshell "call_this_instead:write-then-execute";
   (* a process that outlives the call needs the handle, not this tool *)
   tag_is `Background "call_this_instead:spawn";
-  (* one command feeding another is two calls *)
-  tag_is `Cmd_subst "call_this_instead:execute-twice"
+  (* one command feeding another is two calls, and so is a value the shell
+     would have substituted before the command ran *)
+  tag_is `Cmd_subst "call_this_instead:execute-twice";
+  tag_is `Param_expansion "call_this_instead:execute-twice";
+  (* [>] and [>>] are in the subset, so what is left under this construct is a
+     spelling this tool does not have -- the same call, written out *)
+  tag_is `Redirect "spell_it_as"
+;;
+
+let mentions ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
+  n > 0 && at 0
+;;
+
+(* The advice a caller acts on has to be about the construct they wrote.
+   [`Redirect] used to answer "use the stdin field", which is not a move for
+   [&>out] or for any output redirect, and it was reached by scripts whose
+   redirects were fine. *)
+let test_the_redirect_advice_is_about_redirecting () =
+  let sentence = Rewrite.to_string (rewrite_of `Redirect) in
+  Alcotest.(check bool)
+    (Printf.sprintf "names the spelling this tool takes: %S" sentence)
+    true
+    (mentions ~needle:"> file 2>&1" sentence);
+  Alcotest.(check bool)
+    "does not send an output redirect to the stdin field"
+    false
+    (mentions ~needle:"stdin" sentence)
 ;;
 
 let test_a_nested_pipeline_is_flattened_not_refused () =
@@ -108,6 +159,10 @@ let () =
             "each rewrite names the right move"
             `Quick
             test_each_rewrite_names_the_right_move
+        ; Alcotest.test_case
+            "the redirect advice is about redirecting"
+            `Quick
+            test_the_redirect_advice_is_about_redirecting
         ; Alcotest.test_case
             "a nested pipeline is flattened, not refused"
             `Quick

@@ -10,8 +10,6 @@
 # thinking through the chat-template control token path, not Ollama think:true.
 
 [skills]
-activation-lifetime = "session"
-precedence = "earlier-source-wins"
 # keeper_skill returns raw resource bytes on the provider wire and carries
 # reference/digest evidence as metadata, so this explicit bound aligns with the
 # shared 64 KiB inline tool-result boundary without JSON-envelope expansion.

@@ -11,15 +11,8 @@ type access =
   | Read_only
   | Read_write
 
-type activation_lifetime = Session
-
 type resource_read_max_bytes = private int
 (** Strictly positive configured bound for one deferred Skill resource read. *)
-
-type precedence = Earlier_source_wins
-(** The first configured source containing a usable Skill name is the default
-    winner. Later same-name entries remain addressable by exact identity and
-    are reported as shadowed by the catalog snapshot. *)
 
 type source = private
   { id : source_id
@@ -29,9 +22,7 @@ type source = private
   }
 
 type t = private
-  { activation_lifetime : activation_lifetime option
-  ; precedence : precedence option
-  ; resource_read_max_bytes : resource_read_max_bytes option
+  { resource_read_max_bytes : resource_read_max_bytes option
   ; sources : source list
   }
 
@@ -67,12 +58,6 @@ type anchor_rejection =
 
 type diagnostic =
   | Toml_syntax of string
-  | Missing_activation_lifetime
-  | Invalid_activation_lifetime_type of value_kind
-  | Unsupported_activation_lifetime of string
-  | Missing_precedence
-  | Invalid_precedence_type of value_kind
-  | Unsupported_precedence of string
   | Missing_resource_read_max_bytes
   | Invalid_resource_read_max_bytes_type of value_kind
   | Non_positive_resource_read_max_bytes of int

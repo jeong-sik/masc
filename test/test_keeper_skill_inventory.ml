@@ -5,7 +5,7 @@ module Snapshot = Skill_catalog_snapshot
 module Tool_descriptor = Masc.Keeper_tool_descriptor
 
 let config_text sources =
-  "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = 65536\n"
+  "[skills]\nresource-read-max-bytes = 65536\n"
   ^ sources
 ;;
 

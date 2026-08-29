@@ -15,7 +15,7 @@ let source_row ~id ~path =
 let config_with_resource_read_max_bytes resource_read_max_bytes sources =
   let text =
     Printf.sprintf
-      "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = %d\n"
+      "[skills]\nresource-read-max-bytes = %d\n"
       resource_read_max_bytes
     ^ sources
   in

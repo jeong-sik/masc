@@ -74,6 +74,11 @@ type create_error =
   | Create_invalid_checkpoint of Agent_core.Error.t
   | Create_non_canonical_json of canonical_json_error
 
+type encode_error =
+  | Encode_plan of Keeper_tool_plan_request.encode_error
+  | Encode_invalid_checkpoint of Agent_core.Error.t
+  | Encode_non_canonical_json of canonical_json_error
+
 val create
   :  composition_run_id:Keeper_tool_plan.Composition_run_id.t
   -> origin:origin
@@ -89,7 +94,9 @@ val create
 
 val to_yojson
   :  t
-  -> (Yojson.Safe.t, Keeper_tool_plan_request.encode_error) result
+  -> (Yojson.Safe.t, encode_error) result
+(** Encode the immutable accepted snapshot without consulting a live
+    checkpoint context. Every failure remains typed. *)
 
 val of_yojson
   :  descriptors:Keeper_tool_descriptor.t list
@@ -104,4 +111,9 @@ val accepted_surface_digest : t -> Accepted_surface_digest.t
 
 val plan : t -> Keeper_tool_plan.t
 val invocation : t -> Agent_core.Tool_contract.Invocation.t
-val accepted_checkpoint : t -> Agent_core.Checkpoint.t
+
+val accepted_checkpoint
+  :  t
+  -> (Agent_core.Checkpoint.t, Agent_core.Error.t) result
+(** Decode a fresh checkpoint from the accepted immutable JSON snapshot.
+    Mutating the returned checkpoint context cannot change the recipe. *)

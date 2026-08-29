@@ -27,7 +27,7 @@ type t =
   ; accepted_surface_digest : Accepted_surface_digest.t
   ; plan : Plan.t
   ; invocation : Tool_contract.Invocation.t
-  ; accepted_checkpoint : Agent_core.Checkpoint.t
+  ; accepted_checkpoint_json : Yojson.Safe.t
   }
 
 type object_name =
@@ -79,6 +79,11 @@ type create_error =
   | Create_invalid_invocation_schedule of string
   | Create_invalid_checkpoint of Agent_core.Error.t
   | Create_non_canonical_json of canonical_json_error
+
+type encode_error =
+  | Encode_plan of Plan_request.encode_error
+  | Encode_invalid_checkpoint of Agent_core.Error.t
+  | Encode_non_canonical_json of canonical_json_error
 
 let ( let* ) = Result.bind
 
@@ -211,20 +216,33 @@ let create
       ; accepted_surface_digest
       ; plan
       ; invocation
-      ; accepted_checkpoint
+      ; accepted_checkpoint_json = checkpoint_json
       }
 ;;
 
 let to_yojson recipe =
-  let* plan = Plan_request.to_yojson recipe.plan in
-  Ok
-    (recipe_to_yojson
-       ~composition_run_id:recipe.composition_run_id
-       ~origin:recipe.origin
-       ~accepted_surface_digest:recipe.accepted_surface_digest
-       ~plan
-       ~invocation:recipe.invocation
-       ~accepted_checkpoint:(Agent_core.Checkpoint.to_json recipe.accepted_checkpoint))
+  let* plan =
+    Plan_request.to_yojson recipe.plan
+    |> Result.map_error (fun error -> Encode_plan error)
+  in
+  let recipe_json =
+    recipe_to_yojson
+      ~composition_run_id:recipe.composition_run_id
+      ~origin:recipe.origin
+      ~accepted_surface_digest:recipe.accepted_surface_digest
+      ~plan
+      ~invocation:recipe.invocation
+      ~accepted_checkpoint:recipe.accepted_checkpoint_json
+  in
+  let* _ =
+    Keeper_chat_operation.canonical_json recipe_json
+    |> Result.map_error (fun error -> Encode_non_canonical_json error)
+  in
+  let* _ =
+    Agent_core.Checkpoint.of_json recipe.accepted_checkpoint_json
+    |> Result.map_error (fun error -> Encode_invalid_checkpoint error)
+  in
+  Ok recipe_json
 ;;
 
 let origin_of_yojson json =
@@ -313,7 +331,7 @@ let of_yojson ~descriptors json =
   let* invocation_json = required Recipe "invocation" fields in
   let* invocation = invocation_of_yojson invocation_json in
   let* checkpoint_json = required Recipe "accepted_checkpoint" fields in
-  let* accepted_checkpoint =
+  let* _accepted_checkpoint =
     Agent_core.Checkpoint.of_json checkpoint_json
     |> Result.map_error (fun error -> Invalid_checkpoint error)
   in
@@ -327,7 +345,7 @@ let of_yojson ~descriptors json =
     ; accepted_surface_digest
     ; plan
     ; invocation
-    ; accepted_checkpoint
+    ; accepted_checkpoint_json = checkpoint_json
     }
 ;;
 
@@ -336,4 +354,6 @@ let origin recipe = recipe.origin
 let accepted_surface_digest recipe = recipe.accepted_surface_digest
 let plan recipe = recipe.plan
 let invocation recipe = recipe.invocation
-let accepted_checkpoint recipe = recipe.accepted_checkpoint
+let accepted_checkpoint recipe =
+  Agent_core.Checkpoint.of_json recipe.accepted_checkpoint_json
+;;

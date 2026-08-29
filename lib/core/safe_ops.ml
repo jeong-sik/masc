@@ -248,12 +248,6 @@ let sanitize_text_utf8 (s : string) : string =
     loop 0;
     Buffer.contents buf
 
-type sanitized_json_utf8 =
-  { raw : Yojson.Safe.t
-  ; sanitized : Yojson.Safe.t
-  ; changed : bool
-  }
-
 let rec sanitize_json_utf8 (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
   | `String s ->

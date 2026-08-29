@@ -2,10 +2,7 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { shellAuthSummary, tasks } from '../../store'
-import { callMcpTool } from '../../api/mcp'
 import { fetchRuntimeProviders } from '../../api/dashboard'
-import { requestConfirm } from '../common/confirm-dialog'
-import { showToast } from '../common/toast'
 import { KeeperWorkspaceRail, runtimeRawSpecOpen } from './keeper-workspace-rail'
 import { selectedTask } from '../goals/task-detail-selection'
 import type { Keeper, Task } from '../../types'
@@ -100,14 +97,6 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
 
 vi.mock('../../router', () => ({
   navigate: vi.fn(),
-}))
-
-vi.mock('../../api/mcp', () => ({
-  callMcpTool: vi.fn().mockResolvedValue('{"before_tokens":1000,"after_tokens":800,"phase_after":"Running"}'),
-}))
-
-vi.mock('../common/confirm-dialog', () => ({
-  requestConfirm: vi.fn().mockResolvedValue(true),
 }))
 
 vi.mock('../common/toast', () => ({
@@ -780,9 +769,6 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.querySelector('.ctx-empty')).not.toBeNull()
     expect(container.textContent).not.toContain('윈도우 사용량')
     expect(container.querySelector('.meter')).toBeNull()
-    const button = container.querySelector('.cmp-run') as HTMLButtonElement | null
-    expect(button).not.toBeNull()
-    expect(button?.disabled).toBe(true)
   })
 
   it('shows token-only context without a fake window percentage', () => {
@@ -842,95 +828,6 @@ describe('KeeperWorkspaceRail', () => {
     })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
     expect(container.querySelector('[data-testid="ctx-provenance"]')).toBeNull()
-  })
-
-  it('runs overflow compaction without force through the existing MCP tool', async () => {
-    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
-    // Use lifecycle_phase (the canonical wire field per Keeper type —
-    // `phaseTokenFromKeeper` reads `keeperDisplayStatus(keeper)` which
-    // routes through `lifecycle_phase`, not the deprecated `phase` alias).
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Paused' })} />`)
-    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
-
-    await waitFor(() => {
-      expect(callMcpTool).toHaveBeenCalledWith('masc_keeper_compact', {
-        name: 'masc-improver',
-        force: false,
-      })
-    })
-    expect(requestConfirm).not.toHaveBeenCalled()
-  })
-
-  it('confirms before forcing compaction on running keepers', async () => {
-    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Running' })} />`)
-    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
-
-    await waitFor(() => {
-      expect(requestConfirm).toHaveBeenCalledWith(expect.objectContaining({
-        title: 'Force keeper compact',
-        confirmText: 'Force compact',
-      }))
-      expect(callMcpTool).toHaveBeenCalledWith('masc_keeper_compact', {
-        name: 'masc-improver',
-        force: true,
-      })
-    })
-  })
-
-  it('does not compact running keepers when force confirmation is cancelled', async () => {
-    vi.mocked(requestConfirm).mockResolvedValueOnce(false)
-    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Running' })} />`)
-    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
-
-    await waitFor(() => expect(requestConfirm).toHaveBeenCalled())
-    expect(callMcpTool).not.toHaveBeenCalled()
-  })
-
-  it('shows a pending (not complete) toast when compaction is only enqueued', async () => {
-    // The real masc_keeper_compact ENQUEUES the request and returns
-    // {queued, queue_outcome}; it does NOT return before/after tokens. Enqueue is
-    // not completion — a queue stuck behind an unrecovered inflight turn stays
-    // pending, so the toast must say pending, never "완료".
-    vi.mocked(callMcpTool).mockResolvedValueOnce(
-      '{"name":"masc-improver","queued":true,"queue_outcome":"enqueued","stimulus":"manual_compaction_requested"}',
-    )
-    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Paused' })} />`)
-    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
-
-    // The compaction toast names the keeper; a later refresh toast does not, so
-    // filter by name to avoid asserting on the unrelated refresh notification.
-    await waitFor(() =>
-      expect(
-        vi.mocked(showToast).mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('masc-improver')),
-      ).toBe(true),
-    )
-    const compactCall = vi.mocked(showToast).mock.calls.find(
-      ([msg]) => typeof msg === 'string' && msg.includes('masc-improver'),
-    )
-    expect(compactCall?.[0]).toContain('예약됨')
-    expect(compactCall?.[0]).not.toContain('완료')
-    expect(compactCall?.[1]).toBe('warning')
-  })
-
-  it('reports completion only when the tool returns measured before/after tokens', async () => {
-    vi.mocked(callMcpTool).mockResolvedValueOnce('{"before_tokens":1000,"after_tokens":800}')
-    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Paused' })} />`)
-    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
-
-    await waitFor(() =>
-      expect(
-        vi.mocked(showToast).mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('masc-improver')),
-      ).toBe(true),
-    )
-    const compactCall = vi.mocked(showToast).mock.calls.find(
-      ([msg]) => typeof msg === 'string' && msg.includes('masc-improver'),
-    )
-    expect(compactCall?.[0]).toContain('완료')
-    expect(compactCall?.[1]).toBe('success')
   })
 
   it('opens the memory inspector overlay from the context rail', () => {

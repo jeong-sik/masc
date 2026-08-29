@@ -414,7 +414,6 @@ let source_terminal_receipt_of_stimulus source =
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
-  | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _

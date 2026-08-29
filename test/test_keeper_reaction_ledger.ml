@@ -74,14 +74,6 @@ let require_ok label = function
   | Error message -> failf "%s: %s" label message
 ;;
 
-let manual_compaction_stimulus () : Keeper_event_queue.stimulus =
-  { post_id = Keeper_event_queue.manual_compaction_post_id
-  ; urgency = Keeper_event_queue.Immediate
-  ; arrived_at = 1234.5
-  ; payload = Keeper_event_queue.Manual_compaction_requested
-  }
-;;
-
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
 ;;
@@ -819,7 +811,6 @@ let test_stimulus_kind_string_roundtrip () =
     ; Keeper_reaction_ledger.Schedule_due
     ; Keeper_reaction_ledger.Connector_attention
     ; Keeper_reaction_ledger.Hitl_resolved
-    ; Keeper_reaction_ledger.Manual_compaction
     ; Keeper_reaction_ledger.Completion_authority_rejected
     ];
   check bool "unknown stimulus kind string is None" true

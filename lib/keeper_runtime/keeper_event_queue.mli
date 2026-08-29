@@ -111,9 +111,6 @@ type stimulus_payload =
           unrelated stimulus, no-progress recovery, or the 30-minute approval
           janitor. Blocking approvals resume their resolver directly and do not
           emit this duplicate wake. Mirrors [Fusion_completed]. *)
-  | Manual_compaction_requested
-      (** Operator-requested MASC compaction. The tool only enqueues this
-          stimulus; the owning Keeper consumes it in its Owner child. *)
   | Completion_authority_rejected of completion_authority_rejection
       (** A system completion authority rejected this Keeper's submitted
           evidence. The event is delivered to the producer Keeper as typed
@@ -326,9 +323,6 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].
     De-dups repeat resolve wakes for the same approval within the dedup
     window. *)
-
-val manual_compaction_post_id : post_id
-
 
 val completion_authority_rejection_post_id :
   completion_authority_rejection -> post_id

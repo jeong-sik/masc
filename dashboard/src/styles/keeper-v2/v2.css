@@ -536,7 +536,6 @@
 [data-skin="v2"][data-theme="paper"] .cmp-open:hover { background: #eef0f3; }
 [data-skin="v2"][data-theme="paper"] .kp-row.sel { background: var(--volt-wash); }
 [data-skin="v2"][data-theme="paper"] .kp-row:hover { background: #eef0f3; }
-[data-skin="v2"][data-theme="paper"] .cmp-run { color: var(--volt-ink); }
 .msg.from-user { grid-template-columns: 1fr 34px; }
 .msg.from-user .msg-col { order: 0; }
 .msg.from-user .msg-av { order: 1; }
@@ -1638,18 +1637,7 @@
 .cmp-open:hover { border-color: var(--volt-dim); color: var(--volt); }
 .cmp-open-sub { margin-left: auto; font-size: var(--fs-10); color: var(--text-dim); }
 
-/* manual compaction trigger (ctx rail) — operator-run compact */
-.cmp-actions { margin-top: 10px; }
-.cmp-run {
-  width: 100%; display: flex; align-items: center; justify-content: center; gap: 7px;
-  font-family: var(--font-ui); font-size: var(--fs-12); color: var(--volt-ink);
-  background: var(--volt); border: 1px solid var(--volt); padding: 7px 10px;
-  border-radius: var(--radius-sm); cursor: pointer; transition: 0.14s;
-}
-.cmp-run:hover:not(:disabled) { background: var(--volt-strong); box-shadow: 0 0 16px var(--volt-glow); }
-.cmp-run:disabled { cursor: default; opacity: 0.92; }
-.cmp-run.busy { background: var(--bg-panel-alt); color: var(--text-mid); border-color: var(--border-main); }
-.cmp-spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--border-highlight); border-top-color: var(--volt); animation: spin 0.7s linear infinite; flex: none; }
+/* .drain-spin (above) is the only consumer left of this keyframes. */
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* roster row command menu */

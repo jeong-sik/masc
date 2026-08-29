@@ -49,42 +49,20 @@ type cycle_outcome =
       { meta : keeper_meta
       ; failure : Keeper_unified_turn.turn_failure
       }
-  | Manual_compaction_failed of
-      { meta : keeper_meta
-      ; failure : Keeper_manual_compaction.failure
-      }
-  | Manual_compaction_not_applied of
-      { meta : keeper_meta
-      ; no_compaction : Keeper_post_turn.no_compaction
-      }
-  | Manual_compaction_applied of
-      { receipt : Keeper_manual_compaction.applied_receipt
-      ; evidence : Keeper_compaction_evidence.t
-        (* The recovery this success carries measured the checkpoint on both
-           sides of the compaction. Dropping it here left the owner projection
-           able to say a compaction happened but not how much it saved
-           (#29109). *)
-      ; followup : cycle_outcome
-      }
 
-let rec meta = function
+let meta = function
   | Completed { meta; _ }
   | Checkpointed meta
   | Input_required meta
   | Cancelled meta
   | Skipped meta
-  | Failed { meta; _ }
-  | Manual_compaction_failed { meta; _ }
-  | Manual_compaction_not_applied { meta; _ } ->
+  | Failed { meta; _ } ->
     meta
-  | Manual_compaction_applied { followup; _ } -> meta followup
 ;;
 
-let rec deferred_runtime_lane = function
+let deferred_runtime_lane = function
   | Failed { failure; _ } -> failure.Keeper_unified_turn.deferred_runtime_lane
-  | Manual_compaction_applied { followup; _ } -> deferred_runtime_lane followup
-  | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _
-  | Manual_compaction_failed _ | Manual_compaction_not_applied _ ->
+  | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _ ->
     None
 ;;
 
@@ -192,8 +170,7 @@ let run_keeper_cycle_admitted
   | Ok (Keeper_unified_turn.Turn_skipped meta) -> Skipped meta
 ;;
 
-let run_keeper_cycle_with
-      ~run_manual_compaction
+let run_keeper_cycle
       ~admission_token
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
@@ -206,96 +183,13 @@ let run_keeper_cycle_with
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ~shared_context
       ~(wake : Keeper_registry.wake_reason)
-      ?manual_compaction_requested
       ()
   =
-  let run_standard_cycle () =
-    run_keeper_cycle_admitted
-      ~before_dispatch_authority:
-        (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
-      ?deferred_runtime_lane
-      ?on_deferred_runtime_consumed
-      ~ctx
-      ~meta_after_triage
-      ~stop
-      ~obs
-      ~turn_decision
-      ~shared_context
-      ~wake
-      ?event_bus
-      ?hitl_resolution
-      ()
-  in
-  match manual_compaction_requested with
-  | Some false | None -> run_standard_cycle ()
-  | Some true ->
-    (* Manual compaction and its follow-up remain inside the Owner-admitted
-       autonomous child. *)
-    (match
-       run_manual_compaction
-         ~before_dispatch_authority:
-           (fun _observation ->
-              Keeper_turn_dispatch_authority.validate admission_token)
-         ~config:ctx.config
-         ~meta:meta_after_triage
-         ()
-     with
-     | `Compaction_failed failure ->
-       Log.Keeper.error
-         ~keeper_name:meta_after_triage.name
-         "manual compaction failed in owner lane: %s"
-         (Keeper_manual_compaction.failure_to_string failure);
-       Manual_compaction_failed { meta = meta_after_triage; failure }
-     | `No_compaction (no_compaction : Keeper_post_turn.no_compaction) ->
-       Log.Keeper.info
-         ~keeper_name:meta_after_triage.name
-         "manual compaction reached typed terminal: %s"
-         (Keeper_compaction_outcome.no_compaction_reason_label no_compaction.reason);
-       Manual_compaction_not_applied { meta = meta_after_triage; no_compaction }
-     | `Applied (success : Keeper_manual_compaction.success) ->
-       Manual_compaction_applied
-         { receipt = success.receipt
-         ; evidence = success.recovery.evidence
-         ; followup = run_standard_cycle ()
-         })
-;;
-
-let run_keeper_cycle
-      ~admission_token
-      ?deferred_runtime_lane
-      ?on_deferred_runtime_consumed
-      ?event_bus
-      ?hitl_resolution
-      ~ctx
-      ~meta_after_triage
-      ~stop
-      ~obs
-      ~turn_decision
-      ~shared_context
-      ~wake
-      ?manual_compaction_requested
-      ()
-  =
-run_keeper_cycle_with
-  ~run_manual_compaction:
-    (fun
-      ~before_dispatch_authority:_
-      ~config
-      ~meta
-      ()
-      ->
-       Keeper_manual_compaction.run_under_admission
-         ~before_dispatch_authority:
-           (fun _observation ->
-              Keeper_turn_dispatch_authority.validate admission_token)
-         ~config
-         ~meta
-         ())
-    ~admission_token
+  run_keeper_cycle_admitted
+    ~before_dispatch_authority:
+      (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
     ?deferred_runtime_lane
     ?on_deferred_runtime_consumed
-    ?event_bus
-    ?hitl_resolution
     ~ctx
     ~meta_after_triage
     ~stop
@@ -303,6 +197,7 @@ run_keeper_cycle_with
     ~turn_decision
     ~shared_context
     ~wake
-    ?manual_compaction_requested
+    ?event_bus
+    ?hitl_resolution
     ()
 ;;

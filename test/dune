@@ -1135,14 +1135,6 @@
  (modules test_keeper_connector_attention_batch)
  (libraries masc_test_deps))
 
-; #26348: explicit owner-lane manual compaction preempts a checkpointed
-; data-plane source, then the unchanged durable source resumes.
-
-(test
- (name test_keeper_manual_compaction_preemption)
- (modules test_keeper_manual_compaction_preemption)
- (libraries masc_test_deps))
-
 ; #28809: an approved Gate resolution reaches a turn woken by a different
 ; stimulus (turn-start projection) and preempts an in-flight source while
 ; its one-shot grant is unspent (post-tool boundary yield).

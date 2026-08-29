@@ -2751,10 +2751,16 @@ def assert_overview_event_rows(
             raise AssertionError(f"24-row terminal Overview omitted {expected!r}: {overview!r}")
     assert_event_window_at_newest(overview, "24-row terminal Overview")
     span = event_range_span(overview, "24-row terminal Overview")
-    if span != OVERVIEW_PANEL_ROW_CAP:
+    # The cap is a ceiling, not a quota: the panel draws every event it has up
+    # to six. The total is read off the screen for the reason event_total()
+    # gives -- it counts events the TUI raises itself, so it is not the
+    # fixture's to fix -- and this line asserted a literal 6 against it, which
+    # held only while startup happened to raise at least six.
+    expected_span = min(OVERVIEW_PANEL_ROW_CAP, event_total(overview, "24-row terminal Overview"))
+    if span != expected_span:
         raise AssertionError(
             f"24-row terminal Overview drew {span} event rows, not the "
-            f"{OVERVIEW_PANEL_ROW_CAP} it has room for: {overview!r}"
+            f"{expected_span} it has room for: {overview!r}"
         )
 
     overview = resize_and_wait(
@@ -6623,6 +6629,23 @@ def file_changes_beta_response() -> tuple[int, dict[str, object]]:
     return status, payload
 
 
+def open_changes(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+) -> bytes:
+    """Reach the Changes surface the way the key map says it is reached.
+
+    Changes is not on the Tab ring -- test_tui_keys pins that with
+    "Changes is not a top-level ring entry" -- it is a Keepers child opened
+    with [f] ("files: file changes this keeper wrote"). These scenarios tabbed
+    for it, which walks the ring past a surface that is not on it, so they
+    could not arrive however many presses they were given.
+    """
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    return send_and_wait(process, master_fd, output, b"f", b"masc:lib/example.ml")
+
+
 def changes_keeper_and_arrow_detail_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -6630,7 +6653,7 @@ def changes_keeper_and_arrow_detail_interaction(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    tab_until(process, master_fd, output, b"masc:lib/example.ml")
+    open_changes(process, master_fd, output)
     # The cursor row's diff previews under the list without Enter -- the
     # recorded before/after pair, rendered locally.
     wait_for_output(
@@ -6774,7 +6797,7 @@ def enter_outside_changes_interaction(
     the Changes handler; with changes loaded, coming back to Changes then drew
     a diff nobody opened. Lanes now owns Enter, so this no-op guard uses Acting.
     """
-    populated = tab_until(process, master_fd, output, b"masc:lib/example.ml")
+    populated = open_changes(process, master_fd, output)
     populated_plain = CSI_RE.sub(b"", populated).decode("utf-8")
     if "MASC Changes" not in populated_plain:
         raise AssertionError(
@@ -6784,7 +6807,7 @@ def enter_outside_changes_interaction(
     if b"MASC Acting" not in acting:
         raise AssertionError(f"did not reach Acting: {acting!r}")
     os.write(master_fd, b"\r")
-    back = tab_until(process, master_fd, output, b"masc:lib/example.ml")
+    back = open_changes(process, master_fd, output)
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
     if "Turn" not in back_plain:
         raise AssertionError(

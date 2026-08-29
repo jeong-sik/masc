@@ -74,7 +74,6 @@ let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
   | Keeper_tool_descriptor.Tool_time_now
   | Keeper_tool_descriptor.Tool_tools_list
   | Keeper_tool_descriptor.Tool_capability_search
-  | Keeper_tool_descriptor.Tool_assemble_plan
   | Keeper_tool_descriptor.Tool_context_status
   | Keeper_tool_descriptor.Tool_artifact_read
   | Keeper_tool_descriptor.Tool_memory_search
@@ -209,7 +208,6 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) input =
   | Keeper_tool_descriptor.Tool_time_now
   | Keeper_tool_descriptor.Tool_tools_list
   | Keeper_tool_descriptor.Tool_capability_search
-  | Keeper_tool_descriptor.Tool_assemble_plan
   | Keeper_tool_descriptor.Tool_context_status
   | Keeper_tool_descriptor.Tool_artifact_read
   | Keeper_tool_descriptor.Tool_memory_search

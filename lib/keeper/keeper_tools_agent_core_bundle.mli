@@ -22,8 +22,8 @@ val make_tool_bundle_for_capability_surface
   -> unit
   -> Keeper_tools_agent_core.tool_bundle
 (** Build a bundle from the immutable Tool and Skill authority frozen by the
-    turn caller. Named compositions and [keeper_plan_execute] receive its exact
-    descriptor list, so neither can widen the configured Tool Group surface. *)
+    turn caller. Named compositions receive its exact descriptor list, so they
+    cannot widen the configured Tool Group surface. *)
 
 module For_testing : sig
   val make_tool_bundle

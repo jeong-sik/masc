@@ -206,9 +206,6 @@ val log_call :
     (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
   ?file_change_evidence:Keeper_file_change_evidence.t ->
   ?composition_tool:string ->
-  ?assembler_run_id:Keeper_plan_proposal_execution_request.Assembler_run_id.t ->
-  ?proposal_id:Keeper_plan_proposal.Proposal_id.t ->
-  ?proposal_provenance:Keeper_plan_proposal_provenance.verification ->
   ?skill_reference:Skill_reference.t ->
   ?composition_run_id:string ->
   ?composition_node_id:string ->

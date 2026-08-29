@@ -3,7 +3,6 @@ type tool_origin =
   | Instruction_skill
   | Composition_skill of
       { provenance : Keeper_skill_catalog.provenance option }
-  | Composition_plan
   | Composition_control
 
 type tool =
@@ -109,8 +108,6 @@ let composition_rows skill_catalog =
          match origin with
          | Keeper_tool_composition_surface.Declared_composition provenance ->
            Composition_skill { provenance }
-         | Keeper_tool_composition_surface.Plan_execute
-         | Keeper_tool_composition_surface.Proposal_execute -> Composition_plan
          | Keeper_tool_composition_surface.Async_status
          | Keeper_tool_composition_surface.Async_cancel -> Composition_control
        in
@@ -269,7 +266,7 @@ let project
       let is_skill_row = function
         | { origin = (Instruction_skill | Composition_skill _ | Composition_control); _ }, _ ->
           true
-        | { origin = (Descriptor _ | Composition_plan); _ }, _ -> false
+        | { origin = Descriptor _; _ }, _ -> false
       in
       match tool_delivery with
       | Tools_suppressed_runtime_unsupported -> 0
@@ -570,7 +567,6 @@ let origin_to_yojson = function
           | Some provenance -> Keeper_skill_catalog.provenance_to_yojson provenance
           | None -> `Null )
       ]
-  | Composition_plan -> `Assoc [ "kind", `String "composition_plan" ]
   | Composition_control -> `Assoc [ "kind", `String "composition_control" ]
 ;;
 

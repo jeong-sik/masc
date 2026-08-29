@@ -34,8 +34,6 @@ Scope:
 
 Each path below must appear exactly once and use one owner from the table above.
 
-- `lib/keeper/keeper_tool_assemble_plan_runtime.ml` - execution-dispatch
-- `lib/keeper/keeper_tool_assemble_plan_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_board_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_board_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_code_query.ml` - execution-dispatch

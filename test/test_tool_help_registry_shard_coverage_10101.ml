@@ -102,7 +102,6 @@ let test_9912_base_tools_still_covered () =
     ; "keeper_context_status"
     ; "keeper_memory_search"
     ; "keeper_capability_search"
-    ; "keeper_assemble_plan"
     ; "keeper_tools_list"
     ]
   in

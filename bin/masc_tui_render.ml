@@ -9695,7 +9695,7 @@ let render_keeper_calls (state : state) =
   box_line_styled buf cols ~style:Ansi.bold header;
   box_divider buf cols;
   let col_hdr =
-    "  j/k rows · exact fields: tool | input | assembler | proposal | provenance | output"
+    "  j/k rows · exact fields: tool | input | output"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -9800,18 +9800,6 @@ let render_keeper_calls (state : state) =
            labeled_rows ~call_index ~style:Ansi.dim ~label:"tool" call.kc_tool
            @ labeled_rows ~call_index ~style:Ansi.dim ~label:"input" call.kc_input
          in
-         let proposal_rows =
-           match call.kc_proposal_execution with
-           | None -> []
-           | Some identity ->
-             labeled_rows ~call_index ~style:Ansi.dim ~label:"assembler"
-               identity.pei_assembler_run_id
-             @ labeled_rows ~call_index ~style:Ansi.dim ~label:"proposal"
-                 identity.pei_proposal_id
-             @ labeled_rows ~call_index ~style:Ansi.dim ~label:"provenance"
-                 (proposal_provenance_status_label
-                    identity.pei_provenance_status)
-         in
          let output_rows =
            match
              Option.bind call.kc_output (fun result ->
@@ -9823,7 +9811,7 @@ let render_keeper_calls (state : state) =
                ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
                ~label:"output" digest
          in
-         (call_index, style, summary) :: exact_rows @ proposal_rows @ output_rows)
+         (call_index, style, summary) :: exact_rows @ output_rows)
     |> List.concat
   in
   let total_rows = List.length rows in

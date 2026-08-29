@@ -12,4 +12,3 @@
 
 val status_schema : Masc_domain.tool_schema
 val cancel_schema : Masc_domain.tool_schema
-val proposal_execute_schema : Masc_domain.tool_schema

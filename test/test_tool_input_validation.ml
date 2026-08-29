@@ -267,21 +267,6 @@ let test_extra_fields_allowed () =
    boundary. *)
 let plan_schema = Masc.Keeper_tool_plan_request.input_schema
 
-let test_plan_surface_publishes_request_schema () =
-  let published =
-    Masc.Keeper_tool_composition_surface.schema_tool_rows ()
-    |> List.find_map (fun (origin, (tool : Agent_core.Tool.t)) ->
-      match origin with
-      | Masc.Keeper_tool_composition_surface.Plan_execute ->
-        tool.schema.input_schema
-      | _ -> None)
-  in
-  Alcotest.(check (option string))
-    "keeper_plan_execute publishes the request parser schema"
-    (Some (Yojson.Safe.to_string plan_schema))
-    (Option.map Yojson.Safe.to_string published)
-;;
-
 let plan_args input =
   `Assoc
     [ ( "nodes"
@@ -299,7 +284,7 @@ let test_plan_accepts_an_output_reference () =
   match
     Tool_input_validation.validate_args
       ~schema:plan_schema
-      ~name:"keeper_plan_execute"
+      ~name:"keeper_tool_plan_request"
       ~args:
         (plan_args
            (`Assoc
@@ -326,7 +311,7 @@ let test_plan_template_is_advertised_not_enforced () =
   match
     Tool_input_validation.validate_args
       ~schema:plan_schema
-      ~name:"keeper_plan_execute"
+      ~name:"keeper_tool_plan_request"
       ~args:(plan_args (`Assoc [ "kind", `String "output" ]))
       ()
   with
@@ -2588,9 +2573,5 @@ let () =
         test_oneof_null_const_matches_null_branch;
       Alcotest.test_case "null const: non-null branch matches" `Quick
         test_oneof_null_const_matches_non_null_branch;
-    ]);
-    ("plan_request_schema", [
-      Alcotest.test_case "plan tool publishes request schema" `Quick
-        test_plan_surface_publishes_request_schema;
     ]);
   ]

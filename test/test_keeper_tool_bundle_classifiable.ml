@@ -8,11 +8,11 @@
     is asked about a call the policy simply failed to recognise, with a reason
     that tells them nothing they can act on.
 
-    Four such tools shipped that way. [keeper_compose_<name>],
-    [keeper_plan_execute], [keeper_composition_status] and
-    [keeper_composition_cancel] are materialised as Agent-Core tools outside
-    the descriptor registry, so every composition asked — including one whose
-    whole plan is reads, while the same tools called directly ran unasked.
+    Such tools shipped that way. [keeper_compose_<name>],
+    [keeper_composition_status] and [keeper_composition_cancel] are
+    materialised as Agent-Core tools outside the descriptor registry, so
+    every composition asked — including one whose whole plan is reads, while
+    the same tools called directly ran unasked.
 
     Nothing caught it. The nearest test partitions [Descriptor.public_names ()]
     — the seven LLM-native names — against a hard-coded answer, and never
@@ -68,12 +68,10 @@ let make_meta ~name ?tool_groups () : Keeper_meta_contract.keeper_meta =
 ;;
 
 (* A bundle with no skills carries no composition tools, so a gate run
-   against one would only ever see the descriptor half plus
-   [keeper_plan_execute] — and would pass while the four tools this gate
-   exists for were never in it. These two skills put all four kinds in:
-   an inline composition, an async one (which is what brings
-   keeper_composition_status and _cancel with it), and keeper_plan_execute
-   is unconditional. *)
+   against one would only ever see the descriptor half — and would pass
+   while the tools this gate exists for were never in it. These two skills
+   put every kind in: an inline composition and an async one (which is what
+   brings keeper_composition_status and _cancel with it). *)
 let composition_skill ~name ~execution =
   Printf.sprintf
     {|---
@@ -502,47 +500,6 @@ let test_tools_list_reads_the_supplied_capability_surface () =
          matches)
 ;;
 
-let test_nested_plan_search_keeps_frozen_surface_identity () =
-  with_bundle_tools ~capability_tool_groups:[ "board" ]
-  @@ fun config _meta _snapshot _composition_plan_index capability_surface tools ->
-  let plan_tool =
-    match
-      List.find_opt
-        (fun (tool : Agent_core.Tool.t) ->
-           String.equal
-             tool.schema.name
-             Keeper_tool_composition_catalog.plan_execute_tool_name)
-        tools
-    with
-    | Some tool -> tool
-    | None -> fail "keeper_plan_execute is absent from the supplied surface"
-  in
-  let result =
-    run_tool
-      ~tool_use_id:"bundle-nested-capability-search"
-      plan_tool
-      (`Assoc
-         [ ( "nodes"
-           , `List
-               [ `Assoc
-                   [ "id", `String "search"
-                   ; "tool", `String "keeper_capability_search"
-                   ; ( "input"
-                     , `Assoc
-                         [ "kind", `String "literal"
-                         ; ( "value"
-                           , `Assoc [ "query", `String "tool_read_file" ] )
-                         ] )
-                   ]
-               ] )
-         ])
-    |> decode_tool_json ~base_path:config.base_path
-    |> Yojson.Safe.to_string
-  in
-  check bool "nested search reports the same frozen surface digest" true
-    (contains ~needle:(Keeper_capability_surface.digest capability_surface) result)
-;;
-
 let run_composition_tool ?expected_failure (tool : Agent_core.Tool.t) =
   let invocation =
     Agent_core.Tool_contract.Invocation.create
@@ -633,7 +590,6 @@ let test_the_bundle_is_not_empty () =
            true (List.mem expected names))
       [ "keeper_compose_gate-inline"
       ; "keeper_compose_gate-async"
-      ; Keeper_tool_composition_catalog.plan_execute_tool_name
       ; Keeper_tool_composition_catalog.status_tool_name
       ; Keeper_tool_composition_catalog.cancel_tool_name
       ; Keeper_tool_composition_catalog.skill_tool_name
@@ -857,8 +813,6 @@ let () =
             test_narrow_surface_controls_production_bundle
         ; test_case "tools list reads supplied capability surface" `Quick
             test_tools_list_reads_the_supplied_capability_surface
-        ; test_case "nested search keeps frozen surface identity" `Quick
-            test_nested_plan_search_keeps_frozen_surface_identity
         ; test_case "the skill tool serves the body" `Quick
             test_the_skill_tool_serves_the_body
         ; test_case "a revisionless ask is taught the exact reference" `Quick

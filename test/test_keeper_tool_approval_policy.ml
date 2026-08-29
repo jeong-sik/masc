@@ -160,73 +160,6 @@ let test_an_unrecorded_name_is_still_unclassifiable () =
          ~tool_name:"keeper_compose_never_declared" ~input:no_input))
 ;;
 
-(* keeper_plan_execute carries no catalog entry -- its nodes arrive in the
-   input, so the same fold reads them from there and judges the plan actually
-   being run. *)
-let plan_input tools =
-  `Assoc
-    [ ( "nodes"
-      , `List
-          (List.mapi
-             (fun i tool ->
-                `Assoc
-                  [ "id", `String (Printf.sprintf "n%d" i)
-                  ; "tool", `String tool
-                  ])
-             tools) )
-    ]
-;;
-
-let test_ad_hoc_plan_of_reads_runs_unasked () =
-  with_index [] (fun _ ->
-    check bool "an ad-hoc plan of reads is not asked about" false
-      (asks ~composition_plan_index:None ~tool_name:"keeper_plan_execute" ~input:(plan_input [ "Read"; "Grep" ])))
-;;
-
-let test_ad_hoc_plan_with_a_write_asks () =
-  with_index [] (fun _ ->
-    check bool "an ad-hoc plan that writes is asked about" true
-      (asks ~composition_plan_index:None ~tool_name:"keeper_plan_execute" ~input:(plan_input [ "Read"; "Execute" ])));
-;;
-
-let test_a_malformed_plan_is_asked_about () =
-  with_index [] (fun _ ->
-    (* Not "a plan whose nodes are all reads". The tool will reject it too. *)
-    check bool "a plan_execute call with no nodes field is asked about" true
-      (asks ~composition_plan_index:None ~tool_name:"keeper_plan_execute" ~input:no_input))
-;;
-
-let proposal_input tools =
-  `Assoc
-    [ "proposal_id", `String (String.make 64 'a')
-    ; "approval_tools", `List (List.map (fun tool -> `String tool) tools)
-    ]
-;;
-
-let test_stored_proposal_of_reads_runs_unasked () =
-  check bool "a stored proposal of reads is not asked about" false
-    (asks
-       ~composition_plan_index:None
-       ~tool_name:Masc.Keeper_tool_composition_catalog.proposal_execute_tool_name
-       ~input:(proposal_input [ "Read"; "Grep" ]))
-;;
-
-let test_stored_proposal_with_a_write_asks () =
-  check bool "a stored proposal with Execute is asked about" true
-    (asks
-       ~composition_plan_index:None
-       ~tool_name:Masc.Keeper_tool_composition_catalog.proposal_execute_tool_name
-       ~input:(proposal_input [ "Read"; "Execute" ]))
-;;
-
-let test_stored_proposal_without_tool_sequence_asks () =
-  check bool "a stored proposal without approval_tools is asked about" true
-    (asks
-       ~composition_plan_index:None
-       ~tool_name:Masc.Keeper_tool_composition_catalog.proposal_execute_tool_name
-       ~input:no_input)
-;;
-
 (* The invariant every task in this goal is checked against: nothing that runs
    unasked today may start asking. Read directly and Read inside a plan must
    give the same answer. *)
@@ -293,18 +226,6 @@ let () =
             test_same_name_is_isolated_between_turn_indexes
         ; test_case "an unrecorded name is still unclassifiable" `Quick
             test_an_unrecorded_name_is_still_unclassifiable
-        ; test_case "an ad-hoc plan of reads runs unasked" `Quick
-            test_ad_hoc_plan_of_reads_runs_unasked
-        ; test_case "an ad-hoc plan with a write asks" `Quick
-            test_ad_hoc_plan_with_a_write_asks
-        ; test_case "a malformed plan is asked about" `Quick
-            test_a_malformed_plan_is_asked_about
-        ; test_case "a stored proposal of reads runs unasked" `Quick
-            test_stored_proposal_of_reads_runs_unasked
-        ; test_case "a stored proposal with a write asks" `Quick
-            test_stored_proposal_with_a_write_asks
-        ; test_case "a stored proposal without tools asks" `Quick
-            test_stored_proposal_without_tool_sequence_asks
         ; test_case "no direct call became asked" `Quick
             test_no_direct_call_became_asked
         ] )

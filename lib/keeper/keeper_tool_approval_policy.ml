@@ -14,8 +14,6 @@ let unclassifiable_because = "no descriptor declares what this tool does"
 type undescribed =
   | Control of verdict
   | Composition of string list
-  | Ad_hoc_plan
-  | Stored_proposal
   | Attached_service of bool option
       (** A tool from a work service this Keeper is attached to, carrying
           what that service said about whether it only reads. *)
@@ -49,52 +47,11 @@ let descriptor_for tool_name =
 (* The node tools a composition-shaped call will run, or [None] when this name
    is not composition-shaped.
 
-   Two sources, because compositions carry their plan in two different places.
    A [keeper_compose_<name>] entry is declared in the catalog, so the bundle
-   builder wrote its nodes into the index when it materialised the tool. An
-   ad-hoc [keeper_plan_execute] has no catalog entry: its nodes arrive in the
-   tool input, and reading them here judges the plan actually being run rather
-   than a fixed one.
+   builder wrote its nodes into the index when it materialised the tool.
 
-   Both stay pure. The index read is an in-memory lookup and the input read is
-   a JSON walk; neither opens anything, which is what [Hooks.hook] requires of
-   whatever runs inside [pre_tool_use]. *)
-(* The nodes an ad-hoc plan names, read from the tool input. Pure: a JSON
-   walk, which is what [Hooks.hook] requires of anything inside
-   [pre_tool_use]. *)
-let ad_hoc_plan_nodes input =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "nodes" fields with
-     | Some (`List nodes) ->
-       Some
-         (List.filter_map
-            (function
-              | `Assoc node ->
-                (match List.assoc_opt "tool" node with
-                 | Some (`String tool) -> Some tool
-                 | Some _ | None -> None)
-              | _ -> None)
-            nodes)
-     | Some _ | None -> None)
-  | _ -> None
-;;
-
-let stored_proposal_nodes input =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "approval_tools" fields with
-     | Some (`List tools) ->
-       let rec collect acc = function
-         | [] -> Some (List.rev acc)
-         | `String tool :: rest -> collect (tool :: acc) rest
-         | _ :: _ -> None
-       in
-       collect [] tools
-     | Some _ | None -> None)
-  | _ -> None
-;;
-
+   The read stays pure: an in-memory index lookup, which is what [Hooks.hook]
+   requires of whatever runs inside [pre_tool_use]. *)
 let rec verdict_for ~composition_plan_index ~tool_name ~input =
   match descriptor_for tool_name with
   | None -> verdict_for_undescribed ~composition_plan_index ~tool_name ~input
@@ -168,15 +125,7 @@ and node_asks_for_approval node =
    asks what to do about a call; the bundle gate asks whether this build can
    place the name at all. Splitting that into two predicates is how one grows
    an arm the other does not have, and the gate then passes while the tool
-   still asks with a reason nobody can act on.
-
-   [Ad_hoc_plan] is why the two questions are not the same question.
-   [keeper_plan_execute] is a name this build knows, but what it does depends
-   on nodes that arrive in the input — so it is classifiable without being
-   decidable from the name alone. A gate that asked [verdict_for] with an
-   empty input would read that as "cannot classify", which is the empty-input
-   trap this policy already avoids one level down when it judges plan nodes on
-   static facts rather than on a fabricated [{}]. *)
+   still asks with a reason nobody can act on. *)
 and undescribed_kind ?composition_plan_index tool_name =
   if String.equal tool_name Keeper_tool_composition_catalog.status_tool_name
   then Control (Run { because = "reads a composition request this keeper made" })
@@ -186,14 +135,6 @@ and undescribed_kind ?composition_plan_index tool_name =
   then
     Control
       (Run { because = "reads one instruction skill this keeper already carries" })
-  else if String.equal
-            tool_name
-            Keeper_tool_composition_catalog.plan_execute_tool_name
-  then Ad_hoc_plan
-  else if String.equal
-            tool_name
-            Keeper_tool_composition_catalog.proposal_execute_tool_name
-  then Stored_proposal
   else
     match
       Option.bind composition_plan_index (fun index ->
@@ -245,20 +186,6 @@ and verdict_for_undescribed ~composition_plan_index ~tool_name ~input =
            durable Gate treats that silence as a write and defers it"
       }
   | Composition node_tools -> verdict_of_nodes node_tools
-  | Stored_proposal ->
-    (match stored_proposal_nodes input with
-     | Some node_tools -> verdict_of_nodes node_tools
-     | None ->
-       Ask
-         { because =
-             "this proposal request does not carry its exact Tool sequence"
-         })
-  | Ad_hoc_plan ->
-    (match ad_hoc_plan_nodes input with
-     (* A malformed plan is not a plan whose nodes are all reads. The tool
-        will reject it too; asking about it first is the same answer earlier. *)
-     | None -> Ask { because = "this plan does not say which tools it runs" }
-     | Some node_tools -> verdict_of_nodes node_tools)
   | Unknown ->
     (* Not a safe tool -- one this build cannot classify. Running it unasked
        would make "no descriptor" the quietest way past the gate. *)
@@ -270,8 +197,7 @@ let classifies ~composition_plan_index ~tool_name =
   | Some _ -> true
   | None ->
     (match undescribed_kind ?composition_plan_index tool_name with
-     | Control _ | Composition _ | Ad_hoc_plan | Stored_proposal
-     | Attached_service _ -> true
+     | Control _ | Composition _ | Attached_service _ -> true
      | Unknown -> false)
 ;;
 

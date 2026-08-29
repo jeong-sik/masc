@@ -28,10 +28,9 @@ val verdict_for :
     A name with no descriptor is not automatically that. Composition tools are
     materialised outside the descriptor registry and are judged by the tools
     their plan runs — from the turn-local [composition_plan_index] for
-    [keeper_compose_*], from the input for [keeper_plan_execute]. A plan of
-    reads runs; one node that would be asked about makes the whole plan asked
-    about, and the reason names that node. An absent index asks rather than
-    borrowing another turn's plan.
+    [keeper_compose_*]. A plan of reads runs; one node that would be asked
+    about makes the whole plan asked about, and the reason names that node.
+    An absent index asks rather than borrowing another turn's plan.
 
     A tool from a work service this Keeper is attached to is judged by what
     that service said: [annotations.readOnlyHint] on its own listing, carried
@@ -55,10 +54,8 @@ val classifies :
 (** Whether this build can place [tool_name] at all.
 
     Not the same question as {!verdict_for}, and not answerable by calling it
-    with an empty input. [keeper_plan_execute] is a name this policy knows
-    while what it decides depends on nodes that arrive in the call — asking
-    {!verdict_for} with [{}] would read that as "cannot classify" and pin a
-    fabricated input's answer as the fact about the name.
+    with a fabricated empty input: classification is decided from the name and
+    the turn's plan index alone.
 
     Both this and {!verdict_for} read one closed variant, so an arm added to
     one is an arm added to the other. The bundle gate

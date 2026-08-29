@@ -96,8 +96,8 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
      |> Yojson.Safe.Util.member "observation_only"
      |> Yojson.Safe.Util.to_bool);
   check int
-    "six fixed lanes"
-    6
+    "five fixed lanes"
+    5
     (json |> Yojson.Safe.Util.member "lanes" |> Yojson.Safe.Util.to_list |> List.length);
   let status lane_id =
     lane_by_id json lane_id
@@ -111,10 +111,6 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
     "compaction has no retained observation"
     "no_retained_observation"
     (status "compaction_exact");
-  check string
-    "assembler has no retained observation"
-    "no_retained_observation"
-    (status "assembler_exact");
   check string "verifier idle" "idle" (status Runtime.verifier_exact_lane_id);
   let hitl_slots =
     lane_by_id json "hitl_auto_judge"
@@ -335,7 +331,7 @@ let () =
     "server standalone lane projection"
     [ ( "snapshot"
       , [ test_case
-            "all six lanes and observation states"
+            "all five lanes and observation states"
             `Quick
             test_snapshot_names_every_lane_and_keeps_observed_truth
         ; test_case

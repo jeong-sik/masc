@@ -116,8 +116,8 @@ let expected_model_tool_names
     then [ Keeper_tool_composition_catalog.skill_tool_name ]
     else []
   in
-  (* The shared controls are always present because an Assembler proposal may
-     select async execution independently of Skill-declared compositions. *)
+  (* The shared controls are always present because a Skill-declared
+     composition may select async execution. *)
   let control_names =
     [ Keeper_tool_composition_catalog.status_tool_name
     ; Keeper_tool_composition_catalog.cancel_tool_name
@@ -125,9 +125,7 @@ let expected_model_tool_names
   in
   List.sort_uniq
     String.compare
-    (Keeper_tool_composition_surface.plan_execute_tool_name
-     :: Keeper_tool_composition_surface.proposal_execute_tool_name
-     :: (descriptor_names
+    (descriptor_names
          @ composition_names
          @ instruction_names
          @ control_names
@@ -135,7 +133,7 @@ let expected_model_tool_names
             here from the same list the bundle was handed, so the projection
             check keeps meaning "the surface is what it was built from"
             rather than being widened into always passing. *)
-         @ identity_tool_names))
+         @ identity_tool_names)
 ;;
 
 let prepare_agent_setup

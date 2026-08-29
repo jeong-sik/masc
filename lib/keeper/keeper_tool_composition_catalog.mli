@@ -153,8 +153,6 @@ val tool_kind : entry -> Keeper_tool_descriptor.tool_kind
 val status_tool_kind : Keeper_tool_descriptor.tool_kind
 val cancel_tool_kind : Keeper_tool_descriptor.tool_kind
 
-val plan_execute_tool_name : string
-val proposal_execute_tool_name : string
 (** The ad-hoc plan tool's name. It lives here beside the catalog's own tool
     names because the approval policy needs to recognise it and must not
     depend on the surface that materialises it. Unlike a [keeper_compose_*]

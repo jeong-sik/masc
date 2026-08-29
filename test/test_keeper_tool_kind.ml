@@ -67,7 +67,6 @@ let all_tool_kinds =
   [ Descriptor.Atomic_tool
   ; Descriptor.Composition_tool
   ; Descriptor.Async_composition_tool
-  ; Descriptor.Batch_plan_tool
   ]
 ;;
 
@@ -190,7 +189,7 @@ let test_catalog_entries_declare_tool_kind () =
     (Catalog.tool_kind (entry "clock-background"))
 ;;
 
-let test_async_controls_and_plan_execute_declare_kinds () =
+let test_async_controls_declare_kinds () =
   check
     tool_kind_testable
     "status control is an async composition tool"
@@ -200,12 +199,7 @@ let test_async_controls_and_plan_execute_declare_kinds () =
     tool_kind_testable
     "cancel control is an async composition tool"
     Descriptor.Async_composition_tool
-    Catalog.cancel_tool_kind;
-  check
-    tool_kind_testable
-    "plan execute is a batch plan tool"
-    Descriptor.Batch_plan_tool
-    Surface.plan_execute_tool_kind
+    Catalog.cancel_tool_kind
 ;;
 
 (* Composition surface tools are materialized Agent_core tools outside the
@@ -259,25 +253,6 @@ let test_route_evidence_picks_composition_tool_kind () =
   | None -> fail "composition tool call produced no route evidence"
 ;;
 
-let test_route_evidence_picks_batch_plan_tool_kind () =
-  let output_text =
-    `Assoc
-      [ "composition_tool", `String Surface.plan_execute_tool_name
-      ; "tool_kind", `String "batch_plan"
-      ; "actions", `List []
-      ]
-    |> Yojson.Safe.to_string
-  in
-  match
-    Call_log.route_evidence_json_of_tool_io
-      ~tool_name:Surface.plan_execute_tool_name
-      ~input:(`Assoc [])
-      ~output_text
-  with
-  | Some evidence -> expect_tool_kind_field "batch_plan" evidence
-  | None -> fail "batch plan tool call produced no route evidence"
-;;
-
 let () =
   run
     "keeper_tool_kind"
@@ -311,9 +286,9 @@ let () =
             `Quick
             test_catalog_entries_declare_tool_kind
         ; test_case
-            "async controls and plan execute declare kinds"
+            "async controls declare kinds"
             `Quick
-            test_async_controls_and_plan_execute_declare_kinds
+            test_async_controls_declare_kinds
         ; test_case
             "status result payload carries tool kind"
             `Quick
@@ -326,10 +301,6 @@ let () =
             "route evidence picks composition tool kind"
             `Quick
             test_route_evidence_picks_composition_tool_kind
-        ; test_case
-            "route evidence picks batch plan tool kind"
-            `Quick
-            test_route_evidence_picks_batch_plan_tool_kind
         ] )
     ]
 ;;

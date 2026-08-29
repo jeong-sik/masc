@@ -146,20 +146,6 @@ type system_log_entry = {
     ([GET /api/v1/keepers/:name/tool-calls]). The row's own [keeper] is
     checked against the keeper that was asked for; a row naming another is
     rejected rather than attributed by envelope position. *)
-type proposal_provenance_status =
-  | Proposal_retained_match
-  | Proposal_retained_unconfirmed
-  | Proposal_not_retained
-  | Proposal_retained_contradiction
-
-type proposal_execution_identity =
-  { pei_assembler_run_id : string
-  ; pei_proposal_id : string
-  ; pei_provenance_status : proposal_provenance_status
-  }
-
-val proposal_provenance_status_label : proposal_provenance_status -> string
-
 type keeper_call = {
   kc_at : float;  (** [ts], unix seconds *)
   kc_tool : string;
@@ -173,9 +159,6 @@ type keeper_call = {
   kc_turn : int option;
   kc_task_id : string option;
   kc_model : string option;
-  kc_proposal_execution : proposal_execution_identity option;
-      (** Present only when the durable row carries the complete canonical
-          Assembler run, proposal, and provenance tuple. *)
 }
 
 type keeper_calls_snapshot = {

@@ -308,26 +308,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc []
   | "keeper_capability_search" ->
       `Assoc [ "query", `String "keeper_time_now" ]
-  | "keeper_assemble_plan" ->
-      let descriptor =
-        match
-          Masc.Keeper_tool_descriptor.descriptors_for_internal
-            "keeper_time_now"
-        with
-        | [ descriptor ] -> descriptor
-        | [] -> failwith "keeper_time_now descriptor is absent"
-        | _ :: _ :: _ -> failwith "keeper_time_now descriptor is ambiguous"
-      in
-      `Assoc
-        [ "objective", `String "Read the current time"
-        ; "execution", `String "inline"
-        ; ( "ordinary_tool_references"
-          , `List
-              [ `Assoc
-                  [ "descriptor_id", `String descriptor.id
-                  ; "capability_id", `String descriptor.capability_id
-                  ] ] )
-        ]
   | "keeper_memory_search" ->
       `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
   | "keeper_memory_write" ->

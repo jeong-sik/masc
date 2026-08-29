@@ -223,6 +223,23 @@ tool_schema list` 델타가 이미 있고 `checkpoint_delta.ml:149` 가 도구�
 도구는 그대로 싣는다. `tool_search` 가 색인을 질의해 스키마를 돌려주면서 1 의 확장
 함수로 그 도구를 집합에 넣는다. 그 턴의 다음 요청부터 호출이 통과한다.
 
+`extend_tools` 는 `Agent.t` 를 받는데 도구 핸들러는 그것을 쥐고 있지 않다. 배선은
+읽어서 확인한 이 경로다. hook 으로는 안 된다 — `Hooks.hook` 은
+`hook_event -> hook_decision` 이라 agent 가 없다.
+
+| 자리 | 지금 | 바꿀 것 |
+|---|---|---|
+| `keeper_agent_run.ml:839` | `agent_ref` 를 `prepare_agent_setup`(699) **뒤에** 만든다 | 앞으로 옮겨 setup 에 넘긴다 |
+| `keeper_run_tools.ml` → `keeper_run_tools_setup.ml` | — | 셀을 optional 인자로 통과시킨다 |
+| `keeper_tools_agent_core_bundle.ml:538` | `identity_tools` 전량을 `Keeper_identity_gate.agent_tool` 로 만든다 | 색인 + `tool_search` 로 바꾸고, 핸들러가 셀을 캡처한다 |
+| `keeper_turn_driver_try_provider.ml:948,960` | `~agent_ref:local_agent_ref` | `ctx.agent_ref` 가 있으면 그것을 쓴다 |
+
+마지막 줄이 이 배선의 이음매다. 지금 `ctx.agent_ref` 는 `checkpoint_after_attempt`
+에만 쓰이는 출력 채널이고, 실제 `Agent.t` 를 받는 것은 try_provider 안에서 시도마다
+새로 만드는 `local_agent_ref` 다(903). 같은 셀을 쓰면 `runtime_agent.ml:1099` 가
+agent 를 만든 직후 채우므로, 도구가 실행될 때는 이미 들어 있다. `checkpoint_after_attempt`
+는 지금도 `!local_agent_ref` 를 받으므로 값이 달라지지 않는다.
+
 **3. 관측 — 발견 실패를 센다**
 
 §4 결정 3 의 관측점. 이것이 없으면 §5 의 세 번째 지표를 읽을 수 없고, 설계가 옳은지

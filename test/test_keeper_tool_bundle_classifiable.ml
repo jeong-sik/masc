@@ -55,7 +55,7 @@ let publication_recovery_turn_context ~registry ~keeper_name =
 
 (* agent_name is not free-form: keeper_meta_json_parse rejects a meta whose
    agent_name is not "keeper-<name>-agent". Derived the way production does. *)
-let make_meta ~name ?tool_groups () : Keeper_meta_contract.keeper_meta =
+let make_meta ~name () : Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -251,7 +251,6 @@ let assert_exact_activation snapshot expected
 
 let with_bundle_tools
       ?(record_activations = true)
-      ?tool_groups
       f
   =
   ignore (Masc_test_deps.init_unified_tool_registry ());
@@ -265,7 +264,7 @@ let with_bundle_tools
     ~finally:(fun () -> if Sys.file_exists dir then remove_tree dir)
     (fun () ->
        let config = Workspace.default_config dir in
-       let meta = make_meta ~name:"bundle-classifiable" ?tool_groups () in
+       let meta = make_meta ~name:"bundle-classifiable" () in
        let skill_snapshot, skill_catalog = skill_snapshot_and_catalog () in
        let trace_id = meta.runtime.trace_id in
        let session_dir =

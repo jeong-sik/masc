@@ -7143,6 +7143,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                       (Masc.Tui_decode.sanitize_terminal_text text, kind)))
           in
           state.runtime_config_view <- Some (path, rows);
+          (* Parsed here, with the lex, so the pane and the scroll bound read
+             one list. Parsing per frame would put the count a frame behind
+             the keys on a reload. *)
+          state.config_models_rows <-
+            Masc_tui_model_runtime_table.parse lines;
           state.runtime_config_view_error <- None
       | Error detail -> state.runtime_config_view_error <- Some detail)
   | Code_entries_loaded (dir, result) ->
@@ -9119,6 +9124,41 @@ let main () =
                     else
                       launch_task_cancel state ~mailbox:async_messages
                         ~task_id ~reason)))
+  in
+  (* From a table row to the line that declares it. The header the source
+     pane needs is [models.NAME], quoted when the name carries a dot -- the
+     same two spellings the table parser accepts, kept together here so a
+     name that parses cannot fail to be found. *)
+  let config_models_source_line ~(row : Masc_tui_model_runtime_table.row) rows =
+    let bare = "[models." ^ row.Masc_tui_model_runtime_table.model ^ "]" in
+    let quoted = "[models.\"" ^ row.Masc_tui_model_runtime_table.model ^ "\"]" in
+    let rec scan i = function
+      | [] -> None
+      | segments :: rest ->
+        let text = String.trim (String.concat "" (List.map fst segments)) in
+        if String.equal text bare || String.equal text quoted
+        then Some i
+        else scan (i + 1) rest
+    in
+    scan 0 rows
+  in
+  let handle_config_models_open_source () =
+    match List.nth_opt state.config_models_rows state.config_models_cursor with
+    | None -> add_event state "error" "no model row is selected"
+    | Some row -> (
+      match state.runtime_config_view with
+      | None -> add_event state "error" "config not loaded yet; r to reload"
+      | Some (_, source_rows) ->
+        state.config_pane <- Config_runtime;
+        (* Land a few rows above the header so the section reads as a block
+           rather than starting at the top edge. *)
+        state.config_scroll <-
+          (match config_models_source_line ~row source_rows with
+           | Some i -> max 0 (i - 3)
+           | None -> state.config_scroll);
+        add_event state "info"
+          (Printf.sprintf "runtime.toml at [models.%s] - e to edit"
+             row.Masc_tui_model_runtime_table.model))
   in
   let handle_runtime_config_edit () =
     match state.runtime_config_view with
@@ -11962,6 +12002,15 @@ and is loaded on demand through keeper_skill.
             | Tools -> state.tools_scroll <-
                   move_surface_scroll state ~rows:(surface_rows state) ~delta:(1)
                     ~current:state.tools_scroll
+            | Config when state.config_pane = Config_models ->
+                (* A cursor, not a bare scroll: [e] acts on a row, so the
+                   reader has to be able to say which one. *)
+                let last = max 0 (List.length state.config_models_rows - 1) in
+                state.config_models_cursor <-
+                  min last (state.config_models_cursor + 1);
+                state.config_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows state) ~delta:1
+                    ~current:state.config_scroll
             | Config -> state.config_scroll <-
                   move_surface_scroll state ~rows:(surface_rows state) ~delta:1
                     ~current:state.config_scroll
@@ -12250,6 +12299,13 @@ and is loaded on demand through keeper_skill.
                   state.tools_scroll <-
                   move_surface_scroll state ~rows:(surface_rows state) ~delta:(-1)
                     ~current:state.tools_scroll
+            | Config when state.config_pane = Config_models ->
+                state.config_models_cursor <-
+                  max 0 (state.config_models_cursor - 1);
+                if state.config_scroll > 0 then
+                  state.config_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows state) ~delta:(-1)
+                    ~current:state.config_scroll
             | Config ->
                 if state.config_scroll > 0 then
                   state.config_scroll <-
@@ -13095,11 +13151,13 @@ and is loaded on demand through keeper_skill.
                  | Config_runtime -> handle_runtime_config_edit ()
                  | Config_params ->
                    handle_runtime_param_edit_open ~advanced:false ()
-                 (* The models pane reads runtime.toml through a table. [e]
-                    opens the file, so it belongs to the pane that shows the
-                    file -- editing a projection would need a writer that
-                    knows which of the two tables a column came from. *)
-                 | Config_models | Config_themes -> ())
+                 (* The pane cannot write a value: its two columns come
+                    from two tables and a writer would have to know which.
+                    So [e] hands the reader to the source pane at the
+                    selected model's [models.NAME] line, where the existing
+                    $EDITOR path takes over. One write path, not two. *)
+                 | Config_models -> handle_config_models_open_source ()
+                 | Config_themes -> ())
             | Tools -> handle_skill_edit ()
             | Approvals ->
                 (* Cycle the external-services Gate lane: what happens to a

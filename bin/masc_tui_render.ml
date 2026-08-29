@@ -11448,41 +11448,47 @@ let render_config_models (state : state) =
        for _ = 2 to content_height do
          box_empty buf cols
        done
-   | None, Some (_, source_rows) ->
-       (* [runtime_config_view] holds the file lexed into spans. Rejoining the
-          spans recovers the source the table parses; keeping a second copy of
-          the file on the state would give the two panes room to disagree. *)
-       let lines =
-         List.map
-           (fun segments -> String.concat "" (List.map fst segments))
-           source_rows
-       in
+   | None, Some _ ->
        (* [box_line] spends cells on the two border glyphs and the padding
           either side, and this pane adds two more for its own indent. A
           width that ignores them wraps the last column onto its own row,
-          which reads as a blank value. Measured against a 130-column
-          terminal: the table has to fit in 130 - 6. *)
+          which reads as a blank value. *)
        let table =
          Masc_tui_model_runtime_table.render
            ~width:(max 40 (cols - 6 - 2))
-           (Masc_tui_model_runtime_table.parse lines)
+           state.config_models_rows
        in
        let total = List.length table in
        let max_scroll = max 0 (total - content_height) in
+       (* The window follows the cursor rather than the other way round: a
+          cursor the frame does not draw is a selection the reader cannot
+          see, and [e] would act on a row that is off screen. *)
+       let cursor_line = state.config_models_cursor + 1 in
        let scroll = max 0 (min state.config_scroll max_scroll) in
+       let scroll =
+         if cursor_line < scroll then cursor_line
+         else if cursor_line >= scroll + content_height
+         then min max_scroll (cursor_line - content_height + 1)
+         else scroll
+       in
+       (* Row 0 of [table] is the header, so a cursor over the data rows is
+          one lower than the line it marks. *)
        for i = 0 to content_height - 1 do
-         match List.nth_opt table (scroll + i) with
+         let index = scroll + i in
+         match List.nth_opt table index with
          | Some line ->
-             let styled =
-               if scroll + i = 0 then Ansi.bold ^ line ^ Ansi.reset else line
+             let marked =
+               if index = 0 then "  " ^ Ansi.bold ^ line ^ Ansi.reset
+               else if index = cursor_line then Ansi.bold ^ Theme.info () ^ "> " ^ line ^ Ansi.reset
+               else "  " ^ line
              in
-             box_line buf cols ("  " ^ styled)
+             box_line buf cols marked
          | None -> box_empty buf cols
        done);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  p:next pane  r:reload  Tab:next");
+       ~hints:"j/k:row  e:open in runtime.toml  p:next pane  r:reload  Tab:next");
   finish_surface state ~surface_key:"config_models" ~rows:terminal_rows ~cols buf
 
 let render_config (state : state) =

@@ -684,7 +684,12 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-supports_response_format_json = true
+# 2026-08-29 probe (ollama.com /v1, response_format json_object, temperature 0,
+# 2 runs): content came back as ```json\n{"test":1}\n``` both times. JSON mode
+# is what [structured_output_support] projects to [Json_object_only], and a
+# consumer of that tier parses the content as JSON -- a fenced block fails.
+# Declared false until the served tag stops fencing.
+supports_response_format_json = false
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
@@ -983,9 +988,12 @@ supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
-supports_response_format_json = true
-# Live grouped SO check 2026-06-29: accepts JSON-format requests, but fenced or
-# drifted from the requested schema. Do not advertise native schema guarantee.
+# Live grouped SO check 2026-06-29 already recorded the fencing, but only
+# lowered the schema flag. Fencing breaks JSON mode too: [Json_object_only] is
+# the tier whose consumer parses the content, and ```json ... ``` does not
+# parse. 2026-08-29 re-probe (ollama.com /v1, json_object, 2 runs) still opened
+# with "Here is the JSON you requested:" before the fence.
+supports_response_format_json = false
 supports_structured_output = false
 
 [[models]]

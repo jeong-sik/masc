@@ -83,13 +83,48 @@ let invalidate_keeper_execution_surfaces ~config () =
    an exhaustive match rather than a string-parsing wildcard with a permissive
    default (#8605). [Succeeded]/[Already_live] are successes (Info);
    [Rejected] (400) and [Dispatch_none] (500) are failures (Warn) — see
-   docs/spec/18-log-severity-taxonomy.md § 3.6. *)
+   docs/spec/18-log-severity-taxonomy.md.
+
+   The failing variants carry the sentence the caller was given, and that same
+   value is what [respond_error] sends, so the log and the HTTP response cannot
+   drift apart. Three different gates answer [Rejected] — operator-paused meta,
+   a paused registry lane, and the dispatched tool's own error — and without
+   the payload the log said only [outcome=rejected], which is not enough to
+   tell them apart after the response is gone. *)
 type lifecycle_outcome =
   | Succeeded
   | Already_live
-  | Rejected
+  | Rejected of string
   | Dispatch_none
-  | Persist_failed
+  | Persist_failed of string
+
+let lifecycle_log_line ~action ~name ~actor ~duration_ms outcome =
+  (* docs/spec/18-log-severity-taxonomy.md: the line carries the
+     outcome, so the severity is derived from it (single emission) instead of
+     a static [Info] — otherwise a rejected/failed lifecycle action hides
+     under the noise floor. Failures are degraded-with-recovery (the client
+     gets an error response, the server keeps serving) -> [Warn]. *)
+  let level, outcome_s, reason =
+    match outcome with
+    | Succeeded -> (Log.Info, "ok", None)
+    | Already_live -> (Log.Info, "already_live", None)
+    | Rejected why -> (Log.Warn, "rejected", Some why)
+    | Dispatch_none -> (Log.Warn, "dispatch_none", None)
+    | Persist_failed why -> (Log.Warn, "persist_failed", Some why)
+  in
+  (* [reason] goes last and its newlines collapse to spaces: a dispatched
+     tool's error is free text and would otherwise break the line into
+     fragments no grep reassembles. *)
+  let reason_s =
+    match reason with
+    | None -> ""
+    | Some why ->
+      " reason=" ^ String.map (function '\n' | '\r' -> ' ' | c -> c) why
+  in
+  ( level
+  , Printf.sprintf
+      "keeper lifecycle %s name=%s actor=%s outcome=%s duration_ms=%d%s"
+      action name actor outcome_s duration_ms reason_s )
 
 type boot_preflight =
   | Boot_allowed
@@ -233,24 +268,11 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
           (Eio.Time.now clock -. started_at) *. 1000.0 |> int_of_float
         in
         let log_lifecycle_result (outcome : lifecycle_outcome) =
-          (* docs/spec/18-log-severity-taxonomy.md § 3.6: the line carries the
-             outcome, so the severity is derived from it (single emission)
-             instead of a static [Info] — otherwise a rejected/failed lifecycle
-             action hides under the noise floor. Failures are
-             degraded-with-recovery (the client gets an error response, the
-             server keeps serving) → [Warn]. *)
-          let level, outcome_s =
-            match outcome with
-            | Succeeded -> (Log.Info, "ok")
-            | Already_live -> (Log.Info, "already_live")
-            | Rejected -> (Log.Warn, "rejected")
-            | Dispatch_none -> (Log.Warn, "dispatch_none")
-            | Persist_failed -> (Log.Warn, "persist_failed")
+          let level, line =
+            lifecycle_log_line ~action ~name ~actor:agent_name
+              ~duration_ms:(duration_ms ()) outcome
           in
-          Log.Server.emit level
-            (Printf.sprintf
-               "keeper lifecycle %s name=%s actor=%s outcome=%s duration_ms=%d"
-               action name agent_name outcome_s (duration_ms ()))
+          Log.Server.emit level line
         in
         Log.Server.info "keeper lifecycle %s name=%s actor=%s started"
           action name agent_name;
@@ -272,21 +294,28 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         in
         (match boot_preflight with
          | Boot_meta_read_failed error ->
-           log_lifecycle_result Persist_failed;
+           let why =
+             Printf.sprintf "keeper boot preflight read failed: %s" error
+           in
+           log_lifecycle_result (Persist_failed why);
            respond_error
              ~status:`Internal_server_error
              ~request:req
              ~ok:false
              reqd
-             (Printf.sprintf "keeper boot preflight read failed: %s" error)
+             why
          | Boot_operator_paused ->
-           log_lifecycle_result Rejected;
+           let why =
+             "keeper is operator-paused; commit Resume_owner through the \
+              directive endpoint"
+           in
+           log_lifecycle_result (Rejected why);
            respond_error
              ~status:`Conflict
              ~request:req
              ~ok:false
              reqd
-             "keeper is operator-paused; commit Resume_owner through the directive endpoint"
+             why
          | Boot_allowed ->
         let live_boot_entry =
           match Keeper_registry.get ~base_path:config.base_path name with
@@ -301,13 +330,17 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         in
         (match live_boot_entry with
          | Some entry when entry.phase = Keeper_state_machine.Paused ->
-           log_lifecycle_result Rejected;
+           let why =
+             "keeper registry lane is paused; commit Resume_owner through the \
+              directive endpoint"
+           in
+           log_lifecycle_result (Rejected why);
            respond_error
              ~status:`Conflict
              ~request:req
              ~ok:false
              reqd
-             "keeper registry lane is paused; commit Resume_owner through the directive endpoint"
+             why
          | Some entry ->
            (* Dashboard boot is an idempotent lifecycle action.  If a keeper
               is already live, do not send it through masc_keeper_up's update
@@ -369,7 +402,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               in
               (match post_action_result with
                | Error msg ->
-                 log_lifecycle_result Persist_failed;
+                 log_lifecycle_result (Persist_failed msg);
                  respond_error
                    ~status:`Internal_server_error
                    ~request:req
@@ -406,7 +439,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               in
               (match post_action_result with
                | Error msg ->
-                 log_lifecycle_result Persist_failed;
+                 log_lifecycle_result (Persist_failed msg);
                  respond_error
                    ~status:`Internal_server_error
                    ~request:req
@@ -425,7 +458,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                    reqd)
             | Some result ->
               let body = Tool_result.message result in
-              log_lifecycle_result Rejected;
+              log_lifecycle_result (Rejected body);
               Http.Response.json_value ~status:`Bad_request ~request:req
                 (`Assoc [("ok", `Bool false); ("error", `String body)])
                 reqd

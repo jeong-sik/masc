@@ -1,5 +1,5 @@
 (** Regression tests for outcome-derived log severity
-    (docs/spec/18-log-severity-taxonomy.md § 3.6).
+    (docs/spec/18-log-severity-taxonomy.md).
 
     This pins the pure level-selection helper introduced to stop an
     outcome-carrying line from being emitted at a static [Info] level:

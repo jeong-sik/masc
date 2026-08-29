@@ -1741,6 +1741,13 @@
  (modules test_server_mcp_session_persist)
  (libraries alcotest masc_server unix))
 
+; A rejected keeper boot is only diagnosable from the log line: the sentence
+; explaining it goes to the HTTP response, which the TUI shows and drops.
+(test
+ (name test_keeper_lifecycle_log_line)
+ (modules test_keeper_lifecycle_log_line)
+ (libraries alcotest astring masc_log masc_server))
+
 ; Bounded-cache eviction guard for client-keyed dashboard metrics caches.
 
 (test

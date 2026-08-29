@@ -28,3 +28,27 @@ val refresh_keeper_execution_surfaces :
 val invalidate_keeper_execution_surfaces : config:Workspace.config -> unit -> unit
 (** Invalidate snapshot/projection/execution caches without per-keeper
     patching (used on wakeup/reset paths). *)
+
+type lifecycle_outcome =
+  | Succeeded
+  | Already_live
+  | Rejected of string
+  | Dispatch_none
+  | Persist_failed of string
+(** Outcome of a lifecycle action. The failing variants carry the sentence the
+    caller was given; the same value goes to the HTTP response, so the log and
+    the response cannot drift. Three gates answer [Rejected] — operator-paused
+    meta, a paused registry lane, and the dispatched tool's own error — and
+    they are indistinguishable without the payload. *)
+
+val lifecycle_log_line :
+  action:string ->
+  name:string ->
+  actor:string ->
+  duration_ms:int ->
+  lifecycle_outcome ->
+  Log.level * string
+(** The severity and the single log line for one lifecycle outcome. Severity
+    follows docs/spec/18-log-severity-taxonomy.md § 3.6. A carried reason is
+    appended last as [reason=...] with newlines collapsed to spaces, so free
+    text from a dispatched tool cannot split the record across lines. *)

@@ -555,6 +555,7 @@ let run_named
     ?session_id
     ?(system_prompt = "")
     ?(tools = [])
+    ?agent_core_tools
     ?(initial_messages = [])
     ?model_input_projection
     ?stream_idle_timeout_s
@@ -1268,7 +1269,10 @@ let run_named
             ; goal_blocks
             ; session_id
             ; system_prompt
-            ; tools
+            ; (* Only this lane can widen a running turn, so only this lane
+                 is handed the listing. The official-client branches above
+                 take [tools] whole. *)
+              tools = Option.value agent_core_tools ~default:tools
             ; initial_messages
             ; model_input_projection
             ; stream_idle_timeout_s

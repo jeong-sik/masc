@@ -345,6 +345,7 @@ let prepare_agent_setup
   in
   let
     { Keeper_tools_agent_core.tools = keeper_tools
+    ; agent_core_tools = keeper_agent_core_tools
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
     ; gate_replay_delivery
@@ -435,6 +436,7 @@ let prepare_agent_setup
       ~user_message
   in
   let tools = keeper_tools in
+  let agent_core_tools = keeper_agent_core_tools in
   let registered_descriptors = Keeper_tool_descriptor.all_descriptors () in
   let globally_model_visible_descriptors =
     Keeper_tool_descriptor.model_visible_descriptors ()
@@ -611,6 +613,7 @@ let prepare_agent_setup
     ; skill_activation_context
     ; on_tool_result_ready
     ; tools
+    ; agent_core_tools
     }
   in
   Keeper_run_tools_hooks.assemble_hooks

@@ -2,6 +2,67 @@
 
 ## Unreleased
 
+## [0.26.0] - 2026-08-29
+
+- **A Keeper can carry its own outside identity.** Attaching Jira, Slack,
+  GitHub, or any of the other work services to a Keeper started this train at
+  zero (#30780) and reached 34 services within days (#30867, #30893), with
+  Google's eight apps (Gmail, Drive, Docs, Sheets, Slides, Calendar, Chat,
+  Contacts) sharing one OAuth client (#30932) and a slot for masc's own
+  registered apps where Slack, GitHub, and Figma needed one (#30917). Both the
+  TUI and the dashboard drive the same attach flow (#30822, #30830), and the
+  attached service's own tools reach the Keeper once it is connected (#30822).
+  `docs/KEEPER-IDENTITY-MANUAL.md` (and its Korean twin) is the current count
+  and the setup path for each of the two cases — the ones that just work and
+  the ones that need an app first.
+- **RFC-0393 removes name-encoded Keeper identity as a hard cut** (#31198):
+  the encoding was a parallel identity representation with its own decode
+  failures; nothing reads it after this PR, and nothing converts it either.
+- **External service calls now route through a durable Gate** (#31124): lanes,
+  replay, and grants persist the same way task and goal state already did, so
+  an approval survives a restart instead of living in memory. A Keeper can be
+  pinned to a stricter judge than the workspace default (#31128), and which
+  judge asks first is a per-Keeper order rather than one global list (#31134).
+- **Skills gained an evidence trail.** What used to be a declared capability
+  with no record of use now has an activation ledger (#30752) frozen at each
+  Keeper turn boundary (#30732), a composition ledger that joins the natural
+  turn to what it actually invoked (#31258), and a visual flow studio in both
+  TUI and dashboard for editing one (#31115, #31389 with CAS preview). Editable
+  revisions can be deleted outright once superseded (#31402), and the proof
+  the TUI and dashboard render now scopes to the exact runtime tuple that
+  produced it rather than the catalog in general (#31549, #31552).
+- **Keeper sandboxing gained two lanes beyond Docker.** A `microvm` profile
+  runs turns in Apple container guests and refuses rather than silently
+  falling back when a guest cannot be sized (#31253, #31334); an SSH remote
+  exec lane reached its endpoint-provisioning phase (#31409 through #31459).
+  Underneath both, RFC-0394 Phase 0 makes the `local` sandbox profile
+  fail-closed by default — a Keeper that would have quietly run on the host
+  now refuses unless `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND` says otherwise
+  (#31202).
+- **An assembler can propose a plan durably.** Proposals are typed, bound to
+  an execution request, stored, and run asynchronously with their provenance
+  preserved end to end (#31450 through #31491) — a Keeper's plan no longer has
+  to be re-derived from scratch if the process that proposed it is gone by the
+  time it runs.
+- **The terminal UI kept growing past the 20 surfaces 0.25.0 shipped.**
+  Surfaces converged on one shared chrome contract instead of each drawing its
+  own header and hint row (#31287, #31265), Skill activation and cross-Keeper
+  use became a first-class timeline (#31269), and Goal and Task detail panes
+  gained their own history views (#31394) alongside the judge's actual
+  evidence on Verification (#31447). `docs/TUI-GUIDE.md` names all 20 in Tab
+  order.
+- **The dashboard picked up the same operational signals.** The Keeper roster
+  glows while a turn is in flight and clears when it lands (#31280), shows
+  which Keepers are mid-answer without opening each one (#31222), and warns
+  on screen when the served bundle is older than the server that built it
+  (#31210).
+
+This train is `687` commits over `v0.25.0..v0.26.0` — roughly a fifth each in
+`tui` and `keeper`/`skills` combined, with `identity`, `dashboard`, `gate`,
+`runtime`, and `harness` making up most of the rest. The bulk of it is not
+listed above one PR at a time; this entry names the shape of the train, not
+every stop.
+
 ## [0.25.0] - 2026-08-25
 
 - **The terminal UI is where you drive Keepers now.** 104 of the 188 features

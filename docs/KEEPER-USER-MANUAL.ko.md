@@ -79,6 +79,27 @@ mention_targets = ["rondo, 론도"]     # 아무도 안 칠 이름 한 개
 그 결과를 거부하는 곳도 없습니다. 그래서 잘못 쓰면 **아무 멘션도 안 닿는 채로
 조용히 지나갑니다.** 이건 자기 설정에서 한 번 다시 읽어 볼 값입니다.
 
+## 작업 표면 (playground)
+
+sandbox 안에서 Keeper 의 작업 디렉토리는 `/home/keeper/playground/<이름>/` 이다.
+호스트 쪽은 `<base>/.masc/playground/` 아래의 프로필별 디렉토리로 매핑된다 —
+Docker 와 microVM keeper 는 각자 네임스페이스를 받아 서로의 트리를 공유하지 않는다.
+
+진단을 정확하게 만드는 세 가지 사실:
+
+- **비어서 태어난다.** 새 Keeper(또는 프로필이 바뀐 Keeper)의 playground 는
+  비어 있다. 빈 것이 정상 초기 상태이지 mount 고장이 아니다 — 빈 디렉토리에
+  `ls` 가 성공했다면 표면은 도달 가능하고 아직 내용이 없을 뿐이다.
+- **저장소는 Keeper 가 playground 안에 직접 clone 한다.** 관습 위치는
+  `playground/<이름>/repos/<repo>` 다 (예:
+  `gh repo clone <owner>/<repo> repos/<repo> -- --depth 50`).
+  실행 위치 추적이 이 모양을 인식해 호출을 `repo_root` / `repo_subpath` 로
+  분류하므로 Gate 와 관측이 어느 저장소를 건드렸는지 읽는다. 다른 위치에
+  clone 해도 동작은 하지만 `playground_subpath` 로만 분류된다.
+- **playground 밖 경로 스킴은 없다.** `/home/keeper/repos/<repo>` 를
+  만들어 주거나 호스트 체크아웃을 sandbox 에 mount 하는 장치는 존재하지
+  않는다. playground 가 쓰기 가능한 표면의 전부다.
+
 ## 런타임 배정
 
 Keeper 가 자기 모델을 정하지 않습니다. `runtime.toml` 이 정합니다.

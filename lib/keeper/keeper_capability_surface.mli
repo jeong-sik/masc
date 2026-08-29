@@ -36,25 +36,6 @@ type ordinary_tool_reference = private
 (** Exact identity of one ordinary Tool. It carries no display name or alias
     and can only be constructed from a capability in a frozen surface. *)
 
-type ordinary_tool_reference_parse_error =
-  | Reference_not_object
-  | Unknown_reference_field of string
-  | Duplicate_reference_field of string
-  | Missing_reference_field of string
-  | Reference_field_not_string of string
-  | Empty_reference_field of string
-
-type ordinary_tool_resolution =
-  | Active_tool of Keeper_tool_descriptor.t
-  | Tool_unavailable of capability_availability
-
-type ordinary_tool_resolution_error =
-  | Unknown_tool_reference of ordinary_tool_reference
-  | Mismatched_tool_reference of
-      { reference : ordinary_tool_reference
-      ; expected_capability_id : string
-      }
-
 type skill_identity =
   | Exact_skill of Keeper_skill_inventory.skill_inventory_item
   | Missing_configured_skill_name of string
@@ -82,30 +63,7 @@ val skill_projection : t -> Keeper_skill_catalog.turn_projection
 val skill_catalog : t -> Keeper_skill_catalog.t
 val tool_capabilities : t -> tool_capability list
 val ordinary_tool_reference : tool_capability -> ordinary_tool_reference
-val ordinary_tool_reference_schema : Yojson.Safe.t
-(** JSON Schema for the exact wire object owned by the adjacent encoder and
-    strict decoder. Assembler and proposal request schemas embed this value
-    instead of restating the two identity fields. *)
 val ordinary_tool_reference_to_yojson : ordinary_tool_reference -> Yojson.Safe.t
-
-val ordinary_tool_reference_of_yojson
-  :  Yojson.Safe.t
-  -> (ordinary_tool_reference, ordinary_tool_reference_parse_error) result
-
-val ordinary_tool_reference_parse_error_to_yojson
-  :  ordinary_tool_reference_parse_error
-  -> Yojson.Safe.t
-
-val resolve_ordinary_tool_reference
-  :  t
-  -> ordinary_tool_reference
-  -> (ordinary_tool_resolution, ordinary_tool_resolution_error) result
-(** Resolve both exact identity fields against this frozen surface. An inactive
-    capability returns only its typed availability, never its descriptor. *)
-
-val ordinary_tool_resolution_error_to_yojson
-  :  ordinary_tool_resolution_error
-  -> Yojson.Safe.t
 
 val skill_capabilities : t -> skill_capability list
 (** Exact inventory rows plus configured names that have no matching valid or

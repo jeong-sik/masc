@@ -157,30 +157,6 @@ export const keeperHeartbeats = signal<Map<string, number>>(new Map())
 // route stays the broadest view. Adding a keeper id narrows the scope.
 export const selectedKeeperFilter = signal<Set<string>>(new Set())
 
-export function toggleKeeperInFilter(name: string): void {
-  const next = new Set(selectedKeeperFilter.value)
-  if (next.has(name)) next.delete(name)
-  else next.add(name)
-  selectedKeeperFilter.value = next
-}
-
-// --- Optimistic keeper directive patching ---
-//
-// Server's `refresh_keeper_execution_surfaces` invalidates the
-// projection cache prefix, so the next dashboard fetch recomputes
-// from scratch (hundreds of ms+). The operator perceives this as
-// "재개하기 누르면 느림" even though the directive POST itself
-// returns in <50ms — the row keeps showing the old state until the
-// projection refetch completes.
-//
-// To close the gap we mutate the local `keepers` signal immediately
-// on click. The action button's `keeperActionVisibility` predicate
-// flips, the phase badge updates, and the next reconciling snapshot
-// from WS/SSE or `refreshDashboard` confirms (or corrects) the
-// optimistic state. Restricted to pause/resume/wakeup — boot and
-// shutdown have non-trivial lifecycle transitions that should wait
-// on the authoritative server response.
-
 export type OptimisticKeeperDirective = 'pause' | 'resume' | 'wakeup'
 
 function patchForDirective(action: OptimisticKeeperDirective): Partial<Keeper> {
@@ -235,14 +211,6 @@ export function applyOptimisticKeeperDirectives(
     reverts.set(name, applyOptimisticKeeperDirective(name, action))
   }
   return reverts
-}
-
-export function clearKeeperFilter(): void {
-  selectedKeeperFilter.value = new Set()
-}
-
-export function setKeeperFilterToAll(allNames: readonly string[]): void {
-  selectedKeeperFilter.value = new Set(allNames)
 }
 
 const KEEPER_RELATIVE_AGE_FIELDS = new Set<string>([

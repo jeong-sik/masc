@@ -30,17 +30,6 @@ export function disconnectedSnapshot(reason: string): KeeperPresenceSnapshot {
 
 export const globalPresenceSnapshot = signal<KeeperPresenceSnapshot>(LOADING_SNAPSHOT)
 
-export function updateKeeperPresenceFromSSE(snapshot: unknown): boolean {
-  const normalized = normalizeKeeperPresenceSnapshot(snapshot)
-  if (normalized === null) return false
-  globalPresenceSnapshot.value = normalized
-  return true
-}
-
-export function setGlobalPresence(snapshot: KeeperPresenceSnapshot): void {
-  globalPresenceSnapshot.value = snapshot
-}
-
 export interface KeeperPresenceStore {
   readonly seed: (snapshot: unknown) => boolean
   readonly snapshot: () => KeeperPresenceSnapshot

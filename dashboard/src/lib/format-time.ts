@@ -207,25 +207,6 @@ export function formatTimeAgoEn(iso: string): string {
   return `${Math.floor(diff / SECONDS_PER_DAY)}d ago`
 }
 
-/** Format millisecond timestamp as ISO string. Returns undefined for invalid. */
-export function formatDateTimeIso(ts: number): string | undefined {
-  if (!Number.isFinite(ts)) return undefined
-  const d = new Date(ts)
-  if (!Number.isFinite(d.getTime())) return undefined
-  return d.toISOString()
-}
-
-/** Format ms timestamp as "HH:MM:SS". Returns fallback for invalid. */
-export function formatTimeHmsMs(tsMs: number, fallback = '--:--:--'): string {
-  if (!Number.isFinite(tsMs)) return fallback
-  const d = new Date(tsMs)
-  if (!Number.isFinite(d.getTime())) return fallback
-  return d.toLocaleTimeString('ko-KR', {
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  })
-}
-
-/** Format ms timestamp as "HH:MM". Returns fallback for invalid. */
 export function formatTimeHmMs(tsMs: number, fallback = '--:--'): string {
   if (!Number.isFinite(tsMs)) return fallback
   const d = new Date(tsMs)

@@ -160,6 +160,7 @@ val context_overflow_shrink_sequence :
   ?final_shrink_capacity:(capacity_bytes:int -> int option) ->
   starting_capacity_bytes:int ->
   same_run_retry_authorized:(unit -> bool) ->
+  shrink_admits_history:(capacity_bytes:int -> bool) ->
   record_success:(capacity_bytes:int -> unit) ->
   on_shrink_retry:
     (shrink_attempt:int ->
@@ -175,7 +176,14 @@ val context_overflow_shrink_sequence :
     without copying the shared divisor. On the last permitted retry,
     [final_shrink_capacity] may replace that ordinary target with a measured
     structural floor. A custom value that does not strictly decrease
-    [capacity_bytes] terminates the sequence without another provider attempt. *)
+    [capacity_bytes] terminates the sequence without another provider attempt.
+
+    [shrink_admits_history] answers whether a proposed capacity leaves room
+    for any conversation history once the caller's non-history reserve is
+    charged. A [false] verdict terminates the sequence with the failure in
+    hand rather than spending an attempt on a size that cannot succeed: the
+    reserve does not shrink with the capacity, so a smaller window refuses
+    for the same reason, one size lower. *)
 
 val run_try_provider :
   try_provider_ctx ->

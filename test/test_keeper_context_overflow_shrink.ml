@@ -36,6 +36,9 @@ let network_error () =
 
 let always_authorized () = true
 
+(* Every capacity leaves room for history unless a test says otherwise. *)
+let always_admits_history ~capacity_bytes:_ = true
+
 let no_shrink_expected ~capacity_bytes:_ = fail "unexpected shrink retry"
 
 (* {1 context_overflow_shrink_sequence} *)
@@ -52,6 +55,7 @@ let test_halves_capacity_on_repeated_overflow_until_success () =
     Try_provider.context_overflow_shrink_sequence
       ~starting_capacity_bytes:1024
       ~same_run_retry_authorized:always_authorized
+      ~shrink_admits_history:always_admits_history
       ~record_success:(fun ~capacity_bytes -> recorded_success := Some capacity_bytes)
       ~on_shrink_retry:(fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
         shrink_events :=
@@ -82,6 +86,7 @@ let test_stops_at_the_named_attempt_cap_then_falls_through () =
     Try_provider.context_overflow_shrink_sequence
       ~starting_capacity_bytes:1024
       ~same_run_retry_authorized:always_authorized
+      ~shrink_admits_history:always_admits_history
       ~record_success:(fun ~capacity_bytes:_ -> fail "overflow never succeeds here")
       ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes:_ ->
         incr shrink_count)
@@ -120,6 +125,7 @@ let test_non_overflow_error_never_shrinks () =
     Try_provider.context_overflow_shrink_sequence
       ~starting_capacity_bytes:1024
       ~same_run_retry_authorized:always_authorized
+      ~shrink_admits_history:always_admits_history
       ~record_success:(fun ~capacity_bytes:_ -> fail "network error never succeeds")
       ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes ->
         no_shrink_expected ~capacity_bytes)
@@ -148,6 +154,7 @@ let test_checkpoint_boundary_blocks_shrink_even_on_overflow () =
     Try_provider.context_overflow_shrink_sequence
       ~starting_capacity_bytes:1024
       ~same_run_retry_authorized:(fun () -> false)
+      ~shrink_admits_history:always_admits_history
       ~record_success:(fun ~capacity_bytes:_ -> fail "no success expected")
       ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes ->
         no_shrink_expected ~capacity_bytes)
@@ -174,6 +181,7 @@ let test_custom_shrink_replaces_only_the_exceptional_start () =
       ~same_run_retry_authorized:always_authorized
       ~shrink_capacity:(fun ~capacity_bytes ~default_capacity_bytes ->
         if capacity_bytes = sentinel then 400 else default_capacity_bytes)
+      ~shrink_admits_history:always_admits_history
       ~record_success:(fun ~capacity_bytes:_ -> ())
       ~on_shrink_retry:
         (fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes:_ -> ())
@@ -197,6 +205,7 @@ let test_non_decreasing_custom_shrink_does_not_repeat_provider_attempt () =
       ~same_run_retry_authorized:always_authorized
       ~shrink_capacity:(fun ~capacity_bytes ~default_capacity_bytes:_ ->
         capacity_bytes)
+      ~shrink_admits_history:always_admits_history
       ~record_success:(fun ~capacity_bytes:_ -> fail "overflow never succeeds here")
       ~on_shrink_retry:
         (fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes:_ ->
@@ -222,6 +231,7 @@ let test_last_retry_uses_the_measured_floor () =
       ~starting_capacity_bytes:1024
       ~same_run_retry_authorized:always_authorized
       ~final_shrink_capacity:(fun ~capacity_bytes:_ -> Some 17)
+      ~shrink_admits_history:always_admits_history
       ~record_success:(fun ~capacity_bytes:_ -> fail "overflow never succeeds here")
       ~on_shrink_retry:
         (fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes:_ -> ())
@@ -238,6 +248,65 @@ let test_last_retry_uses_the_measured_floor () =
     (list int)
     "the final bounded dispatch jumps to the measured floor"
     [ 1024; 512; 256; 17 ]
+    (List.rev !attempted_capacities)
+;;
+
+
+(* #31684, measured on keeper edgar.a.poe: a 469638-byte non-history reserve
+   (tool schemas + system prompt + the unmeasured-field allowance) against a
+   524288-byte declared cap. Halving cannot help — 262144 is already smaller
+   than the reserve — yet the sequence spent every attempt discovering that,
+   and the keeper failed the same way on every turn. The admissibility
+   verdict ends the sequence at the first proposal the reserve rules out. *)
+let test_a_reserve_larger_than_the_next_capacity_stops_the_shrink () =
+  let reserve_bytes = 469_638 in
+  let attempted_capacities = ref [] in
+  let shrink_count = ref 0 in
+  let result =
+    Try_provider.context_overflow_shrink_sequence
+      ~starting_capacity_bytes:524_288
+      ~same_run_retry_authorized:always_authorized
+      ~shrink_admits_history:(fun ~capacity_bytes -> reserve_bytes < capacity_bytes)
+      ~record_success:(fun ~capacity_bytes:_ -> fail "overflow never succeeds here")
+      ~on_shrink_retry:
+        (fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes:_ ->
+          incr shrink_count)
+      ~attempt:(fun ~capacity_bytes ->
+        attempted_capacities := capacity_bytes :: !attempted_capacities;
+        Error (context_overflow ()))
+      ()
+  in
+  check bool "the original overflow reaches the lane walk unchanged" true
+    (match result with
+     | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) -> true
+     | Error _ | Ok _ -> false);
+  check (list int) "only the declared capacity is dispatched" [ 524_288 ]
+    (List.rev !attempted_capacities);
+  check int "no shrink retry fires" 0 !shrink_count
+;;
+
+(* An admissible first step still shrinks, and the sequence stops at the
+   first inadmissible one rather than at a fixed attempt count. *)
+let test_the_shrink_stops_at_the_first_inadmissible_step () =
+  let attempted_capacities = ref [] in
+  let result =
+    Try_provider.context_overflow_shrink_sequence
+      ~starting_capacity_bytes:1024
+      ~same_run_retry_authorized:always_authorized
+      ~shrink_admits_history:(fun ~capacity_bytes -> capacity_bytes >= 512)
+      ~record_success:(fun ~capacity_bytes:_ -> fail "overflow never succeeds here")
+      ~on_shrink_retry:
+        (fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes:_ -> ())
+      ~attempt:(fun ~capacity_bytes ->
+        attempted_capacities := capacity_bytes :: !attempted_capacities;
+        Error (context_overflow ()))
+      ()
+  in
+  check bool "the surviving overflow is returned" true
+    (match result with
+     | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) -> true
+     | Error _ | Ok _ -> false);
+  check (list int) "512 is admissible and dispatched; 256 is not" [ 1024; 512 ]
     (List.rev !attempted_capacities)
 ;;
 
@@ -311,6 +380,37 @@ let test_state_is_keyed_per_keeper_and_runtime () =
        ~keeper_name:"beta" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
 ;;
 
+
+(* The memory is a claim that a turn completed at that size. An overflow at
+   that size disproves it, and #31684 showed what keeping it costs: the pair
+   re-entered at the disproved capacity every turn for the life of the
+   process. *)
+let test_state_forgets_a_disproved_capacity () =
+  Eio_main.run
+  @@ fun _env ->
+  Shrink_state.For_testing.reset ();
+  Shrink_state.record_success
+    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity_bytes:131_072;
+  Shrink_state.forget ~keeper_name:"alpha" ~runtime_id:"agent_core-primary";
+  check int "the next turn starts from the declared cap again" 1_048_576
+    (Shrink_state.starting_capacity_bytes
+       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
+;;
+
+let test_forget_leaves_other_pairs_intact () =
+  Eio_main.run
+  @@ fun _env ->
+  Shrink_state.For_testing.reset ();
+  Shrink_state.record_success
+    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity_bytes:131_072;
+  Shrink_state.record_success
+    ~keeper_name:"beta" ~runtime_id:"agent_core-primary" ~capacity_bytes:262_144;
+  Shrink_state.forget ~keeper_name:"alpha" ~runtime_id:"agent_core-primary";
+  check int "a different keeper keeps its own memory" 262_144
+    (Shrink_state.starting_capacity_bytes
+       ~keeper_name:"beta" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
+;;
+
 let () =
   run
     "keeper_context_overflow_shrink"
@@ -343,6 +443,14 @@ let () =
             "the last retry uses the measured floor"
             `Quick
             test_last_retry_uses_the_measured_floor
+        ; test_case
+            "a reserve larger than the next capacity stops the shrink"
+            `Quick
+            test_a_reserve_larger_than_the_next_capacity_stops_the_shrink
+        ; test_case
+            "the shrink stops at the first inadmissible step"
+            `Quick
+            test_the_shrink_stops_at_the_first_inadmissible_step
         ] )
     ; ( "shrink_state"
       , [ test_case
@@ -365,6 +473,14 @@ let () =
             "is keyed per (keeper, runtime)"
             `Quick
             test_state_is_keyed_per_keeper_and_runtime
+        ; test_case
+            "forgets a disproved capacity"
+            `Quick
+            test_state_forgets_a_disproved_capacity
+        ; test_case
+            "forget leaves other pairs intact"
+            `Quick
+            test_forget_leaves_other_pairs_intact
         ] )
     ]
 ;;

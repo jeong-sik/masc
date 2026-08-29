@@ -1136,6 +1136,12 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
             ~default:(max 1 default_capacity_bytes))
         ~final_shrink_capacity:(fun ~capacity_bytes:_ ->
           !observed_floor_capacity_bytes)
+        (* This runtime shrinks to the size the provider itself named
+           ([observed_next_shrink_capacity_bytes]), not to a fraction of a
+           declared request-body cap, and it charges no MASC-side reserve
+           against that size. There is no local account that could rule the
+           next size out, so the provider's own target stands. *)
+        ~shrink_admits_history:(fun ~capacity_bytes:_ -> true)
         ~record_success:(fun ~capacity_bytes ->
           if capacity_bytes <> unbounded_model_input_capacity_bytes
           then

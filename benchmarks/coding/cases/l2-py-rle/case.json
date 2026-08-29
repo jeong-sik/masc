@@ -5,5 +5,6 @@
   "timeout_sec": 900,
   "verify": "verify.sh",
   "prompt": "check.sh fails because rle.py's encode(s) is not implemented. Implement run-length encoding: each maximal run of one character becomes the character followed by its count (e.g. `aaab` -> `a3b1`). Empty input returns empty. Do not modify check.sh. Reply DONE once `bash check.sh` prints PASS.",
-  "description": "Small feature: implement run-length encode(s) in rle.py."
+  "description": "Small feature: implement run-length encode(s) in rle.py.",
+  "build": "build.sh"
 }

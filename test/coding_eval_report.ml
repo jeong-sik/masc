@@ -41,6 +41,17 @@ type row = {
   status : run_status;
   verify_exit : int option;
   regression_exit : int option;
+  (* Deterministic trajectory signals the harness records by comparing the
+     graded workspace against the case's pristine copy (content diff, never
+     output parsing): how many pristine source files the candidate changed, and
+     how many of the reference-solution target files it changed. They split a
+     verify-red run into gave-up / off-target / wrong-solution without guessing.
+     [build_exit] is the optional build-probe exit code that further separates a
+     non-compiling edit from a wrong one. Absent on rows the harness did not
+     instrument, which degrade to the coarse [Verify_red] bucket. *)
+  edited_source_files : int option;
+  edited_target_files : int option;
+  build_exit : int option;
   passed : bool;
   duration_ms : int;
   recorded_at : float;
@@ -60,6 +71,9 @@ let row_keys =
   ; "status"
   ; "verify_exit"
   ; "regression_exit"
+  ; "edited_source_files"
+  ; "edited_target_files"
+  ; "build_exit"
   ; "passed"
   ; "duration_ms"
   ; "recorded_at"
@@ -136,6 +150,9 @@ let row_of_json json =
     in
     let* verify_exit = opt_int "verify_exit" in
     let* regression_exit = opt_int "regression_exit" in
+    let* edited_source_files = opt_int "edited_source_files" in
+    let* edited_target_files = opt_int "edited_target_files" in
+    let* build_exit = opt_int "build_exit" in
     let* passed =
       match List.assoc_opt "passed" fields with
       | Some (`Bool value) -> Ok value
@@ -204,6 +221,9 @@ let row_of_json json =
       ; status
       ; verify_exit
       ; regression_exit
+      ; edited_source_files
+      ; edited_target_files
+      ; build_exit
       ; passed
       ; duration_ms
       ; recorded_at
@@ -280,35 +300,52 @@ let eval_run_of_row (row : row) : Eval_harness.eval_run =
   }
 ;;
 
-(* Failure taxonomy for the report. Every typed run signal maps to its own
-   bucket, and the bucket names follow the RFC-0396 D5 vocabulary where the
-   evidence supports it: a wall-clock timeout is [Budget_exceeded], a provider
-   refusal is [Provider_error]. [Regressed] uses the PASS_TO_PASS signal -- the
-   target verify went green but a declared regression broke. The remaining D5
-   buckets (edit_miss / wrong_file / build_fail / gave_up) need trajectory
-   analysis to attribute and stay folded into [Verify_red]; the report never
-   guesses them from status or tool-name strings, so it never claims more than
-   the row carries. *)
+(* Failure taxonomy for the report (RFC-0396 D5). Each bucket is decided by a
+   typed run signal, never by parsing model output or tool-name strings:
+
+   - [Budget_exceeded] / [Provider_error] / [Transport_error] come from the run
+     status (a wall-clock timeout, a provider refusal, a transport fault).
+   - [Regressed] uses the PASS_TO_PASS signal: verify went green but a declared
+     regression broke.
+   - [Gave_up] / [Off_target_edit] / [Wrong_solution] / [Build_failed] split a
+     verify-red run by the harness's deterministic file-delta signals -- how
+     many pristine source files the candidate changed, how many of them were the
+     reference-solution targets, and whether the optional build probe stayed
+     green. Nothing is guessed: a run that changed no source is [Gave_up]; one
+     that changed source but never the target file is [Off_target_edit]; one
+     that changed the target but fails the build probe is [Build_failed], else
+     [Wrong_solution].
+   - [Verify_red] is the honest fallback for a verify-red run the harness did
+     not instrument with those signals (older rows, or a run with no workspace);
+     the report degrades to the coarse bucket rather than inventing a finer one. *)
 type bucket =
   | Verify_green
-  | Verify_red
   | Regressed
+  | Gave_up
+  | Off_target_edit
+  | Build_failed
+  | Wrong_solution
+  | Verify_red
   | Budget_exceeded
   | Provider_error
   | Transport_error
 
 let bucket_to_string = function
   | Verify_green -> "verify_green"
-  | Verify_red -> "verify_red"
   | Regressed -> "regressed"
+  | Gave_up -> "gave_up"
+  | Off_target_edit -> "off_target_edit"
+  | Build_failed -> "build_failed"
+  | Wrong_solution -> "wrong_solution"
+  | Verify_red -> "verify_red"
   | Budget_exceeded -> "budget_exceeded"
   | Provider_error -> "provider_error"
   | Transport_error -> "transport_error"
 ;;
 
 let all_buckets =
-  [ Verify_green; Verify_red; Regressed; Budget_exceeded; Provider_error
-  ; Transport_error
+  [ Verify_green; Regressed; Gave_up; Off_target_edit; Build_failed
+  ; Wrong_solution; Verify_red; Budget_exceeded; Provider_error; Transport_error
   ]
 ;;
 
@@ -323,7 +360,21 @@ let bucket_of_row (row : row) =
          typed failure the taxonomy names on its own rather than lumping with a
          plain wrong-output run. *)
       | Some 0, Some code when code <> 0 -> Regressed
-      | _ -> Verify_red)
+      | _ ->
+        (* verify itself is red: attribute by the deterministic trajectory
+           signals when the harness recorded them, else fall back to the coarse
+           bucket. [edited_target_files] > 0 means the candidate did edit a file
+           the reference fix also edits, so the failure is in its logic (or its
+           build); = 0 with some source edited means it edited the wrong place;
+           = 0 with nothing edited means it did not attempt the fix. *)
+        (match row.edited_target_files, row.edited_source_files with
+         | Some target, _ when target > 0 ->
+           (match row.build_exit with
+            | Some code when code <> 0 -> Build_failed
+            | _ -> Wrong_solution)
+         | Some 0, Some source when source > 0 -> Off_target_edit
+         | Some 0, Some 0 -> Gave_up
+         | _ -> Verify_red))
   | Run_timeout -> Budget_exceeded
   | Run_provider_error -> Provider_error
   | Run_transport_error -> Transport_error
@@ -415,7 +466,7 @@ let build_suite ~(cases : Coding_eval_case.t list) ~(rows : row list) ~k =
 let render_report (report : suite_report) =
   let buffer = Buffer.create 2048 in
   Buffer.add_string buffer (Eval_harness.report_to_string report.suite);
-  Buffer.add_string buffer "\n## Outcome buckets (coarse, v0)\n\n";
+  Buffer.add_string buffer "\n## Failure taxonomy (RFC-0396 D5)\n\n";
   List.iter
     (fun (bucket, count) ->
        Buffer.add_string

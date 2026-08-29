@@ -323,6 +323,9 @@ evidence_row() {
     --argjson cost_usd "${13}" \
     --argjson error "${14}" \
     --argjson regression_exit "${15}" \
+    --argjson edited_source_files "${16}" \
+    --argjson edited_target_files "${17}" \
+    --argjson build_exit "${18}" \
     '{
       case_id: $case_id,
       run_index: $run_index,
@@ -332,6 +335,9 @@ evidence_row() {
       status: $status,
       verify_exit: $verify_exit,
       regression_exit: $regression_exit,
+      edited_source_files: $edited_source_files,
+      edited_target_files: $edited_target_files,
+      build_exit: $build_exit,
       passed: ($status == "ok" and $verify_exit == 0
                and ($regression_exit == null or $regression_exit == 0)),
       duration_ms: $duration_ms,
@@ -362,13 +368,62 @@ json_number_or_null() {
   fi
 }
 
+# Count how many of the reference-solution target files the candidate actually
+# changed, comparing the graded workspace against the case's pristine copy by
+# content (cmp, never output parsing). A target file the candidate created that
+# the pristine tree lacks, or one whose bytes differ, counts as edited; one it
+# left untouched or never wrote does not. The solution overlay is the case
+# author's fix, so its file set is the ground-truth "files that needed editing".
+count_edited_target_files() {
+  local case_dir="$1" workspace="$2"
+  local solution_dir="${case_dir}/solution"
+  local pristine_dir="${case_dir}/workspace"
+  local count=0 rel
+  while IFS= read -r target_path; do
+    rel="${target_path#"${solution_dir}/"}"
+    if [[ -f "${workspace}/${rel}" ]] \
+      && ! cmp -s "${pristine_dir}/${rel}" "${workspace}/${rel}"; then
+      count=$(( count + 1 ))
+    fi
+  done < <(find "${solution_dir}" -type f)
+  printf '%s' "${count}"
+}
+
+# Count the pristine source files (everything in the canonical workspace except
+# the protected test oracles) whose bytes the candidate changed. Only files that
+# exist in the pristine tree are compared, so artifacts a check run drops
+# (e.g. __pycache__) never read as candidate edits. Zero here means the run
+# touched no source at all -- it gave up rather than edited the wrong file.
+count_edited_source_files() {
+  local case_dir="$1" workspace="$2" test_files="$3"
+  local pristine_dir="${case_dir}/workspace"
+  local count=0 rel is_test test_file
+  while IFS= read -r pristine_path; do
+    rel="${pristine_path#"${pristine_dir}/"}"
+    is_test=0
+    while IFS= read -r test_file; do
+      [[ -z "${test_file}" ]] && continue
+      if [[ "${rel}" == "${test_file}" ]]; then
+        is_test=1
+        break
+      fi
+    done <<< "${test_files}"
+    [[ "${is_test}" == "1" ]] && continue
+    if [[ ! -f "${workspace}/${rel}" ]] \
+      || ! cmp -s "${pristine_path}" "${workspace}/${rel}"; then
+      count=$(( count + 1 ))
+    fi
+  done < <(find "${pristine_dir}" -type f)
+  printf '%s' "${count}"
+}
+
 run_one() {
   local provider="$1"
   local model="$2"
   local case_dir="$3"
   local repeat_index="$4"
 
-  local case_id timeout_sec verify_rel prompt test_files regression_rel
+  local case_id timeout_sec verify_rel prompt test_files regression_rel build_rel
   case_id="$(jq -r '.id' "${case_dir}/case.json")"
   timeout_sec="$(jq -r '.timeout_sec' "${case_dir}/case.json")"
   verify_rel="$(jq -r '.verify' "${case_dir}/case.json")"
@@ -379,6 +434,8 @@ run_one() {
   test_files="$(jq -r '(.test_files // ["check.sh"])[]' "${case_dir}/case.json")"
   # Optional PASS_TO_PASS regression script (case-relative). Empty when absent.
   regression_rel="$(jq -r '.regression // empty' "${case_dir}/case.json")"
+  # Optional build probe (case-relative). Empty when absent.
+  build_rel="$(jq -r '.build // empty' "${case_dir}/case.json")"
 
   local run_id run_dir workspace evidence_path
   run_id="$(printf '%s-%s-%s-r%d' "${provider}" "${model}" "${case_id}" "${repeat_index}" \
@@ -411,6 +468,7 @@ run_one() {
   start_epoch="$(date +%s)"
 
   local finish_status="ok" error_text="" verify_exit_json="null" regression_exit_json="null"
+  local build_exit_json="null" edited_source_json="null" edited_target_json="null"
   local tool_calls_json='[]' input_tokens_json="null" output_tokens_json="null"
   local cost_usd_json="null"
 
@@ -520,6 +578,14 @@ run_one() {
   # The pass verdict stays status=ok AND verify_exit=0 (an unsettled episode
   # is not a completed task), and the report CLI enforces that equation.
   if [[ -d "${workspace}" ]]; then
+    # Deterministic trajectory signals for the D5 failure taxonomy: how many
+    # pristine source files the candidate changed, and how many of them were the
+    # reference-solution targets. Computed before the oracle restore below so a
+    # candidate's edit to a test file is not what these count -- only real source
+    # edits are. The report splits a verify-red run by these without guessing.
+    edited_source_json="$(count_edited_source_files "${case_dir}" "${workspace}" "${test_files}")"
+    edited_target_json="$(count_edited_target_files "${case_dir}" "${workspace}")"
+
     # SWE-bench-style honest oracle: restore each protected test file from the
     # case's canonical workspace before grading, so a run cannot pass by
     # editing the very test it is judged on (the prompt's "do not modify
@@ -550,6 +616,19 @@ run_one() {
       set -e
       regression_exit_json="${regression_code}"
     fi
+
+    # Optional build probe: separates a candidate edit that does not compile
+    # (Build_failed) from one that compiles but is wrong (Wrong_solution). It is
+    # diagnostic only -- the pass verdict stays verify + regression -- and runs
+    # against the same graded workspace.
+    if [[ -n "${build_rel}" ]]; then
+      set +e
+      bash "${case_dir}/${build_rel}" "${workspace}" \
+        >"${run_dir}/build.log" 2>&1
+      local build_code=$?
+      set -e
+      build_exit_json="${build_code}"
+    fi
   fi
 
   tool_calls_json="$(keeper_tool_call_names "${keeper_name}")"
@@ -565,9 +644,10 @@ run_one() {
     "${finish_status}" "${verify_exit_json}" "${duration_ms}" "${recorded_at}" \
     "${tool_calls_json}" "${input_tokens_json}" "${output_tokens_json}" \
     "${cost_usd_json}" "$(json_string_or_null "${error_text}")" \
-    "${regression_exit_json}")"
+    "${regression_exit_json}" "${edited_source_json}" "${edited_target_json}" \
+    "${build_exit_json}")"
   append_row "${row}" "${evidence_path}"
-  echo "[coding-eval] ${run_id}: status=${finish_status} verify_exit=${verify_exit_json} regression_exit=${regression_exit_json}" >&2
+  echo "[coding-eval] ${run_id}: status=${finish_status} verify_exit=${verify_exit_json} regression_exit=${regression_exit_json} edited_target=${edited_target_json} build=${build_exit_json}" >&2
 }
 
 main() {

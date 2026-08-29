@@ -129,7 +129,17 @@ let test_case_json_rejects_undeclared_keys () =
     check bool "error names the key" true (string_contains message "extra")
 ;;
 
-let row_json ?(regression_exit = None) ~run_index ~status ~verify_exit ~passed () =
+let row_json
+      ?(regression_exit = None)
+      ?(edited_source_files = None)
+      ?(edited_target_files = None)
+      ?(build_exit = None)
+      ~run_index
+      ~status
+      ~verify_exit
+      ~passed
+      ()
+  =
   let int_or_null = function
     | Some code -> `Int code
     | None -> `Null
@@ -143,6 +153,9 @@ let row_json ?(regression_exit = None) ~run_index ~status ~verify_exit ~passed (
     ; "status", `String status
     ; "verify_exit", int_or_null verify_exit
     ; "regression_exit", int_or_null regression_exit
+    ; "edited_source_files", int_or_null edited_source_files
+    ; "edited_target_files", int_or_null edited_target_files
+    ; "build_exit", int_or_null build_exit
     ; "passed", `Bool passed
     ; "duration_ms", `Int 1200
     ; "recorded_at", `Float 1700000000.0
@@ -339,6 +352,92 @@ let test_regressed_bucket () =
       (Coding_eval_report.bucket_of_row row = Coding_eval_report.Regressed)
 ;;
 
+let test_case_json_accepts_build () =
+  let json = `Assoc (base_case_fields @ [ "build", `String "build.sh" ]) in
+  match Coding_eval_case.of_json json with
+  | Ok case -> check (option string) "build parsed" (Some "build.sh") case.build
+  | Error message -> Alcotest.failf "expected build to parse, got: %s" message
+;;
+
+(* The verify-red trajectory buckets are decided by the deterministic file-delta
+   signals, never by parsing output: no source edited is Gave_up, source but not
+   the target is Off_target_edit, the target edited with a red build probe is
+   Build_failed, and the target edited with no failing build is Wrong_solution. *)
+let bucket_of_failed_row ?edited_source_files ?edited_target_files ?build_exit () =
+  match
+    Coding_eval_report.row_of_json
+      (row_json
+         ~run_index:1
+         ~status:"ok"
+         ~verify_exit:(Some 1)
+         ?edited_source_files
+         ?edited_target_files
+         ?build_exit
+         ~passed:false
+         ())
+  with
+  | Ok row -> Coding_eval_report.bucket_of_row row
+  | Error message -> Alcotest.failf "row should decode: %s" message
+;;
+
+let test_gave_up_bucket () =
+  check
+    bool
+    "no source edited buckets as Gave_up"
+    true
+    (bucket_of_failed_row
+       ~edited_source_files:(Some 0)
+       ~edited_target_files:(Some 0)
+       ()
+     = Coding_eval_report.Gave_up)
+;;
+
+let test_off_target_edit_bucket () =
+  check
+    bool
+    "source edited but not the target buckets as Off_target_edit"
+    true
+    (bucket_of_failed_row
+       ~edited_source_files:(Some 2)
+       ~edited_target_files:(Some 0)
+       ()
+     = Coding_eval_report.Off_target_edit)
+;;
+
+let test_build_failed_bucket () =
+  check
+    bool
+    "target edited with a red build buckets as Build_failed"
+    true
+    (bucket_of_failed_row
+       ~edited_source_files:(Some 1)
+       ~edited_target_files:(Some 1)
+       ~build_exit:(Some 1)
+       ()
+     = Coding_eval_report.Build_failed)
+;;
+
+let test_wrong_solution_bucket () =
+  check
+    bool
+    "target edited, build green, still red buckets as Wrong_solution"
+    true
+    (bucket_of_failed_row
+       ~edited_source_files:(Some 1)
+       ~edited_target_files:(Some 1)
+       ~build_exit:(Some 0)
+       ()
+     = Coding_eval_report.Wrong_solution)
+;;
+
+let test_uninstrumented_failure_stays_coarse () =
+  check
+    bool
+    "a verify-red row with no trajectory signals stays Verify_red"
+    true
+    (bucket_of_failed_row () = Coding_eval_report.Verify_red)
+;;
+
 let () =
   run
     "coding_eval_cases"
@@ -368,6 +467,7 @@ let () =
             "case.json accepts a regression guard"
             `Quick
             test_case_json_accepts_regression
+        ; test_case "case.json accepts a build probe" `Quick test_case_json_accepts_build
         ] )
     ; ( "report"
       , [ test_case "fixed rows pipeline" `Quick test_report_pipeline_on_fixed_rows
@@ -380,6 +480,14 @@ let () =
             `Quick
             test_regression_failure_gates_passed
         ; test_case "regressed bucket" `Quick test_regressed_bucket
+        ; test_case "gave-up bucket" `Quick test_gave_up_bucket
+        ; test_case "off-target-edit bucket" `Quick test_off_target_edit_bucket
+        ; test_case "build-failed bucket" `Quick test_build_failed_bucket
+        ; test_case "wrong-solution bucket" `Quick test_wrong_solution_bucket
+        ; test_case
+            "uninstrumented failure stays coarse"
+            `Quick
+            test_uninstrumented_failure_stays_coarse
         ] )
     ]
 ;;

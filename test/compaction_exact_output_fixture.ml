@@ -180,8 +180,74 @@ let catalog_generation_fingerprint snapshot =
   |> EO.catalog_generation_fingerprint
 ;;
 
-let publish_registry ~lane_id ~slot_ids resolver_snapshot =
-  let lane : Runtime_schema.exact_output_lane_decl = { id = lane_id; slot_ids; cli_slot_ids = [] } in
+(* Official-client runtime table for cli lane-slot tests: enough for
+   [Fusion_official_client.is_official_client] to admit the two claude ids
+   without executing a client (command is /usr/bin/true). Same shape as the
+   fusion panel fixture. *)
+let official_client_runtime_fixture =
+  {|
+[runtime]
+default = "stub-http.stub-model"
+
+[providers.stub-http]
+display-name = "Stub HTTP"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[providers.claude_code]
+display-name = "Claude Code Max Subscription"
+protocol = "claude-code"
+command = "/usr/bin/true"
+is-non-interactive = true
+
+[models.stub-model]
+api-name = "gpt-5.4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[stub-http.stub-model]
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+turn-timeout-s = 0
+
+[claude_code."claude-sonnet-5"]
+
+[models."claude-haiku-4-5"]
+api-name = "claude-haiku-4-5"
+max-context = 200000
+tools-support = true
+streaming = true
+turn-timeout-s = 0
+
+[claude_code."claude-haiku-4-5"]
+|}
+;;
+
+let cli_primary_runtime = "claude_code.claude-sonnet-5"
+let cli_secondary_runtime = "claude_code.claude-haiku-4-5"
+
+let with_official_client_runtimes f =
+  let path = Filename.temp_file "cli-lane-runtime" ".toml" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+       let channel = open_out path in
+       Fun.protect
+         ~finally:(fun () -> close_out channel)
+         (fun () -> output_string channel official_client_runtime_fixture);
+       match Runtime.init_default ~config_path:path with
+       | Error detail ->
+         Alcotest.failf "official-client runtime fixture must initialize: %s" detail
+       | Ok () -> f ())
+;;
+
+let publish_registry ?(cli_slot_ids = []) ~lane_id ~slot_ids resolver_snapshot =
+  let lane : Runtime_schema.exact_output_lane_decl = { id = lane_id; slot_ids; cli_slot_ids } in
   match Runtime_exact_output_registry.publish ~lanes:[ lane ] resolver_snapshot with
   | Ok registry -> registry
   | Error error ->

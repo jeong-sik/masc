@@ -257,7 +257,7 @@ let recover_projected_durable_demand_owner
           remove the directory) that no maintenance cycle can make for it.
           The recovery loop visits every keeper every cycle, so an
           unacknowledged orphan logged at ERROR every visit -- 167/hour for
-          one stale kidsnote queue on 2026-08-28. Say it once per process;
+          one stale tenant queue on 2026-08-28. Say it once per process;
           the durable work stays where it is either way. *)
        if not (Hashtbl.mem owner_absent_reported keeper_name) then (
          Hashtbl.add owner_absent_reported keeper_name ();

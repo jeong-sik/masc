@@ -394,7 +394,7 @@ let wakeup_running_entry ~intent (entry : registry_entry) =
        [Failing] is derived from [turn_healthy = false] — the record of a turn
        that already ended. Refusing the wake on it deadlocks the keeper: only a
        turn can set [turn_healthy] back, and only a wake starts a turn. Measured
-       2026-08-28: one upstream 500 left taskmaster refusing 181 wakes over 18
+       2026-08-28: one upstream 500 left a keeper refusing 181 wakes over 18
        hours, recoverable only by an operator calling keeper_up. *)
     (match entry.phase with
      | Keeper_state_machine.Running | Keeper_state_machine.Failing ->

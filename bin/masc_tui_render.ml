@@ -3852,8 +3852,8 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
      owner lookup failing, which the health column describes better than a
      blank would. *)
   (* A turn record that outlives the process it belongs to. The summary above
-     this table read "2 offline / not running: polisher, taskmaster" while
-     taskmaster's own row drew a turning mark and a climbing clock: its turn
+     this table read "2 offline / not running" while
+     one listed keeper's own row drew a turning mark and a climbing clock: its turn
      had started and never been closed, and the process behind it had gone.
      The row that most needed reading looked like the healthiest kind.
 

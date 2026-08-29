@@ -125,7 +125,7 @@ let record_outcome outcome =
    dropped here for two reasons.
 
    Size: measured 2026-08-27 on the live queue, they were 23.2 kB of an 85.6 kB
-   bundle for [rondo] -- 51% of the message blocks -- while the call actually
+   bundle for one keeper -- 51% of the message blocks -- while the call actually
    being judged was 2.5 kB. Every pending approval carries its own copy, so one
    Keeper with five of them sent the same reasoning five times.
 

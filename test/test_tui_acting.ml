@@ -430,17 +430,17 @@ let test_skill_tools_wear_a_skill_label () =
     Acting.row_of_entry ~duration_ms:None { Acting.ae_at = 100.; ae_event = event }
   in
   check string "skill body read is named" "skill call"
-    (row (agent_core ~tool:"keeper_skill" "sangsu")).Acting.label;
+    (row (agent_core ~tool:"keeper_skill" "alpha")).Acting.label;
   check string "composition run is named" "skill call"
-    (row (agent_core ~tool:"keeper_compose_work-intake" "sangsu")).Acting.label;
+    (row (agent_core ~tool:"keeper_compose_work-intake" "alpha")).Acting.label;
   check string "a plain tool stays a call" "call"
-    (row (agent_core ~tool:"masc_board_stats" "sangsu")).Acting.label;
+    (row (agent_core ~tool:"masc_board_stats" "alpha")).Acting.label;
   check string "completion keeps the tag" "skill returned"
-    (row (agent_core ~kind:Observer.Tool_completed ~tool:"keeper_skill" "sangsu"))
+    (row (agent_core ~kind:Observer.Tool_completed ~tool:"keeper_skill" "alpha"))
       .Acting.label;
   let keeper_tool_call ?disposition tool : Observer.event =
     Observer.Keeper_tool_call
-      { Observer.kt_keeper = "sangsu"
+      { Observer.kt_keeper = "alpha"
       ; kt_tool = tool
       ; kt_duration_ms = None
       ; kt_disposition = disposition

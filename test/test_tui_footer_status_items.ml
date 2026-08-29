@@ -289,17 +289,17 @@ let test_a_workspace_mismatch_outlives_the_port () =
 
 let test_answering_names_the_first_keeper () =
   check_string "one keeper answering reads by name"
-    "<dim>  q:quit  | \xe2\x97\x8c answering kidsnote | Port: 8935<reset>\n"
+    "<dim>  q:quit  | \xe2\x97\x8c answering echo | Port: 8935<reset>\n"
     (Masc_tui_footer.line
-       ~status:[ Masc_tui_footer.Keeper_answering { names = [ "kidsnote" ]; lead_elapsed_s = None } ]
+       ~status:[ Masc_tui_footer.Keeper_answering { names = [ "echo" ]; lead_elapsed_s = None } ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ());
   check_string "more keepers ride as a count behind the first"
-    "<dim>  q:quit  | \xe2\x97\x8c answering kidsnote +2 | Port: 8935<reset>\n"
+    "<dim>  q:quit  | \xe2\x97\x8c answering echo +2 | Port: 8935<reset>\n"
     (Masc_tui_footer.line
        ~status:
          [ Masc_tui_footer.Keeper_answering
-             { names = [ "kidsnote"; "analyst"; "rondo" ]; lead_elapsed_s = None } ]
+             { names = [ "echo"; "analyst"; "delta" ]; lead_elapsed_s = None } ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ());
   check_string "nobody answering says nothing"
@@ -331,31 +331,31 @@ let test_narrow_width_drops_whole_hint_items () =
 
 let test_answering_carries_the_lead_elapsed_time () =
   check_string "the lead keeper's runtime rides the badge"
-    "<dim>  q:quit  | \xe2\x97\x8c answering kidsnote 14m +1 | Port: 8935<reset>\n"
+    "<dim>  q:quit  | \xe2\x97\x8c answering echo 14m +1 | Port: 8935<reset>\n"
     (Masc_tui_footer.line
        ~status:
          [ Masc_tui_footer.Keeper_answering
-             { names = [ "kidsnote"; "analyst" ]; lead_elapsed_s = Some 850 }
+             { names = [ "echo"; "analyst" ]; lead_elapsed_s = Some 850 }
          ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ())
 
 let test_answered_glow_reads_by_name () =
   check_string "one finish reads by name with its age"
-    "<dim>  q:quit  | \xe2\x9c\x93 kidsnote answered 12s ago | Port: 8935<reset>\n"
+    "<dim>  q:quit  | \xe2\x9c\x93 echo answered 12s ago | Port: 8935<reset>\n"
     (Masc_tui_footer.line
        ~status:
          [ Masc_tui_footer.Keeper_answered
-             { name = "kidsnote"; seconds_ago = 12; more = 0 }
+             { name = "echo"; seconds_ago = 12; more = 0 }
          ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ());
   check_string "older finishes fold behind the newest"
-    "<dim>  q:quit  | \xe2\x9c\x93 kidsnote answered 3m ago +2 | Port: 8935<reset>\n"
+    "<dim>  q:quit  | \xe2\x9c\x93 echo answered 3m ago +2 | Port: 8935<reset>\n"
     (Masc_tui_footer.line
        ~status:
          [ Masc_tui_footer.Keeper_answered
-             { name = "kidsnote"; seconds_ago = 200; more = 2 }
+             { name = "echo"; seconds_ago = 200; more = 2 }
          ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ())
@@ -443,7 +443,7 @@ let test_answering_outlives_the_build_fact () =
         [ Masc_tui_footer.Refresh_interval 2.0
         ; Masc_tui_footer.Server_build
             { version = "9.9.9"; commit = "abcdef0123456" }
-        ; Masc_tui_footer.Keeper_answering { names = [ "kidsnote" ]; lead_elapsed_s = None }
+        ; Masc_tui_footer.Keeper_answering { names = [ "echo" ]; lead_elapsed_s = None }
         ]
       ~dim:"" ~reset:"" ~max_cells:46 ~port:8935 ~hints:"q:quit" ()
   in

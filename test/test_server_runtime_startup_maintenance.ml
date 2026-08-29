@@ -180,8 +180,8 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   let decision_fresh = p [ "decision_audit"; "keeper-a"; "2999-01"; "01.jsonl" ] in
   (* messages/: flat .json files, stale by mtime — the dated pruner was a
      no-op on this layout the whole time it sat on the dated list. *)
-  let message_old = p [ "messages"; "000000001_taskmaster_wmsg-old_broadcast.json" ] in
-  let message_fresh = p [ "messages"; "000000002_taskmaster_wmsg-new_broadcast.json" ] in
+  let message_old = p [ "messages"; "000000001_bravo_wmsg-old_broadcast.json" ] in
+  let message_fresh = p [ "messages"; "000000002_bravo_wmsg-new_broadcast.json" ] in
   (* tool_usage: dated layout, was on no list (own retention env is opt-in). *)
   let tool_usage_old = p [ "tool_usage"; "2020-01"; "01.jsonl" ] in
   (* reaction-ledger: versioned generation dir between store and months. *)

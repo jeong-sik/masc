@@ -219,7 +219,7 @@ let test_request_root_inside_host_root_is_allowed () =
 let test_sibling_endpoint_root_is_not_an_escape () =
   with_tmp_tree (fun root ->
       let a = Filename.concat root "playground" in
-      let b = Filename.concat root "playground-sangsu" in
+      let b = Filename.concat root "playground-alpha" in
       Unix.mkdir a 0o755;
       Unix.mkdir b 0o755;
       (* Each endpoint declares its own root; the host allows both. *)
@@ -267,7 +267,7 @@ let config_for root =
 
 let test_dispatch_uses_the_request_root_not_the_host_root () =
   with_tmp_tree (fun root ->
-      let mine = Filename.concat root "playground-sangsu" in
+      let mine = Filename.concat root "playground-alpha" in
       Unix.mkdir mine 0o755;
       let config = config_for root in
       let request = request_for ~remote_root:mine ~cwd:mine in
@@ -277,8 +277,8 @@ let test_dispatch_uses_the_request_root_not_the_host_root () =
 
 let test_dispatch_rejects_a_cwd_outside_the_request_root () =
   with_tmp_tree (fun root ->
-      let mine = Filename.concat root "playground-sangsu" in
-      let theirs = Filename.concat root "playground-rondo" in
+      let mine = Filename.concat root "playground-alpha" in
+      let theirs = Filename.concat root "playground-delta" in
       Unix.mkdir mine 0o755;
       Unix.mkdir theirs 0o755;
       let config = config_for root in

@@ -23,8 +23,8 @@ let test_running_rows_lead_with_the_chat_target () =
   let lines =
     Masc_tui_answering.overlay ~now:1000.
       ~chat_target:(Some "analyst") ~error:None ~finishes:[]
-      [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:866. "kidsnote"
-      ; row "rondo" Tui_decode.Keeper_turn_idle
+      [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:866. "echo"
+      ; row "delta" Tui_decode.Keeper_turn_idle
       ; running ~lane:Tui_decode.Turn_lane_chat_operation ~started:990.
           "analyst"
       ]
@@ -39,7 +39,7 @@ let test_running_rows_lead_with_the_chat_target () =
       Alcotest.(check bool) "elapsed reads in seconds" true
         (Astring.String.is_infix ~affix:"10s" first);
       Alcotest.(check bool) "the other runner follows" true
-        (Astring.String.is_infix ~affix:"kidsnote" second);
+        (Astring.String.is_infix ~affix:"echo" second);
       Alcotest.(check bool) "minutes carry their seconds" true
         (Astring.String.is_infix ~affix:"2m14s" second);
       Alcotest.(check string) "idle keepers fold into one count" "1 idle" idle
@@ -50,7 +50,7 @@ let test_quiet_fleet_says_so () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
       ~finishes:[]
-      [ row "kidsnote" Tui_decode.Keeper_turn_idle
+      [ row "echo" Tui_decode.Keeper_turn_idle
       ; row "analyst" Tui_decode.Keeper_turn_idle
       ]
   in
@@ -83,7 +83,7 @@ let test_unavailable_reads_as_unknown_not_idle () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
       ~finishes:[]
-      [ row "rondo" (Tui_decode.Keeper_turn_unavailable "owner_not_found") ]
+      [ row "delta" (Tui_decode.Keeper_turn_unavailable "owner_not_found") ]
   in
   match lines with
   | [ quiet; unknown ] ->
@@ -99,23 +99,23 @@ let test_unavailable_reads_as_unknown_not_idle () =
 ;;
 
 let test_finished_turns_glow_then_expire () =
-  let finishes = [ ("kidsnote", 990.) ] in
+  let finishes = [ ("echo", 990.) ] in
   let fresh =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
       ~finishes
-      [ row "kidsnote" Tui_decode.Keeper_turn_idle ]
+      [ row "echo" Tui_decode.Keeper_turn_idle ]
   in
   (match fresh with
    | [ done_line; idle ] ->
        Alcotest.(check bool) "a finish inside the TTL keeps a ✓ row" true
-         (Astring.String.is_infix ~affix:"kidsnote"
+         (Astring.String.is_infix ~affix:"echo"
             done_line.Masc_tui_answering.text
          && Astring.String.is_infix ~affix:"answered 10s ago"
               done_line.Masc_tui_answering.text);
        Alcotest.(check bool) "toned as done" true
          (done_line.Masc_tui_answering.tone = Masc_tui_answering.Done);
        Alcotest.(check bool) "and Enter can open it" true
-         (done_line.Masc_tui_answering.target = Some "kidsnote");
+         (done_line.Masc_tui_answering.target = Some "echo");
        Alcotest.(check bool)
          "a fleet with a fresh finish does not read as nobody" true
          (Astring.String.is_infix ~affix:"idle"
@@ -125,7 +125,7 @@ let test_finished_turns_glow_then_expire () =
     Masc_tui_answering.overlay
       ~now:(990. +. Masc_tui_answering.finish_glow_ttl_seconds +. 1.)
       ~chat_target:None ~error:None ~finishes
-      [ row "kidsnote" Tui_decode.Keeper_turn_idle ]
+      [ row "echo" Tui_decode.Keeper_turn_idle ]
   in
   match texts expired with
   | [ quiet; _idle ] ->
@@ -136,15 +136,15 @@ let test_finished_turns_glow_then_expire () =
 
 let test_advance_finishes_tracks_the_transition () =
   let previous =
-    [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "kidsnote"
+    [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "echo"
     ; running ~lane:Tui_decode.Turn_lane_chat_operation ~started:950. "analyst"
-    ; row "rondo" (Tui_decode.Keeper_turn_unavailable "owner_not_found")
+    ; row "delta" (Tui_decode.Keeper_turn_unavailable "owner_not_found")
     ]
   in
   let current =
-    [ row "kidsnote" Tui_decode.Keeper_turn_idle
+    [ row "echo" Tui_decode.Keeper_turn_idle
     ; running ~lane:Tui_decode.Turn_lane_chat_operation ~started:950. "analyst"
-    ; row "rondo" Tui_decode.Keeper_turn_idle
+    ; row "delta" Tui_decode.Keeper_turn_idle
     ]
   in
   let finishes =
@@ -153,7 +153,7 @@ let test_advance_finishes_tracks_the_transition () =
   in
   Alcotest.(check (list (pair string (float 0.001))))
     "running→idle is a finish; unavailable→idle is not"
-    [ ("kidsnote", 1000.) ] finishes;
+    [ ("echo", 1000.) ] finishes;
   (* A keeper that starts running again drops its glow: the badge takes
      over, and one keeper must not read as both answering and answered. *)
   let running_again =
@@ -161,7 +161,7 @@ let test_advance_finishes_tracks_the_transition () =
       ~previous_rows:current
       ~current_rows:
         [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:1005.
-            "kidsnote"
+            "echo"
         ]
       finishes
   in
@@ -173,8 +173,8 @@ let test_target_indexes_skip_prose () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None
       ~error:(Some "boom") ~finishes:[ ("analyst", 995.) ]
-      [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:990. "kidsnote"
-      ; row "rondo" Tui_decode.Keeper_turn_idle
+      [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:990. "echo"
+      ; row "delta" Tui_decode.Keeper_turn_idle
       ]
   in
   (* error(2 lines) → running(1) → finished(1) → idle(1) *)
@@ -241,7 +241,7 @@ let test_the_overlay_wears_the_same_mark () =
   let lines =
     Masc_tui_answering.overlay ~frame:2 ~now:100. ~chat_target:None ~error:None
       ~finishes:[]
-      [ running ~lane:Tui_decode.Turn_lane_chat_operation ~started:40. "kidsnote" ]
+      [ running ~lane:Tui_decode.Turn_lane_chat_operation ~started:40. "echo" ]
   in
   let running_line =
     List.find (fun (line : Masc_tui_answering.line) -> line.tone = Masc_tui_answering.Running) lines

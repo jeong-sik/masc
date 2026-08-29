@@ -3,7 +3,7 @@
 
    Their per-operation idle timeouts reset on every emitted line, so a CLI
    that keeps emitting inside each window holds the turn indefinitely —
-   observed 2026-08-21 as a 7.2h taskmaster turn that no deadline ended
+   observed 2026-08-21 as a 7.2h keeper turn that no deadline ended
    (provider_attempt_effect_fenced eventually did).
 
    The ceiling is hours-scale on purpose so it never competes with the

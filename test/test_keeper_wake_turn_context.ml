@@ -303,7 +303,7 @@ let test_refused_call_keeps_its_arguments () =
     (Option.is_some (Astring.String.find_sub ~sub:"REJECTED: not verified" section))
 ;;
 
-(* The digest is the salience fix: sangsu re-read the same nonexistent paths
+(* The digest is the salience fix: a keeper re-read the same nonexistent paths
    every autonomous turn on 2026-08-28 while the refusals were already inside
    this window, buried in the row matrix. Five turns of the same rejected
    read must surface as one counted row, ahead of the rows. *)

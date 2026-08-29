@@ -153,8 +153,8 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
              census_error)
       | Ok keeper_names ->
         (* Compare under the fold ledger attribution uses:
-           [Keeper_identity.Keeper_id.of_string] lowercases, so "Taskmaster"
-           and keeper "taskmaster" share one attribution id. A byte compare
+           [Keeper_identity.Keeper_id.of_string] lowercases, so "Alpha"
+           and keeper "alpha" share one attribution id. A byte compare
            admits exactly the collision this gate exists to refuse. *)
         let joining = String.lowercase_ascii (String.trim agent_name) in
         if

@@ -9,7 +9,7 @@
     with a [fallback_reason] derived from the earlier turn's failure rather than
     this turn's.
 
-    Measured on a taskmaster receipt at 2026-08-26T16:40Z: the turn's own error
+    Measured on a live keeper receipt at 2026-08-26T16:40Z: the turn's own error
     was an invalid request (a reasoning-effort contract rejection) while the
     receipt read [degraded_retry_applied = true] and
     [fallback_reason = rate_limit]. The dashboard consequence is in

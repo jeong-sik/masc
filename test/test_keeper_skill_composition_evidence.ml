@@ -87,7 +87,7 @@ let test_latest_exact_reference_replaces_prior_publication () =
              ~composition_run_id
              ~parent_invocation:(parent_invocation ())
              ~request_id:None
-             ~keeper_name:"rondo"
+             ~keeper_name:"delta"
              ~composition_tool:"keeper_compose_indexed-proof"
              ~composition_execution:Keeper_tool_composition_catalog.Inline
              ~result

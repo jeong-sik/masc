@@ -10,7 +10,7 @@ module Delivery_identity = Keeper_chat_delivery_identity
    by. *)
 module Surface = struct
   (* Slack and Discord carry which channel the row came in on. A Keeper can be
-     bound to several -- [sangsu] has five Discord channels -- and without it
+     bound to several -- one keeper has five Discord channels -- and without it
      every one of them reads as the same place.
 
      A reference, not a name: the store has only the platform's id today, and

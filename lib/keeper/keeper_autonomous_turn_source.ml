@@ -123,7 +123,7 @@ let trace_step_of_trajectory = function
    Without the cache, every dashboard poll re-reads the same rejected
    file and replays the same warning (16,128 WARN/day on 2026-08-27 for
    the version arm; 4,157/hour on 2026-08-28 for the missing arm after
-   the hard-cut cleanup deleted pre-cut sangsu traces whose turn records
+   the hard-cut cleanup deleted pre-cut keeper traces whose turn records
    remained). Healable failures (I/O errors) stay uncached. *)
 let version_rejected_runs : (string, unit) Hashtbl.t = Hashtbl.create 64
 let missing_trace_runs : (string, unit) Hashtbl.t = Hashtbl.create 64

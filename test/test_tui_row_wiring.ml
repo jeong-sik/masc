@@ -130,7 +130,7 @@ let test_a_lane_that_cannot_admit_says_why () =
        ~identifiers:[ "reason" ])
 
 (* The fleet summary above the Keepers table read "2 offline" and named
-   taskmaster among them, while taskmaster's own row drew a turning mark and a
+   one keeper among them, while that keeper's own row drew a turning mark and a
    climbing clock. Its turn had started and never been closed; the process
    behind it had gone. A turn state that outlives its process is the row an
    operator most needs to read, and it looked like the healthiest kind.

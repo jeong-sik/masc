@@ -418,43 +418,44 @@ let test_board_runtime_rejects_unknown_route () =
     Yojson.Safe.Util.(member "error" json |> to_string)
 ;;
 
-let test_keeper_tools_list_json_uses_typed_groups () =
+(* #31728 removed the per-keeper tool surface, and with it the descriptor's
+   tool group -- every name used to be filed under board/fs/memory/... and
+   there is no such field any more. The list therefore says which names the
+   model can call, and the group axis is gone rather than collapsed into one
+   constant key. Absence is checked against the whole payload, not against a
+   group that no longer exists, because a lookup on a missing key answers
+   "not there" for every name and proves nothing. *)
+let test_keeper_tools_list_json_names_the_model_visible_tools () =
   let meta = make_meta () in
   let json = Yojson.Safe.from_string (KES.keeper_tools_list_json ~meta) in
-  let member group name =
-    json_list_contains name Yojson.Safe.Util.(member group json)
+  let active_names =
+    Yojson.Safe.Util.(member "descriptor_surface" json |> to_list)
+    |> List.concat_map (fun descriptor ->
+      Yojson.Safe.Util.(member "active_names" descriptor |> to_list)
+      |> List.map Yojson.Safe.Util.to_string)
   in
-  check bool "board canonical tool grouped" true
-    (member "board" "masc_board_post");
-  check bool "fake board-looking tool excluded" false
-    (json_contains_tool "masc_board_fake" json);
-  check bool "voice tool grouped" true
-    (member "voice" "keeper_voice_speak");
+  let names name = List.mem name active_names in
   let is_model_visible name =
     List.exists
       (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
       (Masc.Keeper_tool_policy.keeper_model_tool_schemas ())
   in
-  check bool "task tool grouped as workspace" true
-    (member "workspace" "keeper_task_claim");
-  check bool "MASC task tool grouped as workspace" (is_model_visible "masc_transition")
-    (member "workspace" "masc_transition");
-  check bool "MASC plan tool grouped as workspace" (is_model_visible "masc_plan_get_task")
-    (member "workspace" "masc_plan_get_task");
-  check bool "surface read grouped as surface" true
-    (member "surface" "keeper_surface_read");
-  check bool "surface read not hidden under meta" false
-    (member "meta" "keeper_surface_read");
-  check bool "tools_list remains a meta introspection tool" true
-    (member "meta" "keeper_tools_list");
-  check bool "Grep tool grouped under its sole model name" true
-    (member "search_files" "Grep");
-  check bool "Grep internal route omitted from model list" false
-    (member "search_files" "tool_search_files");
-  check bool "fs tool grouped under its sole model name" true
-    (member "fs" "Read");
-  check bool "memory tool grouped" true
-    (member "memory" "keeper_memory_search");
+  check bool "board tool is named" true (names "masc_board_post");
+  check bool "voice tool is named" true (names "keeper_voice_speak");
+  check bool "task tool is named" true (names "keeper_task_claim");
+  check bool "surface read is named" true (names "keeper_surface_read");
+  check bool "tools_list is named" true (names "keeper_tools_list");
+  check bool "Grep is named" true (names "Grep");
+  check bool "Read is named" true (names "Read");
+  check bool "memory tool is named" true (names "keeper_memory_search");
+  check bool "MASC task tool tracks the model schemas"
+    (is_model_visible "masc_transition") (names "masc_transition");
+  check bool "MASC plan tool tracks the model schemas"
+    (is_model_visible "masc_plan_get_task") (names "masc_plan_get_task");
+  check bool "a board-looking name nobody registered is absent" false
+    (json_contains_tool "masc_board_fake" json);
+  check bool "the internal Grep route is not a model name" false
+    (names "tool_search_files");
   let descriptor_surface =
     Yojson.Safe.Util.(member "descriptor_surface" json |> to_list)
   in
@@ -4695,22 +4696,16 @@ let check_frozen_surface_rejection label (result : KET.executed_tool_result) =
     Yojson.Safe.Util.(data |> member "error" |> to_string)
 ;;
 
-let test_frozen_surface_direct_dispatch_rejects_excluded_global_tool () =
+(* [Read] used to stand here too: a Keeper could declare tool groups and leave
+   it out, so dispatching it was a rejection. #31728 removed that declaration
+   and the surface now holds every model-visible descriptor, so no capability
+   surface can exclude [Read] and the half that asked for it is gone. What a
+   surface still does not hold is a name registered only in [Tool_dispatch]
+   with no descriptor behind it, which is what this covers. *)
+let test_frozen_surface_direct_dispatch_rejects_registered_only_tool () =
   with_exec_fixture "frozen-surface-direct-excluded"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
   let capability_surface = frozen_capability_surface () in
-  let result =
-    KET.execute_keeper_tool_call_for_capability_surface_with_outcome
-      ~capability_surface
-      ~config
-      ~meta
-      ~publication_recovery
-      ~ctx_work
-      ~name:"Read"
-      ~input:(`Assoc [ "file_path", `String "outside.txt" ])
-      ()
-  in
-  check_frozen_surface_rejection "excluded name dispatch" result;
   register_registered_dispatch_probe ();
   let registered_result =
     KET.execute_keeper_tool_call_for_capability_surface_with_outcome
@@ -4761,6 +4756,11 @@ let test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor () =
     (outcome_label name_result.disposition)
 ;;
 
+(* Direct descriptor dispatch is the only route that can present a descriptor
+   the surface does not hold. A composition plan cannot: create canonicalizes
+   every descriptor through [find_id], indexes nodes by [keeper_model_names]
+   alone, and refuses a name with no model name as [Tool_off_keeper_surface]
+   before execution starts. *)
 let test_frozen_surface_rejects_same_id_counterfeit_descriptor () =
   with_exec_fixture "frozen-surface-counterfeit-descriptor"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -4851,68 +4851,6 @@ let test_frozen_surface_name_dispatch_rejects_non_exposed_alias () =
       ()
   in
   check_frozen_surface_rejection "non-exposed internal alias" result
-;;
-
-let test_frozen_surface_nested_plan_rejects_excluded_descriptor () =
-  with_exec_fixture "frozen-surface-nested-plan-excluded"
-  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
-  let capability_surface = frozen_capability_surface () in
-  let descriptor = composition_descriptor "Read" in
-  let node =
-    Masc.Keeper_tool_plan.node
-      ~id:(composition_node_id "read")
-      ~tool_name:"Read"
-      ~input:
-        (Masc.Keeper_tool_plan.Json_template.literal
-           (`Assoc [ "file_path", `String "outside.txt" ]))
-      ()
-  in
-  let plan =
-    match Masc.Keeper_tool_plan.create ~descriptors:[ descriptor ] [ node ] with
-    | Ok plan -> plan
-    | Error error -> fail (Masc.Keeper_tool_plan.error_to_string error)
-  in
-  match
-    Masc.Keeper_tool_plan_executor.execute_keeper
-      ~capability_surface
-      ~plan
-      ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
-      ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
-      ~parent_invocation:
-        (composition_invocation
-           ~completion:Agent_core.Tool_contract.Continue_after_success)
-      ~config
-      ~meta
-      ~publication_recovery
-      ~ctx_snapshot:ctx_work
-      ()
-  with
-  | Error
-      { cause = Masc.Keeper_tool_plan_executor.Tool_did_not_complete node_result
-      ; _
-      } ->
-    check bool
-      "nested exclusion stays a policy rejection"
-      true
-      (match node_result.result with
-       | Tool_result.Failed { class_ = Tool_result.Policy_rejection; _ } -> true
-       | Tool_result.Completed _
-       | Tool_result.Deferred _
-       | Tool_result.Failed _ -> false);
-    check
-      (option bool)
-      "nested exclusion stays proven pre-effect"
-      (Some true)
-      (Option.map
-         (fun disposition -> disposition = Tool_result.Proven_pre_effect)
-         node_result.failure_effect_disposition);
-    check string
-      "nested exclusion preserves typed error"
-      "tool_outside_frozen_capability_surface"
-      Yojson.Safe.Util.
-        (Tool_result.data node_result.result |> member "error" |> to_string)
-  | Error _ -> fail "nested plan failed before the frozen dispatch boundary"
-  | Ok _ -> fail "nested plan recovered a descriptor outside its frozen surface"
 ;;
 
 let test_tools_search_error_reaches_agent_core_as_typed_payload () =
@@ -7295,8 +7233,8 @@ let () =
         test_invalid_surface_post_input_stays_correction_capable;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
-      test_case "frozen surface rejects an excluded global tool" `Quick
-        test_frozen_surface_direct_dispatch_rejects_excluded_global_tool;
+      test_case "frozen surface rejects a registered-only tool" `Quick
+        test_frozen_surface_direct_dispatch_rejects_registered_only_tool;
       test_case "frozen surface accepts its exact descriptor" `Quick
         test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor;
       test_case "frozen surface rejects a same-id counterfeit descriptor" `Quick
@@ -7305,8 +7243,6 @@ let () =
         test_frozen_surface_production_bundle_executes_public_read;
       test_case "frozen surface rejects a non-exposed descriptor alias" `Quick
         test_frozen_surface_name_dispatch_rejects_non_exposed_alias;
-      test_case "nested plan preserves frozen surface authority" `Quick
-        test_frozen_surface_nested_plan_rejects_excluded_descriptor;
       test_case "composition dispatch uses canonical descriptor authority" `Quick
         test_composition_runtime_uses_canonical_descriptor;
       test_case "catalog composition is a first-class executable tool" `Quick
@@ -7351,8 +7287,8 @@ let () =
         test_board_runtime_rejects_unknown_route;
     ]);
     ("keeper_tools_list_json", [
-      test_case "uses typed groups" `Quick
-        test_keeper_tools_list_json_uses_typed_groups;
+      test_case "names the model visible tools" `Quick
+        test_keeper_tools_list_json_names_the_model_visible_tools;
       test_case "lists and searches operator-only Tools" `Quick
         test_frozen_surface_lists_and_searches_operator_only_tool;
       test_case "Agent Core receives typed search failures" `Quick

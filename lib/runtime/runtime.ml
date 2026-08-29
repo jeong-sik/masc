@@ -2578,6 +2578,61 @@ let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
   set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
 ;;
 
+(* [\[runtime.lanes."<id>"\]] is written by table path, not by the [\[runtime\]]
+   array writer above: the candidates live in their own table, one per lane.
+
+   The header must match the file byte for byte ([Toml_line_editor.is_table]
+   compares the whole line), so the id is quoted exactly when TOML requires it
+   — a bare key is [A-Za-z0-9_-] and every runtime id carries a dot, so in
+   practice this quotes. Writing the other form would append a second table
+   for the same key and the post-write validation would reject the file. *)
+let lane_table_path lane_id =
+  let bare =
+    String.for_all
+      (function 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' -> true | _ -> false)
+      lane_id
+  in
+  if bare && not (String.equal lane_id "")
+  then Printf.sprintf "runtime.lanes.%s" lane_id
+  else
+    (* [escape_string] escapes the contents; the quotes are the caller's. *)
+    Printf.sprintf "runtime.lanes.\"%s\"" (Toml_line_editor.escape_string lane_id)
+;;
+
+let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
+  let lane_id = String.trim lane_id in
+  let runtime_ids = List.map String.trim runtime_ids in
+  if String.equal lane_id ""
+  then Error "lane id must not be empty"
+  else if contains_newline lane_id
+  then Error "lane id must not contain newlines"
+  else if runtime_ids = []
+  then
+    (* An empty list is not "no failover", it is a lane that resolves to
+       nothing. Removing a lane is a different edit than emptying it. *)
+    Error "a lane needs at least one candidate"
+  else if List.exists (String.equal "") runtime_ids
+  then Error "runtime_ids must not contain empty entries"
+  else if List.exists contains_newline runtime_ids
+  then Error "runtime_ids must not contain newlines"
+  else (
+    let* path = runtime_config_path_result ?runtime_config_path () in
+    let* locked =
+      with_runtime_config_write_lock path (fun () ->
+        let* content = load_file_result path in
+        let next =
+          Toml_line_editor.edit_table_multiline_array
+            content
+            ~path:(lane_table_path lane_id)
+            ~key:"candidates"
+            ~values:runtime_ids
+        in
+        commit_runtime_config_text ~path next)
+    in
+    let* receipt = locked.value in
+    Ok (attach_lock_warnings locked.warnings receipt))
+;;
+
 (* RFC-0206 single-binding: the deleted [Runtime_runtime.resolve_*_max_context]
    scanned model labels across a runtime's candidates and folded the max. Under
    single-binding every keeper uses the default runtime, so the context budget

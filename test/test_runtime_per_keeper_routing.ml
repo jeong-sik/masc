@@ -889,6 +889,118 @@ let test_runtime_route_writer_rejects_unknown_default_without_write () =
       (Runtime.get_default_runtime_id ()))
 ;;
 
+(* The Runtime screen's failover picker names the lane under the cursor, and
+   those names are runtime ids. Before this writer existed the picker had
+   nowhere to post: the route parser admitted only "default" and
+   "media_failover", so every pick came back "unknown runtime routing lane". *)
+let test_lane_candidates_create_the_lane_table () =
+  with_runtime_file (fun path ->
+    (match
+       Runtime.set_runtime_lane_candidates
+         ~runtime_config_path:path
+         ~lane_id:"openai.gpt"
+         ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ]
+         ()
+     with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "set_runtime_lane_candidates failed: %s" msg);
+    let written = Fs_compat.load_file path in
+    Alcotest.(check bool)
+      "the dotted id is quoted, which is the header the file already uses"
+      true
+      (string_contains written {|[runtime.lanes."openai.gpt"]|});
+    Alcotest.(check bool)
+      "both candidates are written in order"
+      true
+      (string_contains written {|"openai.gpt"|}
+       && string_contains written {|"runpod_mtp.qwen"|});
+    match Runtime.resolve_assignment "openai.gpt" with
+    | `Missing -> Alcotest.fail "the lane disappeared after being written"
+    | `Lane lane ->
+      Alcotest.(check (list string))
+        "the resolver reads back the failover order it was given"
+        [ "openai.gpt"; "runpod_mtp.qwen" ]
+        (Runtime_lane.ordered_candidates lane))
+;;
+
+let test_lane_candidates_replace_rather_than_append () =
+  with_runtime_file (fun path ->
+    let write ids =
+      match
+        Runtime.set_runtime_lane_candidates
+          ~runtime_config_path:path
+          ~lane_id:"openai.gpt"
+          ~runtime_ids:ids
+          ()
+      with
+      | Ok _ -> ()
+      | Error msg -> Alcotest.failf "write failed: %s" msg
+    in
+    write [ "openai.gpt"; "runpod_mtp.qwen" ];
+    write [ "openai.gpt" ];
+    let written = Fs_compat.load_file path in
+    let headers =
+      String.split_on_char '\n' written
+      |> List.filter (fun l ->
+        String.equal (String.trim l) {|[runtime.lanes."openai.gpt"]|})
+    in
+    Alcotest.(check int) "one lane table, not two" 1 (List.length headers);
+    match Runtime.resolve_assignment "openai.gpt" with
+    | `Missing -> Alcotest.fail "the lane disappeared"
+    | `Lane lane ->
+      (* [with_terminal_default] appends the default, so a single declared
+         candidate resolves to two. That is the point of the terminal: a lane
+         is never shorter than "this runtime, then the default". *)
+      Alcotest.(check (list string))
+        "the second write replaced the first"
+        [ "openai.gpt"; "runpod_mtp.qwen" ]
+        (Runtime_lane.ordered_candidates lane))
+;;
+
+let test_lane_candidates_reject_an_empty_ladder () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    (match
+       Runtime.set_runtime_lane_candidates
+         ~runtime_config_path:path
+         ~lane_id:"openai.gpt"
+         ~runtime_ids:[]
+         ()
+     with
+     | Ok _ -> Alcotest.fail "an empty candidate list must not be written"
+     | Error msg ->
+       Alcotest.(check bool)
+         "the refusal says a lane needs a candidate"
+         true
+         (string_contains msg "at least one candidate"));
+    Alcotest.(check string)
+      "runtime.toml is untouched by the refusal"
+      before
+      (Fs_compat.load_file path))
+;;
+
+let test_lane_candidates_reject_an_unknown_candidate () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    (match
+       Runtime.set_runtime_lane_candidates
+         ~runtime_config_path:path
+         ~lane_id:"openai.gpt"
+         ~runtime_ids:[ "openai.gpt"; "missing.runtime" ]
+         ()
+     with
+     | Ok _ -> Alcotest.fail "a candidate that resolves to nothing must not be written"
+     | Error msg ->
+       Alcotest.(check bool)
+         "the refusal names the id it could not find"
+         true
+         (string_contains msg "missing.runtime"));
+    Alcotest.(check string)
+      "runtime.toml is untouched by the refusal"
+      before
+      (Fs_compat.load_file path))
+;;
+
 let test_runtime_route_writer_updates_media_failover () =
   with_runtime_file (fun path ->
     (match
@@ -2191,6 +2303,24 @@ let () =
             "historical qwen36 overflow fixture replays provider cap"
             `Quick
             test_historical_qwen36_context_overflow_fixture_replays_provider_cap
+        ] )
+    ; ( "lane candidate writer"
+      , [ Alcotest.test_case
+            "a picked lane gets its own table"
+            `Quick
+            test_lane_candidates_create_the_lane_table
+        ; Alcotest.test_case
+            "a second write replaces the ladder"
+            `Quick
+            test_lane_candidates_replace_rather_than_append
+        ; Alcotest.test_case
+            "an empty ladder is refused"
+            `Quick
+            test_lane_candidates_reject_an_empty_ladder
+        ; Alcotest.test_case
+            "an unresolvable candidate is refused"
+            `Quick
+            test_lane_candidates_reject_an_unknown_candidate
         ] )
     ; ( "materialize-failure diagnostics"
       , [ Alcotest.test_case

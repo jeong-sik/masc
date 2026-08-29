@@ -365,11 +365,15 @@ run_one() {
   local case_dir="$3"
   local repeat_index="$4"
 
-  local case_id timeout_sec verify_rel prompt
+  local case_id timeout_sec verify_rel prompt test_files
   case_id="$(jq -r '.id' "${case_dir}/case.json")"
   timeout_sec="$(jq -r '.timeout_sec' "${case_dir}/case.json")"
   verify_rel="$(jq -r '.verify' "${case_dir}/case.json")"
   prompt="$(jq -r '.prompt' "${case_dir}/case.json")"
+  # Protected test oracle files (one per line), restored pristine before
+  # grading. Defaults to check.sh when the key is absent — the corpus
+  # convention Coding_eval_case also defaults to.
+  test_files="$(jq -r '(.test_files // ["check.sh"])[]' "${case_dir}/case.json")"
 
   local run_id run_dir workspace evidence_path
   run_id="$(printf '%s-%s-%s-r%d' "${provider}" "${model}" "${case_id}" "${repeat_index}" \
@@ -511,6 +515,17 @@ run_one() {
   # The pass verdict stays status=ok AND verify_exit=0 (an unsettled episode
   # is not a completed task), and the report CLI enforces that equation.
   if [[ -d "${workspace}" ]]; then
+    # SWE-bench-style honest oracle: restore each protected test file from the
+    # case's canonical workspace before grading, so a run cannot pass by
+    # editing the very test it is judged on (the prompt's "do not modify
+    # check.sh" is guidance, not an enforced boundary).
+    while IFS= read -r test_file; do
+      [[ -z "${test_file}" ]] && continue
+      if [[ -f "${case_dir}/workspace/${test_file}" ]]; then
+        mkdir -p "${workspace}/$(dirname "${test_file}")"
+        cp -f "${case_dir}/workspace/${test_file}" "${workspace}/${test_file}"
+      fi
+    done <<< "${test_files}"
     set +e
     bash "${case_dir}/${verify_rel}" "${workspace}" \
       >"${run_dir}/verify.log" 2>&1

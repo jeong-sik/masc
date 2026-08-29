@@ -205,6 +205,79 @@ let test_row_disagreeing_with_its_verdict_is_refused () =
     check bool "error says the row disagrees" true (string_contains message "disagrees")
 ;;
 
+let base_case_fields =
+  [ "id", `String "x"
+  ; "level", `String "L1"
+  ; "lang", `String "python"
+  ; "timeout_sec", `Int 60
+  ; "verify", `String "verify.sh"
+  ; "prompt", `String "p"
+  ; "description", `String "d"
+  ]
+;;
+
+let test_test_files_defaults_to_check_sh () =
+  match Coding_eval_case.of_json (`Assoc base_case_fields) with
+  | Ok case ->
+    check (list string) "default protected oracle" [ "check.sh" ] case.test_files
+  | Error message -> Alcotest.failf "expected the default test_files, got: %s" message
+;;
+
+let test_test_files_rejects_traversal () =
+  let json =
+    `Assoc (base_case_fields @ [ "test_files", `List [ `String "../evil.sh" ] ])
+  in
+  match Coding_eval_case.of_json json with
+  | Ok _ -> Alcotest.fail "expected the .. path to be rejected"
+  | Error message ->
+    check bool "error names the traversal" true (string_contains message "..")
+;;
+
+let write_text_file path contents =
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel contents)
+;;
+
+(* The anti-gaming contract: a solution overlay may not ship its own copy of a
+   protected test oracle, because the graded run restores that file from the
+   case's canonical workspace. If the solution could carry [check.sh], a
+   candidate could be graded against a test it authored. *)
+let test_solution_may_not_ship_the_oracle () =
+  let root = temp_dir "coding_eval_oracle_" in
+  let case_id = "oracle-fixture" in
+  let dir = Filename.concat root case_id in
+  Sys.mkdir dir 0o755;
+  Sys.mkdir (Filename.concat dir "workspace") 0o755;
+  Sys.mkdir (Filename.concat dir "solution") 0o755;
+  write_text_file
+    (Filename.concat dir "case.json")
+    (Yojson.Safe.to_string
+       (`Assoc
+           [ "id", `String case_id
+           ; "level", `String "L1"
+           ; "lang", `String "bash"
+           ; "timeout_sec", `Int 60
+           ; "verify", `String "verify.sh"
+           ; "prompt", `String "p"
+           ; "description", `String "d"
+           ]));
+  write_text_file
+    (Filename.concat dir "verify.sh")
+    "#!/usr/bin/env bash\nbash \"$1/check.sh\"\n";
+  write_text_file
+    (Filename.concat (Filename.concat dir "workspace") "check.sh")
+    "exit 1\n";
+  write_text_file
+    (Filename.concat (Filename.concat dir "solution") "check.sh")
+    "exit 0\n";
+  match Coding_eval_case.load_case ~dir with
+  | Ok _ -> Alcotest.fail "expected the solution-shipped oracle to be rejected"
+  | Error message ->
+    check bool "error names the oracle" true (string_contains message "check.sh")
+;;
+
 let () =
   run
     "coding_eval_cases"
@@ -218,6 +291,18 @@ let () =
             "case.json rejects undeclared keys"
             `Quick
             test_case_json_rejects_undeclared_keys
+        ; test_case
+            "test_files defaults to check.sh"
+            `Quick
+            test_test_files_defaults_to_check_sh
+        ; test_case
+            "test_files rejects path traversal"
+            `Quick
+            test_test_files_rejects_traversal
+        ; test_case
+            "solution may not ship the oracle"
+            `Quick
+            test_solution_may_not_ship_the_oracle
         ] )
     ; ( "report"
       , [ test_case "fixed rows pipeline" `Quick test_report_pipeline_on_fixed_rows

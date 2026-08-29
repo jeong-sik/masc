@@ -124,6 +124,7 @@ import { App } from './app'
 import { performanceMonitor } from './lib/performance-monitor'
 import { startWebVitalsCapture } from './utils/performance-metrics'
 import { startNavTelemetry } from './lib/nav-telemetry'
+import { installWebmcpAgentSurface, webmcpModelContext } from './api/webmcp'
 import { THEME_STORAGE_KEYS, THEME_SEARCH_PARAM, type ThemeId } from './lib/theme'
 
 function normalizeTheme(raw: string | null): ThemeId {
@@ -206,3 +207,20 @@ startWebVitalsCapture()
 // RFC-0049 — surface/section open counters to /api/v1/dashboard/nav-event.
 // Aggregate only, no PII. Drives RFC-0048 IA decisions.
 startNavTelemetry()
+
+// WebMCP (Chrome origin trial) — relay the read-only masc tool allowlist to
+// document.modelContext so in-browser agents call tools instead of the DOM.
+// No-op on browsers without the surface.
+const webmcpSurface = webmcpModelContext(document)
+if (webmcpSurface) {
+  installWebmcpAgentSurface(webmcpSurface)
+    .then((report) => {
+      console.info('[webmcp] agent surface registered', report.registered)
+      if (report.missing.length > 0) {
+        console.warn('[webmcp] allowlisted tools missing from server catalog', report.missing)
+      }
+    })
+    .catch((err) => {
+      console.warn('[webmcp] agent surface install failed', err)
+    })
+}

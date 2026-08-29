@@ -1538,7 +1538,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
    turns a newline into the six characters [\x0A] and then cuts; an [Edit]
    carrying a page of code read as its first forty characters and there was
    no second screen. This is that screen. *)
-let approval_detail_pane (state : state) ~rows ~cols (row : approval_row) buf =
+let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_row) buf =
   let width = max 8 (cols - 6) in
   let fields =
     match row with
@@ -1578,6 +1578,9 @@ let approval_detail_pane (state : state) ~rows ~cols (row : approval_row) buf =
     Masc_tui_scroll.normalize ~count:(List.length lines) ~height:content_height
       state.approval_detail_scroll
   in
+  (* The pane is where the field count and the drawn height meet, so the row
+     it could actually use is reported back rather than recomputed outside. *)
+  clamped := scroll;
   let drawn =
     lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
   in
@@ -1609,8 +1612,9 @@ let render_approval_detail (state : state) (row : approval_row) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  let scroll = ref state.approval_detail_scroll in
   if cols < keeper_split_threshold_cols then
-    approval_detail_pane state ~rows ~cols row buf
+    approval_detail_pane state ~clamped:scroll ~rows ~cols row buf
   else begin
     let left_cols = keeper_roster_pane_cols in
     let left_buf = Buffer.create 1024 in
@@ -1621,14 +1625,15 @@ let render_approval_detail (state : state) (row : approval_row) =
       ~focused:false
       ~labels:(List.map approval_sidebar_label (approval_items state))
       ~selected:state.approval_cursor;
-    approval_detail_pane state ~rows ~cols:(cols - left_cols) row right_buf;
+    approval_detail_pane state ~clamped:scroll ~rows
+      ~cols:(cols - left_cols) row right_buf;
     write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf
   end;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:"j/k:scroll  y:confirm  n:deny  Esc:back");
-  finish_surface state ~surface_key:"approval-detail" ~rows:terminal_rows
-    ~cols buf
+  finish_surface state ~clamped:(Approval_detail_scroll !scroll)
+    ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 
 (* Drawn into its own buffer so the pane above can be told how many rows it
    has to give up. Counting the rows a second way is what let the section draw
@@ -10888,6 +10893,7 @@ let render_code (state : state) =
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
 
 let render_resources (state : state) =
+  let drawn_resource_scroll = ref state.resource_scroll in
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
@@ -10989,6 +10995,9 @@ let render_resources (state : state) =
          let total_lines = List.length rendered in
          let max_scroll = max 0 (total_lines - content_height) in
          let scroll = max 0 (min state.resource_scroll max_scroll) in
+         (* The pane is the only place that knows how many rows the text
+            actually used, so it reports the row it could draw back out. *)
+         drawn_resource_scroll := scroll;
          for i = 0 to content_height - 1 do
            match List.nth_opt rendered (scroll + i) with
            | Some line -> box_line pane_buf pane_cols ("  " ^ line)
@@ -11014,7 +11023,8 @@ let render_resources (state : state) =
          (Printf.sprintf
             "j/k:%s  h/l:pane  Enter:read  Ctrl-W:pane  Esc:list  r:reload  Tab:next"
             (if state.resource_focus = Right_pane then "scroll text" else "move")));
-  finish_surface state ~surface_key:"resources" ~rows:terminal_rows ~cols buf
+  finish_surface state ~clamped:(Resource_scroll !drawn_resource_scroll)
+    ~surface_key:"resources" ~rows:terminal_rows ~cols buf
 
 (* How long ago the running binary's commit landed. Coarse on purpose: the
    question is "is this the build I think it is", and minutes answer it while

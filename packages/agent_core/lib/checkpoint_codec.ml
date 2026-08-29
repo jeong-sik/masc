@@ -687,6 +687,92 @@ let checkpoint_json_result cp =
 let validate_checkpoint cp = Result.map ignore (checkpoint_json_result cp)
 let to_json_result = checkpoint_json_result
 
+(* #31677: one provider-authored unencodable payload — a duplicate object key
+   or a non-finite float anywhere a message carries raw json — poisons the
+   in-memory checkpoint forever, because [to_json] validates the whole tree
+   on every encode and the sink refuses the write, so the keeper dies at the
+   same stage of every later turn. The codec keeps rejecting (that is the
+   public contract); this is the named recovery operation the durable write
+   applies to a COPY: every json payload that cannot be canonically encoded
+   is removed, and the text around it stays. A required payload field
+   ([ToolUse.input], a reasoning detail's [raw]) becomes an empty object
+   rather than losing its block. [None] means nothing was droppable — the
+   refusal is not a payload problem, so the caller keeps the original
+   error instead of retrying. *)
+let encodable_json json =
+  match Execution_json.validate ~context:"Checkpoint v10 drop" json with
+  | Ok () -> true
+  | Error _ -> false
+;;
+
+let rec drop_unencodable_block (dropped : int ref) block =
+  let empty_object = `Assoc [] in
+  match block with
+  | ToolUse { id; name; input } ->
+    if encodable_json input then block
+    else (
+      incr dropped;
+      ToolUse { id; name; input = empty_object })
+  | ToolResult { tool_use_id; content; outcome; json; content_blocks } ->
+    let json =
+      match json with
+      | Some payload when not (encodable_json payload) ->
+        incr dropped;
+        None
+      | json -> json
+    in
+    let content_blocks =
+      match content_blocks with
+      | None -> None
+      | Some blocks ->
+        Some (List.map (drop_unencodable_block dropped) blocks)
+    in
+    ToolResult { tool_use_id; content; outcome; json; content_blocks }
+  | ReasoningDetails { reasoning_content; details } ->
+    let details =
+      details
+      |> List.map (fun (detail : Types.reasoning_detail) ->
+             if encodable_json detail.Types.raw then detail
+             else (
+               incr dropped;
+               { detail with Types.raw = empty_object }))
+    in
+    ReasoningDetails { reasoning_content; details }
+  | Text _ | Thinking _ | RedactedThinking _ | Image _ | Document _ | Audio _ ->
+    block
+;;
+
+let drop_unencodable_json cp =
+  match to_json_result cp with
+  | Ok _ -> None
+  | Error _ ->
+    let dropped = ref 0 in
+    let drop_metadata (name, value) =
+      if encodable_json value then Some (name, value)
+      else (
+        incr dropped;
+        None)
+    in
+    let messages =
+      cp.messages
+      |> List.map (fun (message : Types.message) ->
+             { message with
+               Types.metadata = List.filter_map drop_metadata message.Types.metadata
+             ; Types.content =
+                 List.map (drop_unencodable_block dropped) message.Types.content
+             })
+    in
+    let working_context =
+      match cp.working_context with
+      | Some payload when not (encodable_json payload) ->
+        incr dropped;
+        None
+      | working_context -> working_context
+    in
+    if !dropped = 0 then None
+    else Some { cp with messages; working_context }
+;;
+
 let validated_checkpoint_json_exn ~scope cp =
   match to_json_result cp with
   | Ok json -> json

@@ -896,6 +896,14 @@ module For_testing = struct
   ;;
 end
 
+let save_outcome_after_write ~session_dir ~known ckpt =
+  archive_agent_core_history_best_effort ~session_dir ckpt;
+  Ok
+    (Saved
+       { relation = save_relation ~known ~incoming:ckpt.turn_count
+       ; turn_count = ckpt.turn_count
+       })
+
 let save_agent_core_classified_typed
     ~(session_dir : string)
     (ckpt : Agent_core.Checkpoint.t)
@@ -934,21 +942,38 @@ let save_agent_core_classified_typed
       | Ok existing ->
         let known = Option.map (fun (w : watermark) -> w.turn_count) existing in
         let ownership_root = Filename.dirname session_dir in
-        (match
-           Keeper_fs.save_json_durable_atomic_from
-             ~ownership_root
-             ~pretty:false
-             canonical_path
-             (fun () -> Agent_core.Checkpoint.to_json ckpt)
-         with
-         | Error error -> Error (Canonical_write_failed error)
-         | Ok () ->
-           archive_agent_core_history_best_effort ~session_dir ckpt;
-           Ok
-             (Saved
-                { relation = save_relation ~known ~incoming:ckpt.turn_count
-                ; turn_count = ckpt.turn_count
-                })))
+        let write payload =
+          Keeper_fs.save_json_durable_atomic_from
+            ~ownership_root
+            ~pretty:false
+            canonical_path
+            (fun () -> Agent_core.Checkpoint.to_json payload)
+        in
+        (match write ckpt with
+         | Ok () -> save_outcome_after_write ~session_dir ~known ckpt
+         (* #31677: a payload-encode refusal means the in-memory checkpoint
+            carries a json payload the v10 contract cannot encode — a
+            provider-authored duplicate key or non-finite float. Without
+            recovery the write refuses at this stage of every later turn,
+            which is what bricked keepers for hours on 2026-08-29. The
+            codec still rejects the original; this drop-and-retry-once
+            stores the recovered copy, so the keeper survives and the next
+            restart loads a clean checkpoint. Any other stage failure (or a
+            refusal with nothing droppable) keeps the original error. *)
+         | Error ({ stage = Keeper_fs.Payload_encode; _ } as error) -> (
+           match Agent_core.Checkpoint.drop_unencodable_json ckpt with
+           | None -> Error (Canonical_write_failed error)
+           | Some recovered ->
+             Log.Keeper.warn
+               "checkpoint payload unencodable (%s); storing the recovery \
+                copy with the offending json dropped for %s"
+               (Keeper_fs.durable_write_error_to_string error)
+               ckpt.session_id;
+             (match write recovered with
+              | Error retry_error -> Error (Canonical_write_failed retry_error)
+              | Ok () ->
+                save_outcome_after_write ~session_dir ~known recovered))
+         | Error error -> Error (Canonical_write_failed error)))
 
 let save_agent_core_classified ~(session_dir : string) (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, string) result =

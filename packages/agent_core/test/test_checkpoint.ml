@@ -232,6 +232,48 @@ let () =
             | Ok _ -> fail "invalid current checkpoint was serialized")
         ; test_case "to_json_result Ok is serializable and decodable" `Quick (fun () ->
             check_checkpoint_json_contract (make_checkpoint ()))
+        ; test_case "drop_unencodable_json is None for an encodable checkpoint" `Quick (fun () ->
+            match Checkpoint.drop_unencodable_json (make_checkpoint ()) with
+            | None -> ()
+            | Some _ -> Alcotest.fail "an encodable checkpoint has nothing to drop")
+        ; test_case "drop_unencodable_json drops a duplicate-key ToolResult json" `Quick (fun () ->
+            let poisoned =
+              make_checkpoint
+                ~messages:
+                  [ message
+                      Types.Tool
+                      (Types.ToolResult
+                         { tool_use_id = "call-1"
+                         ; content = "result"
+                         ; outcome = Tool_succeeded
+                         ; json =
+                             Some (`Assoc [ ("k", `Int 1); ("k", `Int 2) ])
+                         ; content_blocks = None
+                         })
+                  ]
+                ()
+            in
+            check_checkpoint_rejected "duplicate-key ToolResult json" poisoned;
+            match Checkpoint.drop_unencodable_json poisoned with
+            | None -> Alcotest.fail "a duplicate-key payload is droppable"
+            | Some recovered -> check_checkpoint_json_contract recovered)
+        ; test_case "drop_unencodable_json is None for a non-payload refusal" `Quick (fun () ->
+            (* An identifier violation is not a json payload problem: there is
+               nothing to drop, so recovery must not offer a copy and the
+               caller keeps the original refusal. *)
+            let malformed =
+              make_checkpoint
+                ~messages:
+                  [ message
+                      Types.Assistant
+                      (Types.ToolUse { id = ""; name = "read"; input = `Assoc [] })
+                  ]
+                ()
+            in
+            check_checkpoint_rejected "empty ToolUse.id" malformed;
+            match Checkpoint.drop_unencodable_json malformed with
+            | None -> ()
+            | Some _ -> Alcotest.fail "a shape refusal has no droppable payload")
         ; test_case "blank tool identifiers are rejected" `Quick (fun () ->
             let tool_use id name =
               make_checkpoint

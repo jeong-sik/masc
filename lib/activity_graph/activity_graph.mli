@@ -176,6 +176,11 @@ module For_testing : sig
   (** Number of full retained-list aggregate rebuilds since the current-day
       cache was reset.  Repeated unchanged projections must reuse one build. *)
 
+  val past_merged_rebuild_count : unit -> int
+  (** Number of past-day merge rebuilds. An append to the current day misses
+      the aggregate but must not move this: the past files did not change,
+      and re-sorting them is the cost the split exists to avoid. *)
+
   val touch_workspace_cache : string -> unit
   val workspace_cache_count : unit -> int
   val workspace_cache_mem : string -> bool

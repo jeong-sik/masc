@@ -770,6 +770,62 @@ let test_current_day_cache_rebuilds_once_per_fingerprint () =
       check int "unchanged fingerprint reuses cache" 2
         (Activity_graph.For_testing.current_day_rebuild_count ()))
 
+(* The aggregate is keyed on every file including today's, and today's grows
+   on nearly every tick, so an append misses it. What must NOT happen on that
+   miss is re-sorting the whole retained history: the past files did not move.
+   On the live store 2026-08-29 that history was 440,068 events against 6,072
+   in the current day, and every miss re-sorted all of them for a page of
+   500. *)
+let test_append_reuses_the_past_day_merge () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      let past_lines = write_past_day_file config ~lines:5 in
+      ignore past_lines;
+      emit_n config 3;
+      let first =
+        Activity_graph.list_events config ~after_seq:0 ~limit:100
+          ~keep:(fun _ -> true) ()
+      in
+      check int "first read sees both days" 8 (List.length first);
+      check int "the past merge is built once" 1
+        (Activity_graph.For_testing.past_merged_rebuild_count ());
+      emit_n config 2;
+      let second =
+        Activity_graph.list_events config ~after_seq:0 ~limit:100
+          ~keep:(fun _ -> true) ()
+      in
+      check int "the append is visible" 10 (List.length second);
+      check bool "the aggregate was rebuilt" true
+        (Activity_graph.For_testing.all_events_rebuild_count () >= 2);
+      check int "but the past merge was not" 1
+        (Activity_graph.For_testing.past_merged_rebuild_count ());
+      let seqs = List.map (fun (e : Activity_graph.event) -> e.seq) second in
+      check (list int) "and the merge stays seq-ordered"
+        (List.sort Int.compare seqs) seqs)
+;;
+
+(* The reuse is keyed on the past files' own signature, so a new past file
+   has to rebuild it -- otherwise the split would serve a stale history. *)
+let test_a_new_past_file_rebuilds_the_merge () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      emit_n config 2;
+      ignore
+        (Activity_graph.list_events config ~after_seq:0 ~limit:100
+           ~keep:(fun _ -> true) ());
+      let before = Activity_graph.For_testing.past_merged_rebuild_count () in
+      ignore (write_past_day_file config ~lines:4);
+      let after_write =
+        Activity_graph.list_events config ~after_seq:0 ~limit:100
+          ~keep:(fun _ -> true) ()
+      in
+      check int "the new past file is visible" 6 (List.length after_write);
+      check bool "and the past merge was rebuilt for it" true
+        (Activity_graph.For_testing.past_merged_rebuild_count () > before))
+;;
+
 let test_default_projections_share_unchanged_event_aggregate () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
@@ -1064,6 +1120,10 @@ let () =
             test_current_day_cache_rebuilds_once_per_fingerprint;
           Alcotest.test_case "unchanged projections share sorted aggregate"
             `Quick test_default_projections_share_unchanged_event_aggregate;
+          test_case "append reuses the past-day merge" `Quick
+            test_append_reuses_the_past_day_merge;
+          test_case "a new past file rebuilds the merge" `Quick
+            test_a_new_past_file_rebuilds_the_merge;
           Alcotest.test_case "same-size rewrite invalidates cache" `Quick
             test_same_size_rewrite_invalidates_current_day_cache;
           Alcotest.test_case "truncate-regrow is not append" `Quick

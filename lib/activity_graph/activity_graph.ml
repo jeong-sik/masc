@@ -315,6 +315,16 @@ type all_events_workspace_cache =
   { root : string
   ; mutex : Stdlib.Mutex.t
   ; mutable entry : all_events_cache_entry option
+  ; (* The merged, seq-sorted events of every file EXCEPT the current day,
+       keyed on those files' own signature. [entry] above is keyed on every
+       file including today's, and today's grows on nearly every tick, so
+       [entry] misses almost always -- 2026-08-29 measured 6,072 of 440,068
+       retained events (1.4%) landing in the current-day file. Without this
+       the miss re-concatenated and re-sorted all 440,068 on every miss, for
+       a page of 500. Past files never change once the day rolls over, so
+       their merge is computed once and reused until a file is added,
+       rotated, or evicted. *)
+    mutable past_merged : all_events_cache_entry option
   ; mutable past_day_cache :
       (file_fingerprint * event list) Past_day_path_map.t
   ; current_day_cache : (string, current_day_entry) Hashtbl.t
@@ -335,6 +345,11 @@ let all_events_workspace_caches_mu = Stdlib.Mutex.create ()
 let all_events_workspace_cache_limit = 16
 let all_events_workspace_use_counter = ref 0
 let all_events_rebuild_counter = Atomic.make 0
+
+(* Rebuilds of the past-day merge specifically. [all_events_rebuild_counter]
+   above counts aggregate misses, which happen on nearly every append; this
+   one has to stay flat across those, because the past files did not move. *)
+let past_merged_rebuild_counter = Atomic.make 0
 
 let evict_lru_idle_workspace_cache () =
   let candidate =
@@ -375,6 +390,7 @@ let acquire_all_events_workspace_cache root =
         { root
         ; mutex = Stdlib.Mutex.create ()
         ; entry = None
+        ; past_merged = None
         ; past_day_cache = Past_day_path_map.empty
         ; current_day_cache = Hashtbl.create 1
         ; last_used
@@ -400,7 +416,8 @@ let reset_all_events_cache_for_testing () =
   Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
     Hashtbl.reset all_events_workspace_caches;
     all_events_workspace_use_counter := 0);
-  Atomic.set all_events_rebuild_counter 0
+  Atomic.set all_events_rebuild_counter 0;
+  Atomic.set past_merged_rebuild_counter 0
 ;;
 
 let current_day_rebuild_counter = Atomic.make 0
@@ -514,36 +531,62 @@ let read_all_events config =
          | Some cached when same_file_signature cached.signature signature ->
            cached.events
          | None | Some _ ->
-           let events =
-             files
-             |> List.fold_left
-                  (fun acc path ->
-                     let rows =
-                       if String.equal path current_day
-                       then parse_current_day_events_cached cache config path
-                       else
-                         match file_fingerprint path with
-                         | None -> parse_events_from_file config path
-                         | Some fingerprint ->
-                           (match Past_day_path_map.find_opt path cache.past_day_cache with
-                            | Some (cached_fingerprint, parsed)
-                              when same_file_fingerprint
-                                     cached_fingerprint
-                                     fingerprint ->
-                              parsed
-                            | None | Some _ ->
-                              let parsed = parse_events_from_file config path in
-                              cache.past_day_cache <-
-                                Past_day_path_map.add
-                                  path
-                                  (fingerprint, parsed)
-                                  cache.past_day_cache;
-                              parsed)
-                     in
-                     List.rev_append rows acc)
-                  []
-             |> List.sort (fun a b -> Int.compare a.seq b.seq)
+           let by_seq (a : event) (b : event) = Int.compare a.seq b.seq in
+           let past_files =
+             List.filter (fun path -> not (String.equal path current_day)) files
            in
+           let past_signature = signature_for past_files in
+           let past_events =
+             match cache.past_merged with
+             | Some cached
+               when same_file_signature cached.signature past_signature ->
+               cached.events
+             | None | Some _ ->
+               let merged =
+                 past_files
+                 |> List.fold_left
+                      (fun acc path ->
+                         let rows =
+                           match file_fingerprint path with
+                           | None -> parse_events_from_file config path
+                           | Some fingerprint ->
+                             (match
+                                Past_day_path_map.find_opt path cache.past_day_cache
+                              with
+                              | Some (cached_fingerprint, parsed)
+                                when same_file_fingerprint
+                                       cached_fingerprint
+                                       fingerprint ->
+                                parsed
+                              | None | Some _ ->
+                                let parsed = parse_events_from_file config path in
+                                cache.past_day_cache <-
+                                  Past_day_path_map.add
+                                    path
+                                    (fingerprint, parsed)
+                                    cache.past_day_cache;
+                                parsed)
+                         in
+                         List.rev_append rows acc)
+                      []
+                 |> List.sort by_seq
+               in
+               Atomic.incr past_merged_rebuild_counter;
+               cache.past_merged <-
+                 Some { signature = past_signature; events = merged };
+               merged
+           in
+           let current_events =
+             if List.exists (fun path -> String.equal path current_day) files
+             then
+               parse_current_day_events_cached cache config current_day
+               |> List.sort by_seq
+             else []
+           in
+           (* Both sides are seq-sorted, so the join is a linear merge rather
+              than a sort of the concatenation. Sorting the whole retained
+              history was the cost this split removes. *)
+           let events = List.merge by_seq past_events current_events in
            Atomic.incr all_events_rebuild_counter;
            let files_after = collect_event_files config in
            let signature_after = signature_for files_after in
@@ -1030,6 +1073,7 @@ module For_testing = struct
   let reset_past_day_cache_for_testing = reset_past_day_cache_for_testing
   let current_day_rebuild_count () = Atomic.get current_day_rebuild_counter
   let all_events_rebuild_count () = Atomic.get all_events_rebuild_counter
+  let past_merged_rebuild_count () = Atomic.get past_merged_rebuild_counter
   let touch_workspace_cache root =
     let cache = acquire_all_events_workspace_cache root in
     release_all_events_workspace_cache cache

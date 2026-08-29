@@ -8258,17 +8258,30 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         if payload.get("method") != "initialize":
             raise AssertionError(f"MCP POST was not an initialize: {payload!r}")
         # The one frame the fixture streamed is a row on the Acting surface.
+        # The default view folds it into a turn chunk: the running turn names
+        # its in-flight call.
         acting = send_and_wait(process, master_fd, output, b"\t", b"MASC Acting")
         for needle, what in (
-            (b"(1 of 1 held, actions)", "the held and shown counts"),
+            (b"(1 of 1 held, turns)", "the held and shown counts"),
             (b"alpha", "the keeper that acted"),
+            (b"turn 7", "the turn"),
+            (b"read_file", "the in-flight tool"),
+        ):
+            if needle not in acting:
+                raise AssertionError(f"Acting did not draw {what}: {acting!r}")
+        # One f lands on the flat actions log, where the call is its own row
+        # and carries the task.
+        flat = send_and_wait(
+            process, master_fd, output, b"f", b"(1 of 1 held, actions)"
+        )
+        for needle, what in (
             ("\u25b6 call".encode(), "the call glyph and label"),
             (b"read_file", "the tool"),
             (b"turn 7", "the turn"),
             (b"task-1", "the task"),
         ):
-            if needle not in acting:
-                raise AssertionError(f"Acting did not draw {what}: {acting!r}")
+            if needle not in flat:
+                raise AssertionError(f"Actions did not draw {what}: {flat!r}")
         os.write(master_fd, b"q")
 
     return interact

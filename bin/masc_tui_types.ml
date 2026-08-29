@@ -2372,7 +2372,7 @@ let create_state
   acting_undecodable_last = None;
   acting_scroll = 0;
   acting_unseen = 0;
-  acting_filter = Masc_tui_acting.Actions;
+  acting_filter = Masc_tui_acting.Turns;
   verification = None;
   verification_error = None;
   verification_scroll = 0;

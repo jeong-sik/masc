@@ -1,0 +1,33 @@
+name = "keeper_webmcp_call"
+description = """
+Execute one WebMCP tool a browser page has registered on \
+document.modelContext, with a JSON object as arguments. Discover names and \
+schemas with keeper_webmcp_list first. Requires an operator-run headed Chrome \
+with --enable-features=WebMCP and --remote-debugging-port, and the target \
+page already open; when a prerequisite is missing the call fails immediately \
+with the reason instead of retrying. Returns JSON {found, result} where \
+result is the page tool's MCP-style content."""
+additional_properties = false
+
+[[params]]
+name = "page"
+type = "string"
+required = true
+description = "Substring matched against open page URLs to pick the target page, for example 8935/dashboard."
+
+[[params]]
+name = "tool"
+type = "string"
+required = true
+description = "Registered WebMCP tool name on that page, exactly as keeper_webmcp_list reports it."
+
+[[params]]
+name = "args_json"
+type = "string"
+required = true
+description = "Arguments for the page tool as one JSON object string, for example {\"limit\":3}. Pass {} when the tool takes none."
+
+[[params]]
+name = "cdp_port"
+type = "integer"
+description = "Chrome DevTools port on 127.0.0.1. Defaults to 9222."

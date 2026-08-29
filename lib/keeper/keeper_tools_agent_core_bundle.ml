@@ -311,7 +311,11 @@ let make_tool_bundle_for_descriptors_with_policy
                   handle in the caller's hands if the call then fails, which
                   is the same shape of loss Execute has. *)
                | Keeper_tool_descriptor.Tool_execute
-               | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch ->
+               | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
+               (* A failed webmcp call may have already executed the page's
+                  tool — the bridge cannot prove otherwise — which is the
+                  same effect-outcome-unknown shape Execute has. *)
+               | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch ->
                  Some mark_terminal_effect_failed
                (* A code query starts a language server, but the pool owns it
                   and the turn ends it either way, so a failed call leaves the

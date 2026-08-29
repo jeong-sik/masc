@@ -100,6 +100,7 @@ let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
   | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
   | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
   | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch
   | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_status
@@ -234,6 +235,7 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) input =
   | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
   | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
   | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch
   | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_status

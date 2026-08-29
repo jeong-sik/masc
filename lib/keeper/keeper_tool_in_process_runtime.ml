@@ -1706,6 +1706,19 @@ let handle_keeper_code_query_with_outcome ~(config : Workspace.config) ~(meta : 
   |> dispatch_option_to_execution ~name
 ;;
 
+(* A failed webmcp call cannot prove the page's tool did not run — the bridge
+   may die after executeTool started — so call failures carry
+   [Effect_outcome_unknown]; the list tool never executes anything. *)
+let handle_keeper_webmcp_with_outcome ~name ~args =
+  let failure_effect_disposition =
+    if String.equal name Keeper_tool_webmcp.call_tool_name
+    then Some Tool_result.Effect_outcome_unknown
+    else None
+  in
+  Keeper_tool_webmcp.dispatch ~name ~args
+  |> dispatch_option_to_execution ?failure_effect_disposition ~name
+;;
+
 let handle_keeper_spawn_with_outcome ~name ~args =
   match Spawn_turn_registry.get_opt (), Eio_context.get_switch_opt () with
   | Some registry, Some sw ->

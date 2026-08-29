@@ -144,6 +144,7 @@ type runtime_handler =
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
   | Tool_keeper_code_query_dispatch
+  | Tool_keeper_webmcp_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status

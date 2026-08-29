@@ -105,6 +105,7 @@ let tag_of_runtime_handler
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_keeper_webmcp_dispatch
   | Tool_analyze_image -> Mod_external
 
 (** Resolve only exact schema or descriptor membership. *)

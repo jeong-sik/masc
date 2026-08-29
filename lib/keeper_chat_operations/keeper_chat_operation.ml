@@ -168,7 +168,11 @@ let validate_nonblank ~field value =
   else Ok value
 ;;
 
-let canonical_json_string value =
+type canonical_json_error =
+  | Duplicate_object_key of string
+  | Non_finite_float
+
+let canonical_json value =
   let rec normalize = function
     | `Assoc fields ->
       let rec loop seen normalized = function
@@ -178,7 +182,7 @@ let canonical_json_string value =
           |> fun fields -> Ok (`Assoc fields)
         | (name, value) :: rest ->
           if List.mem name seen
-          then Error (Printf.sprintf "JSON has duplicate field %S" name)
+          then Error (Duplicate_object_key name)
           else
             (match normalize value with
              | Error _ as error -> error
@@ -195,11 +199,22 @@ let canonical_json_string value =
       in
       loop [] values
     | `Float value when not (Float.is_finite value) ->
-      Error "JSON contains a non-finite float"
+      Error Non_finite_float
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
       Ok value
   in
-  normalize value |> Result.map Yojson.Safe.to_string
+  normalize value
+;;
+
+let canonical_json_error_to_string = function
+  | Duplicate_object_key name -> Printf.sprintf "JSON has duplicate field %S" name
+  | Non_finite_float -> "JSON contains a non-finite float"
+;;
+
+let canonical_json_string value =
+  canonical_json value
+  |> Result.map Yojson.Safe.to_string
+  |> Result.map_error canonical_json_error_to_string
 ;;
 
 let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)

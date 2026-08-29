@@ -52,6 +52,10 @@ type object_name =
   | Origin
   | Invocation
 
+type canonical_json_error =
+  | Duplicate_object_key of string
+  | Non_finite_float
+
 type decode_error =
   | Expected_object of object_name
   | Duplicate_field of
@@ -87,11 +91,14 @@ type decode_error =
   | Invalid_completion_schedule of string
   | Invalid_plan of Keeper_tool_plan_request.error
   | Invalid_checkpoint of Agent_core.Error.t
+  | Non_canonical_json of canonical_json_error
 
 type create_error =
   | Unbound_plan of Keeper_tool_plan_request.encode_error
   | Create_negative_invocation_turn of int
   | Create_invalid_invocation_schedule of string
+  | Create_invalid_checkpoint of Agent_core.Error.t
+  | Create_non_canonical_json of canonical_json_error
 
 val create
   :  composition_run_id:Keeper_tool_plan.Composition_run_id.t
@@ -102,7 +109,9 @@ val create
   -> accepted_checkpoint:Agent_core.Checkpoint.t
   -> (t, create_error) result
 (** Construction rejects plans with unbound parameters, negative invocation
-    turns, invalid schedules, and invalid completion/schedule combinations. *)
+    turns, invalid schedules, invalid completion/schedule combinations,
+    malformed checkpoints, duplicate JSON object keys, and non-finite JSON
+    numbers. *)
 
 val to_yojson
   :  t

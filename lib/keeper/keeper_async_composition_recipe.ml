@@ -68,6 +68,10 @@ type object_name =
   | Origin
   | Invocation
 
+type canonical_json_error = Keeper_chat_operation.canonical_json_error =
+  | Duplicate_object_key of string
+  | Non_finite_float
+
 type decode_error =
   | Expected_object of object_name
   | Duplicate_field of
@@ -102,11 +106,14 @@ type decode_error =
   | Invalid_completion_schedule of string
   | Invalid_plan of Plan_request.error
   | Invalid_checkpoint of Agent_core.Error.t
+  | Non_canonical_json of canonical_json_error
 
 type create_error =
   | Unbound_plan of Plan_request.encode_error
   | Create_negative_invocation_turn of int
   | Create_invalid_invocation_schedule of string
+  | Create_invalid_checkpoint of Agent_core.Error.t
+  | Create_non_canonical_json of canonical_json_error
 
 let ( let* ) = Result.bind
 
@@ -181,6 +188,26 @@ let invocation_to_yojson invocation =
     ]
 ;;
 
+let recipe_to_yojson
+      ~composition_run_id
+      ~origin
+      ~accepted_surface_digest
+      ~plan
+      ~invocation
+      ~accepted_checkpoint
+  =
+  `Assoc
+    [ ( "composition_run_id"
+      , `String (Plan.Composition_run_id.to_string composition_run_id) )
+    ; "origin", origin_to_yojson origin
+    ; ( "accepted_surface_digest"
+      , `String (Accepted_surface_digest.to_string accepted_surface_digest) )
+    ; "plan", plan
+    ; "invocation", invocation_to_yojson invocation
+    ; "accepted_checkpoint", accepted_checkpoint
+    ]
+;;
+
 let create
       ~composition_run_id
       ~origin
@@ -189,9 +216,13 @@ let create
       ~invocation
       ~accepted_checkpoint
   =
-  let* _ =
+  let* plan_json =
     Plan_request.to_yojson plan
     |> Result.map_error (fun error -> Unbound_plan error)
+  in
+  let* checkpoint_json =
+    Agent_core.Checkpoint.to_json_result accepted_checkpoint
+    |> Result.map_error (fun error -> Create_invalid_checkpoint error)
   in
   let turn = Tool_contract.Invocation.turn invocation in
   if turn < 0
@@ -202,6 +233,19 @@ let create
     let* () =
       Schedule.validate_completion_message ~completion schedule
       |> Result.map_error (fun detail -> Create_invalid_invocation_schedule detail)
+    in
+    let recipe_json =
+      recipe_to_yojson
+        ~composition_run_id
+        ~origin
+        ~accepted_surface_digest
+        ~plan:plan_json
+        ~invocation
+        ~accepted_checkpoint:checkpoint_json
+    in
+    let* _ =
+      Keeper_chat_operation.canonical_json recipe_json
+      |> Result.map_error (fun error -> Create_non_canonical_json error)
     in
     Ok
       { composition_run_id
@@ -216,16 +260,13 @@ let create
 let to_yojson recipe =
   let* plan = Plan_request.to_yojson recipe.plan in
   Ok
-    (`Assoc
-      [ ( "composition_run_id"
-        , `String (Plan.Composition_run_id.to_string recipe.composition_run_id) )
-      ; "origin", origin_to_yojson recipe.origin
-      ; ( "accepted_surface_digest"
-        , `String (Accepted_surface_digest.to_string recipe.accepted_surface_digest) )
-      ; "plan", plan
-      ; "invocation", invocation_to_yojson recipe.invocation
-      ; "accepted_checkpoint", Agent_core.Checkpoint.to_json recipe.accepted_checkpoint
-      ])
+    (recipe_to_yojson
+       ~composition_run_id:recipe.composition_run_id
+       ~origin:recipe.origin
+       ~accepted_surface_digest:recipe.accepted_surface_digest
+       ~plan
+       ~invocation:recipe.invocation
+       ~accepted_checkpoint:(Agent_core.Checkpoint.to_json recipe.accepted_checkpoint))
 ;;
 
 let origin_of_yojson json =
@@ -336,6 +377,10 @@ let of_yojson ~descriptors json =
   let* accepted_checkpoint =
     Agent_core.Checkpoint.of_json checkpoint_json
     |> Result.map_error (fun error -> Invalid_checkpoint error)
+  in
+  let* _ =
+    Keeper_chat_operation.canonical_json json
+    |> Result.map_error (fun error -> Non_canonical_json error)
   in
   Ok
     { composition_run_id

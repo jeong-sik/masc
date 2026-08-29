@@ -3975,7 +3975,12 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
           [ Ansi.dim ^ "j/k move" ^ Ansi.reset
           ; toggle
           ; hint Keeper_control.Wakeup "wake"
-          ; hint Keeper_control.Shutdown "shutdown"
+          (* RFC tui-server-lifecycle: with no server up, "s" starts one
+             rather than shutting a keeper down, so the hint follows suit. *)
+          ; (match state.connection_status with
+             | Disconnected -> Ansi.cyan ^ "s" ^ Ansi.reset ^ " start server"
+             | Connecting | Reconnecting | Degraded | Connected ->
+                 hint Keeper_control.Shutdown "shutdown")
           ; Ansi.cyan ^ "e" ^ Ansi.reset ^ " settings"
           ; Ansi.cyan ^ "a" ^ Ansi.reset ^ " new"
           ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"

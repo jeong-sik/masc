@@ -874,6 +874,7 @@
   masc_workspace
   masc_backend
   masc_process
+  masc_tui_server_lifecycle
   masc_eio_context
   masc.http_client
   uri

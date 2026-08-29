@@ -1544,6 +1544,85 @@ let enqueue_dispatch_start mailbox request was_replay =
    one of them gone there is nothing left to disagree. *)
 let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
 
+(* RFC tui-server-lifecycle: the one masc server this TUI started, if any.
+   Held at module scope because the switch cleanup in [run_with_eio_context]
+   is registered before [main] builds the per-session [state], so the
+   cleanup and the key handler need a shared handle neither owns. *)
+let tui_owned_server : Masc_tui_server_lifecycle.owned_server option ref =
+  ref None
+
+(* Resolve [name] on $PATH — the fallback after the sibling-binary probe.
+   [Sys.file_exists] is the same presence test the installer's layout gives
+   us; the executable bit is not re-checked here because a non-executable
+   [masc] on PATH is a broken install the spawn will report on its own. *)
+let find_executable_in_path name =
+  match Sys.getenv_opt "PATH" with
+  | None -> None
+  | Some path ->
+      String.split_on_char ':' path
+      |> List.find_map (fun dir ->
+             if String.equal dir "" then None
+             else
+               let candidate = Filename.concat dir name in
+               if Sys.file_exists candidate then Some candidate else None)
+
+(* Opt-in start of a masc server from inside the TUI. [note] surfaces one
+   line to the operator; [on_ready] fires once /health answers so the caller
+   can trigger a reconnect. Never starts a second server while one is owned;
+   the health wait runs in a forked fiber so the render loop stays live. *)
+let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
+  match !tui_owned_server with
+  | Some _ -> note "masc server is already starting"
+  | None -> (
+      match
+        Masc_tui_server_lifecycle.discover_server_binary
+          ~tui_exe:Sys.executable_name ~file_exists:Sys.file_exists
+          ~path_lookup:find_executable_in_path ~base_path ~host ~port
+      with
+      | Masc_tui_server_lifecycle.Not_found { manual_command } ->
+          note ("masc server binary not found; start it with: " ^ manual_command)
+      | Masc_tui_server_lifecycle.Sibling masc_bin
+      | Masc_tui_server_lifecycle.On_path masc_bin -> (
+          match
+            Masc_tui_server_lifecycle.start ~masc_bin ~base_path ~host ~port
+              ~env:(Unix.environment ())
+          with
+          | Error e -> note ("masc server start failed: " ^ e)
+          | Ok owned -> (
+              tui_owned_server := Some owned;
+              note "starting masc server here...";
+              match Eio_context.get_switch_opt () with
+              | None -> ()
+              | Some sw ->
+                  Eio.Fiber.fork ~sw (fun () ->
+                      let health_ok () =
+                        match
+                          Masc_tui_http.http_get ~host ~port ~path:"/health"
+                        with
+                        | Ok (200, _) -> true
+                        | Ok _ | Error _ -> false
+                      in
+                      let sleep () =
+                        match Eio_context.get_clock_opt () with
+                        | Some clock -> Eio.Time.sleep clock 0.5
+                        | None -> ()
+                      in
+                      match
+                        Masc_tui_server_lifecycle.wait_healthy ~health_ok
+                          ~child_alive:(fun () ->
+                            Masc_tui_server_lifecycle.is_running owned)
+                          ~attempts:60 ~sleep
+                      with
+                      | Masc_tui_server_lifecycle.Ready ->
+                          note "masc server is up";
+                          on_ready ()
+                      | Masc_tui_server_lifecycle.Server_exited ->
+                          tui_owned_server := None;
+                          note "masc server exited before it was ready"
+                      | Masc_tui_server_lifecycle.Timed_out _ ->
+                          note "masc server did not answer /health in time")))
+      )
+
 (* Send the turn and read it as it arrives.
 
    Bounding the silence needs a clock. Without one the buffered send is used
@@ -12750,8 +12829,22 @@ and is loaded on demand through keeper_skill.
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) ->
-                handle_keeper_action state ~base_path ~mailbox:async_messages
-                  Keeper_control.Shutdown
+                (match state.connection_status with
+                 | Disconnected ->
+                     (* RFC tui-server-lifecycle: with no server up there is
+                        no keeper to shut down, so "s" starts one here. *)
+                     start_masc_server_here ~base_path ~host:server_peer_host
+                       ~port:state.port
+                       ~note:(fun msg -> add_event state "system" msg)
+                       ~on_ready:(fun () ->
+                         start_http_refresh state ~host:server_peer_host
+                           ~port:state.port ~intent:Revalidate
+                           ~refresh_inflight:http_refresh_inflight
+                           ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                           ~scoped_refresh_followup ~mailbox:async_messages)
+                 | Connecting | Reconnecting | Degraded | Connected ->
+                     handle_keeper_action state ~base_path
+                       ~mailbox:async_messages Keeper_control.Shutdown)
             | Board ->
                 (match state.board_mode with
                  | Board_compose -> ()
@@ -13096,6 +13189,13 @@ let run_with_eio_context f =
         Eio.Switch.run (fun sw ->
             Eio_guard.enable ();
             Eio.Switch.on_release sw Eio_guard.disable;
+            (* RFC tui-server-lifecycle: stop only a server this TUI started;
+               a server we merely connected to is not ours to kill. *)
+            Eio.Switch.on_release sw (fun () ->
+                match !tui_owned_server with
+                | Some owned ->
+                    Masc_tui_server_lifecycle.stop owned ~grace_sec:2.0
+                | None -> ());
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             Eio_context.set_env env;
             Eio_context.set_switch sw;

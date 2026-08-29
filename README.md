@@ -204,6 +204,11 @@ dune build --root . bin/masc_tui.exe
 `MASC_BASE_PATH` and then the current directory. `dune install` or an opam
 install puts the same program on `PATH` as `masc-tui`.
 
+When no server is answering on the port, the Keepers surface offers `s` to
+start one here: it launches the sibling `masc` binary as a child process,
+waits for `/health`, and stops that server again when the TUI exits. A server
+that was already running is left alone.
+
 ![MASC terminal UI](docs/screenshots/tui/2026-08-26/surfaces/01-overview.png)
 
 Keeper names and the base path in this frame were replaced with stand-ins of the

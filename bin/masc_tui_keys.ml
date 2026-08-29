@@ -288,11 +288,10 @@ let for_surface = function
           ~help:"the open file's working tree against HEAD (d or Esc closes)"
       ; b Act "Enter (history)" "open"
           ~help:"a commit answers with its pull request, from its (#N) and \
-                 the repository's remote; a keeper edit jumps the cursor \
-                 to the lines it wrote (B walks back)"
+                 the repository's remote"
       ; b Act "H" "history"
-          ~help:"the work over the open file: its commits and the recorded \
-                 keeper edits, newest first (H or Esc closes)"
+          ~help:"the commits that touched the open file, newest first \
+                 (H or Esc closes)"
       ]
       @ listing_meta
   | Tools ->

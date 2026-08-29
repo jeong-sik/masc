@@ -454,26 +454,6 @@ let fetch_ide_annotations ~(host : string) ~(port : int) ~(codebase : string)
           Error ("annotations were not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_ide_annotations json)
 
-(** The keeper edits recorded over [file_path] in [codebase]
-    ([/api/v1/ide/regions]). *)
-let fetch_ide_regions ~(host : string) ~(port : int) ~(codebase : string)
-    ~(file_path : string) : (Masc.Tui_decode.ide_region list, string) result =
-  let route =
-    Printf.sprintf "/api/v1/ide/regions?codebase=%s&file_path=%s"
-      (percent_encode_query_value codebase)
-      (percent_encode_query_value file_path)
-  in
-  match http_get ~host ~port ~path:route with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
-    ->
-      Error (Printf.sprintf "regions returned %d: %s" status body)
-  | Ok (_, body) -> (
-      match Yojson.Safe.from_string body with
-      | exception Yojson.Json_error detail ->
-          Error ("regions were not JSON: " ^ detail)
-      | json -> Masc.Tui_decode.decode_ide_regions json)
-
 (** Ask the language server about a name on a line
     ([GET /api/v1/lsp/question]). [question] is the route's own word
     (definition / hover); positions are 1-based both ways. *)

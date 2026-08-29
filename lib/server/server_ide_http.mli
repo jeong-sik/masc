@@ -1,15 +1,11 @@
-(** Server IDE HTTP — REST endpoints for observational IDE annotations
-    and code regions.
+(** Server IDE HTTP — REST endpoints for observational IDE annotations.
 
     Routes:
     - GET  /api/v1/ide/annotations
     - POST /api/v1/ide/annotations
     - DELETE /api/v1/ide/annotations/:id
-    - GET  /api/v1/ide/regions
     - GET  /api/v1/ide/events
     - GET  /api/v1/ide/presence
-    - GET  /api/v1/ide/cursors
-    - POST /api/v1/ide/cursors
 
     All routes use the workspace base resolution from
     {!Server_routes_http_routes_workspace} so the IDE reads/writes

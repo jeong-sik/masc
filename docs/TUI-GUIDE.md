@@ -772,16 +772,11 @@ in place:
 - `h`/`l` pan sideways by one display cell — the gutter stays put, the
   title says `(col N)`, and a double-width glyph on the boundary pads
   rather than splits.
-- `H` swaps the content for the work over the file: the commits that
-  touched it (`/api/v1/git/log`) woven with the recorded keeper edits
-  (`/api/v1/ide/regions`) into one timeline, newest first. The edits ride
-  only in repository scope — elsewhere the first row says why they are
-  missing, and the commits still show. `Enter` on the top visible row
-  opens it: a commit answers with its pull request link (its subject's
-  `(#N)` against the repository's registered remote), and a keeper edit
-  closes the history and jumps the cursor to the lines it wrote, with `B`
-  holding the way back. An untracked file honestly answers that no commit
-  or recorded edit touches it.
+- `H` swaps the content for the commits that touched the file
+  (`/api/v1/git/log`), newest first. `Enter` on the top visible row
+  answers with the commit's pull request link (its subject's `(#N)`
+  against the repository's registered remote). An untracked file honestly
+  answers that no commit touches it.
 - `d` swaps it for the working tree's diff against HEAD, drawn by the same
   renderer the Changes surface uses. A clean file says it matches its last
   commit.
@@ -792,10 +787,9 @@ in place:
   `m` answers in repository scope and says why not in the others. Inside
   the notes view `w` adds one through the `$EDITOR` form (kind: Comment /
   Decision / Question / Bookmark); the acting identity is the bearer's.
-- Once the notes or the history have been read (m or H), the lines they
-  anchor to carry a gutter mark — an accent dot for a note, a dim one for
-  a recorded keeper edit. The pane decorates only what is already loaded;
-  it does not fetch to decorate.
+- Once the notes have been read (m), the lines they anchor to carry a
+  gutter mark — an accent dot. The pane decorates only what is already
+  loaded; it does not fetch to decorate.
 - `K` asks the language server what a name on the cursor line is, and `D`
   where it is defined. The line's own names are the candidates (the pane
   has no character cursor): one name is asked about at once, several open
@@ -912,7 +906,7 @@ Per surface:
 | Left / `Esc` | Code | Close the overlay, then the file, then climb a directory |
 | `/`, `n` / `N` | Code | Jump the tree cursor to a match |
 | `h` / `l` | Code, file open | Pan the file sideways by one cell |
-| `H` | Code, file open | The work over the file: commits and recorded keeper edits, one timeline |
+| `H` | Code, file open | The commits that touched the file, newest first |
 | `d` | Code, file open | The working tree's diff against HEAD |
 | `m` | Code, file open, repository scope | The notes anchored to the file |
 | `w` | Code, notes view | Add a note through the `$EDITOR` form |

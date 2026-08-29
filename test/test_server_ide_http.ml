@@ -33,18 +33,10 @@ let test_delete_annotation_route_is_registered () =
     (has_route `DELETE "/api/v1/ide/annotations/" router)
 ;;
 
-let test_post_cursors_route_is_registered () =
-  let router = Server_ide_http.add_routes (Http.Router.create ()) in
-  check bool "POST /api/v1/ide/cursors" true
-    (has_route `POST "/api/v1/ide/cursors" router)
-;;
-
 let test_read_routes_stay_public () =
   let router = Server_ide_http.add_routes (Http.Router.create ()) in
   check bool "GET /api/v1/ide/annotations" true
-    (has_route `GET "/api/v1/ide/annotations" router);
-  check bool "GET /api/v1/ide/cursors" true
-    (has_route `GET "/api/v1/ide/cursors" router)
+    (has_route `GET "/api/v1/ide/annotations" router)
 ;;
 
 (* ── End-to-end request/response harness ─────────────────────────────── *)
@@ -459,238 +451,6 @@ let test_post_annotations_rejects_unknown_route_fields () =
       (error_code_of_response response))
 ;;
 
-let test_post_cursors_rejects_client_keeper_id () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
-    let body = {|{"file_path":"lib/a.ml","line":1,"keeper_id":"bob"}|} in
-    let request = http_request ~meth:`POST ~path:"/api/v1/ide/cursors" ~body ~token:(Some token) () in
-    let response = dispatch router request in
-    check_status "POST cursor with keeper_id returns 403" 403 response)
-;;
-
-let test_post_cursors_rejects_invalid_focus_mode () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
-    let body = {|{"file_path":"lib/a.ml","line":1,"focus_mode":"hovering"}|} in
-    let request = http_request ~meth:`POST ~path:"/api/v1/ide/cursors" ~body ~token:(Some token) () in
-    let response = dispatch router request in
-    check_status "POST cursor with invalid focus_mode returns 400" 400 response;
-    let json = response |> response_body |> Yojson.Safe.from_string in
-    check
-      string
-      "invalid focus_mode error"
-      "focus_mode must be one of reading, editing, reviewing, planning"
-      (json_string_member "invalid focus_mode response" "error" json);
-    check
-      string
-      "invalid focus_mode code"
-      "invalid_focus_mode"
-      (json_string_member "invalid focus_mode response" "code" json))
-;;
-
-let test_post_cursors_rejects_negative_column () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
-    let body = {|{"file_path":"lib/a.ml","line":7,"column":-1}|} in
-    let request =
-      http_request ~meth:`POST ~path:"/api/v1/ide/cursors" ~body ~token:(Some token) ()
-    in
-    let response = dispatch router request in
-    check_status "POST cursor with negative column returns 400" 400 response;
-    let json = response |> response_body |> Yojson.Safe.from_string in
-    check
-      string
-      "negative column error"
-      "column must be >= 0"
-      (json_string_member "negative column response" "error" json))
-;;
-
-let test_post_cursors_persists_valid_focus_mode () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
-    let body = {|{"file_path":"lib/a.ml","line":7,"focus_mode":"reviewing"}|} in
-    let post_request =
-      http_request
-        ~meth:`POST
-        ~path:(scoped_ide_path "/api/v1/ide/cursors")
-        ~body
-        ~token:(Some token)
-        ()
-    in
-    let post_response = dispatch router post_request in
-    check_status "POST cursor with valid focus_mode returns 201" 201 post_response;
-    let get_request =
-      http_request ~meth:`GET ~path:(scoped_ide_path "/api/v1/ide/cursors") ()
-    in
-    let get_response = dispatch router get_request in
-    check_status "GET cursors after POST succeeds" 200 get_response;
-    let json = get_response |> response_body |> Yojson.Safe.from_string in
-    let data = Json.member "data" json in
-    match json_list_member "cursor snapshot" "cursors" data with
-    | cursor :: _ ->
-      check
-        string
-        "persisted focus_mode"
-        "reviewing"
-        (json_string_member "cursor" "focus_mode" cursor)
-    | [] -> fail "expected persisted cursor")
-;;
-
-let test_post_cursors_broadcasts_ws_invalidation () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
-    let subscriber_id = "test-ide-cursor-ws-invalidation" in
-    let received = ref [] in
-    Sse.subscribe_external ~id:subscriber_id
-      ~callback:(fun (ev : Sse.external_event) ->
-        received := ev.Sse.ext_frame :: !received)
-      ();
-    Fun.protect
-      ~finally:(fun () -> Sse.unsubscribe_external subscriber_id)
-      (fun () ->
-        let body = {|{"file_path":"lib/a.ml","line":7,"focus_mode":"reviewing"}|} in
-        let request =
-          http_request
-            ~meth:`POST
-            ~path:(scoped_ide_path "/api/v1/ide/cursors")
-            ~body
-            ~token:(Some token)
-            ()
-        in
-        let response = dispatch router request in
-        check_status "POST cursor returns 201" 201 response;
-        match !received with
-        | frame :: _ ->
-          (match Sse.data_payload_of_frame frame with
-           | Error Sse.Missing_data_payload -> fail "cursor invalidation frame has no data"
-           | Ok payload ->
-             let json = Yojson.Safe.from_string payload in
-             check string "cursor invalidation type" "ide_cursor_changed"
-               (json_string_member "cursor invalidation" "type" json);
-             check string "cursor invalidation keeper" "alice"
-               (json_string_member "cursor invalidation" "keeper_id" json))
-        | [] -> fail "POST cursor did not broadcast a websocket invalidation"))
-;;
-
-let test_hook_cursors_broadcast_ws_invalidation () =
-  with_ide_server (fun ~base_path ~state:_ ~router:_ ->
-    let subscriber_id = "test-hook-cursor-ws-invalidation" in
-    let received = ref [] in
-    Sse.subscribe_external ~id:subscriber_id
-      ~callback:(fun (ev : Sse.external_event) ->
-        received := ev.Sse.ext_frame :: !received)
-      ();
-    Fun.protect
-      ~finally:(fun () -> Sse.unsubscribe_external subscriber_id)
-      (fun () ->
-        Ide_bridge.ingest_tool_event_from_hook
-          ~base_path
-          ~attribution:
-            (match
-               Agent_observation.Code_address.v ~codebase:"github.com_x_y" ~path:"lib/a.ml"
-             with
-             | Ok address ->
-               Agent_observation.File
-                 (Agent_observation.Addressed { address; checkout = None })
-             | Error _ -> failwith "test address must mint")
-          ~tool_name:"keeper_ide_annotate"
-          ~keeper_id:"alice"
-          ~turn_id:"turn-7"
-          ~outcome:"ok"
-          ~typed_outcome_str:"progress"
-          ~duration_ms:10.0
-          ~output_text:"annotated"
-          ~input:
-            (`Assoc
-               [ "file_path", `String "lib/a.ml"
-               ; "line_start", `Int 7
-               ; "focus_mode", `String "editing"
-               ]);
-        match !received with
-        | frame :: _ ->
-          (match Sse.data_payload_of_frame frame with
-           | Error Sse.Missing_data_payload -> fail "hook cursor invalidation frame has no data"
-           | Ok payload ->
-             let json = Yojson.Safe.from_string payload in
-             check string "hook cursor invalidation type" "ide_cursor_changed"
-               (json_string_member "hook cursor invalidation" "type" json);
-             check string "hook cursor invalidation keeper" "alice"
-               (json_string_member "hook cursor invalidation" "keeper_id" json))
-        | [] -> fail "tool-hook cursor did not broadcast a websocket invalidation"))
-;;
-
-let test_post_cursors_honors_canonical_url_scope () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
-    let scoped_path =
-      "/api/v1/ide/cursors?codebase=github.com_jeong-sik_masc"
-    in
-    let body = {|{"file_path":"lib/a.ml","line":9,"focus_mode":"editing"}|} in
-    let post_request =
-      http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
-    in
-    let post_response = dispatch router post_request in
-    check_status "POST cursor with a codebase scope returns 201" 201 post_response;
-    let unscoped_request = http_request ~meth:`GET ~path:"/api/v1/ide/cursors" () in
-    let unscoped_response = dispatch router unscoped_request in
-    check
-      int
-      "GET unscoped cursors rejects missing scope"
-      400
-      (status_of_response unscoped_response);
-    check
-      string
-      "GET unscoped cursors error code"
-      "missing_ide_scope"
-      (error_code_of_response unscoped_response);
-    let scoped_request = http_request ~meth:`GET ~path:scoped_path () in
-    let scoped_response = dispatch router scoped_request in
-    check_status "GET scoped cursors succeeds" 200 scoped_response;
-    let scoped_json = scoped_response |> response_body |> Yojson.Safe.from_string in
-    let scoped_data = Json.member "data" scoped_json in
-    match json_list_member "scoped cursor snapshot" "cursors" scoped_data with
-    | cursor :: _ ->
-      check string "scoped cursor file" "lib/a.ml" (json_string_member "cursor" "file_path" cursor)
-    | [] -> fail "expected scoped cursor")
-;;
-
-let test_post_cursors_rejects_absolute_file_path () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
-    let token = create_worker_token base_path "alice" in
-    (* RFC-0378 §5.3: the scope names the codebase and the posted path is
-       repo-root-relative. An absolute path — the shape the old catalog
-       re-derivation accepted — is a typed reject at the mint. *)
-    let file_path = Filename.concat agent_core_path "lib/a.ml" in
-    let body =
-      Yojson.Safe.to_string
-        (`Assoc [ "file_path", `String file_path; "line", `Int 9 ])
-    in
-    let scoped_path =
-      "/api/v1/ide/cursors?codebase=github.com_jeong-sik_masc"
-    in
-    let post_request =
-      http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
-    in
-    let post_response = dispatch router post_request in
-    check_status "POST cursor with an absolute file_path returns 400" 400 post_response;
-    check
-      string
-      "cursor mint reject code"
-      "invalid_file_path"
-      (error_code_of_response post_response);
-    (* The co-view vocabulary succeeds: repo-root-relative under the scope. *)
-    let ok_body =
-      Yojson.Safe.to_string (`Assoc [ "file_path", `String "lib/a.ml"; "line", `Int 9 ])
-    in
-    let ok_response =
-      dispatch
-        router
-        (http_request ~meth:`POST ~path:scoped_path ~body:ok_body ~token:(Some token) ())
-    in
-    check_status "POST cursor with a repo-relative file_path returns 201" 201 ok_response)
-;;
-
 let test_post_annotations_accepts_matching_repo_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let _masc_path, _agent_core_path = seed_annotation_scope_repos base_path in
@@ -809,16 +569,16 @@ let test_read_annotations_rejects_missing_scope () =
       (error_code_of_response response))
 ;;
 
-let test_read_cursors_accepts_unknown_codebase_as_empty () =
+let test_read_events_accepts_unknown_codebase_as_empty () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     (* RFC-0378 §5.4: the scope universe is store-measured, not the
        catalog — an unknown slug is a legitimate empty store, not a
        registry miss. *)
     let request =
-      http_request ~meth:`GET ~path:"/api/v1/ide/cursors?codebase=github.com_x_missing" ()
+      http_request ~meth:`GET ~path:"/api/v1/ide/events?codebase=github.com_x_missing" ()
     in
     let response = dispatch router request in
-    check_status "GET cursors with an unknown codebase returns 200" 200 response)
+    check_status "GET events with an unknown codebase returns 200" 200 response)
 ;;
 
 let test_get_events_rejects_invalid_canonical_scope () =
@@ -967,11 +727,11 @@ let test_get_events_rejects_invalid_limit () =
     check string "typed limit error" "limit must be an integer" (error_message_of_response response))
 ;;
 
-let test_get_cursors_rejects_negative_offset () =
+let test_get_events_rejects_negative_offset () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
-    let request = http_request ~meth:`GET ~path:"/api/v1/ide/cursors?offset=-1" () in
+    let request = http_request ~meth:`GET ~path:"/api/v1/ide/events?offset=-1" () in
     let response = dispatch router request in
-    check_status "GET cursors invalid offset returns 400" 400 response;
+    check_status "GET events invalid offset returns 400" 400 response;
     check
       string
       "typed offset error"
@@ -999,8 +759,6 @@ let () =
             test_post_annotations_route_is_registered
         ; test_case "DELETE /api/v1/ide/annotations/ registered" `Quick
             test_delete_annotation_route_is_registered
-        ; test_case "POST /api/v1/ide/cursors registered" `Quick
-            test_post_cursors_route_is_registered
         ; test_case "read routes stay public" `Quick test_read_routes_stay_public
         ] )
     ; ( "presence_contract"
@@ -1019,9 +777,9 @@ let () =
             `Quick
             test_read_annotations_rejects_missing_scope
         ; test_case
-            "GET cursors rejects unmatched repo scope"
+            "GET events accepts an unknown codebase as empty"
             `Quick
-            test_read_cursors_accepts_unknown_codebase_as_empty
+            test_read_events_accepts_unknown_codebase_as_empty
         ; test_case
             "GET events rejects an invalid codebase scope"
             `Quick
@@ -1042,8 +800,8 @@ let () =
     ; ( "query_parsing"
       , [ test_case "GET events rejects invalid limit" `Quick
             test_get_events_rejects_invalid_limit
-        ; test_case "GET cursors rejects negative offset" `Quick
-            test_get_cursors_rejects_negative_offset
+        ; test_case "GET events rejects negative offset" `Quick
+            test_get_events_rejects_negative_offset
         ; test_case "GET memory rejects non-positive limit" `Quick
             test_get_memory_rejects_non_positive_limit
         ] )
@@ -1052,24 +810,6 @@ let () =
             test_post_annotations_rejects_client_keeper_id
         ; test_case "POST annotation rejects unknown route fields" `Quick
             test_post_annotations_rejects_unknown_route_fields
-        ; test_case "POST cursor rejects client keeper_id" `Quick
-            test_post_cursors_rejects_client_keeper_id
-        ; test_case "POST cursor rejects invalid focus_mode" `Quick
-            test_post_cursors_rejects_invalid_focus_mode
-        ; test_case "POST cursor rejects negative column" `Quick
-            test_post_cursors_rejects_negative_column
-        ; test_case "POST cursor persists valid focus_mode" `Quick
-            test_post_cursors_persists_valid_focus_mode
-        ; test_case "POST cursor broadcasts WS invalidation" `Quick
-            test_post_cursors_broadcasts_ws_invalidation
-        ; test_case "tool-hook cursor broadcasts WS invalidation" `Quick
-            test_hook_cursors_broadcast_ws_invalidation
-        ; test_case "POST cursor honors canonical_url scope" `Quick
-            test_post_cursors_honors_canonical_url_scope
-        ; test_case
-            "POST cursor rejects an absolute file_path"
-            `Quick
-            test_post_cursors_rejects_absolute_file_path
         ; test_case "POST annotation accepts matching repo scope" `Quick
             test_post_annotations_accepts_matching_repo_scope
         ; test_case "POST annotation rejects an absolute file_path" `Quick

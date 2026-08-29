@@ -36,8 +36,6 @@ let event_file_name = function
   | Turn -> "turn_events.jsonl"
 ;;
 
-let cursor_file_name = "cursor_events.jsonl"
-
 let event_kind_of_event = function
   | Tool_event _ -> Tool
   | Turn_event _ -> Turn
@@ -211,12 +209,6 @@ let append_event ~base_dir ~codebase ~(event : ide_event) =
     ~max_retained_segments:default_max_retained_segments
     json
 
-let append_cursor ~base_dir ~codebase json =
-  let dir = Ide_paths.code_store_dir ~base_dir ~codebase in
-  Fs_compat.mkdir_p dir;
-  let path = Filename.concat dir cursor_file_name in
-  Fs_compat.append_jsonl path json
-
 let string_field key = function
   | `Assoc fields ->
     (match List.assoc_opt key fields with
@@ -230,16 +222,6 @@ let int64_field key = function
     (match List.assoc_opt key fields with
      | Some (`Int i) -> Some (Int64.of_int i)
      | Some (`Intlit s) -> Int64.of_string_opt s
-     | _ -> None)
-  | _ -> None
-;;
-
-let int_field key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`Int i) -> Some i
-     | Some (`Intlit s) -> int_of_string_opt s
-     | Some (`String s) -> int_of_string_opt (String.trim s)
      | _ -> None)
   | _ -> None
 ;;
@@ -266,51 +248,6 @@ let event_matches_keeper keeper_id json =
     (match string_field "keeper_id" json with
      | Some actual -> String.equal actual expected
      | None -> false)
-;;
-
-let cursor_matches_file file_path json =
-  match file_path with
-  | None -> true
-  | Some expected ->
-    (match string_field "file_path" json with
-     | Some actual -> String.equal actual expected
-     | None -> false)
-;;
-
-let cursor_focus_mode_of_string = function
-  | ("reading" | "editing" | "reviewing" | "planning") as mode -> Some mode
-  | _ -> None
-;;
-
-let valid_focus_mode mode =
-  Option.is_some (cursor_focus_mode_of_string mode)
-;;
-
-let cursor_is_valid json =
-  match
-    ( string_field "keeper_id" json
-    , string_field "file_path" json
-    , int_field "line" json
-    , int_field "column" json
-    , string_field "focus_mode" json )
-  with
-  | Some _, Some file_path, Some line, Some column, Some focus_mode ->
-    String.trim file_path <> "" && line >= 1 && column >= 0 && valid_focus_mode focus_mode
-  | _ -> false
-;;
-
-let cursor_timestamp_ms json =
-  match int64_field "last_update" json with
-  | Some ts -> ts
-  | None ->
-    (match int64_field "timestamp_ms" json with
-     | Some ts -> ts
-     | None -> 0L)
-;;
-
-let compare_cursor_json left right =
-  let by_time = Int64.compare (cursor_timestamp_ms right) (cursor_timestamp_ms left) in
-  if by_time <> 0 then by_time else compare left right
 ;;
 
 let normalize_limit = function
@@ -365,46 +302,6 @@ let list_kind_events ~base_path ~codebase ~kind ?keeper_id ~scan_budget () =
     (fun json -> event_matches_kind kind json && event_matches_keeper keeper_id json)
     jsons
 ;;
-
-let latest_cursor_per_keeper cursors =
-  let seen = Hashtbl.create 8 in
-  let acc = ref [] in
-  List.iter
-    (fun json ->
-       match string_field "keeper_id" json with
-       | Some keeper_id when not (Hashtbl.mem seen keeper_id) ->
-         Hashtbl.add seen keeper_id ();
-         acc := json :: !acc
-       | _ -> ())
-    cursors;
-  List.rev !acc
-;;
-
-let list_cursors
-    ~base_path
-    ~codebase
-    ?keeper_id
-    ?file_path
-    ?limit
-    ?offset
-    ()
-  =
-  let dir = Ide_paths.code_store_dir ~base_dir:base_path ~codebase in
-  let path = Filename.concat dir cursor_file_name in
-  let cursors =
-    Fs_compat.fold_jsonl_lines
-      ~init:[]
-      ~f:(fun acc ~line_no:_ json ->
-        if cursor_is_valid json
-           && event_matches_keeper keeper_id json
-           && cursor_matches_file file_path json
-        then json :: acc
-        else acc)
-      path
-    |> List.sort compare_cursor_json
-    |> latest_cursor_per_keeper
-  in
-  cursors |> drop (normalize_offset offset) |> take (normalize_limit limit)
 
 let list_events
     ~base_path
@@ -480,194 +377,6 @@ let ingest_tool_event
    | exn ->
      Log.Ide.error "ingest_tool_event: %s" (Printexc.to_string exn))
 
-let cursor_line_of_input input =
-  match int_field "line" input with
-  | Some n -> Some n
-  | None -> int_field "line_start" input
-;;
-
-let focus_mode_of_tool_input input =
-  match string_field "focus_mode" input with
-  | Some mode when valid_focus_mode mode -> Some mode
-  | Some _ | None -> None
-;;
-
-let turn_number_of_id turn_id =
-  let digits = Buffer.create (String.length turn_id) in
-  String.iter
-    (fun c -> if c >= '0' && c <= '9' then Buffer.add_char digits c)
-    turn_id;
-  let raw = Buffer.contents digits in
-  if raw = "" then None else int_of_string_opt raw
-;;
-
-let noop_cursor_changed_sink ~keeper_id:_ = ()
-let cursor_changed_sink = Atomic.make noop_cursor_changed_sink
-let register_cursor_changed_sink sink = Atomic.set cursor_changed_sink sink
-
-let notify_cursor_changed ~keeper_id =
-  try Atomic.get cursor_changed_sink ~keeper_id with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Log.Ide.error
-      "cursor_changed_sink: keeper=%s error=%s"
-      keeper_id
-      (Printexc.to_string exn)
-;;
-
-let cursor_event_json
-    ~keeper_id
-    ~file_path
-    ~line
-    ~column
-    ?selection_end
-    ~focus_mode
-    ~last_update
-    ~tool_name
-    ?turn
-    ~turn_id
-    ()
-  =
-  let fields =
-    [ "keeper_id", `String keeper_id
-    ; "file_path", `String file_path
-    ; "line", `Int line
-    ; "column", `Int column
-    ; "focus_mode", `String focus_mode
-    ; "last_update", `Intlit (Int64.to_string last_update)
-    ; "timestamp_ms", `Intlit (Int64.to_string last_update)
-    ; "tool_name", `String tool_name
-    ; "turn_id", `String turn_id
-    ]
-  in
-  let fields =
-    match selection_end with
-    | Some (line, column) ->
-      ( "selection_end"
-      , `Assoc [ "line", `Int line; "column", `Int column ] )
-      :: fields
-    | None -> fields
-  in
-  let fields =
-    match turn with
-    | Some turn -> ("turn", `Int turn) :: fields
-    | None -> fields
-  in
-  `Assoc (List.rev fields)
-;;
-
-(* The cursor derived from a tool call names the same document as the tool row
-   beside it — same call, same file — so it takes the resolved [file_path]
-   rather than re-reading the raw argument, which would put the two rows in
-   different path vocabularies. *)
-let ingest_cursor_event_from_hook
-    ~base_path
-    ~codebase
-    ~file_path
-    ~tool_name
-    ~keeper_id
-    ~turn_id
-    ~timestamp_ms
-    ~(input : Yojson.Safe.t)
-  =
-  match file_path, cursor_line_of_input input, focus_mode_of_tool_input input with
-  | Some file_path, Some line, Some focus_mode when line >= 1 ->
-    let column =
-      match int_field "column" input with
-      | Some n when n >= 0 -> n
-      | _ -> 0
-    in
-    let selection_end =
-      match int_field "line_end" input with
-      | Some line_end when line_end > line -> Some (line_end, column)
-      | _ -> None
-    in
-    let json =
-      cursor_event_json
-        ~keeper_id
-        ~file_path
-        ~line
-        ~column
-        ?selection_end
-        ~focus_mode
-        ~last_update:timestamp_ms
-        ~tool_name
-        ?turn:(turn_number_of_id turn_id)
-        ~turn_id
-        ()
-    in
-    (try
-       append_cursor ~base_dir:base_path ~codebase json;
-       notify_cursor_changed ~keeper_id
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Ide.error
-         "ingest_cursor_event_from_hook: %s"
-         (Printexc.to_string exn))
-  | _ -> ()
-
-let ingest_cursor_event
-    ~base_path
-    ~codebase
-    ~keeper_id
-    ~file_path
-    ~line
-    ?column
-    ?selection_end
-    ?focus_mode
-    ~source
-    ()
-    : (unit, string) result
-  =
-  (* The explicit return annotation pins the branches to [result]: this file
-     [open Ide_event_types], whose [exit_semantics] also has an [Error of
-     string] constructor, so a bare [Error msg] arm would otherwise infer
-     [exit_semantics] and reject the sibling [Ok ()]. *)
-  (* Human-IDE direct path (server_ide_http.ml POST /api/v1/ide/cursors).
-     RFC-0378 §5.3: the server mints the address from the mutation scope
-     and the posted repo-relative path, and hands the codebase slug here
-     follow-up at the server call site. *)
-  let column = Option.value column ~default:0 in
-  let focus_mode =
-    match focus_mode with
-    | None -> Ok "editing"
-    | Some mode ->
-      (match cursor_focus_mode_of_string mode with
-       | Some mode -> Ok mode
-       | None -> Error "Invalid focus_mode")
-  in
-  match focus_mode with
-  | Error msg -> Error msg
-  | Ok focus_mode ->
-    let timestamp_ms = now_ms () in
-    let json =
-      cursor_event_json
-        ~keeper_id
-        ~file_path
-        ~line
-        ~column
-        ?selection_end
-        ~focus_mode
-        ~last_update:timestamp_ms
-        ~tool_name:source
-        ~turn_id:""
-        ()
-    in
-    (try
-       append_cursor ~base_dir:base_path ~codebase json;
-       notify_cursor_changed ~keeper_id;
-       Ok ()
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Ide.error
-         "ingest_cursor_event: %s"
-         (Printexc.to_string exn);
-       Error "Failed to persist cursor event")
-;;
-;;
-
 (** Extract tool event parameters from raw hook data and ingest.
     This is the function called from [keeper_run_tools_hooks.on_tool_executed].
     Separated for direct testability. *)
@@ -687,7 +396,7 @@ let ingest_tool_event_from_hook
      file path are both projections of it. Re-deriving the path from
      [input] here is what put absolute host paths, sandbox-rooted
      [repos/<id>/…] paths, and repo-relative paths in one store, none
-     of which a reader can join against the region and annotation rows
+     of which a reader can join against the annotation rows
      the same resolver produced (masc#28582).
 
      RFC-0378 §5.2: the ide store persists addressed code facts only.
@@ -716,18 +425,7 @@ let ingest_tool_event_from_hook
     ~summary
     ~file_path
     ~timestamp_ms
-    ();
-  (* The hook cursor inherits the tool event's codebase: same tool
-     call, same edited file, so the cursor belongs in the same repo scope. *)
-  ingest_cursor_event_from_hook
-    ~base_path
-    ~codebase
-    ~file_path
-    ~tool_name
-    ~keeper_id
-    ~turn_id
-    ~timestamp_ms
-    ~input
+    ()
 
 let observation_snapshot_json ~take =
   let snapshot =
@@ -744,8 +442,8 @@ let install_agent_observation_sinks () =
      via [Ide_ingest_queue.submit]: the hot path only allocates a closure and
      enqueues; the parse+append run off-domain. When no writer is installed
      (tests, pre-bootstrap) [submit] runs inline, preserving prior behavior.
-     write_region and annotation sinks stay synchronous — annotation returns a
-     Result the caller consumes, so it cannot be deferred. *)
+     The annotation sink stays synchronous — annotation returns a Result the
+     caller consumes, so it cannot be deferred. *)
   Agent_observation.register_tool_event_sink
     (fun (event : Agent_observation.tool_event) ->
       Ide_ingest_queue.submit (fun () ->
@@ -760,29 +458,6 @@ let install_agent_observation_sinks () =
           ~duration_ms:event.duration_ms
           ~output_text:event.output_text
           ~input:event.input));
-  Agent_observation.register_write_region_sink
-    (fun (event : Agent_observation.write_region_event) ->
-      try
-        (match event.attribution with
-         | Agent_observation.Unaddressed _ ->
-           (* RFC-0378 §5.2: not persisted here — the durable record of an
-              unattributed write is the keeper tool_calls store. *)
-           ()
-         | Agent_observation.Addressed addressed ->
-           Ide_region_tracker.ingest_tool_call
-             ~base_dir:event.base_path
-             ~codebase:(codebase_of_addressed addressed)
-             ~keeper_id:event.keeper_id
-             ~turn:event.turn
-             event.tool_call_json);
-        Ok ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Log.Ide.error
-          "ingest_write_region_event: %s"
-          (Printexc.to_string exn);
-        Error Agent_observation.Write_region_sink_failed);
   Agent_observation.register_annotation_sink
     (fun ({ base_path
            ; attribution

@@ -1526,8 +1526,7 @@ val decode_git_diff : Yojson.Safe.t -> (git_diff, string) result
     drawing it as unchanged would say the opposite of what happened. *)
 
 (** One [/api/v1/git/log] commit: hash, author-time epoch milliseconds,
-    author, subject. The epoch shares its unit with {!ide_region}'s
-    [ir_at_ms] so the two sort into one timeline. *)
+    author, subject. *)
 type git_log_row = {
   gl_hash : string;
   gl_at_ms : float;
@@ -1551,19 +1550,6 @@ type ide_annotation = {
 
 val decode_ide_annotations :
   Yojson.Safe.t -> (ide_annotation list, string) result
-(** The route's [{ok; data}] envelope. *)
-
-(** One [/api/v1/ide/regions] row: which lines a keeper wrote, through what
-    (tool and turn, or a manual note), and when. *)
-type ide_region = {
-  ir_line_start : int;
-  ir_line_end : int;
-  ir_keeper : string;
-  ir_source : string;
-  ir_at_ms : float;
-}
-
-val decode_ide_regions : Yojson.Safe.t -> (ide_region list, string) result
 (** The route's [{ok; data}] envelope. *)
 
 (** The [/api/v1/lsp/question] answer: where a name is defined (1-based,

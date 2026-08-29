@@ -1174,21 +1174,11 @@ type code_workspace_scope =
   | Code_scope_keeper of string
   | Code_scope_repo of string
 
-(* One row of the file pane's history view: the work over the open file is
-   the commits that touched it and the recorded keeper edits, woven into one
-   timeline by their shared timestamp. *)
-type code_history_entry =
-  | Hist_commit of Tui_decode.git_log_row
-  | Hist_edit of Tui_decode.ide_region
+(* One row of the file pane's history view: the commits that touched the
+   open file, most recent first. *)
+type code_history_entry = Hist_commit of Tui_decode.git_log_row
 
-type code_history_listing = {
-  chl_entries: code_history_entry list;
-  (* Why the keeper edits are missing when they are: the scope carries no
-     codebase slug, or their fetch failed. The commits still show; the view
-     says what it could not weave in rather than showing a shorter history
-     as if it were the whole one. *)
-  chl_edits_note: string option;
-}
+type code_history_listing = { chl_entries: code_history_entry list }
 
 (* Which list the Config surface is showing. A bool held two and could not
    hold a third. *)
@@ -1746,9 +1736,9 @@ type state = {
   mutable code_file_max_width: int;
   mutable code_focus_file: pane_focus;
   (* The file pane's history view: H on an open file swaps the content for
-     the work over it -- the commits that touched it woven with the recorded
-     keeper edits, newest first -- keyed by the path they were fetched for so
-     opening another file drops a stale listing rather than captioning it. *)
+     the commits that touched it, newest first -- keyed by the path they
+     were fetched for so opening another file drops a stale listing rather
+     than captioning it. *)
   mutable code_history: (string * code_history_listing) option;
   mutable code_history_error: string option;
   mutable code_history_open: bool;

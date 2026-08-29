@@ -13,8 +13,7 @@
   ide_bridge
   ide_event_types
   ide_ingest_queue
-  ide_paths
-  ide_region_tracker)
+  ide_paths)
  (libraries
   unix
   eio

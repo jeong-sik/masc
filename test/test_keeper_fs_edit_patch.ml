@@ -171,13 +171,6 @@ let file_change_evidence (execution : Keeper_tool_execution.t) =
 let parse_string raw field =
   parse raw |> Json.member field |> Json.to_string_option
 
-let parse_write_region_observation_error raw =
-  parse raw
-  |> Json.member "ide_observation"
-  |> Json.member "write_region"
-  |> Json.member "error"
-  |> Json.to_string_option
-
 let permissions path = (Unix.lstat path).Unix.st_perm
 
 let public_fs_edit_call
@@ -1372,63 +1365,6 @@ let test_public_write_file_uses_explicit_repo_path () =
   Alcotest.(check string) "file written through explicit repo path"
     "let generated = true\n" (Fs_compat.load_file path)
 
-let test_write_file_surfaces_missing_ide_observation_sink () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
-  Agent_observation.reset_for_testing ();
-  let path = Filename.concat playground "observed.ml" in
-  let raw =
-    handle_file_write
-      ~turn_sandbox_factory:None
-      ~config
-      ~meta
-      ~publication_recovery
-      ~args:
-        (`Assoc
-          [ "path", `String path
-          ; "mode", `String "overwrite"
-          ; "content", `String "let observed = true\n"
-          ])
-      ()
-  in
-  Alcotest.(check bool) "ok" true (parse_ok raw);
-  Alcotest.(check string) "file written despite observation failure"
-    "let observed = true\n" (Fs_compat.load_file path);
-  Alcotest.(check (option string))
-    "write-region observation failure is surfaced"
-    (Some "write_region sink is not installed")
-    (parse_write_region_observation_error raw)
-
-let test_write_file_sanitizes_ide_observation_sink_failure () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
-  Agent_observation.reset_for_testing ();
-  Agent_observation.register_write_region_sink (fun _ ->
-    Error Agent_observation.Write_region_sink_failed);
-  Fun.protect
-    ~finally:Agent_observation.reset_for_testing
-    (fun () ->
-       let path = Filename.concat playground "observed-sink-failure.ml" in
-       let raw =
-         handle_file_write
-           ~turn_sandbox_factory:None
-           ~config
-           ~meta
-           ~publication_recovery
-           ~args:
-             (`Assoc
-               [ "path", `String path
-               ; "mode", `String "overwrite"
-               ; "content", `String "let observed = true\n"
-               ])
-           ()
-       in
-       Alcotest.(check bool) "ok" true (parse_ok raw);
-       Alcotest.(check string) "file written despite observation failure"
-         "let observed = true\n" (Fs_compat.load_file path);
-       Alcotest.(check (option string))
-         "write-region observation failure is sanitized"
-         (Some "write_region sink failed")
-         (parse_write_region_observation_error raw))
-
 let () =
   Alcotest.run "Keeper_fs_edit_patch"
     [
@@ -1541,9 +1477,5 @@ let () =
             test_edit_translation_pins_patch_even_with_content;
           Alcotest.test_case "public Write uses explicit repo path" `Quick
             test_public_write_file_uses_explicit_repo_path;
-          Alcotest.test_case "write_file surfaces missing IDE observation sink" `Quick
-            test_write_file_surfaces_missing_ide_observation_sink;
-          Alcotest.test_case "write_file sanitizes IDE observation sink failure" `Quick
-            test_write_file_sanitizes_ide_observation_sink_failure;
         ] );
     ]

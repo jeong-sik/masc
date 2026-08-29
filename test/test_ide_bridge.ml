@@ -266,8 +266,7 @@ let test_list_events_merges_kinds_newest_first () =
 (* masc#28582: the row carries the path the attribution resolver named, not the
    argument the keeper typed. The two differ whenever the keeper addressed a
    file through its sandbox — which is the normal case — and a consumer that
-   joins on [file_path] can only match one of them. Both the event and the
-   cursor derived from the same call have to carry the resolved one. *)
+   joins on [file_path] can only match one of them. *)
 let test_hook_row_carries_the_resolved_path_not_the_raw_argument () =
   with_temp_dir (fun base_dir ->
     let raw_argument =
@@ -275,11 +274,7 @@ let test_hook_row_carries_the_resolved_path_not_the_raw_argument () =
     in
     let resolved = "lib/keeper/keeper_approval_queue.ml" in
     let input =
-      `Assoc
-        [ "path", `String raw_argument
-        ; "line_start", `Int 5
-        ; "focus_mode", `String "editing"
-        ]
+      `Assoc [ "path", `String raw_argument; "line_start", `Int 5 ]
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
@@ -292,29 +287,20 @@ let test_hook_row_carries_the_resolved_path_not_the_raw_argument () =
       ~duration_ms:4.0
       ~output_text:"edited"
       ~input;
-    (match
-       Ide_bridge.list_events
-         ~base_path:base_dir
-         ~codebase:("github.com_x_y")
-         ~kind:Ide_bridge.Tool
-         ()
-     with
-     | [ event ] ->
-       check string "event carries the resolved path" resolved (json_string "file_path" event)
-     | events -> Alcotest.failf "expected one tool event, got %d" (List.length events));
     match
-      Ide_bridge.list_cursors
+      Ide_bridge.list_events
         ~base_path:base_dir
         ~codebase:("github.com_x_y")
+        ~kind:Ide_bridge.Tool
         ()
     with
-    | [ cursor ] ->
-      check string "cursor carries the same resolved path" resolved (json_string "file_path" cursor)
-    | cursors -> Alcotest.failf "expected one cursor, got %d" (List.length cursors))
+    | [ event ] ->
+      check string "event carries the resolved path" resolved (json_string "file_path" event)
+    | events -> Alcotest.failf "expected one tool event, got %d" (List.length events))
 ;;
 
-(* A tool call that names no file produces no cursor and stores no document:
-   the row is a keeper-timeline fact. *)
+(* A tool call that names no file stores no document: the row is a
+   keeper-timeline fact. *)
 let test_pathless_hook_stores_no_document () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event_from_hook
@@ -327,28 +313,23 @@ let test_pathless_hook_stores_no_document () =
       ~typed_outcome_str:"progress"
       ~duration_ms:1.0
       ~output_text:"sent"
-      ~input:(`Assoc [ "message", `String "hello"; "focus_mode", `String "editing" ]);
+      ~input:(`Assoc [ "message", `String "hello" ]);
     (* RFC-0378 §5.2: nothing is persisted — the keeper-timeline record of
        a pathless call lives in the tool_calls store, not here. *)
-    (match
-       Ide_bridge.list_events
-         ~base_path:base_dir
-         ~codebase:"github.com_x_y"
-         ~kind:Ide_bridge.Tool
-         ()
-     with
-     | [] -> ()
-     | events ->
-       Alcotest.failf "pathless call must persist nothing, got %d" (List.length events));
-    check int "no cursor" 0
-      (List.length
-         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ()))
-  )
+    match
+      Ide_bridge.list_events
+        ~base_path:base_dir
+        ~codebase:"github.com_x_y"
+        ~kind:Ide_bridge.Tool
+        ()
+    with
+    | [] -> ()
+    | events ->
+      Alcotest.failf "pathless call must persist nothing, got %d" (List.length events))
 ;;
 
 (* RFC-0378 §5.2: an unaddressed write is a keeper fact — the ide store
-   persists no row and no cursor for it; its durable record is the
-   tool_calls store. *)
+   persists no row for it; its durable record is the tool_calls store. *)
 let test_unaddressed_hook_persists_nothing () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event_from_hook
@@ -362,194 +343,18 @@ let test_unaddressed_hook_persists_nothing () =
       ~duration_ms:1.0
       ~output_text:"x"
       ~input:
-        (`Assoc
-           [ "path", `String "/outside/tree.ml"
-           ; "line_start", `Int 1
-           ; "focus_mode", `String "editing"
-           ]);
-    (match
-       Ide_bridge.list_events
-         ~base_path:base_dir
-         ~codebase:"github.com_x_y"
-         ~kind:Ide_bridge.Tool
-         ()
-     with
-     | [] -> ()
-     | events ->
-       Alcotest.failf "unaddressed call must persist nothing, got %d" (List.length events));
-    check int "no cursor" 0
-      (List.length
-         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ())))
-;;
-
-let test_cursor_from_hook_uses_real_file_and_line () =
-  with_temp_dir (fun base_dir ->
-    let input =
-      `Assoc
-        [ "file_path", `String "lib/test.ml"
-        ; "line_start", `Int 12
-        ; "line_end", `Int 14
-        ; "column", `Int 3
-        ; "focus_mode", `String "editing"
-        ]
-    in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
-      ~tool_name:"keeper_ide_annotate"
-      ~keeper_id:"k1"
-      ~turn_id:"turn-7"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:10.0
-      ~output_text:"annotated"
-      ~input;
+        (`Assoc [ "path", `String "/outside/tree.ml"; "line_start", `Int 1 ]);
     match
-      Ide_bridge.list_cursors
+      Ide_bridge.list_events
         ~base_path:base_dir
-        ~codebase:("github.com_x_y")
+        ~codebase:"github.com_x_y"
+        ~kind:Ide_bridge.Tool
         ()
     with
-    | [ cursor ] ->
-      check string "keeper_id" "k1" (json_string "keeper_id" cursor);
-      check string "file_path" "lib/test.ml" (json_string "file_path" cursor);
-      check int "line" 12 (json_int "line" cursor);
-      check int "column" 3 (json_int "column" cursor);
-      check string "focus_mode" "editing" (json_string "focus_mode" cursor);
-      check string "tool_name" "keeper_ide_annotate" (json_string "tool_name" cursor);
-      check int "turn" 7 (json_int "turn" cursor);
-      let selection_end = Yojson.Safe.Util.member "selection_end" cursor in
-      check int "selection end line" 14 (json_int "line" selection_end)
-    | _ -> fail "expected one cursor")
+    | [] -> ()
+    | events ->
+      Alcotest.failf "unaddressed call must persist nothing, got %d" (List.length events))
 ;;
-
-let test_cursor_from_hook_notifies_after_persist () =
-  with_temp_dir (fun base_dir ->
-    let notified_keeper = ref None in
-    Ide_bridge.register_cursor_changed_sink (fun ~keeper_id ->
-      notified_keeper := Some keeper_id);
-    Fun.protect
-      ~finally:(fun () ->
-        Ide_bridge.register_cursor_changed_sink (fun ~keeper_id:_ -> ()))
-      (fun () ->
-        Ide_bridge.ingest_tool_event_from_hook
-          ~base_path:base_dir
-          ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
-          ~tool_name:"keeper_ide_annotate"
-          ~keeper_id:"k1"
-          ~turn_id:"turn-7"
-          ~outcome:"ok"
-          ~typed_outcome_str:"progress"
-          ~duration_ms:10.0
-          ~output_text:"annotated"
-          ~input:
-            (`Assoc
-               [ "file_path", `String "lib/test.ml"
-               ; "line_start", `Int 12
-               ; "focus_mode", `String "editing"
-               ]);
-        check (option string) "durable cursor notification keeper" (Some "k1")
-          !notified_keeper;
-        check int "cursor is durable before notification returns" 1
-          (List.length
-             (Ide_bridge.list_cursors
-                ~base_path:base_dir
-                ~codebase:("github.com_x_y")
-                ()))))
-;;
-
-let test_cursor_notifications_reraise_cancellation () =
-  with_temp_dir (fun base_dir ->
-    Ide_bridge.register_cursor_changed_sink (fun ~keeper_id:_ ->
-      raise (Eio.Cancel.Cancelled (Failure "synthetic cursor cancellation")));
-    Fun.protect
-      ~finally:(fun () ->
-        Ide_bridge.register_cursor_changed_sink (fun ~keeper_id:_ -> ()))
-      (fun () ->
-        let raises_cancel f =
-          match f () with
-          | exception Eio.Cancel.Cancelled _ -> true
-          | exception exn ->
-            failf "expected cancellation, got %s" (Printexc.to_string exn)
-          | _ -> false
-        in
-        let hook_cancelled =
-          raises_cancel (fun () ->
-            Ide_bridge.ingest_tool_event_from_hook
-              ~base_path:base_dir
-              ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
-              ~tool_name:"keeper_ide_annotate"
-              ~keeper_id:"k1"
-              ~turn_id:"turn-7"
-              ~outcome:"ok"
-              ~typed_outcome_str:"progress"
-              ~duration_ms:10.0
-              ~output_text:"annotated"
-              ~input:
-                (`Assoc
-                   [ "file_path", `String "lib/test.ml"
-                   ; "line_start", `Int 12
-                   ; "focus_mode", `String "editing"
-                   ]))
-        in
-        check bool "tool hook cancellation is re-raised" true hook_cancelled;
-        let explicit_cancelled =
-          raises_cancel (fun () ->
-            Ide_bridge.ingest_cursor_event
-              ~base_path:base_dir
-              ~codebase:"github.com_x_y"
-              ~keeper_id:"k1"
-              ~file_path:"lib/test.ml"
-              ~line:13
-              ~source:"test"
-              ())
-        in
-        check bool "explicit cursor cancellation is re-raised" true
-          explicit_cancelled))
-;;
-
-let test_cursor_from_hook_skips_missing_line () =
-  with_temp_dir (fun base_dir ->
-    let input = `Assoc [ "file_path", `String "lib/test.ml" ] in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
-      ~tool_name:"keeper_ide_annotate"
-      ~keeper_id:"k1"
-      ~turn_id:"turn-7"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:10.0
-      ~output_text:"annotated"
-      ~input;
-    check int "no cursor without line" 0
-      (List.length
-         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ())))
-;;
-
-let test_cursor_from_hook_skips_missing_focus_mode () =
-  with_temp_dir (fun base_dir ->
-    let input =
-      `Assoc [ "file_path", `String "lib/test.ml"; "line_start", `Int 12 ]
-    in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
-      ~tool_name:"keeper_ide_annotate"
-      ~keeper_id:"k1"
-      ~turn_id:"turn-7"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:10.0
-      ~output_text:"annotated"
-      ~input;
-    check int "no cursor without explicit focus mode" 0
-      (List.length
-         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ())))
-;;
-
-
-
 
 
 
@@ -903,17 +708,11 @@ let test_queue_writer_drains () =
 ;;
 
 (* The typed codebase carried through the hook path must route the tool event
-   and its derived cursor into the same store. *)
-let test_codebase_routes_tool_event_and_cursor () =
+   into that codebase's store. *)
+let test_codebase_routes_tool_event () =
   with_temp_dir (fun base_dir ->
     let by_url = "github.com_jeong-sik_wkbl" in
-    let input =
-      `Assoc
-        [ "file_path", `String "lib/test.ml"
-        ; "line", `Int 7
-        ; "focus_mode", `String "editing"
-        ]
-    in
+    let input = `Assoc [ "file_path", `String "lib/test.ml"; "line", `Int 7 ] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
       ~attribution:(addressed_file ~codebase:"github.com_jeong-sik_wkbl" ~path:"lib/test.ml")
@@ -925,37 +724,23 @@ let test_codebase_routes_tool_event_and_cursor () =
       ~duration_ms:5.0
       ~output_text:"{}"
       ~input;
-    (* Scoped (by-url) reads see both the tool event and the cursor. *)
+    (* Scoped (by-url) reads see the tool event. *)
     let by_url_events =
       Ide_bridge.list_events ~base_path:base_dir ~codebase:by_url ()
     in
     check bool "codebase holds the tool event" true
       (List.length by_url_events >= 1);
-    let by_url_cursors =
-      Ide_bridge.list_cursors ~base_path:base_dir ~codebase:by_url ()
-    in
-    check bool "codebase holds the derived cursor" true
-      (List.length by_url_cursors >= 1);
     let other_events =
       Ide_bridge.list_events ~base_path:base_dir
         ~codebase:"github.com_other_repo" ()
     in
-    check int "other codebase has no tool event" 0 (List.length other_events);
-    let other_cursors =
-      Ide_bridge.list_cursors ~base_path:base_dir
-        ~codebase:"github.com_other_repo" ()
-    in
-    check int "other codebase has no cursor" 0 (List.length other_cursors))
+    check int "other codebase has no tool event" 0 (List.length other_events))
 ;;
 
 let test_codebases_are_isolated () =
   with_temp_dir (fun base_dir ->
     let input =
-      `Assoc
-        [ "file_path", `String "lib/test.ml"
-        ; "line", `Int 3
-        ; "focus_mode", `String "editing"
-        ]
+      `Assoc [ "file_path", `String "lib/test.ml"; "line", `Int 3 ]
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
@@ -992,8 +777,7 @@ let () =
         ; test_case "multiple events" `Quick test_ingest_multiple_events
         ] )
     ; ( "codebase attribution"
-      , [ test_case "routes tool event + cursor" `Quick
-            test_codebase_routes_tool_event_and_cursor
+      , [ test_case "routes tool event" `Quick test_codebase_routes_tool_event
         ; test_case "codebases are isolated" `Quick test_codebases_are_isolated
         ] )
     ; ( "read"
@@ -1027,23 +811,10 @@ let () =
             "pathless call stores no document"
             `Quick
             test_pathless_hook_stores_no_document
-        ] )
-    ; ( "cursor"
-      , [ test_case "unaddressed hook persists nothing" `Quick test_unaddressed_hook_persists_nothing
-        ; test_case "from hook uses real file and line" `Quick test_cursor_from_hook_uses_real_file_and_line
         ; test_case
-            "from hook notifies after persist"
+            "unaddressed hook persists nothing"
             `Quick
-            test_cursor_from_hook_notifies_after_persist
-        ; test_case
-            "notifications re-raise cancellation"
-            `Quick
-            test_cursor_notifications_reraise_cancellation
-        ; test_case "from hook skips missing line" `Quick test_cursor_from_hook_skips_missing_line
-        ; test_case
-            "from hook skips missing focus mode"
-            `Quick
-            test_cursor_from_hook_skips_missing_focus_mode
+            test_unaddressed_hook_persists_nothing
         ] )
     ; ( "hook_extract"
       , [ test_case "no file_path (execute)" `Quick test_hook_no_file_path

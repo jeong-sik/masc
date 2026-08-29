@@ -536,10 +536,10 @@ let make_tool_bundle_for_descriptors_with_policy
      cycle's one-shot grant threads through so an approved exact call can be
      spent in the woken cycle.
 
-     They reach the model through the index rather than directly: an attached
-     service offers more tools than a request can carry, and the Gate wrapper
-     is the same either way. *)
-  let identity_index_tool =
+     They reach the model through the listing rather than directly: an
+     attached service offers more tools than a request can carry, and the
+     Gate wrapper is the same either way. *)
+  let identity_listing_tool =
     match identity_surface with
     | None -> []
     | Some surface ->
@@ -556,7 +556,7 @@ let make_tool_bundle_for_descriptors_with_policy
         surface
       |> Option.to_list
   in
-  { tools = descriptor_tools @ composition_tools @ identity_index_tool
+  { tools = descriptor_tools @ composition_tools @ identity_listing_tool
   ; cleanup =
       (fun () ->
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)

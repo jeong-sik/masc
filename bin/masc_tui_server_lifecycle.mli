@@ -58,7 +58,6 @@ type owned_server
 (** A server this TUI started and therefore owns. *)
 
 val owned_pgid : owned_server -> int
-val owned_port : owned_server -> int
 
 val is_running : owned_server -> bool
 (** True while at least one member of the owned server's process group is

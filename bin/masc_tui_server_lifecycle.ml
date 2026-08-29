@@ -55,17 +55,15 @@ let wait_healthy ~health_ok ~child_alive ~attempts ~sleep =
 
 type owned_server = {
   pgid : int;
-  port : int;
 }
 
 let owned_pgid t = t.pgid
-let owned_port t = t.port
 let is_running t = Process_eio_detached.is_pgid_alive ~pgid:t.pgid
 
 let start ~masc_bin ~base_path ~host ~port ~env =
   let argv = server_argv ~masc_bin ~base_path ~host ~port in
   match Process_eio_detached.spawn_detached_devnull ~argv ~env ~cwd:base_path with
-  | Ok handle -> Ok { pgid = handle.Process_eio_detached.devnull_pgid; port }
+  | Ok handle -> Ok { pgid = handle.Process_eio_detached.devnull_pgid }
   | Error msg -> Error msg
 
 let stop t ~grace_sec =

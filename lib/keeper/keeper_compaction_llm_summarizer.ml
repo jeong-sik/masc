@@ -954,56 +954,60 @@ let try_cli_slots ~keeper_name ~cli_runner (prepared : prepared_lane) =
   | cli_slots ->
     let system_prompt, user = plan_prompts ~window:prepared.window in
     let prompt_sha256 = Digestif.SHA256.(digest_string user |> to_hex) in
-    (match
-       Keeper_lane_cli_oneshot.walk
-         ?runner:cli_runner
-         ~base_dir:prepared.base_path
-         ~cli_slots
-         ~system_prompt
-         ~requirement:exact_output_requirement
-         ~prompt:user
-         ()
-     with
-     | Error failures ->
-       List.iter
-         (fun failure ->
-            Log.Keeper.warn
-              ~keeper_name
-              "compaction cli lane-slot failed: %s"
-              (Keeper_lane_cli_oneshot.failure_to_string failure))
-         failures;
-       None
-     | Ok (runtime_id, output) ->
-       (match plan_of_json ~window:prepared.window output with
-        | Error detail ->
-          Log.Keeper.warn
-            ~keeper_name
-            "compaction cli output violated MASC domain plan slot=%s: %s"
-            runtime_id
-            detail;
-          None
-        | Ok plan ->
-          (match
-             plan_preserves_exact_future_progress
-               ~keeper_name
-               prepared.selected_slots
-               plan
-           with
-           | Error detail ->
-             Log.Keeper.warn
-               ~keeper_name
-               "compaction cli output blocked future rolling admission slot=%s: %s"
-               runtime_id
-               detail;
-             None
-           | Ok () ->
-             let call_id = Random_id.prefixed ~prefix:"cli-compaction-" ~bytes:16 in
-             Some
-               ( runtime_id
-               , { plan
-                 ; exact_execution_evidence =
-                     cli_evidence ~runtime_id ~call_id ~prompt_sha256
-                 } ))))
+    let rec walk = function
+      | [] -> None
+      | runtime_id :: rest ->
+        (match
+           Keeper_lane_cli_oneshot.run
+             ?runner:cli_runner
+             ~base_dir:prepared.base_path
+             ~runtime_id
+             ~system_prompt
+             ~requirement:exact_output_requirement
+             ~prompt:user
+             ()
+         with
+         | Error failure ->
+           Log.Keeper.warn
+             ~keeper_name
+             "compaction cli lane-slot failed: %s"
+             (Keeper_lane_cli_oneshot.failure_to_string failure);
+           walk rest
+         | Ok output ->
+           (match plan_of_json ~window:prepared.window output with
+            | Error detail ->
+              Log.Keeper.warn
+                ~keeper_name
+                "compaction cli output violated MASC domain plan slot=%s: %s"
+                runtime_id
+                detail;
+              walk rest
+            | Ok plan ->
+              (match
+                 plan_preserves_exact_future_progress
+                   ~keeper_name
+                   prepared.selected_slots
+                   plan
+               with
+               | Error detail ->
+                 Log.Keeper.warn
+                   ~keeper_name
+                   "compaction cli output blocked future rolling admission slot=%s: %s"
+                   runtime_id
+                   detail;
+                 walk rest
+               | Ok () ->
+                 let call_id =
+                   Random_id.prefixed ~prefix:"cli-compaction-" ~bytes:16
+                 in
+                 Some
+                   ( runtime_id
+                   , { plan
+                     ; exact_execution_evidence =
+                         cli_evidence ~runtime_id ~call_id ~prompt_sha256
+                     } ))))
+    in
+    walk cli_slots
 ;;
 
 let execute_prepared_lane_current

@@ -1166,6 +1166,51 @@ let test_cli_walk_failure_keeps_the_catalog_terminal () =
     !attempts
 ;;
 
+let test_cli_walk_advances_after_domain_invalid_json () =
+  run_eio
+  @@ fun ~sw:_ ~net ~clock ->
+  F.with_official_client_runtimes
+  @@ fun () ->
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc compaction cli domain advance"
+      [ { id = "cli-unreachable"; base_url = "http://127.0.0.1:1" } ]
+  in
+  let registry =
+    F.publish_registry
+      ~cli_slot_ids:[ F.cli_primary_runtime; F.cli_secondary_runtime ]
+      ~lane_id:conformance_lane_id
+      ~slot_ids:[ "cli-unreachable" ]
+      snapshot
+  in
+  let prepared = prepare_exn ~keeper_name:"keeper-cli-domain-advance" ~registry () in
+  let attempts = ref [] in
+  let runner ~runtime_id ~system_prompt:_ ~prompt:_ =
+    attempts := !attempts @ [ runtime_id ];
+    if String.equal runtime_id F.cli_primary_runtime
+    then Ok {|{"summary":"","keep_from_unit_index":1}|}
+    else Ok (Yojson.Safe.to_string valid_plan_json)
+  in
+  let completed =
+    execute_prepared_lane
+      ~keeper_name:"keeper-cli-domain-advance"
+      ~cli_runner:runner
+      ~net
+      ~clock
+      prepared
+    |> completed_exn
+  in
+  Alcotest.(check (list string))
+    "domain-invalid JSON advances to the next cli slot"
+    [ F.cli_primary_runtime; F.cli_secondary_runtime ]
+    !attempts;
+  Alcotest.(check string)
+    "the second cli slot owns the accepted evidence"
+    F.cli_secondary_runtime
+    (C.exact_execution_evidence_slot_id
+       (C.completed_exact_execution_evidence completed))
+;;
+
 let test_semantic_exhaustion_falls_back_to_cli () =
   run_eio
   @@ fun ~sw ~net ~clock ->
@@ -1289,6 +1334,10 @@ let () =
             "cli walk failure keeps the catalog terminal"
             `Quick
             test_cli_walk_failure_keeps_the_catalog_terminal
+        ; Alcotest.test_case
+            "cli walk advances after domain-invalid JSON"
+            `Quick
+            test_cli_walk_advances_after_domain_invalid_json
         ; Alcotest.test_case
             "semantic exhaustion falls back to cli"
             `Quick

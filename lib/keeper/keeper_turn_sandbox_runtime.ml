@@ -565,22 +565,34 @@ let stop_and_delete_microvm_container ?timeout_sec container_name =
       ?timeout_sec
       (Keeper_sandbox_microvm.stop_argv ~container_name)
   in
-  let (_ : Unix.process_status * string) =
+  let delete_st, delete_out =
     run_argv_with_status
       ?timeout_sec
       (Keeper_sandbox_microvm.delete_force_argv ~container_name)
   in
-  match stop_st with
-  | Unix.WEXITED 0 -> Ok ()
-  | _ ->
-    (* A missing guest is a successful teardown; anything else surfaces. *)
-    (match probe_microvm_container_state ?timeout_sec container_name with
-     | Ok Keeper_sandbox_runtime.Docker_container_absent -> Ok ()
-     | Ok _ | Error _ ->
-       Error
-         (Printf.sprintf
-            "microvm_teardown_failed: %s"
-            (Keeper_sandbox_runtime.docker_failure_output_for_log stop_out)))
+  (* Both commands can race a guest that is already absent, so their exit
+     codes are only diagnostics. The postcondition is authoritative: do not
+     release the mounted identity snapshot until the guest name is gone. *)
+  match probe_microvm_container_state ?timeout_sec container_name with
+  | Ok Keeper_sandbox_runtime.Docker_container_absent -> Ok ()
+  | Ok Keeper_sandbox_runtime.Docker_container_running
+  | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
+    Error
+      (Printf.sprintf
+         "microvm_teardown_failed: guest remains after stop=%s (%s), delete=%s (%s)"
+         (Keeper_sandbox_exec_failure.status_label stop_st)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log stop_out)
+         (Keeper_sandbox_exec_failure.status_label delete_st)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log delete_out))
+  | Error probe_error ->
+    Error
+      (Printf.sprintf
+         "microvm_teardown_failed: post-delete state unknown: %s; stop=%s (%s), delete=%s (%s)"
+         probe_error
+         (Keeper_sandbox_exec_failure.status_label stop_st)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log stop_out)
+         (Keeper_sandbox_exec_failure.status_label delete_st)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log delete_out))
 ;;
 
 let start_microvm_container_unlocked ?timeout_sec (t : t) =

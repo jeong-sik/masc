@@ -1737,7 +1737,6 @@ type state = {
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
   mutable runtime_surface_error: string option;
   mutable runtime_surface_scroll: int;
-  mutable runtime_lane_cursor: int;
   (* The lane a fallback is being added to, and where the picker sits in the
      runtime catalogue. Both are cleared when the picker closes: a cursor kept
      across visits opens the list part-way down for no reason the reader gave. *)
@@ -2350,7 +2349,6 @@ let create_state
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;
-  runtime_lane_cursor = 0;
   runtime_lane_pick = None;
   runtime_lane_pick_cursor = 0;
   runtime_lane_error = None;
@@ -2927,9 +2925,15 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
   | Runtime ->
       Some
         { sc_count =
-            (match state.runtime_surface with
-             | None -> 0
-             | Some s -> List.length s.Tui_decode.rss_candidates)
+            (* The two views draw different lists, and the scroll bound is the
+               list being drawn. Reading candidates in both stopped the roster
+               at the slot count and left the runtimes past it unreachable. *)
+            (match state.runtime_surface, state.runtime_mode with
+             | None, _ -> 0
+             | Some s, Runtime_lanes ->
+                 List.length s.Tui_decode.rss_candidates
+             | Some s, Runtime_all ->
+                 List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
         ; sc_chrome = runtime_listing_chrome ~error:state.runtime_surface_error
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = None

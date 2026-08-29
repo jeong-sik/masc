@@ -10387,28 +10387,6 @@ and is loaded on demand through keeper_skill.
                       || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                  set (current ^ s)
                | _ -> ()))
-       | Some "j" | Some "k"
-         when state.view = Runtime
-              && state.runtime_mode = Masc_tui_types.Runtime_lanes
-              && Option.is_none state.runtime_lane_pick ->
-           (* The lane cursor is what [e] acts on, so it moves with the same
-              keys that scroll. Clamped to the lane list, not the slot rows:
-              a lane with two candidates draws two rows and selecting the
-              second would name the same lane. *)
-           let lane_count =
-             match state.runtime_surface with
-             | None -> 0
-             | Some snapshot ->
-                 List.length
-                   snapshot.Masc.Tui_decode.rss_resolved
-                     .Masc.Tui_decode.rrs_lanes
-           in
-           (match key with
-            | Some "j" when state.runtime_lane_cursor < lane_count - 1 ->
-                state.runtime_lane_cursor <- state.runtime_lane_cursor + 1
-            | Some "k" when state.runtime_lane_cursor > 0 ->
-                state.runtime_lane_cursor <- state.runtime_lane_cursor - 1
-            | _ -> ())
        | Some "j" | Some "k" | Some "e" | Some "E" | Some "\r"
          when state.view = Runtime && Option.is_some state.runtime_lane_pick ->
            (* The picker is open: j/k move it, Enter appends, e closes. *)
@@ -10438,18 +10416,19 @@ and is loaded on demand through keeper_skill.
               && state.runtime_mode = Masc_tui_types.Runtime_lanes ->
            (* Add a failover candidate to the lane under the cursor. The
               catalogue is fetched on open so the list is the server's now. *)
+           (* The lane under the row cursor. Rows are lane-by-candidate, so
+              two rows can name one lane; either selects it. *)
            (match state.runtime_surface with
             | None -> ()
             | Some snapshot ->
-                let lanes =
-                  snapshot.Masc.Tui_decode.rss_resolved
-                    .Masc.Tui_decode.rrs_lanes
-                in
-                (match List.nth_opt lanes state.runtime_lane_cursor with
+                (match
+                   List.nth_opt snapshot.Masc.Tui_decode.rss_candidates
+                     state.runtime_cursor
+                 with
                  | None -> ()
-                 | Some lane ->
+                 | Some row ->
                      state.runtime_lane_pick <-
-                       Some lane.Masc.Tui_decode.rrl_id;
+                       Some row.Masc.Tui_decode.rcr_lane_id;
                      state.runtime_lane_pick_cursor <- 0;
                      state.runtime_lane_error <- None;
                      launch_runtime_catalog_load state ~mailbox:async_messages))

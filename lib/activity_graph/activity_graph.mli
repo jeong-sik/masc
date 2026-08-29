@@ -168,6 +168,10 @@ module For_testing : sig
   (** Clears the workspace-owned parse and aggregate caches. *)
 
   val reset_past_day_cache_for_testing : unit -> unit
+
+  val reset_line_count_cache_for_testing : unit -> unit
+  (** Clears the per-file line-count cache that answers [total] without
+      parsing. *)
   (** Clears the per-path, full-fingerprint event-list past-day cache. *)
 
   val current_day_rebuild_count : unit -> int

@@ -711,6 +711,41 @@ let strip_generated_at_iso json =
    from RSS, so what has to hold is that the number follows the cache. A
    fixture day file from the past is what puts anything in the past-day cache
    at all: today's file belongs to the current-day cache. *)
+(* Several dated files with globally ascending seq, which is the shape the
+   store has: [emit] bumps seq under the same lock that appends the line, so
+   a later file never holds a smaller seq than an earlier one. *)
+let write_dated_file config ~day ~seq_from ~lines =
+  let root =
+    Filename.concat (Workspace_utils.masc_dir config) Activity_graph.store_dirname
+  in
+  let dir = Filename.concat root "2020-01" in
+  let rec mkdir_p path =
+    if not (Sys.file_exists path)
+    then (
+      mkdir_p (Filename.dirname path);
+      try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p dir;
+  let path = Filename.concat dir (Printf.sprintf "%02d.jsonl" day) in
+  let oc = open_out path in
+  for i = 0 to lines - 1 do
+    Printf.fprintf oc
+      {|{"seq":%d,"ts_ms":1577923200000,"ts_iso":"2020-01-%02dT00:00:00Z","workspace_id":"default","kind":"test.fixture","actor":{"kind":"agent","id":"fixture"},"subject":{"kind":"tool","id":"fixture"},"payload":{}}|}
+      (seq_from + i) day;
+    output_char oc '\n'
+  done;
+  close_out oc;
+  path
+;;
+
+let seqs_of_json json =
+  json
+  |> Yojson.Safe.Util.member "events"
+  |> Yojson.Safe.Util.to_list
+  |> List.filter_map (fun e ->
+    match Yojson.Safe.Util.member "seq" e with `Int seq -> Some seq | _ -> None)
+;;
+
 let write_past_day_file config ~lines =
   let root = Filename.concat (Workspace_utils.masc_dir config) Activity_graph.store_dirname in
   let dir = Filename.concat root "2020-01" in
@@ -852,18 +887,94 @@ let test_unfiltered_and_trivially_filtered_pages_agree () =
         unfiltered)
 ;;
 
-let test_default_projections_share_unchanged_event_aggregate () =
+
+(* The unfiltered read walks newest-first and stops once the page is covered,
+   so the older files are never parsed. That is the whole point: on the live
+   store the first read after a restart parsed 440,068 events to serve a page
+   of 500, and the heavy-refresh warning landed once per boot at ~2,900MB
+   (8 consecutive boots, 2026-08-29/30). The parse cache holds one entry per
+   parsed past-day file, so its size is the assertion. *)
+let test_unfiltered_read_parses_only_the_newest_files () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      Activity_graph.For_testing.reset_line_count_cache_for_testing ();
+      ignore (write_dated_file config ~day:2 ~seq_from:1 ~lines:20);
+      ignore (write_dated_file config ~day:3 ~seq_from:21 ~lines:20);
+      ignore (write_dated_file config ~day:4 ~seq_from:41 ~lines:20);
+      ignore (write_dated_file config ~day:5 ~seq_from:61 ~lines:20);
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:5 () in
+      check (list int) "the page is the newest five" [ 76; 77; 78; 79; 80 ]
+        (seqs_of_json json);
+      let stats = Activity_graph.cache_stats () in
+      (* Newest file covers the page; one more is read as the ordering
+         margin. The two oldest must stay untouched. *)
+      check bool
+        (Printf.sprintf "only the newest files are parsed (past_day_files=%d of 4)"
+           stats.Activity_graph.past_day_files)
+        true
+        (stats.Activity_graph.past_day_files <= 2))
+;;
+
+(* total counts the store, not the page, and it comes from line counts rather
+   than parsed rows. It has to agree with what a full parse would say. *)
+let test_unfiltered_total_counts_the_whole_store () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      Activity_graph.For_testing.reset_line_count_cache_for_testing ();
+      ignore (write_dated_file config ~day:2 ~seq_from:1 ~lines:30);
+      ignore (write_dated_file config ~day:3 ~seq_from:31 ~lines:30);
+      let graph = Activity_graph.graph_json config ~limit:5 ~timeline_limit:80 () in
+      let total =
+        graph
+        |> Yojson.Safe.Util.member "window"
+        |> Yojson.Safe.Util.member "events_store_total"
+      in
+      check (option int) "total is every event in the store" (Some 60)
+        (match total with `Int n -> Some n | _ -> None);
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:5 () in
+      let filtered =
+        Activity_graph.list_events config ~after_seq:0 ~limit:5
+          ~keep:(fun _ -> true) ()
+      in
+      check (list int) "and the page matches the filtered path exactly"
+        (List.map (fun (e : Activity_graph.event) -> e.seq) filtered)
+        (seqs_of_json json))
+;;
+
+(* A page larger than the store must still return everything, in order, and
+   not trip on running out of files. *)
+let test_unfiltered_page_larger_than_the_store () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      Activity_graph.For_testing.reset_line_count_cache_for_testing ();
+      ignore (write_dated_file config ~day:2 ~seq_from:1 ~lines:3);
+      ignore (write_dated_file config ~day:3 ~seq_from:4 ~lines:3);
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:100 () in
+      check (list int) "every event, ascending" [ 1; 2; 3; 4; 5; 6 ]
+        (seqs_of_json json))
+;;
+
+(* The three default projections used to share one rebuild of the full
+   retained aggregate. They no longer build it at all: none of them filters,
+   so each reads only the files covering its page. The aggregate is still
+   built for filtered reads, where a kind or a time bound can match an event
+   of any age, and this pins both halves. *)
+let test_default_projections_no_longer_build_the_aggregate () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
       emit_n config 10;
       ignore (Activity_graph.json_response config ~after_seq:0 ~limit:1000 ());
       ignore (Activity_graph.graph_json config ~limit:500 ~timeline_limit:80 ());
       ignore (Activity_graph.agent_spans_json config ~limit:500 ());
-      check int "three unchanged projections share one aggregate rebuild" 1
+      check int "unfiltered projections build no aggregate" 0
         (Activity_graph.For_testing.all_events_rebuild_count ());
-      emit_n config 1;
-      ignore (Activity_graph.json_response config ~after_seq:0 ~limit:1000 ());
-      check int "append invalidates aggregate signature" 2
+      ignore
+        (Activity_graph.list_events config ~after_seq:0 ~limit:1000
+           ~keep:(fun _ -> true) ());
+      check int "a filtered read still builds it" 1
         (Activity_graph.For_testing.all_events_rebuild_count ()))
 
 let test_same_size_rewrite_invalidates_current_day_cache () =
@@ -1144,14 +1255,20 @@ let () =
         [
           test_case "current-day cache rebuilds once per fingerprint" `Quick
             test_current_day_cache_rebuilds_once_per_fingerprint;
-          Alcotest.test_case "unchanged projections share sorted aggregate"
-            `Quick test_default_projections_share_unchanged_event_aggregate;
+          Alcotest.test_case "unfiltered projections build no aggregate"
+            `Quick test_default_projections_no_longer_build_the_aggregate;
           test_case "append reuses the past-day merge" `Quick
             test_append_reuses_the_past_day_merge;
           test_case "a new past file rebuilds the merge" `Quick
             test_a_new_past_file_rebuilds_the_merge;
           test_case "unfiltered and trivially filtered pages agree" `Quick
             test_unfiltered_and_trivially_filtered_pages_agree;
+          test_case "unfiltered read parses only the newest files" `Quick
+            test_unfiltered_read_parses_only_the_newest_files;
+          test_case "unfiltered total counts the whole store" `Quick
+            test_unfiltered_total_counts_the_whole_store;
+          test_case "unfiltered page larger than the store" `Quick
+            test_unfiltered_page_larger_than_the_store;
           Alcotest.test_case "same-size rewrite invalidates cache" `Quick
             test_same_size_rewrite_invalidates_current_day_cache;
           Alcotest.test_case "truncate-regrow is not append" `Quick

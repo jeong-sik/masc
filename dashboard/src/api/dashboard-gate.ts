@@ -340,7 +340,6 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
     'turn_id',
     'task_id',
     'goal_id',
-    'goal_ids',
     'actor',
     'decision_source',
     'summary_status',
@@ -362,10 +361,6 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
   const turnId = raw.turn_id === null ? null : asInt(raw.turn_id)
   const taskId = raw.task_id === null ? null : asNullableString(raw.task_id)
   const goalId = raw.goal_id === null ? null : asNullableString(raw.goal_id)
-  const goalIds = Array.isArray(raw.goal_ids)
-    && raw.goal_ids.every(value => typeof value === 'string' && value.trim() !== '')
-    ? raw.goal_ids as string[]
-    : null
   const actor = raw.actor === null
     ? null
     : typeof raw.actor === 'string' && raw.actor.trim() !== ''
@@ -388,7 +383,6 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
     || (turnId !== null && (turnId === undefined || turnId < 0))
     || (taskId !== null && !taskId)
     || (goalId !== null && !goalId)
-    || goalIds === null
     || actor === undefined
     || !decisionSource
     || summaryStatus === null
@@ -405,7 +399,6 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
     turn_id: turnId,
     task_id: taskId,
     goal_id: goalId,
-    goal_ids: goalIds,
     actor,
     decision_source: decisionSource,
     summary_status: summaryStatus,

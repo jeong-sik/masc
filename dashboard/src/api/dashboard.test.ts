@@ -1912,7 +1912,6 @@ describe('fetchDashboardGate', () => {
       turn_id: null,
       task_id: null,
       goal_id: null,
-      goal_ids: [],
       actor: 'operator',
       decision_source: 'human_operator',
       summary_status: 'not_requested',

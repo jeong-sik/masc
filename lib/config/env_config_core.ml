@@ -457,6 +457,24 @@ let running_under_test_executable () =
     fallback is the correct production behavior. *)
 let test_allow_home_base_path_env = "MASC_TEST_ALLOW_HOME_BASE_PATH"
 
+(* Keeper sandbox test hooks, same shape as the guard above.
+
+   [keeper_sandbox_runtime_setup.ml] read MASC_TEST_FAKE_DOCKER_PATH at three
+   call sites, each spelling the "set and non-blank" test its own way, and
+   MASC_TEST_ALLOW_REAL_DOCKER at a fourth. Reading them here gives the two
+   keys one reader and routes them through [raw_value_opt], so a boot override
+   reaches them like every other key -- a direct [Sys.getenv_opt] did not. *)
+let test_fake_docker_path_env = "MASC_TEST_FAKE_DOCKER_PATH"
+let test_allow_real_docker_env = "MASC_TEST_ALLOW_REAL_DOCKER"
+
+let fake_docker_path_opt () =
+  raw_value_opt test_fake_docker_path_env |> trim_opt
+
+let real_docker_allowed_under_test () =
+  match raw_value_opt test_allow_real_docker_env |> trim_opt with
+  | Some v -> String.equal v "1" || String.equal v "true"
+  | None -> false
+
 let base_path_prod_guard path =
   if not (running_under_test_executable ()) then path
   else begin

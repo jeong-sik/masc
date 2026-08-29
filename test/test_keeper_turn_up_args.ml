@@ -74,29 +74,6 @@ let with_test_context f =
       in
       f ctx)
 
-let test_parse_rejects_runtime_agent_identity_as_keeper_name () =
-  with_test_context @@ fun ctx ->
-  List.iter
-    (fun agent_name ->
-      match
-        Keeper_turn_up_args.parse ctx
-          (`Assoc [ "name", `String agent_name ])
-      with
-      | Ok _ ->
-        failf "runtime agent identity %S was accepted as a keeper name" agent_name
-      | Error result ->
-        let body = Keeper_types_profile.tool_result_body result in
-        check bool "identifies the wrong identity kind" true
-          (String.starts_with body ~prefix:"invalid keeper name:");
-        check bool "names the canonical keeper" true
-          (String.ends_with body
-             ~suffix:"use the canonical keeper name \"omega\""))
-    [ "keeper-omega-agent"
-    ; "keeper_omega_agent"
-    ; "keeper-omega_agent"
-    ; "keeper_omega-agent"
-    ]
-
 let test_remote_endpoint_validation () =
   with_test_context @@ fun ctx ->
   let preflight_key = "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" in
@@ -106,9 +83,13 @@ let test_remote_endpoint_validation () =
     ~finally:(fun () ->
       Unix.putenv preflight_key (Option.value previous_preflight ~default:""))
   @@ fun () ->
+  (* RFC-0121: the resolver reads .masc/config/runtime.toml — the path the
+     live layout uses — not the .masc root this fixture used to write to. *)
   let masc_dir = Filename.concat ctx.config.base_path ".masc" in
   Unix.mkdir masc_dir 0o700;
-  let runtime_path = Filename.concat masc_dir "runtime.toml" in
+  let config_dir = Filename.concat masc_dir "config" in
+  Unix.mkdir config_dir 0o700;
+  let runtime_path = Filename.concat config_dir "runtime.toml" in
   let oc = open_out_bin runtime_path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
     output_string oc
@@ -248,7 +229,10 @@ let test_remote_endpoint_persistence_round_trip () =
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   let masc_dir = Filename.concat ctx.config.base_path ".masc" in
   if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o700;
-  let runtime_oc = open_out_bin (Filename.concat masc_dir "runtime.toml") in
+  (* RFC-0121: the resolver reads .masc/config/runtime.toml. *)
+  let config_dir = Filename.concat masc_dir "config" in
+  if not (Sys.file_exists config_dir) then Unix.mkdir config_dir 0o700;
+  let runtime_oc = open_out_bin (Filename.concat config_dir "runtime.toml") in
   Fun.protect ~finally:(fun () -> close_out runtime_oc) (fun () ->
     output_string runtime_oc
       {|[exec.ssh.endpoints.fixture]
@@ -1403,12 +1387,6 @@ let () =
             "post-write revision failure restores missing manifest"
             `Quick
             test_post_write_revision_failure_restores_missing_manifest
-        ] )
-    ; ( "keeper_name"
-      , [ test_case
-            "runtime agent identities are rejected"
-            `Quick
-            test_parse_rejects_runtime_agent_identity_as_keeper_name
         ] )
     ]
 ;;

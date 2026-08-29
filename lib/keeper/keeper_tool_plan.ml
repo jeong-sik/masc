@@ -350,7 +350,14 @@ end
 module Composition_run_id = struct
   type t = string
 
+  type error = Invalid_uuid_v7 of string
+
   let fresh = Random_id.uuid_v7
+  let of_string value =
+    Random_id.parse_uuid_v7 value
+    |> Result.map_error (fun reason -> Invalid_uuid_v7 reason)
+  ;;
+
   let to_string value = value
   let equal = String.equal
 end

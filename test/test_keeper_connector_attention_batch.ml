@@ -250,6 +250,20 @@ let scheduled_wake_stimulus ~occurrence ~arrived_at : Q.stimulus =
   }
 ;;
 
+let hitl_resolution_stimulus ~approval_id ~arrived_at : Q.stimulus =
+  let resolution : Q.hitl_resolution =
+    { approval_id
+    ; decision = Q.Hitl_approved
+    ; channel = Keeper_continuation_channel.unrouted "test"
+    }
+  in
+  { Q.post_id = Q.hitl_resolution_post_id resolution
+  ; urgency = Q.Immediate
+  ; arrived_at
+  ; payload = Q.Hitl_resolved resolution
+  }
+;;
+
 let connector_event_ids_of_queue queue =
   Q.to_list queue
   |> List.filter_map (fun (s : Q.stimulus) ->
@@ -343,6 +357,64 @@ let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
       (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
        |> Result.map Q.length
        |> Result.value ~default:(-1)))
+;;
+
+let test_one_intake_admits_only_one_hitl_resolution () =
+  with_ctx "hitl-exact-replay-batch" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let first =
+      hitl_resolution_stimulus ~approval_id:"appr-first" ~arrived_at:1.0
+    in
+    let second =
+      hitl_resolution_stimulus ~approval_id:"appr-second" ~arrived_at:2.0
+    in
+    List.iter (enqueue_exn ~base_path keeper_name) [ first; second ];
+    let intake =
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+        ~ctx
+        ~meta_after_triage:meta
+        ~pending_board_events:[]
+    in
+    check int "one turn owns one exact HITL grant" 1 intake.consumed_stimulus_count;
+    check
+      (list string)
+      "the oldest ready approval is the only admitted source"
+      [ first.post_id ]
+      (List.map (fun (source : Q.stimulus) -> source.post_id) intake.consumed_stimuli);
+    check int "turn completion can ACK only that exact approval" 1
+      (List.length intake.consumed_selections);
+    (match intake.consumed_selections with
+     | [ selection ] ->
+       (match
+          Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+            ~base_path
+            keeper_name
+            ~applied_at:1000.0
+            ~selection
+        with
+        | Ok _ -> ()
+        | Error detail -> failf "first approval ACK failed: %s" detail)
+     | _ -> fail "one HITL intake must carry one ACK selection");
+    let queued =
+      match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+      | Ok queue -> Q.to_list queue
+      | Error detail -> failf "queue reload failed: %s" detail
+    in
+    check
+      (list string)
+      "ACK removes only the replayed approval; the second remains durable"
+      [ second.post_id ]
+      (List.map (fun (source : Q.stimulus) -> source.post_id) queued);
+    let next =
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+        ~ctx
+        ~meta_after_triage:meta
+        ~pending_board_events:[]
+    in
+    check
+      (list string)
+      "the next turn admits the remaining exact approval"
+      [ second.post_id ]
+      (List.map (fun (source : Q.stimulus) -> source.post_id) next.consumed_stimuli))
 ;;
 
 (* Adversarial review P1-2: the turn-completion/failure batch disposition
@@ -679,6 +751,10 @@ let () =
             "admits all ready Board, Schedule, and Bootstrap sources in one turn"
             `Quick
             test_one_intake_admits_every_ready_non_connector_in_queue_order
+        ; test_case
+            "admits only one exact HITL resolution per turn"
+            `Quick
+            test_one_intake_admits_only_one_hitl_resolution
         ; test_case
             "admits a channel's whole backlog in arrival order, leaves other \
              channels queued"

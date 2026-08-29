@@ -89,8 +89,8 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper_types/keeper_types.ml`�
 - **Lineage**: `generation`, `trace_id`, `trace_history`, `last_handoff_ts`
 - **Goal/Task links**: `active_goal_ids`, `current_task_id`, typed goal/task transitions
 - **Model**: `runtime_id`, `last_model_used`, derived `active_model`
-- **Capability boundary**: the flat Tool catalog plus objective `allowed_paths`
-  containment; external effects pass through the Gate.
+- **Capability boundary**: the flat Tool catalog plus the sandbox path
+  boundary; external effects pass through the Gate.
 - **Scope**: `mention_targets`, `bound_workspace_ids`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등

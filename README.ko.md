@@ -296,7 +296,6 @@ autoboot_enabled = true
 proactive_enabled = true
 sandbox_profile = "local"
 mention_targets = ["operator"]
-allowed_paths = ["workspace/yousleepwhen/masc"]
 
 [keeper.tools]
 native = "read"  # "none" | "read" | "full" (Auto 모드에서는 read로 안전 강등)

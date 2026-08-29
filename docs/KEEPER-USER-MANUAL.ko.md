@@ -35,7 +35,6 @@ autoboot_enabled = true
 proactive_enabled = true
 sandbox_profile = "docker"
 mention_targets = ["reviewer", "리뷰어"]
-allowed_paths = ["workspace/yousleepwhen/masc"]
 
 instructions = """
 당신은 리뷰 Keeper 입니다. 요약문이 아니라 실제 diff 와 파일 원문을 읽어 주세요.
@@ -56,7 +55,6 @@ instructions = """
 | `proactive_enabled` | 9/11 | 스스로 턴을 돌지, 불렸을 때만 움직일지 |
 | `mention_targets` | 7/11 | 보드에서 이 Keeper 를 부르는 이름들 |
 | `network_mode` | 6/11 | 샌드박스에서 네트워크가 닿는 범위 |
-| `allowed_paths` | 6/11 | 주로 작업할 저장소 경로 |
 | `name` | 5/11 | 파일 이름과 표시 이름이 다를 때 |
 | `always_allow` | 2/11 | 이 Keeper 의 도구 호출을 승인 대기열에 안 넣음 |
 

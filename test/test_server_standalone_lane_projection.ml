@@ -64,7 +64,7 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
       ; started_at = 70.
       ; status =
           Verification.Completed
-            { outcome = Verification.Approved
+            { outcome = Verification.Approved { reason = "" }
             ; evaluator_runtime = Some "verifier-primary"
             ; elapsed_s = 2.
             ; tools = []

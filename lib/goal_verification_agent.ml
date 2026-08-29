@@ -16,12 +16,11 @@
     Authority is the fixed identity
     [System_llm_agent { agent_run_id = "verifier_exact" }] (RFC-0361 D7(b)):
     the handler binds [ctx.agent_name] into the verdict, and this lane's
-    context names the lane. Evidence is the model's stated reason; the
-    verdict channel drops the reason for [Approve], so it is captured from
-    the successful [report_review_verdict] tool call via [on_tool_result],
-    and config/prompts/goal_verification.proof.md makes the reason mandatory
-    for both outcomes. A verdict without a stated reason is not a judgment:
-    nothing is committed and the pending row stays durable.
+    context names the lane. Evidence is the model's stated reason, which the
+    verdict itself now carries on either outcome, and
+    config/prompts/goal_verification.proof.md makes it mandatory for both. A
+    verdict without a stated reason is not a judgment: nothing is committed and
+    the pending row stays durable.
 
     Failure keeps evidence: an unavailable evaluator, a malformed reply after
     all slots failed, or a refused commit leaves the pending row durable and
@@ -288,25 +287,7 @@ let process_pending_work_inner
             ~goal_id:work.goal_id
             ~reason:("goal proof lookup surface unavailable: " ^ detail)
         | Ok lookup ->
-       (* The verdict channel drops the reason for [Approve]; capture the
-          stated reason from the successful verdict tool call — exactly one
-          such call exists per review, and it belongs to the winning slot
-          (a slot that recorded a verdict never fails over). *)
-       let stated_reason = ref None in
-       let on_tool_result ~input result =
-         observe_tool ~input result;
-         if Tool_result.is_success result
-         then
-           match
-             Task.Anti_rationalization.parse_review_verdict_from_json input
-           with
-           | Ok _ ->
-             (match Json_util.get_string input "reason" with
-              | Some reason when String.trim reason <> "" ->
-                stated_reason := Some reason
-              | Some _ | None -> ())
-           | Error _ -> ()
-       in
+       let on_tool_result ~input result = observe_tool ~input result in
        let result =
          Task.Anti_rationalization.run
            ~base_path:config.base_path
@@ -343,14 +324,14 @@ let process_pending_work_inner
            | Some review_verdict ->
              let evidence =
                match review_verdict with
-               | Task.Anti_rationalization.Reject reason -> Some reason
-               | Task.Anti_rationalization.Approve -> !stated_reason
+               | Task.Anti_rationalization.Reject reason
+               | Task.Anti_rationalization.Approve reason -> reason
              in
              (match evidence with
-              | Some evidence when String.trim evidence <> "" ->
+              | evidence when String.trim evidence <> "" ->
                 let decision =
                   match review_verdict with
-                  | Task.Anti_rationalization.Approve ->
+                  | Task.Anti_rationalization.Approve _ ->
                     Workspace_goals.Proof_proven
                   | Task.Anti_rationalization.Reject reason ->
                     Workspace_goals.Proof_refuted { reason }
@@ -378,7 +359,7 @@ let process_pending_work_inner
                    defer
                      ~goal_id:work.goal_id
                      ~reason:detail)
-              | Some _ | None ->
+              | _ ->
                 defer
                   ~goal_id:work.goal_id
                   ~reason:

@@ -37,7 +37,7 @@ let make_req ?(title = "Fix auth bug") ?(desc = "Fix the login issue")
     completion_notes = notes; agent_name = agent; task_id = "test-task-eval";
     evidence_refs = [] }
 
-let make_result ?(verdict = AR.Approve) ?(runtime = "verifier")
+let make_result ?(verdict = AR.Approve "") ?(runtime = "verifier")
     ?gen_runtime ?(gate = AR.Structured_tool) ?fallback_reason () : AR.review_result =
   { verdict = Some verdict; evaluator_runtime = runtime;
     generator_runtime = gen_runtime; gate; fallback_reason;
@@ -189,7 +189,7 @@ let test_find_divergences_false_positive () =
   let dir = tmpdir () in
   Cal.For_testing.set_store ~base_dir:dir;
   let req = make_req ~title:"FP task" ~notes:"looks ok but not" () in
-  let result = make_result ~verdict:AR.Approve ~gate:AR.Structured_tool () in
+  let result = make_result ~verdict:(AR.Approve "") ~gate:AR.Structured_tool () in
   Cal.record_verdict ~task_id:"t1" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"FP task" ~notes:"looks ok but not" in
   Cal.record_human_label
@@ -231,7 +231,7 @@ let test_find_divergences_agreement () =
   let dir = tmpdir () in
   Cal.For_testing.set_store ~base_dir:dir;
   let req = make_req ~title:"OK task" ~notes:"done correctly" () in
-  let result = make_result ~verdict:AR.Approve () in
+  let result = make_result ~verdict:(AR.Approve "") () in
   Cal.record_verdict ~task_id:"t3" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"OK task" ~notes:"done correctly" in
   Cal.record_human_label
@@ -267,7 +267,7 @@ let test_select_examples_max () =
     let title = Printf.sprintf "task-%d" i in
     let notes = Printf.sprintf "notes-%d" i in
     let req = make_req ~title ~notes () in
-    let result = make_result ~verdict:AR.Approve () in
+    let result = make_result ~verdict:(AR.Approve "") () in
     Cal.record_verdict ~task_id:(Printf.sprintf "t%d" i) ~req ~result ();
     let hash = Cal.notes_hash ~task_title:title ~notes in
     Cal.record_human_label
@@ -315,10 +315,10 @@ let test_calibration_stats () =
   (* 2 approvals, 1 rejection *)
   let req1 = make_req ~title:"t1" ~notes:"n1" () in
   Cal.record_verdict ~task_id:"id1" ~req:req1
-    ~result:(make_result ~verdict:AR.Approve ~gate:AR.Structured_tool ()) ();
+    ~result:(make_result ~verdict:(AR.Approve "") ~gate:AR.Structured_tool ()) ();
   let req2 = make_req ~title:"t2" ~notes:"n2" () in
   Cal.record_verdict ~task_id:"id2" ~req:req2
-    ~result:(make_result ~verdict:AR.Approve ~gate:AR.Structured_tool ()) ();
+    ~result:(make_result ~verdict:(AR.Approve "") ~gate:AR.Structured_tool ()) ();
   let req3 = make_req ~title:"t3" ~notes:"n3" () in
   Cal.record_verdict ~task_id:"id3" ~req:req3
     ~result:(make_result ~verdict:(AR.Reject "bad") ~gate:AR.Structured_tool ()) ();

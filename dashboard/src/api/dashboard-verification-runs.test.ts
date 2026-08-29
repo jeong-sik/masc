@@ -194,6 +194,26 @@ describe('parseVerificationRunsResponse', () => {
     expect(() => parseVerificationRunsResponse(null)).toThrow('root must be an object')
   })
 
+  it('surfaces the reason an approval states', () => {
+    const parsed = parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
+      runs: [row({ reason: 'ran the suite in the sandbox: 9355/9355' })],
+    })
+    expect(onlyRun(parsed).cause).toBe('ran the suite in the sandbox: 9355/9355')
+  })
+
+  // Approvals written before the reviewer channel carried a reason have no
+  // such field. They still decode, with nothing to show.
+  it('decodes an approval that states no reason', () => {
+    const parsed = parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
+      runs: [row()],
+    })
+    expect(onlyRun(parsed).cause).toBeUndefined()
+  })
+
   it('rejects outcome-specific fields on the wrong constructor', () => {
     expect(() => parseVerificationRunsResponse({
       generated_at: '2026-08-05T00:00:00Z',

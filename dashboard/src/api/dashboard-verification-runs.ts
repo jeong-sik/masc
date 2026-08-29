@@ -47,9 +47,10 @@ const BACKEND_STATUSES: readonly string[] = [
 /** One tracked review from the registry.
 
     `cause` is the operator-readable reason the outcome happened, flattened from
-    the backend's per-outcome field (`reason` on a rejection, `detail` on the
-    failure shapes). Absent on `running` and `approved` — those are the only two
-    outcomes with nothing to explain. */
+    the backend's per-outcome field (`reason` on an approval or a rejection,
+    `detail` on the failure shapes). Absent on `running`, and on an approval
+    whose reviewer stated nothing — rows written before approvals carried a
+    reason have no such field at all. */
 export interface VerificationRunRecord {
   verificationId: string
   taskId: string
@@ -188,7 +189,9 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
       break
     case 'approved':
       requiredOutcomeFields = ['elapsed_s', 'tools']
-      optionalFields = ['evaluator_runtime']
+      // Optional, not required: rows written before an approval carried its
+      // reviewer's stated reason have no `reason` field and must still decode.
+      optionalFields = ['evaluator_runtime', 'reason']
       break
     case 'rejected':
       requiredOutcomeFields = ['elapsed_s', 'reason', 'tools']
@@ -234,6 +237,8 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
     evaluatorRuntime: optionalNonEmptyString(raw.evaluator_runtime, `${context}.evaluator_runtime`),
     cause: status === 'rejected'
       ? nonEmptyString(raw.reason, `${context}.reason`)
+      : status === 'approved'
+      ? optionalNonEmptyString(raw.reason, `${context}.reason`)
       : status === 'infrastructure_unavailable' || status === 'not_reviewed'
         || status === 'commit_failed' || status === 'raised'
         ? nonEmptyString(raw.detail, `${context}.detail`)

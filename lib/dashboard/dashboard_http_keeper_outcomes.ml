@@ -52,7 +52,7 @@ let compute_outcomes_rollup
   List.iter
     (fun (v : Dashboard_harness_health.harness_verdict_item) ->
       match Eval_calibration.verdict_of_string (String.lowercase_ascii v.verdict) with
-      | Some Task.Anti_rationalization.Approve -> incr pass_v
+      | Some (Task.Anti_rationalization.Approve _) -> incr pass_v
       | Some (Task.Anti_rationalization.Reject reason) ->
           incr fail_v;
           let r =

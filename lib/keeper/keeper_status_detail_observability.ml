@@ -74,9 +74,7 @@ let lightweight_runtime_contract_json ~runtime_blocker_class ~selected_model
   `Assoc
     [ "source", `String source
     ; "verified", `Bool runtime_verified
-    ; "provider_scope", `Null
     ; "provider_reachable", `Null
-    ; "healthy_runtime_count", `Null
     ; "actual_model_id", `Null
     ; "actual_slots", `Null
     ; "actual_ctx", `Null

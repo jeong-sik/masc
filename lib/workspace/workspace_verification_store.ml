@@ -737,42 +737,28 @@ let valid_producer_relative_path path =
            || String.equal segment "."
            || String.equal segment "..")))
 
-(* Resolve a producer-relative artifact path against the producer's repository
-   checkouts when the direct [ownership_root / relative_path] read misses.
+(* A producer-relative artifact path resolves against the producer's sandbox
+   root and nowhere else.
 
-   A producer may reference a file checkout-relative (e.g. [lib/foo.ml] rather
-   than [repos/masc/lib/foo.ml]). The direct concat then points at a path that
-   does not exist under the ownership root, so we fall back to enumerating the
-   [repos/*] checkouts and resolving the path inside each. We only accept the
-   resolution when exactly one checkout contains the file; zero matches is a
-   plain miss and multiple matches is ambiguous, both of which we refuse rather
-   than silently picking an arbitrary checkout. *)
-let resolve_checkout_relative_artifact ~ownership_root ~reference relative_path =
-  let repos_dir = Filename.concat ownership_root "repos" in
-  if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir) then
-    None
-  else
-    let is_regular_file path =
-      try (Unix.stat path).Unix.st_kind = Unix.S_REG
-      with Unix.Unix_error _ | Sys_error _ -> false
-    in
-    let candidates =
-      Sys.readdir repos_dir
-      |> Array.to_list
-      |> List.filter (fun name ->
-        let candidate =
-          Filename.concat (Filename.concat repos_dir name) relative_path
-        in
-        is_regular_file candidate)
-    in
-    match candidates with
-    | [ name ] ->
-      let target = Filename.concat (Filename.concat repos_dir name) relative_path in
-      (match read_regular_file_prefix ~ownership_root target with
-       | Ok (content, bytes, truncated) ->
-         Some (Evidence_artifact { reference; content; bytes; truncated })
-       | Error _ -> None)
-    | [] | _ :: _ :: _ -> None
+   A submitter often writes the path relative to the checkout it worked in
+   ([lib/foo.ml] rather than [masc/lib/foo.ml]), and the direct concat then
+   misses. This store used to guess the rest: it enumerated [repos/*] and
+   accepted the read when exactly one entry held the file. That guess was
+   wrong twice over. It hardcoded a [repos/] segment, which
+   {!Keeper_playground_checkouts} exists to remove — a keeper puts its
+   checkouts where it likes, and the ones at the top level were invisible to
+   it. And where a keeper holds the same repository several times, the file
+   sits in several checkouts with different content, so the arm that reads
+   "exactly one match" is the arm that never fires for the layout that most
+   needs it.
+
+   Reading a file the submitter did not name is worse than not reading one:
+   the judge receives content without knowing which checkout produced it.
+   So the miss stays a typed [Evidence_artifact_unreadable] and travels to
+   the judge, which holds Read/Grep on this same root and a [root_layout]
+   naming every checkout under it. Resolving a checkout-relative path is the
+   judge's call, and [verification.lookup.producer_tree] already tells it to
+   make that call. *)
 
 let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_path =
   if not (valid_producer_relative_path relative_path)
@@ -789,16 +775,7 @@ let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_pa
     match read_regular_file_prefix ~ownership_root target with
     | Ok (content, bytes, truncated) ->
       Evidence_artifact { reference; content; bytes; truncated }
-    | Error (Evidence_missing as reason) ->
-      (* Direct path missed: try checkout-relative resolution before giving up. *)
-      (match
-         resolve_checkout_relative_artifact
-           ~ownership_root
-           ~reference
-           relative_path
-       with
-       | Some artifact -> artifact
-       | None -> Evidence_artifact_unreadable { reference; reason })
+    | Error (Evidence_missing as reason)
     | Error (Evidence_not_regular_file as reason)
     | Error (Evidence_outside_worker_playground as reason)
     | Error (Evidence_invalid_utf8 as reason)

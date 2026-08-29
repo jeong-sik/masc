@@ -255,18 +255,6 @@ type prepared_review =
    can land either way on the same evidence: task-808 was refused at 10:55 for
    an artifact the store reported missing, and approved at 10:59 with the file
    still absent. *)
-let unresolved_artifact_references items =
-  List.filter_map
-    (function
-      | Workspace_verification_store.Evidence_artifact_unreadable
-          { reference; reason = Workspace_verification_store.Evidence_missing } ->
-        Some reference
-      | Workspace_verification_store.Evidence_artifact _
-      | Workspace_verification_store.Evidence_note _
-      | Workspace_verification_store.Evidence_invalid_reference
-      | Workspace_verification_store.Evidence_artifact_unreadable _ -> None)
-    items
-;;
 
 let prepare_review
       ~(config : Workspace_utils_backend_setup.config)
@@ -337,17 +325,40 @@ let prepare_review
              "submitted evidence header worker mismatch (expected=%s actual=%s)"
              assignee
              header.worker)
-      else if unresolved_artifact_references items <> []
-      then
-        Error
-          (Printf.sprintf
-             "submitted evidence names artifacts that do not exist: %s"
-             (String.concat ", " (unresolved_artifact_references items)))
       else
         let* evidence_refs = evidence_refs_of_output request.output in
         let* completion_contract, required_artifacts =
           completion_contract_of_request request
         in
+        (* An artifact reference the store could not read is carried here,
+           not refused here.
+
+           The three header checks above are identity: this payload is not the
+           one this review is for, and no reviewer can repair that. An
+           unreadable artifact is a different kind of fact. The store resolves
+           a reference against the producer's sandbox root only, so a path the
+           submitter wrote relative to a checkout misses even when the file is
+           right there — [Evidence_missing] answers the path that was asked
+           for, not whether the work exists.
+
+           Refusing here made that miss terminal. [prepare_review] runs before
+           the lookup surface is built, so no evaluator ran, no verdict was
+           committed, and [observe_rejection_wakeup] fires only on a committed
+           [Verdict_rejected] — the producer was never told. The outcome
+           recorded as [Infrastructure_unavailable], which schedules no retry.
+           The Task then sat in [AwaitingVerification] until an operator
+           noticed (task-568, task-785, task-845, 2026-08-29). RFC-0337
+           (Withdrawn) already removed the hierarchy where evidence shape
+           rejects work ahead of the judge; this was that hierarchy again,
+           minus the notification.
+
+           The judge is equipped for it: [submitted_evidence_access] carries
+           each unreadable item as a typed [artifact_unreadable] with its
+           reference and reason, and the judge holds Read/Grep on the same
+           root plus a [root_layout] naming every checkout under it.
+           [verification.lookup.producer_tree] tells it to prefix a
+           checkout-relative path and to establish the tree's shape before
+           calling a path absent. A REJECT from there reaches the producer. *)
         let completion_notes =
           Yojson.Safe.pretty_to_string
             (`Assoc
@@ -928,7 +939,6 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
 module For_testing = struct
   let authority_actor = authority_actor
   let evidence_refs_of_output = evidence_refs_of_output
-  let unresolved_artifact_references = unresolved_artifact_references
   let completion_verdict_of_review = completion_verdict_of_review
   let review_notes = review_notes
 

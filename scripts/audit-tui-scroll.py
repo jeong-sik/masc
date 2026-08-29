@@ -202,6 +202,12 @@ class Tui:
         when nothing else has focus, so this reads it as "j does nothing".
         Check the key handler before believing that verdict on a surface whose
         keys act on the right pane.
+
+        The run sets NO_COLOR, so a cursor drawn only as a highlight leaves no
+        mark in the text. A surface whose list fits the screen moves its cursor
+        and scrolls nothing, and both are invisible here -- which is why the
+        verdict for a short list is "nothing to scroll" rather than a pass or
+        a fail.
         """
         out = []
         for line in self.screen.display:

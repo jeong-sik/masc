@@ -702,6 +702,20 @@ val set_runtime_media_failover :
     validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. The list order is preserved. *)
 
+val set_runtime_lane_candidates :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  runtime_ids:string list ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Persist [\[runtime.lanes."<lane_id>"\]].candidates through the runtime.toml
+    SSOT writer, validate the resulting config, atomically write it, and refresh
+    the in-process runtime cache. The list order is the failover order. Creates
+    the lane table when the id has none — a runtime whose lane was synthesized
+    ([self, default]) becomes a declared lane the first time an operator adds a
+    candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
+    nothing is not the same edit as removing the lane. *)
+
 val default_max_context : unit -> int
 (** Effective context-window budget of the default runtime's model (RFC-0206
     single-binding), clamped by the AGENT_CORE provider capability catalog when that

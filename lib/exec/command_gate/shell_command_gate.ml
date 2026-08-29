@@ -178,6 +178,7 @@ let too_complex_reason_tag = function
   | Unsupported_construct `Proc_subst -> "proc_subst"
   | Unsupported_construct `Subshell -> "subshell"
   | Unsupported_construct `Arith_expansion -> "arith_expansion"
+  | Unsupported_construct `Param_expansion -> "param_expansion"
   | Unsupported_construct `Control_flow -> "control_flow"
   | Unsupported_construct `Function_def -> "function_def"
   | Unsupported_construct `Glob_brace -> "glob_brace"

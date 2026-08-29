@@ -457,9 +457,9 @@ let test_brace_expansion_is_too_complex_glob_brace () =
   (* Corpus fixture: ls {a,b}.txt
      Worker gate: ok (brace not in the Execute shell injection precheck).
      IR: Too_complex (Unsupported_construct `Glob_brace).
-     Phase 0 PR-A2: new fixture covering classify_too_complex's
-     [has "{" || has "}"] arm — previously no corpus row exercised
-     it. *)
+     Phase 0 PR-A2: new fixture covering the brace arm — previously no
+     corpus row exercised it. The reason now comes from the lexer rule
+     that matches [{], not from a scan of the whole source. *)
   match
     gate_from_raw
       ~raw:"ls {a,b}.txt"

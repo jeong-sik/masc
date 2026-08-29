@@ -6,7 +6,9 @@
  (name masc_exec_bash_parser)
  (public_name masc.masc_exec_bash_parser)
  (wrapped true)
- (libraries masc_exec masc_core))
+ ; masc_core was here for the substring scan that guessed a refusal reason.
+ ; The lexer names its own refusals now and nothing in this library reads it.
+ (libraries masc_exec))
 
 (ocamllex bash_lexer)
 

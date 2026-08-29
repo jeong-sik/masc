@@ -1046,6 +1046,7 @@ let pp_validation_error ppf = function
        | `Proc_subst -> "process substitution"
        | `Subshell -> "a subshell"
        | `Arith_expansion -> "arithmetic expansion"
+       | `Param_expansion -> "a shell expansion"
        | `Control_flow -> "control flow"
        | `Function_def -> "a function definition"
        | `Glob_brace -> "brace expansion"

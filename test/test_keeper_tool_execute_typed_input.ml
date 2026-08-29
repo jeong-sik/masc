@@ -594,6 +594,42 @@ let test_script_outside_the_subset_is_named () =
       Execute_input.pp_validation_error e
 ;;
 
+(* The sentence a caller acts on names the construct their script contains.
+
+   sangsu sent this on 2026-08-30 and was told the script "uses a redirection,
+   which this tool does not run. use the stdin field". Every redirect in it is
+   one the subset takes; the [$?] is what the lexer stopped on. Acting on that
+   sentence means rewriting four working redirects and arriving back here. *)
+let test_the_refusal_names_the_construct_the_script_contains () =
+  let script =
+    "echo cmd=build > ev.txt && git rev-parse HEAD >> ev.txt 2>&1; dune build \
+     >> ev.txt 2>&1; echo exit=$? >> ev.txt"
+  in
+  let input = parse_json_exn (`Assoc [ "script", `String script ]) in
+  match Execute_input.to_shell_ir input with
+  | Ok _ -> Alcotest.fail "[$?] is outside the subset"
+  | Error (Execute_input.Script_outside_the_subset `Redirect) ->
+    Alcotest.fail
+      "the redirects in this script are all ones the subset takes; naming one \
+       sends the caller to rewrite working code"
+  | Error (Execute_input.Script_outside_the_subset `Param_expansion) ->
+    let msg =
+      Format.asprintf
+        "%a"
+        Execute_input.pp_validation_error
+        (Execute_input.Script_outside_the_subset `Param_expansion)
+    in
+    Alcotest.(check bool)
+      (Printf.sprintf "does not send an expansion to the stdin field: %S" msg)
+      false
+      (String_util.contains_substring_ci msg "stdin")
+  | Error e ->
+    Alcotest.failf
+      "expected the expansion to be named, got %a"
+      Execute_input.pp_validation_error
+      e
+;;
+
 (* A separated list carries a redirect often enough that naming the redirect
    was the classifier's usual answer. Measured over the 548 command lines the
    runtime produced 2026-08-21..23, all 31 refusals reported as a redirect
@@ -1984,6 +2020,10 @@ let suite =
           "script_outside_the_subset_is_named"
           `Quick
           test_script_outside_the_subset_is_named
+      ; Alcotest.test_case
+          "the_refusal_names_the_construct_the_script_contains"
+          `Quick
+          test_the_refusal_names_the_construct_the_script_contains
       ; Alcotest.test_case
           "a_separator_is_lowered_to_sequence"
           `Quick

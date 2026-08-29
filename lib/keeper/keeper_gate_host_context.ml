@@ -60,7 +60,6 @@ let repository_reference_json ~catalog ~argument_index ~raw ~canonical_id =
          `Assoc
            [ "state", `String "registered"
            ; "repository_id", `String repository.id
-           ; "declared_url", `String repository.url
            ]
        | matches ->
          `Assoc

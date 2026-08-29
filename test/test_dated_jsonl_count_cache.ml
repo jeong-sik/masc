@@ -192,6 +192,149 @@ let test_per_file_cache_matches_uncached_across_days () =
   check int "after growth total is 15" 15 (Dated_jsonl.count_entries t)
 ;;
 
+
+(* The cache was process-memory only, so a restart re-counted every retained
+   line of every dated store. Measured 2026-08-29: 24 bootstraps that day, and
+   23 of 28 telemetry_summary "heavy refresh" warnings inside five minutes of
+   one, worst 225.70s / 5,704MB. Persisting it makes a restart resume the
+   incremental read. [reset_count_cache_for_testing] stands in for the
+   restart: it is exactly the state a fresh process has. *)
+let test_saved_cache_survives_a_restart () =
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let base = tmpdir "count_cache_persist" in
+  seed_store base 12;
+  let t = Dated_jsonl.create ~base_dir:base () in
+  check int "warm count" 12 (Dated_jsonl.count_entries t);
+  let cache_file = Filename.concat (tmpdir "count_cache_file") "counts.json" in
+  (match Dated_jsonl.save_count_cache ~path:cache_file with
+   | Ok () -> ()
+   | Error detail -> failf "save failed: %s" detail);
+  Dated_jsonl.reset_count_cache_for_testing ();
+  (match Dated_jsonl.load_count_cache ~path:cache_file with
+   | Ok rows -> check bool "at least the seeded file was restored" true (rows >= 1)
+   | Error detail -> failf "load failed: %s" detail);
+  check int "the restored count is the same count" 12 (Dated_jsonl.count_entries t)
+;;
+
+(* The restored entry is still only a boundary claim. Growth behind it has to
+   show up, or the cache would serve a number the store no longer has. *)
+let test_a_restored_entry_still_sees_growth () =
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let base = tmpdir "count_cache_growth" in
+  seed_store base 4;
+  let t = Dated_jsonl.create ~base_dir:base () in
+  check int "warm count" 4 (Dated_jsonl.count_entries t);
+  let cache_file = Filename.concat (tmpdir "count_cache_file2") "counts.json" in
+  (match Dated_jsonl.save_count_cache ~path:cache_file with
+   | Ok () -> () | Error detail -> failf "save failed: %s" detail);
+  Dated_jsonl.reset_count_cache_for_testing ();
+  seed_store base 3;
+  (match Dated_jsonl.load_count_cache ~path:cache_file with
+   | Ok _ -> () | Error detail -> failf "load failed: %s" detail);
+  check int "growth behind a restored boundary is counted" 7
+    (Dated_jsonl.count_entries t);
+  check int "and it agrees with an uncached count"
+    (Dated_jsonl.count_entries_uncached t)
+    (Dated_jsonl.count_entries t)
+;;
+
+(* A restored boundary past the file's current size is the shrink case, which
+   the existing rescan path already handles. It must not survive as a count. *)
+let test_a_restored_entry_rescans_a_shrunk_file () =
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let base = tmpdir "count_cache_shrink" in
+  seed_store base 9;
+  let t = Dated_jsonl.create ~base_dir:base () in
+  check int "warm count" 9 (Dated_jsonl.count_entries t);
+  let cache_file = Filename.concat (tmpdir "count_cache_file3") "counts.json" in
+  (match Dated_jsonl.save_count_cache ~path:cache_file with
+   | Ok () -> () | Error detail -> failf "save failed: %s" detail);
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let path = today_day_path base in
+  let oc = open_out path in
+  output_string oc "{\"seq\":1}\n";
+  close_out oc;
+  (match Dated_jsonl.load_count_cache ~path:cache_file with
+   | Ok _ -> () | Error detail -> failf "load failed: %s" detail);
+  check int "a shrunk file is rescanned, not trusted" 1
+    (Dated_jsonl.count_entries t)
+;;
+
+(* Absent and unreadable cache files are the cold-start path, which is
+   correct -- just slower. Neither may fail a count. *)
+let test_missing_and_corrupt_cache_files_are_survivable () =
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let base = tmpdir "count_cache_absent" in
+  seed_store base 5;
+  let t = Dated_jsonl.create ~base_dir:base () in
+  let missing = Filename.concat (tmpdir "count_cache_file4") "absent.json" in
+  (match Dated_jsonl.load_count_cache ~path:missing with
+   | Ok rows -> check int "a missing cache restores nothing" 0 rows
+   | Error detail -> failf "a missing cache must not be an error: %s" detail);
+  check int "and the count is still exact" 5 (Dated_jsonl.count_entries t);
+  let corrupt = Filename.concat (tmpdir "count_cache_file5") "corrupt.json" in
+  write_raw corrupt "{not json";
+  (match Dated_jsonl.load_count_cache ~path:corrupt with
+   | Ok _ -> fail "a corrupt cache must report the failure"
+   | Error _ -> ());
+  Dated_jsonl.reset_count_cache_for_testing ();
+  check int "a corrupt cache leaves counting correct" 5
+    (Dated_jsonl.count_entries t)
+;;
+
+
+(* The three tests above would pass even if [load_count_cache] installed
+   nothing: recounting from scratch returns the same number. This one pins
+   that the restored entry is actually consumed. The saved count is edited to
+   a value the file cannot produce while its boundary is left alone, so a
+   count that still matches the file proves the load did nothing. This is also
+   the honest shape of the cache's risk: a boundary that matches is trusted,
+   and the size check is the only thing standing between a stale row and a
+   wrong number. *)
+let test_a_restored_entry_is_actually_used () =
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let base = tmpdir "count_cache_consumed" in
+  seed_store base 6;
+  let t = Dated_jsonl.create ~base_dir:base () in
+  check int "warm count" 6 (Dated_jsonl.count_entries t);
+  let cache_file = Filename.concat (tmpdir "count_cache_file6") "counts.json" in
+  (match Dated_jsonl.save_count_cache ~path:cache_file with
+   | Ok () -> () | Error detail -> failf "save failed: %s" detail);
+  let saved =
+    let ic = open_in cache_file in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () -> really_input_string ic (in_channel_length ic))
+  in
+  let replace_first ~needle ~replacement haystack =
+    let nlen = String.length needle and hlen = String.length haystack in
+    let rec scan i =
+      if i + nlen > hlen
+      then haystack
+      else if String.equal (String.sub haystack i nlen) needle
+      then
+        String.sub haystack 0 i
+        ^ replacement
+        ^ String.sub haystack (i + nlen) (hlen - i - nlen)
+      else scan (i + 1)
+    in
+    scan 0
+  in
+  let tampered =
+    replace_first ~needle:"\"count\":6" ~replacement:"\"count\":4242" saved
+  in
+  check bool "the fixture edited the saved count" true
+    (not (String.equal tampered saved));
+  let oc = open_out cache_file in
+  output_string oc tampered;
+  close_out oc;
+  Dated_jsonl.reset_count_cache_for_testing ();
+  (match Dated_jsonl.load_count_cache ~path:cache_file with
+   | Ok _ -> () | Error detail -> failf "load failed: %s" detail);
+  check int "the restored row is the one that answers" 4242
+    (Dated_jsonl.count_entries t)
+;;
+
 let () =
   Alcotest.run
     "dated_jsonl_count_cache"
@@ -205,6 +348,16 @@ let () =
             `Quick
             test_unterminated_trailing_line
         ; test_case "shrunk file forces full rescan" `Quick test_shrunk_file_rescans
+        ; test_case "a saved cache survives a restart" `Quick
+            test_saved_cache_survives_a_restart
+        ; test_case "a restored entry still sees growth" `Quick
+            test_a_restored_entry_still_sees_growth
+        ; test_case "a restored entry rescans a shrunk file" `Quick
+            test_a_restored_entry_rescans_a_shrunk_file
+        ; test_case "missing and corrupt cache files are survivable" `Quick
+            test_missing_and_corrupt_cache_files_are_survivable
+        ; test_case "a restored entry is actually used" `Quick
+            test_a_restored_entry_is_actually_used
         ; test_case
             "directory recreation forgets old file identity"
             `Quick

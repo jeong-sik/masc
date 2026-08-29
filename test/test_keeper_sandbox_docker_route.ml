@@ -247,7 +247,7 @@ let setup ~sandbox f =
   ensure_dir (Workspace.keepers_runtime_dir config);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.For_testing.clear ();
-  let meta = make_meta ~name:"minjae" ~sandbox () in
+  let meta = make_meta ~name:"acme-sandbox" ~sandbox () in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   let repos_toml = Filename.concat config_dir "repositories.toml" in
@@ -260,7 +260,7 @@ let setup ~sandbox f =
         aliases = []\n\
         default_branch = \"main\"\n\
         status = \"Active\"\n\
-        keepers = [\"minjae\"]\n\
+        keepers = [\"acme-sandbox\"]\n\
         auto_sync = false\n\
         sync_interval = 300\n\
         created_at = 0\n\
@@ -280,7 +280,7 @@ let setup_with_sandbox ~sandbox f =
   ensure_dir (Workspace.keepers_runtime_dir config);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.For_testing.clear ();
-  let meta = make_meta ~name:"minjae" ~sandbox () in
+  let meta = make_meta ~name:"acme-sandbox" ~sandbox () in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   let repos_toml = Filename.concat config_dir "repositories.toml" in
@@ -293,7 +293,7 @@ let setup_with_sandbox ~sandbox f =
         aliases = []\n\
         default_branch = \"main\"\n\
         status = \"Active\"\n\
-        keepers = [\"minjae\"]\n\
+        keepers = [\"acme-sandbox\"]\n\
         auto_sync = false\n\
         sync_interval = 300\n\
         created_at = 0\n\

@@ -88,13 +88,13 @@ let test_explicit_external_root_is_allowed () =
 let test_docker_keeper_blocks_outside () =
   with_tmp_base @@ fun base ->
   let config = Workspace.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker () in
+  let meta = make_meta ~name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   let outside = "/etc/passwd" in
   match
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target:outside
   with
   | Ok () ->
-      Alcotest.fail "expected containment to block /etc/passwd for minjae"
+      Alcotest.fail "expected containment to block /etc/passwd for acme-sandbox"
   | Error msg ->
       Alcotest.(check bool) "error is objective containment rejection"
         true
@@ -106,7 +106,7 @@ let test_docker_keeper_blocks_outside () =
 let test_docker_keeper_allows_inside_playground () =
   with_tmp_base @@ fun base ->
   let config = Workspace.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker () in
+  let meta = make_meta ~name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   let bundle = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let inside = Filename.concat bundle "scratch/scratch.md" in
   Alcotest.(check bool) "playground-internal path is allowed"
@@ -129,7 +129,7 @@ let test_docker_second_keeper_contained () =
 let test_path_just_outside_playground_blocked () =
   with_tmp_base @@ fun base ->
   let config = Workspace.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker () in
+  let meta = make_meta ~name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker () in
   (* Sibling directory with a name that LOOKS like a prefix of the playground
      path; must still be blocked (prevents the classic prefix-without-slash
      containment bypass). *)

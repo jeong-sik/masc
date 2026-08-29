@@ -23,6 +23,14 @@ set -euo pipefail
 BASE_IMAGE="ocaml/opam:alpine-3.24-ocaml-5.5"
 ARCHES="amd64 arm64"
 OUT_DIR="dist/remote-ssh"
+prep_container=""
+
+cleanup_prep_container() {
+  [ -z "$prep_container" ] \
+    || docker rm -f "$prep_container" >/dev/null 2>&1 \
+    || true
+}
+trap cleanup_prep_container EXIT INT TERM
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -59,11 +67,12 @@ prepare_builder() {
     return 0
   fi
   echo "[build-shim] preparing $tag (first run per arch: opam install)" >&2
-  container="masc-shim-prep-$arch-$$"
-  docker run --platform "linux/$arch" --name "$container" "$BASE_IMAGE" \
+  prep_container="masc-shim-prep-$arch-$$"
+  docker run --platform "linux/$arch" --name "$prep_container" "$BASE_IMAGE" \
     sh -lc 'opam install -y dune yojson base64 >/dev/null'
-  docker commit "$container" "$tag" >/dev/null
-  docker rm "$container" >/dev/null
+  docker commit "$prep_container" "$tag" >/dev/null
+  docker rm "$prep_container" >/dev/null
+  prep_container=""
 }
 
 build_one() {

@@ -8,6 +8,11 @@ type canonical_json_error = Keeper_chat_operation.canonical_json_error =
   | Duplicate_object_key of string
   | Non_finite_float
 
+type invariant_error =
+  | Uncallable_model_projection of Descriptor.keeper_model_projection
+  | Blank_accepted_tool_name
+  | Invalid_model_input_schema of string list
+
 type t =
   { descriptor_id : string
   ; capability_id : string
@@ -27,6 +32,7 @@ type create_error =
       { location : schema_location
       ; error : canonical_json_error
       }
+  | Create_invariant_violation of invariant_error
 
 type decode_error =
   | Non_canonical_json of canonical_json_error
@@ -41,6 +47,7 @@ type decode_error =
   | Invalid_composable_output of string
   | Composable_output_payload_mismatch
   | Invalid_execution of string
+  | Decode_invariant_violation of invariant_error
 
 type drift =
   | Descriptor_removed of
@@ -95,28 +102,50 @@ let normalize_schema location schema =
   |> Result.map_error (fun error -> Non_canonical_schema { location; error })
 ;;
 
+let validate_invariant contract =
+  match contract.model_projection with
+  | Descriptor.Operator_only | Descriptor.Transport_alias _ ->
+    Error (Uncallable_model_projection contract.model_projection)
+  | Descriptor.Preferred_public_name | Descriptor.Internal_name ->
+    if String.trim contract.accepted_tool_name = ""
+    then Error Blank_accepted_tool_name
+    else
+      (match
+         Descriptor.model_input_schema_errors
+           ~tool_name:contract.accepted_tool_name
+           contract.input_schema
+       with
+       | [] -> Ok ()
+       | errors -> Error (Invalid_model_input_schema errors))
+;;
+
 let create ~accepted_tool_name descriptor =
+  let* input_schema = normalize_schema Input_schema descriptor.Descriptor.input_schema in
+  let* composable_output =
+    match descriptor.composable_output with
+    | Descriptor.Opaque_output -> Ok Descriptor.Opaque_output
+    | Descriptor.Json_output { schema } ->
+      let* schema = normalize_schema Composable_output_schema schema in
+      Ok (Descriptor.Json_output { schema })
+  in
+  let contract =
+    { descriptor_id = descriptor.id
+    ; capability_id = descriptor.capability_id
+    ; accepted_tool_name
+    ; model_projection = descriptor.keeper_model_projection
+    ; input_schema
+    ; composable_output
+    ; execution = descriptor.execution
+    }
+  in
+  let* () =
+    validate_invariant contract
+    |> Result.map_error (fun error -> Create_invariant_violation error)
+  in
   let projected = Descriptor.keeper_model_names descriptor in
-  if not (List.exists (String.equal accepted_tool_name) projected)
-  then Error (Accepted_tool_name_not_projected { accepted = accepted_tool_name; projected })
-  else
-    let* input_schema = normalize_schema Input_schema descriptor.Descriptor.input_schema in
-    let* composable_output =
-      match descriptor.composable_output with
-      | Descriptor.Opaque_output -> Ok Descriptor.Opaque_output
-      | Descriptor.Json_output { schema } ->
-        let* schema = normalize_schema Composable_output_schema schema in
-        Ok (Descriptor.Json_output { schema })
-    in
-    Ok
-      { descriptor_id = descriptor.id
-      ; capability_id = descriptor.capability_id
-      ; accepted_tool_name
-      ; model_projection = descriptor.keeper_model_projection
-      ; input_schema
-      ; composable_output
-      ; execution = descriptor.execution
-      }
+  if List.exists (String.equal accepted_tool_name) projected
+  then Ok contract
+  else Error (Accepted_tool_name_not_projected { accepted = accepted_tool_name; projected })
 ;;
 
 let model_projection_fields = function
@@ -248,7 +277,7 @@ let of_yojson json =
     in
     let* execution_name = string "execution" fields in
     let* execution = execution_of_string execution_name in
-    Ok
+    let contract =
       { descriptor_id
       ; capability_id
       ; accepted_tool_name
@@ -257,6 +286,12 @@ let of_yojson json =
       ; composable_output
       ; execution
       }
+    in
+    let* () =
+      validate_invariant contract
+      |> Result.map_error (fun error -> Decode_invariant_violation error)
+    in
+    Ok contract
   | _ -> Error Expected_object
 ;;
 

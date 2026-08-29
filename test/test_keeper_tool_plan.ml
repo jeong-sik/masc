@@ -136,15 +136,114 @@ let test_descriptor_contract_rejects_execution_drift () =
   | Ok _ -> fail "execution drift revalidated"
 ;;
 
-let test_descriptor_contract_round_trips () =
-  let contract = time_descriptor_contract () in
+let replace_contract_field name value = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (field, current) ->
+            if String.equal field name then field, value else field, current)
+         fields)
+  | _ -> fail "descriptor contract encoder returned a non-object"
+;;
+
+let check_contract_round_trip label contract =
   let encoded = Descriptor_contract.to_yojson contract in
   let decoded = Descriptor_contract.of_yojson encoded |> Result.get_ok in
   check
     (testable Yojson.Safe.pp Yojson.Safe.equal)
-    "canonical descriptor contract round-trip"
+    label
     encoded
     (Descriptor_contract.to_yojson decoded)
+;;
+
+let test_descriptor_contract_round_trips () =
+  let current = descriptor "keeper_time_now" in
+  let preferred =
+    { current with
+      Descriptor.keeper_model_projection = Descriptor.Preferred_public_name
+    ; public_name = "Clock"
+    }
+  in
+  let internal =
+    { current with
+      Descriptor.keeper_model_projection = Descriptor.Internal_name
+    ; internal_name = "clock_internal"
+    }
+  in
+  Descriptor_contract.create ~accepted_tool_name:"Clock" preferred
+  |> Result.get_ok
+  |> check_contract_round_trip "preferred-name round-trip";
+  Descriptor_contract.create ~accepted_tool_name:"clock_internal" internal
+  |> Result.get_ok
+  |> check_contract_round_trip "internal-name round-trip"
+;;
+
+let test_descriptor_contract_rejects_impossible_projection_and_name () =
+  let encoded = Descriptor_contract.to_yojson (time_descriptor_contract ()) in
+  let projection name projected_by =
+    encoded
+    |> replace_contract_field "model_projection" (`String name)
+    |> replace_contract_field "projected_by" projected_by
+  in
+  List.iter
+    (fun json ->
+       match Descriptor_contract.of_yojson json with
+       | Error
+           (Descriptor_contract.Decode_invariant_violation
+              (Descriptor_contract.Uncallable_model_projection _)) -> ()
+       | Error _ -> fail "uncallable projection returned the wrong error"
+       | Ok _ -> fail "uncallable projection decoded")
+    [ projection "operator_only" `Null
+    ; projection "transport_alias" (`String "keeper_time_now")
+    ];
+  let current = descriptor "keeper_time_now" in
+  let operator_only =
+    { current with Descriptor.keeper_model_projection = Descriptor.Operator_only }
+  in
+  (match Descriptor_contract.create ~accepted_tool_name:"keeper_time_now" operator_only with
+   | Error
+       (Descriptor_contract.Create_invariant_violation
+          (Descriptor_contract.Uncallable_model_projection Descriptor.Operator_only)) -> ()
+   | Error _ -> fail "uncallable created projection returned the wrong error"
+   | Ok _ -> fail "uncallable projection created");
+  let blank = replace_contract_field "accepted_tool_name" (`String " \t") encoded in
+  match Descriptor_contract.of_yojson blank with
+  | Error
+      (Descriptor_contract.Decode_invariant_violation
+         Descriptor_contract.Blank_accepted_tool_name) -> ()
+  | Error _ -> fail "blank accepted name returned the wrong error"
+  | Ok _ -> fail "blank accepted name decoded"
+;;
+
+let test_descriptor_contract_rejects_invalid_input_schema () =
+  let current = descriptor "keeper_time_now" in
+  let encoded = Descriptor_contract.to_yojson (time_descriptor_contract ()) in
+  let invalid_schemas =
+    [ `Null
+    ; `Assoc
+        [ "type", `String "object"
+        ; "properties", `Null
+        ; "additionalProperties", `Bool false
+        ]
+    ]
+  in
+  List.iter
+    (fun input_schema ->
+       let decoded = replace_contract_field "input_schema" input_schema encoded in
+       (match Descriptor_contract.of_yojson decoded with
+        | Error
+            (Descriptor_contract.Decode_invariant_violation
+               (Descriptor_contract.Invalid_model_input_schema (_ :: _))) -> ()
+        | Error _ -> fail "invalid decoded input schema returned the wrong error"
+        | Ok _ -> fail "invalid input schema decoded");
+       let changed = { current with Descriptor.input_schema } in
+       match Descriptor_contract.create ~accepted_tool_name:"keeper_time_now" changed with
+       | Error
+           (Descriptor_contract.Create_invariant_violation
+              (Descriptor_contract.Invalid_model_input_schema (_ :: _))) -> ()
+       | Error _ -> fail "invalid created input schema returned the wrong error"
+       | Ok _ -> fail "invalid input schema created")
+    invalid_schemas
 ;;
 
 let test_descriptor_contract_rejects_noncanonical_output_schema () =
@@ -2036,6 +2135,14 @@ let () =
             "execution drift"
             `Quick
             test_descriptor_contract_rejects_execution_drift
+        ; test_case
+            "impossible projection and name"
+            `Quick
+            test_descriptor_contract_rejects_impossible_projection_and_name
+        ; test_case
+            "invalid input schema"
+            `Quick
+            test_descriptor_contract_rejects_invalid_input_schema
         ; test_case
             "non-canonical output schema"
             `Quick

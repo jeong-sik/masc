@@ -156,6 +156,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_boundary.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_descriptor_contract.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_descriptor_contract.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor_resolution.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor_resolution.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_runtime_schemas.ml` - tool-surface-policy
@@ -176,8 +178,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_progress_identity.mli` - tool-surface-policy
 - `lib/keeper_tool_response/keeper_tool_response.ml` - tool-surface-policy
 - `lib/keeper_tool_response/keeper_tool_response.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_route_telemetry.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_route_telemetry.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface_ops.ml` - tool-surface-policy

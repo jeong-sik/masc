@@ -91,7 +91,7 @@
 
 **추가**
 - **Monitor 섹션 탭 신설**: Keeper Fleet · **Internal Agents**(monitoring?section=internal-agents) · **감사 무결성**(lab?section=audit-integrity) · **비용 원장**(monitoring?section=runtime&view=cost). mock 은 Lab surface 를 따로 두지 않으므로 Monitor 에 모으고 각 패널에 정식 라우트를 표기. 새 파일 `internal-agents.jsx` + `styles/monitor.css`.
-- Internal Agents = Exact lane(librarian_exact · hitl_auto_judge · board_attention_exact · compaction_exact) + verification + fusion run, 필터 5종 · 펼치면 input/result 증거 · verification 은 도구 disposition/ms/IO.
+- Internal Agents = Exact lane(librarian_exact · hitl_auto_judge · board_attention_exact) + verification + fusion run, 필터 5종 · 펼치면 input/result 증거 · verification 은 도구 disposition/ms/IO.
 - 감사 무결성 = keeper별 hash-chain verify(엔트리 수 · 정상/실패 · 첫 단절 index · 상세).
 - 비용 원장 = date-split `.masc/costs/YYYY-MM/DD.jsonl`, 정확 신원 병합, `state`(구 status), 다중 모델 집계엔 model 미표기, dup/malformed 진단.
 - Settings paths 에 **상태 스토어 레이아웃** 블록(root-state.json · costs · telemetry · gate · keepers · audit-approvals) + FD 압박 오버라이드 단일화 고지.

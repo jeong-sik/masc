@@ -5,13 +5,12 @@
    각 패널 헤더에 정식 라우트를 그대로 표기한다. */
 const { useState: useStateIA } = React;
 
-/* lane = Exact_lane (librarian_exact · hitl_auto_judge · board_attention_exact ·
-   compaction_exact) + verification lane + fusion run registry. */
+/* lane = Exact_lane (librarian_exact · hitl_auto_judge · board_attention_exact)
+   + verification lane + fusion run registry. */
 const IA_LANE = {
   librarian_exact: 'Librarian',
   hitl_auto_judge: 'Auto Judge',
   board_attention_exact: 'Board Judge',
-  compaction_exact: 'Compaction',
 };
 const IA_FILTERS = [
   ['all', 'All'], ['librarian', 'Librarian'], ['judge', 'Judge'],
@@ -29,9 +28,6 @@ const IA_RUNS = [
       { name: 'tool_read_file', disposition: 'allowed', ms: 312, input: { path: 'lib/scheduler/round.ml', range: '88,140' }, out: 'compact() 호출이 unlock 이후로 이동됨 — 재진입 경로 없음' },
       { name: 'tool_execute', disposition: 'allowed', ms: 41220, input: { cmd: 'dune build @runtest' }, out: 'scheduler 스위트 84/84 통과', truncated: true },
     ] },
-  { src: 'exact', id: 'exact:cp-4417', lane: 'compaction_exact', status: 'succeeded', actor: 'ollama_cloud.deepseek-v4-flash', subject: 'nick0cave · Compaction_started', elapsed: 6.1, at: '14:22',
-    input: { keeper: 'nick0cave', trigger: 'provider overflow recovery', request_bytes: 1841200 },
-    output: { kept: 12, summarized: 6, dropped: 9, after_tokens: 71400 } },
   { src: 'fusion', id: 'fusion:fus-2261', status: 'failed', actor: 'analyst', subject: 'fus-2261', elapsed: null, at: '14:05',
     preset: 'conditional', failureCode: 'joj_panel_missing', error: 'live config 에 first-order judges 패널이 없어 JoJ 단계가 fail-closed' },
   { src: 'exact', id: 'exact:ba-1903', lane: 'board_attention_exact', status: 'rejected', actor: 'ollama_cloud.deepseek-v4-flash', subject: 'post-4471 · attention candidate', elapsed: 0.9, at: '13:58',

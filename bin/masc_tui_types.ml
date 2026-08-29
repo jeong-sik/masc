@@ -1220,6 +1220,7 @@ type code_history_listing = { chl_entries: code_history_entry list }
    hold a third. *)
 type config_pane =
   | Config_runtime
+  | Config_models
   | Config_params
   | Config_prompts
   | Config_themes

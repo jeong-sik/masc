@@ -11031,6 +11031,7 @@ let config_pane_strip (state : state) =
   in
   String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
     [ name Config_runtime "runtime.toml"
+    ; name Config_models "models"
     ; name Config_params "params"
     ; name Config_prompts "prompts"
     ; name Config_themes "themes"
@@ -11408,6 +11409,82 @@ let render_themes (state : state) =
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"themes" ~rows:terminal_rows ~cols buf
 
+(* The two knobs a model binding carries sit in different tables --
+   [reasoning-effort] under [models.NAME], [max-tokens] under
+   [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
+   bottom never puts them side by side. On 2026-08-29 nine of ten
+   ollama_cloud bindings carried neither; a request with no reasoning_effort
+   has Ollama turn thinking on by itself, and one keeper spent a turn
+   producing 2,000 characters of reasoning and no answer. This pane is the
+   same source the runtime.toml pane shows, arranged so a missing knob is a
+   column and not an absence.
+
+   Read-only. Editing lands in the runtime.toml pane next door, which already
+   has the preview-checked write path. *)
+let render_config_models (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  let path_note =
+    match state.runtime_config_view with
+    | Some (path, _) -> Ansi.dim ^ path ^ Ansi.reset
+    | None -> Ansi.dim ^ "(not loaded)" ^ Ansi.reset
+  in
+  box_line buf cols
+    (Printf.sprintf "%s  %s  %s  %s" (screen_title " MASC Models")
+       (config_pane_strip state) path_note (connection_badge state));
+  box_divider buf cols;
+  let content_height = max 1 (rows_avail - 5) in
+  (match state.runtime_config_view_error, state.runtime_config_view with
+   | Some detail, _ ->
+       box_line buf cols
+         (Theme.bad () ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset);
+       for _ = 2 to content_height do
+         box_empty buf cols
+       done
+   | None, None ->
+       box_line buf cols (Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset);
+       for _ = 2 to content_height do
+         box_empty buf cols
+       done
+   | None, Some (_, source_rows) ->
+       (* [runtime_config_view] holds the file lexed into spans. Rejoining the
+          spans recovers the source the table parses; keeping a second copy of
+          the file on the state would give the two panes room to disagree. *)
+       let lines =
+         List.map
+           (fun segments -> String.concat "" (List.map fst segments))
+           source_rows
+       in
+       (* [box_line] spends cells on the two border glyphs and the padding
+          either side, and this pane adds two more for its own indent. A
+          width that ignores them wraps the last column onto its own row,
+          which reads as a blank value. Measured against a 130-column
+          terminal: the table has to fit in 130 - 6. *)
+       let table =
+         Masc_tui_model_runtime_table.render
+           ~width:(max 40 (cols - 6 - 2))
+           (Masc_tui_model_runtime_table.parse lines)
+       in
+       let total = List.length table in
+       let max_scroll = max 0 (total - content_height) in
+       let scroll = max 0 (min state.config_scroll max_scroll) in
+       for i = 0 to content_height - 1 do
+         match List.nth_opt table (scroll + i) with
+         | Some line ->
+             let styled =
+               if scroll + i = 0 then Ansi.bold ^ line ^ Ansi.reset else line
+             in
+             box_line buf cols ("  " ^ styled)
+         | None -> box_empty buf cols
+       done);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:scroll  p:next pane  r:reload  Tab:next");
+  finish_surface state ~surface_key:"config_models" ~rows:terminal_rows ~cols buf
+
 let render_config (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -11540,6 +11617,7 @@ let render_surface (state : state) =
     | Config_prompts -> render_prompts state
     | Config_themes -> render_themes state
     | Config_runtime -> render_config state
+    | Config_models -> render_config_models state
     | Config_params -> render_runtime_params state)
   | Resources -> render_resources state
   | Code -> render_code state

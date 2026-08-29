@@ -468,6 +468,3 @@ let repositories_toml_basename = "repositories.toml"
 let repositories_toml_path ~base_path =
   Filename.concat (masc_root ~base_path)
     (Filename.concat "config" repositories_toml_basename)
-
-let keeper_repo_mappings_toml_path ~base_path =
-  Filename.concat (masc_root ~base_path) "config/keeper_repo_mappings.toml"

@@ -421,11 +421,6 @@ let test_rfc0121_repositories_toml () =
     "/x/.masc/config/repositories.toml"
     (Config_dir_resolver.repositories_toml_path ~base_path:"/x")
 
-let test_rfc0121_keeper_repo_mappings_toml () =
-  check string "keeper_repo_mappings.toml under .masc/config"
-    "/x/.masc/config/keeper_repo_mappings.toml"
-    (Config_dir_resolver.keeper_repo_mappings_toml_path ~base_path:"/x")
-
 let test_runtime_toml_path_uses_explicit_base_path () =
   with_env "MASC_CONFIG_DIR" None (fun () ->
     check string "runtime.toml under explicit workspace config root"
@@ -574,8 +569,6 @@ let () =
           test_case "data_dir sibling of .masc" `Quick test_rfc0121_data_dir;
           test_case "repositories_toml under config" `Quick
             test_rfc0121_repositories_toml;
-          test_case "keeper_repo_mappings_toml under config" `Quick
-            test_rfc0121_keeper_repo_mappings_toml;
           test_case "runtime.toml uses explicit workspace config root" `Quick
             test_runtime_toml_path_uses_explicit_base_path;
           test_case "masc_root agrees with Common" `Quick

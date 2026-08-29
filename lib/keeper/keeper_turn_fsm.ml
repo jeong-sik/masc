@@ -169,17 +169,15 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
     ; turn_fsm_wall_clock_at = now
     }
   in
-  Log.Keeper.emit
-    Log.Info
-    ~keeper_name
-    ~turn_id:transition.turn_fsm_turn_id
-    ~category:Log.Fsm
-    ~details:
-      (`Assoc
-        [ ( "turn_fsm_transition"
-          , Keeper_transition_audit.turn_fsm_transition_to_json transition )
-        ])
-    (Printf.sprintf "[fsm:transition] %s -> %s action=%s%s" prev_label state_label action_label stop_label);
+  (* No log line for an ordinary transition. The record itself is kept: the
+     next line writes it to the transition-audit store, and the OTel counter
+     below carries the same (from, to, action) for rates. The INFO line was a
+     third copy of both, and it spent the operator log on internal
+     state-machine vocabulary -- an operator reading
+     "streaming -> failed:provider_error action=ProviderError" learns nothing
+     the keeper's own failure line does not already say, and a busy keeper
+     emits one per transition. Violations and unclassified transitions still
+     log above: those are defects, not traffic. *)
   Keeper_transition_audit.record_turn_fsm_transition
     ~keeper_name
     transition;

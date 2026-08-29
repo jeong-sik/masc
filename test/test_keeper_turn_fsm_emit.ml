@@ -6,7 +6,7 @@
 
     The tests pin:
     - the function exists with the documented labels
-    - the log details carry the typed transition record
+    - the audit sink carries the typed transition record
     - every cancel_reason and failure_reason variant is reachable
       via the public [turn_state_label] surface so that
       [bin/masc-trace] grouping does not silently lose a state
@@ -17,11 +17,6 @@ module F = Keeper_turn_fsm
 module P = Otel_metric_store
 
 let run_eio f = Eio_main.run (fun _env -> f ())
-
-let latest_log_seq () =
-  match Log.Ring.recent ~limit:1 () with
-  | (entry : Log.Ring.entry) :: _ -> entry.seq
-  | [] -> -1
 
 (* ── Compile-time signature anchor ─────────────────────────── *)
 
@@ -46,61 +41,88 @@ let test_emit_transition_signature_stable () =
     true
 ;;
 
+(* The transition record's home is [Keeper_transition_audit]'s durable sink,
+   which [MASC_KEEPER_TRANSITION_LOG] points at a file here. This used to read
+   the same record out of the operator log ring, back when [emit_transition]
+   also wrote an INFO line per transition; that line was a second copy of what
+   this sink already holds, so it went and the assertion followed the record
+   to the surface that owns it. *)
 let test_emit_transition_carries_typed_record () =
   let keeper_name = "typed-fsm-log-details" in
   let turn_id = 92417 in
-  let baseline = latest_log_seq () in
+  let sink = Filename.temp_file "masc_turn_fsm_emit" ".jsonl" in
+  Unix.putenv "MASC_KEEPER_TRANSITION_LOG" sink;
   let ctx =
     { F.stop_signaled_before = false; stop_signaled_after = false }
   in
-  run_eio (fun () ->
-    F.emit_transition
-      ~ctx
-      ~keeper_name
-      ~turn_id
-      ~prev:F.Streaming
-      F.Completing);
-  let entry =
-    Log.Ring.recent
-      ~limit:20
-      ~module_filter:"Keeper"
-      ~since_seq:baseline
-      ()
-    |> List.find_opt (fun (entry : Log.Ring.entry) ->
-      entry.keeper_name = Some keeper_name && entry.turn_id = Some turn_id)
-  in
-  match entry with
-  | None -> Alcotest.fail "typed FSM log entry not found"
-  | Some (entry : Log.Ring.entry) ->
-    let transition_json =
-      Yojson.Safe.Util.member "turn_fsm_transition" entry.details
-    in
-    (match
-       Keeper_transition_audit.turn_fsm_transition_of_json transition_json
-     with
-     | Error error -> Alcotest.fail error
-     | Ok transition ->
-       Alcotest.(check int) "turn id" turn_id transition.turn_fsm_turn_id;
-       Alcotest.(check string)
-         "previous state"
-         "streaming"
-         transition.turn_fsm_prev_state;
-       Alcotest.(check string)
-         "new state"
-         "completing"
-         transition.turn_fsm_new_state;
-       Alcotest.(check string)
-         "action"
-         "StreamComplete"
-         transition.turn_fsm_action;
-       Alcotest.(check (option bool))
-         "stop before"
-         (Some false)
-         transition.turn_fsm_stop_signaled_before;
-       Alcotest.(check (option bool))
-         "stop after"
-         (Some false)
-         transition.turn_fsm_stop_signaled_after)
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_KEEPER_TRANSITION_LOG" "";
+      try Sys.remove sink with Sys_error _ -> ())
+    (fun () ->
+      run_eio (fun () ->
+        F.emit_transition
+          ~ctx
+          ~keeper_name
+          ~turn_id
+          ~prev:F.Streaming
+          F.Completing);
+      let rows =
+        let ic = open_in sink in
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr ic)
+          (fun () ->
+            let rec read acc =
+              match input_line ic with
+              | line -> read (line :: acc)
+              | exception End_of_file -> List.rev acc
+            in
+            read [])
+      in
+      let entry =
+        rows
+        |> List.filter_map (fun line ->
+          match Yojson.Safe.from_string line with
+          | json ->
+            if Yojson.Safe.Util.(json |> member "keeper" |> to_string_option)
+               = Some keeper_name
+            then Some (Yojson.Safe.Util.member "turn_fsm_transition" json)
+            else None
+          | exception Yojson.Json_error _ -> None)
+        |> List.rev
+        |> function
+        | [] -> None
+        | newest :: _ -> Some newest
+      in
+      match entry with
+      | None -> Alcotest.fail "typed FSM transition not found in the audit sink"
+      | Some transition_json ->
+        (match
+           Keeper_transition_audit.turn_fsm_transition_of_json transition_json
+         with
+         | Error error -> Alcotest.fail error
+         | Ok transition ->
+           Alcotest.(check int) "turn id" turn_id transition.turn_fsm_turn_id;
+           Alcotest.(check string)
+             "previous state"
+             "streaming"
+             transition.turn_fsm_prev_state;
+           Alcotest.(check string)
+             "new state"
+             "completing"
+             transition.turn_fsm_new_state;
+           Alcotest.(check string)
+             "action"
+             "StreamComplete"
+             transition.turn_fsm_action;
+           Alcotest.(check (option bool))
+             "stop before"
+             (Some false)
+             transition.turn_fsm_stop_signaled_before;
+           Alcotest.(check (option bool))
+             "stop after"
+             (Some false)
+             transition.turn_fsm_stop_signaled_after))
 ;;
 
 (* ── Label coverage ────────────────────────────────────────── *)

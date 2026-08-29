@@ -1050,6 +1050,35 @@ let post_runtime_assignment ~(host : string) ~(port : int)
        |> Result.map (fun receipt -> Runtime_assignment_committed receipt))
   | Ok _ -> Error "runtime assignment response must be an object"
 
+(** POST /api/v1/runtime/config/routing — set one lane's candidate order.
+
+    The server owns the write: it previews the resulting runtime.toml, refuses
+    an id the catalog does not know, and only then persists. This sends the
+    whole list because the endpoint's contract is the lane's order, not a
+    delta — a caller that sent one id would be declaring the lane has one
+    candidate. *)
+let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
+      ~(runtime_ids : string list) : (unit, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "lane", `String lane
+         ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
+         ])
+  in
+  match
+    post_json ~host ~port ~path:"/api/v1/runtime/config/routing" ~body
+  with
+  | Error detail -> Error detail
+  | Ok json ->
+    (match json with
+     | `Assoc fields ->
+       (match List.assoc_opt "error" fields with
+        | Some (`String detail) -> Error detail
+        | Some _ | None -> Ok ())
+     | _ -> Ok ())
+;;
+
 (** GET /api/v1/keepers/tool-approvals — the tool calls keepers are holding. *)
 let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

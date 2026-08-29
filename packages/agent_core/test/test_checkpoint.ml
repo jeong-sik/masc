@@ -175,6 +175,28 @@ let sample_echo_tool =
        Ok { Types.content = msg; _meta = None })
 ;;
 
+let message ?(metadata = []) role content : Types.message =
+  { role; content = [ content ]; name = None; tool_call_id = None; metadata }
+;;
+
+let check_checkpoint_rejected label checkpoint =
+  match Checkpoint.to_json_result checkpoint with
+  | Error (Error.Serialization _) -> ()
+  | Error error -> Alcotest.failf "%s: unexpected error: %s" label (Error.to_string error)
+  | Ok _ -> Alcotest.failf "%s: malformed public checkpoint was serialized" label
+;;
+
+let check_checkpoint_json_contract checkpoint =
+  match Checkpoint.to_json_result checkpoint with
+  | Error error -> Alcotest.fail ("valid checkpoint was rejected: " ^ Error.to_string error)
+  | Ok json ->
+    ignore (Yojson.Safe.to_string json);
+    (match Checkpoint.of_json json with
+     | Ok _ -> ()
+     | Error error ->
+       Alcotest.fail ("serializer emitted an undecodable checkpoint: " ^ Error.to_string error))
+;;
+
 let () =
   let open Alcotest in
   run
@@ -208,6 +230,134 @@ let () =
             | Error (Error.Serialization _) -> ()
             | Error error -> fail ("unexpected error: " ^ Error.to_string error)
             | Ok _ -> fail "invalid current checkpoint was serialized")
+        ; test_case "to_json_result Ok is serializable and decodable" `Quick (fun () ->
+            check_checkpoint_json_contract (make_checkpoint ()))
+        ; test_case "blank tool identifiers are rejected" `Quick (fun () ->
+            let tool_use id name =
+              make_checkpoint
+                ~messages:
+                  [ message
+                      Types.Assistant
+                      (Types.ToolUse { id; name; input = `Assoc [] })
+                  ]
+                ()
+            in
+            let tool_result tool_use_id =
+              make_checkpoint
+                ~messages:
+                  [ message
+                      Types.Tool
+                      (Types.ToolResult
+                         { tool_use_id
+                         ; content = "result"
+                         ; outcome = Tool_succeeded
+                         ; json = None
+                         ; content_blocks = None
+                         })
+                  ]
+                ()
+            in
+            check_checkpoint_rejected "empty ToolUse.id" (tool_use "" "read");
+            check_checkpoint_rejected "empty ToolUse.name" (tool_use "call-1" "");
+            check_checkpoint_rejected "blank ToolUse.id" (tool_use " \t" "read");
+            check_checkpoint_rejected "empty ToolResult.tool_use_id" (tool_result ""))
+        ; test_case "non-finite JSON is rejected at every public path" `Quick (fun () ->
+            let cases value =
+              let metadata =
+                make_checkpoint
+                  ~messages:
+                    [ message
+                        ~metadata:
+                          [ "trace", `Assoc [ "nested", `List [ `Float value ] ] ]
+                        Types.Assistant
+                        (Types.Text "answer")
+                    ]
+                  ()
+              in
+              let tool_input =
+                make_checkpoint
+                  ~messages:
+                    [ message
+                        Types.Assistant
+                        (Types.ToolUse
+                           { id = "call-1"
+                           ; name = "read"
+                           ; input = `Assoc [ "nested", `List [ `Float value ] ]
+                           })
+                    ]
+                  ()
+              in
+              let tool_result_json =
+                make_checkpoint
+                  ~messages:
+                    [ message
+                        Types.Tool
+                        (Types.ToolResult
+                           { tool_use_id = "call-1"
+                           ; content = "result"
+                           ; outcome = Tool_succeeded
+                           ; json = Some (`Assoc [ "nested", `List [ `Float value ] ])
+                           ; content_blocks = None
+                           })
+                    ]
+                  ()
+              in
+              let context = Context.create_sync () in
+              Context.set context "nested" (`Assoc [ "value", `Float value ]);
+              let input_schema =
+                `Assoc
+                  [ "type", `String "object"
+                  ; ( "properties"
+                    , `Assoc
+                        [ ( "count"
+                          , `Assoc
+                              [ "type", `String "number"; "default", `Float value ] )
+                        ] )
+                  ]
+              in
+              let tool_schema =
+                match
+                  Types.tool_schema_of_input_schema
+                    ~name:"count"
+                    ~description:"Count"
+                    ~input_schema
+                    ()
+                with
+                | Ok schema -> schema
+                | Error detail -> fail ("test schema construction failed: " ^ detail)
+              in
+              [ "created_at", { (make_checkpoint ()) with created_at = value }
+              ; ( "estimated_cost_usd"
+                , { (make_checkpoint ()) with
+                    usage = { Types.empty_usage with estimated_cost_usd = value }
+                  } )
+              ; "temperature", { (make_checkpoint ()) with temperature = Some value }
+              ; "top_p", { (make_checkpoint ()) with top_p = Some value }
+              ; "min_p", { (make_checkpoint ()) with min_p = Some value }
+              ; "message metadata", metadata
+              ; "ToolUse.input", tool_input
+              ; "ToolResult.json", tool_result_json
+              ; "Context value", make_checkpoint ~context ()
+              ; ( "working_context"
+                , { (make_checkpoint ()) with
+                    working_context = Some (`Assoc [ "nested", `Float value ])
+                  } )
+              ; ( "response schema"
+                , { (make_checkpoint ()) with
+                    response_format =
+                      Types.JsonSchema (`Assoc [ "nested", `Float value ])
+                  } )
+              ; "tool input schema", make_checkpoint ~tools:[ tool_schema ] ()
+              ]
+            in
+            [ "NaN", Float.nan
+            ; "+infinity", Float.infinity
+            ; "-infinity", Float.neg_infinity
+            ]
+            |> List.iter (fun (number, value) ->
+              cases value
+              |> List.iter (fun (path, checkpoint) ->
+                check_checkpoint_rejected (number ^ " in " ^ path) checkpoint)))
         ; test_case "old version 4 is rejected" `Quick (fun () ->
             match Checkpoint.of_json (`Assoc [ "version", `Int 4 ]) with
             | Error (Error.Serialization (Error.VersionMismatch { got = 4; _ })) -> ()

@@ -3930,6 +3930,34 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
    from somewhere else, not a different single one. The server previews the
    resulting runtime.toml and refuses an unknown id, so this sends and reads
    the verdict rather than validating here. *)
+(* The picker's list, ordered so the candidate a lane actually needs is at
+   the top. Computed in both the key handler and the renderer from the same
+   snapshot rather than stored: a cached order and a re-read snapshot drift,
+   and the cursor would then point at a different runtime than the one drawn. *)
+let runtime_lane_picker_rows (state : state) =
+  match state.runtime_lane_pick, state.runtime_surface with
+  | Some lane, Some snapshot ->
+      let open Masc.Tui_decode in
+      let already =
+        snapshot.rss_resolved.rrs_lanes
+        |> List.find_opt (fun (l : runtime_resolved_lane) ->
+             String.equal l.rrl_id lane)
+        |> function Some l -> l.rrl_runtime_ids | None -> []
+      in
+      let lane_providers =
+        already
+        |> List.filter_map (fun id ->
+             List.find_opt
+               (fun (r : runtime_option) -> String.equal r.ro_id id)
+               state.runtime_catalog
+             |> Option.map (fun (r : runtime_option) -> r.ro_provider))
+      in
+      ( already
+      , Masc_tui_types.runtimes_for_lane_picker ~lane_providers ~already
+          state.runtime_catalog )
+  | _ -> [], []
+;;
+
 let launch_runtime_lane_append state ~mailbox ~lane ~runtime_id ~existing =
   let host = server_peer_host in
   let port = state.port in
@@ -10384,7 +10412,7 @@ and is loaded on demand through keeper_skill.
        | Some "j" | Some "k" | Some "e" | Some "E" | Some "\r"
          when state.view = Runtime && Option.is_some state.runtime_lane_pick ->
            (* The picker is open: j/k move it, Enter appends, e closes. *)
-           let catalog = state.runtime_catalog in
+           let already, catalog = runtime_lane_picker_rows state in
            let count = List.length catalog in
            (match key with
             | Some "j" when state.runtime_lane_pick_cursor < count - 1 ->
@@ -10394,21 +10422,12 @@ and is loaded on demand through keeper_skill.
             | Some "\r" ->
                 (match
                    ( state.runtime_lane_pick
-                   , List.nth_opt catalog state.runtime_lane_pick_cursor
-                   , state.runtime_surface )
+                   , List.nth_opt catalog state.runtime_lane_pick_cursor )
                  with
-                 | Some lane, Some runtime, Some snapshot ->
-                     let existing =
-                       snapshot.Masc.Tui_decode.rss_resolved
-                         .Masc.Tui_decode.rrs_lanes
-                       |> List.find_opt (fun (l : Masc.Tui_decode.runtime_resolved_lane) ->
-                            String.equal l.rrl_id lane)
-                       |> function
-                         | Some l -> l.Masc.Tui_decode.rrl_runtime_ids
-                         | None -> []
-                     in
+                 | Some lane, Some runtime ->
                      launch_runtime_lane_append state ~mailbox:async_messages
-                       ~lane ~runtime_id:runtime.Masc.Tui_decode.ro_id ~existing
+                       ~lane ~runtime_id:runtime.Masc.Tui_decode.ro_id
+                       ~existing:already
                  | _ -> ())
             | Some "e" | Some "E" ->
                 state.runtime_lane_pick <- None;

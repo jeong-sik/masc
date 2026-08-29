@@ -55,7 +55,7 @@ let configure_prompt_registry () =
 let test_structured_tool_is_the_only_semantic_verdict () =
   with_reviewer
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
-       Ok (Some AR.Approve))
+       Ok (Some (AR.Approve "")))
     (fun () ->
        let result = review () in
        Alcotest.(check string)
@@ -63,7 +63,7 @@ let test_structured_tool_is_the_only_semantic_verdict () =
          "structured_tool"
          (AR.gate_to_string result.gate);
        match result.verdict with
-       | Some AR.Approve -> ()
+       | Some (AR.Approve _) -> ()
        | Some (AR.Reject reason) -> Alcotest.failf "unexpected reject: %s" reason
        | None -> Alcotest.fail "structured verdict was lost")
 ;;
@@ -159,7 +159,7 @@ let test_reject_without_reason_is_malformed () =
     (fun args ->
        match AR.parse_review_verdict_from_json args with
        | Error _ -> ()
-       | Ok AR.Approve -> Alcotest.fail "malformed REJECT became APPROVE"
+       | Ok (AR.Approve _) -> Alcotest.fail "malformed REJECT became APPROVE"
        | Ok (AR.Reject reason) ->
          Alcotest.failf "malformed REJECT fabricated a reason: %s" reason)
     malformed
@@ -175,7 +175,34 @@ let test_reject_reason_is_preserved () =
   with
   | Ok (AR.Reject reason) ->
     Alcotest.(check string) "rejection reason is not rewritten" " evidence is incomplete " reason
-  | Ok AR.Approve -> Alcotest.fail "REJECT became APPROVE"
+  | Ok (AR.Approve _) -> Alcotest.fail "REJECT became APPROVE"
+  | Error detail -> Alcotest.fail detail
+;;
+
+(* An approval keeps the reviewer's stated reason too. The parser used to read
+   [reason] and hand back a nullary [Approve], so what the reviewer said it
+   checked never left this function. An omitted reason stays empty: only REJECT
+   is refused without one, and failing an approval for a missing sentence would
+   be a new gate. *)
+let test_approve_reason_is_preserved () =
+  (match
+     AR.parse_review_verdict_from_json
+       (`Assoc
+           [ "verdict", `String "APPROVE"
+           ; "reason", `String "ran the suite in the sandbox: 9355/9355"
+           ])
+   with
+   | Ok (AR.Approve reason) ->
+     Alcotest.(check string)
+       "approval reason is not rewritten"
+       "ran the suite in the sandbox: 9355/9355"
+       reason
+   | Ok (AR.Reject _) -> Alcotest.fail "APPROVE became REJECT"
+   | Error detail -> Alcotest.fail detail);
+  match AR.parse_review_verdict_from_json (`Assoc [ "verdict", `String "APPROVE" ]) with
+  | Ok (AR.Approve reason) ->
+    Alcotest.(check string) "a silent approval stays silent" "" reason
+  | Ok (AR.Reject _) -> Alcotest.fail "APPROVE became REJECT"
   | Error detail -> Alcotest.fail detail
 ;;
 
@@ -224,6 +251,10 @@ let () =
             "reject reason is preserved"
             `Quick
             test_reject_reason_is_preserved
+        ; Alcotest.test_case
+            "approve reason is preserved"
+            `Quick
+            test_approve_reason_is_preserved
         ; Alcotest.test_case
             "evidence meaning stays with reviewer"
             `Quick

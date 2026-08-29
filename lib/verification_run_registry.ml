@@ -3,7 +3,7 @@ type infrastructure_stage =
   | Lookup_surface
 
 type outcome =
-  | Approved
+  | Approved of { reason : string }
   | Rejected of { reason : string }
   | Infrastructure_unavailable of
       { stage : infrastructure_stage
@@ -107,7 +107,7 @@ let tool_observation_of_yojson json =
 ;;
 
 let outcome_label = function
-  | Approved -> "approved"
+  | Approved _ -> "approved"
   | Rejected _ -> "rejected"
   | Infrastructure_unavailable _ -> "infrastructure_unavailable"
   | Not_reviewed _ -> "not_reviewed"
@@ -178,8 +178,7 @@ module Payload = struct
   ;;
 
   let outcome_fields = function
-    | Approved -> []
-    | Rejected { reason } -> [ "reason", `String reason ]
+    | Approved { reason } | Rejected { reason } -> [ "reason", `String reason ]
     | Commit_failed { detail }
     | Raised { detail }
     | Review_cancelled { detail } ->
@@ -213,6 +212,8 @@ module Payload = struct
     let* label = Run_registry_core.Json.string_field "outcome" fields in
     let required_detail_fields =
       match label with
+      (* [reason] is optional here, not required: rows written before an
+         approval carried one have no such field and must still read back. *)
       | "approved" -> Ok []
       | "rejected" -> Ok [ "reason" ]
       | "infrastructure_unavailable" -> Ok [ "stage"; "detail" ]
@@ -221,10 +222,15 @@ module Payload = struct
       | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
     in
     let* required_detail_fields = required_detail_fields in
+    let optional_detail_fields =
+      match label with
+      | "approved" -> [ "reason" ]
+      | _ -> []
+    in
     let* () =
       Run_registry_core.Json.exact_fields
         ~required:([ "outcome"; "elapsed_s"; "tools" ] @ required_detail_fields)
-        ~optional:[ "evaluator_runtime" ]
+        ~optional:("evaluator_runtime" :: optional_detail_fields)
         fields
     in
     let* elapsed_s = Run_registry_core.Json.float_field "elapsed_s" fields in
@@ -246,7 +252,11 @@ module Payload = struct
     let* tools = parse_tools [] tools_json in
     let* outcome =
       match label with
-      | "approved" -> Ok Approved
+      | "approved" ->
+        let* reason =
+          Run_registry_core.Json.optional_string_field "reason" fields
+        in
+        Ok (Approved { reason = Option.value reason ~default:"" })
       | "rejected" ->
         let* reason = Run_registry_core.Json.string_field "reason" fields in
         Ok (Rejected { reason })
@@ -377,8 +387,7 @@ let status_label = function
 ;;
 
 let outcome_detail_fields = function
-  | Approved -> []
-  | Rejected { reason } -> [ "reason", `String reason ]
+  | Approved { reason } | Rejected { reason } -> [ "reason", `String reason ]
   | Commit_failed { detail }
   | Raised { detail }
   | Review_cancelled { detail } ->

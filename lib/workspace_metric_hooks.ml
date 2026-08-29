@@ -362,7 +362,7 @@ let install () =
              ~tool_name:name
              ~start_time
              (match verdict with
-              | Approve -> "Completion verdict recorded: APPROVE"
+              | Approve reason -> "Completion verdict recorded: APPROVE: " ^ reason
               | Reject reason -> "Completion verdict recorded: REJECT: " ^ reason)
          | Error msg ->
            protocol_error_ref := Some msg;

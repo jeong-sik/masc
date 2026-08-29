@@ -88,7 +88,7 @@ let test_concurrent_register_and_complete_both_land () =
             R.mark_completed
               t
               ~verification_id:"vrf-first"
-              ~outcome:R.Approved
+              ~outcome:(R.Approved { reason = "" })
               ~tools:[]
               ~elapsed_s:1.0
               ())

@@ -40,20 +40,23 @@ let label_verdict_of_string = function
   | _ -> None
 
 let verdict_to_string = function
-  | Task.Anti_rationalization.Approve -> "approve"
+  | Task.Anti_rationalization.Approve _ -> "approve"
   | Task.Anti_rationalization.Reject "" -> "reject"
   | Task.Anti_rationalization.Reject reason -> "reject:" ^ reason
 
+(* The label format stays what it was: one piece for approve, "reject:<reason>"
+   for a rejection. Calibration compares verdicts against hand labels, so an
+   approval's stated reason has no place in the label and reads back empty. *)
 let verdict_of_string raw =
   match String.split_on_char ':' raw with
-  | ["approve"] -> Some Task.Anti_rationalization.Approve
+  | ["approve"] -> Some (Task.Anti_rationalization.Approve "")
   | ["reject"] -> Some (Task.Anti_rationalization.Reject "")
   | "reject" :: reason_parts ->
       Some (Task.Anti_rationalization.Reject (String.concat ":" reason_parts))
   | _ -> None
 
 let label_verdict_of_verdict = function
-  | Task.Anti_rationalization.Approve -> Approve_label
+  | Task.Anti_rationalization.Approve _ -> Approve_label
   | Task.Anti_rationalization.Reject _ -> Reject_label
 
 type verdict_record = {
@@ -281,8 +284,8 @@ let select_examples ~(max_examples : int) : calibration_example list =
   (* Prioritize false positives: evaluator approved but human rejected *)
   let false_positives, others = List.partition (fun d ->
     match d.evaluator_verdict, d.human_verdict with
-    | Task.Anti_rationalization.Approve, Reject_label -> true
-    | Task.Anti_rationalization.Approve, Approve_label -> false
+    | Task.Anti_rationalization.Approve _, Reject_label -> true
+    | Task.Anti_rationalization.Approve _, Approve_label -> false
     | Task.Anti_rationalization.Reject _, Reject_label -> false
     | Task.Anti_rationalization.Reject _, Approve_label -> false
   ) divs in
@@ -349,7 +352,7 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
           | Some v ->
               let ac', rc' =
                 match v with
-                | Task.Anti_rationalization.Approve -> ac + 1, rc
+                | Task.Anti_rationalization.Approve _ -> ac + 1, rc
                 | Task.Anti_rationalization.Reject _ -> ac, rc + 1
               in
               let gate = string_field json "gate" in
@@ -406,9 +409,9 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
                agreement_rate. Listing the pairs makes the compiler ask
                instead. *)
             match ev, hv with
-            | Task.Anti_rationalization.Approve, Reject_label -> (fp + 1, fn, ag)
+            | Task.Anti_rationalization.Approve _, Reject_label -> (fp + 1, fn, ag)
             | Task.Anti_rationalization.Reject _, Approve_label -> (fp, fn + 1, ag)
-            | Task.Anti_rationalization.Approve, Approve_label
+            | Task.Anti_rationalization.Approve _, Approve_label
             | Task.Anti_rationalization.Reject _, Reject_label ->
                 (* [label_verdict_of_verdict ev = hv] already returned above. *)
                 (fp, fn, ag + 1))

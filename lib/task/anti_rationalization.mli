@@ -42,8 +42,11 @@ type lookup_surface =
                 than implying an empty tree. *)
       }
 
+(** Both outcomes carry the reviewer's stated reason. The string may be empty:
+    the tool schema asks for one on either outcome, but only [Reject] is
+    refused without it. *)
 type verdict =
-  | Approve
+  | Approve of string
   | Reject of string
 
 val verdict_constructor_name : verdict -> string

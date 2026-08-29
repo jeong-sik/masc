@@ -21,7 +21,7 @@ type reviewer_response =
   | Reviewer_verdict of AR.verdict
   | Reviewer_unavailable
 
-let reviewer_response = ref (Reviewer_verdict AR.Approve)
+let reviewer_response = ref (Reviewer_verdict (AR.Approve ""))
 
 let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () =
   match !reviewer_response with
@@ -291,7 +291,7 @@ let test_completion_denied_when_unclaimed () =
 let test_short_notes_without_evidence_follow_llm_approval () =
   with_ws "completion_llm_short_notes"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-    reviewer_response := Reviewer_verdict AR.Approve;
+    reviewer_response := Reviewer_verdict (AR.Approve "");
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"caller's own task" ~priority:1
@@ -331,7 +331,7 @@ let test_short_notes_without_evidence_follow_llm_approval () =
 let test_completion_with_evidence_refs_succeeds () =
   with_ws "completion_trust_evidence_refs"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-    reviewer_response := Reviewer_verdict AR.Approve;
+    reviewer_response := Reviewer_verdict (AR.Approve "");
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"complete with evidence refs" ~priority:1
@@ -418,7 +418,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
       "success"
       (outcome_label rejected.KTE.disposition);
     let retry_after_reject () =
-      reviewer_response := Reviewer_verdict AR.Approve;
+      reviewer_response := Reviewer_verdict (AR.Approve "");
       let approved =
         attempt_done
           ~config

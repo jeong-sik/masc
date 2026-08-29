@@ -31,8 +31,16 @@ type lookup_surface =
       ; root_layout : string list
       }
 
+(* Both outcomes carry the reviewer's stated reason. [Approve] used to be
+   nullary, and the parser below read [reason] and then dropped it, so an
+   approval reached the ledger as a bare token while a rejection arrived with
+   its argument. [Goal_verification_agent] had to re-read the reason out of the
+   tool call through a ref to commit a goal proof at all; carrying it here is
+   what that workaround was standing in for. The string may be empty — the
+   schema asks for one on both outcomes but only [Reject] refuses without it,
+   and turning an approval into a failure is a gate this does not add. *)
 type verdict =
-  | Approve
+  | Approve of string
   | Reject of string
 
 let outcome_observer_fn
@@ -59,7 +67,7 @@ let run_llm_reviewer_fn
     maps to a name in [valid_verdict_strings]. Adding a 3rd
     constructor will fail compilation in [verdict_constructor_name]. *)
 let verdict_constructor_name = function
-  | Approve -> "APPROVE"
+  | Approve _ -> "APPROVE"
   | Reject _ -> "REJECT"
 ;;
 
@@ -222,7 +230,11 @@ let report_review_verdict_schema : Masc_domain.tool_schema =
               ; ( "reason"
                 , `Assoc
                     [ "type", `String "string"
-                    ; "description", `String "Brief explanation (required for REJECT)"
+                    ; ( "description"
+                      , `String
+                          "Brief explanation of the verdict. For REJECT, what is \
+                           missing or unsupported. For APPROVE, what you checked and \
+                           what it showed. Required for REJECT; recorded for both." )
                     ] )
               ] )
         ; "required", `List [ `String "verdict" ]
@@ -243,7 +255,7 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
       | Yojson.Safe.Util.Type_error _ -> ""
     in
     match verdict_str with
-    | "APPROVE" -> Ok Approve
+    | "APPROVE" -> Ok (Approve reason)
     | "REJECT" ->
       if String.equal (String.trim reason) ""
       then Error "REJECT verdict requires a non-empty reason"
@@ -409,10 +421,11 @@ let run
          match run_attempt slot with
          | Ok (Some verdict), _nested_retryable_error_seen ->
            (match verdict with
-            | Approve ->
+            | Approve reason ->
               task_info
-                "LLM approved runtime=%s"
+                "LLM approved runtime=%s reason=%s"
                 slot
+                reason
             | Reject reason ->
               task_info
                 "LLM rejected runtime=%s reason=%s"

@@ -4,8 +4,11 @@ type infrastructure_stage =
   | Review_preparation
   | Lookup_surface
 
+(** [Approved] carries the reviewer's stated reason, the same way [Rejected]
+    does. It may be empty: rows written before the reviewer channel carried it
+    read back that way, and the reviewer is not refused for omitting it. *)
 type outcome =
-  | Approved
+  | Approved of { reason : string }
   | Rejected of { reason : string }
   | Infrastructure_unavailable of
       { stage : infrastructure_stage

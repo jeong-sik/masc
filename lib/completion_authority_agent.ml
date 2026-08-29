@@ -136,7 +136,7 @@ let evidence_refs_of_output = function
 ;;
 
 let completion_verdict_of_review = function
-  | Task.Anti_rationalization.Approve -> Masc_domain.Verdict_approved
+  | Task.Anti_rationalization.Approve _ -> Masc_domain.Verdict_approved
   | Task.Anti_rationalization.Reject reason ->
     Masc_domain.Verdict_rejected { reason }
 ;;
@@ -148,7 +148,11 @@ let review_notes
     ~authority =
   let verdict =
     match result.Task.Anti_rationalization.verdict with
-    | Some Task.Anti_rationalization.Approve -> `String "approve"
+    (* Stays the bare "approve" token: [Dashboard_harness_health] and the
+       label decoders read this notes field as that exact one-piece string. The
+       stated reason travels to the run registry instead, where the outcome has
+       a field for it. *)
+    | Some (Task.Anti_rationalization.Approve _) -> `String "approve"
     | Some (Task.Anti_rationalization.Reject reason) ->
       `Assoc [ "kind", `String "reject"; "reason", `String reason ]
     | None -> `Null
@@ -696,10 +700,14 @@ let process_task_once
              ~result
              ~authority
          in
+         (* Built from [review_verdict], not from [verdict]: the domain verdict
+            drops the reason on approval, and the registry row is where an
+            operator later asks what the reviewer checked. *)
          let on_commit =
-           match verdict with
-           | Masc_domain.Verdict_approved -> Verification_run_registry.Approved
-           | Masc_domain.Verdict_rejected { reason } ->
+           match review_verdict with
+           | Task.Anti_rationalization.Approve reason ->
+             Verification_run_registry.Approved { reason }
+           | Task.Anti_rationalization.Reject reason ->
              Verification_run_registry.Rejected { reason }
          in
          complete

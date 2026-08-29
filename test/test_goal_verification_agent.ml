@@ -178,8 +178,8 @@ let goal_events_text config =
 
    The stub plays the real reviewer's seam contract: a verdict is delivered
    by one successful [report_review_verdict] tool call (reported through
-   [on_tool_result], which is where the lane reads the stated reason an
-   APPROVE otherwise drops) and returned as the typed verdict. *)
+   [on_tool_result]) and returned as the typed verdict, which carries the
+   stated reason on either outcome. *)
 
 type stub_behavior =
   | Stub_approve of string (* the model's stated reason *)
@@ -202,9 +202,9 @@ let recording_reviewer calls behaviors =
     | Some (Stub_approve reason) ->
       answer
         (`Assoc [ "verdict", `String "APPROVE"; "reason", `String reason ])
-        AR.Approve
+        (AR.Approve reason)
     | Some Stub_approve_silent ->
-      answer (`Assoc [ "verdict", `String "APPROVE" ]) AR.Approve
+      answer (`Assoc [ "verdict", `String "APPROVE" ]) (AR.Approve "")
     | Some (Stub_reject reason) ->
       answer
         (`Assoc [ "verdict", `String "REJECT"; "reason", `String reason ])
@@ -299,6 +299,9 @@ let test_goal_proof_reads_the_workspace_playground () =
   ignore
     (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   let reads = ref 0 in
+  (* One sentence, stated once: the tool call and the returned verdict must
+     agree, the way a real reviewer's do. *)
+  let stated_reason = "measured pass rate 100% reaches the target" in
   let reviewer =
     fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_
         ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
@@ -335,16 +338,13 @@ let test_goal_proof_reads_the_workspace_playground () =
            check bool "the judge read the measurement itself" true
              (String_util.contains_substring output "pass rate: 100%"));
         let input =
-          `Assoc
-            [ "verdict", `String "APPROVE"
-            ; "reason", `String "measured pass rate 100% reaches the target"
-            ]
+          `Assoc [ "verdict", `String "APPROVE"; "reason", `String stated_reason ]
         in
         on_tool_result
           ~input
           (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0
              "recorded");
-        Ok (Some AR.Approve)
+        Ok (Some (AR.Approve stated_reason))
   in
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "verifier-a" ])
@@ -389,17 +389,18 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
       let verdict, reason =
         match read with
         | Ok output when String_util.contains_substring output "pass rate: 100%" ->
-          AR.Approve, "read pass rate: 100%, which reaches the target"
+          ( AR.Approve "read pass rate: 100%, which reaches the target"
+          , "read pass rate: 100%, which reaches the target" )
         | Ok _ | Error _ ->
           ( AR.Reject "no measurement of the declared metric is on disk"
           , "no measurement of the declared metric is on disk" )
       in
-      verdicts := !verdicts @ [ (match verdict with AR.Approve -> "approve" | AR.Reject _ -> "reject") ];
+      verdicts := !verdicts @ [ (match verdict with AR.Approve _ -> "approve" | AR.Reject _ -> "reject") ];
       on_tool_result
         ~input:
           (`Assoc
             [ "verdict"
-            , `String (match verdict with AR.Approve -> "APPROVE" | AR.Reject _ -> "REJECT")
+            , `String (match verdict with AR.Approve _ -> "APPROVE" | AR.Reject _ -> "REJECT")
             ; "reason", `String reason
             ])
         (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0 "recorded");

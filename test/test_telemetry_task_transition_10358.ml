@@ -169,7 +169,7 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
      emits the lifecycle telemetry under test. *)
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
-      Ok (Some Task.Anti_rationalization.Approve));
+      Ok (Some (Task.Anti_rationalization.Approve "")));
   Atomic.set Workspace_hooks.get_default_runtime_id_fn
     (fun () -> "test-evaluator-runtime");
   Atomic.set

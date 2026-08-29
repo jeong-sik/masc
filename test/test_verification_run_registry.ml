@@ -57,7 +57,7 @@ let register t ~verification_id ~started_at =
    show. Reused by the label, serialization and replay cases so a new
    constructor fails all three at once instead of silently skipping them. *)
 let all_outcomes : (string * E.outcome) list =
-  [ "approved", E.Approved
+  [ "approved", E.Approved { reason = "" }
   ; "rejected", E.Rejected { reason = "aria attributes are not committed" }
   ; ( "infrastructure_unavailable"
     , E.Infrastructure_unavailable
@@ -122,17 +122,16 @@ let test_outcome_detail_reaches_the_surface () =
            ("evaluator_runtime " ^ label)
            (Some "judge-runtime")
            (str json "evaluator_runtime");
-         (* Approved is the only outcome with nothing to explain; every failure
-            shape must carry an operator-readable cause, never a bare label. *)
+         (* Every outcome carries an operator-readable cause, never a bare
+            label — an approval included. The fixture builds this one with an
+            empty reason, which is the shape a reviewer that stated nothing
+            produces, so the field is present and blank rather than absent. *)
          let cause =
            match str json "reason", str json "detail" with
            | Some value, _ | _, Some value -> Some value
            | None, None -> None
          in
-         (match outcome with
-          | E.Approved -> check (option string) "approved has no cause" None cause
-          | _ ->
-            check bool ("cause present for " ^ label) true (Option.is_some cause)))
+         check bool ("cause present for " ^ label) true (Option.is_some cause))
     all_outcomes
 ;;
 
@@ -199,6 +198,60 @@ let test_not_reviewed_wire_shape_is_gate_and_detail () =
   remove_if_exists path
 ;;
 
+(* An approval states why it approved, and that reason reaches the wire beside
+   a rejection's. Before this, [Approved] was the one nullary outcome: the
+   reviewer's stated reason was parsed and then dropped, so an operator reading
+   a passed review saw a bare token. *)
+let test_approval_reason_reaches_the_wire () =
+  let t = R.create () in
+  register t ~verification_id:"vrf-approved" ~started_at:1.0;
+  R.mark_completed
+    t
+    ~verification_id:"vrf-approved"
+    ~outcome:(E.Approved { reason = "ran the suite in the sandbox: 9355/9355" })
+    ~tools:[]
+    ~elapsed_s:2.0
+    ();
+  match R.get t ~verification_id:"vrf-approved" with
+  | None -> fail "completed review should stay tracked"
+  | Some run ->
+    check
+      (option string)
+      "approval reason on the wire"
+      (Some "ran the suite in the sandbox: 9355/9355")
+      (str (R.run_to_yojson run) "reason")
+;;
+
+(* An approval row written before the reason existed still replays. The reason
+   is optional on read for exactly this row, and reads back empty rather than
+   rejecting the row or inventing a sentence. *)
+let test_approval_row_without_reason_replays () =
+  let path = fresh_path ".approved-no-reason.jsonl" in
+  remove_if_exists path;
+  let out = open_out path in
+  output_string
+    out
+    ({|{"event":"register","id":"vrf-old","started_at":1.0,"registration":|}
+     ^ {|{"task_id":"task-1","producer":"p","authority_kind":"system_llm_agent",|}
+     ^ {|"authority_actor":"verifier_exact"}}|}
+     ^ "\n"
+     ^ {|{"event":"complete","id":"vrf-old","completion":{"outcome":"approved",|}
+     ^ {|"elapsed_s":1.0,"tools":[]}}|}
+     ^ "\n");
+  close_out out;
+  let replayed = R.replay path in
+  (match R.get replayed ~verification_id:"vrf-old" with
+   | None -> fail "an approval without a reason must still replay"
+   | Some run ->
+     check string "replayed status" "approved" (R.status_label run.status);
+     check
+       (option string)
+       "absent reason reads back empty"
+       (Some "")
+       (str (R.run_to_yojson run) "reason"));
+  remove_if_exists path
+;;
+
 (* A legacy row is skipped, not silently reinterpreted. *)
 let test_legacy_retryable_row_is_rejected () =
   let path = fresh_path ".legacy-retryable.jsonl" in
@@ -229,7 +282,7 @@ let test_replay_drops_running_reviews () =
   let path = fresh_path ".running.jsonl" in
   let t = R.create ~path () in
   register t ~verification_id:"vrf-done" ~started_at:10.0;
-  R.mark_completed t ~verification_id:"vrf-done" ~outcome:E.Approved ~tools:[] ~elapsed_s:1.0 ();
+  R.mark_completed t ~verification_id:"vrf-done" ~outcome:(E.Approved { reason = "" }) ~tools:[] ~elapsed_s:1.0 ();
   register t ~verification_id:"vrf-stale" ~started_at:20.0;
   let replayed = R.replay path in
   (* The review fiber dies with the process and the authority rescans
@@ -282,7 +335,7 @@ let test_unknown_completion_is_not_persisted () =
   R.mark_completed
     t
     ~verification_id:"vrf-unknown"
-    ~outcome:E.Approved
+    ~outcome:(E.Approved { reason = "" })
     ~tools:[]
     ~elapsed_s:1.0
     ();
@@ -334,7 +387,7 @@ let test_completed_runs_are_pruned () =
   for i = 1 to total do
     let verification_id = Printf.sprintf "vrf-%03d" i in
     register t ~verification_id ~started_at:(float_of_int i);
-    R.mark_completed t ~verification_id ~outcome:E.Approved ~tools:[] ~elapsed_s:0.5 ()
+    R.mark_completed t ~verification_id ~outcome:(E.Approved { reason = "" }) ~tools:[] ~elapsed_s:0.5 ()
   done;
   check
     int
@@ -383,7 +436,7 @@ let test_tool_result_keeps_typed_disposition_and_input () =
   R.mark_completed
     t
     ~verification_id:"vrf-tools"
-    ~outcome:E.Approved
+    ~outcome:(E.Approved { reason = "" })
     ~tools:[ tool ]
     ~elapsed_s:0.1
     ();
@@ -428,6 +481,14 @@ let () =
             `Quick
             test_outcome_detail_reaches_the_surface
         ; test_case "every outcome survives replay" `Quick test_outcomes_survive_replay
+        ; test_case
+            "an approval carries the reviewer's stated reason"
+            `Quick
+            test_approval_reason_reaches_the_wire
+        ; test_case
+            "an approval written without a reason still replays"
+            `Quick
+            test_approval_row_without_reason_replays
         ; test_case
             "not_reviewed wire shape is gate and detail only"
             `Quick

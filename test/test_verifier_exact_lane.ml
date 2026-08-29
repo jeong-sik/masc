@@ -79,7 +79,7 @@ let test_failover_follows_declared_slot_order () =
     ~reviewer:
       (recording_reviewer
          calls
-         [ "slot-a", rate_limited; "slot-b", Ok (Some AR.Approve) ])
+         [ "slot-a", rate_limited; "slot-b", Ok (Some (AR.Approve "")) ])
     (fun () ->
        let result = review () in
        Alcotest.(check (list string))
@@ -95,7 +95,7 @@ let test_failover_follows_declared_slot_order () =
          "slot-b"
          result.evaluator_runtime;
        match result.verdict with
-       | Some AR.Approve -> ()
+       | Some (AR.Approve _) -> ()
        | Some (AR.Reject reason) -> Alcotest.failf "unexpected reject: %s" reason
        | None -> Alcotest.fail "failover lost the second slot's verdict")
 ;;
@@ -104,7 +104,7 @@ let test_first_slot_success_never_fails_over () =
   let calls = ref [] in
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "slot-a"; "slot-b" ])
-    ~reviewer:(recording_reviewer calls [ "slot-a", Ok (Some AR.Approve) ])
+    ~reviewer:(recording_reviewer calls [ "slot-a", Ok (Some (AR.Approve "")) ])
     (fun () ->
        let result = review () in
        Alcotest.(check (list string)) "one attempt only" [ "slot-a" ] !calls;
@@ -129,7 +129,7 @@ let test_invalid_verdict_fails_over () =
        match result.verdict with
        | Some (AR.Reject reason) ->
          Alcotest.(check string) "reason" "missing evidence" reason
-       | Some AR.Approve -> Alcotest.fail "unexpected approve"
+       | Some (AR.Approve _) -> Alcotest.fail "unexpected approve"
        | None -> Alcotest.fail "failover lost the second slot's verdict")
 ;;
 
@@ -240,7 +240,7 @@ let test_explicit_override_never_consults_the_lane () =
   let calls = ref [] in
   with_lane_and_reviewer
     ~slots:(fun () -> Error "lane must not be consulted")
-    ~reviewer:(recording_reviewer calls [ "explicit-runtime", Ok (Some AR.Approve) ])
+    ~reviewer:(recording_reviewer calls [ "explicit-runtime", Ok (Some (AR.Approve "")) ])
     (fun () ->
        let result =
          AR.review

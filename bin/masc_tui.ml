@@ -1369,13 +1369,17 @@ type async_msg =
   | Gate_snapshot_loaded of (Tui_decode.gate_snapshot, string) result
       (** The durable Gate beside the held calls: pending approvals that
           survive nobody watching, and both lane modes. *)
-  | Gate_approval_resolved of string * bool * (unit, string) result
-      (** approval id, approve, and whether the resolve route took it. *)
+  | Gate_approval_resolved of
+      string * bool * (unit, string) result * Approval.Flow.generation
+      (** approval id, approve, the resolve result, and the in-flight
+          generation this decision holds. Completion releases that slot, so
+          the header stops drawing [submitting] and a second press is admitted
+          again. *)
   | Gate_external_mode_set of string * (unit, string) result
       (** The external-services lane the operator asked for, and whether the
           server took it. *)
   | Surface_tool_approval_answered of
-      string * string * bool * (bool, string) result
+      string * string * bool * (bool, string) result * Approval.Flow.generation
   (* Its own message rather than a field on the stance one: the two come from
      different endpoints and one failing must not blank the other. *)
   | Keeper_gate_settings_loaded of
@@ -1710,29 +1714,44 @@ let settle_live_turn state (request : Keeper_chat.request) =
    a pane's transcript. *)
 let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
     ~allow =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
-          ~tool_call_id ~allow
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox
-      (Surface_tool_approval_answered (keeper_name, tool_call_id, allow, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Surface_tool_approval_answered
-           (keeper_name, tool_call_id, allow, Error "Eio switch is unavailable"))
+  (* Answering a held tool call mutates server state over one round trip, like
+     the Gate and operator-confirm decisions beside it. Take the same
+     single-action slot so the header shows [submitting] at once and a repeat
+     press during the trip is refused rather than answering the call twice.
+     Completion ([Surface_tool_approval_answered]) releases the slot. *)
+  match Approval.Flow.begin_action state.approval_flow with
+  | Error `Already_inflight ->
+      add_event state "system" "Approval action already in progress"
+  | Ok (flow, generation) -> (
+      state.approval_flow <- flow;
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try
+            Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
+              ~tool_call_id ~allow
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox
+          (Surface_tool_approval_answered
+             (keeper_name, tool_call_id, allow, result, generation))
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          enqueue_async mailbox
+            (Surface_tool_approval_answered
+               ( keeper_name,
+                 tool_call_id,
+                 allow,
+                 Error "Eio switch is unavailable",
+                 generation )))
 
 (* Fetch the held tool calls for the Approvals surface. Its own fiber for the
    same reason every loader runs on one: a slow server costs the refresh, not
@@ -1798,28 +1817,42 @@ let launch_gate_snapshot_load state ~mailbox =
         (Gate_snapshot_loaded (Error "Eio switch is unavailable"))
 
 let launch_gate_resolve state ~mailbox ~approval_id ~approve =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_http.post_dashboard_gate_resolve ~host ~port ~approval_id
-          ~approve
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Gate_approval_resolved (approval_id, approve, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Gate_approval_resolved
-           (approval_id, approve, Error "Eio switch is unavailable"))
+  (* A Gate decision mutates durable server state over one round trip. Take the
+     same single-action slot the operator-confirm path takes, so the header
+     draws [submitting] the instant the key lands and a second press during the
+     trip is refused here instead of firing a duplicate resolve. Completion
+     ([Gate_approval_resolved]) releases the slot. *)
+  match Approval.Flow.begin_action state.approval_flow with
+  | Error `Already_inflight ->
+      add_event state "system" "Approval action already in progress"
+  | Ok (flow, generation) -> (
+      state.approval_flow <- flow;
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try
+            Masc_tui_http.post_dashboard_gate_resolve ~host ~port ~approval_id
+              ~approve
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox
+          (Gate_approval_resolved (approval_id, approve, result, generation))
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          enqueue_async mailbox
+            (Gate_approval_resolved
+               ( approval_id,
+                 approve,
+                 Error "Eio switch is unavailable",
+                 generation )))
 
 let launch_gate_external_mode_set state ~mailbox ~mode =
   let host = server_peer_host in
@@ -7538,7 +7571,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.gate_error <- Some detail)
-  | Gate_approval_resolved (approval_id, approve, result) ->
+  | Gate_approval_resolved (approval_id, approve, result, generation) ->
+      (* Release the single-action slot [launch_gate_resolve] took, whatever the
+         outcome, so the header stops drawing [submitting] and the next decision
+         is admitted. [begin_action] serialises decisions, so this completion
+         owns its slot; the durable server result applies either way. *)
+      let flow, _owns_action =
+        Approval.Flow.finish_action state.approval_flow generation
+      in
+      state.approval_flow <- flow;
       (match result with
        | Ok () ->
            add_event state "system"
@@ -7622,7 +7663,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Error detail ->
            add_event state "error"
              (Printf.sprintf "could not set %s's gate: %s" keeper_name detail))
-  | Surface_tool_approval_answered (keeper_name, tool_call_id, allow, result) ->
+  | Surface_tool_approval_answered
+      (keeper_name, tool_call_id, allow, result, generation) ->
+      (* Release the single-action slot [launch_surface_tool_approval] took, so
+         the header clears [submitting] and the next decision is admitted. *)
+      let flow, _owns_action =
+        Approval.Flow.finish_action state.approval_flow generation
+      in
+      state.approval_flow <- flow;
       (* The listing is stale the moment an answer lands, so the settled call
          leaves the local list at once rather than waiting for a refresh. *)
       state.keeper_tool_approvals <-

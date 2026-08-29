@@ -94,6 +94,7 @@ let with_workspace f =
   in
   Eio.Switch.on_release sw (fun () -> rm_rf dir);
   Unix.putenv "MASC_BASE_PATH" dir;
+  Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "1";
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ();
@@ -168,6 +169,32 @@ let register_keeper ?proactive_enabled config keeper_name =
     ~base_path:config.Workspace_utils.base_path
     keeper_name
     meta
+;;
+
+let register_offline_keeper ?proactive_enabled config keeper_name =
+  let meta =
+    let meta = keeper_meta_for_name keeper_name in
+    match proactive_enabled with
+    | None -> meta
+    | Some enabled ->
+      { meta with
+        autoboot_enabled = true
+      ; proactive = { enabled }
+      }
+  in
+  (match
+     Keeper_owner_registry.create_meta
+       ~base_path:config.Workspace_utils.base_path
+       meta
+   with
+   | Ok (Some _) -> ()
+   | Ok None -> fail "owner metadata creation removed its snapshot"
+   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+  ignore
+    (Keeper_registry.register_offline
+       ~base_path:config.Workspace_utils.base_path
+       keeper_name
+       meta)
 ;;
 
 let dashboard_schedule_row_exn dashboard ~schedule_id =
@@ -1551,6 +1578,47 @@ let test_retry_before_terminal_reconciliation_retains_wake () =
      |> Keeper_event_queue.length)
 ;;
 
+let test_deferred_keeper_wake_not_running_is_retryable () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "offline-schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  register_offline_keeper ~proactive_enabled:true config keeper_name;
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.unregister ~base_path keeper_name)
+    (fun () ->
+       let request =
+         create_named_keeper_wake_schedule
+           config
+           ~schedule_id:"deferred-wake-not-running"
+           ~keeper_name
+       in
+       let result = tick_ok config ~now:201.0 in
+       check int "one dispatch attempted" 1 (List.length result.dispatches);
+       let dispatch = List.hd result.dispatches in
+       check string "dispatch returns retryable failure" "failed"
+         (Schedule_runner.dispatch_status_to_string dispatch.status);
+       (match dispatch.error with
+        | Some detail ->
+          check bool "retryable failure explicitly mentions owner not running" true
+            (String_util.contains_substring detail "deferred owner-not-running")
+        | None -> fail "dispatch error detail missing");
+       (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+        | None -> fail "schedule missing"
+        | Some stored ->
+          check string "schedule remains due for retry" "due"
+            (Schedule_domain.schedule_status_to_string stored.status));
+       check int "stimulus is enqueued and remains pending" 1
+         (Keeper_event_queue.length
+            (Keeper_registry_event_queue.snapshot ~base_path keeper_name));
+       let retried = tick_ok config ~now:202.0 in
+       check int "one retry dispatch attempted" 1 (List.length retried.dispatches);
+       check int "queue does not accumulate duplicate entries on retry" 1
+         (Keeper_event_queue.length
+            (Keeper_registry_event_queue.snapshot ~base_path keeper_name)))
+;;
+
 let test_due_schedule_wakes_live_keeper_with_proactive_disabled () =
   with_workspace
   @@ fun config ->
@@ -2143,6 +2211,9 @@ let () =
         ; test_case "retry before terminal reconciliation retains wake"
             `Quick
             test_retry_before_terminal_reconciliation_retains_wake
+        ; test_case "deferred keeper wake when not running is retryable"
+            `Quick
+            test_deferred_keeper_wake_not_running_is_retryable
         ; test_case "due wake bypasses proactive policy" `Quick
             test_due_schedule_wakes_live_keeper_with_proactive_disabled
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick

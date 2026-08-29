@@ -224,11 +224,11 @@ let test_an_override_can_hold_one_keeper_higher () =
      while the rest of the workspace is not. *)
   with_workspace @@ fun (base_path, config) ->
   select_workspace config Keeper_gate_mode.Auto_judge;
-  ignore (single_out config ~keeper_name:"kidsnote" (Some Keeper_gate_mode.Manual));
+  ignore (single_out config ~keeper_name:"echo" (Some Keeper_gate_mode.Manual));
   check string "the singled-out keeper asks a person" "manual"
-    (resolved ~base_path ~keeper_name:"kidsnote");
+    (resolved ~base_path ~keeper_name:"echo");
   check string "and nobody else moved" "auto_judge"
-    (resolved ~base_path ~keeper_name:"rondo")
+    (resolved ~base_path ~keeper_name:"delta")
 
 let test_an_override_cannot_lower_one_keeper () =
   (* Turning the workspace stricter must not be undoable one keeper at a
@@ -236,9 +236,9 @@ let test_an_override_cannot_lower_one_keeper () =
   with_workspace @@ fun (base_path, config) ->
   select_workspace config Keeper_gate_mode.Manual;
   ignore
-    (single_out config ~keeper_name:"kidsnote" (Some Keeper_gate_mode.Always_allow));
+    (single_out config ~keeper_name:"echo" (Some Keeper_gate_mode.Always_allow));
   check string "the workspace still decides" "manual"
-    (resolved ~base_path ~keeper_name:"kidsnote")
+    (resolved ~base_path ~keeper_name:"echo")
 
 let test_a_lower_override_waits_rather_than_being_lost () =
   (* Kept on disk, ignored on read. An operator who set one and then
@@ -247,8 +247,8 @@ let test_a_lower_override_waits_rather_than_being_lost () =
   with_workspace @@ fun (base_path, config) ->
   select_workspace config Keeper_gate_mode.Manual;
   ignore
-    (single_out config ~keeper_name:"kidsnote" (Some Keeper_gate_mode.Auto_judge));
-  (match Keeper_gate_mode.keeper_override ~base_path ~keeper_name:"kidsnote" with
+    (single_out config ~keeper_name:"echo" (Some Keeper_gate_mode.Auto_judge));
+  (match Keeper_gate_mode.keeper_override ~base_path ~keeper_name:"echo" with
    | Ok (Some o) ->
      check string "what was asked for is still recorded" "auto_judge"
        (Keeper_gate_mode.to_string o.Keeper_gate_mode.mode)
@@ -258,15 +258,15 @@ let test_a_lower_override_waits_rather_than_being_lost () =
 let test_clearing_an_override_removes_it () =
   with_workspace @@ fun (base_path, config) ->
   select_workspace config Keeper_gate_mode.Auto_judge;
-  ignore (single_out config ~keeper_name:"kidsnote" (Some Keeper_gate_mode.Manual));
-  ignore (single_out config ~keeper_name:"kidsnote" None);
+  ignore (single_out config ~keeper_name:"echo" (Some Keeper_gate_mode.Manual));
+  ignore (single_out config ~keeper_name:"echo" None);
   (match Keeper_gate_mode.keeper_overrides ~base_path with
    | Ok [] -> ()
    | Ok rows ->
      failf "clearing left %d override(s) behind" (List.length rows)
    | Error error -> fail ("failed to read the overrides: " ^ error));
   check string "and the keeper is back on the workspace answer" "auto_judge"
-    (resolved ~base_path ~keeper_name:"kidsnote")
+    (resolved ~base_path ~keeper_name:"echo")
 
 let test_an_unreadable_override_file_is_not_an_empty_list () =
   (* An empty list answers with the workspace mode, which is the looser one.
@@ -277,7 +277,7 @@ let test_an_unreadable_override_file_is_not_an_empty_list () =
   (match Fs_compat.save_file_atomic file "{ not a list" with
    | Ok () -> ()
    | Error detail -> fail ("could not write the fixture: " ^ detail));
-  match Keeper_gate_mode.resolve ~base_path ~keeper_name:"kidsnote" with
+  match Keeper_gate_mode.resolve ~base_path ~keeper_name:"echo" with
   | Error _ -> ()
   | Ok mode ->
     failf "an unreadable override file resolved to %s"
@@ -328,7 +328,7 @@ let test_a_preference_survives_a_round_trip () =
      Keeper_exact_lane_preference.set
        config
        ~actor:"test"
-       ~keeper_name:"kidsnote"
+       ~keeper_name:"echo"
        ~lane_id:"hitl_auto_judge"
        (Some "ollama.qwen")
    with
@@ -337,7 +337,7 @@ let test_a_preference_survives_a_round_trip () =
   (match
      Keeper_exact_lane_preference.find
        ~base_path
-       ~keeper_name:"kidsnote"
+       ~keeper_name:"echo"
        ~lane_id:"hitl_auto_judge"
    with
    | Ok (Some row) ->
@@ -348,7 +348,7 @@ let test_a_preference_survives_a_round_trip () =
   match
     Keeper_exact_lane_preference.find
       ~base_path
-      ~keeper_name:"rondo"
+      ~keeper_name:"delta"
       ~lane_id:"hitl_auto_judge"
   with
   | Ok None -> ()
@@ -362,7 +362,7 @@ let test_clearing_a_preference_removes_it () =
       Keeper_exact_lane_preference.set
         config
         ~actor:"test"
-        ~keeper_name:"kidsnote"
+        ~keeper_name:"echo"
         ~lane_id:"hitl_auto_judge"
         value
     with
@@ -389,7 +389,7 @@ let test_an_unreadable_preference_file_is_not_an_empty_list () =
   match
     Keeper_exact_lane_preference.find
       ~base_path
-      ~keeper_name:"kidsnote"
+      ~keeper_name:"echo"
       ~lane_id:"hitl_auto_judge"
   with
   | Error _ -> ()
@@ -401,7 +401,7 @@ let test_legacy_judge_row_is_not_a_current_exact_lane_row () =
   let legacy =
     `List
       [ `Assoc
-          [ "keeper_name", `String "kidsnote"
+          [ "keeper_name", `String "echo"
           ; "slot_id", `String "ollama.qwen"
           ; "updated_by", `String "test"
           ; "updated_at", `String "2026-08-28T00:00:00Z"
@@ -424,7 +424,7 @@ let test_duplicate_exact_lane_owner_is_rejected () =
   Fs_compat.mkdir_p (Keeper_gate_path.dir ~base_path);
   let row slot_id =
     `Assoc
-      [ "keeper_name", `String "kidsnote"
+      [ "keeper_name", `String "echo"
       ; "lane_id", `String "hitl_auto_judge"
       ; "slot_id", `String slot_id
       ; "updated_by", `String "test"
@@ -449,7 +449,7 @@ let test_preferences_are_scoped_by_exact_lane () =
       Keeper_exact_lane_preference.set
         config
         ~actor:"test"
-        ~keeper_name:"kidsnote"
+        ~keeper_name:"echo"
         ~lane_id
         (Some slot_id)
     with
@@ -461,11 +461,11 @@ let test_preferences_are_scoped_by_exact_lane () =
   match
     ( Keeper_exact_lane_preference.find
         ~base_path
-        ~keeper_name:"kidsnote"
+        ~keeper_name:"echo"
         ~lane_id:"hitl_auto_judge"
     , Keeper_exact_lane_preference.find
         ~base_path
-        ~keeper_name:"kidsnote"
+        ~keeper_name:"echo"
         ~lane_id:"librarian_exact" )
   with
   | Ok (Some hitl), Ok (Some librarian) ->

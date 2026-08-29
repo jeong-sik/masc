@@ -268,7 +268,7 @@ let schedule_request_json ?last_wake (request : Schedule_domain.schedule_request
               different values from one result, and the checkpoint encoder --
               which rejects duplicate keys outright -- failed the whole turn
               at [message[_].content[_].json], after the tool had already run.
-              Keeper sangsu lost 12 consecutive turns to that on 2026-08-29.
+              One keeper lost 12 consecutive turns to that on 2026-08-29.
               The flattened pair below stays for the readers that use it. *)
          ; ( "recurrence_kind"
            , `String (Schedule_domain.recurrence_kind_to_string request.recurrence) )

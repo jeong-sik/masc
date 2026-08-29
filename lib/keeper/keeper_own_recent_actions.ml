@@ -106,7 +106,7 @@ let turns_of_rows ~keeper_name ~max_turns ~window_saturated rows =
 
 (* The salience problem this answers: a 12-turn window renders as a hundred
    or more one-line calls in which a handful of refusals sit buried, and the
-   keeper repeats the rejected call anyway (2026-08-28: sangsu re-read the
+   keeper repeats the rejected call anyway (2026-08-28: a keeper re-read the
    same nonexistent paths every autonomous turn, 61 distinct paths over a
    day, while every one of those refusals was already inside this window).
    The digest lifts the failures out deduped: one row per distinct rejected

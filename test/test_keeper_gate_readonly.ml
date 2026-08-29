@@ -197,7 +197,7 @@ let rec remove_tree path =
 ;;
 
 let gate_request base_path argv =
-  { Keeper_gate.keeper_name = "sangsu"
+  { Keeper_gate.keeper_name = "alpha"
   ; operation = "tool_execute"
   ; input = gate_input argv
   ; base_path

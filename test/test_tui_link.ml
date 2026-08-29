@@ -31,7 +31,7 @@ let test_round_trip () =
     ; (Masc_tui_link.Task, "task-7")
     ; (Masc_tui_link.Schedule, "sch-1")
     ; (Masc_tui_link.Fusion_run, "run-9")
-    ; (Masc_tui_link.Keeper, "kidsnote")
+    ; (Masc_tui_link.Keeper, "echo")
     ]
 
 (* Anything else is refused. A reference that cannot be read back is not one

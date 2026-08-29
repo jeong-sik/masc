@@ -226,7 +226,7 @@ let test_coverage_is_carried_per_provider () =
      question this tab cannot answer from its own row -- and it is the answer
      that stops an operator consenting twice as the wrong account. *)
   let providers =
-    [ declared ~also_on:[ "sangsu"; "taskmaster" ] "atlassian" "Atlassian";
+    [ declared ~also_on:[ "alpha"; "bravo" ] "atlassian" "Atlassian";
       declared "linear" "Linear" ]
   in
   let coverage id =
@@ -241,7 +241,7 @@ let test_coverage_is_carried_per_provider () =
   check
     (Alcotest.option (Alcotest.list Alcotest.string))
     "the two that have it"
-    (Some [ "sangsu"; "taskmaster" ])
+    (Some [ "alpha"; "bravo" ])
     (coverage "atlassian");
   check
     (Alcotest.option (Alcotest.list Alcotest.string))

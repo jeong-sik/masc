@@ -1,6 +1,6 @@
 (** The durable Gate in front of attached outside services.
 
-    On 2026-08-27 the kidsnote keeper wrote three tickets and two comments
+    On 2026-08-27 one keeper wrote three tickets and two comments
     into a company Jira with no approval anywhere: neither approval device
     covered the identity-tool path. These tests pin the three claims of the
     fix, each against the real files under a temp base path:

@@ -960,7 +960,7 @@ let run_keeper_cycle
                   queued" branch, and why an operator reading a receipt saw a retry
                   that had not happened -- carrying a [fallback_reason] computed
                   from the earlier turn's failure rather than this turn's. Observed
-                  2026-08-27 on a taskmaster receipt whose own error was an invalid
+                  2026-08-27 on a live receipt whose own error was an invalid
                   request while the reason read rate_limit.
 
                   The comparison lives in [Keeper_unified_turn_types] so it can be

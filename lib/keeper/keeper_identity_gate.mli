@@ -4,7 +4,7 @@
     Slack, GitHub over MCP) is an external effect. Before this module, none
     of them reached {!Keeper_gate}: the only two approval devices each
     covered a different half of the runtime, and the write path to somebody
-    else's service ran between them (incident of 2026-08-27, kidsnote
+    else's service ran between them (incident of 2026-08-27: one
     keeper, three unapproved Jira tickets).
 
     The producer contract mirrors the built-in tools:

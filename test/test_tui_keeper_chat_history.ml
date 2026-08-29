@@ -350,7 +350,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
     "codex \xc2\xb7 broadcast"
     (label
        (addressed ~speaker_name:"codex" ~surface:(surface "broadcast" []) "main red"));
-  (* The channel comes with it. A Keeper can be bound to several -- [sangsu]
+  (* The channel comes with it. A Keeper can be bound to several -- one keeper
      has five Discord channels -- and without this every one of them reads as
      the same place. *)
   check string "a connector says which one, and which channel"

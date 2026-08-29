@@ -1,6 +1,6 @@
 (** The Answering overlay: who is mid-turn right now, in one keypress.
 
-    The footer badge compresses the same fact to "◌ answering kidsnote +2";
+    The footer badge compresses the same fact to "◌ answering echo +2";
     this overlay is the "+2" unfolded — every running keeper with its lane
     and how long the turn has been going, the pane's last chat target first,
     because that is the answer the operator who pressed the key is waiting

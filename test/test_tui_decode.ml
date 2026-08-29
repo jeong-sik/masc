@@ -1507,7 +1507,7 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
     if usage then
       `List
         [ `Assoc
-            [ ("keeper", `String "taskmaster")
+            [ ("keeper", `String "bravo")
             ; ("invocations", `Int 12)
             ; ("deliveries", `Int 12)
             ; ("actions", `Int 9)
@@ -1581,7 +1581,7 @@ let test_decode_skills_catalog_reads_usage_and_flow () =
              surface.Tui_decode.scs_kind;
            (match surface.Tui_decode.scs_usage with
             | [ row ] ->
-                Alcotest.(check string) "usage keeper" "taskmaster"
+                Alcotest.(check string) "usage keeper" "bravo"
                   row.Tui_decode.su_keeper;
                 Alcotest.(check int) "invocations" 12
                   row.Tui_decode.su_invocations;
@@ -3227,7 +3227,7 @@ let keeper_turns_json =
     ; ( "keepers"
       , `List
           [ `Assoc
-              [ ("keeper_name", `String "kidsnote")
+              [ ("keeper_name", `String "echo")
               ; ("status", `String "ok")
               ; ( "turn"
                 , `Assoc
@@ -3241,7 +3241,7 @@ let keeper_turns_json =
               ; ("turn", `Null)
               ]
           ; `Assoc
-              [ ("keeper_name", `String "rondo")
+              [ ("keeper_name", `String "delta")
               ; ("status", `String "unavailable")
               ; ("detail", `String "owner_not_found")
               ; ("turn", `Null)
@@ -3253,7 +3253,7 @@ let test_decode_keeper_turns () =
   match Tui_decode.decode_keeper_turns keeper_turns_json with
   | Error err -> Alcotest.fail err
   | Ok [ running; idle; unavailable ] ->
-      Alcotest.(check string) "running keeper" "kidsnote"
+      Alcotest.(check string) "running keeper" "echo"
         running.Tui_decode.ktr_keeper_name;
       (match running.ktr_state with
        | Tui_decode.Keeper_turn_running { lane; started_at_unix } ->
@@ -3279,7 +3279,7 @@ let test_decode_keeper_turns_reads_the_preview () =
       ; ( "keepers"
         , `List
             [ `Assoc
-                [ ("keeper_name", `String "kidsnote")
+                [ ("keeper_name", `String "echo")
                 ; ("status", `String "ok")
                 ; ( "turn"
                   , `Assoc
@@ -3323,7 +3323,7 @@ let test_decode_keeper_turns_rejects_unknown_lane () =
       ; ( "keepers"
         , `List
             [ `Assoc
-                [ ("keeper_name", `String "kidsnote")
+                [ ("keeper_name", `String "echo")
                 ; ("status", `String "ok")
                 ; ( "turn"
                   , `Assoc
@@ -4234,7 +4234,7 @@ let test_decode_gate_identity_row_reads_its_target () =
   let row =
     `Assoc
       [ ("id", `String "appr-1");
-        ("keeper_name", `String "kidsnote");
+        ("keeper_name", `String "echo");
         ("tool_name", `String "identity_call");
         ("input_preview", `String "{\"provider_id\":\"atlassian\"}");
         ("waiting_s", `Int 42);
@@ -4605,7 +4605,7 @@ let test_decode_gate_ready_queue_state_is_not_a_warning () =
 let test_decode_gate_row_missing_id_is_an_error () =
   let row =
     `Assoc
-      [ ("keeper_name", `String "kidsnote");
+      [ ("keeper_name", `String "echo");
         ("tool_name", `String "identity_call");
       ]
   in
@@ -4620,12 +4620,12 @@ let keeper_gate_settings_json =
   `Assoc
     [ ( "modes"
       , `List
-          [ `Assoc [ ("keeper_name", `String "kidsnote"); ("mode", `String "manual") ] ] )
+          [ `Assoc [ ("keeper_name", `String "echo"); ("mode", `String "manual") ] ] )
     ; ("modes_state", `Assoc [ ("state", `String "ready") ])
     ; ( "judges"
       , `List
           [ `Assoc
-              [ ("keeper_name", `String "kidsnote")
+              [ ("keeper_name", `String "echo")
               ; ("slot_id", `String "glm-coding.glm-5-turbo")
               ] ] )
     ; ("judges_state", `Assoc [ ("state", `String "ready") ])
@@ -4636,9 +4636,9 @@ let test_decode_keeper_gate_settings_reads_both_lists () =
   | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
   | Ok (modes, judges) ->
     Alcotest.(check (list (pair string string)))
-      "modes" [ ("kidsnote", "manual") ] modes;
+      "modes" [ ("echo", "manual") ] modes;
     Alcotest.(check (list (pair string string)))
-      "judges" [ ("kidsnote", "glm-coding.glm-5-turbo") ] judges
+      "judges" [ ("echo", "glm-coding.glm-5-turbo") ] judges
 
 let test_decode_keeper_gate_settings_takes_an_empty_workspace () =
   (* Nobody singled out is a working configuration, not a missing answer. *)
@@ -4761,7 +4761,7 @@ let test_goal_timeline_decodes_ready_events () =
       {|{"approval_queue_state":{"state":"ready"},
          "timeline":[
            {"ts":"2026-07-28T03:57:38Z","kind":"goal_phase","lane":"goal",
-            "title":"Goal Phase","summary":"phase=completed by rondo",
+            "title":"Goal Phase","summary":"phase=completed by delta",
             "severity":"ok"},
            {"ts":"2026-07-28T04:00:00Z","kind":"keeper_receipt","lane":"keeper",
             "title":"Receipt","summary":"turn failed","severity":"bad"}]}|}
@@ -4776,7 +4776,7 @@ let test_goal_timeline_decodes_ready_events () =
       Alcotest.(check string) "ts" "2026-07-28T03:57:38Z"
         first.Masc.Tui_decode.gt_ts;
       Alcotest.(check string) "kind" "goal_phase" first.gt_kind;
-      Alcotest.(check string) "summary" "phase=completed by rondo"
+      Alcotest.(check string) "summary" "phase=completed by delta"
         first.gt_summary;
       Alcotest.(check string) "severity" "ok" first.gt_severity
 
@@ -4809,7 +4809,7 @@ let test_goal_timeline_rejects_a_thin_event () =
 let test_task_history_decodes_live_rows () =
   let json =
     Yojson.Safe.from_string
-      {|[{"type":"task_transition","agent":"sangsu","task":"task-770",
+      {|[{"type":"task_transition","agent":"alpha","task":"task-770",
           "from_status":"in_progress","to_status":"todo",
           "ts":"2026-08-28T09:25:14Z","action":"release",
           "handoff_context":{"summary":"build replay is readable"}},
@@ -4825,7 +4825,7 @@ let test_task_history_decodes_live_rows () =
       Alcotest.(check (option string)) "from" (Some "in_progress")
         first.th_from_status;
       Alcotest.(check (option string)) "to" (Some "todo") first.th_to_status;
-      Alcotest.(check (option string)) "actor" (Some "sangsu") first.th_actor;
+      Alcotest.(check (option string)) "actor" (Some "alpha") first.th_actor;
       Alcotest.(check (option string)) "note" (Some "build replay is readable")
         first.th_note;
       let second = List.nth rows 1 in
@@ -4848,7 +4848,7 @@ let test_verification_evidence_decodes_items () =
   let json =
     Yojson.Safe.from_string
       {|{"ok":true,"result":{"task_id":"task-9","verification_id":"vr-1",
-         "producer":"sangsu",
+         "producer":"alpha",
          "evidence":{"access":"available","request":{},
            "items":[
              {"kind":"note","content":"tests green"},
@@ -5095,7 +5095,7 @@ let skill_evidence_observed_fixture () =
                   ; ( "claims"
                     , `List
                         [ `Assoc
-                            [ "keeper", `String "rondo"
+                            [ "keeper", `String "delta"
                             ; "source", `String "runtime_manifest"
                             ]
                         ] )
@@ -5151,7 +5151,7 @@ let test_decode_skill_evidence_reads_typed_activation_owner () =
     Alcotest.(check string) "trace" "trace-proof" item.sea_trace_id;
     Alcotest.(check (list string))
       "owner claim"
-      [ "rondo" ]
+      [ "delta" ]
       (List.map (fun claim -> claim.Tui_decode.seo_keeper) item.sea_owner_claims)
   | Ok _ -> Alcotest.fail "typed activation selection was not preserved"
 ;;

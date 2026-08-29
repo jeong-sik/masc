@@ -4168,7 +4168,7 @@ let test_skill_evidence_joins_activation_and_composition () =
         ; "parent_turn", `Int 1
         ; "parent_planned_index", `Int 0
         ; "request_id", `Null
-        ; "keeper", `String "rondo"
+        ; "keeper", `String "delta"
         ; "composition_tool", `String "keeper_compose_release-checklist"
         ; "composition_execution", `String "inline"
         ; "executor_settlements", `List [ node ]
@@ -4194,7 +4194,7 @@ let test_skill_evidence_joins_activation_and_composition () =
                     ; ( "claims"
                       , `List
                           [ `Assoc
-                              [ "keeper", `String "rondo"
+                              [ "keeper", `String "delta"
                               ; "source", `String "current_meta"
                               ]
                           ] )
@@ -4223,7 +4223,7 @@ let test_skill_evidence_joins_activation_and_composition () =
   check string "evidence schema" "masc.skill-evidence/v5"
     (json |> member "schema" |> to_string);
   check string "observed status" "observed" (json |> member "status" |> to_string);
-  check string "activation keeper" "rondo"
+  check string "activation keeper" "delta"
     (json |> member "activation" |> member "evidence" |> member "owner"
      |> member "claims" |> index 0 |> member "keeper" |> to_string);
   check int "composition node count" 1

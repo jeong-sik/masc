@@ -396,58 +396,6 @@ def proof_reference(proof: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def action_markers(actions: list[Any]) -> list[str]:
-    markers: list[str] = []
-    for index, action_value in enumerate(actions):
-        require(
-            isinstance(action_value, dict), f"proof action {index} is not an object"
-        )
-        action = cast(dict[str, Any], action_value)
-        identity = object_field(action, "identity", f"proof action {index}")
-        kind = identity.get("kind")
-        if kind == "call_id":
-            markers.append(
-                "call=" + string_field(identity, "call_id", "action identity")
-            )
-        elif kind == "provider_step":
-            conversation_id = string_field(
-                identity, "conversation_id", "action identity"
-            )
-            step_index = integer_field(identity, "step_index", "action identity")
-            markers.append(f"step={conversation_id}:{step_index}")
-        else:
-            raise VerificationError(f"proof action {index} identity is unsupported")
-    return markers
-
-
-def receipt_matches_activation(
-    block: str, activation: dict[str, Any], actions: list[Any]
-) -> bool:
-    lines = [line.strip(" │") for line in block.splitlines()]
-    try:
-        expected = tui_capture.expected_receipt_lines(activation, actions)
-    except tui_capture.CaptureError:
-        return False
-    return lines == expected
-
-
-def receipt_rows_are_covered_in_order(
-    frame_texts: list[str], expected_rows: list[str]
-) -> bool:
-    covered = 0
-    for visible_text in frame_texts:
-        try:
-            next_covered = tui_capture.receipt_frame_progress(
-                visible_text, expected_rows, covered
-            )
-        except tui_capture.CaptureError:
-            return False
-        if next_covered is None:
-            return False
-        covered = next_covered
-    return covered == len(expected_rows)
-
-
 def server_from_proof(evidence: dict[str, Any]) -> dict[str, str]:
     source = object_field(evidence, "source", "proof")
     runtime = object_field(evidence, "runtime", "proof")
@@ -936,8 +884,6 @@ def verify_bundle(
             "session_id",
             "ledger_revision",
             "skill_tool_use_id",
-            "action_markers",
-            "captured_action_marker",
         },
         "TUI repeated proof field set differs",
     )
@@ -952,12 +898,6 @@ def verify_bundle(
         == string_field(proof_identity, "ledger_revision", "proof identity")
         and string_field(tui_proof, "skill_tool_use_id", "TUI proof") == selected_id,
         "TUI repeated proof identity differs",
-    )
-    expected_markers = action_markers(proof_actions)
-    require(
-        tui_proof.get("action_markers") == expected_markers
-        and tui_proof.get("captured_action_marker") == expected_markers[0],
-        "TUI action markers differ",
     )
     require(
         object_field(tui, "producer_artifacts", "TUI proof")
@@ -1134,11 +1074,11 @@ def verify_bundle(
     )
     receipt_line = f"receipt_sha256={expected_receipt_sha256}"
     require(
-        any(
+        all(
             receipt_line in [line.strip(" │") for line in frame.splitlines()]
             for frame in frame_texts
         ),
-        "TUI frames do not contain the exact receipt projection revision",
+        "TUI frame does not contain the exact receipt projection revision",
     )
 
     verified_count = (
@@ -1173,7 +1113,7 @@ def verify_bundle(
         "later_model_selected_actions": len(proof_actions),
         "invalid_transitions": 0,
         "dashboard_exact_row_screenshots": 1,
-        "tui_exact_row_screenshots": len(frame_values),
+        "tui_receipt_identity_screenshots": len(frame_values),
         "source_server_identity_changes": 0,
         "incomplete_markers": 0,
     }

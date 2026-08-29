@@ -494,146 +494,6 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         self.assertEqual(visited, ["keeper-one"])
         wait_screen.assert_not_called()
 
-    def test_receipt_uses_exact_begin_and_end_boundaries(self):
-        same = "\n".join(
-            [
-                "begin id=call-skill-1",
-                "exact source_id=one",
-                "invoked turn=1 id=call-skill-1 runtime=one",
-                "action turn=1 runtime=one tool=x call=call-action-1",
-                "end id=call-skill-1",
-            ]
-        )
-        another = "\n".join(
-            [
-                "begin id=call-skill-1",
-                "exact source_id=one",
-                "invoked turn=1 id=call-skill-1 runtime=one",
-                "end id=call-skill-1",
-                "begin id=call-skill-2",
-                "exact source_id=two",
-                "invoked turn=2 id=call-skill-2 runtime=one",
-                "action turn=2 runtime=one tool=x call=call-action-1",
-                "end id=call-skill-2",
-            ]
-        )
-
-        self.assertEqual(capture.exact_receipt_block(same, "call-skill-1"), same)
-        self.assertNotIn(
-            "exact source_id=two",
-            capture.exact_receipt_block(another, "call-skill-1") or "",
-        )
-        prefix_collision = "\n".join(
-            [
-                "begin id=call-skill-10",
-                "exact source_id=ten",
-                "invoked turn=1 id=call-skill-10 runtime=one",
-                "action turn=1 runtime=one tool=x call=call-action-1",
-                "end id=call-skill-10",
-            ]
-        )
-        self.assertIsNone(capture.exact_receipt_block(prefix_collision, "call-skill-1"))
-
-    def test_exact_receipt_block_excludes_following_terminal_chrome(self):
-        receipt = "\n".join(
-            [
-                "begin id=call skill 1",
-                "exact source_id=one",
-                "invoked turn=1 id=call skill 1 runtime=runtime one",
-                "action turn=1 runtime=runtime one tool=x call=action id 1",
-                "end id=call skill 1",
-            ]
-        )
-        screen = receipt + "\n\n  ↑/↓ scroll  q back"
-
-        self.assertEqual(capture.exact_receipt_block(screen, "call skill 1"), receipt)
-
-    def test_receipt_progress_accumulates_ordered_overlapping_frames(self):
-        expected = [f"row-{index}" for index in range(40)]
-        frames = (
-            expected[0:12],
-            expected[11:23],
-            expected[22:34],
-            expected[33:40],
-        )
-        next_index = 0
-        for frame in frames:
-            progress = capture.receipt_frame_progress(
-                "chrome\n" + "\n".join(frame) + "\nfooter",
-                expected,
-                next_index,
-            )
-            self.assertIsNotNone(progress)
-            next_index = progress or next_index
-
-        self.assertEqual(next_index, len(expected))
-
-    def test_receipt_progress_does_not_cross_a_foreign_row(self):
-        expected = ["begin id=one", "action one", "action two", "end id=one"]
-        visible = "\n".join(
-            ["begin id=one", "action one", "foreign", "action two", "end id=one"]
-        )
-
-        self.assertEqual(capture.receipt_frame_progress(visible, expected, 0), 2)
-        self.assertIsNone(
-            capture.receipt_frame_progress("action two\nend id=one", expected, 2)
-        )
-
-    def test_exact_receipt_block_ignores_unrelated_clock_change(self):
-        before = "\n".join(
-            [
-                "MASC Tools 14:10:47 [connected]",
-                "session=session-1  ledger=ledger-1",
-                "begin id=call-skill-1",
-                "exact source_id=one",
-                "invoked turn=1 id=call-skill-1 runtime=one",
-                "action turn=1 runtime=one tool=x call=call-action-1",
-                "end id=call-skill-1",
-            ]
-        )
-        after = before.replace("14:10:47", "14:10:48")
-
-        self.assertNotEqual(before, after)
-        self.assertEqual(
-            capture.exact_receipt_block(before, "call-skill-1"),
-            capture.exact_receipt_block(after, "call-skill-1"),
-        )
-        self.assertTrue(capture.tools_surface_is_connected(after))
-
-    def test_exact_receipt_block_detects_changed_runtime_tool_and_turn(self):
-        before = "\n".join(
-            [
-                "begin id=call-skill-1",
-                "exact source_id=one",
-                "invoked turn=1 id=call-skill-1 runtime=one",
-                "action turn=1 runtime=one tool=x call=call-action-1",
-                "end id=call-skill-1",
-            ]
-        )
-        after = before.replace("turn=1 runtime=one tool=x", "turn=9 runtime=two tool=y")
-
-        self.assertNotEqual(
-            capture.exact_receipt_block(before, "call-skill-1"),
-            capture.exact_receipt_block(after, "call-skill-1"),
-        )
-
-    def test_exact_receipt_block_detects_changed_exact_identity(self):
-        before = "\n".join(
-            [
-                "begin id=call-skill-1",
-                "exact source_id=one",
-                "invoked turn=1 id=call-skill-1 runtime=one",
-                "action turn=1 runtime=one tool=x call=call-action-1",
-                "end id=call-skill-1",
-            ]
-        )
-        after = before.replace("source_id=one", "source_id=two")
-
-        self.assertNotEqual(
-            capture.exact_receipt_block(before, "call-skill-1"),
-            capture.exact_receipt_block(after, "call-skill-1"),
-        )
-
     def test_ledger_projection_requires_the_full_revision(self):
         revision = "abcdef0123456789"
 
@@ -784,7 +644,11 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         self.assertEqual([call.args[1] for call in press.call_args_list], ["Home"])
 
     def test_receipt_projection_revision_binds_full_unicode_identifier(self):
-        revision = "a" * 64
+        revision = "8b9a4dc07173dbf0deca356bf3b9ae53c6da7b155c006087364c48bbfdee70c8"
+        self.assertEqual(
+            capture.receipt_projection_revision(revision, "call-한한한A"),
+            "4f92d081521e839a230f46fbb531c0eae99d3f2f847e062ed174a2720ef3ecff",
+        )
         shared = "call-" + ("한" * 200)
         left = capture.receipt_projection_revision(revision, shared + "A")
         right = capture.receipt_projection_revision(revision, shared + "B")

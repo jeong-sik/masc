@@ -908,9 +908,12 @@ let test_projection_decoder_reuses_all_ledger_invariants () =
 ;;
 
 let test_receipt_projection_revision_binds_full_unicode_id () =
-  with_session @@ fun config trace _session_dir ->
-  let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
-  let ledger = Ledger.empty ~workspace_root ~trace_id:trace in
+  let ledger =
+    Ledger.empty ~workspace_root:"/workspace" ~trace_id:(trace_id "trace-one")
+  in
+  check string "shared OCaml/Python golden"
+    "4f92d081521e839a230f46fbb531c0eae99d3f2f847e062ed174a2720ef3ecff"
+    (Ledger.receipt_projection_revision ledger ~skill_tool_use_id:"call-한한한A");
   let shared = "call-" ^ String.concat "" (List.init 200 (fun _ -> "한")) in
   let left = Ledger.receipt_projection_revision ledger ~skill_tool_use_id:(shared ^ "A") in
   let right = Ledger.receipt_projection_revision ledger ~skill_tool_use_id:(shared ^ "B") in

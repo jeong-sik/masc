@@ -18,7 +18,6 @@ type field =
   | Schema
   | Name
   | Instructions
-  | Autonomous_instructions
   | Trace_id
   | Trace_history
   | Last_handoff_ts
@@ -54,7 +53,6 @@ let all_fields =
   [ Schema
   ; Name
   ; Instructions
-  ; Autonomous_instructions
   ; Trace_id
   ; Trace_history
   ; Last_handoff_ts
@@ -91,7 +89,6 @@ let field_name = function
   | Schema -> "schema"
   | Name -> "name"
   | Instructions -> "instructions"
-  | Autonomous_instructions -> "autonomous_instructions"
   | Trace_id -> "trace_id"
   | Trace_history -> "trace_history"
   | Last_handoff_ts -> "last_handoff_ts"

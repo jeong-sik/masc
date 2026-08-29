@@ -45,7 +45,6 @@ type shutdown_latch = Operator_stopped
 
 type profile_update =
   { instructions : string
-  ; autonomous_instructions : string option
   ; sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
   ; network_mode : Keeper_types_profile.network_mode

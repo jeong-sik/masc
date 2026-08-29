@@ -3227,7 +3227,6 @@ describe('fetchKeeperConfig', () => {
       config_revision: configRevision,
       autoboot_enabled: 'false',
       max_context_override: 64_000,
-      autonomous_wake_prompt: '백로그를 확인하고 하나 진행해.',
       sandbox_profile: 'docker',
       network_mode: 'none',
       keeper_last_error: 'sandbox docker exec failed',
@@ -3323,7 +3322,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.sandbox_roots).toEqual(['/tmp/workspace'])
     expect(result.autoboot_enabled).toBe(false)
     expect(result.max_context_override).toBe(64000)
-    expect(result.autonomous_wake_prompt).toBe('백로그를 확인하고 하나 진행해.')
     expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
     expect(result.keeper_last_error).toBe('sandbox docker exec failed')
@@ -3413,19 +3411,6 @@ describe('fetchKeeperConfig', () => {
       )
       vi.unstubAllGlobals()
     }
-  })
-
-  it('decodes an absent autonomous_wake_prompt as inherit (null)', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null,"skills":{"names":null}}', {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchKeeperConfig('keeper-sangsu')
-    expect(result.autonomous_wake_prompt).toBeNull()
   })
 
   it('rejects a response that omits the Skill selection authority', async () => {

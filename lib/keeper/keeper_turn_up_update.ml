@@ -303,7 +303,6 @@ type manifest_publication =
 let profile_update_command (meta : keeper_meta) =
   Keeper_owner_reducer.Update_profile
     { instructions = meta.instructions
-    ; autonomous_instructions = meta.autonomous_instructions
     ; sandbox_profile = meta.sandbox_profile
     ; sandbox_image = meta.sandbox_image
     ; network_mode = meta.network_mode
@@ -439,7 +438,6 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                  (if String.trim old.instructions <> "" then old.instructions
                   else Option.value ~default:"" p.profile_defaults.instructions)
                p.instructions_opt);
-    autonomous_instructions = p.autonomous_instructions_opt;
     sandbox_profile;
     network_mode;
     autoboot_enabled;

@@ -21,7 +21,6 @@ let editable_fields =
   ; Direct ("mention_targets", [ "workspace"; "mention_targets" ])
   ; Direct ("autoboot_enabled", [ "autoboot_enabled" ])
   ; Direct ("max_context_override", [ "max_context_override" ])
-  ; Direct ("autonomous_wake_prompt", [ "autonomous_wake_prompt" ])
   ; Direct ("sandbox_profile", [ "sandbox_profile" ])
   ; Direct ("network_mode", [ "network_mode" ])
   ; Direct ("instructions", [ "prompt"; "instructions" ])
@@ -453,8 +452,6 @@ let view_lines ~sanitize json =
       (fun () -> bool_value (at [ "proactive"; "enabled" ]))
   ; editable_value_row "Context override"
       (fun () -> int_override_value (at [ "max_context_override" ]))
-  ; editable_value_row "Wake prompt override"
-      (fun () -> string_value (at [ "autonomous_wake_prompt" ]))
   ; editable_value_row "Sandbox / network"
       (fun () ->
         Printf.sprintf "%s / %s"

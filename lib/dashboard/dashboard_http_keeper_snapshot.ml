@@ -180,7 +180,7 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
         `Assoc [
           ( "instructions",
             `String
-              (Keeper_unified_prompt.effective_autonomous_instructions
+              (Keeper_unified_prompt.effective_instructions
                  ~meta:m
                  ~profile_defaults:defaults
                  ()) );
@@ -319,13 +319,6 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
          ("config_revision", keeper_config_revision_json config_revision);
          ("autoboot_enabled", `Bool m.autoboot_enabled);
          ("max_context_override", Json_util.int_opt_to_json m.max_context_override);
-         (* Keeper-level override only ([None] = inherit the fleet
-            autonomous.wake_prompt). The resolved value a turn would
-            actually use is already served as
-            [prompt.unified_user_message_preview]. *)
-         ( "autonomous_wake_prompt",
-           Json_util.string_opt_to_json
-             defaults.Keeper_types_profile.autonomous_wake_prompt );
          ( "sandbox_profile"
          , `String
              (Keeper_types_profile_sandbox.sandbox_profile_to_string

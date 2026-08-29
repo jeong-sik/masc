@@ -658,7 +658,7 @@ let test_wake_prompt_is_readable_in_the_settings_projection () =
       "what changed since your last turn?"
       (row |> member "configured_value" |> to_string);
     check string "the effective value is the one the prompt builder resolves"
-      (Keeper_unified_prompt.effective_autonomous_wake_prompt ())
+      (Env_config_keeper.KeeperAutonomous.wake_prompt ())
       (row |> member "effective_value" |> to_string);
     check bool "the consumer is named" true
       (row

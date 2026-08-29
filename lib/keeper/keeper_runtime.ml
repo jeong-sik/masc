@@ -236,8 +236,6 @@ let keeper_meta_persistent_drift_categories
         (not
            (Keeper_runtime_instructions.text_equal
               current.instructions target.instructions));
-      drift_if "autonomous_instructions"
-        (current.autonomous_instructions <> target.autonomous_instructions);
       drift_if "agent_core_env" (current.agent_core_env <> target.agent_core_env);
     ]
 
@@ -302,9 +300,6 @@ let ensure_keeper_meta_with_cause config name =
       apply_default defaults.proactive_enabled Keeper_config.default_proactive_enabled in
     (* --- Keeper instructions --- *)
     let target_instructions = apply_default defaults.instructions meta.instructions in
-    let target_autonomous_instructions =
-      apply_default_opt defaults.autonomous_instructions meta.autonomous_instructions
-    in
 
     (* --- Policy --- *)
     let target_autoboot_enabled =
@@ -365,7 +360,6 @@ let ensure_keeper_meta_with_cause config name =
           enabled = target_proactive;
         };
         instructions = target_instructions;
-        autonomous_instructions = target_autonomous_instructions;
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;
         sandbox_profile = target_sandbox_profile;
@@ -410,7 +404,6 @@ let ensure_keeper_meta_with_cause config name =
           ~keeper_name:persisted_updated.name
           (Keeper_owner_reducer.Update_profile
              { instructions = persisted_updated.instructions
-             ; autonomous_instructions = persisted_updated.autonomous_instructions
              ; sandbox_profile = persisted_updated.sandbox_profile
              ; sandbox_image = persisted_updated.sandbox_image
              ; network_mode = persisted_updated.network_mode

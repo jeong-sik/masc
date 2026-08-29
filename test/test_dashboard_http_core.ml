@@ -3134,38 +3134,6 @@ let test_context_shrink_detection () =
     (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
 ;;
 
-(* The dashboard PATCH layer for the per-keeper autonomous wake prompt: field
-   admitted by the allow-list, typed as string-or-null, content delegated to
-   the shared contract (blank reject, 2048-byte bound). *)
-let test_config_patch_accepts_autonomous_wake_prompt () =
-  let meta = shrink_base_meta () in
-  let validate fields =
-    Keeper_config_post.validate_dashboard_config_patch ~meta fields
-  in
-  let check_ok label fields =
-    match validate fields with
-    | Ok () -> ()
-    | Error e -> Alcotest.failf "%s: %s" label e
-  in
-  let check_error label fields =
-    match validate fields with
-    | Error _ -> ()
-    | Ok () -> Alcotest.failf "%s unexpectedly accepted" label
-  in
-  check_ok "a wake prompt string is accepted"
-    [ ("autonomous_wake_prompt", `String "백로그를 확인하고 하나 진행해.") ];
-  check_ok "null clears the keeper override"
-    [ ("autonomous_wake_prompt", `Null) ];
-  check_error "blank delegates to the shared contract"
-    [ ("autonomous_wake_prompt", `String "   ") ];
-  check_error "over-bound delegates to the shared contract"
-    [ ("autonomous_wake_prompt", `String (String.make 2049 'x')) ];
-  check_error "non-string, non-null is a type error"
-    [ ("autonomous_wake_prompt", `Int 1) ];
-  check_error "unknown fields are still rejected"
-    [ ("autonomous_wake_promptt", `String "typo") ]
-;;
-
 let test_config_patch_accepts_typed_skills () =
   let meta = shrink_base_meta () in
   let validate fields =
@@ -4479,8 +4447,6 @@ let () =
             test_cached_surface_success_clears_the_previous_error;
           test_case "shrink of max_context_override is detected" `Quick
             test_context_shrink_detection;
-          test_case "config patch accepts the autonomous wake prompt" `Quick
-            test_config_patch_accepts_autonomous_wake_prompt;
           test_case "config patch accepts typed Skills" `Quick
             test_config_patch_accepts_typed_skills;
           test_case "config POST atomically restarts runtime" `Quick

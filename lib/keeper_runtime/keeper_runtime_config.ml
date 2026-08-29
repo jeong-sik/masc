@@ -559,11 +559,8 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
        | "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC" ->
          display_float Env_config_keeper.KeeperGrpc.reconnect_backoff_sec
        | "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT" ->
-         (* Reports the same string the prompt builder would use for a keeper
-            with no override of its own, so the settings panel and the turn
-            agree. A keeper that sets [autonomous_wake_prompt] is not visible
-            here -- this row is the fleet value, and per-keeper overrides live
-            with the keeper. *)
+         (* Reports the same string the prompt builder uses, so the settings
+            panel and the turn agree. *)
          Env_config_keeper.KeeperAutonomous.wake_prompt ()
        | "MASC_SEARXNG_URL" ->
          let url =

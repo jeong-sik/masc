@@ -381,13 +381,7 @@ let full_fields
       :: fields
     | None -> fields
   in
-  (* Not a meta field: the per-keeper wake prompt lives only in the keeper
-     TOML (profile-defaults layer, #28456), so the creation snapshot takes it
-     from the parsed args rather than from [meta]. *)
-  match parsed.Keeper_turn_up_args.autonomous_wake_prompt_opt with
-  | Some value ->
-    ("autonomous_wake_prompt", Keeper_toml_loader.Toml_string value) :: fields
-  | None -> fields
+  fields
 
 let explicit_edits
       (parsed : Keeper_turn_up_args.parsed_args)
@@ -436,15 +430,6 @@ let explicit_edits
          set_string (Runtime_native_tools.to_string posture)
        | None -> Keeper_toml_loader.Remove )
      :: fields)
-  |> fun fields ->
-  if not parsed.autonomous_wake_prompt_present
-  then fields
-  else
-    ( "autonomous_wake_prompt"
-    , match parsed.autonomous_wake_prompt_opt with
-      | Some value -> set_string value
-      | None -> Keeper_toml_loader.Remove )
-    :: fields
 
 let strict_write_result = function
   | Ok () -> Ok []

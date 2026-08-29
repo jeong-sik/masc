@@ -57,7 +57,6 @@ let nullable_field_names =
   ; "latched_reason"
   ; "current_task_id"
   ; "keeper_id"
-  ; "autonomous_instructions"
   ]
 ;;
 

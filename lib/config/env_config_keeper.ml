@@ -171,10 +171,9 @@ module KeeperAutonomous = struct
       instead of being left to the operator's judgement. *)
   let max_wake_prompt_bytes = 2048
 
-  (** Shared contract for both authoring surfaces -- this env var and the
-      per-keeper [autonomous_wake_prompt] in keeper TOML. [Error] carries an
-      operator-facing reason; blank is rejected rather than folded into the
-      default, so "unset" and "set to nothing" stay distinguishable. *)
+  (** Contract for the fleet env var. [Error] carries an operator-facing
+      reason; blank is rejected rather than folded into the default, so
+      "unset" and "set to nothing" stay distinguishable. *)
   let validate_wake_prompt raw =
     let trimmed = String.trim raw in
     if String.equal trimmed ""

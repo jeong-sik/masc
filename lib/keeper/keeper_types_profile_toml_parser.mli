@@ -56,7 +56,6 @@ type keeper_profile_defaults =
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
   instructions : string option;
-  autonomous_instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
@@ -65,7 +64,6 @@ type keeper_profile_defaults =
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   remote_endpoint : string option;
-  autonomous_wake_prompt : string option;
   max_context_override : int option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;

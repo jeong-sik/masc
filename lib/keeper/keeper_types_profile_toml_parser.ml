@@ -23,8 +23,6 @@ type keeper_toml_field_kind =
 let keeper_toml_fields =
   [ "name", Field_string
   ; "instructions", Field_string
-  ; "autonomous_instructions", Field_string
-  ; "autonomous_wake_prompt", Field_string
   ; "autoboot_enabled", Field_bool
   ; "mention_targets", Field_string_array
   ; "proactive_enabled", Field_bool
@@ -249,30 +247,13 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       Keeper_config.validate_max_context_override_value value
       |> Result.map Option.some
   in
-  (* Same contract the fleet env var is held to, so an operator cannot author a
-     blank or unbounded wake prompt on one surface and a valid one on the other. *)
-  let autonomous_wake_prompt_result =
-    match str "autonomous_wake_prompt" with
-    | None -> Ok None
-    | Some value ->
-      Env_config_keeper.KeeperAutonomous.validate_wake_prompt value
-      |> Result.map Option.some
-      |> Result.map_error (fun reason -> "keeper.autonomous_wake_prompt: " ^ reason)
-  in
-  let max_context_override_result =
-    Result.bind max_context_override_result (fun max_context_override ->
-      Result.map
-        (fun autonomous_wake_prompt -> max_context_override, autonomous_wake_prompt)
-        autonomous_wake_prompt_result)
-  in
   Result.bind result (fun () ->
     Result.map
-      (fun (max_context_override, autonomous_wake_prompt) ->
+      (fun max_context_override ->
       {
         id = None;
         manifest_path = None;
         instructions = str "instructions";
-        autonomous_instructions = str "autonomous_instructions";
         autoboot_enabled = bool_ "autoboot_enabled";
         mention_targets = strs "mention_targets";
         proactive_enabled = bool_ "proactive_enabled";
@@ -282,7 +263,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
         remote_endpoint = str "remote_endpoint";
-        autonomous_wake_prompt;
         max_context_override;
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
@@ -319,10 +299,6 @@ let merge_keeper_profile_defaults
     id = prefer overlay.id base.id;
     manifest_path = prefer overlay.manifest_path base.manifest_path;
     instructions = prefer overlay.instructions base.instructions;
-    autonomous_instructions =
-      prefer overlay.autonomous_instructions base.autonomous_instructions;
-    autonomous_wake_prompt =
-      prefer overlay.autonomous_wake_prompt base.autonomous_wake_prompt;
     autoboot_enabled = prefer overlay.autoboot_enabled base.autoboot_enabled;
     mention_targets =
       merge_string_list ~base:base.mention_targets overlay.mention_targets;

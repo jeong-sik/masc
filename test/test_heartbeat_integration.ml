@@ -1731,8 +1731,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; mention_targets_opt = None
         ; max_context_override_opt = None
         ; max_context_override_present = false
-        ; autonomous_wake_prompt_opt = None
-        ; autonomous_wake_prompt_present = false
         ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
@@ -1747,8 +1745,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; declarative_manifest_snapshot =
             Keeper_types_profile.Declarative_manifest_missing
         ; instructions_opt = profile_defaults.instructions
-        ; autonomous_instructions_arg = None
-        ; autonomous_instructions_opt = None
         }
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1997,8 +1993,6 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         ; mention_targets_opt = None
         ; max_context_override_opt = None
         ; max_context_override_present = false
-        ; autonomous_wake_prompt_opt = None
-        ; autonomous_wake_prompt_present = false
         ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
@@ -2013,8 +2007,6 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         ; declarative_manifest_snapshot =
             Keeper_types_profile.Declarative_manifest_missing
         ; instructions_opt = profile_defaults.instructions
-        ; autonomous_instructions_arg = None
-        ; autonomous_instructions_opt = None
         }
       in
       let ctx : _ Keeper_types_profile.context =
@@ -2166,8 +2158,6 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         ; mention_targets_opt = None
         ; max_context_override_opt = None
         ; max_context_override_present = false
-        ; autonomous_wake_prompt_opt = None
-        ; autonomous_wake_prompt_present = false
         ; proactive_enabled_opt = Some false
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
@@ -2182,8 +2172,6 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         ; declarative_manifest_snapshot =
             Keeper_types_profile.Declarative_manifest_missing
         ; instructions_opt = profile_defaults.instructions
-        ; autonomous_instructions_arg = None
-        ; autonomous_instructions_opt = None
         }
       in
       let update_switch, resolve_update_switch = Eio.Promise.create () in

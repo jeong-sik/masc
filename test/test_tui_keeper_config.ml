@@ -13,7 +13,6 @@ let observed =
       },
       "autoboot_enabled": true,
       "max_context_override": null,
-      "autonomous_wake_prompt": null,
       "sandbox_profile": "docker",
       "network_mode": "none",
       "sandbox_roots": ["repo-a", ".masc/playground/alpha/"],
@@ -42,7 +41,6 @@ let test_editor_starts_from_observed_values () =
     ; "mention_targets"
     ; "autoboot_enabled"
     ; "max_context_override"
-    ; "autonomous_wake_prompt"
     ; "sandbox_profile"
     ; "network_mode"
     ; "instructions"
@@ -192,7 +190,6 @@ let test_every_row_says_whether_e_reaches_it () =
     ; "Autoboot", `Editable
     ; "Autonomous turns", `Editable
     ; "Context override", `Editable
-    ; "Wake prompt override", `Editable
     ; "Sandbox / network", `Editable
     ; "Mention targets", `Editable
     ; "Skills", `Editable

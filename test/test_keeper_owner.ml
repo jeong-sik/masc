@@ -278,7 +278,6 @@ let test_profile_update_preserves_owner_runtime_state () =
   let current = Option.get (Reducer.projection state).meta in
   let update : Reducer.profile_update =
     { instructions = "updated instructions"
-    ; autonomous_instructions = None
     ; sandbox_profile = current.sandbox_profile
     ; sandbox_image = current.sandbox_image
     ; network_mode = current.network_mode

@@ -20,8 +20,6 @@ type parsed_args =
   ; mention_targets_opt : string list option
   ; max_context_override_opt : int option
   ; max_context_override_present : bool
-  ; autonomous_wake_prompt_opt : string option
-  ; autonomous_wake_prompt_present : bool
   ; proactive_enabled_opt : bool option
   ; sandbox_profile_opt : string option
   ; remote_endpoint_opt : string option
@@ -35,8 +33,6 @@ type parsed_args =
   ; profile_defaults : keeper_profile_defaults
   ; declarative_manifest_snapshot : declarative_manifest_snapshot
   ; instructions_opt : string option
-  ; autonomous_instructions_arg : string option
-  ; autonomous_instructions_opt : string option
   }
 
 (** Project an [`Assoc] member at [key]; [None] for non-objects or
@@ -45,16 +41,6 @@ type parsed_args =
     zero explicitly clears it; positive integers are preserved exactly. *)
 val parse_max_context_override :
   Yojson.Safe.t -> (bool * int option, string) result
-
-(** Parse the explicit per-keeper autonomous wake prompt. Missing is
-    [(false, None)]; null explicitly clears it; a string is validated through
-    the shared contract
-    ([Env_config_keeper.KeeperAutonomous.validate_wake_prompt]): blank is
-    rejected rather than folded into "unset", and the 2048-byte bound applies
-    because the value is appended to the durable checkpoint on every
-    autonomous turn. *)
-val parse_autonomous_wake_prompt :
-  Yojson.Safe.t -> (bool * string option, string) result
 
 (** Top-level parser: project the [keeper_up] tool args JSON to a
     [parsed_args] record, or return a [tool_result] error envelope. *)

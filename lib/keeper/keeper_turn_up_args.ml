@@ -16,8 +16,6 @@ type parsed_args = {
   mention_targets_opt : string list option;
   max_context_override_opt : int option;
   max_context_override_present : bool;
-  autonomous_wake_prompt_opt : string option;
-  autonomous_wake_prompt_present : bool;
   proactive_enabled_opt : bool option;
   sandbox_profile_opt : string option;
   remote_endpoint_opt : string option;
@@ -31,8 +29,6 @@ type parsed_args = {
   profile_defaults : keeper_profile_defaults;
   declarative_manifest_snapshot : declarative_manifest_snapshot;
   instructions_opt : string option;
-  autonomous_instructions_arg : string option;
-  autonomous_instructions_opt : string option;
 }
 
 let parse_tools_patch args =
@@ -194,26 +190,6 @@ let parse_max_context_override args =
            "max_context_override must be an integer or null (received %s)"
            (Json_util.kind_name other))
 
-(* Same shared contract as the fleet env var and the keeper TOML parser
-   (Env_config_keeper.KeeperAutonomous.validate_wake_prompt), so no value can
-   pass one authoring surface and be rejected by another. Null is the only
-   explicit clear: strings have no zero sentinel, and folding "" into a clear
-   would make a typo read as "the setting did not take". *)
-let parse_autonomous_wake_prompt args =
-  match Json_util.assoc_member_opt "autonomous_wake_prompt" args with
-  | None -> Ok (false, None)
-  | Some `Null -> Ok (true, None)
-  | Some (`String raw) ->
-      (match Env_config_keeper.KeeperAutonomous.validate_wake_prompt raw with
-       | Ok value -> Ok (true, Some value)
-       | Error reason ->
-           Error (Printf.sprintf "autonomous_wake_prompt: %s" reason))
-  | Some other ->
-      Error
-        (Printf.sprintf
-           "autonomous_wake_prompt must be a string or null (received %s)"
-           (Json_util.kind_name other))
-
 let parse (ctx : _ context) (args : Yojson.Safe.t) :
     (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
@@ -238,15 +214,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       Ok (skill_names_present, skill_names_opt) ->
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let max_context_override_res = parse_max_context_override args in
-    let autonomous_wake_prompt_res = parse_autonomous_wake_prompt args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let remote_endpoint_res = parse_remote_endpoint args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
     let instructions_arg = get_string_opt args "instructions" in
-    let autonomous_instructions_arg =
-      get_string_opt args "autonomous_instructions"
-    in
     match
       load_declarative_materialization_defaults
         ~base_path:ctx.config.base_path
@@ -279,11 +251,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       match instructions_arg with
       | Some _ -> instructions_arg
       | None -> profile_defaults.instructions
-    in
-    let autonomous_instructions_opt =
-      match autonomous_instructions_arg with
-      | Some _ -> autonomous_instructions_arg
-      | None -> profile_defaults.autonomous_instructions
     in
     let remote_endpoint_error =
       match sandbox_profile_error, remote_endpoint_res with
@@ -331,18 +298,14 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
          | (Local | Docker | Micro_vm), None -> None)
     in
     match
-      sandbox_profile_error, remote_endpoint_error,
-      max_context_override_res, autonomous_wake_prompt_res
+      sandbox_profile_error, remote_endpoint_error, max_context_override_res
     with
-    | Some msg, _, _, _
-    | None, Some msg, _, _ ->
+    | Some msg, _, _
+    | None, Some msg, _ ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
-    | None, None, Error msg, _ ->
+    | None, None, Error msg ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
-    | None, None, _, Error msg ->
-      Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
-    | None, None, Ok (max_context_override_present, max_context_override_opt),
-      Ok (autonomous_wake_prompt_present, autonomous_wake_prompt_opt) ->
+    | None, None, Ok (max_context_override_present, max_context_override_opt) ->
     let remote_endpoint_present, remote_endpoint_opt =
       match remote_endpoint_res with
       | Ok value -> value
@@ -355,8 +318,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       mention_targets_opt;
       max_context_override_opt;
       max_context_override_present;
-      autonomous_wake_prompt_opt;
-      autonomous_wake_prompt_present;
       proactive_enabled_opt;
       sandbox_profile_opt;
       remote_endpoint_opt;
@@ -370,8 +331,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       profile_defaults;
       declarative_manifest_snapshot;
       instructions_opt;
-      autonomous_instructions_arg;
-      autonomous_instructions_opt;
     }
 
 (** Resolve mention targets with dedup and filtering. *)

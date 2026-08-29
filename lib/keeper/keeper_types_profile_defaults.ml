@@ -2,11 +2,6 @@ type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
   instructions : string option;
-  (* Per-keeper autonomous-turn instructions. When non-empty and the turn
-     channel is Scheduled_autonomous, this replaces [instructions] in the
-     system prompt. When absent, autonomous turns fall back to [instructions]
-     — zero behavioral change for keepers that don't set it. *)
-  autonomous_instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
@@ -19,11 +14,6 @@ type keeper_profile_defaults = {
      [remote_ssh_endpoint_missing]; the registry itself arrives with
      Phase 1 task 2. *)
   remote_endpoint : string option;
-  (* User message this keeper's autonomous turns are woken with, overriding the
-     fleet [autonomous.wake_prompt]. Distinct from [instructions]: that frames
-     the system prompt once, this is the conversation input the keeper receives
-     every cycle and which the durable checkpoint keeps. [None] inherits. *)
-  autonomous_wake_prompt : string option;
   max_context_override : int option;
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
@@ -52,7 +42,6 @@ let empty_keeper_profile_defaults =
     id = None;
     manifest_path = None;
     instructions = None;
-    autonomous_instructions = None;
     autoboot_enabled = None;
     mention_targets = [];
     proactive_enabled = None;
@@ -60,7 +49,6 @@ let empty_keeper_profile_defaults =
     sandbox_image = None;
     network_mode = None;
     remote_endpoint = None;
-    autonomous_wake_prompt = None;
     max_context_override = None;
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;

@@ -1,0 +1,9 @@
+{
+  "id": "l2-py-slugify",
+  "level": "L2",
+  "lang": "python",
+  "timeout_sec": 900,
+  "verify": "verify.sh",
+  "prompt": "check.sh fails because slug.py's slugify is not implemented. Implement it so the check passes: lowercase the text, keep letters and digits, collapse every other run of characters into single hyphens, and strip leading/trailing hyphens. Do not modify check.sh. Reply DONE once `bash check.sh` prints PASS.",
+  "description": "Small feature: implement slugify(text) in slug.py to satisfy the documented cases in check.sh."
+}

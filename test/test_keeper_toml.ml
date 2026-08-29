@@ -655,7 +655,7 @@ let test_profile_rejects_invalid_tools_native () =
          (String_util.contains_substring detail "none, read, full"))
 
 let test_profile_rejects_unknown_tools_sibling_key () =
-  let input = "[keeper.tools]\ngroup = [\"board\"]\n" in
+  let input = "[keeper.tools]\ngroups = [\"board\"]\n" in
   match TL.parse_toml input with
   | Error error -> fail error
   | Ok doc ->
@@ -665,7 +665,7 @@ let test_profile_rejects_unknown_tools_sibling_key () =
        check bool "generic unknown-key error" true
          (String_util.contains_substring detail "unknown keeper TOML keys");
        check bool "names unknown key" true
-         (String_util.contains_substring detail "keeper.tools.group"))
+         (String_util.contains_substring detail "keeper.tools.groups"))
 
 
 

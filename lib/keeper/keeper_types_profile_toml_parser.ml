@@ -40,7 +40,6 @@ let keeper_toml_fields =
        [tools.nativ] and leave the runtime on its default posture without a
        word, which is what naming them here prevents. *)
   ; "tools.native", Field_string
-  ; "tools.groups", Field_string_array
   ; "skills.names", Field_string_array
   ]
 

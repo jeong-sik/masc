@@ -7,11 +7,14 @@
     partial taskboard surface, so a reader of these values never has to ask
     whether a schema loaded.
 
-    keeper_tasks_list is the one of the six still in OCaml: its status enum
-    comes from [Masc_domain.valid_task_status_strings], and a TOML literal
-    would cut that derivation. It moves once it has a test pinning the file
-    against its owner. [test_taskboard_tool_toml_parity] pins all six against
-    what the list published before any of this moved. *)
+    keeper_tasks_list was the last of the seven left in OCaml: its status enum
+    comes from [Masc_domain.valid_task_status_strings], and a TOML literal cuts
+    that derivation. The condition for moving it was a test pinning the file
+    against its owner, and [test_taskboard_tool_toml_parity] now carries one —
+    it compares the enum in the declaration against that value, so a new
+    task_status constructor fails the suite instead of quietly publishing a
+    schema that no longer names every status. The same suite pins all seven
+    against what the list published before any of this moved. *)
 
 let schema_of_name name : Masc_domain.tool_schema =
   let rel = "tools/" ^ name ^ ".toml" in
@@ -23,6 +26,7 @@ let schema_of_name name : Masc_domain.tool_schema =
      | Error message -> failwith message)
 ;;
 
+let tasks_list = schema_of_name "keeper_tasks_list"
 let tasks_audit = schema_of_name "keeper_tasks_audit"
 let broadcast = schema_of_name "keeper_broadcast"
 let task_claim = schema_of_name "keeper_task_claim"

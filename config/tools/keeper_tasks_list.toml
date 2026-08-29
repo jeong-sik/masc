@@ -1,5 +1,10 @@
 name = "keeper_tasks_list"
-description = "List MASC backlog tasks visible to this keeper."
+description = """
+List backlog tasks. Rows carry id, title, priority, created_at, status, \
+assignee; projection=full adds description, files, contract, \
+handoff_context, execution_links. awaiting_verification means the task \
+awaits the completion-authority verdict and no Keeper can claim it; \
+never Read producer sandbox paths."""
 [help]
 short_description = "List MASC backlog tasks visible to this keeper."
 when_to_use = "Use before claiming work, checking awaiting verification items, or diagnosing current task state."
@@ -9,3 +14,40 @@ key_constraints = [
 ]
 details_markdown = "Rows: id, title, priority, created_at, status, assignee; projection=full adds the task body."
 examples = ["status='todo' include_done=false limit=20"]
+
+[[params]]
+name = "status"
+type = "string"
+# Kept identical to Masc_domain.valid_task_status_strings, which derives from
+# the task_status variant. test_taskboard_tool_toml_parity pins this list
+# against that value, so adding a constructor fails the suite here rather than
+# publishing a schema that has quietly stopped naming every status.
+enum = ["todo", "claimed", "in_progress", "awaiting_verification", "done", "cancelled"]
+description = "Filter by task status"
+
+[[params]]
+name = "include_done"
+type = "boolean"
+description = "Include completed tasks (default: false)"
+
+[[params]]
+name = "limit"
+type = "integer"
+# #18472: a multi-type schema trips the agent-core boundary fail-closed and
+# crashes the keeper cycle. The runtime coerces string->int, so strict integer
+# is safe here.
+minimum = 1
+maximum = 100
+default = 50
+description = "Max tasks to return (default: 50)"
+
+[[params]]
+name = "if_revision"
+type = "string"
+description = "Optional producer revision from the previous keeper_tasks_list snapshot; matching revisions return unchanged."
+
+[[params]]
+name = "projection"
+type = "string"
+enum = ["compact", "full"]
+default = "compact"

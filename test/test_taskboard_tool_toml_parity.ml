@@ -81,6 +81,51 @@ let test_the_published_order_is_unchanged () =
     (List.map (fun (s : Masc_domain.tool_schema) -> s.name) published)
 ;;
 
+(* The condition the taskboard loader named for moving keeper_tasks_list out
+   of OCaml. Its status enum used to be built from
+   [Masc_domain.valid_task_status_strings] at schema-construction time, so a
+   new task_status constructor reached the published schema on its own. A TOML
+   literal cannot do that, and the failure it replaces is silent: the tool goes
+   on advertising a status list that no longer names every status, and a filter
+   for the missing one is refused at the boundary with nothing to point at.
+
+   So the derivation becomes an assertion. The declaration is read back through
+   the same loader the runtime uses, not from the file text, because that is
+   the value the model is handed. *)
+let test_status_enum_still_names_every_task_status () =
+  let published =
+    List.find
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name "keeper_tasks_list")
+      Tool_shard_types.taskboard_tools
+  in
+  let declared =
+    match published.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc properties) ->
+         (match List.assoc_opt "status" properties with
+          | Some (`Assoc status_fields) ->
+            (match List.assoc_opt "enum" status_fields with
+             | Some (`List values) ->
+               List.map
+                 (function
+                   | `String value -> value
+                   | other -> failf "status enum holds a non-string: %s"
+                                (Yojson.Safe.to_string other))
+                 values
+             | _ -> fail "keeper_tasks_list status carries no enum")
+          | _ -> fail "keeper_tasks_list publishes no status property")
+       | _ -> fail "keeper_tasks_list publishes no properties")
+    | _ -> fail "keeper_tasks_list input_schema is not an object"
+  in
+  check
+    (list string)
+    "config/tools/keeper_tasks_list.toml status enum vs \
+     Masc_domain.valid_task_status_strings"
+    Masc_domain.valid_task_status_strings
+    declared
+;;
+
 let () =
   run
     "taskboard_tool_toml_parity"
@@ -91,6 +136,12 @@ let () =
             `Quick
             test_input_schemas_match_with_keys_sorted
         ; test_case "published order" `Quick test_the_published_order_is_unchanged
+        ] )
+    ; ( "derivation"
+      , [ test_case
+            "status enum names every task_status"
+            `Quick
+            test_status_enum_still_names_every_task_status
         ] )
     ]
 ;;

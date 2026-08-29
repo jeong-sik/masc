@@ -981,10 +981,30 @@ type gate_lane_modes = {
           lane: opening one does not open the other. *)
 }
 
+(** An always-allow rule standing behind the queue. It answers a request
+    before it ever becomes a pending ask, so a screen that shows only the
+    queue shows nothing once a rule covers a call. The fingerprint is the
+    whole match: one Keeper, one tool, one exact input shape. *)
+type gate_rule = {
+  gr_id : string;
+  gr_keeper : string;
+  gr_tool : string;
+  gr_fingerprint : string;
+  gr_created_at : float;
+  gr_created_by : string option;
+  gr_expires_at : float option;
+}
+
 type gate_snapshot = {
   gs_pending : gate_pending list;
   gs_modes : gate_lane_modes option;
   gs_queue_unavailable : string option;
+  gs_rules : gate_rule list;
+      (** Standing always-allow rules, newest first, as the server sorted
+          them. Empty when none are stored. *)
+  gs_rules_unavailable : string option;
+      (** [Some detail] when the server reported the rule store unreadable —
+          the screen must not read that as "no standing rules". *)
       (** [Some detail] when the server reported the approval-queue store
           unreadable ([approval_queue_state.state] other than ready) — the
           screen must not read that as "no pending approvals". *)

@@ -1601,6 +1601,12 @@ type state = {
   mutable gate_pending: Tui_decode.gate_pending list;
   mutable gate_modes: Tui_decode.gate_lane_modes option;
   mutable gate_queue_unavailable: string option;
+  (* Standing always-allow rules. A rule answers a call before it can become
+     a pending ask, so the queue alone cannot show that one exists — an
+     operator reading an empty queue has to be told what is answering in its
+     place. *)
+  mutable gate_rules: Tui_decode.gate_rule list;
+  mutable gate_rules_unavailable: string option;
   mutable gate_error: string option;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
@@ -2266,6 +2272,8 @@ let create_state
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
+  gate_rules = [];
+  gate_rules_unavailable = None;
   gate_error = None;
   keeper_yolo_names = [];
   runtime_params = [];

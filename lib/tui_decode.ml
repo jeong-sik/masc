@@ -4054,10 +4054,27 @@ type gate_lane_modes = {
   glm_external : string;
 }
 
+(* An always-allow rule standing behind the queue. It answers a request
+   before it ever becomes a pending ask, so a screen that shows only the
+   queue shows nothing at all once a rule covers a call. The fingerprint is
+   the whole match: a rule fires for one Keeper, one tool, and one exact
+   input shape. *)
+type gate_rule = {
+  gr_id : string;
+  gr_keeper : string;
+  gr_tool : string;
+  gr_fingerprint : string;
+  gr_created_at : float;
+  gr_created_by : string option;
+  gr_expires_at : float option;
+}
+
 type gate_snapshot = {
   gs_pending : gate_pending list;
   gs_modes : gate_lane_modes option;
   gs_queue_unavailable : string option;
+  gs_rules : gate_rule list;
+  gs_rules_unavailable : string option;
 }
 
 (* What a human decides on. An identity_call row carries the real target
@@ -4272,6 +4289,38 @@ let decode_gate_lane_modes json =
   let* glm_external = required_string_field external_lane "mode" in
   Ok { glm_workspace; glm_external }
 
+let decode_gate_rule json =
+  let* gr_id = required_string_field json "id" in
+  let* gr_keeper = required_string_field json "keeper_name" in
+  let* gr_tool = required_string_field json "tool_name" in
+  let* gr_fingerprint = required_string_field json "request_fingerprint" in
+  let* gr_created_at =
+    match member "created_at" json with
+    | `Float value -> Ok value
+    | `Int value -> Ok (float_of_int value)
+    | _ -> Error "approval rule created_at must be a number"
+  in
+  let optional_string field =
+    match member field json with
+    | `String value -> Some value
+    | _ -> None
+  in
+  let gr_expires_at =
+    match member "expires_at" json with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | _ -> None
+  in
+  Ok
+    { gr_id
+    ; gr_keeper
+    ; gr_tool
+    ; gr_fingerprint
+    ; gr_created_at
+    ; gr_created_by = optional_string "created_by"
+    ; gr_expires_at
+    }
+
 let decode_gate_snapshot json =
   let* gs_pending =
     match member "approval_queue" json with
@@ -4313,7 +4362,35 @@ let decode_gate_snapshot json =
         let* modes = decode_gate_lane_modes hitl in
         Ok (Some modes)
   in
-  Ok { gs_pending; gs_modes; gs_queue_unavailable }
+  let* gs_rules =
+    match member "approval_rules" json with
+    | `Null -> Ok []
+    | `List items ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | item :: rest ->
+              let* decoded = decode_gate_rule item in
+              loop (decoded :: acc) rest
+        in
+        loop [] items
+    | _ -> Error "approval_rules is neither a list nor null"
+  in
+  let* gs_rules_unavailable =
+    match member "approval_rules_state" json with
+    | `Null -> Ok None
+    | state_json ->
+        (match member "state" state_json with
+         | `String "ready" -> Ok None
+         | `String _ ->
+             let detail =
+               match member "error" state_json with
+               | `String detail -> detail
+               | _ -> "approval rule store is unreadable"
+             in
+             Ok (Some detail)
+         | _ -> Error "approval_rules_state.state must be a string")
+  in
+  Ok { gs_pending; gs_modes; gs_queue_unavailable; gs_rules; gs_rules_unavailable }
 
 (* The durable per-Keeper Gate settings, which are a different thing from the
    in-memory YOLO stance above: this is what the Gate decides an external

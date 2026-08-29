@@ -68,5 +68,5 @@ bootstrap 스크립트는 마지막에 서버가 쓰는 것과 같은 연결 모
 
 keeper의 자가 보고가 아니라 원장을 본다: 승인 영수증은
 `gate/replay-results.json`의 `outcomes`, 실행 결과 본문은
-`~/me/.masc/tool_blobs/<sha2>/<sha256>`. blob의 `via`/`remote_endpoint`
+`<base-path>/.masc/tool_blobs/<sha2>/<sha256>`. blob의 `via`/`remote_endpoint`
 필드가 실제로 SSH 레인을 탔는지 말해준다.

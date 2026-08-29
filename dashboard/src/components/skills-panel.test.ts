@@ -275,6 +275,34 @@ describe('decodeSkillsResponse', () => {
     })
   })
 
+  it('preserves empty identifiers from rejected YAML keys', () => {
+    const rejection: SkillSnapshotRejection = {
+      source_index: 0,
+      source_id: 'workspace',
+      package_id: null,
+      content_revision: null,
+      reason: {
+        kind: 'document_rejected',
+        diagnostics: [
+          {
+            code: 'unexpected_frontmatter_field',
+            message: 'empty YAML key is not specified',
+            field: '',
+          },
+          {
+            code: 'invalid_metadata_value',
+            message: 'empty metadata key has a non-string value',
+            key: '',
+          },
+        ],
+      },
+    }
+    expect(decodeSkillsResponse(readyPayload([], [], [rejection]))).toMatchObject({
+      state: 'ready',
+      snapshot: { rejections: [rejection] },
+    })
+  })
+
   it('decodes a complete non-empty exact-reference projection', () => {
     expect(decodeSkillsResponse(readyPayload(
       [intake],

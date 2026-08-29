@@ -823,7 +823,7 @@ const SkillDocumentFieldSchema = Schema.Union(
       'allowed-tools',
     ),
   }),
-  Schema.Struct({ kind: Schema.Literal('extension'), name: Schema.NonEmptyString }),
+  Schema.Struct({ kind: Schema.Literal('extension'), name: Schema.String }),
 )
 
 const SkillNameViolationSchema = Schema.Union(
@@ -857,11 +857,11 @@ const SkillDocumentDiagnosticSchema = Schema.Union(
   }),
   Schema.Struct({
     ...diagnosticBase('duplicate_metadata_key'),
-    key: Schema.NonEmptyString,
+    key: Schema.String,
   }),
   Schema.Struct({
     ...diagnosticBase('unexpected_frontmatter_field'),
-    field: Schema.NonEmptyString,
+    field: Schema.String,
   }),
   Schema.Struct(diagnosticBase('missing_name')),
   Schema.Struct(diagnosticBase('missing_description')),
@@ -891,7 +891,7 @@ const SkillDocumentDiagnosticSchema = Schema.Union(
   }),
   Schema.Struct({
     ...diagnosticBase('invalid_metadata_value'),
-    key: Schema.NonEmptyString,
+    key: Schema.String,
   }),
 )
 

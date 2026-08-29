@@ -111,10 +111,10 @@ let pending_entry
   | None -> fail "pending approval disappeared"
 ;;
 
-let publish_lane slot_ids snapshot =
+let publish_lane ?(cli_slot_ids = []) slot_ids snapshot =
   match
     Runtime.publish_exact_output_registry
-      ~lanes:[ { Runtime_schema.id = Worker.For_testing.lane_id; slot_ids; cli_slot_ids = [] } ]
+      ~lanes:[ { Runtime_schema.id = Worker.For_testing.lane_id; slot_ids; cli_slot_ids } ]
       snapshot
   with
   | Ok _ -> ()
@@ -2314,6 +2314,212 @@ let test_missing_summary_earns_failed () =
   Alcotest.(check bool) "no output is synthesised" true (output = `Null)
 ;;
 
+(* ── CLI lane-slot fallback (RFC cli-runtimes-as-lane-slots) ────────
+   The walk engages only after every catalog slot is exhausted. These drive
+   the real worker flow against an unreachable HTTP slot and an injected cli
+   runner; the runtime table below is what lets [is_official_client] admit
+   the cli ids, exactly like the fusion panel fixture. *)
+
+let cli_runtime_fixture =
+  {|
+[runtime]
+default = "stub-http.stub-model"
+
+[providers.stub-http]
+display-name = "Stub HTTP"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[providers.claude_code]
+display-name = "Claude Code Max Subscription"
+protocol = "claude-code"
+command = "/usr/bin/true"
+is-non-interactive = true
+
+[models.stub-model]
+api-name = "gpt-5.4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[stub-http.stub-model]
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+turn-timeout-s = 0
+
+[claude_code."claude-sonnet-5"]
+
+[models."claude-haiku-4-5"]
+api-name = "claude-haiku-4-5"
+max-context = 200000
+tools-support = true
+streaming = true
+turn-timeout-s = 0
+
+[claude_code."claude-haiku-4-5"]
+|}
+;;
+
+let cli_primary = "claude_code.claude-sonnet-5"
+let cli_secondary = "claude_code.claude-haiku-4-5"
+
+let with_cli_runtimes f =
+  let path = Filename.temp_file "hitl-cli-runtime" ".toml" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+       let channel = open_out path in
+       Fun.protect
+         ~finally:(fun () -> close_out channel)
+         (fun () -> output_string channel cli_runtime_fixture);
+       match Runtime.init_default ~config_path:path with
+       | Error detail -> failf "cli runtime fixture must initialize: %s" detail
+       | Ok () -> f ())
+;;
+
+let publish_unreachable_lane_with_cli ~cli_slot_ids ~source =
+  let fixtures : F.target_fixture list =
+    [ { id = "hitl-cli-unreachable"; base_url = "http://127.0.0.1:1" } ]
+  in
+  publish_lane
+    ~cli_slot_ids
+    [ "hitl-cli-unreachable" ]
+    (F.resolver_snapshot ~source fixtures)
+;;
+
+let test_cli_slot_answers_after_catalog_exhaustion () =
+  run_eio @@ fun ~sw:_ ~net ~clock ->
+  with_temp_dir "hitl-cli-summary" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       with_cli_runtimes @@ fun () ->
+       publish_unreachable_lane_with_cli
+         ~cli_slot_ids:[ cli_primary ]
+         ~source:"hitl-cli-summary";
+       let entry = pending_entry ~base_path () in
+       let seen_runtime = ref None in
+       let runner ~runtime_id ~system_prompt:_ ~prompt =
+         seen_runtime := Some runtime_id;
+         check bool
+           "the cli prompt carries the judgment contract"
+           true
+           (Astring.String.is_infix ~affix:"judgment" prompt);
+         Ok (Yojson.Safe.to_string (judgment_json "approve"))
+       in
+       let summary = ref None in
+       Worker.For_testing.execute_prepared_flow_with_queue_ops
+         ~queue_ops:(exact_queue_ops ())
+         ~cli_runner:runner
+         ~net
+         ~clock
+         ~on_summary:(fun observed -> summary := Some observed)
+         (prepare_exn entry)
+       |> require_executed;
+       check (option string) "the declared cli slot ran" (Some cli_primary) !seen_runtime;
+       check bool "the cli summary reached on_summary" true (Option.is_some !summary);
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
+       | Some
+           { exact_attempt =
+               QT.Exact_bound { slot_id; status = QT.Exact_completed; _ }
+           ; _
+           } ->
+         check string "completion is bound to the cli identity" cli_primary slot_id
+       | _ -> fail "the cli summary did not complete the durable attempt")
+;;
+
+let test_cli_walk_advances_past_domain_invalid_output () =
+  run_eio @@ fun ~sw:_ ~net ~clock ->
+  with_temp_dir "hitl-cli-advance" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       with_cli_runtimes @@ fun () ->
+       publish_unreachable_lane_with_cli
+         ~cli_slot_ids:[ cli_primary; cli_secondary ]
+         ~source:"hitl-cli-advance";
+       let entry = pending_entry ~base_path () in
+       let runner ~runtime_id ~system_prompt:_ ~prompt:_ =
+         if String.equal runtime_id cli_primary
+         then Ok "{}" (* valid JSON, invalid judgment domain *)
+         else Ok (Yojson.Safe.to_string (judgment_json "require_human"))
+       in
+       let summary = ref None in
+       Worker.For_testing.execute_prepared_flow_with_queue_ops
+         ~queue_ops:(exact_queue_ops ())
+         ~cli_runner:runner
+         ~net
+         ~clock
+         ~on_summary:(fun observed -> summary := Some observed)
+         (prepare_exn entry)
+       |> require_executed;
+       check bool "the second cli slot answered" true (Option.is_some !summary);
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
+       | Some
+           { exact_attempt =
+               QT.Exact_bound { slot_id; status = QT.Exact_completed; _ }
+           ; _
+           } ->
+         check string
+           "completion is bound to the advancing cli identity"
+           cli_secondary
+           slot_id
+       | _ -> fail "the advancing cli walk did not complete the durable attempt")
+;;
+
+let test_cli_walk_exhaustion_quarantines_the_last_cli_identity () =
+  run_eio @@ fun ~sw:_ ~net ~clock ->
+  with_temp_dir "hitl-cli-exhausted" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       with_cli_runtimes @@ fun () ->
+       publish_unreachable_lane_with_cli
+         ~cli_slot_ids:[ cli_primary; cli_secondary ]
+         ~source:"hitl-cli-exhausted";
+       let entry = pending_entry ~base_path () in
+       let runner ~runtime_id:_ ~system_prompt:_ ~prompt:_ =
+         Error "subscription window exhausted"
+       in
+       Worker.For_testing.execute_prepared_flow_with_queue_ops
+         ~queue_ops:(exact_queue_ops ())
+         ~cli_runner:runner
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> fail "an exhausted cli walk delivered a summary")
+         (prepare_exn entry)
+       |> require_executed;
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
+       | Some
+           { exact_attempt =
+               QT.Exact_bound
+                 { slot_id
+                 ; status = QT.Exact_quarantined QT.Exact_flow_execution_failed
+                 ; _
+                 }
+           ; summary_attempt_disposition = QT.Summary_attempt_settled
+           ; _
+           } ->
+         check string
+           "the quarantined identity is the last cli slot"
+           cli_secondary
+           slot_id
+       | _ -> fail "cli exhaustion did not quarantine under the last cli identity")
+;;
+
 let () =
   run
     "Hitl_summary_worker"
@@ -2437,6 +2643,20 @@ let () =
             "Require_human head does not stop owner drain"
             `Quick
             test_require_human_head_does_not_stop_owner_drain
+        ] )
+    ; ( "cli_lane_slots"
+      , [ test_case
+            "a cli slot answers after catalog exhaustion"
+            `Quick
+            test_cli_slot_answers_after_catalog_exhaustion
+        ; test_case
+            "the cli walk advances past domain-invalid output"
+            `Quick
+            test_cli_walk_advances_past_domain_invalid_output
+        ; test_case
+            "cli exhaustion quarantines the last cli identity"
+            `Quick
+            test_cli_walk_exhaustion_quarantines_the_last_cli_identity
         ] )
     ; ( "run_registry_outcome"
       , [ test_case

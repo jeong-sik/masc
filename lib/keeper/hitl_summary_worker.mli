@@ -125,6 +125,7 @@ module For_testing : sig
 
   val execute_prepared_flow_with_queue_ops
     :  queue_ops:exact_queue_ops
+    -> ?cli_runner:Keeper_lane_cli_oneshot.runner
     -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
     -> ?clock:_ Eio.Time.clock
     -> on_summary:(Keeper_approval_queue_rules_types.hitl_context_summary -> unit)
@@ -136,6 +137,10 @@ module For_testing : sig
 
   val spawn_with_queue_ops
     :  queue_ops:exact_queue_ops
+    -> ?cli_runner:Keeper_lane_cli_oneshot.runner
+         (** Injectable effect edge for the cli lane-slot fallback walked
+             after HTTP candidate exhaustion (RFC cli-runtimes-as-lane-slots);
+             [None] spawns the real official client. *)
     -> sw:Eio.Switch.t
     -> entry:Keeper_approval_queue_rules_types.pending_approval
     -> on_summary:(Keeper_approval_queue_rules_types.hitl_context_summary -> unit)

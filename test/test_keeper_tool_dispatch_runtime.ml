@@ -103,6 +103,33 @@ let make_meta ?(name = "keeper-exec-tools") () =
   | Ok meta -> meta
   | Error err -> failwith ("make_meta failed: " ^ err)
 
+(* Durable HITL intake reads the recipient's metadata to decide whether the
+   Keeper exists (#31717), so a fixture that only registers in the in-memory
+   registry has its operator decision refused as [Hitl_recipient_absent] and
+   never writes the resolution journal the replay then looks for. *)
+let create_keeper_meta_exn ~sw ~config (meta : Masc.Keeper_meta_contract.keeper_meta) =
+  (match
+     Masc.Keeper_owner_registry.install_from_store
+       ~sw
+       ~operation_runner:None
+       ~on_turn_slot_released:None
+       config
+   with
+   | Ok _ -> ()
+   | Error error ->
+     failwith
+       ("keeper owner inventory install failed: "
+        ^ Masc.Keeper_owner_registry.install_error_to_string error));
+  match
+    Masc.Keeper_owner_registry.create_meta ~base_path:config.Workspace.base_path meta
+  with
+  | Ok _ -> ()
+  | Error error ->
+    failwith
+      ("create_keeper_meta failed: "
+       ^ Masc.Keeper_owner_registry.command_error_to_string error)
+;;
+
 let playground_file ~config ~meta name =
   let root = KES.keeper_playground_root ~config ~meta in
   mkdir_p root;
@@ -145,6 +172,7 @@ let with_exec_fixture
         let meta = make_meta () in
         if always_allow then { meta with always_allow = Some true } else meta
       in
+      create_keeper_meta_exn ~sw ~config meta;
       ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
       Fun.protect
         ~finally:(fun () ->
@@ -3607,6 +3635,7 @@ let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
       Eio_context.with_turn_switch turn_sw @@ fun () ->
       let config = Workspace.default_config dir in
       let meta = make_meta () in
+      create_keeper_meta_exn ~sw:root_sw ~config meta;
       ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
       Masc_test_deps.with_publication_recovery_registry
         ~sw:root_sw

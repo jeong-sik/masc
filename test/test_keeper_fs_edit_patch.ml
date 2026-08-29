@@ -1347,7 +1347,9 @@ let test_edit_translation_pins_patch_even_with_content () =
       (Some "patch")
       (match List.assoc_opt "mode" fields with
        | Some (`String s) -> Some s
-       | _ -> None)
+       | _ -> None);
+    Alcotest.(check bool) "content dropped by the closed translation" false
+      (List.mem_assoc "content" fields)
   | _ -> Alcotest.fail "expected translated args to stay an object"
 
 let test_public_write_file_uses_explicit_repo_path () =

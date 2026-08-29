@@ -61,7 +61,7 @@ Use the repository's focused validation wrapper.
 let configured_snapshot ~source_id ~anchor ~path documents =
   let config_text =
     Printf.sprintf
-      "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = 65536\n[[skills.sources]]\nid = %S\nanchor = %S\npath = %S\naccess = \"read-only\"\n"
+      "[skills]\nresource-read-max-bytes = 65536\n[[skills.sources]]\nid = %S\nanchor = %S\npath = %S\naccess = \"read-only\"\n"
       source_id
       anchor
       path
@@ -805,8 +805,6 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
 let shadowed_guide_snapshot () =
   let config_text =
     "[skills]\n\
-     activation-lifetime = \"session\"\n\
-     precedence = \"earlier-source-wins\"\n\
      resource-read-max-bytes = 65536\n\
      [[skills.sources]]\n\
      id = \"primary-catalog\"\n\

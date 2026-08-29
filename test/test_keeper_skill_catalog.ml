@@ -7,8 +7,6 @@ module Snapshot = Skill_catalog_snapshot
 let snapshot_of_document ~directory source_text =
   let config_text =
     {|[skills]
-activation-lifetime = "session"
-precedence = "earlier-source-wins"
 resource-read-max-bytes = 65536
 [[skills.sources]]
 id = "fixture"
@@ -45,8 +43,6 @@ access = "read-write"
 let shadowed_snapshot () =
   let config_text =
     {|[skills]
-activation-lifetime = "session"
-precedence = "earlier-source-wins"
 resource-read-max-bytes = 65536
 [[skills.sources]]
 id = "first"

@@ -54,7 +54,7 @@ let setup base_path ~access =
   write_file skill_path source_text;
   let config_text =
     Printf.sprintf
-      "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = 65536\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = %S\n"
+      "[skills]\nresource-read-max-bytes = 65536\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = %S\n"
       access
   in
   let workspace =

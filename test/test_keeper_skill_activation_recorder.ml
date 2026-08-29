@@ -71,7 +71,7 @@ let task_snapshot () =
   let config =
     match
       Skill_source_config.parse_text
-        "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = 65536\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
+        "[skills]\nresource-read-max-bytes = 65536\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
     with
     | Ok config -> config
     | Error _ -> fail "Skill source fixture config rejected"

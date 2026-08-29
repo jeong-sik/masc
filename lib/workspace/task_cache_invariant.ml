@@ -77,7 +77,6 @@ let emit_cache_clear_event config ~cause ~agent_name ~task_id ~status_label ~mod
         ; "module", `String module_name
         ; "agent", `String agent_name
         ; "task_id", `String task_id
-        ; "backlog_status", `String status_label
         ; "ts", `String (now_iso ())
         ])
   with

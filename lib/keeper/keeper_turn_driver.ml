@@ -766,8 +766,6 @@ let run_named
               [
                 ("routing_action", `String "modality_rerouted");
                 ("routing_reason", `String reason);
-                ("assigned_runtime_id", `String first_candidate_id);
-                ("rerouted_runtime_id", `String first_runtime_id);
               ]))
        Keeper_runtime_manifest.Runtime_routed
    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ -> ());

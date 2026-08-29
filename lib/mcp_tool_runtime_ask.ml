@@ -76,7 +76,6 @@ let ask_json (a : Keeper_ask.ask) =
     [
       ("ask_id", `String a.ask_id);
       ("keeper_name", `String a.keeper_name);
-      ("question_count", `Int (List.length a.questions));
       ( "questions",
         `List
           (List.map
@@ -85,7 +84,6 @@ let ask_json (a : Keeper_ask.ask) =
                  [
                    ("question_id", `String q.question_id);
                    ("header", `String q.header);
-                   ("choice_count", `Int (List.length q.choices));
                  ])
              a.questions) );
     ]

@@ -821,7 +821,6 @@ let setting_to_yojson row =
     ; "exposure", `String (match row.exposure with Toml_and_env _ -> "toml_and_env" | Env_only -> "env_only")
     ; "type", `String (value_kind_label row.value_kind)
     ; "range", range_to_yojson row.value_range
-    ; "range_display", `String (value_range_label row.value_range)
     ; "default", `String row.default_display
     ; "reload_class", `String (reload_class_label row.reload_class)
     ; "requires_restart", `Bool (requires_restart row)

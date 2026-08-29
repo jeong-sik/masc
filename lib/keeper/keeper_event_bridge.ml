@@ -519,9 +519,7 @@ let broadcast_drop_marker
       ; ( "agent_name"
         , Json_util.string_opt_to_json
             (Json_util.assoc_string_opt "agent_name" pending.json) )
-      ; "failed_stage", `String stage_label
       ; "attempts", `Int attempts
-      ; "original_event_type", `String (relay_event_type pending.json)
       ]
   in
   try Sse.broadcast_to All marker with

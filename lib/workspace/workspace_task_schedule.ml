@@ -92,7 +92,6 @@ let reconcile_agent_current_task_record
       (`Assoc
           [ "type", `String "agent_current_task_reconciled"
           ; "agent", `String agent.name
-          ; "stale_task", `String task_id
           ; "ts", `String (now_iso ())
           ])
   | Some _ | None -> ()

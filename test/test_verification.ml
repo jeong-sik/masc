@@ -66,7 +66,17 @@ let list_requests_exn base_path =
   scan.V.readable
 ;;
 
-let ensure_keeper_meta config name =
+let ensure_keeper_meta (config : Workspace_core.config) name =
+  let profile_path =
+    Keeper_sandbox_config.keeper_toml_path
+      ~base_path:config.base_path
+      ~agent_name:name
+  in
+  Fs_compat.mkdir_p (Filename.dirname profile_path);
+  Out_channel.with_open_text profile_path (fun channel ->
+    Printf.fprintf
+      channel
+      "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = \"docker\"\n");
   match
     Result.bind
       (Masc_test_deps.meta_of_json_fixture

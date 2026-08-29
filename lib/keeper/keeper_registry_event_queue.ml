@@ -572,6 +572,16 @@ let project_accepted_transfer_durable_result
      | Keeper_shutdown_intake_fence.Intake_committed result -> interpret result)
 ;;
 
+type hitl_resolution_enqueue_error =
+  | Hitl_recipient_retired of Keeper_shutdown_types.Operation_id.t
+  | Hitl_enqueue_failed of string
+
+let hitl_resolution_enqueue_error_to_string = function
+  | Hitl_recipient_retired operation_id ->
+    durable_intake_error_to_string (Durable_intake_keeper_retired operation_id)
+  | Hitl_enqueue_failed reason -> reason
+;;
+
 let enqueue_hitl_resolution_durable_result
     ~base_path
     ~keeper_name
@@ -589,7 +599,23 @@ let enqueue_hitl_resolution_durable_result
     ; payload = Keeper_event_queue.Hitl_resolved resolution
     }
   in
-  enqueue_durable_result ~base_path keeper_name stimulus
+  match
+    with_durable_intake
+      ~base_path
+      ~keeper_name
+      (fun () ->
+        enqueue_durable_result_unfenced ~base_path keeper_name stimulus)
+  with
+  | Ok (Ok ()) -> Ok ()
+  | Ok (Error message) -> Error (Hitl_enqueue_failed message)
+  | Error (Durable_intake_keeper_retired operation_id) ->
+    Error (Hitl_recipient_retired operation_id)
+  | Error
+      (( Durable_intake_token_not_live
+       | Durable_intake_shutdown_reserved _
+       | Durable_intake_keeper_metadata_read_failed _
+       | Durable_intake_retirement_read_failed _ ) as error) ->
+    Error (Hitl_enqueue_failed (durable_intake_error_to_string error))
 ;;
 
 let drop_by_post_id ~base_path name ~post_id =

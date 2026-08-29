@@ -264,7 +264,10 @@ let test_peek_skips_resolution_still_pending () =
        ~channel:unrouted
    with
    | Ok () -> ()
-   | Error message -> fail message);
+   | Error error ->
+     fail
+       (Keeper_registry_event_queue.hitl_resolution_enqueue_error_to_string
+          error));
   check bool
     "pending approval is not projected"
     true
@@ -272,6 +275,86 @@ let test_peek_skips_resolution_still_pending () =
        (Keeper_heartbeat_stimulus_intake.ready_hitl_resolution_peek
           ~base_path
           ~keeper_name))
+;;
+
+(* --- retired recipient -------------------------------------------------- *)
+
+(* A finalized shutdown with [meta_removed = true] and a [Remove_meta] cleanup
+   reason is exactly the durable state that makes
+   [authorize_durable_intake_owner] report the Keeper as retired. *)
+let persist_retired_shutdown ~config ~keeper_name =
+  let digest =
+    match Keeper_meta_json.Snapshot_digest.of_string (String.make 64 'a') with
+    | Ok digest -> digest
+    | Error detail -> fail detail
+  in
+  let trace_id =
+    match Keeper_id.Trace_id.of_string "trace-hitl-retired-fixture" with
+    | Ok trace_id -> trace_id
+    | Error detail -> fail detail
+  in
+  let operation : Keeper_shutdown_types.t =
+    { schema_version = Keeper_shutdown_types.schema_version
+    ; revision = 1
+    ; operation_id = Keeper_shutdown_types.Operation_id.generate ()
+    ; keeper_name
+    ; lane_ownership = Keeper_shutdown_types.Dormant_meta
+    ; trace_id
+    ; actor = "test"
+    ; cleanup_intent =
+        { reason = Keeper_shutdown_types.Operator_stop_remove_meta
+        ; remove_session = true
+        }
+    ; turn_disposition = Keeper_shutdown_types.No_inflight_turn
+    ; expected_backlog_version = 0
+    ; owned_task_ids = []
+    ; join_evidence = None
+    ; phase =
+        Keeper_shutdown_types.Finalized
+          { cleanup =
+              { settled_task_ids = []
+              ; pending_confirms_removed = 0
+              ; meta_snapshot_digest = digest
+              }
+          ; meta_removed = true
+          ; session_removed = true
+          ; registry_unregistered = true
+          ; accumulator_dropped = true
+          ; completion = Keeper_shutdown_types.Completion_not_requested
+          }
+    ; created_at = "2026-08-29T00:00:00Z"
+    ; updated_at = "2026-08-29T00:00:00Z"
+    }
+  in
+  match Keeper_shutdown_store.persist_new ~config operation with
+  | Ok () -> ()
+  | Error error -> fail (Keeper_shutdown_store.error_to_string error)
+;;
+
+(* #31684: a resolution addressed to a removed Keeper used to stay in the
+   durable delivery store and replay the same permanent failure at every
+   boot. It must be settled at resolve time instead. *)
+let test_retired_recipient_settles_delivery () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_name = "hitl-retired-keeper" in
+  persist_retired_shutdown ~config ~keeper_name;
+  let input = `Assoc [ "target", `String "hitl-retired" ] in
+  (* Resolving against the retired recipient must succeed (the fixture fails
+     the test on a resolve error) and must not leave a durable delivery. *)
+  ignore (approved_grant_fixture ~base_path ~keeper_name ~input);
+  match Keeper_approval_queue.install_persistence ~base_path with
+  | Ok report ->
+    check int
+      "retired recipient leaves nothing to replay"
+      0
+      report.replayed_deliveries;
+    check int
+      "retired recipient leaves no replay failures"
+      0
+      (List.length report.delivery_replay_failures)
+  | Error error -> fail (Keeper_approval_queue.install_error_to_string error)
 ;;
 
 let test_peek_none_on_empty_queue () =
@@ -321,6 +404,12 @@ let () =
             "projects nothing from an empty queue"
             `Quick
             test_peek_none_on_empty_queue
+        ] )
+    ; ( "retired recipient"
+      , [ test_case
+            "settles the delivery instead of replaying it forever"
+            `Quick
+            test_retired_recipient_settles_delivery
         ] )
     ]
 ;;

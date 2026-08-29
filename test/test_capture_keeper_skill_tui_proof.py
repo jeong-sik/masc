@@ -704,13 +704,15 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             "tool_name": "x",
             "observed_at": "2026-08-29T01:52:35Z",
         }
+        receipt_sha256 = capture.receipt_projection_revision(
+            "abcdef0123456789", "call-skill-1"
+        )
         receipt = "\n".join(
             [
                 "MASC Tools 14:10:47 [connected]",
-                *capture.visible_receipt_lines(activation, [action], cols=180),
+                f"receipt_sha256={receipt_sha256}",
             ]
         )
-        self.assertTrue(any(line.endswith("~") for line in receipt.splitlines()))
         screens = iter([top, middle, middle, receipt, receipt, receipt])
         with (
             mock.patch.object(capture, "screen_text", side_effect=screens),
@@ -724,7 +726,6 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
                 ledger_revision="abcdef0123456789",
                 activation=activation,
                 actions=[action],
-                cols=180,
                 capture_frame=captured_frames.append,
                 timeout=1.0,
             )
@@ -733,10 +734,62 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         self.assertEqual(
             observations["skill_header"], "Skill Use — keeper-one (8 receipts)"
         )
-        self.assertIn("id=call-skill-1", observations["receipt_block"])
+        self.assertEqual(observations["receipt_sha256"], receipt_sha256)
         self.assertEqual(visible_frames, [receipt])
         self.assertEqual(captured_frames, [0])
         self.assertEqual([call.args[1] for call in press.call_args_list], ["End", "k"])
+
+    def test_scroll_returns_to_header_after_receipt_identity_is_visible_first(self):
+        class Page:
+            def wait_for_timeout(self, _milliseconds):
+                pass
+
+        revision = "a" * 64
+        skill_tool_use_id = "call-" + ("한" * 200)
+        receipt_sha256 = capture.receipt_projection_revision(
+            revision, skill_tool_use_id
+        )
+        receipt = "\n".join(
+            [
+                "MASC Tools 14:10:47 [connected]",
+                f"receipt_sha256={receipt_sha256}",
+            ]
+        )
+        top = "\n".join(
+            [
+                "MASC Tools 14:10:48 [connected]",
+                "Skill Use — keeper-one (8 receipts)",
+                f"session=trace-one  ledger={revision}",
+            ]
+        )
+        screens = iter([receipt, receipt, top, top])
+        with (
+            mock.patch.object(capture, "screen_text", side_effect=screens),
+            mock.patch.object(capture, "press") as press,
+        ):
+            visible, observations, frames = capture.scroll_to_skill_receipt(
+                Page(),
+                keeper="keeper-one",
+                session_id="trace-one",
+                ledger_revision=revision,
+                activation={"skill_tool_use_id": skill_tool_use_id},
+                actions=[],
+                capture_frame=lambda _index: None,
+                timeout=1.0,
+            )
+
+        self.assertEqual(visible, top)
+        self.assertEqual(observations["receipt_sha256"], receipt_sha256)
+        self.assertEqual(frames, [receipt])
+        self.assertEqual([call.args[1] for call in press.call_args_list], ["Home"])
+
+    def test_receipt_projection_revision_binds_full_unicode_identifier(self):
+        revision = "a" * 64
+        shared = "call-" + ("한" * 200)
+        left = capture.receipt_projection_revision(revision, shared + "A")
+        right = capture.receipt_projection_revision(revision, shared + "B")
+        self.assertRegex(left, r"^[0-9a-f]{64}$")
+        self.assertNotEqual(left, right)
 
     def test_tools_surface_connection_rejects_disconnected(self):
         self.assertTrue(

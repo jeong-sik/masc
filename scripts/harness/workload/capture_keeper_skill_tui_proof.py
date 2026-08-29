@@ -31,11 +31,6 @@ REQUIRED_PRODUCER_ARTIFACTS = {
     "masc_tui.exe",
 }
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-TUI_FRAME_BORDER_CELLS = 2
-TUI_FRAME_PADDING_CELLS = 2
-RECEIPT_PRIMARY_INDENT_CELLS = 3
-RECEIPT_FIELD_INDENT_CELLS = 5
-RECEIPT_EVIDENCE_INDENT_CELLS = 7
 
 
 class CaptureError(RuntimeError):
@@ -1127,51 +1122,21 @@ def expected_receipt_lines(activation: dict[str, Any], actions: list[Any]) -> li
     return lines
 
 
-def visible_receipt_lines(
-    activation: dict[str, Any], actions: list[Any], *, cols: int
-) -> list[str]:
-    """Project durable receipt rows through the exact ASCII TUI row contract.
-
-    The renderer supplies 3, 5, or 7 leading cells to receipt rows, then
-    ``box_line_styled`` fits that content into ``cols - 4`` cells and marks a
-    truncated tail with ``~``. Receipt identities are protocol ASCII; refusing
-    any other scalar keeps this mirror exact instead of guessing terminal cell
-    widths independently from the attested OCaml renderer.
-    """
-    expected = expected_receipt_lines(activation, actions)
-    renderer_indents = [
-        RECEIPT_PRIMARY_INDENT_CELLS,
-        RECEIPT_PRIMARY_INDENT_CELLS,
-        RECEIPT_FIELD_INDENT_CELLS,
-        RECEIPT_FIELD_INDENT_CELLS,
-        RECEIPT_FIELD_INDENT_CELLS,
-        RECEIPT_FIELD_INDENT_CELLS,
-        RECEIPT_EVIDENCE_INDENT_CELLS,
-        RECEIPT_EVIDENCE_INDENT_CELLS,
-        RECEIPT_EVIDENCE_INDENT_CELLS,
-    ]
-    renderer_indents.extend([RECEIPT_EVIDENCE_INDENT_CELLS] * len(actions))
-    renderer_indents.append(RECEIPT_EVIDENCE_INDENT_CELLS)
-    require(
-        len(renderer_indents) == len(expected),
-        "TUI Skill receipt renderer projection differs from durable rows",
-    )
-    inner_width = cols - TUI_FRAME_BORDER_CELLS - TUI_FRAME_PADDING_CELLS
-    require(inner_width > 0, "TUI width cannot project Skill receipt rows")
-    projected: list[str] = []
-    for row_index, (indent, value) in enumerate(
-        zip(renderer_indents, expected, strict=True)
+def receipt_projection_revision(ledger_revision: str, skill_tool_use_id: str) -> str:
+    payload = bytearray()
+    for field, value in (
+        ("ledger_revision", ledger_revision),
+        ("skill_tool_use_id", skill_tool_use_id),
     ):
-        require(
-            value.isascii(),
-            f"TUI Skill receipt row {row_index} is not protocol ASCII",
-        )
-        content = (" " * indent) + value
-        visible = (
-            content[: inner_width - 1] + "~" if len(content) > inner_width else content
-        )
-        projected.append(visible.strip(" "))
-    return projected
+        field_bytes = field.encode()
+        value_bytes = value.encode()
+        payload.extend(str(len(field_bytes)).encode())
+        payload.extend(b":")
+        payload.extend(field_bytes)
+        payload.extend(str(len(value_bytes)).encode())
+        payload.extend(b":")
+        payload.extend(value_bytes)
+    return digest_bytes(bytes(payload))
 
 
 def receipt_matches_activation(
@@ -1213,15 +1178,17 @@ def scroll_to_skill_receipt(
     ledger_revision: str,
     activation: dict[str, Any],
     actions: list[Any],
-    cols: int,
     capture_frame: Callable[[int], None],
     timeout: float,
 ) -> tuple[str, dict[str, str], list[str]]:
     deadline = time.monotonic() + timeout
     observations: dict[str, str] = {}
-    durable_expected = expected_receipt_lines(activation, actions)
-    expected = visible_receipt_lines(activation, actions, cols=cols)
-    next_receipt_index = 0
+    del actions
+    receipt_sha256 = receipt_projection_revision(
+        ledger_revision,
+        string_field(activation, "skill_tool_use_id", "Skill activation"),
+    )
+    receipt_line = f"receipt_sha256={receipt_sha256}"
     frames: list[str] = []
     jumped_to_end = False
     while time.monotonic() < deadline:
@@ -1250,12 +1217,7 @@ def scroll_to_skill_receipt(
             )
             if session_line is not None:
                 observations["session_line"] = session_line
-        progress = (
-            receipt_frame_progress(visible, expected, next_receipt_index)
-            if next_receipt_index < len(expected)
-            else None
-        )
-        if progress is not None:
+        if "receipt_sha256" not in observations and receipt_line in normalized_lines:
             if not tools_surface_is_connected(visible):
                 wait_tools_surface_connected(page, deadline)
                 continue
@@ -1265,29 +1227,31 @@ def scroll_to_skill_receipt(
                 tools_surface_is_connected(captured_visible),
                 "TUI Tools surface disconnected while capturing an advancing frame",
             )
-            captured_progress = receipt_frame_progress(
-                captured_visible, expected, next_receipt_index
+            captured_lines = [
+                line.strip(" │") for line in captured_visible.splitlines()
+            ]
+            require(
+                receipt_line in captured_lines,
+                "TUI Skill receipt identity changed while capturing its frame",
             )
-            if captured_progress is None or captured_progress < progress:
-                raise CaptureError(
-                    "TUI Skill receipt changed while capturing an advancing frame"
-                )
             frames.append(captured_visible)
             visible = captured_visible
-            next_receipt_index = captured_progress
-            if next_receipt_index == len(expected):
-                observations["receipt_block"] = "\n".join(durable_expected)
-        if len(observations) == 3 and next_receipt_index == len(expected):
+            observations["receipt_sha256"] = receipt_sha256
+        if len(observations) == 3:
             return visible, observations, frames
         if (
             not jumped_to_end
-            and next_receipt_index == 0
+            and "receipt_sha256" not in observations
             and "skill_header" in observations
             and "session_line" in observations
         ):
             press(page, "End")
             jumped_to_end = True
-        elif jumped_to_end and next_receipt_index == 0:
+        elif "receipt_sha256" in observations and (
+            "skill_header" not in observations or "session_line" not in observations
+        ):
+            press(page, "Home")
+        elif jumped_to_end and "receipt_sha256" not in observations:
             press(page, "k")
         else:
             press(page, "j")
@@ -1296,7 +1260,7 @@ def scroll_to_skill_receipt(
             page.wait_for_timeout(50)
             advanced = screen_text(page)
         if advanced == visible:
-            required = {"skill_header", "session_line", "receipt_block"}
+            required = {"skill_header", "session_line", "receipt_sha256"}
             missing = sorted(required - observations.keys())
             raise CaptureError(f"TUI reached the bottom before observations: {missing}")
     raise CaptureError("TUI Skill receipt observations did not complete before timeout")
@@ -1416,7 +1380,6 @@ def main() -> int:
                     ledger_revision=selected["ledger_revision"],
                     activation=selected["activation"],
                     actions=selected["actions"],
-                    cols=args.cols,
                     capture_frame=capture_frame,
                     timeout=args.timeout,
                 )
@@ -1467,7 +1430,7 @@ def main() -> int:
             }
         )
     result = {
-        "schema": "masc.keeper-skill-tui-proof.v4",
+        "schema": "masc.keeper-skill-tui-proof.v5",
         "captured_at": utc_now(),
         "source": {
             "expected_sha": selected["expected_sha"],

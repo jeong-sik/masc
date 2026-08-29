@@ -25,7 +25,7 @@ import capture_keeper_skill_tui_proof as tui_capture
 SCHEMA = "masc.keeper-skill-proof-verification/v1"
 JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v2"
 PROOF_SCHEMA = "masc.keeper-skill-use-proof.v2"
-TUI_SCHEMA = "masc.keeper-skill-tui-proof.v4"
+TUI_SCHEMA = "masc.keeper-skill-tui-proof.v5"
 BUILD_SCHEMA = "masc.tui-build-evidence/v1"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -793,7 +793,6 @@ def verify_bundle(
         len(durable_matches) == 1,
         "joined durable Skill ledger does not contain one selected activation",
     )
-    durable_activation = cast(dict[str, Any], durable_matches[0])
     scoped = object_field(proof_identity, "scoped_summary", "proof identity")
     scoped_summary = object_field(scoped, "summary", "proof scoped summary")
     require(
@@ -1102,12 +1101,12 @@ def verify_bundle(
         frame_screenshot_paths.append(tui_root / screenshot_name)
     observations = object_field(tui, "observations", "TUI proof")
     require(
-        set(observations) == {"skill_header", "session_line", "receipt_block"},
+        set(observations) == {"skill_header", "session_line", "receipt_sha256"},
         "TUI observation field set differs",
     )
     skill_header = string_field(observations, "skill_header", "TUI observations")
     session_line = string_field(observations, "session_line", "TUI observations")
-    receipt_block = string_field(observations, "receipt_block", "TUI observations")
+    receipt_sha256 = string_field(observations, "receipt_sha256", "TUI observations")
     header_match = re.fullmatch(
         rf"Skill Use — {re.escape(str(proof_identity['keeper']))} \(([1-9][0-9]*) receipts\)",
         skill_header,
@@ -1125,16 +1124,21 @@ def verify_bundle(
         ),
         "TUI ledger projection differs",
     )
-    require(
-        receipt_matches_activation(receipt_block, durable_activation, proof_actions),
-        "TUI exact receipt observation differs",
-    )
-    expected_receipt_rows = tui_capture.visible_receipt_lines(
-        durable_activation, proof_actions, cols=requested_size[0]
+    expected_receipt_sha256 = tui_capture.receipt_projection_revision(
+        string_field(proof_identity, "ledger_revision", "proof identity"),
+        string_field(proof_identity, "skill_tool_use_id", "proof identity"),
     )
     require(
-        receipt_rows_are_covered_in_order(frame_texts, expected_receipt_rows),
-        "TUI frames do not cover the exact receipt rows in order",
+        receipt_sha256 == expected_receipt_sha256,
+        "TUI receipt projection revision differs",
+    )
+    receipt_line = f"receipt_sha256={expected_receipt_sha256}"
+    require(
+        any(
+            receipt_line in [line.strip(" │") for line in frame.splitlines()]
+            for frame in frame_texts
+        ),
+        "TUI frames do not contain the exact receipt projection revision",
     )
 
     verified_count = (

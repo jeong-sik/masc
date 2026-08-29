@@ -336,6 +336,7 @@
   test_filesystem_shard_toml_parity
   test_operator_tool_toml_parity
   test_workspace_core_toml_parity
+  test_keeper_library_tool_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
@@ -676,6 +677,7 @@
   test_filesystem_shard_toml_parity
   test_operator_tool_toml_parity
   test_workspace_core_toml_parity
+  test_keeper_library_tool_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
   test_keeper_schema_toml_parity

@@ -7,7 +7,7 @@ updated: 2026-08-27
 author: claude
 supersedes: ["0057", "0182"]
 superseded_by: null
-related: ["0080", "0233", "0386", "0389"]
+related: ["0080", "0233", "0386"]
 ---
 
 # RFC: 프롬프트와 도구 정의를 OCaml 밖으로 (prompts-and-tool-definitions-outside-ocaml)
@@ -20,7 +20,7 @@ related: ["0080", "0233", "0386", "0389"]
 전부를 `<config-root>` 의 파일로 옮기고, OCaml 에는 **typed handler 바인딩만** 남기며,
 "OCaml 안 모델 대면 산문 바이트" 를 0 으로 내리는 래칫으로 완료를 정의한다.
 
-RFC-0389 가 도구의 *선택*(Keeper 별 표면)을 다루고, 이 RFC 는 도구의 *정의*(본문)와
+이 RFC 는 도구의 *정의*(본문)와
 프롬프트의 *소유*를 다룬다. 둘 다 같은 선언 축(`<config-root>` TOML/markdown)을 쓴다.
 
 ## 1. 관측 (main `1c6d91deef`, 2026-08-22; §1.1 은 `b0f56b0e2d` 에서 재측정)
@@ -119,7 +119,6 @@ agent_core `agent_tools.ml` 531 (unknown-tool 힌트).
 |---|---|
 | name | `Tool_name` 변형 + 27개 스키마 파일의 문자열 + descriptor `~internal_name/~public_name` + `tool_catalog_surfaces.ml` 83개 + `mcp_server_eio_tool_profile.ml` title 25개 + `transport.ml` HTTP 경로 10개 |
 | description / input_schema | 정의 지점 138곳, 도구 113개. **27개 도구는 설명이 두 곳에 따로** — Board 8개(`board_tool_schemas` ↔ `board_keeper_projection`), keeper_* 10개 + read/edit/write/search_files/execute 5개(`tool_shard_types_*` ↔ `keeper_tool_descriptor`), `masc_heartbeat`·`masc_add_task`·`masc_batch_add_tasks`·`masc_broadcast`(↔ `agent_core_tool_contract`) |
-| group | 코드 전용: `keeper_tool_group_of_runtime_handler` 로 handler 에서 파생. 라이브 `<config-root>/tool_policy.toml` 의 `[groups.*]` 는 **읽는 코드가 없는 죽은 파일**(`keeper_board_get` 같은 존재하지 않는 이름 포함) |
 | execution policy | 3곳: `Tool_catalog.explicit_metadata` 132행, descriptor `policy` + `execution`, `Board_tool_registry.operation_policy` |
 | permission | `Tool_catalog.explicit_metadata` 만 |
 | visibility | `Tool_catalog.visibility` + descriptor `keeper_model_projection` 4종 + `Tool_catalog_surfaces` + `Mcp_server_eio_tool_profile` 프로파일 3종 |
@@ -130,7 +129,7 @@ agent_core `agent_tools.ml` 531 (unknown-tool 힌트).
 - `Prompt_registry` 키 17개(라이브 `/api/v1/prompts`, 전부 `source=file`, override 0). Keeper 턴 경로에서
   실제로 resolve 되는 키는 5개(`keeper`, `keeper.observation.*` 4종). 나머지 12개는 심판·검증·librarian 호출자.
 - 턴의 시스템 프롬프트 중 `keeper.md` 는 710 B 이고 나머지(identity/workspace/instructions/goals)는 OCaml 이
-  조립한다 (와이어 실측 중앙값 1,572 B, RFC-0389 §1.1).
+  조립한다 (와이어 실측 중앙값 1,572 B).
 - 대시보드에는 프롬프트 화면이 4개, 데이터 소스가 3개이며 서로 연결되지 않는다.
   `PromptRegistryPanel` → `/api/v1/prompts`; 그 안의 **"Build details"**(`keeper-prompt-assembly-panel.ts`)는
   TS 상수 `STAGES`(:114-178) 로 그린 정적 그림이고 "Sent to model" 의 world/memory 행은
@@ -169,7 +168,6 @@ B·C·D 의 산문 전부가 키가 된다. 반복 행(`key=value` 직렬화)은
 name = "masc_board_vote"
 title = "Board vote"
 description = "Vote a board post up or down."
-group = "board"                     # keeper_tool_group wire 이름 (RFC-0389)
 permission = "can_vote"
 visibility = "model"                # model | hidden | operator
 additional_properties = false       # 있으면 JSON additionalProperties 로
@@ -281,7 +279,7 @@ constraints = "..."
 - 설명이 2곳 이상인 도구 수 27 → 0.
 - 소비자 없는 config 파일(`tool_policy.toml`) 0.
 - 대시보드 프롬프트 화면 4개 → 1개, "보낸 것" 은 턴 기록에서만.
-- 동작 불변: 와이어에 나가는 시스템 프롬프트·도구 배열이 마이그레이션 전후 같음(RFC-0389 §1.1 의
+- 동작 불변: 와이어에 나가는 시스템 프롬프트·도구 배열이 마이그레이션 전후 같음(
   wire capture 로 PR 마다 비교). 도구 스키마는 **JSON 객체 키 순서를 제외하고** 같음 — 설명, 타입,
   `required`, `default`, `enum`, `pattern`, 중첩 구조는 전부 고정한다.
 
@@ -303,7 +301,6 @@ constraints = "..."
   선언 원본이고 등록은 여전히 한 번이다.
 - RFC-0182 (Tool_spec SSOT, Draft) 는 흡수, RFC-0057 (codegen, Draft) 은 폐기.
 - RFC-0386 (tool_kind 닫힌 합타입), RFC-0233 (Prompt_block_id 닫힌 합타입) 은 유지·확장.
-- RFC-0389 (Keeper 별 표면) 의 `[keeper.tools]` 선언은 이 RFC 의 `group` 값을 참조한다.
 
 ## 6. 하지 않을 것
 

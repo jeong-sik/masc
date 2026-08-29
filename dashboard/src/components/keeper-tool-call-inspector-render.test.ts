@@ -600,7 +600,7 @@ describe('KeeperToolCallInspector render', () => {
             backend: 'ocaml_runtime',
             runtime_handler: 'tool_time_now',
             readonly: true,
-            receipt_labels: { keeper_tool_group: 'meta' },
+            receipt_labels: { lane: 'meta' },
           },
         },
       ],
@@ -628,7 +628,7 @@ describe('KeeperToolCallInspector render', () => {
     expect(text).toContain('in_process')
     expect(text).toContain('ocaml_runtime')
     expect(text).toContain('tool_time_now')
-    expect(text).toContain('keeper_tool_group=meta')
+    expect(text).toContain('lane=meta')
     expect(text).toContain('runtime contract')
     expect(text).toContain('/sandbox/analyst/')
     expect(text).toContain('.masc/playground/analyst/')

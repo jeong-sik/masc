@@ -620,7 +620,6 @@ let test_keeper_mainline_failures_log_at_error () =
     (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
        {|episode_create failed|})
 
-(* ── RFC-0389: declared keeper's turn payload narrows ─────────────────────── *)
 
 (* Replicates the wire-capture byte measure (keeper_wire_capture.ml): the
    compact JSON of the exact unredacted tools array sent to the model. *)
@@ -663,7 +662,7 @@ let with_bundle ~name f =
       in
       Fun.protect ~finally:bundle.cleanup (fun () -> f bundle))
 
-(* An undeclared keeper's turn payload keeps the full surface (RFC-0389
+(* A keeper's turn payload carries the full surface (
    default [All], pinned byte-identically by test_keeper_tool_schema_bytes);
    a declared keeper's payload narrows to its groups. This test proves the
    narrowing is real in the actual turn bundle, not just discovery JSON. *)
@@ -705,7 +704,7 @@ let () =
             test_tool_bundle_does_not_emit_full_universe_assignment;
           test_case "assignment telemetry is before-turn scoped" `Quick
             test_tool_assignment_telemetry_is_before_turn_scoped;
-          test_case "declared keeper's turn payload narrows (RFC-0389)" `Quick
+          test_case "turn payload carries the full surface" `Quick
             test_declared_bundle_narrows_turn_payload;
         ] );
       ( "atomic_agent_json",

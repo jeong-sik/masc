@@ -7294,8 +7294,8 @@ let render_fusion_list (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-8s %-7s %-9s %-*s %-10s %-10s %s" "TIME" "AGE"
-       "STATUS" keeper_width "KEEPER" "PRESET" "TOPOLOGY" "RUN");
+    (Printf.sprintf "  %-8s %-7s %-9s %-*s %-10s %s" "TIME" "AGE" "STATUS"
+       keeper_width "KEEPER" "PRESET" "RUN");
   box_divider buf cols;
   (match state.fusion_error with
    | None -> ()
@@ -7335,17 +7335,14 @@ let render_fusion_list (state : state) =
           let status = fusion_run_status_to_string run.fur_status in
           let line =
             (* [fit_width] pads, so the cell is already the column's width. *)
-            Printf.sprintf "%-8s %-7s %s%-9s%s %s %-10s %-10s %s"
+            Printf.sprintf "%-8s %-7s %s%-9s%s %s %-10s %s"
               (fusion_run_clock run)
               (fit_width (fusion_run_age ~now:now_epoch run) 7)
               (fusion_run_status_color run.fur_status)
               status Ansi.reset
               (fit_width (Terminal_text.single_line run.fur_keeper) keeper_width)
               (fit_width (Terminal_text.single_line run.fur_preset) 10)
-              (fit_width
-                 (Fusion_types.fusion_topology_to_string run.fur_topology)
-                 10)
-              (Terminal_text.single_line run.fur_run_id)
+              (fit_width (Terminal_text.single_line run.fur_run_id) 14)
           in
           if row_index = state.fusion_cursor then
             box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
@@ -7393,7 +7390,6 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         ^ Link.reference Keeper
             (Terminal_text.single_line run.fur_keeper) )
     ; fusion_run_status_color run.fur_status, "  Status: " ^ status
-    ; Ansi.reset, "  Keeper: " ^ Terminal_text.single_line run.fur_keeper
     ; ( Ansi.reset
     , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )

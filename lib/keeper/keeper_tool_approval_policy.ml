@@ -26,19 +26,6 @@ let verdict_because = function
 
    Spelled out per group rather than defaulted, so a group added later stops
    the build here instead of inheriting "runs without asking". *)
-let group_changes_the_world (group : Keeper_tool_group.t) =
-  match group with
-  | Keeper_tool_group.Execute_group -> true (* runs a program *)
-  | Keeper_tool_group.Filesystem_group -> true (* writes files *)
-  | Keeper_tool_group.Board_group -> false (* posts inside masc, undoable and visible *)
-  | Keeper_tool_group.Search_files_group -> false
-  | Keeper_tool_group.Voice_group -> false
-  | Keeper_tool_group.Workspace_group -> false
-  | Keeper_tool_group.Surface_group -> false
-  | Keeper_tool_group.Memory_group -> false
-  | Keeper_tool_group.Meta_group -> false
-  | Keeper_tool_group.Core_group -> false
-
 let descriptor_for tool_name =
   match Descriptor.descriptors_for_internal tool_name with
   | descriptor :: _ -> Some descriptor
@@ -60,19 +47,7 @@ let rec verdict_for ~composition_plan_index ~tool_name ~input =
       | Some true ->
           Run { because = "this call only reads" }
       | Some false | None ->
-          let group = descriptor.keeper_tool_group in
-          if group_changes_the_world group then
-            Ask
-              { because =
-                  Printf.sprintf "%s tools change something outside this turn"
-                    (Descriptor.keeper_tool_group_to_string group)
-              }
-          else
-            Run
-              { because =
-                  Printf.sprintf "%s tools stay inside masc"
-                    (Descriptor.keeper_tool_group_to_string group)
-              })
+          Ask { because = "this call is not a read" })
 
 (* A name with no descriptor is either a composition, whose nodes each have
    one, or something this build cannot classify at all.
@@ -109,15 +84,7 @@ and node_asks_for_approval node =
   | Some descriptor ->
     (match Descriptor.readonly_static_hint descriptor with
      | Some true -> None
-     | Some false | None ->
-       let group = descriptor.keeper_tool_group in
-       if group_changes_the_world group
-       then
-         Some
-           ( node
-           , Printf.sprintf "%s tools change something outside this turn"
-               (Descriptor.keeper_tool_group_to_string group) )
-       else None)
+     | Some false | None -> Some (node, "this call is not a read"))
 
 (* What an undescribed name is, decided once.
 

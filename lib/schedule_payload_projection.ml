@@ -368,7 +368,6 @@ let known_kind_contract_to_yojson kind =
   | Keeper_wake ->
     `Assoc
       [ "kind", `String (known_kind_to_string kind)
-      ; "dispatch_tool", `String (dispatch_tool_name kind)
       ; "creation_contract", `String "per_kind_validator_required"
       ; "dispatch_contract", `String "consumer_supported"
       ]

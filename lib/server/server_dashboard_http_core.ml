@@ -471,9 +471,6 @@ let dashboard_shell_payload_json
            ([ "cluster", `String cluster
             ; "workspace_root", `String config.base_path
             ; "workspace_path", `String config.workspace_path
-            ; "keeper_count_source", `String "runtime_keepalive"
-            ; "configured_keeper_count_source", `String "keeper_toml"
-            ; "persisted_keeper_count_source", `String "keeper_meta"
             ; "status_ms", `Int status_ms
             ; "agents_ms", `Int agents_ms
             ; "tasks_ms", `Int tasks_ms

@@ -228,10 +228,7 @@ let gc config ~days () =
 
   log_event config (`Assoc [
     ("type", `String "gc");
-    ("stale_tasks", `Int stale_count);
-    ("old_messages", `Int !old_msg_count);
     ("preserved", `Int !preserved_count);
-    ("pubsub_cleaned", `Int !pubsub_cleanup_count);
     ("days", `Int days);
     ("ts", `String (now_iso ()));
   ]);

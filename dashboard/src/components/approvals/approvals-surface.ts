@@ -1037,6 +1037,7 @@ export function ApprovalsSurface() {
   const rules = gateData.value?.approval_rules ?? []
   const rulesState = gateData.value?.approval_rules_state ?? null
   const queueViolations = gateData.value?.approval_queue_violations ?? []
+  const resolvedViolations = gateData.value?.recent_resolved_violations ?? []
   const error = gateError.value
   // First load only: gateResource is stale-while-revalidate, so a refetch
   // keeps the previous data — gateData is null ONLY before the first load
@@ -1100,6 +1101,23 @@ export function ApprovalsSurface() {
               <div class="ap-error sev-bad" role="alert" data-testid="approvals-history-unavailable">
                 <strong><span aria-hidden="true">!</span> 승인 처리 이력을 읽을 수 없습니다</strong>
                 <span>${resolvedUnavailable.error}</span>
+              </div>
+            `
+          : null}
+        ${resolvedViolations.length > 0
+          ? html`
+              <div class="ap-error sev-warn" role="alert" data-testid="approvals-history-violations">
+                <strong><span aria-hidden="true">!</span> 표시 불가 처리 이력 ${resolvedViolations.length}건</strong>
+                <span>
+                  아래 행은 디코딩 계약을 위반해 목록에 넣지 못했습니다. 나머지 이력과
+                  열린 Gate 수는 그대로 보입니다. 서버 원장(audit-approvals)에서 확인하세요.
+                </span>
+                ${resolvedViolations.map(violation => html`
+                  <span class="mono" key=${violation.index}>
+                    #${violation.index} · ${violation.keeper_name ?? 'keeper?'} ·
+                    ${violation.tool_name ?? 'tool?'} · ${violation.id ?? 'id?'}
+                  </span>
+                `)}
               </div>
             `
           : null}

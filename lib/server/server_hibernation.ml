@@ -13,7 +13,6 @@ let status_json () =
     ; "scale_to_zero_supported", `Bool false
     ; "suspend_on_idle_supported", `Bool false
     ; "resume_orchestrator_present", `Bool false
-    ; "serverless_provider", `Null
     ; "operator_action_required", `Bool false
     ; "terminal_reason", `String "no_hibernation_orchestrator"
     ; ( "supported_controls"

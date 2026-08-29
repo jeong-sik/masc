@@ -54,7 +54,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0009 | Runtime Trust Phase 2: Operator Recommendations + Opt-in Persist | Implemented | - |
 | 0010 | ocamlformat config reconciliation | Implemented | - |
 | 0012 | Mid-Turn Progress Probe | Draft | - |
-| 0024 | Ollama Runtime Integration + KV Cache Optimization | Draft | - |
 | 0029 | Dashboard Fiber-Batched Aggregation | Active | - |
 | 0032 | Environment Knob Unification | Draft | - |
 | 0036 | Multi-Keeper Docker Orchestration & Lifecycle Cleanup | Draft | - |
@@ -79,11 +78,9 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0077 | Write-side silent failure — typed propagation | Implemented | - |
 | 0079 | Log row typed encoder + silent-drop removal | Implemented | - |
 | 0080 | Registered descriptors are the tool-surface SSOT | Implemented | - |
-| 0081 | agent_core Telemetry Envelope Context & Keeper/Goal Pivot Timeline | Implemented | - |
 | 0083 | Dashboard system-actor convention typed unification | Implemented | - |
 | 0084 | Tool dispatch handler and observation unification | Implemented | - |
 | 0086 | Keeper namespace bulk promotion to sub-library | Implemented | - |
-| 0087 | Tool Dispatch Path Unification + Legacy Purge | Implemented | - |
 | 0088 | Counter-as-Fix → Result Propagation (umbrella scoping) | Active | - |
 | 0089 | String Classifier to Typed Variant — direct replacement, no lint | Implemented | - |
 | 0090 | Write-side success-model attribution — finish N-of-M migration | Implemented | - |
@@ -100,10 +97,8 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0106 | Cancel-safe try-with discipline (Eio.Cancel.Cancelled propagation) | Active | - |
 | 0107 | Outbound HTTP stack consolidation — pooled keep-alive, scoped Switch, Docker ... | Active | Phase C.0 — `Eio_context.get_switch_opt` global access audit (`RFC-0107-eio-context-switch-audit.md`, Evidence)<br>Phase D — Connection pool design (interface-first) (`RFC-0107-phase-d-pool-design.md`, Active) |
 | 0108 | Atomic JSONL Append (in-process) (`RFC-0108-atomic-jsonl-append.md`)<br>PR / Worktree Operation Safety Gates (`RFC-0108-pr-worktree-operation-safety-gates.md`) | Active<br>Implemented | - |
-| 0111 | Goal mint atomicity — auto-goal uniqueness invariant at write boundary | Implemented | - |
 | 0112 | Typed JSON parse boundary — eliminate silent-drop fallback across read sites | Implemented | - |
 | 0115 | KTC turn_phase spec ← runtime parity — backfill spec for Turn_routing / Turn_... | Implemented | - |
-| 0120 | Cross-spec set-name divergence — 3-class classification framework (STALE / DE... | Implemented | - |
 | 0121 | Config-dir resolution — single active root, no implicit fallback | Active | - |
 | 0122 | Keeper disk pressure — process-local fleet failure mode beyond FD | Implemented | - |
 | 0123 | Briefing last_event fabrication — option-typed write boundary | Implemented | - |
@@ -122,10 +117,8 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0145 | Permissive-Silent-Fallback Elimination | Active | - |
 | 0148 | Typed `tool_error` Variant for LLM-Facing Tool Failure Surface | Implemented | - |
 | 0149 | Audit-Driven Telemetry-as-Fix Sunset | Implemented | - |
-| 0150 | Keeper Attention Signal — backend 단일 typed wire envelope | Implemented | - |
 | 0154 | System_error_class typed SSOT — close substring-classifier loop across backen... | Implemented | - |
 | 0159 | Reason_internal_error typed split — close string-classifier catch-all | Draft | - |
-| 0161 | Tool Error Hint Symmetry Enforcement | Draft | - |
 | 0162 | JSONL Write-Path FD Pressure Root-Fix | Draft | - |
 | 0174 | Dashboard substring classifier to typed — TypeScript | Draft | - |
 | 0175 | Godfile decomposition Wave D — keeper core 5-file split | Draft | - |
@@ -135,7 +128,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0182 | masc_* Workspace Tool Descriptor Projection + Tool_spec SSOT Consolidation | Draft | - |
 | 0189 | Typed Tool_result.result variant — eliminating boolean blindness in tool disp... | Draft | - |
 | 0190 | Descriptor as Visibility/Metadata SSOT — Surface Projection from descriptor.p... | Draft | - |
-| 0198 | Execute typed redirection | Implemented | - |
 | 0200 | Time constants 를 leaf library 로 분리 | Draft | - |
 | 0201 | Activity events wait-free snapshot (RFC-0138 extension, file-base preserved) | Draft | - |
 | 0203 | In-process Discord connector | Implemented (Phase 3 cutover landed 2026-05-29) | - |
@@ -195,7 +187,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0307 | Mid-turn advisor consult for keepers — evaluation and deferral | Draft | - |
 | 0312 | Keeper repo mappings are advisory default scope, not access caps | Accepted | - |
 | 0315 | Typed wake-turn context and self-directed work lane | Active | - |
-| 0316 | Merge gating convergence: enforce_admins=true + live Branch Protection Watchdog | Draft | - |
 | 0317 | In-process Slack connector (Socket Mode) | Implemented | - |
 | 0320 | Keeper connector-aware continuation: carry the originating channel through wa... | Draft | - |
 | 0324 | keeper repo 경로를 filesystem 진실로 (catalog 거짓 주입 제거) | Draft | - |
@@ -239,17 +230,22 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0386 | 툴 종류(tool kind)는 닫힌 합타입으로 선언한다 | Draft | - |
 | 0387 | Goal verifier 게이트 — 성공조건 필수화, 생성 시 실재성 검증, 완료의 2단계 증명 | Draft | - |
 | 0388 | awaiting_tool 대기의 liveness — 취소 도달과 시간 기반 만료 | Draft | - |
-| 0389 | Keeper 별 도구 표면 — 101개를 전원에게 매 턴 보내는 것을 그만둔다 | Draft | - |
+| 0389 | Keeper 별 도구 표면 — 101개를 전원에게 매 턴 보내는 것을 그만둔다 | Adopted | - |
 | 0390 | Official client 네이티브 도구를 keeper 별로 켜고 끈다 | Draft | - |
 | 0391 | Shell IR 세미콜론(;) 순차 실행 커맨드 체이닝 지원 | Draft | - |
 | 0392 | Keeper 신원을 provider 로 매개변수화 — provider 추가가 OCaml 을 늘리지 않는다 | Draft | - |
 | 0393 | 이름 안에 인코딩된 keeper 신원을 제거한다 — 관계는 데이터로, 이름은 하나로 | Draft | - |
 | 0394 | Local playground fail-closed; execution relocates off-host (SSH, then microVM) | Draft | - |
-| 0396 | Keeper coding capability — wire a coding-outcome eval from existing parts, then gate tool improvements on its numbers | Draft | - |
+| 0395 | Pinned OpenSSH is the Phase 1 remote execution lane | Draft | - |
+| 0396 | Keeper coding capability: wire a coding-outcome eval from existing parts, the... | Draft | - |
+| 0397 | Librarian wire contract states changes, not the whole roster | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
+| RFC-attached-service-tool-scoping | 부착 서비스 도구를 매 턴 전량 싣는 것을 그만둔다 | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |
+| RFC-claude-setting-sources-opt-in | Claude Code settings layers as a keeper-profile opt-in | Implemented | - |
+| RFC-cli-runtimes-as-lane-slots | CLI runtimes as lane slots | Draft | - |
 | RFC-connector-ambient-attention-wake | Connector ambient attention wake: drive an idle keeper turn from external-att... | Draft | - |
 | RFC-dashboard-dev-token-configured-role | Loopback dashboard dev-token issues Admin | Draft | - |
 | RFC-event-queue-admit-all-ready | 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 | Draft | - |
@@ -266,6 +262,10 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
 | RFC-skills-as-tools | Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다 | Active | - |
 | RFC-spawn-a-process-that-outlives-the-call | Spawn: a process that outlives the call | Draft | - |
+| RFC-virtual-project-missions | Virtual-project missions: RW24-RW30 from planned rows to judged runs | Draft | - |
+| RFC-webmcp-capability-lanes | WebMCP 를 masc 능력으로 — credential 위임(C), 생태계 센서(D), 공유 화면·사람 승인(E) | Draft | - |
+| RFC-webmcp-dashboard-agent-surface | 대시보드를 WebMCP 도구 표면으로 — 읽기 전용 MCP allowlist relay 와 CDP 소비 브리지 | Draft | - |
+| RFC-webmcp-keeper-consumption | keeper 의 WebMCP 소비 — Yolo Bash 브리지 lane(지금)과 typed 도구 모듈 lane(트리거 뒤) | Active | - |
 
 ### 신규 RFC
 

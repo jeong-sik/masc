@@ -439,8 +439,6 @@ function KeeperConfigFull({ keeper, onClose, onNav }) {
                   <SetRow label="sandbox_profile"><Segmented options={['local', 'docker']} value={f.access.sandbox} onChange={v => upd('access', 'sandbox', v)} /></SetRow>
                   <SetRow label="network_mode"><Segmented options={['none', 'inherit']} value={f.access.network} onChange={v => upd('access', 'network', v)} /></SetRow>
                   <div className="kcf-paths">
-                    <div className="kcf-tf-h"><label>allowed_paths</label><span className="kcf-tf-hint">한 줄에 하나 · 명시 경로만 허용</span></div>
-                    <textarea className="kcf-text mono" rows={2} value={f.access.allowedPaths} onChange={e => upd('access', 'allowedPaths', e.target.value)} />
                     <span className="kcf-path-eff mono">effective: {f.access.effectivePath}</span>
                   </div>
                 </KcfSec>

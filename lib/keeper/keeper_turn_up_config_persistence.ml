@@ -350,12 +350,6 @@ let full_fields
     | None -> fields
   in
   let fields =
-    match meta.tool_groups with
-    | Some groups ->
-      ("tools.groups", Keeper_toml_loader.Toml_string_array groups) :: fields
-    | None -> fields
-  in
-  let fields =
     match
       if parsed.remote_endpoint_present
       then parsed.remote_endpoint_opt
@@ -415,15 +409,6 @@ let explicit_edits
      ( "max_context_override"
      , match parsed.max_context_override_opt with
        | Some value -> set_int value
-       | None -> Keeper_toml_loader.Remove )
-     :: fields)
-  |> fun fields ->
-  (if not parsed.tool_groups_present
-   then fields
-   else
-     ( "tools.groups"
-     , match parsed.tool_groups_opt with
-       | Some groups -> set_strings groups
        | None -> Keeper_toml_loader.Remove )
      :: fields)
   |> fun fields ->

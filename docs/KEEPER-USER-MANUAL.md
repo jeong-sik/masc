@@ -37,7 +37,6 @@ autoboot_enabled = true
 proactive_enabled = true
 sandbox_profile = "docker"
 mention_targets = ["reviewer", "리뷰어"]
-allowed_paths = ["workspace/yousleepwhen/masc"]
 
 instructions = """
 You are the review Keeper. Read the actual diff and the file, not a summary of
@@ -58,7 +57,6 @@ Counted across the eleven Keepers on one live runtime, 2026-08-25:
 | `proactive_enabled` | 9/11 | Whether it takes turns on its own, or only when addressed |
 | `mention_targets` | 7/11 | The names that route a board mention to it |
 | `network_mode` | 6/11 | Network reachability for its sandbox |
-| `allowed_paths` | 6/11 | Which repository paths it prefers to work in |
 | `name` | 5/11 | Display name when it differs from the filename |
 | `always_allow` | 2/11 | Skips the approval queue for this Keeper's tool calls |
 

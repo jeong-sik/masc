@@ -83,7 +83,6 @@ type failure_stage =
   | Approval_summary_retirement
   | Meta_update
   | Meta_remove
-  | Retirement_record
   | Session_remove
   | Registry_unregister
 

@@ -8866,7 +8866,6 @@ let tools_display_lines (state : state) =
                    ets_official_client_kind;
                    ets_tool_delivery;
                    ets_native_posture;
-                   ets_tool_groups;
                    ets_skill_snapshot_revision;
                    ets_skill_resource_read_max_bytes;
                    ets_instruction_skills;
@@ -8888,9 +8887,6 @@ let tools_display_lines (state : state) =
           | Masc.Tui_decode.Effective_tools_delivered -> "delivered"
           | Masc.Tui_decode.Effective_tools_suppressed_runtime_unsupported ->
             "suppressed:runtime_tools_unsupported"
-        in
-        let groups =
-          match ets_tool_groups with [] -> "all" | xs -> String.concat "," xs
         in
         let resource_bound =
           match ets_skill_resource_read_max_bytes with
@@ -9221,11 +9217,10 @@ let tools_display_lines (state : state) =
             (Terminal_text.single_line ets_keeper_name)
             (List.length ets_tools);
           Ansi.dim,
-          Printf.sprintf "   runtime=%s  client=%s  native=%s  delivery=%s  groups=%s"
+          Printf.sprintf "   runtime=%s  client=%s  native=%s  delivery=%s"
             (Terminal_text.single_line ets_runtime_id)
             (Terminal_text.single_line ets_official_client_kind)
-            native (Terminal_text.single_line delivery)
-            (Terminal_text.single_line groups);
+            native (Terminal_text.single_line delivery);
           Ansi.dim,
           Printf.sprintf "   instruction skills=%s  composition skills=%s"
             (Terminal_text.single_line instruction)

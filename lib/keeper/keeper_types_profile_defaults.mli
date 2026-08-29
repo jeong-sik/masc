@@ -25,7 +25,6 @@ type keeper_profile_defaults = {
   (* RFC-0389: per-keeper model tool surface. [None] inherits the default
      (every model-visible tool). A [Some (Declared _)] narrows the surface to
      the declared groups; [Core_group] and [Meta_group] are always retained. *)
-  tool_groups : string list option;
   (** Profile-only Keeper Skill selection. [None] exposes all names; [Some []]
       exposes none. Names use exact equality against canonical Skill names. *)
   skill_names : string list option;

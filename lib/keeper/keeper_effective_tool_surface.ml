@@ -1,5 +1,5 @@
 type tool_origin =
-  | Descriptor of { group : string }
+  | Descriptor
   | Instruction_skill
   | Composition_skill of
       { provenance : Keeper_skill_catalog.provenance option }
@@ -29,7 +29,6 @@ type t =
   ; official_client_kind : string
   ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
-  ; tool_groups : string list
   ; skill_names : string list option
   ; unavailable_skill_names : Keeper_skill_catalog.configured_name_unavailable list
   ; current_task_id : string option
@@ -83,13 +82,9 @@ let descriptor_schema_tool (descriptor : Keeper_tool_descriptor.t) name =
 let descriptor_rows descriptors =
   List.concat_map
     (fun (descriptor : Keeper_tool_descriptor.t) ->
-       let group =
-         Keeper_tool_descriptor.keeper_tool_group_to_string
-           descriptor.keeper_tool_group
-       in
        List.map
          (fun name ->
-            ( { name; origin = Descriptor { group } }
+            ( { name; origin = Descriptor }
             , descriptor_schema_tool descriptor name ))
          (Keeper_tool_descriptor.keeper_model_names descriptor))
     descriptors
@@ -121,7 +116,6 @@ let project
       ~official_client_kind
       ~tool_delivery
       ~native_posture
-      ~tool_groups
       ~skill_names
       ~current_task_id
       ~task_skill_references
@@ -150,7 +144,6 @@ let project
   | Ok task_selection ->
     let capability_surface =
       Keeper_capability_surface.create
-        ~tool_groups
         ~skill_names
         ~global_skill_catalog
         ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
@@ -266,7 +259,7 @@ let project
       let is_skill_row = function
         | { origin = (Instruction_skill | Composition_skill _ | Composition_control); _ }, _ ->
           true
-        | { origin = Descriptor _; _ }, _ -> false
+        | { origin = Descriptor; _ }, _ -> false
       in
       match tool_delivery with
       | Tools_suppressed_runtime_unsupported -> 0
@@ -314,7 +307,6 @@ let project
       ; official_client_kind
       ; tool_delivery
       ; native_posture
-      ; tool_groups = Option.value ~default:[] tool_groups
       ; skill_names
       ; unavailable_skill_names =
           Keeper_skill_catalog.configured_names_unavailable turn_skill_projection
@@ -499,7 +491,6 @@ let resolve ~config ~keeper_name =
                      ~official_client_kind:(client_kind runtime)
                      ~tool_delivery:(runtime_tool_delivery runtime)
                      ~native_posture
-                     ~tool_groups:meta.tool_groups
                      ~skill_names:profile_defaults.skill_names
                      ~current_task_id
                      ~skills_left_out
@@ -556,8 +547,7 @@ let projection_basis_to_string = function
 ;;
 
 let origin_to_yojson = function
-  | Descriptor { group } ->
-    `Assoc [ "kind", `String "descriptor"; "group", `String group ]
+  | Descriptor -> `Assoc [ "kind", `String "descriptor" ]
   | Instruction_skill -> `Assoc [ "kind", `String "instruction_skill" ]
   | Composition_skill { provenance } ->
     `Assoc
@@ -591,7 +581,6 @@ let to_yojson = function
         , match surface.native_posture with
           | None -> `Null
           | Some posture -> `String (Runtime_native_tools.to_string posture) )
-      ; "tool_groups", string_list surface.tool_groups
       ; ( "skill_selection"
         , match surface.skill_names with
           | None -> `Assoc [ "mode", `String "all" ]

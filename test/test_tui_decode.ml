@@ -1897,7 +1897,6 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "official_client_kind", `String "codex"
       ; "tool_delivery", `Assoc [ "status", `String "delivered" ]
       ; "native_posture", `String "read"
-      ; "tool_groups", `List [ `String "filesystem" ]
       ; "skill_snapshot_revision", `String (String.make 64 'c')
       ; "instruction_skills", `List [ exact_reference "ocaml-coding" 'a' ]
       ; "composition_skills", `List [ exact_reference "mission-snapshot" 'b' ]
@@ -2035,7 +2034,6 @@ let test_decode_effective_keeper_surface_rejects_legacy_skill_names () =
       ; "official_client_kind", `String "codex"
       ; "tool_delivery", `Assoc [ "status", `String "delivered" ]
       ; "native_posture", `Null
-      ; "tool_groups", `List []
       ; "skill_snapshot_revision", `String (String.make 64 'c')
       ; "instruction_skills", `List [ `String "legacy-name" ]
       ; "composition_skills", `List []
@@ -2086,7 +2084,6 @@ let test_decode_effective_keeper_surface_keeps_tool_suppression () =
             ; "reason", `String "runtime_tools_unsupported"
             ] )
       ; "native_posture", `Null
-      ; "tool_groups", `List []
       ; "skill_snapshot_revision", `String (String.make 64 'c')
       ; "instruction_skills", `List []
       ; "composition_skills", `List []

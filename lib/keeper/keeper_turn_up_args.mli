@@ -25,8 +25,6 @@ type parsed_args =
   ; remote_endpoint_opt : string option
   ; remote_endpoint_present : bool
   ; network_mode_opt : string option
-  ; tool_groups_opt : string list option
-  ; tool_groups_present : bool
   ; skill_names_opt : string list option
   ; skill_names_present : bool
   ; native_tool_posture_opt : Runtime_native_tools.posture option

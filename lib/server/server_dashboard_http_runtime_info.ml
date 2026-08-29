@@ -1632,7 +1632,6 @@ let runtime_request_config_json (rt : Runtime.t) =
       ; "model", Json_util.string_opt_to_json config.model
       ; "timeout_s", `Float config.timeout_s
       ; "execution_mode", `String "masc_mcp_only"
-      ; "tool_owner", `String "masc_mcp"
       ; "verified", `Bool false
       ]
   | Runtime_execution.Agent_core cfg ->
@@ -1804,7 +1803,6 @@ let effective_capabilities_json (rt : Runtime.t) =
       [ "source", `String "unverified"
       ; "execution", `String "claude_code"
       ; "execution_mode", `String "masc_mcp_only"
-      ; "tool_owner", `String "masc_mcp"
       ; "verified", `Bool false
       ]
   | Runtime_execution.Agent_core provider_config ->
@@ -1897,7 +1895,6 @@ let runtime_parameter_policy_json (rt : Runtime.t) =
       [ "source", `String "official-client-owned"
       ; "execution", `String "claude_code"
       ; "execution_mode", `String "masc_mcp_only"
-      ; "tool_owner", `String "masc_mcp"
       ]
   | Runtime_execution.Agent_core provider_config ->
     let dialect = RD.for_provider_config provider_config in

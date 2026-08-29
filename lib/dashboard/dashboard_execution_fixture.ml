@@ -107,10 +107,7 @@ let execution_smoke_fixture_json () =
                 ("status", `String "active");
                 ("stage", `String "verify");
                 ("assigned_unit_id", `String "squad-runtime");
-                ("assigned_unit_label", `String "Runtime Squad");
                 ("blocker_summary", `String "Runtime squad needs trace review before verify proceeds");
-                ("search_status", `String "blocked");
-                ("next_tool", `String "masc_operator_snapshot");
                 ("updated_at", `String generated_at);
                 ("top_handoff", command_handoff);
                 ("command_handoff", command_handoff);
@@ -122,10 +119,7 @@ let execution_smoke_fixture_json () =
                 ("status", `String "active");
                 ("stage", `String "verify");
                 ("assigned_unit_id", `String "squad-review");
-                ("assigned_unit_label", `String "Review Squad");
                 ("blocker_summary", `String "Waiting on upstream checkpoint before verify stage");
-                ("search_status", `String "blocked");
-                ("next_tool", `String "masc_status");
                 ("updated_at", `String generated_at);
                 ("top_handoff", operation_handoff);
                 ("command_handoff", operation_handoff);

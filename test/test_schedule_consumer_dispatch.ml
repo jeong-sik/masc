@@ -1986,6 +1986,7 @@ let test_consumed_grant_without_outcome_stays_actionable () =
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
   let keeper_name = "spent-grant-keeper" in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
   let input = `Assoc [ "target", `String "spent-grant" ] in
   let approval_id = approved_grant_fixture ~base_path ~keeper_name ~input in
   (match
@@ -2024,6 +2025,7 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
   let keeper_name = "spent-grant-keeper" in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
   let input = `Assoc [ "target", `String "spent-grant" ] in
   let approval_id = approved_grant_fixture ~base_path ~keeper_name ~input in
   (match
@@ -2072,6 +2074,7 @@ let test_unconsumed_grant_replay_stays_actionable () =
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
   let keeper_name = "live-grant-keeper" in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
   let input = `Assoc [ "target", `String "live-grant" ] in
   ignore (approved_grant_fixture ~base_path ~keeper_name ~input : string);
   check_single_queued_replay ~base_path ~keeper_name;

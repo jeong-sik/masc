@@ -126,7 +126,7 @@ let () = test "keeper_tool_help_uses_descriptor_projection" (fun () ->
     tool_help_description Tool_misc.dispatch ctx "masc_board_post"
   in
   let keeper_ctx =
-    { ctx with help_schemas = Keeper_tool_descriptor.model_visible_schemas ~surface:All }
+    { ctx with help_schemas = Keeper_tool_descriptor.model_visible_schemas () }
   in
   let keeper_description =
     tool_help_description Tool_misc.dispatch keeper_ctx "masc_board_post"

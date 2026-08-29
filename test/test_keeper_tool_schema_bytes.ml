@@ -58,8 +58,8 @@ let schema_json (schema : Masc_domain.tool_schema) =
     ]
 ;;
 
-let measured ~surface =
-  let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas ~surface in
+let measured () =
+  let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas () in
   let bytes =
     List.fold_left
       (fun acc schema -> acc + String.length (Yojson.Safe.to_string (schema_json schema)))
@@ -189,7 +189,7 @@ let all_surface_golden_names =
 ;;
 
 let test_all_surface_is_unchanged () =
-  let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas ~surface:All in
+  let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas () in
   let names = List.sort String.compare (List.map (fun (s : Masc_domain.tool_schema) -> s.name) schemas) in
   let missing = List.filter (fun n -> not (List.mem n names)) all_surface_golden_names in
   let added = List.filter (fun n -> not (List.mem n all_surface_golden_names)) names in
@@ -210,38 +210,9 @@ let test_all_surface_is_unchanged () =
     (List.length names)
 ;;
 
-(* RFC-0389: a Declared surface must be strictly smaller than All — that is the
-   whole point of the feature. Core/Meta are always retained, so a Declared
-   surface is never empty. *)
-let test_declared_surface_is_smaller_than_all () =
-  let _, all_bytes = measured ~surface:All in
-  let declared_surfaces =
-    [ Masc.Keeper_tool_descriptor.Declared
-        { groups = [ Masc.Keeper_tool_group.Board_group ] }
-    ; Masc.Keeper_tool_descriptor.Declared
-        { groups =
-            [ Masc.Keeper_tool_group.Board_group
-            ; Masc.Keeper_tool_group.Workspace_group
-            ]
-        }
-    ; Masc.Keeper_tool_descriptor.Declared
-        { groups =
-            [ Masc.Keeper_tool_group.Memory_group
-            ; Masc.Keeper_tool_group.Surface_group
-            ]
-        }
-    ]
-  in
-  List.iter
-    (fun surface ->
-      let count, bytes = measured ~surface in
-      check bool "Declared surface is non-empty" true (count > 0);
-      check bool "Declared surface is smaller than All" true (bytes < all_bytes))
-    declared_surfaces
-;;
 
 let test_tool_schema_bytes_stay_under_the_ceiling () =
-  let count, bytes = measured ~surface:All in
+  let count, bytes = measured () in
   check bool "the surface is non-empty" true (count > 0);
   if bytes > ceiling_bytes
   then
@@ -261,7 +232,7 @@ let test_tool_schema_bytes_stay_under_the_ceiling () =
    the reduction: a baseline that has drifted far from what it measures is
    reporting on nothing. *)
 let test_the_ceiling_still_tracks_the_surface () =
-  let _, bytes = measured ~surface:All in
+  let _, bytes = measured () in
   let slack = ceiling_bytes - bytes in
   if bytes <= ceiling_bytes && slack > ceiling_bytes / 3
   then
@@ -285,8 +256,6 @@ let () =
     ; ( "RFC-0389 per-keeper surface"
       , [ test_case "All surface is unchanged (backward compat)" `Quick
             test_all_surface_is_unchanged
-        ; test_case "Declared surface is smaller than All" `Quick
-            test_declared_surface_is_smaller_than_all
-        ] )
+        ;        ] )
     ]
 ;;

@@ -59,6 +59,25 @@ let with_workspace f =
 
 let unrouted = Keeper_continuation_channel.unrouted "test"
 
+(* Durable intake is authorized by current metadata, so every test keeper
+   that must accept a wake needs to exist first. *)
+let create_keeper_exn ~config name =
+  let json =
+    `Assoc [ "name", `String name; "trace_id", `String ("trace-" ^ name) ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Error detail -> fail detail
+  | Ok meta ->
+    (match
+       Keeper_owner_registry.create_meta
+         ~base_path:config.Workspace_utils.base_path
+         meta
+     with
+     | Ok _ -> ()
+     | Error error ->
+       fail (Keeper_owner_registry.command_error_to_string error))
+;;
+
 (* Submit + approve one grant. Resolving an approval for a keeper with no
    live lane durably enqueues its [Hitl_resolved] wake, which is exactly the
    queue state the projection and preemption read. *)
@@ -180,6 +199,7 @@ let test_yield_request_tracks_grant_consumption () =
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
   let keeper_name = "hitl-preempt-keeper" in
+  create_keeper_exn ~config keeper_name;
   let input = `Assoc [ "target", `String "hitl-preempt" ] in
   let approval_id = approved_grant_fixture ~base_path ~keeper_name ~input in
   (match Keeper_unified_turn.hitl_replay_yield_request ~base_path ~keeper_name with
@@ -216,6 +236,7 @@ let test_peek_projects_ready_resolution_without_consuming () =
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
   let keeper_name = "hitl-peek-keeper" in
+  create_keeper_exn ~config keeper_name;
   let input = `Assoc [ "target", `String "hitl-peek" ] in
   let approval_id = approved_grant_fixture ~base_path ~keeper_name ~input in
   let before = queue_length ~base_path ~keeper_name in
@@ -238,6 +259,7 @@ let test_peek_skips_resolution_still_pending () =
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
   let keeper_name = "hitl-unready-keeper" in
+  create_keeper_exn ~config keeper_name;
   (match Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
    | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
@@ -277,40 +299,21 @@ let test_peek_skips_resolution_still_pending () =
           ~keeper_name))
 ;;
 
-(* --- retired recipient -------------------------------------------------- *)
+(* --- absent recipient --------------------------------------------------- *)
 
-(* A recorded retirement with no live metadata is exactly the durable state
-   that makes [authorize_durable_intake_owner] report the Keeper as
-   retired. *)
-let persist_retired_shutdown ~config ~keeper_name =
-  let trace_id =
-    match Keeper_id.Trace_id.of_string "trace-hitl-retired-fixture" with
-    | Ok trace_id -> trace_id
-    | Error detail -> fail detail
-  in
-  match
-    Keeper_retirement_store.record
-      ~config
-      ~keeper_name
-      { Keeper_retirement_store.trace_id
-      ; operation_id = Keeper_shutdown_types.Operation_id.generate ()
-      }
-  with
-  | Ok () -> ()
-  | Error detail -> fail detail
-;;
-
-(* #31684: a resolution addressed to a removed Keeper used to stay in the
-   durable delivery store and replay the same permanent failure at every
-   boot. It must be settled at resolve time instead. *)
+(* #31684: a resolution addressed to a Keeper that does not exist used to
+   stay in the durable delivery store and replay the same permanent failure
+   at every boot. Durable intake follows current metadata, so a name with no
+   Keeper behind it settles the delivery at resolve time instead. *)
 let test_retired_recipient_settles_delivery () =
   with_workspace
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
+  (* No metadata is ever created for this name: the recipient does not
+     exist. *)
   let keeper_name = "hitl-retired-keeper" in
-  persist_retired_shutdown ~config ~keeper_name;
   let input = `Assoc [ "target", `String "hitl-retired" ] in
-  (* Resolving against the retired recipient must succeed (the fixture fails
+  (* Resolving against the absent recipient must succeed (the fixture fails
      the test on a resolve error) and must not leave a durable delivery. *)
   ignore (approved_grant_fixture ~base_path ~keeper_name ~input);
   match Keeper_approval_queue.install_persistence ~base_path with

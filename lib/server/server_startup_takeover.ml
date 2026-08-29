@@ -414,7 +414,6 @@ let write_takeover_breadcrumb ~lock_path ~port ~target_pid ~signal_name =
       [ (* NDT-OK: forensic evidence records the killer's identity and
            wall-clock; no deterministic logic branches on these fields. *)
         "killer_pid", `Int (Unix.getpid ())
-      ; "killer_argv", `String (String.concat " " (Array.to_list Sys.argv))
       ; "target_pid", `Int target_pid
       ; "port", `Int port
       ; "signal", `String signal_name

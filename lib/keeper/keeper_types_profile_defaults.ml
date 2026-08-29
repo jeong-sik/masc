@@ -26,7 +26,6 @@ type keeper_profile_defaults = {
      inherits the default (every model-visible tool). Converted to
      [Keeper_tool_descriptor.tool_surface] at the consumption site to avoid
      a dependency cycle through Keeper_meta_contract. *)
-  tool_groups : string list option;
   (* Profile-only Skill selection; explicit empty is distinct from absence. *)
   skill_names : string list option;
   (* Per-keeper AGENT_CORE CLI transport env vars (AGENT_CORE 0.159+).
@@ -55,7 +54,6 @@ let empty_keeper_profile_defaults =
     telemetry_feedback_window_hours = None;
     always_allow = None;
     native_tool_posture = None;
-    tool_groups = None;
     skill_names = None;
     agent_core_env = [];
   }

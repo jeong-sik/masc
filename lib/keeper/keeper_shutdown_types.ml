@@ -100,7 +100,6 @@ type failure_stage =
   | Approval_summary_retirement
   | Meta_update
   | Meta_remove
-  | Retirement_record
   | Session_remove
   | Registry_unregister
 
@@ -534,7 +533,6 @@ let failure_stage_to_string = function
   | Approval_summary_retirement -> "approval_summary_retirement"
   | Meta_update -> "meta_update"
   | Meta_remove -> "meta_remove"
-  | Retirement_record -> "retirement_record"
   | Session_remove -> "session_remove"
   | Registry_unregister -> "registry_unregister"
 ;;
@@ -553,7 +551,6 @@ let failure_stage_of_string = function
   | "approval_summary_retirement" -> Ok Approval_summary_retirement
   | "meta_update" -> Ok Meta_update
   | "meta_remove" -> Ok Meta_remove
-  | "retirement_record" -> Ok Retirement_record
   | "session_remove" -> Ok Session_remove
   | "registry_unregister" -> Ok Registry_unregister
   | value -> Error (Printf.sprintf "unknown Keeper shutdown failure stage: %S" value)

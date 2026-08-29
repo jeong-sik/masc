@@ -117,14 +117,13 @@ let valid_named name inventory =
   | None -> failf "valid Skill %S missing from inventory" name
 ;;
 
-let capability_surface ?(skill_names = None) ?(tool_groups = None) frozen =
+let capability_surface ?(skill_names = None) frozen =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let global_skill_catalog, diagnostics =
     Masc.Keeper_skill_catalog.of_snapshot frozen
   in
   check int "catalog diagnostics" 0 (List.length diagnostics);
   Masc.Keeper_capability_surface.create
-    ~tool_groups
     ~skill_names
     ~global_skill_catalog
     ~skill_inventory:(Inventory.of_snapshot frozen)
@@ -335,7 +334,7 @@ let test_catalog_status_tracks_source_precedence () =
 let test_capability_surface_keeps_active_and_outside_tools () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let frozen = snapshot config [ [] ] in
-  let surface = capability_surface ~tool_groups:(Some [ "board" ]) frozen in
+  let surface = capability_surface frozen in
   let capabilities = Masc.Keeper_capability_surface.tool_capabilities surface in
   check bool "restricted surface has active Tools" true
     (List.exists
@@ -415,15 +414,12 @@ let test_complete_inventory_preserves_agent_core_surface () =
   check int "inventory covers every canonical descriptor"
     (List.length (Tool_descriptor.all_descriptors ()))
     (List.length (Masc.Keeper_capability_surface.tool_capabilities unrestricted));
-  let restricted = capability_surface ~tool_groups:(Some [ "board" ]) frozen in
+  let restricted = capability_surface frozen in
   let restricted_descriptor_ids =
     descriptor_ids (Masc.Keeper_capability_surface.descriptors restricted)
   in
   let expected_restricted =
-    Tool_descriptor.tool_groups_to_surface (Some [ "board" ])
-    |> fun surface ->
-    Tool_descriptor.model_visible_descriptors_for_surface ~surface
-    |> descriptor_ids
+    Tool_descriptor.model_visible_descriptors () |> descriptor_ids
   in
   check (list string) "restricted descriptors stay canonical model projection"
     expected_restricted
@@ -565,10 +561,7 @@ let test_search_includes_outside_tool_and_skill () =
     snapshot config [ [ candidate ~directory:"release-checklist" instruction_document ] ]
   in
   let surface =
-    capability_surface
-      ~tool_groups:(Some [ "board" ])
-      ~skill_names:(Some [])
-      frozen
+    capability_surface ~skill_names:(Some []) frozen
   in
   let outside_tool =
     search_candidates surface "tool_read_file"

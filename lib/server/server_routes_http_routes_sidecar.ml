@@ -603,8 +603,6 @@ let sidecar_status_retention_json ~base_path ~id ~status_path =
     ; "status_path", `String status_path
     ; "default_status_path"
       , `String (Filename.concat base_path (Printf.sprintf ".gate/runtime/%s/status.json" id))
-    ; "lifecycle_desired_path", `String (sidecar_desired_path ~base_path id)
-    ; "lifecycle_attempt_path", `String (sidecar_attempt_path ~base_path id)
     ; "binding_store_path"
       , `String (Filename.concat base_path (Printf.sprintf ".gate/runtime/%s/bindings.json" id))
     ; "binding_audit_store_path"
@@ -748,7 +746,6 @@ let handle_stop state request reqd =
                 ; "note", `String trimmed
                 ; "desired_state", `String (desired_state_to_string desired.desired_state)
                 ; "desired_generation", `Int desired.generation
-                ; "stop_semantics", `String "synchronous_stop_with_desired_fence"
                 ])))
 ;;
 
@@ -942,7 +939,6 @@ let handle_put_config _state request reqd =
                      ; "id", `String id
                      ; "path", `String path
                      ; "written_fields", `Int (List.length accepted)
-                     ; "rejected_fields", `List (List.map (fun s -> `String s) rejected)
                      ]))))
 ;;
 

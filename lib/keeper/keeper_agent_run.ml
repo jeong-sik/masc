@@ -786,7 +786,6 @@ let run_turn
                 , `String (digest_text dynamic_context) )
               ; ( "temporal_context_digest"
                 , `String (digest_text temporal_context) )
-              ; "user_message_digest", `String (digest_text user_message)
               ; "history_message_count", `Int (List.length history_messages)
               ; "history_messages_digest", `String history_messages_digest
               ; "context_window", `Int max_context

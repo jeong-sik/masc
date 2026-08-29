@@ -301,7 +301,6 @@ autoboot_enabled = true
 proactive_enabled = true
 sandbox_profile = "local"
 mention_targets = ["operator"]
-allowed_paths = ["workspace/yousleepwhen/masc"]
 
 [keeper.tools]
 native = "read"  # "none" | "read" | "full" (Auto mode safely degrades to read)

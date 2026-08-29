@@ -19,7 +19,7 @@ let visible name =
   match
     List.find_opt
       (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
-      (Masc.Keeper_tool_descriptor.model_visible_schemas ~surface:Masc.Keeper_tool_descriptor.All)
+      (Masc.Keeper_tool_descriptor.model_visible_schemas ())
   with
   | Some schema -> schema
   | None -> failf "%s is absent from the model-visible surface" name

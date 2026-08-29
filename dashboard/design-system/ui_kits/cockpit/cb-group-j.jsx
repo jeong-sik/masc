@@ -193,8 +193,8 @@ function IxTreeAllowed({ branch = "main", keepers }) {
   const selected = p3KeeperIds(keepers);
   const rows = P3J.files.filter(f => !focus || f.owners.includes(focus));
   return (
-    <div className="ix-tree" role="region" aria-label="File tree with allowed_paths overlay">
-      <P3Header title="E1-A · allowed_paths overlay" meta={`${branch} · ${selected.length} keeper scope`} right="hover keeper chip to spotlight" />
+    <div className="ix-tree" role="region" aria-label="File tree with sandbox scope overlay">
+      <P3Header title="E1-A · sandbox scope overlay" meta={`${branch} · ${selected.length} keeper scope`} right="hover keeper chip to spotlight" />
       <div className="ix-tree-keepers" role="toolbar" aria-label="Spotlight keeper" onMouseLeave={() => setFocus(null)}>
         {P3J.keepers.map(k => (
           <button key={k.id} type="button" onMouseEnter={() => setFocus(k.id)} onFocus={() => setFocus(k.id)} aria-pressed={focus === k.id} className={focus === k.id ? "on" : ""}>

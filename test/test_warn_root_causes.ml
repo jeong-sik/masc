@@ -61,14 +61,11 @@ let publication_recovery_turn_context ~registry ~keeper_name =
 ;;
 
 (* RFC-0393: the keeper meta carries one name and nothing derived from it. *)
-let make_meta ?(name = "test-keeper") ?tool_groups () : Keeper_meta_contract.keeper_meta =
-  (* [tool_groups] is not part of the persisted-meta JSON schema (the parser
-     always decodes it to [None]); set it on the parsed record directly so a
-     declared keeper's surface can be exercised without schema drift. *)
+let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc [("name", `String name);
              ("trace_id", `String "test-trace-warn")]) with
-  | Ok meta -> { meta with tool_groups }
+  | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 
 let test_web_tools_are_bundle_visible () =
@@ -637,7 +634,7 @@ let bundle_tool_count (bundle : Keeper_tools_agent_core.tool_bundle) =
   List.length bundle.tools
 ;;
 
-let with_bundle ~name ?tool_groups f =
+let with_bundle ~name f =
   ignore (init_registry ());
   let dir =
     Filename.concat
@@ -649,7 +646,7 @@ let with_bundle ~name ?tool_groups f =
     ~finally:(fun () -> try Unix.rmdir dir with _ -> ())
     (fun () ->
       let config = Workspace.default_config dir in
-      let meta = make_meta ~name ?tool_groups () in
+      let meta = make_meta ~name () in
       let ctx_snapshot =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
       in
@@ -676,7 +673,7 @@ let test_declared_bundle_narrows_turn_payload () =
       (bundle_tool_count b, bundle_schema_bytes b))
   in
   let declared_count, declared_bytes =
-    with_bundle ~name:"test-declared" ~tool_groups:[ "board" ] (fun b ->
+    with_bundle ~name:"test-declared" (fun b ->
       (bundle_tool_count b, bundle_schema_bytes b))
   in
   check bool "undeclared keeper's payload is non-empty" true (undeclared_count > 0);

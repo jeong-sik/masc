@@ -195,7 +195,6 @@ let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string
   | Hitl_resolved _ -> []
   | Delegate_completed dc ->
     [ "delegate_operation_id", `String dc.dc_operation_id
-    ; "delegate_keeper", `String dc.dc_keeper
     ]
   | Composition_completed cc ->
     [ "composition_request_id", `String cc.cc_request_id

@@ -26,10 +26,77 @@ let () =
     ()
 ;;
 
+(** Every terminal disposition of the HITL exact-output flow.
+
+    Closed on purpose. These were 27 string literals spread over 37 call
+    sites, so a branch added later could reach the metric — and any consumer
+    derived from it — without the compiler asking. A variant makes each
+    derivation an exhaustive match, so the next branch stops the build
+    until it is classified. The metric label text is unchanged: it is
+    derived here rather than restated at each site. *)
+type flow_outcome =
+  | Ok_summary
+  | Ok_summary_cli
+  | Source_resolved
+  | Identity_unbound
+  | Identity_unbound_source_changed
+  | Terminal_sync_unconfirmed
+  | Terminal_persistence_failure
+  | Terminal_rejected
+  | Provenance_mismatch
+  | Domain_invalid_output
+  | Attempt_replay
+  | Attempt_start_failed
+  | Measurement_start_failed
+  | Measurement_callback_failed
+  | Candidates_exhausted
+  | Bind_failed
+  | Release_failed
+  | Execution_failed
+  | Cli_slots_exhausted
+  | Cli_released_without_binding
+  | Cli_walk_fell_back
+  | Cli_release_unconfirmed
+  | Cli_bind_unconfirmed
+  | Cli_bind_failed
+  | Cancellation
+  | Cancellation_settlement_failed
+  | Crashed
+
+let outcome_label = function
+  | Ok_summary -> "ok_summary"
+  | Ok_summary_cli -> "ok_summary_cli"
+  | Source_resolved -> "exact_source_resolved"
+  | Identity_unbound -> "exact_identity_unbound"
+  | Identity_unbound_source_changed -> "exact_identity_unbound_source_changed"
+  | Terminal_sync_unconfirmed -> "exact_terminal_sync_unconfirmed"
+  | Terminal_persistence_failure -> "exact_terminal_persistence_failure"
+  | Terminal_rejected -> "exact_terminal_rejected"
+  | Provenance_mismatch -> "exact_provenance_mismatch"
+  | Domain_invalid_output -> "exact_domain_invalid_output"
+  | Attempt_replay -> "exact_attempt_replay"
+  | Attempt_start_failed -> "exact_attempt_start_failed"
+  | Measurement_start_failed -> "exact_measurement_start_failed"
+  | Measurement_callback_failed -> "exact_measurement_callback_failed"
+  | Candidates_exhausted -> "exact_candidates_exhausted"
+  | Bind_failed -> "exact_bind_failed"
+  | Release_failed -> "exact_release_failed"
+  | Execution_failed -> "exact_execution_failed"
+  | Cli_slots_exhausted -> "exact_cli_slots_exhausted"
+  | Cli_released_without_binding -> "exact_cli_released_without_binding"
+  | Cli_walk_fell_back -> "exact_cli_walk_fell_back"
+  | Cli_release_unconfirmed -> "exact_cli_release_unconfirmed"
+  | Cli_bind_unconfirmed -> "exact_cli_bind_unconfirmed"
+  | Cli_bind_failed -> "exact_cli_bind_failed"
+  | Cancellation -> "exact_cancellation"
+  | Cancellation_settlement_failed -> "exact_cancellation_settlement_failed"
+  | Crashed -> "crashed"
+;;
+
 let record_outcome outcome =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string HitlSummaryOutcomes)
-    ~labels:[ "outcome", outcome ]
+    ~labels:[ "outcome", outcome_label outcome ]
     ()
 ;;
 
@@ -655,7 +722,7 @@ let signal_terminalization_persistence_failure
        entry
        "persistence uncertainty observation"
        (Keeper_approval_queue.exact_attempt_error_to_string marker_error));
-  record_outcome "exact_terminal_persistence_failure";
+  record_outcome Terminal_persistence_failure;
   log_exact_error entry operation detail;
   raise
     (Exact_terminalization_persistence_failed
@@ -705,7 +772,7 @@ let quarantine_identity_result
       (Exact_queue_persistence_failed
          ("quarantine durability confirmation failed: " ^ detail))
   | Error error when exact_attempt_source_resolved entry error ->
-    record_outcome "exact_source_resolved";
+    record_outcome Source_resolved;
     Ok ()
   | Error (Exact_attempt_storage_error error) ->
     Error
@@ -751,7 +818,7 @@ let settle_current ~queue_ops (entry : pending_approval) ~reason ~cause =
       (Exact_settlement_persistence_failed
          (Keeper_approval_queue.storage_error_to_string error))
   | Ok None ->
-    record_outcome "exact_source_resolved";
+    record_outcome Source_resolved;
     Ok ()
   | Ok (Some { exact_attempt = Exact_unbound; _ }) ->
     Error
@@ -766,7 +833,7 @@ let settle_current ~queue_ops (entry : pending_approval) ~reason ~cause =
           Exact_bound { status = (Exact_completed | Exact_quarantined _); _ }
       ; _
       }) ->
-    record_outcome "exact_source_resolved";
+    record_outcome Source_resolved;
     Ok ()
   | Ok (Some { exact_attempt = Exact_bound binding; _ }) ->
     quarantine_identity_result
@@ -785,11 +852,11 @@ let signal_settlement_error (entry : pending_approval) = function
   | Exact_settlement_identity_unbound detail ->
     (match persist_identity_unbound entry with
      | Ok () ->
-       record_outcome "exact_identity_unbound";
+       record_outcome Identity_unbound;
        log_exact_error entry "terminalization blocked" detail;
        raise (Exact_terminalization_identity_unbound detail)
      | Error `Transition_not_applied ->
-       record_outcome "exact_identity_unbound_source_changed";
+       record_outcome Identity_unbound_source_changed;
        raise (Exact_terminalization_identity_unbound detail)
      | Error (`Rejected rejection) ->
        raise (Exact_terminalization_rejected rejection)
@@ -927,20 +994,20 @@ let handle_validated_success
   let identity = exact_identity_of_candidate candidate in
   match complete_exact_attempt queue_ops entry identity summary with
   | Ok { write_outcome = Fsync_completed; _ } ->
-    record_outcome "ok_summary";
+    record_outcome Ok_summary;
     on_summary summary
   | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
-    record_outcome "exact_terminal_sync_unconfirmed";
+    record_outcome Terminal_sync_unconfirmed;
     signal_terminalization_persistence_failure
       entry
       "completion sync"
       detail
   | Error error when exact_attempt_source_resolved entry error ->
-    record_outcome "exact_source_resolved"
+    record_outcome Source_resolved
   | Error (Exact_attempt_rejected rejection) ->
     raise (Exact_terminalization_rejected rejection)
   | Error (Exact_attempt_storage_error error) ->
-    record_outcome "exact_terminal_persistence_failure";
+    record_outcome Terminal_persistence_failure;
     log_exact_error
       entry
       "completion"
@@ -985,14 +1052,14 @@ let handle_semantic_exhaustion ~queue_ops (prepared : prepared_flow) trace =
   let candidate = Exact_output.flow_success_candidate flow_success in
   match rejection.rejection with
   | Semantic_provenance_mismatch ->
-    record_outcome "exact_provenance_mismatch";
+    record_outcome Provenance_mismatch;
     quarantine_candidate
       ~queue_ops
       prepared.entry
       candidate
       Exact_flow_execution_failed
   | Semantic_domain_invalid detail ->
-    record_outcome "exact_domain_invalid_output";
+    record_outcome Domain_invalid_output;
     log_exact_error prepared.entry "domain validation" detail;
     quarantine_candidate
       ~queue_ops
@@ -1003,7 +1070,7 @@ let handle_semantic_exhaustion ~queue_ops (prepared : prepared_flow) trace =
 
 let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
   | Exact_output.Flow_attempt_already_started evidence ->
-    record_outcome "exact_attempt_replay";
+    record_outcome Attempt_replay;
     log_exact_error prepared.entry "attempt replay" (flow_evidence_detail evidence);
     settle_current_or_signal
       ~queue_ops
@@ -1011,7 +1078,7 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
       ~reason:"HITL exact-output flow attempt was replayed"
       ~cause:Exact_attempt_replay
   | Exact_output.Flow_attempt_start_failed { cause; evidence; _ } ->
-    record_outcome "exact_attempt_start_failed";
+    record_outcome Attempt_start_failed;
     let cause_detail =
       match cause with
       | Exact_output.Call_id_generation_failed detail -> detail
@@ -1026,7 +1093,7 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
       ~reason:"HITL exact-output candidate attempt allocation failed"
       ~cause:Exact_flow_execution_failed
   | Exact_output.Flow_measurement_start_failed { evidence; _ } ->
-    record_outcome "exact_measurement_start_failed";
+    record_outcome Measurement_start_failed;
     log_exact_error
       prepared.entry
       "measurement allocation"
@@ -1037,7 +1104,7 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
       ~reason:"HITL exact-output measurement allocation failed"
       ~cause:Exact_flow_execution_failed
   | Exact_output.Flow_candidates_exhausted { rejection; evidence } ->
-    record_outcome "exact_candidates_exhausted";
+    record_outcome Candidates_exhausted;
     log_exact_error
       prepared.entry
       "candidate exhaustion before dispatch"
@@ -1054,7 +1121,7 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
       { cause; _ }
   | Exact_output.Flow_measurement_terminal_callback_failed
       { cause; _ } ->
-    record_outcome "exact_measurement_callback_failed";
+    record_outcome Measurement_callback_failed;
     (match flow_callback_rejection cause with
      | Some rejection -> raise (Exact_terminalization_rejected rejection)
      | None ->
@@ -1064,7 +1131,7 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
          ~reason:(flow_callback_error_to_string cause)
          ~cause:Exact_terminal_persistence_failure)
   | Exact_output.Flow_before_dispatch_callback_failed { cause; _ } ->
-    record_outcome "exact_bind_failed";
+    record_outcome Bind_failed;
     (match flow_callback_rejection cause with
      | Some rejection -> raise (Exact_terminalization_rejected rejection)
      | None ->
@@ -1074,7 +1141,7 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
          ~reason:(flow_callback_error_to_string cause)
          ~cause:Exact_terminal_persistence_failure)
   | Exact_output.Flow_before_advance_callback_failed { cause; _ } ->
-    record_outcome "exact_release_failed";
+    record_outcome Release_failed;
     (match flow_callback_rejection cause with
      | Some rejection -> raise (Exact_terminalization_rejected rejection)
      | None ->
@@ -1084,7 +1151,7 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
          ~reason:(flow_callback_error_to_string cause)
          ~cause:Exact_terminal_persistence_failure)
   | Exact_output.Flow_exact_execution_failed { candidate; cause; evidence } ->
-    record_outcome "exact_execution_failed";
+    record_outcome Execution_failed;
     log_exact_error
       prepared.entry
       "exact execution"
@@ -1161,7 +1228,7 @@ let try_cli_slots
            (* The last failed cli slot is still Exact_dispatch_uncertain, so
               the entry settles through the ordinary quarantine transition
               under the identity that actually failed. *)
-           record_outcome "exact_cli_slots_exhausted";
+           record_outcome Cli_slots_exhausted;
            log_exact_error
              entry
              "cli lane-slot walk"
@@ -1178,7 +1245,7 @@ let try_cli_slots
               success returns before the walk recurses. Treat it as the
               exhausted case with an execution cause rather than hiding it
               under a wildcard. *)
-           record_outcome "exact_cli_slots_exhausted";
+           record_outcome Cli_slots_exhausted;
            quarantine_identity ~queue_ops entry identity Exact_flow_execution_failed;
            Cli_settled
          | None, (Some _ | None) ->
@@ -1188,7 +1255,7 @@ let try_cli_slots
                 cli slot managed to bind: the pre-cli state is gone, so the
                 caller's quarantine (which requires that binding) would be
                 rejected. Settle the entry here instead. *)
-             record_outcome "exact_cli_released_without_binding";
+             record_outcome Cli_released_without_binding;
              settle_current_or_signal
                ~queue_ops
                entry
@@ -1200,7 +1267,7 @@ let try_cli_slots
            else (
              (* Nothing was released and nothing bound: the pre-cli state is
                 intact and the caller's ordinary settlement still applies. *)
-             record_outcome "exact_cli_walk_fell_back";
+             record_outcome Cli_walk_fell_back;
              Cli_fell_back))
       | runtime_id :: rest ->
         (* Rebind discipline: whatever is bound (the exhausted HTTP candidate
@@ -1213,7 +1280,7 @@ let try_cli_slots
            | Some identity -> release identity
          with
          | Error detail ->
-           record_outcome "exact_cli_release_unconfirmed";
+           record_outcome Cli_release_unconfirmed;
            log_exact_error entry "cli slot release" detail;
            (* The release did not confirm, so the caller's binding may or may
               not remain; the caller's own settlement copes with either (its
@@ -1230,13 +1297,13 @@ let try_cli_slots
            in
            (match bind_exact_attempt queue_ops entry identity with
             | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
-              record_outcome "exact_cli_bind_unconfirmed";
+              record_outcome Cli_bind_unconfirmed;
               log_exact_error entry "cli slot bind" detail;
               (* The binding may not be durable; walking on without a durable
                  identity would detach the dispatch from the queue record. *)
               Cli_fell_back
             | Error error ->
-              record_outcome "exact_cli_bind_failed";
+              record_outcome Cli_bind_failed;
               log_exact_error
                 entry
                 "cli slot bind"
@@ -1286,11 +1353,11 @@ let try_cli_slots
                   | Ok summary ->
                     (match complete_exact_attempt queue_ops entry identity summary with
                      | Ok { write_outcome = Fsync_completed; _ } ->
-                       record_outcome "ok_summary_cli";
+                       record_outcome Ok_summary_cli;
                        on_summary summary;
                        Cli_summary
                      | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
-                       record_outcome "exact_terminal_sync_unconfirmed";
+                       record_outcome Terminal_sync_unconfirmed;
                        (* Raises: the surrounding execution boundary treats an
                           unconfirmed terminal write as persistence
                           uncertainty, same as the HTTP completion path. *)
@@ -1299,12 +1366,12 @@ let try_cli_slots
                          "cli completion sync"
                          detail
                      | Error error when exact_attempt_source_resolved entry error ->
-                       record_outcome "exact_source_resolved";
+                       record_outcome Source_resolved;
                        Cli_settled
                      | Error (Exact_attempt_rejected rejection) ->
                        raise (Exact_terminalization_rejected rejection)
                      | Error (Exact_attempt_storage_error error) ->
-                       record_outcome "exact_terminal_persistence_failure";
+                       record_outcome Terminal_persistence_failure;
                        log_exact_error
                          entry
                          "cli completion"
@@ -1391,7 +1458,7 @@ let execute_prepared_flow_with_queue_ops_current
           with
           | Cli_summary | Cli_settled -> ()
           | Cli_no_slots | Cli_fell_back ->
-            record_outcome "exact_domain_invalid_output";
+            record_outcome Domain_invalid_output;
             quarantine_candidate
               ~queue_ops
               prepared.entry
@@ -1471,7 +1538,7 @@ let execute_prepared_flow_with_queue_ops_current
       try
         Eio.Cancel.protect
         @@ fun () ->
-        record_outcome "exact_cancellation";
+        record_outcome Cancellation;
         (match
            settle_current
              ~queue_ops
@@ -1511,7 +1578,7 @@ let execute_prepared_flow_with_queue_ops_current
      | Cancellation_exact_settlement_failed
          (Exact_settlement_persistence_failed detail)
      | Cancellation_settlement_raised detail ->
-       record_outcome "exact_cancellation_settlement_failed";
+       record_outcome Cancellation_settlement_failed;
        log_exact_error
          prepared.entry
          "cancellation terminalization persistence"
@@ -1525,7 +1592,7 @@ let execute_prepared_flow_with_queue_ops_current
   | Exact_terminalization_persistence_failed _ as persistence_failure ->
     raise persistence_failure
   | Exact_terminalization_rejected rejection ->
-    record_outcome "exact_terminal_rejected";
+    record_outcome Terminal_rejected;
     log_exact_error
       prepared.entry
       "terminalization rejected"
@@ -1536,7 +1603,7 @@ let execute_prepared_flow_with_queue_ops_current
     Identity_unbound_blocked
   | exn ->
     let detail = Printexc.to_string exn in
-    record_outcome "crashed";
+    record_outcome Crashed;
     log_exact_error prepared.entry "worker crash" detail;
     let settlement =
       Eio.Cancel.protect
@@ -1552,7 +1619,7 @@ let execute_prepared_flow_with_queue_ops_current
      | Error (Exact_settlement_identity_unbound detail) ->
        (match persist_identity_unbound prepared.entry with
         | Ok () ->
-          record_outcome "exact_identity_unbound";
+          record_outcome Identity_unbound;
           log_exact_error prepared.entry "terminalization blocked" detail;
           Identity_unbound_blocked
         | Error `Transition_not_applied ->

@@ -783,10 +783,6 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check string "runtime contract sandbox profile"
         (row |> U.member "sandbox_profile" |> U.to_string)
         (runtime_contract |> U.member "sandbox_profile" |> U.to_string);
-      check bool "runtime contract allowed paths present" true
-        (runtime_contract |> U.member "allowed_paths" |> U.to_list
-         |> List.length
-         > 0);
       let omits_field name =
         match runtime_contract with
         | `Assoc fields -> not (List.mem_assoc name fields)

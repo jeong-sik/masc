@@ -1736,8 +1736,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; network_mode_opt = None
         ; remote_endpoint_opt = None
         ; remote_endpoint_present = false
-        ; tool_groups_opt = None
-        ; tool_groups_present = false
         ; skill_names_opt = None
         ; skill_names_present = false
         ; native_tool_posture_opt = None
@@ -2000,8 +1998,6 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         ; network_mode_opt = None
         ; remote_endpoint_opt = None
         ; remote_endpoint_present = false
-        ; tool_groups_opt = None
-        ; tool_groups_present = false
         ; skill_names_opt = None
         ; skill_names_present = false
         ; native_tool_posture_opt = None
@@ -2167,8 +2163,6 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         ; network_mode_opt = None
         ; remote_endpoint_opt = None
         ; remote_endpoint_present = false
-        ; tool_groups_opt = None
-        ; tool_groups_present = false
         ; skill_names_opt = None
         ; skill_names_present = false
         ; native_tool_posture_opt = None
@@ -3978,81 +3972,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       check bool
         "delivered dashboard purge released admission fence"
         true
-        (Option.is_none admission);
-      let late_stimulus : Keeper_event_queue.stimulus =
-        { post_id = "dashboard-purge-late-stimulus"
-        ; urgency = Keeper_event_queue.Normal
-        ; arrived_at = 1.0
-        ; payload = Keeper_event_queue.Bootstrap
-        }
-      in
-      (match
-         Masc.Keeper_registry_event_queue.enqueue_durable_result
-           ~base_path:config.base_path
-           meta.name
-           late_stimulus
-       with
-       | Error detail ->
-         check string "post-purge durable intake reports exact retirement"
-           (Printf.sprintf
-              "keeper durable intake rejected because Keeper was removed by shutdown operation=%s"
-              (Shutdown_types.Operation_id.to_string operation_id))
-           detail
-       | Ok () -> fail "post-purge durable intake recreated the Keeper queue");
-      check bool
-        "post-purge durable intake leaves runtime directory absent"
-        false
-        (Sys.file_exists runtime_dir);
-      let retired_identity = make_meta meta.name in
-      (match Keeper_meta_store.replace_snapshot config retired_identity with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      (match
-         Masc.Keeper_registry_event_queue.enqueue_durable_result
-           ~base_path:config.base_path
-           meta.name
-           late_stimulus
-       with
-       | Error detail ->
-         check string "same identity remains retired"
-           (Printf.sprintf
-              "keeper durable intake rejected because Keeper was removed by shutdown operation=%s"
-              (Shutdown_types.Operation_id.to_string operation_id))
-           detail
-       | Ok () -> fail "retired Keeper identity reopened durable intake");
-      (* A replacement incarnation is a new trace, which is what the
-         retirement fence compares. *)
-      let replacement =
-        Keeper_meta_contract.map_runtime
-          (fun runtime ->
-            { runtime with
-              trace_id =
-                (match
-                   Keeper_id.Trace_id.of_string ("trace-integ-replacement-" ^ meta.name)
-                 with
-                 | Ok trace_id -> trace_id
-                 | Error detail -> fail detail)
-            })
-          (make_meta meta.name)
-      in
-      (match Keeper_meta_store.replace_snapshot config replacement with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      (match
-         Masc.Keeper_registry_event_queue.enqueue_durable_result
-           ~base_path:config.base_path
-           meta.name
-           late_stimulus
-       with
-       | Ok () -> ()
-       | Error detail ->
-         fail
-           ("replacement Keeper metadata did not supersede retirement: "
-            ^ detail));
-      check bool
-        "replacement Keeper accepts durable intake"
-        true
-        (Sys.file_exists runtime_dir))
+        (Option.is_none admission))
 ;;
 
 let test_keeper_shutdown_cleanup_replays_after_meta_removal () =

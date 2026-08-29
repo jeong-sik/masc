@@ -134,35 +134,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let agent_core_env = extract_agent_core_env_from_doc doc in
-  (* RFC-0389: [keeper.tools] nested table — read groups as a string array
-     and reject unknown names here, at load time. [Keeper_tool_group] is a
-     leaf under this parser and the descriptor, which is what makes the
-     check possible at this end at all: a typo in [keeper.tools] fails the
-     load instead of quietly keeping the full surface. *)
-  let tool_groups_result =
-    match List.assoc_opt "keeper.tools.groups" doc with
-    | None -> Ok None
-    | Some (Keeper_toml_loader.Toml_string_array groups) ->
-      let normalized = normalize_name_list groups in
-      if normalized = [] then Ok None
-      else
-        let unknown =
-          List.filter_map
-            (fun name ->
-               match Keeper_tool_group.of_string name with
-               | Some _ -> None
-               | None -> Some name)
-            normalized
-        in
-        (match unknown with
-         | [] -> Ok (Some normalized)
-         | names ->
-           Error
-             (Printf.sprintf
-                "unknown keeper tool groups (keeper.tools.groups): %s"
-                (String.concat ", " names)))
-    | Some _ -> Ok None
-  in
   let result =
     match detect_unknown_keeper_toml_keys doc with
     | [] -> Ok ()
@@ -171,18 +142,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           (Printf.sprintf
              "unknown keeper TOML keys: %s"
              (String.concat ", " fields))
-  in
-  let result =
-    Result.bind result (fun () ->
-        match tool_groups_result with
-        | Ok _ -> Ok ()
-        | Error error -> Error error)
-  in
-  (* The record is built from the checked value; on [Error] the parse below
-     never escapes to a caller anyway, so the fallback here is unreachable
-     bookkeeping rather than a silent pass-through. *)
-  let tool_groups =
-    match tool_groups_result with Ok groups -> groups | Error _ -> None
   in
   (* Do not use [strs] alone here: it maps an absent array and an explicit []
      to the same value. The profile contract gives those opposite meanings. *)
@@ -310,7 +269,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         always_allow = bool_ "always_allow";
         native_tool_posture =
           Option.bind (str "tools.native") Runtime_native_tools.of_string;
-        tool_groups;
         skill_names;
         agent_core_env;
       })
@@ -359,7 +317,6 @@ let merge_keeper_profile_defaults
     always_allow = prefer overlay.always_allow base.always_allow;
     native_tool_posture =
       prefer overlay.native_tool_posture base.native_tool_posture;
-    tool_groups = prefer overlay.tool_groups base.tool_groups;
     skill_names = prefer overlay.skill_names base.skill_names;
     agent_core_env =
       (let overlay_keys = List.map fst overlay.agent_core_env in

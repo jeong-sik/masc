@@ -107,18 +107,13 @@ let missing_skill_capabilities ~skill_names ~skill_inventory =
 ;;
 
 let create
-      ~tool_groups
       ~skill_names
       ~global_skill_catalog
       ~skill_inventory
       ~task_skills
   =
-  let tool_surface =
-    Keeper_tool_descriptor.tool_groups_to_surface tool_groups
-  in
   let descriptors =
-    Keeper_tool_descriptor.model_visible_descriptors_for_surface
-      ~surface:tool_surface
+    Keeper_tool_descriptor.model_visible_descriptors ()
   in
   let skill_projection =
     Keeper_skill_catalog.project_turn
@@ -304,9 +299,7 @@ let candidate_description = function
 ;;
 
 let candidate_category = function
-  | Ordinary_tool capability ->
-    Keeper_tool_descriptor.keeper_tool_group_to_string
-      capability.descriptor.keeper_tool_group
+  | Ordinary_tool _ -> "tool"
   | Skill _ -> "skill"
 ;;
 

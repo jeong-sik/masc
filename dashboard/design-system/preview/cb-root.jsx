@@ -115,8 +115,8 @@ function App() {
 
       {/* ════════ PHASE 3 · CODE IDE v2 ════════ */}
 
-      <DCSection id="ide-tree" title="E1 · File Tree Explorer" subtitle="allowed_paths overlay · live filters · recent/pinned/changing memory · diff rollups.">
-        <DCArtboard id="e1-allowed" label="A · Tree + allowed_paths overlay" width={920} height={520}><IxTreeAllowed branch="main" keepers={["nick0cave","sangsu","masc-improver"]}/></DCArtboard>
+      <DCSection id="ide-tree" title="E1 · File Tree Explorer" subtitle="sandbox scope overlay · live filters · recent/pinned/changing memory · diff rollups.">
+        <DCArtboard id="e1-allowed" label="A · Tree + sandbox scope overlay" width={920} height={520}><IxTreeAllowed branch="main" keepers={["nick0cave","sangsu","masc-improver"]}/></DCArtboard>
         <DCArtboard id="e1-filter"  label="B · Filter bar" width={920} height={420}><IxTreeFilter branch="feat/keeper-clarity" keepers={["sangsu","masc-improver"]}/></DCArtboard>
         <DCArtboard id="e1-tabs"    label="C · Recent / pinned / changed / search" width={780} height={420}><IxTreeTabs branch="main"/></DCArtboard>
         <DCArtboard id="e1-diff"    label="D · Diff-annotated tree" width={920} height={520}><IxTreeDiff branch="main" keepers={["nick0cave","qa-king"]}/></DCArtboard>

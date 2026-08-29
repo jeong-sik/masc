@@ -537,7 +537,6 @@ let success_json ~audit command report =
       , `String command.request.expected_quarantine_id )
     ; "failure_category", `String failure_category
     ; "decision", `String "acknowledge_and_requeue"
-    ; "partition_state", `String (Partition.state_to_string report.partition.state)
     ; "wake", `String (wake_to_string report.wake)
     ; "audit", audit
     ]

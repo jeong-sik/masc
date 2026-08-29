@@ -111,6 +111,27 @@ let drop_resolution ~base_path ~keeper_name resolution =
 ;;
 
 
+(* Durable HITL wakes are addressed to a Keeper that must exist, so every
+   submitted approval gets its recipient's metadata written first. *)
+let ensure_keeper_exists ~base_path ~keeper_name =
+  let json =
+    `Assoc
+      [ "name", `String keeper_name
+      ; "trace_id", `String ("trace-" ^ keeper_name)
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Error detail -> Alcotest.fail detail
+  | Ok meta ->
+    (match
+       Masc.Keeper_meta_store.replace_snapshot
+         (Masc.Workspace.default_config base_path)
+         meta
+     with
+     | Ok () -> ()
+     | Error detail -> Alcotest.fail detail)
+;;
+
 let submit_submission_with_context
       ?turn_id
       ?request_context
@@ -122,6 +143,7 @@ let submit_submission_with_context
       ~input
       ()
   =
+  ensure_keeper_exists ~base_path ~keeper_name;
   match
     AQ.submit_pending
       ~keeper_name

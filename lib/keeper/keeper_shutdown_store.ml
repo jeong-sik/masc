@@ -847,13 +847,13 @@ type terminal_delete_outcome =
   | Terminal_deleted
   | Terminal_retained
 
-(* The retirement fact lives in [Keeper_retirement_store] (written by
-   shutdown finalize when it removes the metadata), so a settled operation
-   record has no reader left and keeping it only makes boot recovery walk
-   the same settled operation forever. A [Completion_pending] receipt is
-   still owed to its consumer; [requires_admission_fence] already keeps
-   such an operation out of the reclaim call sites, and this predicate
-   refuses it independently. *)
+(* Durable intake is authorized by current metadata alone
+   ([authorize_durable_intake_owner]), so a settled operation record has no
+   reader left and keeping it only makes boot recovery walk the same
+   settled operation forever. A [Completion_pending] receipt is still owed
+   to its consumer; [requires_admission_fence] already keeps such an
+   operation out of the reclaim call sites, and this predicate refuses it
+   independently. *)
 let reclaimable_terminal_phase (operation : Keeper_shutdown_types.t) =
   match operation.phase with
   | Keeper_shutdown_types.Superseded _ -> true

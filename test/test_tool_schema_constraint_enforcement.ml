@@ -86,7 +86,7 @@ let find_schema_exn name schemas =
 let all_masc_schemas =
   Config.raw_all_tool_schemas
   @ Keeper_schema.schemas
-  @ Keeper_tool_descriptor.model_visible_schemas ~surface:All
+  @ Keeper_tool_descriptor.model_visible_schemas ()
 ;;
 
 let keeper_artifact_read_schema = find_schema_exn "keeper_artifact_read" all_masc_schemas

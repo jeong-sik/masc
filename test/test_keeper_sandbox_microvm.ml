@@ -133,7 +133,6 @@ let microvm_meta ~name : Masc.Keeper_meta_contract.keeper_meta =
     `Assoc
       [ ("name", `String name)
       ; ("trace_id", `String ("trace-" ^ name))
-      ; ("allowed_paths", `List [ `String "*" ])
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

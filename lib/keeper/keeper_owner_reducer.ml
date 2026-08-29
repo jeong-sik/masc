@@ -50,7 +50,6 @@ type profile_update =
   ; telemetry_feedback_window_hours : int option
   ; always_allow : bool option
   ; agent_core_env : (string * string) list
-  ; tool_groups : string list option
   ; updated_at : string
   }
 
@@ -438,7 +437,6 @@ let apply_existing (state : state) meta command =
          ; telemetry_feedback_window_hours = update.telemetry_feedback_window_hours
          ; always_allow = update.always_allow
          ; agent_core_env = update.agent_core_env
-         ; tool_groups = update.tool_groups
          ; updated_at = update.updated_at
          })
   | Repair_trace_identity repair ->

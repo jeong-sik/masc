@@ -227,6 +227,17 @@ export interface KeeperApprovalQueueRowViolation {
   tool_name?: string | null
 }
 
+/** A recent_resolved row the server sent but the client contract rejected.
+ *  Surfaced as a typed violation instead of discarding the whole Gate
+ *  snapshot (#31695): one undecodable history row must not blind the
+ *  operator to the open-Gate count. Identity fields are best-effort salvage. */
+export interface KeeperResolvedApprovalRowViolation {
+  index: number
+  id?: string | null
+  keeper_name?: string | null
+  tool_name?: string | null
+}
+
 /** Which exact-output lane serves Gate Auto Judge. Slot order is Agent Core failover
  *  order: the first slot is the model that actually judges. */
 export type GateJudgeLane =
@@ -306,6 +317,7 @@ export interface DashboardGateResponse {
   approval_queue: KeeperApprovalQueueItem[] | null
   approval_queue_state: KeeperApprovalQueueState
   approval_queue_violations?: KeeperApprovalQueueRowViolation[]
+  recent_resolved_violations?: KeeperResolvedApprovalRowViolation[]
   recent_resolved: KeeperResolvedApprovalItem[] | null
   recent_resolved_page: KeeperResolvedApprovalPage | null
   recent_resolved_state: KeeperResolvedApprovalState

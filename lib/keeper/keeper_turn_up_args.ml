@@ -21,8 +21,6 @@ type parsed_args = {
   remote_endpoint_opt : string option;
   remote_endpoint_present : bool;
   network_mode_opt : string option;
-  tool_groups_opt : string list option;
-  tool_groups_present : bool;
   skill_names_opt : string list option;
   skill_names_present : bool;
   native_tool_posture_opt : Runtime_native_tools.posture option;
@@ -35,7 +33,7 @@ type parsed_args = {
 
 let parse_tools_patch args =
   match Json_util.assoc_member_opt "tools" args with
-  | None -> Ok (false, None, false, None)
+  | None -> Ok (false, None)
   | Some (`Assoc fields) ->
       let duplicates =
         fields
@@ -56,7 +54,7 @@ let parse_tools_patch args =
         let unknown =
           List.filter_map
             (fun (key, _) ->
-               if String.equal key "groups" || String.equal key "native"
+               if String.equal key "native"
                then None
                else Some key)
             fields
@@ -64,39 +62,6 @@ let parse_tools_patch args =
         if unknown <> []
         then Error ("unsupported tools field(s): " ^ String.concat ", " unknown)
         else
-          let groups =
-            match List.assoc_opt "groups" fields with
-            | None -> Ok (false, None)
-            | Some `Null -> Ok (true, None)
-            | Some (`List values) ->
-              let rec collect acc index = function
-                | [] ->
-                  let groups = normalize_name_list (List.rev acc) in
-                  let unknown =
-                    List.filter
-                      (fun name -> Option.is_none (Keeper_tool_group.of_string name))
-                      groups
-                  in
-                  if unknown = []
-                  then Ok (true, if groups = [] then None else Some groups)
-                  else
-                    Error
-                      ("unknown keeper tool groups: " ^ String.concat ", " unknown)
-                | `String value :: rest -> collect (value :: acc) (index + 1) rest
-                | bad :: _ ->
-                  Error
-                    (Printf.sprintf
-                       "tools.groups[%d] must be a string (received %s)"
-                       index
-                       (Json_util.kind_name bad))
-              in
-              collect [] 0 values
-            | Some other ->
-              Error
-                (Printf.sprintf
-                   "tools.groups must be an array of strings or null (received %s)"
-                   (Json_util.kind_name other))
-          in
           let native =
             match List.assoc_opt "native" fields with
             | None -> Ok (false, None)
@@ -115,15 +80,7 @@ let parse_tools_patch args =
                    "tools.native must be a string or null (received %s)"
                    (Json_util.kind_name other))
           in
-          (match groups, native with
-           | Ok (tool_groups_present, tool_groups_opt),
-             Ok (native_tool_posture_present, native_tool_posture_opt) ->
-             Ok
-               ( tool_groups_present
-               , tool_groups_opt
-               , native_tool_posture_present
-               , native_tool_posture_opt )
-           | Error detail, _ | _, Error detail -> Error detail)
+          native
   | Some other ->
     Error
       (Printf.sprintf
@@ -253,11 +210,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
     | _, _, _, Error e -> Error (tool_result_error ~class_:Tool_result.Policy_rejection e)
     | Ok mention_targets_opt,
       Ok runtime_id_opt,
-      Ok
-        ( tool_groups_present
-        , tool_groups_opt
-        , native_tool_posture_present
-        , native_tool_posture_opt ),
+      Ok (native_tool_posture_present, native_tool_posture_opt),
       Ok (skill_names_present, skill_names_opt) ->
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let max_context_override_res = parse_max_context_override args in
@@ -370,8 +323,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       remote_endpoint_opt;
       remote_endpoint_present;
       network_mode_opt;
-      tool_groups_opt;
-      tool_groups_present;
       skill_names_opt;
       skill_names_present;
       native_tool_posture_opt;

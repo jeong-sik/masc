@@ -139,12 +139,10 @@ let realtime_bridge_voice_loop_json ~session_active ~endpoint =
       , `Assoc
           [ "capture", `String "dashboard_microphone_stream"
           ; "handoff", `String "audio_frames_to_realtime_bridge"
-          ; "fallback_route", `String "POST /api/v1/voice/transcribe"
           ] )
     ; ( "keeper_output"
       , `Assoc
           [ "delivery", `String "assistant_audio_events_or_tts_audio_clip"
-          ; "fallback_tool", `String "keeper_voice_speak"
           ; ( "browser_route"
             , `String ("GET " ^ Masc_network_defaults.voice_audio_path "<token>")
             )

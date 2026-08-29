@@ -1675,7 +1675,7 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
   let ctx : Tool_misc.context =
     { config
     ; agent_name = meta.name
-    ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ~surface:All
+    ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
     }
   in
   Tool_misc.dispatch ctx ~name ~args

@@ -1366,7 +1366,6 @@ let entry_observation_to_yojson = function
   | Entry_present { kind; identity } ->
     `Assoc
       [ "kind", `String "present"
-      ; "resource_kind", `String (file_kind_to_string kind)
       ; "identity", identity_to_yojson identity
       ]
 ;;
@@ -1394,7 +1393,6 @@ let prepared_outcome_to_yojson = function
   | Prepared_unbound_stage_preserved { kind; identity } ->
     `Assoc
       [ "kind", `String "unbound_stage_preserved"
-      ; "resource_kind", `String (file_kind_to_string kind)
       ; "identity", identity_to_yojson identity
       ]
 ;;
@@ -1424,7 +1422,6 @@ let bound_outcome_to_yojson = function
   | Bound_stage_preserved { kind; identity; observed_target } ->
     `Assoc
       [ "kind", `String "stage_preserved"
-      ; "resource_kind", `String (file_kind_to_string kind)
       ; "identity", identity_to_yojson identity
       ; "observed_target", entry_observation_to_yojson observed_target
       ]
@@ -1641,7 +1638,6 @@ let core_failure_cause_to_yojson = function
   | Core.Unexpected_resource_kind kind ->
     `Assoc
       [ "kind", `String "unexpected_resource_kind"
-      ; "resource_kind", `String (file_kind_to_string kind)
       ]
   | Core.Resource_identity_changed { expected; actual } ->
     `Assoc
@@ -1751,7 +1747,6 @@ let row_to_yojson = function
     `Assoc
       [ "kind", `String "unexpected_lane_entry"
       ; "name", `String name
-      ; "resource_kind", `String (file_kind_to_string kind)
       ]
   | Missing_lane_entry { name } ->
     `Assoc [ "kind", `String "missing_lane_entry"; "name", `String name ]
@@ -1822,7 +1817,6 @@ let row_to_yojson = function
       [ "kind", `String "unexpected_record_kind"
       ; "area", `String (record_area_to_string area)
       ; "operation_id", `String operation_id
-      ; "resource_kind", `String (file_kind_to_string kind)
       ]
   | Missing_record_entry { area; operation_id } ->
     `Assoc

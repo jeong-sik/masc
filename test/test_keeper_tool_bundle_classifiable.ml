@@ -55,7 +55,7 @@ let publication_recovery_turn_context ~registry ~keeper_name =
 
 (* agent_name is not free-form: keeper_meta_json_parse rejects a meta whose
    agent_name is not "keeper-<name>-agent". Derived the way production does. *)
-let make_meta ~name ?tool_groups () : Keeper_meta_contract.keeper_meta =
+let make_meta ~name () : Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -63,7 +63,7 @@ let make_meta ~name ?tool_groups () : Keeper_meta_contract.keeper_meta =
           ; "trace_id", `String "test-trace-bundle-classifiable"
           ])
   with
-  | Ok meta -> { meta with tool_groups }
+  | Ok meta -> meta
   | Error e -> failf "make_meta failed: %s" e
 ;;
 
@@ -251,8 +251,6 @@ let assert_exact_activation snapshot expected
 
 let with_bundle_tools
       ?(record_activations = true)
-      ?tool_groups
-      ?capability_tool_groups
       f
   =
   ignore (Masc_test_deps.init_unified_tool_registry ());
@@ -266,7 +264,7 @@ let with_bundle_tools
     ~finally:(fun () -> if Sys.file_exists dir then remove_tree dir)
     (fun () ->
        let config = Workspace.default_config dir in
-       let meta = make_meta ~name:"bundle-classifiable" ?tool_groups () in
+       let meta = make_meta ~name:"bundle-classifiable" () in
        let skill_snapshot, skill_catalog = skill_snapshot_and_catalog () in
        let trace_id = meta.runtime.trace_id in
        let session_dir =
@@ -320,10 +318,6 @@ let with_bundle_tools
        in
        let capability_surface =
          Keeper_capability_surface.create
-           ~tool_groups:
-             (match capability_tool_groups with
-              | Some groups -> Some groups
-              | None -> meta.tool_groups)
            ~skill_names:None
            ~global_skill_catalog:skill_catalog
            ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
@@ -360,8 +354,7 @@ let with_bundle f =
 ;;
 
 let test_narrow_surface_controls_production_bundle () =
-  with_bundle_tools ~tool_groups:[ "board" ]
-  @@ fun _config _meta _skill_snapshot _composition_plan_index _surface tools ->
+  with_bundle_tools  @@ fun _config _meta _skill_snapshot _composition_plan_index _surface tools ->
   let names =
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools
   in
@@ -423,10 +416,8 @@ let decode_tool_json ~base_path content =
 ;;
 
 let test_tools_list_reads_the_supplied_capability_surface () =
-  with_bundle_tools ~capability_tool_groups:[ "board" ]
-  @@ fun config meta _snapshot _composition_plan_index capability_surface tools ->
-  check bool "fixture metadata remains unrestricted" true
-    (Option.is_none meta.tool_groups);
+  with_bundle_tools
+  @@ fun config _meta _snapshot _composition_plan_index capability_surface tools ->
   let tool =
     match
       List.find_opt
@@ -779,7 +770,6 @@ let test_bundle_matches_expected_projection () =
         ~official_client_kind:"agent_core"
         ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
         ~native_posture:None
-        ~tool_groups:None
         ~skill_names:None
         ~current_task_id:(Some "task-001")
         ~task_skill_references:[ task_reference ]

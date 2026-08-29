@@ -151,7 +151,6 @@ let clear_agent_current_task_cache config ~task_id =
                    (`Assoc
                        [ "type", `String "agent_current_task_cache_cleared"
                        ; "agent", `String agent.name
-                       ; "stale_task", `String task_id
                        ; "ts", `String (Masc_domain.now_iso ())
                        ])
                | Ok _ -> ()

@@ -450,7 +450,6 @@ let attribution_of_transition
     let evidence : Yojson.Safe.t =
       `Assoc
         [ "event", `String event_name
-        ; "violated_event", `String ev
         ; "precondition_reason", `String reason
         ]
     in

@@ -484,7 +484,6 @@ let repository_checkouts_json_with_budget_impl
               list. They are different answers and now say so. *)
            | Ok _, Error _ -> "filesystem_unavailable") )
     ; "scan", Keeper_playground_checkouts.scan_json scan
-    ; "freshness_basis", `String "local_tracking_ref"
     ; "observed_at", `String (Masc_domain.iso8601_of_unix_seconds observed_at_unix)
     ; "observed_at_unix", `Float observed_at_unix
     ; "entries", `List entries

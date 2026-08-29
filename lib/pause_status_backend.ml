@@ -30,8 +30,6 @@ let keeper_pause_status_json config =
     [ "paused", `Bool (paused_names <> [])
     ; "paused_count", `Int (List.length paused_names)
     ; "paused_names", `List (List.map (fun name -> `String name) paused_names)
-    ; "meta_paused_count", `Int (List.length meta_paused_names)
-    ; "phase_paused_count", `Int (List.length phase_paused_names)
     ; ( "read_errors"
       , `List
           (List.rev_map

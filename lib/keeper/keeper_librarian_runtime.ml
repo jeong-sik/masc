@@ -673,7 +673,6 @@ let prompt_material_payload = function
   | Error detail ->
     `Assoc
       [ "key", `String Prompt_names.librarian
-      ; "render_error", `String detail
       ]
 ;;
 

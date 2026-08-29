@@ -152,9 +152,6 @@ let enqueue_external_decision queue stimulus =
 type durable_intake_error =
   | Durable_intake_token_not_live
   | Durable_intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
-  | Durable_intake_keeper_retired of Keeper_shutdown_types.Operation_id.t
-  | Durable_intake_keeper_metadata_read_failed of string
-  | Durable_intake_retirement_read_failed of string
 
 let durable_intake_error_to_string = function
   | Durable_intake_token_not_live ->
@@ -163,49 +160,6 @@ let durable_intake_error_to_string = function
     Printf.sprintf
       "keeper durable intake rejected by shutdown operation=%s"
       (Keeper_shutdown_types.Operation_id.to_string operation_id)
-  | Durable_intake_keeper_retired operation_id ->
-    Printf.sprintf
-      "keeper durable intake rejected because Keeper was removed by shutdown operation=%s"
-      (Keeper_shutdown_types.Operation_id.to_string operation_id)
-  | Durable_intake_keeper_metadata_read_failed detail ->
-    "keeper durable intake rejected because Keeper metadata could not be read: "
-    ^ detail
-  | Durable_intake_retirement_read_failed detail ->
-    "keeper durable intake rejected because Keeper retirement state could not be read: "
-    ^ detail
-;;
-
-let authorize_durable_intake_owner ~base_path ~keeper_name =
-  let config = Workspace.default_config base_path in
-  (* The retirement fact is durable on its own (Keeper_retirement_store,
-     written by shutdown finalize when it removes the metadata); it used to
-     be inferred from retained Finalized shutdown operation records, which
-     forced those records to survive every boot (masc#31686). A name with a
-     recorded retirement stays closed while it has no live incarnation, and
-     a live incarnation stays closed exactly when its trace is the retired
-     one; a replacement incarnation is a new trace and is admitted. *)
-  match Keeper_retirement_store.list_for_keeper ~config ~keeper_name with
-  | Error detail -> Error (Durable_intake_retirement_read_failed detail)
-  | Ok [] -> Ok ()
-  | Ok (first_retirement :: later_retirements as retirements) ->
-    (match Keeper_meta_store.read_meta config keeper_name with
-     | Error detail -> Error (Durable_intake_keeper_metadata_read_failed detail)
-     | Ok None ->
-       let latest_retirement =
-         List.fold_left (fun _ entry -> entry) first_retirement later_retirements
-       in
-       Error
-         (Durable_intake_keeper_retired
-            latest_retirement.Keeper_retirement_store.operation_id)
-     | Ok (Some meta) ->
-       (match
-          List.find_opt
-            (fun (entry : Keeper_retirement_store.entry) ->
-              Keeper_id.Trace_id.equal meta.runtime.trace_id entry.trace_id)
-            retirements
-        with
-        | Some entry -> Error (Durable_intake_keeper_retired entry.operation_id)
-        | None -> Ok ()))
 ;;
 
 let with_durable_intake
@@ -221,20 +175,14 @@ let with_durable_intake
         token
         ~base_path
         ~keeper_name
-    then (
-      match authorize_durable_intake_owner ~base_path ~keeper_name with
-      | Ok () -> Ok (operation ())
-      | Error _ as error -> error)
+    then Ok (operation ())
     else Error Durable_intake_token_not_live
   | None ->
     (match
        Keeper_shutdown_intake_fence.run_durable_intake_if_open
          ~base_path
          ~keeper_name
-         (fun _intake_token ->
-            match authorize_durable_intake_owner ~base_path ~keeper_name with
-            | Ok () -> Ok (operation ())
-            | Error _ as error -> error)
+         (fun _intake_token -> Ok (operation ()))
      with
      | Keeper_shutdown_intake_fence.Intake_committed result -> result
      | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
@@ -564,12 +512,12 @@ let project_accepted_transfer_durable_result
 ;;
 
 type hitl_resolution_enqueue_error =
-  | Hitl_recipient_retired of Keeper_shutdown_types.Operation_id.t
+  | Hitl_recipient_absent
   | Hitl_enqueue_failed of string
 
 let hitl_resolution_enqueue_error_to_string = function
-  | Hitl_recipient_retired operation_id ->
-    durable_intake_error_to_string (Durable_intake_keeper_retired operation_id)
+  | Hitl_recipient_absent ->
+    "hitl resolution rejected because the Keeper does not exist"
   | Hitl_enqueue_failed reason -> reason
 ;;
 
@@ -590,23 +538,32 @@ let enqueue_hitl_resolution_durable_result
     ; payload = Keeper_event_queue.Hitl_resolved resolution
     }
   in
+  (* This is the sole carrier of an operator decision and must fail closed:
+     a resolution addressed to a Keeper that does not exist can never be
+     consumed, so it is reported as [Hitl_recipient_absent] before any
+     durable row is written. Generic stimuli take no such check — the queue
+     stays an open mailbox. A Keeper mid-shutdown is fenced by the intake
+     reservation below, which keeps the delivery replayable until the
+     removal either completes or unwinds. *)
   match
-    with_durable_intake
-      ~base_path
-      ~keeper_name
-      (fun () ->
-        enqueue_durable_result_unfenced ~base_path keeper_name stimulus)
+    Keeper_meta_store.read_meta (Workspace.default_config base_path) keeper_name
   with
-  | Ok (Ok ()) -> Ok ()
-  | Ok (Error message) -> Error (Hitl_enqueue_failed message)
-  | Error (Durable_intake_keeper_retired operation_id) ->
-    Error (Hitl_recipient_retired operation_id)
-  | Error
-      (( Durable_intake_token_not_live
-       | Durable_intake_shutdown_reserved _
-       | Durable_intake_keeper_metadata_read_failed _
-       | Durable_intake_retirement_read_failed _ ) as error) ->
-    Error (Hitl_enqueue_failed (durable_intake_error_to_string error))
+  | Error detail -> Error (Hitl_enqueue_failed detail)
+  | Ok None -> Error Hitl_recipient_absent
+  | Ok (Some _) ->
+    (match
+       with_durable_intake
+         ~base_path
+         ~keeper_name
+         (fun () ->
+           enqueue_durable_result_unfenced ~base_path keeper_name stimulus)
+     with
+     | Ok (Ok ()) -> Ok ()
+     | Ok (Error message) -> Error (Hitl_enqueue_failed message)
+     | Error
+         (( Durable_intake_token_not_live
+          | Durable_intake_shutdown_reserved _ ) as error) ->
+       Error (Hitl_enqueue_failed (durable_intake_error_to_string error)))
 ;;
 
 let drop_by_post_id ~base_path name ~post_id =

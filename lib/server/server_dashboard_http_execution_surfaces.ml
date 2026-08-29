@@ -489,7 +489,6 @@ let with_cached_dashboard_surface_metadata
             ; "workspace_path", `String config.workspace_path
             ; "producer", `String producer
             ; "store_kind", `String store_kind
-            ; "cache_surface", `String "Server_dashboard_http_execution_surfaces.cached_surface"
             ; "background_refresh_interval_s", `Float background_refresh_interval_s
             ; ( "cache_policy"
               , `String

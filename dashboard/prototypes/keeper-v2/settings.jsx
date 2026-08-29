@@ -199,7 +199,6 @@ function SettingsSurface({ onNav }) {
   // sandbox — real MASC keys only (keepers/<name>.toml [access])
   const [sbProfile, setSbProfile] = useSet('local');
   const [netMode, setNetMode] = useSet('inherit');
-  const [allowPaths, setAllowPaths] = useSet('~/wt/<keeper>\n/tmp/masc');
   // repositories — POST /api/v1/repositories (add-repo-dialog.ts fields)
   const [repos, setRepos] = useSet([
     { id: 'masc', name: 'masc', url: 'https://github.com/jeong-sik/masc.git', branch: 'main', autoSync: true, interval: 300, path: '.masc/repos/masc' },
@@ -449,15 +448,12 @@ function SettingsSurface({ onNav }) {
 
             {sec === 'sandbox' && (
               <React.Fragment>
-                <div className="set-hint" style={{ marginBottom: 12 }}>keeper 실행 격리의 <b>namespace 기본값</b>. keeper별 override 는 각 keeper 설정에서. 실제 키는 <span className="mono">sandbox_profile</span> · <span className="mono">network_mode</span> · <span className="mono">allowed_paths</span> 입니다.</div>
+                <div className="set-hint" style={{ marginBottom: 12 }}>keeper 실행 격리의 <b>namespace 기본값</b>. keeper별 override 는 각 keeper 설정에서. 실제 키는 <span className="mono">sandbox_profile</span> · <span className="mono">network_mode</span> 입니다.</div>
                 <div className="set-callout warn" style={{ marginBottom: 14 }}>
                   <b>보안 경계 아님.</b> <span className="mono">container</span> 는 <span className="mono">docker run</span> 을 호출하지만 Docker 미가용 시 <b>local 실행으로 폴백</b>합니다. 신뢰 경계가 아니라 편의적 격리로 취급하세요.
                 </div>
                 <SetRow label="sandbox_profile" hint="실행 격리 방식 · keeper 기본값"><SetSeg value={sbProfile} options={['local', 'container', 'none']} onChange={setSbProfile} /></SetRow>
                 <SetRow label="network_mode" hint="inherit=호스트 상속 · off=차단 · allow=허용"><SetSeg value={netMode} options={['inherit', 'off', 'allow']} onChange={setNetMode} /></SetRow>
-                <div className="set-sub-h">allowed_paths</div>
-                <div className="set-hint" style={{ marginBottom: 8 }}>한 줄에 하나 · 비우면 worktree 루트만</div>
-                <textarea className="set-input mono" style={{ width: '100%', minHeight: 66, resize: 'vertical' }} value={allowPaths} onChange={e => setAllowPaths(e.target.value)} />
               </React.Fragment>
             )}
 

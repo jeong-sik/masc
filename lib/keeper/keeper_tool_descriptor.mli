@@ -223,6 +223,14 @@ val all_descriptors : unit -> t list
     authority. *)
 val find_id : string -> t option
 
+(** Objective schema-shape errors for a model-facing input schema. The schema
+    must be an object and every structural field must pass the same validator
+    used by descriptor projection. *)
+val model_input_schema_errors
+  :  tool_name:string
+  -> Yojson.Safe.t
+  -> string list
+
 (** Objective schema-shape errors that prevent model projection. Empty means
     the descriptor has a resolved object schema whose structural fields are
     well-formed. *)

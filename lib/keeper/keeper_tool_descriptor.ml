@@ -2434,16 +2434,22 @@ let find_id id =
   List.find_opt (fun descriptor -> String.equal descriptor.id id) (all_descriptors ())
 ;;
 
-let model_schema_errors descriptor =
-  match descriptor.input_schema_source, descriptor.input_schema with
-  | (Descriptor_owned | Canonical_registry | Keeper_projection), `Assoc _ ->
-    (Tool_input_validation.schema_shape descriptor.input_schema).errors
-  | (Descriptor_owned | Canonical_registry | Keeper_projection), other ->
+let model_input_schema_errors ~tool_name = function
+  | `Assoc _ as schema -> (Tool_input_validation.schema_shape schema).errors
+  | other ->
     [ Printf.sprintf
         "input schema for %s must be an object, got %s"
-        descriptor.internal_name
+        tool_name
         (Json_util.kind_name other)
     ]
+;;
+
+let model_schema_errors descriptor =
+  match descriptor.input_schema_source with
+  | Descriptor_owned | Canonical_registry | Keeper_projection ->
+    model_input_schema_errors
+      ~tool_name:descriptor.internal_name
+      descriptor.input_schema
 ;;
 
 let keeper_model_names descriptor =

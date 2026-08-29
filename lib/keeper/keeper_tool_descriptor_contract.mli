@@ -15,6 +15,11 @@ type canonical_json_error = Keeper_chat_operation.canonical_json_error =
   | Duplicate_object_key of string
   | Non_finite_float
 
+type invariant_error =
+  | Uncallable_model_projection of Keeper_tool_descriptor.keeper_model_projection
+  | Blank_accepted_tool_name
+  | Invalid_model_input_schema of string list
+
 type create_error =
   | Accepted_tool_name_not_projected of
       { accepted : string
@@ -24,6 +29,7 @@ type create_error =
       { location : schema_location
       ; error : canonical_json_error
       }
+  | Create_invariant_violation of invariant_error
 
 type decode_error =
   | Non_canonical_json of canonical_json_error
@@ -38,6 +44,7 @@ type decode_error =
   | Invalid_composable_output of string
   | Composable_output_payload_mismatch
   | Invalid_execution of string
+  | Decode_invariant_violation of invariant_error
 
 type drift =
   | Descriptor_removed of

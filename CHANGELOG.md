@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+## [0.28.0] - 2026-08-30
+
+- **A bare Linux install runs in one shot.** The Linux release binaries link
+  SQLite statically, so `masc` and `masc-tui` start without `libsqlite3.so.0`
+  installed first (#31784), and the release build asserts neither shipped
+  binary keeps a dynamic SQLite dependency. When a system library is genuinely
+  missing, the installer now prints the loader error and the missing library
+  name instead of a blank `--version` failure (#31781). An offline install
+  smoke stages the packaged binaries as a `file://` release and boots the
+  installed server end to end, so the installer's asset-name and checksum
+  contract is exercised on every release (#31731, #31795).
+- **The TUI can start its own server.** `masc-tui` discovers the sibling server
+  binary and, on the Keepers surface, starts it on `s` when disconnected and
+  stops it on exit — an opt-in path toward the TUI as the default entry point
+  (RFC `tui-server-lifecycle`, #31745, #31752, #31761).
+- **Approvals answer the first keypress.** The Gate and held-tool decisions now
+  take the same single-action slot the operator-confirm path takes, so the
+  Approvals header shows `[submitting]` the instant a decision key lands and a
+  repeat press during the server round trip is refused instead of dispatching a
+  duplicate resolve (#31803). The surface also lists the standing always-allow
+  rules (#31819) and carries the reviewer's stated reason on an approval
+  (#31821).
+- **New Runtime and Config surfaces in the TUI.** The Runtime surface lists
+  every runtime rather than only the assigned ones (#31790), adds lane failover
+  candidates and repairs its scroll (#31806), and a self-hosted server declares
+  what it can actually do (#31823). A Config pane puts each model's two runtime
+  knobs in one table (#31817), and a turn can widen its own tool set (#31818).
+- **Keeper identity, sandbox, and GitHub App.** A GitHub App
+  installation-token broker issues scoped tokens (RFC `keeper-github-apps`,
+  #31766), `masc_keeper_up` advertises the microvm sandbox profile (#31764), an
+  omitted `sandbox_profile` resolves from the TOML declaration rather than
+  defaulting to the playground (#31786, #31789), identity scalar redaction
+  becomes a runtime toggle (#31787), and a keeper either exists or it does not —
+  the retirement fact is dropped (#31717).
+- **Verification does not stall on bad input.** An unreadable artifact reaches
+  the judge instead of leaving the Task waiting forever (#31802), and a
+  checkpoint whose payload cannot be encoded is recovered rather than lost
+  (#31779).
+- **Dashboard slimming and dependency floors.** Caller-less dashboard exports,
+  never-mounted config blocks, and seven weeks of unloaded `ds-*-kit` CSS are
+  removed (#31737, #31741, #31748, #31754), and a light refresh no longer rides
+  on a full-refresh waiter (#31804). `tls` moves to 2.1.2 so a client checks the
+  server certificate's usage (#31827), and esbuild, @babel/core, and three
+  vulnerable transitives are lifted past their patched floors (#31799, #31792).
+
 ## [0.27.0] - 2026-08-29
 
 - **A page's own tools reach a Keeper — WebMCP.** The dashboard registers a

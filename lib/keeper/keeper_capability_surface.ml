@@ -1,6 +1,5 @@
 type capability_availability =
   | Active
-  | Outside_tool_surface
   | Outside_skill_surface
   | Not_model_invocable
   | Invalid_definition
@@ -42,12 +41,6 @@ type t =
   ; skill_capabilities : skill_capability list
   ; skill_snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   }
-
-let descriptor_is_active descriptors (candidate : Keeper_tool_descriptor.t) =
-  List.exists
-    (fun (active : Keeper_tool_descriptor.t) -> String.equal active.id candidate.id)
-    descriptors
-;;
 
 let valid_skill_availability
       ~skill_names
@@ -125,13 +118,20 @@ let create
     Keeper_tool_descriptor.all_descriptors ()
     |> List.map (fun descriptor ->
       { descriptor
+        (* A descriptor that names itself to the model is in the surface, and
+           nothing left can take it back out. Until #31728 a Keeper could
+           narrow its own surface by declaring tool groups, and what fell
+           outside was carried here as [Outside_tool_surface]; that
+           declaration was removed because no Keeper ever wrote one. What
+           names itself is exactly what [model_visible_descriptors] holds --
+           [keeper_model_names] answers [] for a descriptor with schema
+           errors, which is the only other way those two lists could differ --
+           so the arm that said "outside" could not be reached, and the
+           surface it named does not exist. *)
       ; availability =
           (match Keeper_tool_descriptor.keeper_model_names descriptor with
            | [] -> Not_model_invocable
-           | _ :: _ ->
-             if descriptor_is_active descriptors descriptor
-             then Active
-             else Outside_tool_surface)
+           | _ :: _ -> Active)
       })
   in
   let skill_capabilities =
@@ -178,7 +178,6 @@ let candidates surface =
 
 let capability_availability_to_string = function
   | Active -> "active"
-  | Outside_tool_surface -> "outside_tool_surface"
   | Outside_skill_surface -> "outside_skill_surface"
   | Not_model_invocable -> "not_model_invocable"
   | Invalid_definition -> "invalid_definition"

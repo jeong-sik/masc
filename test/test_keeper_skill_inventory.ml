@@ -331,22 +331,31 @@ let test_catalog_status_tracks_source_precedence () =
   | valid -> failf "expected two exact valid items, got %d" (List.length valid)
 ;;
 
-let test_capability_surface_keeps_active_and_outside_tools () =
+(* Every Tool the inventory carries is either callable this turn or not
+   something the model can call at all. There is no third state: until #31728
+   a Keeper could declare tool groups and put a model-visible Tool outside its
+   own surface, and no Keeper ever did. *)
+let test_every_inventoried_tool_is_active_or_not_model_invocable () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let frozen = snapshot config [ [] ] in
   let surface = capability_surface frozen in
   let capabilities = Masc.Keeper_capability_surface.tool_capabilities surface in
-  check bool "restricted surface has active Tools" true
+  check bool "the surface has active Tools at all" true
     (List.exists
        (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
           capability.availability = Masc.Keeper_capability_surface.Active)
        capabilities);
-  check bool "restricted surface retains outside Tools" true
-    (List.exists
-       (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
-          capability.availability
-          = Masc.Keeper_capability_surface.Outside_tool_surface)
-       capabilities)
+  List.iter
+    (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+       match capability.availability with
+       | Masc.Keeper_capability_surface.Active
+       | Masc.Keeper_capability_surface.Not_model_invocable -> ()
+       | other ->
+         failf
+           "%s is %s, which no Tool can be"
+           capability.descriptor.internal_name
+           (Masc.Keeper_capability_surface.capability_availability_to_string other))
+    capabilities
 ;;
 
 let tool_capability_by_internal_name surface internal_name =
@@ -367,7 +376,6 @@ let active_capability_descriptor_ids surface =
   |> List.filter_map (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
     match capability.availability with
     | Masc.Keeper_capability_surface.Active -> Some capability.descriptor.id
-    | Outside_tool_surface
     | Outside_skill_surface
     | Not_model_invocable
     | Invalid_definition
@@ -427,9 +435,11 @@ let test_complete_inventory_preserves_agent_core_surface () =
   check (list string) "restricted active descriptors stay Agent Core projection"
     restricted_descriptor_ids
     (active_capability_descriptor_ids restricted);
-  let outside = tool_capability_by_internal_name restricted "tool_read_file" in
-  check bool "restricted model-visible Tool remains explicitly outside" true
-    (outside.availability = Masc.Keeper_capability_surface.Outside_tool_surface)
+  let read = tool_capability_by_internal_name restricted "tool_read_file" in
+  check string "a model-visible Tool is active in every surface"
+    "active"
+    (Masc.Keeper_capability_surface.capability_availability_to_string
+       read.availability)
 ;;
 
 let test_empty_selection_makes_valid_skill_operator_only () =
@@ -563,15 +573,15 @@ let test_search_includes_outside_tool_and_skill () =
   let surface =
     capability_surface ~skill_names:(Some []) frozen
   in
-  let outside_tool =
+  let read_tool =
     search_candidates surface "tool_read_file"
     |> List.exists (fun hit ->
       match hit.Masc.Keeper_capability_search.document.payload with
       | Masc.Keeper_capability_surface.Ordinary_tool capability ->
-        capability.availability = Masc.Keeper_capability_surface.Outside_tool_surface
+        capability.availability = Masc.Keeper_capability_surface.Active
       | Skill _ -> false)
   in
-  check bool "outside Tool is searchable" true outside_tool;
+  check bool "an active Tool is searchable" true read_tool;
   let outside_skill =
     search_candidates surface "\"release-checklist\""
     |> List.exists (fun hit ->
@@ -919,8 +929,8 @@ let () =
             test_invalid_sibling_isolated_with_digest
         ; test_case "catalog source precedence" `Quick
             test_catalog_status_tracks_source_precedence
-        ; test_case "restricted Tool availability" `Quick
-            test_capability_surface_keeps_active_and_outside_tools
+        ; test_case "every inventoried Tool is active or not model invocable" `Quick
+            test_every_inventoried_tool_is_active_or_not_model_invocable
         ; test_case "operator-only Tool inventory and search" `Quick
             test_operator_only_tool_is_in_inventory_and_search
         ; test_case "complete inventory preserves Agent Core surface" `Quick

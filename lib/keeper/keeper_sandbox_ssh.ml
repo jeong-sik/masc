@@ -361,6 +361,7 @@ let runner ~timeout_sec t =
         ; argv
         ; env
         ; cwd
+        ; remote_root = t.endpoint.remote_root
         ; timeout_sec
         ; stdin_len = Int64.of_int (String.length stdin)
         }

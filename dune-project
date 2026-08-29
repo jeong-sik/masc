@@ -81,8 +81,8 @@
   ;; Agent execution is built from packages/agent_core in this repository.
   ;; It is a private MASC library, not an independently versioned package.
   (uri (>= 4.4))
-  (tls (>= 2.0))
-  (tls-eio (>= 2.0))
+  (tls (>= 2.1.2))
+  (tls-eio (>= 2.1.2))
   (domain-name (>= 0.4))
   (ca-certs (>= 0.2))
   (ppx_deriving_yojson (>= 3.6))

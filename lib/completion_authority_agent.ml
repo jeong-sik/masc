@@ -614,6 +614,16 @@ let process_task_once
                 ~on_tool_result
                 prepared.review_request
             in
+            (* Every verdict lands in the calibration ledger the Harness
+               surface reads — which evaluator judged, and whether a fallback
+               answered for the intended one. The judge kept running after the
+               July evaluation flow was removed, but this call went with it,
+               and the ledger starved for a month while verdicts flowed
+               (last record 2026-07-27; the surface read as a museum). A
+               non-verdict is a no-op inside; the stalled path below already
+               reaches the Board. *)
+            Eval_calibration.record_verdict ~task_id:task.id
+              ~req:prepared.review_request ~result ();
             let evaluator_runtime = result.evaluator_runtime in
             match result.verdict with
        | None ->

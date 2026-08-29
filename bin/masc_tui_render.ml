@@ -6922,6 +6922,28 @@ let render_harness_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (* The tab name alone says nothing; the surface introduces itself. *)
+  box_line_styled buf cols ~style:(Theme.recede ())
+    "  Task verification verdicts \xe2\x80\x94 which evaluator judged each one, \
+     and which rows a fallback answered for.";
+  (* A ledger that quietly stopped is this screen's own failure mode: it once
+     starved for a month while the judge kept running, and the stale rows
+     read as a working gate. Say the age instead of letting old rows pass as
+     current. *)
+  let stale_note =
+    match verdicts with
+    | [] -> None
+    | newest :: _ ->
+        let age_days =
+          (Unix.gettimeofday () -. newest.Masc.Tui_decode.hv_at) /. 86_400.
+        in
+        if age_days >= 2. then
+          Some (Printf.sprintf "  last verdict %.0f days ago \xe2\x80\x94 the judge runs but nothing is being recorded" age_days)
+        else None
+  in
+  (match stale_note with
+   | None -> ()
+   | Some note -> box_line_styled buf cols ~style:(Theme.warn ()) note);
   let col_hdr =
     Printf.sprintf "  %-8s %-14s %-9s %-9s %s" "Time" "Task \xe2\x86\x92 Overview" "Gate" "Verdict"
       "Evaluator"
@@ -6934,7 +6956,11 @@ let render_harness_list (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let chrome_rows = if Option.is_some state.harness_error then 9 else 7 in
+  let chrome_rows =
+    (if Option.is_some state.harness_error then 9 else 7)
+    + 1
+    + (if Option.is_some stale_note then 1 else 0)
+  in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.harness_scroll max_scroll) in

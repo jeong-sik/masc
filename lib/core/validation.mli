@@ -16,7 +16,7 @@ val reset_rejection_stats : unit -> unit
 
 (** {1 Agent ID} *)
 
-module Agent_id : sig
+module Id_shape : sig
   type t
 
   val validate : string -> (t, string) result

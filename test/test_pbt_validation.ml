@@ -47,7 +47,7 @@ let prop_valid_always_ok =
     arb_valid_id
     (fun id ->
        Validation.reset_rejection_stats ();
-       match Validation.Agent_id.validate id with
+       match Validation.Id_shape.validate id with
        | Ok _ -> true
        | Error _ -> false)
 
@@ -57,7 +57,7 @@ let prop_empty_fails =
     QCheck.(make Gen.(return ""))
     (fun id ->
        Validation.reset_rejection_stats ();
-       match Validation.Agent_id.validate id with
+       match Validation.Id_shape.validate id with
        | Error _ -> true
        | Ok _ -> false)
 
@@ -69,7 +69,7 @@ let prop_path_sep_fails =
        QCheck.assume (String.length base > 0);
        Validation.reset_rejection_stats ();
        let with_slash = base ^ "/" ^ base in
-       match Validation.Agent_id.validate with_slash with
+       match Validation.Id_shape.validate with_slash with
        | Error _ -> true
        | Ok _ -> false)
 
@@ -81,7 +81,7 @@ let prop_traversal_fails =
        QCheck.assume (String.length suffix > 0);
        Validation.reset_rejection_stats ();
        let traversal = ".." ^ suffix in
-       match Validation.Agent_id.validate traversal with
+       match Validation.Id_shape.validate traversal with
        | Error _ -> true
        | Ok _ -> false)
 
@@ -91,8 +91,8 @@ let prop_roundtrip =
     arb_valid_id
     (fun id ->
        Validation.reset_rejection_stats ();
-       match Validation.Agent_id.validate id with
-       | Ok validated -> String.equal (Validation.Agent_id.to_string validated) id
+       match Validation.Id_shape.validate id with
+       | Ok validated -> String.equal (Validation.Id_shape.to_string validated) id
        | Error _ -> false)
 
 (* Property 6: IDs with invalid chars always fail *)
@@ -101,7 +101,7 @@ let prop_invalid_chars_fail =
     arb_invalid_id
     (fun id ->
        Validation.reset_rejection_stats ();
-       match Validation.Agent_id.validate id with
+       match Validation.Id_shape.validate id with
        | Error _ -> true
        | Ok _ -> false)
 

@@ -17,94 +17,94 @@ module Validation = Validation
    ============================================================ *)
 
 let test_agent_id_valid_simple () =
-  match Validation.Agent_id.validate "claude" with
-  | Ok t -> check string "to_string" "claude" (Validation.Agent_id.to_string t)
+  match Validation.Id_shape.validate "claude" with
+  | Ok t -> check string "to_string" "claude" (Validation.Id_shape.to_string t)
   | Error e -> fail e
 
 let test_agent_id_valid_with_dash () =
-  match Validation.Agent_id.validate "claude-opus" with
-  | Ok t -> check string "to_string" "claude-opus" (Validation.Agent_id.to_string t)
+  match Validation.Id_shape.validate "claude-opus" with
+  | Ok t -> check string "to_string" "claude-opus" (Validation.Id_shape.to_string t)
   | Error e -> fail e
 
 let test_agent_id_valid_with_underscore () =
-  match Validation.Agent_id.validate "agent_001" with
-  | Ok t -> check string "to_string" "agent_001" (Validation.Agent_id.to_string t)
+  match Validation.Id_shape.validate "agent_001" with
+  | Ok t -> check string "to_string" "agent_001" (Validation.Id_shape.to_string t)
   | Error e -> fail e
 
 let test_agent_id_valid_numeric () =
-  match Validation.Agent_id.validate "12345" with
-  | Ok t -> check string "numeric ok" "12345" (Validation.Agent_id.to_string t)
+  match Validation.Id_shape.validate "12345" with
+  | Ok t -> check string "numeric ok" "12345" (Validation.Id_shape.to_string t)
   | Error e -> fail e
 
 let test_agent_id_valid_mixed () =
-  match Validation.Agent_id.validate "Agent-X_42" with
-  | Ok t -> check string "mixed" "Agent-X_42" (Validation.Agent_id.to_string t)
+  match Validation.Id_shape.validate "Agent-X_42" with
+  | Ok t -> check string "mixed" "Agent-X_42" (Validation.Id_shape.to_string t)
   | Error e -> fail e
 
 let test_agent_id_valid_colon_namespace () =
-  match Validation.Agent_id.validate "keeper:keeper-test-98295-0" with
-  | Ok t -> check string "colon namespace" "keeper:keeper-test-98295-0" (Validation.Agent_id.to_string t)
+  match Validation.Id_shape.validate "keeper:keeper-test-98295-0" with
+  | Ok t -> check string "colon namespace" "keeper:keeper-test-98295-0" (Validation.Id_shape.to_string t)
   | Error e -> fail e
 
 let test_agent_id_reject_empty () =
-  match Validation.Agent_id.validate "" with
+  match Validation.Id_shape.validate "" with
   | Ok _ -> fail "should reject empty"
   | Error e -> check bool "contains empty" true (String.length e > 0)
 
 let test_agent_id_reject_too_long () =
   let long_id = String.make 100 'a' in
-  match Validation.Agent_id.validate long_id with
+  match Validation.Id_shape.validate long_id with
   | Ok _ -> fail "should reject too long"
   | Error e -> check bool "contains long" true (String.length e > 0)
 
 let test_agent_id_reject_slash () =
-  match Validation.Agent_id.validate "agent/bad" with
+  match Validation.Id_shape.validate "agent/bad" with
   | Ok _ -> fail "should reject slash"
   | Error e -> check bool "contains path" true (String.length e > 0)
 
 let test_agent_id_reject_backslash () =
-  match Validation.Agent_id.validate "agent\\bad" with
+  match Validation.Id_shape.validate "agent\\bad" with
   | Ok _ -> fail "should reject backslash"
   | Error e -> check bool "contains path" true (String.length e > 0)
 
 let test_agent_id_reject_path_traversal () =
-  match Validation.Agent_id.validate "../etc/passwd" with
+  match Validation.Id_shape.validate "../etc/passwd" with
   | Ok _ -> fail "should reject path traversal"
   | Error e -> check bool "contains traversal" true (String.length e > 0)
 
 let test_agent_id_reject_special_chars () =
-  match Validation.Agent_id.validate "agent@domain.com" with
+  match Validation.Id_shape.validate "agent@domain.com" with
   | Ok _ -> fail "should reject special chars"
   | Error e -> check bool "contains invalid" true (String.length e > 0)
 
 let test_agent_id_reject_space () =
-  match Validation.Agent_id.validate "agent name" with
+  match Validation.Id_shape.validate "agent name" with
   | Ok _ -> fail "should reject space"
   | Error e -> check bool "error exists" true (String.length e > 0)
 
 let test_agent_id_reject_bare_colon () =
-  match Validation.Agent_id.validate ":" with
+  match Validation.Id_shape.validate ":" with
   | Ok _ -> fail "should reject bare colon"
   | Error _ -> ()
 
 let test_agent_id_reject_multi_colon () =
-  match Validation.Agent_id.validate "a:b:c" with
+  match Validation.Id_shape.validate "a:b:c" with
   | Ok _ -> fail "should reject multiple colons"
   | Error _ -> ()
 
 let test_agent_id_reject_leading_colon () =
-  match Validation.Agent_id.validate ":foo" with
+  match Validation.Id_shape.validate ":foo" with
   | Ok _ -> fail "should reject leading colon"
   | Error _ -> ()
 
 let test_agent_id_reject_trailing_colon () =
-  match Validation.Agent_id.validate "foo:" with
+  match Validation.Id_shape.validate "foo:" with
   | Ok _ -> fail "should reject trailing colon"
   | Error _ -> ()
 
 let test_agent_id_of_string_unsafe () =
-  let t = Validation.Agent_id.of_string_unsafe "unsafe-input" in
-  check string "unsafe" "unsafe-input" (Validation.Agent_id.to_string t)
+  let t = Validation.Id_shape.of_string_unsafe "unsafe-input" in
+  check string "unsafe" "unsafe-input" (Validation.Id_shape.to_string t)
 
 (* ============================================================
    Task_id Tests
@@ -167,8 +167,8 @@ let test_reset_rejection_stats () =
 let test_rejection_stats_increment () =
   Validation.reset_rejection_stats ();
   (* Trigger exactly 2 rejections *)
-  ignore (Validation.Agent_id.validate "");
-  ignore (Validation.Agent_id.validate "bad/path");
+  ignore (Validation.Id_shape.validate "");
+  ignore (Validation.Id_shape.validate "bad/path");
   let (count, time) = Validation.get_rejection_stats () in
   check int "exactly 2 rejections" 2 count;
   check bool "time > 0" true (time > 0.0)
@@ -181,7 +181,7 @@ let test_rejection_stats_concurrent_snapshot () =
       Domain.spawn (fun () ->
         for write_index = 1 to writes_per_domain do
           ignore
-            (Validation.Agent_id.validate
+            (Validation.Id_shape.validate
                (Printf.sprintf "invalid/%d/%d" domain_index write_index))
         done))
   in
@@ -197,13 +197,13 @@ let test_rejection_stats_concurrent_snapshot () =
 
 let test_agent_id_max_length () =
   let max_id = String.make 64 'a' in
-  match Validation.Agent_id.validate max_id with
-  | Ok t -> check int "length 64" 64 (String.length (Validation.Agent_id.to_string t))
+  match Validation.Id_shape.validate max_id with
+  | Ok t -> check int "length 64" 64 (String.length (Validation.Id_shape.to_string t))
   | Error e -> fail e
 
 let test_agent_id_over_max_length () =
   let over_id = String.make 65 'a' in
-  match Validation.Agent_id.validate over_id with
+  match Validation.Id_shape.validate over_id with
   | Ok _ -> fail "should reject 65 chars"
   | Error _ -> ()
 
@@ -220,8 +220,8 @@ let test_task_id_over_max_length () =
   | Error _ -> ()
 
 let test_agent_id_single_char () =
-  match Validation.Agent_id.validate "a" with
-  | Ok t -> check string "single char" "a" (Validation.Agent_id.to_string t)
+  match Validation.Id_shape.validate "a" with
+  | Ok t -> check string "single char" "a" (Validation.Id_shape.to_string t)
   | Error e -> fail e
 
 let test_task_id_single_char () =
@@ -230,7 +230,7 @@ let test_task_id_single_char () =
   | Error e -> fail e
 
 let test_agent_id_unicode_rejected () =
-  match Validation.Agent_id.validate "agent_한글" with
+  match Validation.Id_shape.validate "agent_한글" with
   | Ok _ -> fail "should reject unicode"
   | Error _ -> ()
 
@@ -240,17 +240,17 @@ let test_task_id_unicode_rejected () =
   | Error _ -> ()
 
 let test_agent_id_dot_only () =
-  match Validation.Agent_id.validate "agent.name" with
+  match Validation.Id_shape.validate "agent.name" with
   | Ok _ -> fail "should reject dot"
   | Error _ -> ()
 
 let test_agent_id_single_dot () =
-  match Validation.Agent_id.validate "." with
+  match Validation.Id_shape.validate "." with
   | Ok _ -> fail "should reject single dot"
   | Error _ -> ()
 
 let test_agent_id_double_dot () =
-  match Validation.Agent_id.validate ".." with
+  match Validation.Id_shape.validate ".." with
   | Ok _ -> fail "should reject double dot"
   | Error _ -> ()
 
@@ -270,7 +270,7 @@ let test_task_id_unquoted_still_works () =
 let test_agent_id_quotes_are_rejected () =
   List.iter
     (fun raw ->
-       match Validation.Agent_id.validate raw with
+       match Validation.Id_shape.validate raw with
        | Ok _ -> failf "quoted agent id %S must be rejected" raw
        | Error _ -> ())
     [ "'keeper'"; "\"keeper\""; "'has space'" ]

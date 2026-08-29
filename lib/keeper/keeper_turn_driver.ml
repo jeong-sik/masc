@@ -1271,8 +1271,13 @@ let run_named
             ; system_prompt
             ; (* Only this lane can widen a running turn, so only this lane
                  is handed the listing. The official-client branches above
-                 take [tools] whole. *)
-              tools = Option.value agent_core_tools ~default:tools
+                 take [tools] whole. A caller that named no lane view is not
+                 deferring anything, so this lane sends every tool too --
+                 which is what every caller did before the listing existed. *)
+              tools =
+                (match agent_core_tools with
+                 | Some lane_view -> lane_view
+                 | None -> tools)
             ; initial_messages
             ; model_input_projection
             ; stream_idle_timeout_s

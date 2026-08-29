@@ -381,7 +381,9 @@ let resolve_librarian_slots ~base_path ~keeper_id =
       Exact_setup_failed
         (Exact_lane_preference_unavailable detail))
   in
-  Ok resolved.Runtime_exact_output_registry.selected_slots
+  Ok
+    ( resolved.Runtime_exact_output_registry.selected_slots
+    , resolved.Runtime_exact_output_registry.cli_slots )
 ;;
 
 let prepare_attempt ~selected_slots messages =
@@ -446,7 +448,70 @@ let exact_execution_error error =
   { outward_effect; detail }
 ;;
 
+(* The librarian's whole prompt is one User message; the cli one-shot needs
+   that text back out of the fitted list. Anything else is a structural
+   drift this lane has never produced, so the walk is skipped with a log
+   rather than inventing an input. *)
+let cli_prompt_of_messages ~keeper_id (messages : Agent_core.Types.message list) =
+  match messages with
+  | [ { Agent_core.Types.content = [ Agent_core.Types.Text prompt ]; _ } ] ->
+    Some prompt
+  | messages ->
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "librarian cli fallback skipped: fitted prompt is not one text message \
+       (%d messages)"
+      (List.length messages);
+    None
+;;
+
+let try_cli_slots
+      ~keeper_id
+      ~base_path
+      ~cli_runner
+      ~cli_slots
+      ~(selected_input : Keeper_librarian.input)
+      ~messages
+  =
+  match cli_slots with
+  | [] -> None
+  | cli_slots ->
+    (match cli_prompt_of_messages ~keeper_id messages with
+     | None -> None
+     | Some prompt ->
+       (match
+          Keeper_lane_cli_oneshot.walk
+            ?runner:cli_runner
+            ~base_dir:base_path
+            ~cli_slots
+            ~system_prompt:""
+            ~requirement:librarian_output_requirement
+            ~prompt
+            ()
+        with
+        | Error failures ->
+          List.iter
+            (fun failure ->
+               Log.Keeper.warn
+                 ~keeper_name:keeper_id
+                 "librarian cli lane-slot failed: %s"
+                 (Keeper_lane_cli_oneshot.failure_to_string failure))
+            failures;
+          None
+        | Ok (runtime_id, output) ->
+          (match Keeper_librarian.selection_of_json_result selected_input output with
+           | Ok selection -> Some (runtime_id, selection, output)
+           | Error error ->
+             Log.Keeper.warn
+               ~keeper_name:keeper_id
+               "librarian cli output invalid slot=%s: %s"
+               runtime_id
+               (Keeper_librarian.parse_error_to_string error);
+             None)))
+;;
+
 let execute_exact_output_classified
+      ?cli_runner
       ~clock
       ~net
       ~base_path
@@ -454,9 +519,10 @@ let execute_exact_output_classified
       ~(selected_input : Keeper_librarian.input)
       ~messages
       ~render_at
+      ()
   =
   let open Result.Syntax in
-  let* selected_slots = resolve_librarian_slots ~base_path ~keeper_id in
+  let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
   let* messages, fitted_message_count =
     fitted_messages ~selected_slots ~full_messages:messages ~render_at
   in
@@ -490,7 +556,32 @@ let execute_exact_output_classified
     in
     Ok (success.accepted, selected_slot, fitted_message_count)
   | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-    Error (Exact_execution_failed (exact_execution_error cause))
+    let terminal () = Error (Exact_execution_failed (exact_execution_error cause)) in
+    (* Only provider exhaustion may fall back to the cli walk; the
+       infrastructure causes keep their terminal (RFC
+       cli-runtimes-as-lane-slots, same split as the other lanes). *)
+    (match cause with
+     | Exact_output.Flow_candidates_exhausted _
+     | Exact_output.Flow_exact_execution_failed _ ->
+       (match
+          try_cli_slots
+            ~keeper_id
+            ~base_path
+            ~cli_runner
+            ~cli_slots
+            ~selected_input
+            ~messages
+        with
+        | Some (runtime_id, selection, output) ->
+          Ok ((selection, output), runtime_id, fitted_message_count)
+        | None -> terminal ())
+     | Exact_output.Flow_attempt_already_started _
+     | Exact_output.Flow_attempt_start_failed _
+     | Exact_output.Flow_measurement_start_failed _
+     | Exact_output.Flow_before_measurement_dispatch_callback_failed _
+     | Exact_output.Flow_measurement_terminal_callback_failed _
+     | Exact_output.Flow_before_dispatch_callback_failed _
+     | Exact_output.Flow_before_advance_callback_failed _ -> terminal ())
   | Error
       (Exact_output.Flow_semantic_candidates_exhausted
          { rejections; _ }) ->
@@ -500,9 +591,21 @@ let execute_exact_output_classified
         rejections.first
         rejections.rest
     in
-    Error
-      (Domain_output_invalid
-         (Keeper_librarian.parse_error_to_string rejection.rejection))
+    (match
+       try_cli_slots
+         ~keeper_id
+         ~base_path
+         ~cli_runner
+         ~cli_slots
+         ~selected_input
+         ~messages
+     with
+     | Some (runtime_id, selection, output) ->
+       Ok ((selection, output), runtime_id, fitted_message_count)
+     | None ->
+       Error
+         (Domain_output_invalid
+            (Keeper_librarian.parse_error_to_string rejection.rejection)))
 ;;
 
 (* A failure while no current snapshot exists means the keeper is running
@@ -620,6 +723,7 @@ let failed_output = `Assoc []
 ;;
 
 let run_best_effort
+      ?cli_runner
       ~base_path
       ~keepers_dir
       ~keeper_id
@@ -699,6 +803,7 @@ let run_best_effort
              let* (selection, exact_output), selected_slot, fitted_message_count
                =
                execute_exact_output_classified
+                 ?cli_runner
                  ~clock
                  ~net
                  ~base_path
@@ -706,6 +811,7 @@ let run_best_effort
                  ~selected_input:prompt_input
                  ~messages:[ message Agent_core.Types.User prompt ]
                  ~render_at
+                 ()
              in
              (match fitted_message_count with
               | None -> ()
@@ -866,3 +972,10 @@ let run_best_effort
              (Printexc.to_string exn))
         ~cadence_deferred:false)
 ;;
+
+module For_testing = struct
+  type classified_error = extraction_error
+
+  let classified_error_detail = extraction_error_to_string
+  let execute_exact_output_classified = execute_exact_output_classified
+end

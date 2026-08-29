@@ -29,6 +29,8 @@ INSTALL_SH="$REPO_ROOT/scripts/install.sh"
 [ -x "$INSTALL_SH" ] || { echo "install-smoke: $INSTALL_SH not executable" >&2; exit 2; }
 [ -f "$REPO_ROOT/config/runtime.toml" ] || {
   echo "install-smoke: config/runtime.toml missing" >&2; exit 2; }
+[ -f "$REPO_ROOT/config/agent-core-models-overlay.toml" ] || {
+  echo "install-smoke: config/agent-core-models-overlay.toml missing" >&2; exit 2; }
 
 ASSETS=(
   "masc-$ARCH"
@@ -78,10 +80,16 @@ for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deplo
 done
 echo "install-smoke: installer placed all four binaries"
 
-# Boot the installed server. --no-seed left no config, so seed runtime.toml
-# from the repo checkout the same way release-binary-smoke.sh does.
+# Boot the installed server. --no-seed left no config, so seed the same files
+# the real installer seeds: runtime.toml AND the model-catalog overlay. Without
+# the overlay the exact-output lanes (e.g. hitl_auto_judge) reference glm slots
+# the ambient catalog does not admit, and the server exits FATAL before /health
+# -- which is exactly the shape a bare-Linux user hits, so the smoke must seed
+# what install.sh seeds, not a subset.
 mkdir -p "$base/.masc/config"
 cp "$REPO_ROOT/config/runtime.toml" "$base/.masc/config/runtime.toml"
+cp "$REPO_ROOT/config/agent-core-models-overlay.toml" \
+  "$base/.masc/config/agent-core-models-overlay.toml"
 
 PORT="${INSTALL_SMOKE_PORT:-18946}"
 log="$work/server.log"

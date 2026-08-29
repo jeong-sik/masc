@@ -171,6 +171,17 @@ jobs:
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
 
+      # Exercise scripts/install.sh end to end against the just-packaged
+      # binaries: stage dist/ as a file:// release, install through the real
+      # installer (detect_asset + SHA256SUMS verification + placement), boot
+      # the installed server, and assert /health. This guards the installer's
+      # asset-name and checksum contract -- the download path that nothing
+      # else runs -- without any network access.
+      - name: Installer smoke (offline)
+        run: |
+          chmod +x scripts/install-smoke.sh
+          scripts/install-smoke.sh dist ${{ matrix.arch }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:

@@ -1,5 +1,10 @@
 # Coding-outcome baseline — 2026-08-29 (RFC-0396 W2 smoke)
 
+> Superseded the same day: the 0/2 below turned out to measure the approval
+> gate, not the model — see [`../20260829-ungated`](../20260829-ungated/NOTES.md)
+> for the resolution (#31640) and the 2/2 collection that followed. This file
+> stays as the record of the gated state.
+
 First live collection through `scripts/harness_coding_eval.sh`. One case
 (`l1-calc-add`, L1 single-file bug fix), n=2, local Ollama, isolated server
 per invocation. The pass verdict is the case verify script's exit code

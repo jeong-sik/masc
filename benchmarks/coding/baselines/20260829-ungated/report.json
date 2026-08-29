@@ -1,0 +1,27 @@
+{
+  "suite_name": "coding-eval",
+  "total_runs": 2,
+  "overall_pass_rate": 1.0,
+  "total_cost_usd": null,
+  "results": [
+    {
+      "case_id": "l1-calc-add",
+      "runs": 2,
+      "pass_at_k": 1.0,
+      "mean_score": 1.0,
+      "consistency": 0.0,
+      "ci95_low": 1.0,
+      "ci95_high": 1.0,
+      "min_runs_met": false,
+      "total_cost_usd": null
+    }
+  ],
+  "bucket_counts": {
+    "verify_green": 2,
+    "verify_red": 0,
+    "timeout": 0,
+    "provider_error": 0,
+    "transport_error": 0
+  },
+  "unrun_case_ids": []
+}

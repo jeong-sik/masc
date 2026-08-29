@@ -381,12 +381,22 @@ run_one() {
     return 0
   fi
   mkdir -p "${run_dir}"
-  workspace="${run_dir}/workspace"
-  rm -rf "${workspace}"
-  mkdir -p "${workspace}"
-  cp -R "${case_dir}/workspace/." "${workspace}"
 
   local keeper_name="coding-eval-${run_id}"
+  # Effectful tools (Execute/Edit/Write) are operator-gated by default, and an
+  # eval run has no operator: every call sat in elicitation until its ~180s
+  # expiry and the episode starved (#31640 measured exactly this). The
+  # product's own per-keeper trust knob answers it — a keeper profile TOML
+  # read at creation time. MASC_CONFIG_DIR (which this harness sets) shadows
+  # the <base_path>/.masc/config overlay, so the profile goes into the
+  # isolated config copy, not the base path.
+  local profile_dir="${CONFIG_DIR}/keepers"
+  mkdir -p "${profile_dir}"
+  {
+    printf '[keeper]\nalways_allow = true\nsandbox_profile = "local"\ninstructions = """\n'
+    coding_keeper_instructions
+    printf '"""\n'
+  } > "${profile_dir}/${keeper_name}.toml"
   local runtime_id="${provider}.$(model_alias_of "${model}")"
   local start_epoch end_epoch duration_ms recorded_at
   start_epoch="$(date +%s)"
@@ -400,23 +410,41 @@ run_one() {
     --arg name "${keeper_name}" \
     --arg instructions "$(coding_keeper_instructions)" \
     --arg runtime_id "${runtime_id}" \
-    --argjson allowed_paths "$(jq -cn --arg path "${workspace}" '[ $path ]')" \
     '{
       name: $name,
       instructions: $instructions,
       runtime_id: $runtime_id,
       autoboot_enabled: false,
-      proactive_enabled: false,
-      allowed_paths: $allowed_paths
+      proactive_enabled: false
     }')"
 
   if ! call_mcp_tool 4000 "masc_keeper_up" "${create_args}" 45; then
     finish_status="transport_error"
     error_text="keeper_up: $(tool_error_text)"
   else
+    # The chat-stream approval hook asks an operator per effectful call and
+    # expires unanswered asks (#31640 measured ~180s per round). Yolo is the
+    # product's explicit per-keeper, process-lifetime "stop asking in this
+    # chat" stance; the durable Keeper_gate still decides external effects,
+    # where the profile's always_allow answers.
+    if ! curl -fsS -m 20 -X POST       "http://127.0.0.1:${PORT}/api/v1/keepers/tool-approval-mode"       -H "Authorization: Bearer ${MCP_TOKEN}" -H 'Content-Type: application/json'       -d "$(jq -cn --arg name "${keeper_name}" '{name:$name, mode:"yolo"}')"       >/dev/null 2>&1; then
+      finish_status="transport_error"
+      error_text="tool-approval-mode yolo set failed for ${keeper_name}"
+    fi
+  fi
+
+  if [[ "${finish_status}" == "ok" ]]; then
+    # The local profile writes inside the keeper playground and the model
+    # addresses paths relative to it, so the case workspace lives there —
+    # an external absolute directory produced playground-confined
+    # cwd_not_directory / File-not-found on every call.
+    workspace="${TARGET_DIR}/.masc/playground/${keeper_name}/workspace"
+    rm -rf "${workspace}"
+    mkdir -p "${workspace}"
+    cp -R "${case_dir}/workspace/." "${workspace}"
     local message request_json request_id
-    message="$(printf '%s\n\nWorkspace directory: %s\nRun the check inside that directory.' \
-      "${prompt}" "${workspace}")"
+    message="$(printf '%s\n\nWorkspace directory (relative to your working root): workspace\nRun the check inside that directory.' \
+      "${prompt}")"
     if ! call_mcp_tool 4100 "masc_keeper_msg" \
       "$(jq -cn --arg name "${keeper_name}" --arg message "${message}" \
         '{name:$name, message:$message}')" 30; then

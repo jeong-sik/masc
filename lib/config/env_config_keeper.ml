@@ -196,7 +196,7 @@ module KeeperAutonomous = struct
       module lets the operator settings projection report the same effective
       value the prompt builder would use, without the projection reaching up a
       layer to ask. *)
-  let default_wake_prompt = "Continue."
+  let default_wake_prompt = "지금은 자율 턴입니다. 위 World State 와 직전 턴들이 남긴 것을 먼저 읽고, 이어서 할 일을 고릅니다."
 
   (** Fleet-wide wake prompt, or [None] when unset. Read as a function: the
       value is steerable through the boot override store, and a keeper process

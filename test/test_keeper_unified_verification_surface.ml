@@ -958,8 +958,11 @@ let test_autonomous_continuation_is_an_ordinary_user_turn () =
   let { Masc.Keeper_unified_prompt.user_message; _ } =
     build_prompt ~meta:minimal_meta base_observation
   in
-  check string "autonomous continuation uses a compact ordinary cue"
-    "Continue."
+  (* The cue's wording is the operator-steerable wake prompt, so this pins
+     that the autonomous turn carries that same marker rather than a second
+     literal that would drift from it. *)
+  check string "autonomous continuation carries the wake marker"
+    Masc.Keeper_unified_prompt.autonomous_wake_marker
     user_message
 
 let post_id_exn s =

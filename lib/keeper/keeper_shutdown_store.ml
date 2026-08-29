@@ -847,17 +847,24 @@ type terminal_delete_outcome =
   | Terminal_deleted
   | Terminal_retained
 
-(* A [Finalized { meta_removed = true }] record is load-bearing after its
-   Keeper is gone: [authorize_durable_intake_owner] reads it as the
-   retirement fence that keeps durable intake closed for the removed
-   incarnation. Every other settled phase is inert once its admission
-   transition is released, and keeping it only makes boot recovery walk the
-   same settled operation forever. *)
+(* The retirement fact lives in [Keeper_retirement_store] (written by
+   shutdown finalize when it removes the metadata), so a settled operation
+   record has no reader left and keeping it only makes boot recovery walk
+   the same settled operation forever. A [Completion_pending] receipt is
+   still owed to its consumer; [requires_admission_fence] already keeps
+   such an operation out of the reclaim call sites, and this predicate
+   refuses it independently. *)
 let reclaimable_terminal_phase (operation : Keeper_shutdown_types.t) =
   match operation.phase with
   | Keeper_shutdown_types.Superseded _ -> true
-  | Keeper_shutdown_types.Finalized { meta_removed = false; _ } -> true
-  | Keeper_shutdown_types.Finalized { meta_removed = true; _ }
+  | Keeper_shutdown_types.Finalized
+      { completion = Keeper_shutdown_types.Completion_pending _; _ } -> false
+  | Keeper_shutdown_types.Finalized
+      { completion =
+          ( Keeper_shutdown_types.Completion_not_requested
+          | Keeper_shutdown_types.Completion_delivered _ )
+      ; _
+      } -> true
   | Keeper_shutdown_types.Prepared
   | Keeper_shutdown_types.Joining_lanes
   | Keeper_shutdown_types.Joined_idle

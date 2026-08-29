@@ -18,9 +18,17 @@
 //   node scripts/webmcp-bridge.mjs list [--port 9222] [--page localhost:8935]
 //   node scripts/webmcp-bridge.mjs call <tool> [jsonArgs] [--port ...] [--page ...]
 //   node scripts/webmcp-bridge.mjs loop-check [--port ...] [--page ...]
+//   node scripts/webmcp-bridge.mjs detect [--port 9222] [--expect-external]
+//
+// `detect` scans every open tab and reports which expose WebMCP tools. It is
+// the ecosystem sensor for RFC-webmcp-capability-lanes Lane D: run it against a
+// browser with a candidate site open (Expedia, Shopify, …) and it says whether
+// that site has begun serving document.modelContext tools. --expect-external
+// turns it into a trigger check — exit 0 only when a non-localhost origin
+// exposes a surface, so a scheduled run stays silent until the ecosystem flips.
 //
 // Exit codes: 0 ok, 1 unexpected failure, 2 target page not found,
-//             3 loop-check assertion failed.
+//             3 loop-check assertion failed, 4 detect --expect-external found none.
 
 const args = process.argv.slice(2)
 const command = args[0]
@@ -145,6 +153,59 @@ async function callCommand() {
   if (!outcome.found) process.exit(3)
 }
 
+// Reports a page's WebMCP surface without asserting anything. Returns the tool
+// count and, when present, the origin the tools declare — the origin, not the
+// tab URL, is what a cross-origin frame's tools carry.
+const SURFACE_PROBE_EXPR = `(async () => {
+  if (!document.modelContext) return JSON.stringify({ surface: false, count: 0 })
+  const tools = await document.modelContext.getTools()
+  return JSON.stringify({
+    surface: true,
+    count: tools.length,
+    names: tools.map(t => t.name),
+    origins: [...new Set(tools.map(t => t.origin).filter(Boolean))],
+  })
+})()`
+
+function isExternalOrigin(url) {
+  try {
+    const host = new URL(url).hostname
+    return host !== 'localhost' && host !== '127.0.0.1' && host !== '[::1]'
+  } catch {
+    return false
+  }
+}
+
+// Ecosystem sensor: probe every open tab, report which expose WebMCP.
+async function detectCommand() {
+  const expectExternal = args.includes('--expect-external')
+  let targets
+  try {
+    targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+  } catch (error) {
+    console.error(`CDP endpoint 127.0.0.1:${port} unreachable: ${error}`)
+    process.exit(2)
+  }
+  const pages = targets.filter(t => t.type === 'page' && /^https?:/.test(t.url))
+  const report = []
+  for (const page of pages) {
+    const { ws, send, opened } = connect(page)
+    await opened
+    try {
+      const probe = await evaluateJson(send, SURFACE_PROBE_EXPR)
+      report.push({ url: page.url, external: isExternalOrigin(page.url), ...probe })
+    } catch (error) {
+      report.push({ url: page.url, external: isExternalOrigin(page.url), surface: false, count: 0, error: String(error) })
+    } finally {
+      ws.close()
+    }
+  }
+  const withSurface = report.filter(r => r.surface && r.count > 0)
+  const externalSurface = withSurface.filter(r => r.external)
+  console.log(JSON.stringify({ scanned: pages.length, withSurface: withSurface.length, externalSurface: externalSurface.length, pages: report }, null, 2))
+  if (expectExternal && externalSurface.length === 0) process.exit(4)
+}
+
 // Deterministic round-trip assertions against the dashboard's own surface.
 async function loopCheckCommand() {
   const failures = []
@@ -190,7 +251,10 @@ switch (command) {
   case 'loop-check':
     await loopCheckCommand()
     break
+  case 'detect':
+    await detectCommand()
+    break
   default:
-    console.error('usage: webmcp-bridge.mjs <list|call|loop-check> [--port 9222] [--page localhost:8935]')
+    console.error('usage: webmcp-bridge.mjs <list|call|loop-check|detect> [--port 9222] [--page localhost:8935]')
     process.exit(1)
 }

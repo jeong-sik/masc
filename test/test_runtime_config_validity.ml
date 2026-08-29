@@ -1206,7 +1206,7 @@ check
 check
   (option (list string))
   "verifier_exact slot order is frozen"
-  (Some [ "deepseek.deepseek-v4-pro"; "glm-coding.glm-5-turbo" ])
+  (Some [ "glm-coding.glm-5-turbo"; "kimi_coding.kimi-for-coding" ])
   (match
      List.find_opt
        (fun (lane_id, _) -> String.equal lane_id "verifier_exact")
@@ -1232,7 +1232,7 @@ List.iter
         ~assignments
         ~verifier_exact_slot_ids:
           (* pinned to the seed by the verifier_exact lane check above *)
-          [ "deepseek.deepseek-v4-pro"; "glm-coding.glm-5-turbo" ]
+          [ "glm-coding.glm-5-turbo"; "kimi_coding.kimi-for-coding" ]
         ~media_failover
         ~lanes
     in
@@ -1589,7 +1589,7 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let io : Exact_output.resolver_io =
     { getenv =
         (function
-          | "ZAI_CODING_API_KEY" | "ZAI_API_KEY_SB" | "DEEPSEEK_API_KEY" ->
+          | "ZAI_CODING_API_KEY" | "ZAI_API_KEY_SB" | "KIMI_API_KEY" ->
             Ok (Some "exact-output-seed-test")
           | _ -> Ok None)
     }

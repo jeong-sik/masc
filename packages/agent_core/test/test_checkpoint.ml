@@ -260,7 +260,9 @@ let () =
             check_checkpoint_rejected "empty ToolUse.id" (tool_use "" "read");
             check_checkpoint_rejected "empty ToolUse.name" (tool_use "call-1" "");
             check_checkpoint_rejected "blank ToolUse.id" (tool_use " \t" "read");
-            check_checkpoint_rejected "empty ToolResult.tool_use_id" (tool_result ""))
+            check_checkpoint_rejected "blank ToolUse.name" (tool_use "call-1" " \n");
+            check_checkpoint_rejected "empty ToolResult.tool_use_id" (tool_result "");
+            check_checkpoint_rejected "blank ToolResult.tool_use_id" (tool_result "\n "))
         ; test_case "non-finite JSON is rejected at every public path" `Quick (fun () ->
             let cases value =
               let metadata =
@@ -358,6 +360,89 @@ let () =
               cases value
               |> List.iter (fun (path, checkpoint) ->
                 check_checkpoint_rejected (number ^ " in " ^ path) checkpoint)))
+        ; test_case "nested duplicate JSON is rejected at every public path" `Quick (fun () ->
+            let duplicate = `Assoc [ "same", `Int 1; "same", `Int 2 ] in
+            let metadata =
+              make_checkpoint
+                ~messages:
+                  [ message
+                      ~metadata:[ "trace", `Assoc [ "nested", duplicate ] ]
+                      Types.Assistant
+                      (Types.Text "answer")
+                  ]
+                ()
+            in
+            let tool_input =
+              make_checkpoint
+                ~messages:
+                  [ message
+                      Types.Assistant
+                      (Types.ToolUse
+                         { id = "call-1"
+                         ; name = "read"
+                         ; input = `Assoc [ "nested", duplicate ]
+                         })
+                  ]
+                ()
+            in
+            let tool_result_json =
+              make_checkpoint
+                ~messages:
+                  [ message
+                      Types.Tool
+                      (Types.ToolResult
+                         { tool_use_id = "call-1"
+                         ; content = "result"
+                         ; outcome = Tool_succeeded
+                         ; json = Some (`Assoc [ "nested", duplicate ])
+                         ; content_blocks = None
+                         })
+                  ]
+                ()
+            in
+            let context = Context.create_sync () in
+            Context.set context "value" (`Assoc [ "nested", duplicate ]);
+            let reasoning_details =
+              make_checkpoint
+                ~messages:
+                  [ message
+                      Types.Assistant
+                      (Types.ReasoningDetails
+                         { reasoning_content = None
+                         ; details =
+                             [ { Types.raw = `Assoc [ "nested", duplicate ]; text = None } ]
+                         })
+                  ]
+                ()
+            in
+            let cases =
+              [ "ToolResult.json", tool_result_json
+              ; "message metadata", metadata
+              ; "ToolUse.input", tool_input
+              ; "Context value", make_checkpoint ~context ()
+              ; ( "working_context"
+                , { (make_checkpoint ()) with
+                    working_context = Some (`Assoc [ "nested", duplicate ])
+                  } )
+              ; ( "response schema"
+                , { (make_checkpoint ()) with
+                    response_format =
+                      Types.JsonSchema (`Assoc [ "nested", duplicate ])
+                  } )
+              ; "ReasoningDetails.raw", reasoning_details
+              ]
+            in
+            List.iter
+              (fun (path, checkpoint) -> check_checkpoint_rejected path checkpoint)
+              cases;
+            match Checkpoint.to_json tool_result_json with
+            | _ -> fail "throwing serializer accepted a duplicate public JSON value"
+            | exception Invalid_argument message ->
+              check
+                bool
+                "throwing API keeps Invalid_argument"
+                true
+                (String.starts_with ~prefix:"Checkpoint.to_json:" message))
         ; test_case "old version 4 is rejected" `Quick (fun () ->
             match Checkpoint.of_json (`Assoc [ "version", `Int 4 ]) with
             | Error (Error.Serialization (Error.VersionMismatch { got = 4; _ })) -> ()

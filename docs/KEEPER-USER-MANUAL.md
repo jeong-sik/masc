@@ -81,6 +81,31 @@ Each entry is case-folded and kept whole. A comma inside the string does not
 split it, and nothing rejects the result, so a mistyped list silently routes
 no mentions at all. This one is worth re-reading in your own config.
 
+## The work surface (playground)
+
+Inside its sandbox a Keeper's working directory is
+`/home/keeper/playground/<name>/`. On the host that maps to a
+profile-scoped directory under `<base>/.masc/playground/` — Docker and
+microVM keepers get their own namespace there, so two profiles never share
+a tree.
+
+Three facts about it keep diagnoses honest:
+
+- **It is born empty.** A new Keeper (or a Keeper whose profile changed)
+  starts with an empty playground. Empty is the normal initial state, not a
+  broken mount — `ls` succeeding on an empty directory means the surface is
+  reachable and simply has nothing in it yet.
+- **Repositories are cloned by the Keeper, into the playground.** The
+  convention is `playground/<name>/repos/<repo>` (e.g.
+  `gh repo clone <owner>/<repo> repos/<repo> -- --depth 50`). Execution
+  location tracking recognises that shape and labels calls with
+  `repo_root` / `repo_subpath`, so the Gate and observability see which
+  repository a call touched. A clone anywhere else in the playground still
+  works, but is classified as a plain `playground_subpath`.
+- **There is no path scheme outside the playground.** Nothing provisions
+  `/home/keeper/repos/<repo>` or mounts host checkouts into the sandbox;
+  the playground is the whole writable surface.
+
 ## Runtime assignment
 
 A Keeper does not name its model. `runtime.toml` does:

@@ -757,6 +757,75 @@ let result_of_execution ?proposal_id ~tool_name ~tool_kind ~start_time = functio
       (Yojson.Safe.to_string data)
 ;;
 
+let evidence_nodes_of_execution = function
+  | Ok settled -> List.map node_result_to_json settled
+  | Error failure -> List.map node_result_to_json failure.Executor.settled
+;;
+
+let record_skill_composition_evidence
+      ~config
+      ~reference
+      ~composition_run_id
+      ~request_id
+      ~parent_invocation
+      ~meta
+      ~composition_tool
+      ~composition_execution
+      ~execution
+      ~result =
+  let report detail =
+    Log.Keeper.warn
+      "Skill composition evidence publication failed: tool=%s run=%s error=%s"
+      composition_tool
+      (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
+      detail;
+    (try
+       Telemetry_coverage_gap.record
+         ~masc_root:(Workspace.masc_root_dir config)
+         ~source:"skill_composition_evidence"
+         ~producer:"keeper_tool_composition_surface"
+         ~durable_store:"skill-composition-evidence-v1"
+         ~dashboard_surface:"/api/v1/skills/evidence"
+         ~stale_reason:"skill_composition_evidence_publication_failed"
+         ~keeper_name:meta.Keeper_meta_contract.name
+         ~error:detail
+         ()
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Keeper.warn
+         "Skill composition evidence coverage-gap publication also failed: tool=%s error=%s"
+         composition_tool
+         (Printexc.to_string exn))
+  in
+  match
+    Keeper_skill_composition_evidence.make
+      ~reference
+      ~composition_run_id
+      ~parent_invocation
+      ~request_id
+      ~keeper_name:meta.name
+      ~composition_tool
+      ~composition_execution
+      ~result
+      ~executor_settlements:(evidence_nodes_of_execution execution)
+  with
+  | Error error ->
+    Keeper_skill_composition_evidence.error_to_string error |> report
+  | Ok evidence ->
+    (match Keeper_skill_composition_evidence.save_latest config evidence with
+     | Error error ->
+       Keeper_skill_composition_evidence.error_to_string error |> report
+     | Ok Keeper_skill_composition_evidence.Saved -> ()
+     | Ok
+         (Keeper_skill_composition_evidence.Saved_with_lock_release_error error) ->
+       Log.Keeper.warn
+         "Skill composition evidence published but lock release failed: tool=%s run=%s error=%s"
+         composition_tool
+         (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
+         (File_lock_eio.durable_lock_error_to_string error))
+;;
+
 let async_parent_invocation ~request_id source =
   Agent_core.Tool_contract.Invocation.create
     ~tool_use_id:("composition-async:" ^ request_id)
@@ -776,6 +845,7 @@ let execute_keeper_plan ~capability_authority =
 let async_worker_result
       ~composition_execution
       ~tool_kind
+      ?skill_reference
       ?assembler_run_id
       ?proposal_id
       ?proposal_provenance
@@ -843,6 +913,20 @@ let async_worker_result
       ~start_time
       execution
   in
+  Option.iter
+    (fun reference ->
+       record_skill_composition_evidence
+         ~config
+         ~reference
+         ~composition_run_id
+         ~request_id:(Some request_id)
+         ~parent_invocation:source_invocation
+         ~meta
+         ~composition_tool:tool_name
+         ~composition_execution
+         ~execution
+         ~result)
+    skill_reference;
   match assembler_run_id, proposal_id, proposal_provenance with
   | Some assembler_run_id, Some proposal_id, Some proposal_provenance ->
     Keeper_plan_proposal_provenance.attach_to_result
@@ -919,8 +1003,18 @@ let async_submission_result
     | `Assoc fields -> `Assoc (fields @ proposal_fields)
     | json -> json
   in
+  let request_context_fields =
+    proposal_fields
+    @ [ ( "composition_run_id"
+        , `String
+            (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) ) ]
+    @ Option.to_list
+        (Option.map
+           (fun reference -> "skill_reference", Skill_reference.to_yojson reference)
+           skill_reference)
+  in
   let request_context =
-    match proposal_fields with
+    match request_context_fields with
     | [] -> None
     | fields -> Some fields
   in
@@ -971,6 +1065,7 @@ let async_submission_result
            async_worker_result
              ~composition_execution:Catalog.Async
              ~tool_kind
+             ?skill_reference
              ?assembler_run_id
              ?proposal_id
              ?proposal_provenance
@@ -1821,7 +1916,7 @@ let make_tools_with_authority
                   ; _
                   } ->
                 ());
-             let result =
+             let executor_result =
                result_of_execution
                  ~tool_name
                  ~tool_kind:(Catalog.tool_kind entry)
@@ -1832,7 +1927,7 @@ let make_tools_with_authority
                match
                  Tool_bridge.attach_artifact_manifest
                    ~base_path:config.base_path
-                   result
+                   executor_result
                with
                | Ok result -> result
                | Error { message; _ } ->
@@ -1854,6 +1949,17 @@ let make_tools_with_authority
                    ~start_time
                    "composition result manifest persistence failed"
              in
+             record_skill_composition_evidence
+               ~config
+               ~reference:skill.reference
+               ~composition_run_id
+               ~request_id:None
+               ~parent_invocation
+               ~meta
+               ~composition_tool:tool_name
+               ~composition_execution:Catalog.Inline
+               ~execution
+               ~result;
              observe_composition_run_summary
                ~composition_tool:tool_name
                ~assembler_run_id:None

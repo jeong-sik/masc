@@ -526,15 +526,19 @@ jobs:
     # Focused group deadlines total 93 minutes when agent-core is selected
     # (paused-work 10, board-attention-worker 3, normal 20, newly-wired 5,
     # mcp-tool-matrix 15, agent-core 15, operator-control 10, sse 15).
-    # Setup and the dune build take 12 minutes (run 32634585750: 10:45:48 to
-    # 10:57:15), so a run where every group uses its full budget ends at
-    # 105 minutes. The job timeout sits above that so scripts/ci-run-tests.sh
-    # prints its timeout diagnostics before GitHub ends the job.
+    # Setup and the dune build measured 28 minutes on 2026-08-29 (runs
+    # 33217628504 and 33221296317: job start 23:43:04, suite start 00:10:59
+    # — the older 12-minute figure from run 32634585750 no longer holds), so
+    # a run where every group uses its full budget ends at ~121 minutes. At
+    # the previous 110 the job died at exactly 87 suite-minutes on both
+    # runs, before the suite's own 5400s deadline could fire, so its timeout
+    # diagnostics were never printed. The job timeout sits above the sum so
+    # scripts/ci-run-tests.sh ends the run, not GitHub.
     # Build and full validation belong to the manual lane. PR authors and
     # agents provide their focused exact-head evidence before opening the PR;
     # repeating a cold 15-minute toolchain build on every synchronization cost
     # more runner time than the failures it prevented.
-    timeout-minutes: 110
+    timeout-minutes: 130
     needs: [changes]
     # Manual dispatch runs full validation so a
     # lib/ regression introduced by a non-build-path change (e.g. a dashboard-only

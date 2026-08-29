@@ -49,7 +49,6 @@ type event_queue_trigger =
       (** Another Keeper cancelled a Task this Keeper authored. A distinct
           reactive input: it is not Board activity (no post exists), not
           scheduled work, and not a completion-authority decision. *)
-  | Manual_compaction_stimulus
   | Workspace_message_stimulus
       (** A committed workspace message named this Keeper and was delivered as
           a durable queue entry. The transcript scan reports the same message
@@ -67,7 +66,6 @@ type turn_reason =
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
-  | Manual_compaction_pending
   | Workspace_message_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
@@ -100,7 +98,6 @@ let turn_reason_to_string = function
   | Completion_authority_rejection_pending ->
     "completion_authority_rejection_pending"
   | Task_cancellation_pending -> "task_cancellation_pending"
-  | Manual_compaction_pending -> "manual_compaction_pending"
   | Workspace_message_pending -> "workspace_message_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
   | Scheduled_automation_due -> "scheduled_automation_due"
@@ -117,7 +114,6 @@ let turn_reason_of_event_queue_trigger = function
   | Completion_authority_rejection_stimulus ->
     Completion_authority_rejection_pending
   | Task_cancellation_stimulus -> Task_cancellation_pending
-  | Manual_compaction_stimulus -> Manual_compaction_pending
   | Workspace_message_stimulus -> Workspace_message_pending
 ;;
 

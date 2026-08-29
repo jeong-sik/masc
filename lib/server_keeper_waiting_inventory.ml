@@ -31,7 +31,6 @@ type wake_producer =
   | Operator_pending_confirm_store
   | Completion_authority
   | Keeper_task_cancellation
-  | Keeper_compaction_request
   | Keeper_workspace_message
   | Keeper_delegate
   | Keeper_composition
@@ -106,7 +105,6 @@ let wake_producer_to_string = function
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
   | Keeper_task_cancellation -> "keeper_task_cancellation"
   | Completion_authority -> "completion_authority"
-  | Keeper_compaction_request -> "keeper_compaction_request"
   | Keeper_composition -> "keeper_composition"
   | Keeper_workspace_message -> "keeper_workspace_message"
   | Keeper_delegate -> "keeper_delegate"
@@ -123,7 +121,6 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Connector_attention _ -> Connector_attention_hook
   | Hitl_resolved _ -> Hitl_resolution_hook
   | Ask_answered _ -> Keeper_ask_answer
-  | Manual_compaction_requested -> Keeper_compaction_request
   | Completion_authority_rejected _ -> Completion_authority
   | Task_cancelled _ -> Keeper_task_cancellation
   | Workspace_message _ -> Keeper_workspace_message
@@ -195,8 +192,7 @@ let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string
   | Fusion_completed _
   | Schedule_due _
   | Connector_attention _
-  | Hitl_resolved _
-  | Manual_compaction_requested -> []
+  | Hitl_resolved _ -> []
   | Delegate_completed dc ->
     [ "delegate_operation_id", `String dc.dc_operation_id
     ; "delegate_keeper", `String dc.dc_keeper
@@ -250,7 +246,6 @@ let queue_payload_what : Keeper_event_queue.stimulus_payload -> string = functio
      | Hitl_approved -> Printf.sprintf "운영자 승인됨 · %s" resolution.approval_id
      | Hitl_rejected _ -> Printf.sprintf "운영자 거절됨 · %s" resolution.approval_id)
   | Ask_answered _ -> "질문에 답이 왔음"
-  | Manual_compaction_requested -> "운영자 압축 요청"
   | Completion_authority_rejected rejection ->
     Printf.sprintf "작업 %s 완료 증거 거절됨" rejection.car_task_id
   | Task_cancelled cancellation ->

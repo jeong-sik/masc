@@ -63,7 +63,6 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Ask_answered _
-  | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _
@@ -210,8 +209,6 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
        instead of silently proceeding on its own state. This changes only how
        the turn is described, not whether it runs. *)
     Some Keeper_world_observation.Hitl_resolved_stimulus
-  | Keeper_event_queue.Manual_compaction_requested ->
-    Some Keeper_world_observation.Manual_compaction_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Fusion_completed _
@@ -325,11 +322,6 @@ let consume_single_heartbeat_stimulus
         (List.length pending_events)
         meta_after_triage.name;
       Stimulus_consumed pending_events
-    | Keeper_event_queue.Manual_compaction_requested ->
-      Log.Keeper.info
-        "turn entry: manual compaction request delivered (keeper=%s)"
-        meta_after_triage.name;
-      Stimulus_consumed []
     | Keeper_event_queue.Bootstrap ->
       Log.Keeper.info
         "turn entry: bootstrap stimulus consumed (keeper=%s)"
@@ -468,7 +460,6 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
-  | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _
@@ -503,7 +494,6 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
          | Keeper_event_queue.Schedule_due _
          | Keeper_event_queue.Connector_attention _
          | Keeper_event_queue.Ask_answered _
-         | Keeper_event_queue.Manual_compaction_requested
          | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _
          | Keeper_event_queue.Workspace_message _
@@ -580,7 +570,6 @@ let reconcile_spent_selection
   | Bootstrap
   | Fusion_completed _
   | Connector_attention _
-  | Manual_compaction_requested
   | Completion_authority_rejected _
   (* A committed cancellation cannot be undone or settled elsewhere, so the
      selection is always still worth a turn. *)
@@ -623,7 +612,6 @@ let heartbeat_event_intake
     | Keeper_event_queue.Schedule_due _
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Ask_answered _
-    | Keeper_event_queue.Manual_compaction_requested
     | Keeper_event_queue.Completion_authority_rejected _
     | Keeper_event_queue.Task_cancelled _
     | Keeper_event_queue.Workspace_message _
@@ -631,28 +619,8 @@ let heartbeat_event_intake
     | Keeper_event_queue.Composition_completed _ ->
       None
   in
-  let is_manual_compaction (selection : Keeper_event_queue_state.pending_selection) =
-    match selection.source.payload with
-    | Keeper_event_queue.Manual_compaction_requested -> true
-    | Keeper_event_queue.Ask_answered _
-    | Keeper_event_queue.Board_signal _
-    | Keeper_event_queue.Board_attention _
-    | Keeper_event_queue.Bootstrap
-    | Keeper_event_queue.Fusion_completed _
-    | Keeper_event_queue.Schedule_due _
-    | Keeper_event_queue.Connector_attention _
-    | Keeper_event_queue.Hitl_resolved _
-    | Keeper_event_queue.Completion_authority_rejected _
-    | Keeper_event_queue.Task_cancelled _
-    | Keeper_event_queue.Workspace_message _
-    | Keeper_event_queue.Delegate_completed _
-    | Keeper_event_queue.Composition_completed _ -> false
-  in
   let ready_batch selections =
-    match List.find_opt is_manual_compaction selections with
-    | Some manual -> [ manual ]
-    | None ->
-      let first_connector_conversation =
+    let first_connector_conversation =
         List.find_map
           (fun (selection : Keeper_event_queue_state.pending_selection) ->
              if stimulus_ready_for_intake ~base_path selection.source
@@ -702,7 +670,6 @@ let heartbeat_event_intake
     | Keeper_event_queue.Schedule_due _
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
-    | Keeper_event_queue.Manual_compaction_requested
     | Keeper_event_queue.Completion_authority_rejected _
     | Keeper_event_queue.Task_cancelled _
     | Keeper_event_queue.Workspace_message _

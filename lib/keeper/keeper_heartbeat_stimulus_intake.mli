@@ -142,10 +142,7 @@ val reconcile_spent_selection
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events] reads one exact durable queue snapshot and admits
-    every ready selection in queue order. A pending
-    [Manual_compaction_requested] preempts and is admitted alone so an
-    in-flight source checkpoint can yield, compact, and resume from unchanged
-    durable input.
+    every ready selection in queue order.
 
     RFC-0377's routing boundary remains: only the first ready
     [Connector_attention] conversation is admitted, but all of its pending

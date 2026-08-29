@@ -1037,6 +1037,178 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
       []
       (List.sort String.compare clamped)
 
+(* Both the self-hosted server templates (llama.cpp, vLLM, MLX) and the official
+   client examples ship commented out. A provider declared as live TOML has to be
+   fully enabled with a concrete binding or the install wizard refuses it
+   ("has no concrete runtime binding"), and none of these servers exists on a
+   fresh install. Commented TOML is never parsed, so without a gate the examples
+   rot in place and the operator finds out months later. Both tests below
+   uncomment one region and drive the real resolver over the result.
+
+   A region runs from its heading to the first live TOML line after it. Only
+   lines that look like TOML get uncommented; the prose around them stays put. *)
+let line_contains ~(needle : string) (haystack : string) : bool =
+  let nl = String.length needle and hl = String.length haystack in
+  nl <= hl
+  && (let rec scan i =
+        i + nl <= hl && (String.equal (String.sub haystack i nl) needle || scan (i + 1))
+      in
+      scan 0)
+;;
+
+let self_hosted_example_marker = "Self-hosted OpenAI-compatible servers"
+let official_client_example_marker = "Official Claude Code subscription runtime example"
+
+let uncomment_example_region ~(marker : string) (content : string) : string =
+  let rec walk acc inside = function
+    | [] -> List.rev acc
+    | line :: rest ->
+      let inside =
+        inside
+        || (String.length line > 0 && line.[0] = '#' && line_contains ~needle:marker line)
+      in
+      if not inside
+      then walk (line :: acc) false rest
+      else if String.equal (String.trim line) ""
+      then walk (line :: acc) true rest
+      else if String.length line > 0 && line.[0] <> '#'
+      then (* first live TOML line ends the region; the rest is verbatim *)
+        List.rev_append acc (line :: rest)
+      else (
+        let body =
+          if String.length line >= 2 && String.equal (String.sub line 0 2) "# "
+          then String.sub line 2 (String.length line - 2)
+          else if String.equal line "#"
+          then ""
+          else line
+        in
+        (* A table header, or a bare key followed by " = ". Requiring the key to
+           be space-free keeps prose that happens to quote an assignment
+           mid-sentence from being uncommented into the middle of a document. *)
+        let looks_like_toml =
+          (String.length body > 0 && body.[0] = '[')
+          ||
+          match String.index_opt body '=' with
+          | Some i when i >= 2 && body.[i - 1] = ' ' ->
+            let key = String.sub body 0 (i - 1) in
+            String.length key > 0 && not (String.contains key ' ')
+          | Some _ | None -> false
+        in
+        walk ((if looks_like_toml then body else line) :: acc) true rest)
+  in
+  String.concat "\n" (walk [] false (String.split_on_char '\n' content))
+;;
+
+let seed_runtime_toml () =
+  let seed_path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  let ic = open_in_bin seed_path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+;;
+
+let with_uncommented_seed ~marker f =
+  let content = seed_runtime_toml () in
+  if not
+       (List.exists
+          (fun line -> String.length line > 0 && line.[0] = '#' && line_contains ~needle:marker line)
+          (String.split_on_char '\n' content))
+  then failf "example heading moved; update this gate: %s" marker;
+  let path = Filename.temp_file "seed_example_" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+       try Sys.remove path with
+       | _ -> ())
+    (fun () ->
+       let oc = open_out path in
+       output_string oc (uncomment_example_region ~marker content);
+       close_out oc;
+       match Runtime.load_list ~config_path:path with
+       | Error msg ->
+         failf "uncommented example region should load (%s): %s" marker msg
+       | Ok (runtimes, _default, _assignments, _media_failover, _lanes) -> f runtimes)
+;;
+
+(* The three self-hosted stacks disagree on exactly the features a keeper turn
+   depends on, and none of them has a catalog row, so each lands in
+   runtime_adapter's no-catalog branch where the runtime.toml block is the whole
+   declaration. That is what makes these assertions meaningful rather than a
+   readback of the catalog. *)
+let self_hosted_template_cases =
+  [ ( "llama_server.llama-server-local"
+    , 262144
+      (* measured on llama.cpp build 10180: json_schema honoured exactly, two
+         tool calls in one turn, tool_choice "required" answered in prose *)
+    , true (* structured output *)
+    , false (* required tool choice *)
+    , true (* parallel tool calls *) )
+  ; ( "vllm.vllm-served-model"
+    , 262144
+      (* vLLM docs: "required" rides the structured-outputs backend; parallel
+         tool calls are parser- and model-dependent, so the row does not claim
+         them *)
+    , true
+    , true
+    , false )
+  ; ( "mlx_server.mlx-served-model"
+    , 262144
+      (* mlx_lm.server takes no tool_choice and validates no JSON schema *)
+    , false
+    , false
+    , false )
+  ]
+;;
+
+let test_self_hosted_templates_resolve_when_enabled () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  with_uncommented_seed ~marker:self_hosted_example_marker
+  @@ fun runtimes ->
+  List.iter
+    (fun (runtime_id, context, structured, required_choice, parallel_calls) ->
+       match
+         List.find_opt
+           (fun (rt : Runtime.t) -> String.equal rt.Runtime.id runtime_id)
+           runtimes
+       with
+       | None -> failf "uncommenting the example did not produce runtime %s" runtime_id
+       | Some runtime ->
+         (match
+            Llm_provider.Provider_config.capabilities_for_config_model
+              (agent_core_provider_config runtime)
+          with
+          | None -> failf "%s must resolve capabilities without a catalog row" runtime_id
+          | Some caps ->
+            check (option int) (runtime_id ^ " context") (Some context)
+              caps.max_context_tokens;
+            check bool (runtime_id ^ " structured output") structured
+              caps.supports_structured_output;
+            check bool (runtime_id ^ " required tool choice") required_choice
+              caps.supports_required_tool_choice;
+            check bool (runtime_id ^ " parallel tool calls") parallel_calls
+              caps.supports_parallel_tool_calls))
+    self_hosted_template_cases
+;;
+
+(* The Claude Code example has shipped commented since before this gate existed
+   and was never parsed by anything; the Codex and Antigravity ones arrive the
+   same way. A stale command name, a missing required provider field, or a key
+   the parser no longer takes fails here now. *)
+let test_commented_official_client_examples_load () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  with_uncommented_seed ~marker:official_client_example_marker
+  @@ fun runtimes ->
+  let ids = List.map (fun (rt : Runtime.t) -> rt.Runtime.id) runtimes in
+  List.iter
+    (fun expected ->
+       if not (List.exists (String.equal expected) ids)
+       then failf "uncommenting the examples did not produce %s" expected)
+    [ "claude_code.claude-code-sonnet"
+    ; "claude_code.claude-code-opus-high"
+    ; "codex_subscription.codex-gpt-5-6"
+    ; "antigravity_subscription.antigravity-gemini-3-7-flash-high"
+    ]
+;;
+
 (* The capability probe on 2026-08-13 sent 36 requests to the kimi_coding
    models and all 36 came back carrying thinking while nothing declared it, so
    every one logged Thinking_returned_but_declared_unsupported (#28457). Two of
@@ -4400,6 +4572,10 @@ let () =
             test_kimi_for_coding_declares_the_reasoning_it_returns;
           test_case "repo-runtime-toml-declares-no-clamped-max-context" `Quick
             test_repo_runtime_toml_declares_no_clamped_max_context;
+          test_case "self-hosted server templates resolve when enabled" `Quick
+            test_self_hosted_templates_resolve_when_enabled;
+          test_case "commented official-client examples load" `Quick
+            test_commented_official_client_examples_load;
           test_case
             "deployment exact-output catalog admits repo seed lanes"
             `Quick

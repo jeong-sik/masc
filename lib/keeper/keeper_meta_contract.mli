@@ -10,8 +10,8 @@
     [blocker_class_of_serialized_string] (deserializer used
     only by JSON parsing), [map_proactive_rt]
     (nested-record updaters that callers reach via the higher-level
-    {!map_runtime} / {!map_usage}).  All consumed only via the runtime
-    contract or the JSON pipeline. *)
+    {!map_usage}).  All consumed only via the runtime contract or the JSON
+    pipeline. *)
 
 (** {1 Policy types} *)
 
@@ -298,19 +298,13 @@ val now_iso : unit -> string
 (** [now_iso ()] is the ISO-8601 timestamp from
     {!Masc_domain.now_iso}. *)
 
-val map_runtime :
-  (agent_runtime_state -> agent_runtime_state) ->
-  keeper_meta ->
-  keeper_meta
-(** [map_runtime f m] returns [{ m with runtime = f m.runtime }] —
-    pure functional update of the runtime sub-record. *)
 
 val map_usage :
   (usage_metrics -> usage_metrics) ->
   keeper_meta ->
   keeper_meta
-(** [map_usage f m] is [map_runtime (fun rt -> { rt with usage =
-    f rt.usage }) m] — convenience for usage-only updates. *)
+(** [map_usage f m] replaces [m]'s runtime usage with [f] applied to it —
+    convenience for usage-only updates. *)
 
 val zero_usage : usage_metrics
 (** [zero_usage] is the all-zero usage_metrics record.  Pinned

@@ -87,10 +87,7 @@ type claude_setting_source =
   | Settings_project
   | Settings_local
 
-val claude_setting_source_of_string : string -> claude_setting_source option
 
-val valid_claude_setting_source_strings : string list
-(** For error messages, in declaration order. *)
 
 val claude_setting_sources_arg : claude_setting_source list -> string
 (** The complete [--setting-sources=...] argv token; the empty list renders

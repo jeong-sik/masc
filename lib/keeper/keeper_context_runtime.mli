@@ -110,6 +110,7 @@ val dispatch_keeper_phase_event
 type lifecycle_dispatch_error =
   | Transition_rejected of Keeper_state_machine.transition_error
 
+
 val dispatch_keeper_phase_event_result
   :  config:Workspace.config
   -> ?origin:Keeper_registry.lifecycle_event_origin

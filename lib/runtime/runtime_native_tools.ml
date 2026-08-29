@@ -115,15 +115,6 @@ let claude_setting_source_to_string = function
   | Settings_local -> "local"
 ;;
 
-let claude_setting_source_of_string = function
-  | "user" -> Some Settings_user
-  | "project" -> Some Settings_project
-  | "local" -> Some Settings_local
-  | _ -> None
-;;
-
-let valid_claude_setting_source_strings = [ "user"; "project"; "local" ]
-
 let claude_setting_sources_arg sources =
   "--setting-sources="
   ^ String.concat "," (List.map claude_setting_source_to_string sources)

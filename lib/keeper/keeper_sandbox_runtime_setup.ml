@@ -6,6 +6,52 @@
     configured hardening requirements without forming a module
     dependency cycle. *)
 
+let test_allow_real_docker_env = "MASC_TEST_ALLOW_REAL_DOCKER"
+
+(* A test that forgets MASC_TEST_FAKE_DOCKER_PATH does not fail; it finds the
+   operator's docker on PATH and speaks to the real daemon. On 2026-08-29 that
+   left ten persistent containers behind, named for a base_path in /tmp whose
+   owner pid was already gone -- outside every sweep's scope, because a
+   persistent container surviving its owner is the normal state between server
+   restarts, and no teardown owns a temp workspace nobody will open again.
+
+   Same shape as the #9903 base-path guard: the unknown case here is "a test
+   that did not say which docker it wants", and resolving that to the live one
+   is the most expensive reading available. Refuse instead, and say what to
+   set. *)
+let fake_docker_configured () =
+  match Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" with
+  | Some path -> String.trim path <> ""
+  | None -> false
+;;
+
+let refuse_real_daemon_under_test ~what =
+  if Env_config_core.running_under_test_executable ()
+     && not (fake_docker_configured ())
+  then (
+    let allowed =
+      match Sys.getenv_opt test_allow_real_docker_env with
+      | Some v ->
+        let v = String.trim v in
+        String.equal v "1" || String.equal v "true"
+      | None -> false
+    in
+    if not allowed
+    then
+      failwith
+        (Printf.sprintf
+           "test isolation breach: test executable %S tried to %s on the host \
+            docker daemon without MASC_TEST_FAKE_DOCKER_PATH. A container it \
+            starts is named for this test's temp base_path, which no sweep or \
+            teardown owns -- a persistent container outliving its owner pid is \
+            the normal state between server restarts, so nothing reclaims it \
+            and it stays there. Point the test at a fake docker, or set %s=1 \
+            to use the real daemon on purpose (not recommended)."
+           (Filename.basename Sys.executable_name)
+           what
+           test_allow_real_docker_env))
+;;
+
 let docker_command () =
   match Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" with
   | Some path when String.trim path <> "" -> path

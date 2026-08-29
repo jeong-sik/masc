@@ -14,6 +14,7 @@ module Keeper_tool_execute_runtime = Masc.Keeper_tool_execute_runtime
 module Keeper_workspace_ops = Masc.Keeper_workspace_ops
 module Keeper_tool_dispatch_runtime = Masc.Keeper_tool_dispatch_runtime
 module Keeper_registry = Masc.Keeper_registry
+module Keeper_sandbox_runtime_setup = Masc.Keeper_sandbox_runtime_setup
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_exec_failure = Masc.Keeper_sandbox_exec_failure
 module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
@@ -358,6 +359,43 @@ let with_fake_docker script f =
   Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
   with_env "MASC_TEST_FAKE_DOCKER_PATH" docker_path @@ fun () ->
   with_env "PATH" path f
+
+let message_mentions needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
+  scan 0
+
+(* The leak this guard exists to stop: on 2026-08-29 ten persistent containers
+   were found on the host daemon, named for temp base_paths whose owner pids
+   were gone. Nothing reclaims those -- outliving the owner is normal for a
+   persistent container between server restarts, so the sweep leaves it, and no
+   teardown owns a workspace nobody reopens. *)
+let test_guard_refuses_the_real_daemon_without_a_fake () =
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" "" @@ fun () ->
+  with_env "MASC_TEST_ALLOW_REAL_DOCKER" "" @@ fun () ->
+  match
+    Keeper_sandbox_runtime_setup.refuse_real_daemon_under_test
+      ~what:"start a persistent container"
+  with
+  | () -> Alcotest.fail "a test executable was allowed at the host daemon"
+  | exception Failure message ->
+    Alcotest.(check bool) "the refusal says how to fix it" true
+      (message_mentions "MASC_TEST_FAKE_DOCKER_PATH" message)
+
+(* A fake is the ordinary case and must stay silent, or every docker test in
+   this file dies. It did, while the guard was only checking for a test
+   executable. *)
+let test_guard_is_silent_with_a_fake () =
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" "/tmp/does-not-need-to-exist" @@ fun () ->
+  Keeper_sandbox_runtime_setup.refuse_real_daemon_under_test
+    ~what:"start a persistent container"
+
+(* And a test that means it can still reach the daemon. *)
+let test_guard_yields_to_an_explicit_opt_in () =
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" "" @@ fun () ->
+  with_env "MASC_TEST_ALLOW_REAL_DOCKER" "1" @@ fun () ->
+  Keeper_sandbox_runtime_setup.refuse_real_daemon_under_test
+    ~what:"start a persistent container"
 
 let test_docker_command_skips_empty_path_segment () =
   let cwd = temp_dir () in
@@ -2247,6 +2285,15 @@ let () =
           Alcotest.test_case
             "docker command skips empty PATH segment"
             `Quick test_docker_command_skips_empty_path_segment;
+          Alcotest.test_case
+            "guard refuses the real daemon without a fake"
+            `Quick test_guard_refuses_the_real_daemon_without_a_fake;
+          Alcotest.test_case
+            "guard is silent with a fake"
+            `Quick test_guard_is_silent_with_a_fake;
+          Alcotest.test_case
+            "guard yields to an explicit opt-in"
+            `Quick test_guard_yields_to_an_explicit_opt_in;
           Alcotest.test_case
             "tool_execute typed pipeline uses local shell ir dispatch"
             `Quick test_execute_typed_pipeline_uses_local_shell_ir_dispatch;

@@ -1,4 +1,18 @@
 val docker_command : unit -> string
+val refuse_real_daemon_under_test : what:string -> unit
+(** Raise when a test executable is about to reach the host docker daemon
+    without a fake configured.
+
+    A container a test starts is named for its temp base_path. Nothing
+    reclaims it: a persistent container outliving its owner pid is the normal
+    state between server restarts, so the sweep leaves it, and no teardown
+    owns a workspace nobody will open again. Ten of them were found on the
+    daemon on 2026-08-29.
+
+    [what] names the operation for the message ("start a container"). Set
+    MASC_TEST_ALLOW_REAL_DOCKER=1 to opt a test into the real daemon
+    deliberately. *)
+
 val docker_command_argv : unit -> string list
 val docker_run_pull_never_args : unit -> string list
 val docker_image_inspect_next_action : string

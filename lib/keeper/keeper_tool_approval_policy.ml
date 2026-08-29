@@ -47,7 +47,14 @@ let rec verdict_for ~composition_plan_index ~tool_name ~input =
       | Some true ->
           Run { because = "this call only reads" }
       | Some false | None ->
-          Ask { because = "this call is not a read" })
+          (* A write that only moves masc's own durable rows is visible in the
+             workspace and undoable there, so it runs. One that leaves — the
+             sandbox filesystem, a process, a service — is asked about. The
+             descriptor declares which it is; before #31728 this same split
+             was read off the tool's group. *)
+          if descriptor.Descriptor.policy.Descriptor.leaves_masc then
+            Ask { because = "this call reaches outside masc" }
+          else Run { because = "this call stays inside masc" })
 
 (* A name with no descriptor is either a composition, whose nodes each have
    one, or something this build cannot classify at all.
@@ -84,7 +91,10 @@ and node_asks_for_approval node =
   | Some descriptor ->
     (match Descriptor.readonly_static_hint descriptor with
      | Some true -> None
-     | Some false | None -> Some (node, "this call is not a read"))
+     | Some false | None ->
+       if descriptor.Descriptor.policy.Descriptor.leaves_masc
+       then Some (node, "this call reaches outside masc")
+       else None)
 
 (* What an undescribed name is, decided once.
 

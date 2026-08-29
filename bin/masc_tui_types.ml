@@ -1013,7 +1013,6 @@ let surface_ring : (surface * string) list =
     (Fusion, "Fusion");
     (Repositories, "Repos");
     (Code, "Code");
-    (Changes, "Changes");
     (Connectors, "Connectors");
     (Runtime, "Runtime");
     (Config, "Config");
@@ -1023,12 +1022,15 @@ let surface_ring : (surface * string) list =
   ]
 
 (* Ring position of the family a view belongs to. Keeper sub-modes collapse
-   onto Keepers, and Task Review collapses onto Planning. *)
+   onto Keepers, Task Review collapses onto Planning, and Changes collapses
+   onto Keepers -- its rows are one keeper's file writes, chosen by the
+   roster cursor, so it was never a destination of its own. *)
 let surface_ring_index (view : surface) =
   let family =
     match view with
     | Keepers _ -> Keepers Keeper_list
     | Verification -> Planning
+    | Changes -> Keepers Keeper_list
     | v -> v
   in
   let rec find i = function

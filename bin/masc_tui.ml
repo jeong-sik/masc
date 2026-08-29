@@ -11611,7 +11611,10 @@ and is loaded on demand through keeper_skill.
                   state.changes_tree_diff_error <- None;
                   state.changes_tree_diff_path <- None
                 end
-                else state.view <- Overview
+                else
+                  (* Changes opens from the roster, so Esc goes back to the
+                     roster rather than to Overview. *)
+                  state.view <- Keepers Keeper_list
             | Repositories | Connectors | Runtime
             | Config | Tools
             | System_logs -> state.view <- Overview)
@@ -12633,6 +12636,11 @@ and is loaded on demand through keeper_skill.
             | Acting
             | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
+       (* Changes reads one keeper's file writes and already binds to the
+          roster cursor on entry, so it opens from the roster rather than
+          from the Tab ring. *)
+       | Some "f" | Some "F" when state.view = Keepers Keeper_list ->
+           goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "f" | Some "F" when state.view = Planning ->

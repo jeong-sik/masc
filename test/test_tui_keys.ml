@@ -161,6 +161,16 @@ let test_task_review_is_a_planning_child () =
     (surface_ring_index Planning)
     (surface_ring_index Verification)
 
+(* Changes reads one keeper's file writes and binds to the roster cursor on
+   entry, so it opens with [f] from the roster instead of holding a Tab stop
+   of its own. *)
+let test_changes_is_a_keeper_child () =
+  Alcotest.(check bool) "Changes is not a top-level ring entry" false
+    (List.exists (fun (surface, _) -> surface = Changes) surface_ring);
+  Alcotest.(check int) "Changes highlights Keepers"
+    (surface_ring_index (Keepers Keeper_list))
+    (surface_ring_index Changes)
+
 let test_system_logs_lost_the_keys_it_never_had () =
   (* The old help table documented g, G, and f on System logs; the dispatch
      binds them on Acting only. *)
@@ -559,6 +569,8 @@ let () =
             test_planning_footer_carries_filter_and_sort
         ; Alcotest.test_case "Task Review is a Planning child" `Quick
             test_task_review_is_a_planning_child
+        ; test_case "Changes is a Keepers child" `Quick
+            test_changes_is_a_keeper_child
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick

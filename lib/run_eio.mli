@@ -31,8 +31,6 @@ val run_dir : Workspace_utils.config -> string -> string
 
 val run_json_path : Workspace_utils.config -> string -> string
 
-val plan_path : Workspace_utils.config -> string -> string
-
 (** [""] when the file does not exist. *)
 val read_text_file : string -> string
 

@@ -87,7 +87,6 @@ type claude_setting_source =
   | Settings_project
   | Settings_local
 
-val claude_setting_source_to_string : claude_setting_source -> string
 val claude_setting_source_of_string : string -> claude_setting_source option
 
 val valid_claude_setting_source_strings : string list

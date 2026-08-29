@@ -291,13 +291,6 @@ val load_existing :
   config:Workspace.config ->
   trace_id:Keeper_id.Trace_id.t ->
   (t option, store_error) result
-(** Read an already-materialized ledger. Unlike {!load}, absence remains
-    [None] instead of being projected as a synthetic empty ledger. *)
-
-val load_existing_read_only :
-  config:Workspace.config ->
-  trace_id:Keeper_id.Trace_id.t ->
-  (t option, store_error) result
 (** Strict snapshot read that creates neither the trace root nor a session lock.
     The durable writer publishes by atomic rename, while
     {!Fs_compat.load_owned_regular_file} verifies the opened descriptor before

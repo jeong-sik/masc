@@ -124,7 +124,6 @@ val digest : t -> string
     separately exposed Skill snapshot revision is not digest material. *)
 
 val capability_availability_to_string : capability_availability -> string
-val tool_capability_to_yojson : tool_capability -> Yojson.Safe.t
 val skill_capability_to_yojson : skill_capability -> Yojson.Safe.t
 val candidate_to_yojson : candidate -> Yojson.Safe.t
 val candidate_name : candidate -> string

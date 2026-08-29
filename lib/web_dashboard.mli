@@ -73,10 +73,6 @@ val load_dashboard_asset : string -> (string, asset_load_error) result
     immutable content-addressed snapshot and verify size/SHA-256 before
     returning bytes. Invalid/replaced bindings fail closed. *)
 
-val dashboard_asset_root : unit -> string option
-(** Bound snapshot root, general checkout dashboard root, or [None] when a
-    provenance-bound source/snapshot is invalid. *)
-
 module For_testing : sig
   val surface_recovery :
     asset_resolution:Build_identity.dashboard_asset_resolution ->

@@ -14,8 +14,6 @@ val composition_run_summary_tool_name : string
 (** Execution-semantics kind (RFC-0386) of the model-defined plan tool:
     [Keeper_tool_descriptor.Batch_plan_tool]. *)
 val plan_execute_tool_kind : Keeper_tool_descriptor.tool_kind
-val proposal_execute_tool_kind : Keeper_tool_descriptor.tool_kind
-
 type 'evidence schema_tool_origin =
   | Declared_composition of 'evidence
   | Plan_execute

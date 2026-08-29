@@ -36,19 +36,6 @@ type keeper_repo_mapping = {
 }
 [@@deriving yojson, show, eq]
 
-let repository_scope_of_ids repository_ids =
-  if List.exists (String.equal "*") repository_ids then
-    All_repositories
-  else
-    Selected_repositories repository_ids
-
-let make_keeper_repo_mapping ~keeper_id ~repository_ids =
-  {
-    keeper_id;
-    repository_ids;
-    repository_scope = repository_scope_of_ids repository_ids;
-  }
-
 (* [Otoml.t] is a 3rd-party closed variant with 12 value constructors;
    the on-disk config loaders in this library only ever distinguish
    "table-shaped" (TomlTable / TomlInlineTable) from everything else.

@@ -191,12 +191,6 @@ val jail_for_request
 val parse_config : string -> (config, string) result
 val load_config : unit -> (config, string) result
 
-val config_env_var : string
-(** [= "MASC_EXEC_SHIM_CONFIG"] *)
-
-val default_config_path : string
-(** [= "/etc/masc-exec-shim.conf"] *)
-
 (** {1 Nonblocking drain helper} *)
 
 type drain_result =

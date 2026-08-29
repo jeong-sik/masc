@@ -36,8 +36,6 @@ type keeper_repo_mapping = {
 }
 [@@deriving yojson, show, eq]
 
-val make_keeper_repo_mapping :
-  keeper_id:string -> repository_ids:repository_id list -> keeper_repo_mapping
 (** [make_keeper_repo_mapping ~keeper_id ~repository_ids] preserves the raw
     IDs for serialization while storing the parsed access scope. *)
 

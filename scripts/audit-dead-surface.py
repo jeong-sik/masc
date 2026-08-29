@@ -654,7 +654,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # its own authority and re-measures the floor at what the tree now holds.
 # The remainder predates the train and sits outside the skills surface, so
 # it waits for its own reviewed purge rather than a blind sweep here.
-DEAD_EXPORT_BASELINE = 45
+DEAD_EXPORT_BASELINE = 1
 
 
 def run_ratchet(count: int) -> int:

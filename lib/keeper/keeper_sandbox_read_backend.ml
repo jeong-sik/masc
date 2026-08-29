@@ -326,18 +326,23 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
        This avoids wasteful docker runs that inevitably fail with
        "No such file or directory", and lets us emit a precise error
        that names the host path the keeper actually asked for. *)
+    let profile_label =
+      Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile
+    in
     if not (Sys.file_exists host_path) then
       Error
         (Printf.sprintf
-           "docker_cat_failed: path_not_found: %s (host path does not exist; verify the \
+           "%s_read_failed: path_not_found: %s (host path does not exist; verify the \
             relative path under your playground before calling Read)"
+           profile_label
            host_path)
     else if Sys.is_directory host_path then
       Error
         (Printf.sprintf
-           "docker_cat_failed: path_is_directory: %s (Read requires a file, \
+           "%s_read_failed: path_is_directory: %s (Read requires a file, \
             not a directory; to list a directory use Execute with ls, e.g. \
             argv=['ls','-la','%s'])"
+           profile_label
            host_path
            host_path)
     else

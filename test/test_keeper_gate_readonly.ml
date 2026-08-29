@@ -92,7 +92,52 @@ let test_write_shapes_stay_blocked () =
 ;;
 
 let executes ~operation argv =
-  Readonly.readonly_sandbox_execute ~operation ~input:(gate_input argv)
+  Readonly.observation_only_request ~operation ~input:(gate_input argv)
+;;
+
+let network_input ~capability =
+  `Assoc
+    [ "capability", `String capability
+    ; "input", `Assoc [ "query", `String "ocaml eio"; "limit", `Int 3 ]
+    ]
+;;
+
+let test_network_observation_capabilities () =
+  check bool
+    "web_search reads without judgment"
+    true
+    (Readonly.observation_only_request
+       ~operation:"network_read"
+       ~input:(network_input ~capability:"web_search"));
+  check bool
+    "web_fetch stays with the judge (caller-chosen address)"
+    false
+    (Readonly.observation_only_request
+       ~operation:"network_read"
+       ~input:(network_input ~capability:"web_fetch"));
+  check bool
+    "unknown capability never matches"
+    false
+    (Readonly.observation_only_request
+       ~operation:"network_read"
+       ~input:(network_input ~capability:"port_scan"));
+  check bool
+    "missing capability never matches"
+    false
+    (Readonly.observation_only_request
+       ~operation:"network_read"
+       ~input:(`Assoc [ "input", `Assoc [ "query", `String "x" ] ]));
+  check bool
+    "network arm ignores tool_execute shapes"
+    false
+    (Readonly.observation_only_request
+       ~operation:"network_read"
+       ~input:(gate_input [ "ls" ]));
+  check
+    (Alcotest.list Alcotest.string)
+    "observation network set is closed at web_search"
+    [ "web_search" ]
+    Readonly.observation_network_capabilities
 ;;
 
 let test_gate_shape_gates () =
@@ -100,11 +145,11 @@ let test_gate_shape_gates () =
   check bool
     "non-tool_execute never matches"
     false
-    (Readonly.readonly_sandbox_execute ~operation:"slack_post" ~input:(gate_input [ "ls" ]));
+    (Readonly.observation_only_request ~operation:"slack_post" ~input:(gate_input [ "ls" ]));
   check bool
     "local sandbox profile never matches"
     false
-    (Readonly.readonly_sandbox_execute
+    (Readonly.observation_only_request
        ~operation:"tool_execute"
        ~input:
          (`Assoc
@@ -116,11 +161,11 @@ let test_gate_shape_gates () =
   check bool
     "missing sandbox fields never matches"
     false
-    (Readonly.readonly_sandbox_execute ~operation:"tool_execute" ~input:(`Assoc [ "input", `Assoc [] ]));
+    (Readonly.observation_only_request ~operation:"tool_execute" ~input:(`Assoc [ "input", `Assoc [] ]));
   check bool
     "non-string argv entry never matches"
     false
-    (Readonly.readonly_sandbox_execute
+    (Readonly.observation_only_request
        ~operation:"tool_execute"
        ~input:
          (`Assoc
@@ -233,6 +278,10 @@ let () =
       , [ test_case "observation table is fully read" `Quick test_observation_table_is_fully_read
         ; test_case "write shapes stay blocked" `Quick test_write_shapes_stay_blocked
         ; test_case "gate shape gates" `Quick test_gate_shape_gates
+        ; test_case
+            "network observation capabilities"
+            `Quick
+            test_network_observation_capabilities
         ] )
     ; ( "gate path"
       , [ test_case

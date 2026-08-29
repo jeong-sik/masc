@@ -6,11 +6,18 @@
 
 (** [readonly_sandbox_execute ~operation ~input] is [true] exactly when the
     gate request is a [tool_execute] whose argv is a closed-set
-    observation-only command and whose declared sandbox is docker. [true]
-    means the request may be allowed without judgment or queueing; [false]
-    means nothing — the request falls through to the configured gate mode.
-    The input shape is [Keeper_tool_execute_runtime.execute_gate_input]. *)
-val readonly_sandbox_execute : operation:string -> input:Yojson.Safe.t -> bool
+    observation-only command and whose declared sandbox is docker, or a
+    [network_read] request whose capability is in the closed
+    observation set ([web_search] — server-side, provider-bound, no
+    caller-chosen address; [web_fetch] deliberately stays with the judge).
+    [true] means the request may be allowed without judgment or queueing;
+    [false] means nothing — the request falls through to the configured
+    gate mode. The execute input shape is
+    [Keeper_tool_execute_runtime.execute_gate_input]; the network shape is
+    the [network_read] gate request ([capability] at the top level). *)
+val observation_only_request : operation:string -> input:Yojson.Safe.t -> bool
+
+val observation_network_capabilities : string list
 
 (** Exposed for tests: the argv classifier alone. *)
 val classify_argv : string list -> bool

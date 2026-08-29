@@ -111,11 +111,7 @@ let snapshot_rejection_to_yojson = function
       [ "kind", `String "document_rejected"
       ; ( "diagnostics"
         , `List
-            (List.map
-               (fun diagnostic ->
-                  `String
-                    (Agent_core.Skill_document.diagnostic_to_string diagnostic))
-               diagnostics) )
+            (List.map Agent_core.Skill_document.diagnostic_to_yojson diagnostics) )
       ]
   | Skill_catalog_snapshot.Document_unreadable { path; detail } ->
     `Assoc

@@ -156,6 +156,9 @@ source candidate를 typed rejection으로 격리한다. 해당 Skill을 Task가 
 
 - `GET /api/v1/skills` — 발행 스냅샷의 valid entry와 typed rejection, 종류·합성 도구
   이름/실행 모드·최근 사용 및 완료 성공/실패 횟수를 함께 돌려준다.
+- document rejection은 안정적인 diagnostic `code`와 사람용 `message`를 함께 내보낸다.
+  Monitor › Skills는 valid Skill이 하나도 없어도 source candidate별 code를 표시하며,
+  message 문자열을 재파싱해 상태를 추측하지 않는다.
 - 합성 실행은 노드 단위로 `tool_calls` 스토어에 남는다 (`composition_tool`,
   `composition_run_id`, `composition_node_id`) — SSE
   `keeper_tool_call_evidence_committed` 로도 흐른다. 이벤트에는 `success`, `disposition`,

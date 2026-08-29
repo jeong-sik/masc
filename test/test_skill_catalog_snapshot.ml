@@ -355,21 +355,22 @@ let test_public_projection_exposes_document_rejection () =
          (match List.assoc_opt "reason" rejection_fields with
           | Some (`Assoc reason_fields) ->
             (match List.assoc_opt "diagnostics" reason_fields with
-             | Some (`List values) ->
-               List.filter_map
-                 (function
-                   | `String value -> Some value
-                   | _ -> None)
-                 values
+             | Some (`List values) -> values
              | _ -> fail "public rejection has no diagnostics array")
           | _ -> fail "public rejection has no typed reason")
        | _ -> fail "public snapshot does not contain exactly one rejection")
     | _ -> fail "public snapshot is not an object"
   in
   check
-    (list string)
+    (list (testable Yojson.Safe.pp Yojson.Safe.equal))
     "the reason is public"
-    [ "SKILL.md name \"declared-name\" does not match directory \"directory-name\"" ]
+    [ `Assoc
+        [ "code", `String "name_mismatch"
+        ; ( "message"
+          , `String
+              "SKILL.md name \"declared-name\" does not match directory \"directory-name\"" )
+        ]
+    ]
     diagnostics
 ;;
 

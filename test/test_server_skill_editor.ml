@@ -132,6 +132,8 @@ let test_invalid_candidate_is_never_written () =
           too_long )
     ; ( "unknown top-level field"
       , "---\nname: sample\ndescription: Reject unknown policy.\ndisable-model-invocation: true\n---\nBody\n" )
+    ; ( "Unicode whitespace-only description"
+      , "---\nname: sample\ndescription: \xc2\xa0\n---\nBody\n" )
     ]
   in
   List.iter
@@ -181,6 +183,25 @@ let test_invalid_new_skill_is_never_created () =
     "package directory remains absent"
     false
     (Sys.file_exists (Filename.concat base_path "skills/not-created"))
+  ;
+  let whitespace_package = "alpha " in
+  (match
+     Editor.create
+       ~base_path
+       ~source_id
+       ~package_id:whitespace_package
+       ~source_text:
+         "---\nname: alpha\ndescription: The raw directory must match.\n---\nBody\n"
+       ~refresh
+   with
+   | Error (Editor.Validation_failed _) -> ()
+   | Error error -> fail ("wrong whitespace create error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "trimmed package directory was created");
+  check
+    bool
+    "whitespace package directory remains absent"
+    false
+    (Sys.file_exists (Filename.concat base_path ("skills/" ^ whitespace_package)))
 ;;
 
 let test_composition_preview_exposes_validated_flow () =

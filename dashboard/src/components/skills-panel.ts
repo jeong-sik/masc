@@ -21,6 +21,7 @@ import {
   type SkillReference,
   type SkillSnapshotConfig,
   type SkillSnapshotEntry,
+  type SkillSnapshotRejection,
   type SkillSurface,
   type SkillSurfaceProfile,
   type SkillsResponse,
@@ -92,6 +93,19 @@ export function sortSkillRows(rows: readonly SkillRow[]): SkillRow[] {
     || compareText(left.identity.name, right.identity.name)
     || compareText(left.content_revision, right.content_revision),
   )
+}
+
+export function rejectionDiagnostics(rejection: SkillSnapshotRejection): string[] {
+  switch (rejection.reason.kind) {
+    case 'document_rejected':
+      return rejection.reason.diagnostics.map(
+        diagnostic => `${diagnostic.code}: ${diagnostic.message}`,
+      )
+    case 'document_unreadable':
+    case 'exact_identity_duplicate':
+    case 'invalid_package_id':
+      return [rejection.reason.kind]
+  }
 }
 
 export function kindLabel(surface: SkillSurface | null): string {
@@ -655,7 +669,7 @@ export function SkillsPanel() {
     return html`<${EmptyState} message=${stateMessage(res.state)} />`
   }
   const rows = sortSkillRows(mergeSkillRows(res.snapshot.skills, res.surfaces))
-  if (rows.length === 0) {
+  if (rows.length === 0 && res.snapshot.rejections.length === 0) {
     return html`<${EmptyState} message="The published snapshot lists no skills." />`
   }
   return html`
@@ -701,7 +715,7 @@ export function SkillsPanel() {
               <option value="instruction">Instruction · on demand</option>
               <option value="composition">Composition · tool flow</option>
             </select>
-            <input class="ss-input mono" value=${createName.value} pattern="[a-z0-9-]+" placeholder="skill-name" onInput=${(event: Event) => { createName.value = (event.currentTarget as HTMLInputElement).value }} required />
+            <input class="ss-input mono" value=${createName.value} placeholder="skill-name" onInput=${(event: Event) => { createName.value = (event.currentTarget as HTMLInputElement).value }} required />
           </div>
           <input class="ss-input" value=${createDescription.value} placeholder="When should an agent use this?" onInput=${(event: Event) => { createDescription.value = (event.currentTarget as HTMLInputElement).value }} required />
           <textarea class="ss-input min-h-24" value=${createBody.value} onInput=${(event: Event) => { createBody.value = (event.currentTarget as HTMLTextAreaElement).value }} />
@@ -722,7 +736,7 @@ export function SkillsPanel() {
           ? html` · ${res.snapshot.rejections.length} rejected`
           : null}
       </div>
-      <table class="ss-table" data-testid="skills-table">
+      ${rows.length > 0 ? html`<table class="ss-table" data-testid="skills-table">
         <thead>
           <tr>
             <th>skill</th><th>capability</th><th>context</th><th>current users</th><th>source</th>
@@ -780,7 +794,28 @@ export function SkillsPanel() {
             `
           })}
         </tbody>
-      </table>
+      </table>` : html`<div class="ss-muted py-3" data-testid="skills-no-valid">No valid Skills are published.</div>`}
+      ${res.snapshot.rejections.length > 0 ? html`
+        <div class="mt-4" data-testid="skill-rejections">
+          <strong>Rejected source candidates</strong>
+          <table class="ss-table mt-2">
+            <thead><tr><th>source</th><th>content revision</th><th>typed reason</th></tr></thead>
+            <tbody>
+              ${res.snapshot.rejections.map(rejection => html`
+                <tr key=${`${rejection.source_id}/${rejection.package_id ?? ''}/${rejection.content_revision ?? ''}`}>
+                  <td class="mono">${rejection.source_id}/${rejection.package_id ?? '(invalid package)'}</td>
+                  <td class="mono">${rejection.content_revision?.slice(0, 12) ?? 'unavailable'}</td>
+                  <td>
+                    ${rejectionDiagnostics(rejection).map(diagnostic => html`
+                      <div class="text-[var(--color-status-warn)]">${diagnostic}</div>
+                    `)}
+                  </td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+      ` : null}
     <//>
   `
 }

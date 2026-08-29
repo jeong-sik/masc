@@ -244,10 +244,7 @@ let rejection_reason_to_private_yojson = function
       [ "kind", `String "document_rejected"
       ; ( "diagnostics"
         , `List
-            (List.map
-               (fun diagnostic ->
-                  `String (Agent_core.Skill_document.diagnostic_to_string diagnostic))
-               diagnostics) )
+            (List.map Agent_core.Skill_document.diagnostic_to_yojson diagnostics) )
       ]
   | Document_unreadable { path; detail } ->
     `Assoc
@@ -631,11 +628,7 @@ let rejection_to_public_yojson (rejection : rejection) =
         [ "kind", `String "document_rejected"
         ; ( "diagnostics"
           , `List
-              (List.map
-                 (fun diagnostic ->
-                    `String
-                      (Agent_core.Skill_document.diagnostic_to_string diagnostic))
-                 diagnostics) )
+              (List.map Agent_core.Skill_document.diagnostic_to_yojson diagnostics) )
         ]
     | Document_unreadable _ ->
       `Assoc [ "kind", `String "document_unreadable" ]

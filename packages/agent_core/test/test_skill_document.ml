@@ -84,6 +84,25 @@ let test_official_frontmatter_violations_are_rejected () =
               { declared = "declared-name"; directory = "directory-name" } ->
             true
           | _ -> false) )
+    ; ( "raw directory name is not trimmed"
+      , "alpha "
+      , "---\nname: alpha\ndescription: Reject a changed parent name.\n---\nBody"
+      , (function
+          | Skill_document.Name_mismatch
+              { declared = "alpha"; directory = "alpha " } -> true
+          | _ -> false) )
+    ; ( "combining mark is not alphanumeric"
+      , "\xcd\x85"
+      , "---\nname: \xcd\x85\ndescription: Reject alphabetic combining marks.\n---\nBody"
+      , (function
+          | Skill_document.Invalid_name
+              { violations; _ } ->
+            List.mem Skill_document.Name_has_invalid_character violations
+          | _ -> false) )
+    ; ( "Unicode whitespace-only description"
+      , "unicode-space"
+      , "---\nname: unicode-space\ndescription: \xc2\xa0\n---\nBody"
+      , (function Skill_document.Missing_description -> true | _ -> false) )
     ; ( "description over 1024 characters"
       , "long-description"
       , Printf.sprintf
@@ -166,6 +185,22 @@ let test_structural_failures_are_rejected () =
     cases
 ;;
 
+let test_independent_frontmatter_diagnostics_accumulate () =
+  match
+    Skill_document.decode
+      ~directory_name:"missing-fields"
+      "---\ncustom: value\n---\nBody"
+  with
+  | Skill_document.Loaded _ -> Alcotest.fail "invalid frontmatter was admitted"
+  | Skill_document.Unloadable diagnostics ->
+    Alcotest.(check bool) "missing name" true
+      (List.mem Skill_document.Missing_name diagnostics);
+    Alcotest.(check bool) "missing description" true
+      (List.mem Skill_document.Missing_description diagnostics);
+    Alcotest.(check bool) "unexpected field" true
+      (List.mem (Skill_document.Unexpected_frontmatter_field "custom") diagnostics)
+;;
+
 let () =
   Alcotest.run
     "skill_document"
@@ -183,5 +218,9 @@ let () =
             "structural failures"
             `Quick
             test_structural_failures_are_rejected
+        ; Alcotest.test_case
+            "independent diagnostics accumulate"
+            `Quick
+            test_independent_frontmatter_diagnostics_accumulate
         ] ) ]
 ;;

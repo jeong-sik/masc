@@ -105,3 +105,6 @@ val decode : directory_name:string -> string -> load_outcome
 
 val diagnostics : load_outcome -> diagnostic list
 val diagnostic_to_string : diagnostic -> string
+val diagnostic_to_yojson : diagnostic -> Yojson.Safe.t
+(** Closed operator projection with a stable [code] and human-readable
+    [message]. Consumers classify by [code], never by parsing [message]. *)

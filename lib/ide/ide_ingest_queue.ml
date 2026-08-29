@@ -37,7 +37,7 @@ let run_job label job =
   try job () with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Printf.eprintf "Ide_ingest_queue.%s: job failed: %s\n%!" label (Printexc.to_string exn)
+    Log.Ide.error "ingest_queue %s: job failed: %s" label (Printexc.to_string exn)
 ;;
 
 let submit (job : job) : unit =

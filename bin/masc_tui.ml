@@ -82,7 +82,7 @@ let redirect_stderr_off_terminal ~base_path =
     path
   with
   | path ->
-      Log.info ~ctx:"masc-tui" "stderr redirected to %s" path
+      Log.Startup.info "stderr redirected to %s" path
   | exception (Unix.Unix_error _ | Sys_error _) ->
       (* Say so before the screen is taken: a surface drawing over a mirror it
          could not move is the state this whole path exists to avoid. *)

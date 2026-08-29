@@ -70,3 +70,48 @@ lib/config_dir_resolver/config_dir_resolver.ml
 #  that is a static literal and is now the Agent_core_event module — a module name
 #  string may contain a colon even though the OCaml identifier cannot.)
 lib/agent_core_log_bridge.ml
+
+# --- Operator CLI harnesses (bin/) ---
+# These binaries are run by a person at a terminal and their stdout/stderr is
+# the answer to the command, not a server record. fusion_run prints four arms
+# side by side "so a human can judge"; keeper_canary_run narrates a live
+# recall protocol turn by turn; the probe CLI is the operator entry point to
+# the RFC-0374 probe lane; checkpoint purge and the preflight helper are
+# offline one-shots. Routing any of it through the structured sink would move
+# the output away from the person who asked for it.
+bin/keeper_canary_run.ml
+bin/keeper_canary_http.ml
+bin/fusion_run.ml
+bin/keeper_capability_probe_cli.ml
+bin/masc_checkpoint_purge.ml
+bin/deployment_preflight_helper.ml
+
+# --- Before the screen, and before the log ---
+# masc_tui writes to stderr while deciding where stderr goes; saying it
+# through the sink it is still redirecting is a mirror drawing over itself.
+# main_stdio_eio's one eprintf is a pre-init FATAL on the stdio transport,
+# where stdout is the protocol and cannot carry diagnostics.
+bin/masc_tui.ml
+bin/main_stdio_eio.ml
+
+# --- Below the logging stack ---
+# runtime_log_sink is where Log.emit lands; it cannot emit through itself.
+# fd_accountant reports file-descriptor exhaustion, the condition that stops
+# the sink from opening anything. server_base_path_guard refuses a bad
+# --base-path before Log is initialised.
+lib/runtime_log_sink.ml
+lib/fd_accountant/
+lib/server/server_base_path_guard.ml
+
+# --- Not in this process ---
+# exec_shim is a static binary that runs on the remote endpoint. There is no
+# masc logging stack there; stderr is what the frame carries back.
+lib/exec_shim/exec_shim.ml
+
+# --- gh subcommand output, in a module that is otherwise server code ---
+# print_observation and run_cli_{login,status,logout} print what `masc keeper
+# github ...` was asked for. The rest of this 1,200-line module runs inside
+# the server, and a prefix entry cannot say "only the last hundred lines", so
+# this exemption is wider than the four functions that earn it. Splitting the
+# subcommands into their own module is the fix; see the follow-up issue.
+lib/keeper/keeper_github_identity.ml

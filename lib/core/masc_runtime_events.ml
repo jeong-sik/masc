@@ -67,14 +67,13 @@ let pid_is_live pid =
 let prune_stale_dumps ~dir =
   if preserve_requested ()
   then
-    Log.info
-      ~ctx:"runtime_events"
+    Log.Runtime.info
       "OCAML_RUNTIME_EVENTS_PRESERVE set; leaving dumps in %s"
       dir
   else (
     match Sys.readdir dir with
     | exception Sys_error msg ->
-      Log.warn ~ctx:"runtime_events" "cannot scan %s for stale dumps: %s" dir msg
+      Log.Runtime.warn "cannot scan %s for stale dumps: %s" dir msg
     | entries ->
     (* Identity check only: never unlink our own live buffer. No output value
        depends on the pid, so it is not a determinism input. *)
@@ -93,14 +92,12 @@ let prune_stale_dumps ~dir =
           let path = Filename.concat dir name in
           (match Sys.remove path with
            | () ->
-             Log.info
-               ~ctx:"runtime_events"
+             Log.Runtime.info
                "removed stale dump %s (pid %d no longer exists)"
                name
                pid
            | exception Sys_error msg ->
-             Log.warn
-               ~ctx:"runtime_events"
+             Log.Runtime.warn
                "cannot remove stale dump %s: %s"
                name
                msg))
@@ -118,6 +115,5 @@ let start_listener () =
     match Runtime_events.path () with
     | Some p -> prune_stale_dumps ~dir:(Filename.dirname p)
     | None ->
-      Log.warn
-        ~ctx:"runtime_events"
+      Log.Runtime.warn
         "listener started but path is unavailable; skipping stale-dump prune")

@@ -90,8 +90,8 @@ let string_field fields key =
 ;;
 
 let warn_malformed_record ~path ~line_no msg =
-  Printf.eprintf
-    "[Ide_annotations] skip malformed annotation row %s:%d: %s\n%!"
+  Log.Ide.warn
+    "skip malformed annotation row %s:%d: %s"
     path
     line_no
     msg

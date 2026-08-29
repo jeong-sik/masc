@@ -105,12 +105,37 @@ jobs:
             sleep 15
           done
 
+      # Bake SQLite into the release binaries instead of requiring
+      # libsqlite3.so.0 at runtime. libsqlite3-dev ships the static archive
+      # libsqlite3.a; removing the shared linker symlink makes the linker
+      # resolve -lsqlite3 to that archive. Without this a bare Ubuntu cannot
+      # start v0.27.0 until `apt-get install libsqlite3-0` is run first.
+      - name: Prefer static SQLite (self-contained Linux binary)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y -qq libsqlite3-dev
+          sudo rm -f /usr/lib/*/libsqlite3.so /usr/lib/libsqlite3.so
+
       - name: Build
         run: |
           opam exec -- dune build --release \
             bin/main_eio.exe \
             bin/masc_tui.exe \
             bin/deployment_preflight_helper.exe
+
+      # Prove the self-contained claim: neither shipped binary may keep a
+      # dynamic libsqlite3 dependency, or a bare Linux install breaks again.
+      - name: Assert Linux binaries carry no dynamic SQLite
+        if: runner.os == 'Linux'
+        run: |
+          for exe in main_eio masc_tui; do
+            if ldd "_build/default/bin/$exe.exe" 2>/dev/null | grep -qi sqlite; then
+              echo "$exe.exe still dynamically links sqlite3:"
+              ldd "_build/default/bin/$exe.exe" | grep -i sqlite
+              exit 1
+            fi
+          done
+          echo "server and TUI binaries carry no dynamic sqlite dependency"
 
       # The Build step above compiles only the OCaml binaries. The server reads
       # the dashboard SPA from assets/dashboard/ at runtime, so without this the

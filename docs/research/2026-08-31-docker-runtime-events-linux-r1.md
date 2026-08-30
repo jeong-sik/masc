@@ -15,11 +15,11 @@ r71-r73의 초기 성공은 옛 shared `MASC_RUN_DIR` 설계 위에서 측정됐
 동작은 보여주지만 최종 lock 조합의 승인 근거로는 쓰지 않는다. 그 공유 PID 설계가 반복
 SIGKILL에서 새 컨테이너를 잘못 SIGTERM하는 r74 반례로 폐기됐기 때문이다.
 
-최종 조합 r78은 fresh shared volume에서 12회 부팅했다. 처음 11개를 SIGKILL하고 마지막을
+최종 조합 r79는 fresh shared volume에서 12회 부팅했다. 처음 11개를 SIGKILL하고 마지막을
 정상 종료했다. 12/12개가 unique runtime/current-ready/auth ok였고, SIGKILL 뒤에는 ring 1개가
 남았으며 다음 runtime ready 시에도 current ring은 정확히 1개였다. 동일 PID filename을 재사용한
-6번은 이전 ring과 새 ring의 SHA-256이 모두 달라 재초기화가 직접 확인됐다. 다른 filename을 쓴
-5번은 stale file을 제거하고 새 ring을 만들었다. 마지막 정상 종료 뒤 ring은 0개였다.
+7번은 이전 ring과 새 ring의 SHA-256이 모두 달라 재초기화가 직접 확인됐다. 다른 filename을 쓴
+4번은 stale file을 제거하고 새 ring을 만들었다. 마지막 정상 종료 뒤 ring은 0개였다.
 
 같은 volume의 concurrent contender도 약 100ms 안에 exit 1로 거부됐고 token hash는 불변이었다.
 12회 동안 shared PID file과 잘못된 takeover 로그는 0건이었다.
@@ -34,7 +34,7 @@ SIGKILL에서 새 컨테이너를 잘못 SIGTERM하는 r74 반례로 폐기됐�
 
 MASC는 `MASC_RUNTIME_EVENTS` 기본값이 true이고 startup에서 `Runtime_events.start()`를 호출한다.
 따라서 release image의 root-owned `/app`은 쓰기 가능한 기본 경로가 아니다. PID filename은
-container PID namespace마다 반복될 수 있으므로, r78은 단순 file 존재뿐 아니라 같은 filename의
+container PID namespace마다 반복될 수 있으므로, r79는 단순 file 존재뿐 아니라 같은 filename의
 content 교체도 검증했다.
 
 ## r70: 쓰기 불가 반례
@@ -71,7 +71,7 @@ runtime user는 UID/GID 999였다. writable override 진단 runtime
   `7.events`를 만든 뒤 1.078초에 ready; clean exit 뒤 ring 0개
 
 이 측정은 runtime-events directory 문제를 분리하는 데는 유효하다. 그러나 lease와 PID lock을 함께
-shared `MASC_RUN_DIR`에 둔 source였으므로 final composition 증거가 아니다. 최종 판단은 r78로
+shared `MASC_RUN_DIR`에 둔 source였으므로 final composition 증거가 아니다. 최종 판단은 r79로
 교체한다.
 
 ## r77: 측정 harness 폐기
@@ -81,25 +81,31 @@ contender exit 1을 보였다. 그러나 harness가 event 하나를 `path + stat
 `wc -l`을 file count로 사용해 2를 1과 비교했다. 최종 assertion이 exit 1이었으므로 acceptance
 evidence에서 제외하고 artifact는 원인 추적용으로만 보존했다.
 
-## r78: 최종 조합 12회 재시작
+## r78: pre-rebase 조합 확인
 
-- stacked product head: `25197c4c2bb3602a75a7a03611eae55ce46d3232`
-- measurement head: `bdb43963af`
-- image: `sha256:31f3829fecdd4832f0c918f44c4c250e49a1d97db5ea1e055bff891ef361890e`
+r78은 최종 lock 조합에서 12/12 ready와 ring 교체를 통과했다. 이후 base PR의 evidence JSONL을
+canonical one-object-per-line 형식으로 고치면서 stacked commit identity가 바뀌었으므로, 이 결과는
+기능 회귀 비교용으로만 남기고 새 identity의 r79로 최종 근거를 교체했다.
+
+## r79: 최종 조합 12회 재시작
+
+- stacked product head: `b85c82ec976f175bc795db5a49cc1956d8e99b07`
+- measurement head: `3c6c86a62b15cc663c2ebef8b69242b6682ff13d`
+- image: `sha256:25b0aa9b39d4be1a8f63f05694a840fa776f95efc33797cf5071bcf4a9da0d9d`
 - binary: `7956eda96b01c7c93bd54eed815b018c549cf818fc2e5f23cd79d56c016571e0`
 
 이 image는 product head에 이미 main에 병합된 one-click build fix 3개를 더한 측정 합성본이다.
-합성 커밋은 `0942b26`, `e03cc1c`, `bdb4396`이며 제품 기능 코드는 product head와 같다.
+합성 커밋은 `cfdde57`, `90fa042`, `3c6c86a`이며 제품 기능 코드는 product head와 같다.
 
 - ready/auth ok 및 unique runtime: 12/12
-- current-ready: 최소 1.229초, 최대 1.555초, 평균 1.403초
+- current-ready: 최소 1.229초, 최대 1.645초, 평균 1.312초
 - SIGKILL exit 137/OOM false: 11/11
 - 마지막 clean exit 0/OOM false: 1/1
 - ready 중 event file: 항상 1개
 - SIGKILL 뒤 event file: 항상 1개
 - 다음 ready에서 이전 ring 교체 입증: 12/12
-- 같은 filename 재사용: 6회, 이전/새 ring SHA-256 변경 6/6
-- 다른 filename 사용: 5회, stale cleanup log 5건
+- 같은 filename 재사용: 7회, 이전/새 ring SHA-256 변경 7/7
+- 다른 filename 사용: 4회, stale cleanup log 4건
 - final clean stop 뒤 event file: 0개
 - shared PID file 최대: 0개
 - `alive but unresponsive`/`sending SIGTERM` takeover log: 0건
@@ -112,7 +118,7 @@ evidence에서 제외하고 artifact는 원인 추적용으로만 보존했다.
 - `test_install_script`: 44/44 pass
 - `bash -n`, `ocamlformat --check`, `git diff --check`: pass
 - JSON/JSONL parse, secret-string scan, SHA-256 manifest, evidence-record strict validation을 수행한다.
-- r78은 Linux/arm64 Docker Desktop local volume과 one-click image를 사용했다.
+- r79는 Linux/arm64 Docker Desktop local volume과 one-click image를 사용했다.
 - r71은 production-shaped local image였지만 폐기된 shared-PID base였다. 최종 product head의 release
   artifact image는 아직 측정하지 않았다.
 - GitHub release published artifact, Kubernetes RWX, multi-host filesystem lock은 측정 범위 밖이다.
@@ -122,6 +128,7 @@ evidence에서 제외하고 artifact는 원인 추적용으로만 보존했다.
 
 - [근거] OCaml 5.5 공식 Runtime_events API와 runtime tracing manual, 2026-08-31 확인,
   신뢰도 High.
-- [근거] r70 반례, r71-r73 preliminary artifacts, r77 rejected harness, r78 source/image/binary/runtime
+- [근거] r70 반례, r71-r73 preliminary artifacts, r77 rejected harness, r78 superseded run,
+  r79 source/image/binary/runtime
   identity, health, Docker inspect, ring path/stat/hash, contender rejection, token hash,
-  2026-08-31T04:22:32+09:00 확인, 신뢰도 High.
+  2026-08-31T04:28:14+09:00 확인, 신뢰도 High.

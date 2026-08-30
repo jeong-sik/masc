@@ -139,6 +139,21 @@ let expected_model_tool_names
          @ identity_names)
 ;;
 
+(* The Agent Core lane always carries the attached-tool listing and may also
+   carry attached schemas that its conversation used on an earlier turn.
+   Those carried names are a subset of the current attachment offering; an
+   unknown actual name must stay outside the expectation so the projection
+   check still reports it. The listing remains expected even when it is
+   accidentally absent from the actual surface. *)
+let agent_core_identity_names ~attached_names ~actual_names =
+  match attached_names with
+  | [] -> []
+  | _ :: _ ->
+    Keeper_identity_tool_search.tool_name
+    :: List.filter (fun name -> List.mem name attached_names) actual_names
+    |> List.sort_uniq String.compare
+;;
+
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -528,12 +543,17 @@ let prepare_agent_setup
         "Keeper model tool bundle differs from the descriptor projection"
   in
   check_projection ~surface:"tools" ~identity_names:attached_names keeper_tools;
+  let agent_core_actual_names =
+    List.map
+      (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
+      keeper_agent_core_tools
+  in
   check_projection
     ~surface:"agent_core_tools"
     ~identity_names:
-      (match attached_names with
-       | [] -> []
-       | _ :: _ -> [ Keeper_identity_tool_search.tool_name ])
+      (agent_core_identity_names
+         ~attached_names
+         ~actual_names:agent_core_actual_names)
     keeper_agent_core_tools;
   Log.Keeper.routine
     "keeper:%s tool visibility: registered=%d visible=%d transport_alias=%d \

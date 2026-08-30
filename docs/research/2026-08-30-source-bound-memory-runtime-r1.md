@@ -47,13 +47,13 @@ explicit claim의 철회·재생성만 다룬다.
 
 ## exact-head runtime
 
-- source commit: `b9633e8bc0e20d7ad96ae096fb21369e1e657a0c`
+- source commit: `7b9277e32044f05c05f06f50a6ee912e08d927d2`
 - binary SHA-256:
-  `d1ffd8611f371161c7e665f3a9b3c998970c248b2683d6d2ff8c10bbc0f0184a`
+  `b535479f77731ae5b1606f83fb308065091c526725f1142ff529d3b5d41f18db`
 - provider/model: `ollama` /
   `hf.co/unsloth/gemma-4-31B-it-qat-GGUF:UD-Q4_K_XL`
-- isolated port: `9496`
-- duration: `182000 ms`
+- isolated port: `9497`
+- duration: `38000 ms`
 - workspace verifier: `0`
 - tool sequence: `Read, Read, Execute, Write, Execute, keeper_memory_write`
 
@@ -68,10 +68,10 @@ live `service.toml`과 fact의 source digest는 모두
 
 원시 artifact SHA-256:
 
-- `evidence.json`: `c00357f0…f8cbf6`
-- `last-prompt.json`: `d0de054a…20e3e5`
-- `memory-source-seed.json`: `8d02f64e…04461`
-- `memory-source-final.json`: `bad93dba…9c996`
+- `evidence.json`: `e2db5df0…89ed93`
+- `last-prompt.json`: `efa475ec…d60e2d`
+- `memory-source-seed.json`: `3bebedd1…d3b971`
+- `memory-source-final.json`: `ccda8d6d…b81ab6`
 
 전체 값과 exact prompt block은
 `benchmarks/context_recovery/results/20260830-source-r1/summary.json`에 있다.
@@ -87,7 +87,7 @@ live `service.toml`과 fact의 source digest는 모두
 | qwen3:8b, current case | 성공 | 성공 | 실패 | fail |
 
 추가 탐색 run까지 합치면 모델이 첫 토큰을 받기 전 stale claim 제거는
-6/6이었다. 이는 SHA 비교가 model call 전에 끝났기 때문이다. 하지만
+7/7이었다. 이는 SHA 비교가 model call 전에 끝났기 때문이다. 하지만
 자동 재생성은 deterministic하지 않다. 8B는 한 번은 권위 원본을 잘못
 고쳤고, 다음 번에는 workspace를 고친 뒤 `keeper_memory_write`를 호출하지
 않았다. invalidation이 남아 다음 turn에 false claim이 돌아오지 않은 것이
@@ -99,7 +99,7 @@ live `service.toml`과 fact의 source digest는 모두
 
 다음 focused checks를 통과했다.
 
-- `test_keeper_memory_write`: 11/11
+- `test_keeper_memory_write`: 12/12
 - `test_keeper_memory_os_current`: 22/22
 - `test_coding_eval_cases`: 17/17
 - `test_base_tool_toml_parity`: 3/3
@@ -138,7 +138,7 @@ live `service.toml`과 fact의 source digest는 모두
 
 ## 실행 종료
 
-격리 포트 `9491`–`9496`에는 listener가 남지 않았다. 운영 `8935`는
+격리 포트 `9491`–`9497`에는 listener가 남지 않았다. 운영 `8935`는
 `status=ok`였다. `effective_base_path=/Users/dancer/me`,
 `effective_masc_root=/Users/dancer/me/.masc`, `roots_diverge=false`도 다시
 확인했다.
@@ -160,4 +160,4 @@ live `service.toml`과 fact의 source digest는 모두
   확인했다.
 - [근거] `git rev-parse HEAD`, `shasum -a 256
   _build/default/bin/main_eio.exe`, isolated runtime artifacts,
-  2026-08-30T12:42:25+09:00 확인, 신뢰도 High.
+  2026-08-30T12:49:38+09:00 확인, 신뢰도 High.

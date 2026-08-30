@@ -2,7 +2,7 @@
 
 ## 공통 헤더
 
-- 날짜(ISO8601): `2026-08-30T12:42:25+09:00`
+- 날짜(ISO8601): `2026-08-30T12:49:38+09:00`
 - 작성자: `Codex`
 - 결정 ID: `memory-source-refresh-r1`
 - 적용 대상: `keeper_memory_write`, Memory OS recall/search/status,
@@ -18,7 +18,7 @@
   `https://arxiv.org/abs/2605.06527`,
   `https://arxiv.org/abs/2608.01619`, `git rev-parse HEAD`,
   `shasum -a 256 _build/default/bin/main_eio.exe`, isolated runtime artifacts
-- 확인일시: `2026-08-30T12:42:25+09:00`
+- 확인일시: `2026-08-30T12:49:38+09:00`
 - 신뢰도: `High`
 - 제한조건: file source만 지원한다. source는 Keeper sandbox 안의 regular
   file이어야 하며 1 MiB 이하여야 한다. 모델별 표본은 n<5다.
@@ -29,8 +29,8 @@
 
 - 1차: Lemmalog 원문·저장소, STALE, StateAuditor의 provenance/retraction
   경계를 2026-08-30에 다시 확인했다.
-- 2차: commit `b9633e8bc0e20d7ad96ae096fb21369e1e657a0c`, binary
-  SHA-256 `d1ffd8611f371161c7e665f3a9b3c998970c248b2683d6d2ff8c10bbc0f0184a`,
+- 2차: commit `7b9277e32044f05c05f06f50a6ee912e08d927d2`, binary
+  SHA-256 `b535479f77731ae5b1606f83fb308065091c526725f1142ff529d3b5d41f18db`,
   운영 `/health?full=1`, 격리 포트 종료 상태를 확인했다.
 - 3차: exact binary로 stale source snapshot을 넣고 live file을 바꾼 뒤
   Gemma 4 31B Keeper episode를 실행했다. `/last-prompt`, final source

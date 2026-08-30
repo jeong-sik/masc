@@ -1797,6 +1797,13 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
         ~clock
         ~broadcast_digest:
           Server_dashboard_http_execution_surfaces.broadcast_operator_digest;
+      (* Full-health has its own off-domain worker, timeout, and warm delay.
+         Start its loop independently so a slow shell prewarm cannot leave
+         restart diagnostics requested-but-idle. *)
+      Server_routes_http_runtime.start_full_health_snapshot_refresh_loop
+        ~sw
+        ~clock
+        ~request_authority:background_request_authority;
       (* Pre-warm shell cache in a separate fiber so it cannot block
          lazy startup tasks or later keeper loop startup
          (#keeper-bootstrap-stuck). *)
@@ -1805,7 +1812,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
         let outer_timeout_sec =
           Env_config_runtime.Dashboard.shell_prewarm_outer_timeout_sec
         in
-        (try
+        try
            match Eio.Time.with_timeout clock outer_timeout_sec (fun () ->
              Server_dashboard_http.warm_shell_cache state;
              Ok ())
@@ -1819,13 +1826,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
          | exn ->
              Log.Dashboard.warn "shell cache pre-warm failed: %s"
              (Printexc.to_string exn));
-        (* Full-health scans are heavier than the probe path. Start them after
-           shell prewarm has either succeeded or exhausted its own budget so
-           cold-start diagnostics do not contend with the shell's first render. *)
-        Server_routes_http_runtime.start_full_health_snapshot_refresh_loop
-          ~sw
-          ~clock
-          ~request_authority:background_request_authority);
       ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

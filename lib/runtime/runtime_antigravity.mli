@@ -41,6 +41,13 @@ type config =
         shared hours-scale default). The idle timeout above resets on every
         emitted line, so this is the only bound a turn of continuous thin
         progress cannot outlive (#31242). *)
+  ; output_schema : Yojson.Safe.t option
+    (** JSON Schema the CLI enforces on the turn's final answer
+        ([--json-schema]). Validation with a re-prompt, not constrained
+        decoding. Only the result event's [structured_output] carries the value
+        that passed; the narrated response beside it can still hold a draft the
+        schema rejects, so this adapter reports the structured value as the
+        turn's text when the field is present. *)
   }
 
 val default_config : cwd:string -> model:string -> config

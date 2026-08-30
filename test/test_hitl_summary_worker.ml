@@ -2500,7 +2500,7 @@ let test_cli_bind_rejection_after_release_settles_the_entry () =
              ~plan_fingerprint
              ~request_body_sha256
        in
-       let runner ~runtime_id ~system_prompt:_ ~prompt:_ =
+       let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
          failf "no cli slot may run without a durable binding (%s)" runtime_id
        in
        Worker.For_testing.execute_prepared_flow_with_queue_ops
@@ -2548,7 +2548,7 @@ let test_cli_slot_answers_after_catalog_exhaustion () =
          ~source:"hitl-cli-summary";
        let entry = pending_entry ~base_path () in
        let seen_runtime = ref None in
-       let runner ~runtime_id ~system_prompt:_ ~prompt =
+       let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
          seen_runtime := Some runtime_id;
          check bool
            "the cli prompt carries the judgment contract"
@@ -2591,7 +2591,7 @@ let test_cli_walk_advances_past_domain_invalid_output () =
          ~cli_slot_ids:[ cli_primary; cli_secondary ]
          ~source:"hitl-cli-advance";
        let entry = pending_entry ~base_path () in
-       let runner ~runtime_id ~system_prompt:_ ~prompt:_ =
+       let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
          if String.equal runtime_id cli_primary
          then Ok "{}" (* valid JSON, invalid judgment domain *)
          else Ok (Yojson.Safe.to_string (judgment_json "require_human"))
@@ -2633,7 +2633,7 @@ let test_cli_walk_exhaustion_quarantines_the_last_cli_identity () =
          ~cli_slot_ids:[ cli_primary; cli_secondary ]
          ~source:"hitl-cli-exhausted";
        let entry = pending_entry ~base_path () in
-       let runner ~runtime_id:_ ~system_prompt:_ ~prompt:_ =
+       let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
          Error "subscription window exhausted"
        in
        Worker.For_testing.execute_prepared_flow_with_queue_ops

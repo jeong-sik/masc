@@ -92,7 +92,7 @@ let run ?runner ~runtime_id () =
     ()
 ;;
 
-let unreachable_runner ~runtime_id ~system_prompt:_ ~prompt:_ =
+let unreachable_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
   failf "the runner must not run for %s" runtime_id
 ;;
 
@@ -111,7 +111,7 @@ let test_non_official_ids_are_refused_before_the_runner () =
 let test_prompt_carries_the_exact_agent_core_schema_sentence () =
   with_runtime (fun () ->
     let seen_prompt = ref None in
-    let runner ~runtime_id:_ ~system_prompt ~prompt =
+    let runner ~runtime_id:_ ~system_prompt ~output_schema:_ ~prompt =
       check string "system prompt passes through" "You judge." system_prompt;
       seen_prompt := Some prompt;
       Ok {|{"verdict":"pass"}|}
@@ -137,9 +137,59 @@ let test_prompt_carries_the_exact_agent_core_schema_sentence () =
          check bool "prompt ends with the Agent Core instruction" true suffix_matches))
 ;;
 
+(* The transport carries the schema now, not only the sentence. The Claude and
+   Antigravity CLIs both take it on the command line and validate their own
+   answer against it, so handing them a local copy that could drift from the
+   caller's requirement would be the whole point missed. *)
+let test_the_runner_receives_the_callers_own_schema () =
+  with_runtime (fun () ->
+    let seen_schema = ref None in
+    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt:_ =
+      seen_schema := Some output_schema;
+      Ok {|{"verdict":"pass"}|}
+    in
+    match run ~runner ~runtime_id:official_client_runtime () with
+    | Error failure -> failf "must succeed: %s" (Cli_oneshot.failure_to_string failure)
+    | Ok _ ->
+      (match !seen_schema with
+       | None -> fail "the runner never saw a schema"
+       | Some schema ->
+         check
+           string
+           "the schema is the requirement's own, byte for byte"
+           (Yojson.Safe.to_string (Exact_output.domain_schema requirement))
+           (Yojson.Safe.to_string schema)))
+;;
+
+(* Both channels, not one instead of the other: the flag refuses what does not
+   match, the sentence says what to write. llama.cpp documents that a schema
+   handed to a grammar is never shown to the model, and the two CLIs re-prompt
+   on a mismatch -- a model that was told the shape needs fewer rounds. *)
+let test_the_prompt_keeps_its_instruction_alongside_the_schema () =
+  with_runtime (fun () ->
+    let both = ref None in
+    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt =
+      both := Some (output_schema, prompt);
+      Ok {|{"verdict":"pass"}|}
+    in
+    match run ~runner ~runtime_id:official_client_runtime () with
+    | Error failure -> failf "must succeed: %s" (Cli_oneshot.failure_to_string failure)
+    | Ok _ ->
+      (match !both with
+       | None -> fail "the runner never ran"
+       | Some (schema, prompt) ->
+         check bool "the schema channel is populated" true (schema <> `Null);
+         let instruction = Exact_output.schema_instruction_text requirement in
+         check
+           bool
+           "and the prompt still carries the instruction"
+           true
+           (String.length prompt >= String.length instruction)))
+;;
+
 let test_a_fenced_answer_is_invalid_output_not_repaired () =
   with_runtime (fun () ->
-    let runner ~runtime_id:_ ~system_prompt:_ ~prompt:_ =
+    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
       Ok "```json\n{\"verdict\":\"pass\"}\n```"
     in
     match run ~runner ~runtime_id:official_client_runtime () with
@@ -152,7 +202,7 @@ let test_a_fenced_answer_is_invalid_output_not_repaired () =
 
 let test_walk_advances_and_keeps_every_failure_in_order () =
   with_runtime (fun () ->
-    let runner ~runtime_id ~system_prompt:_ ~prompt:_ =
+    let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
       if String.equal runtime_id official_client_runtime
       then Ok {|{"verdict":"pass"}|}
       else Error "spawn failed"
@@ -180,7 +230,7 @@ let test_walk_advances_and_keeps_every_failure_in_order () =
 
 let test_walk_exhaustion_returns_every_failure () =
   with_runtime (fun () ->
-    let runner ~runtime_id:_ ~system_prompt:_ ~prompt:_ = Error "quota" in
+    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Error "quota" in
     match
       Cli_oneshot.walk
         ~runner
@@ -231,6 +281,14 @@ let () =
             "prompt carries the exact Agent Core schema sentence"
             `Quick
             test_prompt_carries_the_exact_agent_core_schema_sentence
+        ; test_case
+            "the runner receives the caller's own schema"
+            `Quick
+            test_the_runner_receives_the_callers_own_schema
+        ; test_case
+            "the prompt keeps its instruction alongside the schema"
+            `Quick
+            test_the_prompt_keeps_its_instruction_alongside_the_schema
         ; test_case
             "a fenced answer is invalid output, not repaired"
             `Quick

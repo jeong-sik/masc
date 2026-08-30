@@ -457,6 +457,13 @@ val make_output_requirement
   -> minimum_guarantee:minimum_guarantee
   -> output_requirement
 
+val domain_schema : output_requirement -> Yojson.Safe.t
+(** The schema the requirement was built with, unbranded. Exported for the
+    same reason as {!schema_instruction_text}: an executor whose transport
+    carries a schema of its own — the official-client CLIs take one on the
+    command line — has to hand over the caller's schema rather than a local
+    copy that can drift from it. *)
+
 (** Project the exact serialized generation-body size for one catalog-admitted
     target without resolving credentials, allocating an attempt, measuring
     tokens, or dispatching. The same provider serializer and output requirement

@@ -45,6 +45,7 @@ val run_panelist
   -> runtime_id:string
   -> system_prompt:string
   -> ?timeout_s:float
+  -> ?output_schema:Yojson.Safe.t
   -> prompt:string
   -> unit
   -> (string, Fusion_types.panel_failure) result
@@ -56,6 +57,17 @@ val run_panelist
     consumer of that runtime. When absent the adapter resolves its own deadline
     exactly as before. It does not move [admission_timeout_s], which bounds
     waiting for admission rather than the answer.
+
+    [output_schema] is a JSON Schema the client enforces on its own final
+    answer -- [--json-schema] on both the Claude and Antigravity CLIs. The
+    mechanism is validation with a re-prompt, not constrained decoding, and
+    the answer returned here is then the validated value rather than the
+    narrated text: the Antigravity result event was measured on 2026-08-30
+    carrying a fenced draft in [response] while [structured_output] held the
+    object that passed. Codex takes no schema on this transport -- the
+    [--output-schema] flag belongs to [codex exec], and the app-server
+    [turn/start] request has no field for one -- so a schema is ignored there
+    and the prompt-carried instruction stays the only channel.
 
     [base_dir] is the directory the official client is spawned in. There is no
     global accessor for the MASC base path, so callers thread it down from

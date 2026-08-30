@@ -36,9 +36,18 @@ type failure =
 val failure_to_string : failure -> string
 
 type runner =
-  runtime_id:string -> system_prompt:string -> prompt:string -> (string, string) result
+  runtime_id:string
+  -> system_prompt:string
+  -> output_schema:Yojson.Safe.t
+  -> prompt:string
+  -> (string, string) result
 (** The effectful edge, injectable for tests. The default wraps
-    {!Fusion_official_client.run_panelist}. *)
+    {!Fusion_official_client.run_panelist}.
+
+    [output_schema] is the caller's own domain schema, handed to the CLI's
+    schema flag so the client validates its answer instead of only being asked
+    for the shape in prose. Codex ignores it: its app-server [turn/start] has
+    no field for a schema. *)
 
 val run
   :  ?runner:runner

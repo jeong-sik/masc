@@ -14,6 +14,7 @@ type config =
   ; setting_sources : Runtime_native_tools.claude_setting_source list
   ; timeout_s : float option
   ; wall_clock_ceiling_s : float option
+  ; output_schema : Yojson.Safe.t option
   }
 
 let default_timeout_s = 300.0
@@ -37,6 +38,7 @@ let default_config ~cwd =
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
   ; wall_clock_ceiling_s = None
+  ; output_schema = None
   }
 ;;
 
@@ -823,6 +825,19 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
       | Some _ -> protocol_error stage "field \"result\" must be a string or null"
     in
     let* result = result in
+    (* Under --json-schema the client validates its own answer and re-prompts,
+       and [structured_output] carries what passed. The docs say a run can end
+       [subtype=success] with the field absent and that this counts as a
+       failure, so an absent field is left to the caller's own contract rather
+       than silently read as "no schema was asked for". Measured 2026-08-30 in
+       this argv shape: a prompt asking for a key the schema forbids came back
+       without it, and both fields agreed. Prefer the parsed value anyway --
+       the sibling antigravity adapter's narrated text does not agree. *)
+    let result =
+      match List.assoc_opt "structured_output" fields with
+      | None | Some `Null -> result
+      | Some value -> Some (Yojson.Safe.to_string value)
+    in
     (* The keeper side of this runtime hardcoded [usage = None] while the
        antigravity runtime fills the same slot from its CLI stream, which is why
        official-client turns carry no input_tokens (#28023) and why a window
@@ -1181,6 +1196,14 @@ let command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id =
        approval mode ([Keeper_official_client_host.admit_claude_setting_sources]). *)
     @ [ Runtime_native_tools.claude_setting_sources_arg config.setting_sources ]
     @ reasoning_args
+    @ (match config.output_schema with
+       | None -> []
+       (* --json-schema is documented as print-mode only, and this invocation
+          is print mode: --input-format stream-json only works with --print.
+          Measured 2026-08-30 in exactly this argv shape -- a prompt asking for
+          a key the schema forbids came back without it, and the result frame
+          carried structured_output. *)
+       | Some schema -> [ "--json-schema"; Yojson.Safe.to_string schema ])
     @ [ "--input-format"; "stream-json" ]
   in
   Ok args

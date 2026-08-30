@@ -37,6 +37,19 @@ Keeper가 생성됐고 turn은 `Succeeded`, 응답은 `LONG_PURGE_OK`였다. pro
 metrics의 dynamic context는 0 bytes, source snapshot은 absent,
 `/last-prompt`는 injection artifact가 없어 HTTP 404였다.
 
+## max 128 boundary refresh
+
+같은 exact binary로 `Keeper_name.max_length`인 128자를 다시 측정했다.
+포트 `9519`에서 source invalidation state를 만들고, 포트 `9520`에서 purge
+HTTP 202를 받았다. source snapshot/TOML/runtime/meta는 모두 absent였고
+completion/recovery error는 0건이었다.
+
+포트 `9521` 재기동 뒤 같은 128자 이름의 fresh turn은 `Succeeded`, 응답은
+`BOUNDARY_PURGE_OK`, dynamic context는 0 bytes였다. chat store는 raw 128자
+filename 대신 hash-suffixed 길이 안전 projection을 사용했다. source snapshot은
+없었다. 첫 fixture run의 report CLI가 case id와 directory basename 불일치를
+거절해 directory를 exact id로 고친 뒤 새 output에서 다시 측정했다.
+
 ## 실패에서 수정한 두 번째 경계
 
 resolver만 고친 첫 binary는 purge를 202로 받았지만 completion의 agent
@@ -48,7 +61,7 @@ resolver와 completion focused case 2/2, exact runtime 전체가 통과했다.
 
 전체 hash는
 `benchmarks/context_recovery/results/20260830-long-name-purge-r1/summary.json`에
-있다. 성능 향상은 주장하지 않는다. 포트 `9515`-`9517`은 모두 종료했다.
+있다. 성능 향상은 주장하지 않는다. 포트 `9515`-`9521`은 모두 종료했다.
 
 ## 근거
 

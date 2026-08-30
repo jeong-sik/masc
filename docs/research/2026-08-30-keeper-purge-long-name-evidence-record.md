@@ -17,8 +17,8 @@
   Keeper metrics/chat
 - 확인일시: `2026-08-30T14:14:04+09:00`
 - 신뢰도: `High`
-- 제한조건: 75자에서 실측했다. 최대 128자 전체와 non-ASCII는 측정하지
-  않았다. portable grammar만 지원한다.
+- 제한조건: 75자와 최대 128자에서 실측했다. non-ASCII는 portable grammar
+  밖이다.
 - Delta: Keeper resolver와 Keeper-owned agent artifact bundle만 typed
   Keeper validator로 바꿨다. plain-agent route는 그대로다.
 
@@ -30,14 +30,14 @@
   focused resolver/completion 2/2를 확인했다.
 - 3차: exact binary로 75자 Keeper 생성→source fact 생성→purge→server
   restart→same-name fresh turn을 실행했다.
-- 재현 결과: 성공. purge 202, 네 artifact absent, recovery error 0,
-  fresh turn `Succeeded`, dynamic context 0 bytes였다.
+- 재현 결과: 성공. 75자와 128자 모두 purge 202, 네 artifact absent,
+  recovery error 0, fresh turn `Succeeded`, dynamic context 0 bytes였다.
 
 ## 불확실성
 
-- 미확인 항목: 128자 boundary runtime, filesystem별 NAME_MAX 차이.
-- 영향: 극단 boundary에서 별도 path suffix가 NAME_MAX를 넘을 수 있다.
-- 추가 확인 필요: 128자 exact create/purge probe를 다음 반복에 추가한다.
+- 미확인 항목: filesystem별 NAME_MAX 차이와 대소문자 충돌 filesystem.
+- 영향: 다른 filesystem에서는 path projection 동작이 달라질 수 있다.
+- 추가 확인 필요: Linux filesystem에서 같은 128자 chain을 반복한다.
 
 ## 적용범위
 

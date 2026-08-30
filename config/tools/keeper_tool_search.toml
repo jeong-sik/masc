@@ -14,4 +14,3 @@ name = "names"
 type = "array"
 required = true
 items = { type = "string" }
-description = "Exact tool names, copied from the list in this tool's description."

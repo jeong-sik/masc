@@ -364,8 +364,20 @@ let invalidate_execution_cache () =
   | Eio_guard.Non_eio -> invalidate ()
 ;;
 
-let install_task_mutation_cache_invalidation () =
-  Atomic.set Workspace_hooks.on_task_mutation_fn invalidate_execution_cache
+let invalidate_task_mutation_caches ~invalidate_full_health_snapshot () =
+  invalidate_execution_cache ();
+  try invalidate_full_health_snapshot () with
+  | exn ->
+    record_invalidation_failure
+      ~callback:"full_health_snapshot_invalidate"
+      ~message:"Failed to invalidate full-health snapshot"
+      exn
+;;
+
+let install_task_mutation_cache_invalidation ~invalidate_full_health_snapshot () =
+  Atomic.set
+    Workspace_hooks.on_task_mutation_fn
+    (invalidate_task_mutation_caches ~invalidate_full_health_snapshot)
 ;;
 
 module For_testing = struct

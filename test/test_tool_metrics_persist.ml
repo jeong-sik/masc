@@ -180,6 +180,16 @@ let test_high_watermark_wakes_flush_waiter clock =
         true
         (trigger = `High_watermark)))
 
+let test_timer_wakes_below_high_watermark clock =
+  with_tmp_dir (fun _base_path ->
+    let trigger =
+      P.For_testing.await_flush_trigger ~clock ~interval_s:0.01
+    in
+    Alcotest.(check bool)
+      "timer remains the maximum flush delay"
+      true
+      (trigger = `Timer))
+
 let test_hydrate_replaces_metrics_and_skips_bad_rows () =
   with_tmp_dir (fun base_path ->
     Tool_metrics.clear ();
@@ -278,6 +288,9 @@ let () =
         ; eio_clock_test
             "cross-domain high watermark wakes the flush waiter"
             test_high_watermark_wakes_flush_waiter
+        ; eio_clock_test
+            "timer wakes below the high watermark"
+            test_timer_wakes_below_high_watermark
         ; eio_test
             "startup hydration restores current rows once"
             test_hydrate_replaces_metrics_and_skips_bad_rows

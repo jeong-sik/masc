@@ -47,6 +47,7 @@ type config = {
   timeout_s : float;
   on_failure : (failure -> unit) option;
   wakeup : unit Eio.Stream.t option;
+  wakeup_coalesce_s : float;
   warm_delay_s : float;
   warn_first_failure : bool;
 }
@@ -60,6 +61,7 @@ let default_config ~label ~interval_s =
     timeout_s = 10.0;
     on_failure = None;
     wakeup = None;
+    wakeup_coalesce_s = 0.0;
     warm_delay_s = 0.0;
     warn_first_failure = true;
   }
@@ -165,10 +167,31 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
       match config.wakeup with
       | None -> Eio.Time.sleep clock seconds
       | Some stream ->
-        Eio.Fiber.first
-          (fun () -> Eio.Time.sleep clock seconds)
-          (fun () -> Eio.Stream.take stream);
-        while Option.is_some (Eio.Stream.take_nonblocking stream) do () done
+        let reason =
+          Eio.Fiber.first
+            (fun () ->
+               Eio.Time.sleep clock seconds;
+               `Interval)
+            (fun () ->
+               Eio.Stream.take stream;
+               `Wakeup)
+        in
+        (match reason with
+         | `Interval -> ()
+         | `Wakeup ->
+           let coalesce_s = max 0.0 config.wakeup_coalesce_s in
+           if coalesce_s > 0.0 then Eio.Time.sleep clock coalesce_s;
+           let siblings = ref 0 in
+           while Option.is_some (Eio.Stream.take_nonblocking stream) do
+             incr siblings
+           done;
+           if !siblings > 0
+           then
+             Log.Dashboard.debug
+               "%s coalesced %d sibling wakeup signal(s) over %.3fs"
+               config.label
+               !siblings
+               coalesce_s)
     in
     let rec loop () =
       let jitter = Random.float (!current_interval *. 0.25) in

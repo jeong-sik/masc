@@ -260,6 +260,9 @@ module For_testing : sig
 
   val full_health_refresh_timing : unit -> float * float * float
   (** Returns [(interval_sec, timeout_sec, ttl_sec)] for full-health refresh. *)
+
+  val full_health_refresh_wakeup_coalesce_sec : unit -> float
+  (** Returns the fixed leading-edge coalescing bound for mutation wakes. *)
 end
 
 val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list

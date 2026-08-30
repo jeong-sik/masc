@@ -253,6 +253,39 @@ let test_empty_completion_exemption_budget_is_bounded () =
        ~keeper_name ~is_auto_recoverable:true empty_err);
   KUF.note_turn_success keeper_name
 
+let test_transient_transport_exemption_budget_is_bounded () =
+  let module KUF = Keeper_unified_turn_failure in
+  let keeper_name = "test-keeper-transient-transport-budget" in
+  let transient_err =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.Timeout { message = "timeout"; phase = None })
+  in
+  KUF.note_turn_success keeper_name;
+  for i = 1 to KUF.transient_transport_exemption_budget do
+    Alcotest.(check bool)
+      (Printf.sprintf "exempted transient transport %d does not count" i)
+      false
+      (KUF.account_failure_counting
+         ~keeper_name ~is_auto_recoverable:true transient_err)
+  done;
+  Alcotest.(check bool)
+    "transient transport past the budget counts toward crash"
+    true
+    (KUF.account_failure_counting
+       ~keeper_name ~is_auto_recoverable:true transient_err);
+  Alcotest.(check bool)
+    "later failures stay crash-accounted until success"
+    true
+    (KUF.account_failure_counting
+       ~keeper_name ~is_auto_recoverable:true transient_err);
+  KUF.note_turn_success keeper_name;
+  Alcotest.(check bool)
+    "success resets the transient transport budget"
+    false
+    (KUF.account_failure_counting
+       ~keeper_name ~is_auto_recoverable:true transient_err);
+  KUF.note_turn_success keeper_name
+
 let test_extra_system_context_preserves_typed_blocks () =
   let blocks =
     [ Prompt_block_id.Dynamic_context, "dynamic"
@@ -297,6 +330,8 @@ let () =
           test_generic_invalid_request_is_not_empty_completion;
         Alcotest.test_case "empty completion exemption budget is bounded" `Quick
           test_empty_completion_exemption_budget_is_bounded;
+        Alcotest.test_case "transient transport exemption budget is bounded" `Quick
+          test_transient_transport_exemption_budget_is_bounded;
         Alcotest.test_case "extra system context preserves typed blocks" `Quick
           test_extra_system_context_preserves_typed_blocks;
       ] );

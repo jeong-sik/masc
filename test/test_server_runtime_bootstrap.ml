@@ -2871,11 +2871,17 @@ let test_health_response_full_query_uses_snapshot_cache () =
       with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
       with_config_input "MASC_BASE_PATH" (Some dir) @@ fun () ->
       let previous_state = Server_auth.For_testing.snapshot_server_state () in
+      let previous_task_mutation_hook =
+        Atomic.get Workspace_hooks.on_task_mutation_fn
+      in
       Config_dir_resolver.reset ();
       Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
       Fun.protect
         ~finally:(fun () ->
           Server_auth.For_testing.restore_server_state @@ previous_state;
+          Atomic.set
+            Workspace_hooks.on_task_mutation_fn
+            previous_task_mutation_hook;
           Config_dir_resolver.reset ();
           Server_routes_http_runtime.For_testing.reset_full_health_snapshot ())
         (fun () ->
@@ -2937,7 +2943,12 @@ let test_health_response_full_query_uses_snapshot_cache () =
             "unavailable"
             (refreshed |> member "publication_recovery_activation"
              |> member "status" |> to_string);
-          Server_routes_http_runtime.invalidate_full_health_snapshot ();
+          Server_dashboard_http_execution_surfaces
+          .install_task_mutation_cache_invalidation
+            ~invalidate_full_health_snapshot:
+              Server_routes_http_runtime.invalidate_full_health_snapshot
+            ();
+          (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
           let invalidated =
             Server_routes_http_runtime.make_health_response_json request
           in

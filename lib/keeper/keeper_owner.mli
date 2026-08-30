@@ -8,6 +8,11 @@
 
 val mailbox_capacity : int
 
+val install_state_change_observer : (unit -> unit) -> unit
+(** Install the process-wide non-yielding observer invoked after a
+    health-visible operation, turn, or shutdown projection changes. Observer
+    failures are logged and never change the accepted Owner result. *)
+
 type store =
   { replace : Keeper_meta_contract.keeper_meta -> (unit, string) result
   ; remove : Keeper_meta_contract.keeper_meta -> (unit, string) result

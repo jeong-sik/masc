@@ -190,12 +190,62 @@ let parse_max_context_override args =
            "max_context_override must be an integer or null (received %s)"
            (Json_util.kind_name other))
 
+(* The unknown-key contract, derived from the [parse] body below: every
+   top-level key the parser consumes, and nothing else. A consumed-but-
+   unlisted key would make the gate reject valid traffic; a listed-but-dead
+   key would certify exactly the silent drop this gate exists to kill
+   (R09: [turn_up_arg_unknown]). Keep exactly in sync with [parse]. *)
+let known_turn_up_args =
+  [ "name"
+  ; "runtime_id"
+  ; "autoboot_enabled"
+  ; "mention_targets"
+  ; "max_context_override"
+  ; "proactive_enabled"
+  ; "sandbox_profile"
+  ; "remote_endpoint"
+  ; "network_mode"
+  ; "tools"
+  ; "skills"
+  ; "instructions"
+  ]
+
+(* Typed rejection naming every unrecognised key, so a caller that sends
+   [merge_existing] / [keep_warm] / [stash_untracked] hears about it instead
+   of watching the field vanish. *)
+let turn_up_arg_unknown keys =
+  tool_result_error
+    ~class_:Tool_result.Policy_rejection
+    (Printf.sprintf
+       "[turn_up_arg_unknown] unknown keeper_up argument(s): %s (known arguments: %s)"
+       (String.concat ", " (List.sort String.compare keys))
+       (String.concat ", " (List.sort String.compare known_turn_up_args)))
+
+(* Top-level envelope gate. Non-object envelopes pass here: the required-name
+   check rejects them with the field it cannot find. *)
+let validate_no_unknown_keys args =
+  match args with
+  | `Assoc fields ->
+    let unknown =
+      List.filter_map
+        (fun (key, _) ->
+           if List.exists (fun known -> String.equal known key) known_turn_up_args
+           then None
+           else Some key)
+        fields
+    in
+    if unknown = [] then Ok () else Error (turn_up_arg_unknown unknown)
+  | _ -> Ok ()
+
 let parse (ctx : _ context) (args : Yojson.Safe.t) :
     (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
     Error (tool_result_error ~class_:Tool_result.Policy_rejection (invalid_name_error name))
   else
+    match validate_no_unknown_keys args with
+    | Error result -> Error result
+    | Ok () ->
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
     let runtime_id_opt_res = parse_runtime_id_opt args in
     let tools_patch_res = parse_tools_patch args in

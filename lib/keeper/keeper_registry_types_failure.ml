@@ -54,6 +54,15 @@ type failure_reason =
               instead of reparsing [code]. [None] for non-exhaustion
               provider/runtime errors. *)
       }
+  | Turn_configuration_error of
+      { code : string
+      ; field : string option
+      ; detail : string
+      }
+  (** A typed Agent Core configuration error that cannot recover without a
+      configuration or process-environment change. Kept separate from
+      provider runtime failures so health can require operator action without
+      parsing rendered error text. *)
   | Fiber_unresolved of fiber_drop_cause
   (** Fiber exited without resolving [done_r].
           Issue #18901: cause payload distinguishes graceful shutdown
@@ -83,6 +92,9 @@ let failure_reason_to_string = function
         ~some:(Printf.sprintf " http=%d")
     in
     Printf.sprintf "provider_runtime_error(%s:%s%s%s)" code detail prov http
+  | Turn_configuration_error { code; field; detail } ->
+    let field = Option.fold field ~none:"" ~some:(Printf.sprintf " field=%s") in
+    Printf.sprintf "turn_configuration_error(%s:%s%s)" code detail field
   | Fiber_unresolved Graceful_shutdown -> "fiber_unresolved(graceful_shutdown)"
   | Fiber_unresolved Cancelled_by_parent -> "fiber_unresolved(cancelled_by_parent)"
   | Fiber_unresolved Unexpected -> "fiber_unresolved(unexpected)"
@@ -90,4 +102,3 @@ let failure_reason_to_string = function
   | Turn_overflow_failure -> "turn_overflow_failure"
   | Operator_interrupt -> "operator_interrupt"
 ;;
-

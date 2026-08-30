@@ -219,6 +219,16 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                code
                detail
          })
+  | Keeper_registry.Turn_configuration_error { code; field; detail } ->
+    Some
+      { blocker_class = "turn_configuration_error"
+      ; summary =
+          Printf.sprintf
+            "Keeper configuration error (%s%s): %s; operator configuration change is required."
+            code
+            (Option.fold field ~none:"" ~some:(Printf.sprintf " field=%s"))
+            detail
+      }
   | Keeper_registry.Fiber_unresolved _ ->
     Some
       (runtime_blocker_surface_of_typed_class

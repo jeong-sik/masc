@@ -168,11 +168,38 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
    for the agent-core error fallback, this routing reduces to a clean variant
    match — no substring classifier left in this function. *)
 let registry_failure_reason_of_terminal_reason
+      ?core_error
       (terminal_reason : Keeper_turn_terminal.t)
       ~(raw_error : string)
   : Keeper_registry.failure_reason option
   =
   let detail = Keeper_types_profile.short_preview raw_error in
+  let configuration_failure =
+    match core_error with
+    | Some (Agent_core.Error.Config (MissingEnvVar { var_name })) ->
+      Some
+        (Keeper_registry.Turn_configuration_error
+           { code = "missing_env_var"
+           ; field = Some var_name
+           ; detail = "required environment variable is missing"
+           })
+    | Some (Agent_core.Error.Config (UnsupportedProvider { detail })) ->
+      Some
+        (Keeper_registry.Turn_configuration_error
+           { code = "unsupported_provider"; field = None; detail })
+    | Some (Agent_core.Error.Config (InvalidConfig { field; detail })) ->
+      Some
+        (Keeper_registry.Turn_configuration_error
+           { code = "invalid_config"; field = Some field; detail })
+    | Some (Agent_core.Error.Config (SensitiveValueInConfig { detail })) ->
+      Some
+        (Keeper_registry.Turn_configuration_error
+           { code = "sensitive_value_in_config"; field = None; detail })
+    | Some _ | None -> None
+  in
+  match configuration_failure with
+  | Some _ as reason -> reason
+  | None ->
   match runtime_exhausted_failure_reason_of_raw_error ~detail raw_error with
   | Some _ as reason -> reason
   | None ->

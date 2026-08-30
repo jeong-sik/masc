@@ -252,6 +252,7 @@ let prepare_agent_setup
   let runtime_id_string = runtime_id in
   let active_checkpoint_owner = ref None in
   let active_runtime_id = Atomic.make None in
+  let receipt_lane_attempt_index_ref : int ref = ref 0 in
   let tool_result_commit_required () =
     match on_tool_result_ready, !active_checkpoint_owner with
     | None, _ -> false
@@ -263,6 +264,8 @@ let prepare_agent_setup
     =
     active_checkpoint_owner := Some attempt.checkpoint_owner;
     Atomic.set active_runtime_id (Some attempt.runtime_id);
+    receipt_lane_attempt_index_ref :=
+      max !receipt_lane_attempt_index_ref attempt.lane_attempt_index;
     Option.iter
       (fun observe ->
          observe
@@ -664,7 +667,6 @@ let prepare_agent_setup
     =
     ref None
   in
-  let receipt_lane_attempt_index_ref : int ref = ref 0 in
   let receipt_response_text_present_ref = ref false in
   let compute_tool_surface
         ~turn:_

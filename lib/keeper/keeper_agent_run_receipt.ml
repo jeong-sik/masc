@@ -41,6 +41,12 @@ let degraded_retry_runtime_of_wire ~keeper_name raw =
           raw;
       None
 
+let lane_attempt_facts ~turn_succeeded ~last_attempt_index =
+  let lane_attempt_count = max 1 (last_attempt_index + 1) in
+  let lane_failover_applied = turn_succeeded && last_attempt_index > 0 in
+  lane_attempt_count, lane_failover_applied
+;;
+
 let finalize
     ~config
     ~meta
@@ -109,15 +115,16 @@ let finalize
   let runtime_observation : Runtime_observation.runtime_observation option =
     !receipt_runtime_observation_ref
   in
-  (* Truth source for cross-runtime failover: the lane walk's winning
-     candidate index ([Keeper_turn_driver.named_run_result.lane_attempt_index]),
-     not a per-runtime observation field. A winning index > 0 means this
-     turn settled on a later lane candidate after one or more earlier
-     candidates failed. A turn whose lane never produced a winner (total
-     exhaustion) leaves this ref at its fresh-per-turn default of 0, so a
-     failed turn never claims a fallback it never observed. *)
+  (* The ref follows every dispatched candidate, so even a lane with no winner
+     retains its last attempted index. Successful fallback remains stricter:
+     only a turn that settled successfully on a later candidate sets
+     [runtime_fallback_applied]. *)
   let lane_attempt_index = !receipt_lane_attempt_index_ref in
-  let lane_failover_applied = lane_attempt_index > 0 in
+  let lane_attempt_count, lane_failover_applied =
+    lane_attempt_facts
+      ~turn_succeeded:(Result.is_ok turn_result)
+      ~last_attempt_index:lane_attempt_index
+  in
   (* #20936: the before_turn_params hook snapshots the final injected
      extra_system_context (digest + byte size) into the accumulator each
      agent-core turn; the receipt reports the last agent-core turn's values. Agent Core
@@ -167,7 +174,7 @@ let finalize
          a turn that routed to two candidates read as attempt_count=1 next to
          fallback_applied=true. The index of the candidate that won is one less
          than the number routed, and the turn already has it. *)
-    ; runtime_lane_attempt_count = lane_attempt_index + 1
+    ; runtime_lane_attempt_count = lane_attempt_count
     ; runtime_fallback_applied = lane_failover_applied
     ; runtime_outcome =
         Keeper_agent_error.runtime_outcome_of_observation
@@ -309,3 +316,7 @@ let finalize
     Keeper_runtime_manifest.Turn_finished;
   final_result
 ;;
+
+module For_testing = struct
+  let lane_attempt_facts = lane_attempt_facts
+end

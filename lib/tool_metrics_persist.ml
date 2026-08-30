@@ -185,7 +185,7 @@ let flush_now ~base_path =
 let start_flush_fiber ~sw ~clock ~base_path =
   let store = get_or_create_store ~base_path in
   Eio.Fiber.fork ~sw (fun () ->
-    Log.Metrics.info "tool_metrics_persist: flush fiber started (interval=%.0fs)"
+    Log.Metrics.info "tool_metrics_persist: flush fiber started (interval=%.3gs)"
       flush_interval_s;
     let rec loop () =
       Eio.Time.sleep clock flush_interval_s;

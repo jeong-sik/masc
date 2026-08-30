@@ -22,11 +22,12 @@
 - 2차: macOS binary를 재사용하지 않았다. Linux OCaml 5.5 builder에서 서버와 preflight helper를 빌드하고 ELF, binary SHA-256, image OS/arch/ID를 확인했다.
 - 3차: r87 인증 가정을 폐기했다. r88에서 `hydrated 1`과 API 0의 모순을 재현해 두 메모리 원천을 찾았다. r89에서 새 이미지와 새 볼륨으로 A→B→C를 다시 실행했다.
 - 4차: 정상 형식, 깨진 JSON, 현재 형식과 맞지 않는 행, 보존 기간, 반복 복구, 읽기 실패 원자성을 focused unit test로 확인했다.
+- 5차: 같은 Linux image에서 빈 저장소, 100,000행, 1,000,000행을 비교했다. 각 크기를 두 번 시작해 skip count, API 총합/percentile/응답 시간, 메모리, exit/OOM을 확인했다.
 - 재현 결과: r89 A는 호출 뒤 API 1, B는 새 호출 전 API 1과 호출 뒤 2, C는 새 호출 없이 API 2를 각각 두 번 연속 반환했다. 세 runtime은 고유하고 모두 exit 0/OOM false였다.
 
 ## 불확실성
 
-- 미확인 항목: Kubernetes/PVC, multi-host filesystem, published release artifact, 전체 테스트, GitHub CI.
+- 미확인 항목: 1,000,000행 초과, 여러 도구 분포, 동시 API 요청, Kubernetes/PVC, multi-host filesystem, published release artifact, 전체 테스트, GitHub CI.
 - 영향: 다른 저장 장치나 배포 경로의 권한·일관성 문제는 이번 로컬 Docker 결과만으로 확정할 수 없다.
 - 추가 확인 필요: Draft PR CI와 실제 배포 환경에서 같은 consumer 검사를 반복한다.
 

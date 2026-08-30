@@ -58,6 +58,24 @@
 - `ocamlformat --check`, `git diff --check`, JSON/JSONL parse를 확인한다.
 - 전체 테스트와 GitHub CI는 이 로컬 결과에 포함하지 않는다.
 
+## r90/r91 크기 측정
+
+같은 image와 빈 named volume에서 기준값을 잰 뒤 100,000행과 1,000,000행을 넣었다. 각 파일에는
+정상 행 외에 깨진 JSON과 현재 형식에 맞지 않는 행을 0.1%씩 추가했다. 컨테이너 시작 시각은
+`docker inspect .State.StartedAt`, 완료 시각은 `docker logs --timestamps`의 hydration 로그를 썼다.
+
+| 입력 | 정상/깨짐/형식 불일치 | 시작→hydration 로그 | API 응답 | 관측 메모리 | 결과 |
+|---|---:|---:|---:|---:|---|
+| 빈 저장소 | 0/0/0 | 0.800s | 총합 0 | 78.22MiB | 통과 |
+| 8.90MB | 100,000/100/100 | 0.864s, 재시작 0.881s | 20.6–25.0ms | 81.45–82.95MiB | 통과 |
+| 89.0MB | 1,000,000/1,000/1,000 | 1.846s, 재시작 1.898s | 186–206ms | 116.0–131.6MiB | 통과 |
+
+두 크기 모두 API 총합과 `p50=51`, `p95=95`, `p99=99`가 입력과 맞았다. 재시작 뒤에도 같은
+총합을 반환했고 모든 컨테이너가 exit 0/OOM false였다. 1,000,000행은 이번 측정의 상한일 뿐
+제품의 최대 허용치가 아니다. 그보다 큰 파일, 여러 도구로 넓게 퍼진 분포, 동시 API 요청은 아직
+측정하지 않았다. API는 요청마다 duration 배열을 정렬하므로 행 수가 계속 늘면 응답 시간과 임시
+메모리가 선형 이상으로 커질 수 있다.
+
 ## 경계
 
 - 현재 JSONL 형식만 읽는다. 예전 `success` 형식 변환 코드는 추가하지 않았다.
@@ -67,6 +85,8 @@
 - 읽기 실패는 경고로 남고 서버는 계속 뜬다. 일부만 읽은 스냅샷은 공개하지 않는다.
 - Linux/arm64 Docker Desktop의 로컬 named volume에서 측정했다. Kubernetes, multi-host storage,
   GitHub 배포 artifact는 범위 밖이다.
+- 크기 측정의 메모리는 `docker stats --no-stream` 단일 표본이다. GC와 다른 시작 fiber의 영향을
+  포함하므로 정밀한 heap profile로 해석하지 않는다.
 - `/Users/dancer/me/.masc`와 현재 8935 서버는 변경하거나 재시작하지 않았다.
 
 ## 근거
@@ -74,5 +94,7 @@
 - [근거] `scripts/dune-local.sh build bin/main_eio.exe`, 세 focused test 실행 결과,
   image/binary SHA-256, A→B→C runtime ID, startup hydration 로그, 실제 MCP 호출, API 반복 조회,
   종료 코드, JSONL 행 수와 SHA-256, 2026-08-31T05:42:07+09:00 확인, 신뢰도 High.
+- [근거] r90 100,000행과 r91 1,000,000행의 두 번 연속 Linux 시작, 정확한 skip count,
+  API 응답 시간/총합/percentile, `docker stats`, exit/OOM, 입력 파일 SHA-256,
+  2026-08-31T05:49:38+09:00 확인, 신뢰도 High.
 - [근거] Lemmalog, STALE, Supersede 원문을 2026-08-31에 확인, 신뢰도 High.
-

@@ -587,15 +587,15 @@ let make_tool_bundle_for_descriptors_with_policy
       @ (match identity_listing with
          | None -> []
          | Some listing ->
-           (* The listing, plus what this conversation already asked for. A
-              load reaches the agent of the turn that made it and no further,
-              so without the second part the model asks again every turn:
-              one Keeper asked for [github_issue_read] on five consecutive
-              turns. Placing them here rather than widening after the agent
-              exists means the first request of the turn already carries
-              them, so no round trip is spent re-asking. *)
+           (* The listing, plus the attached tools this conversation has
+              run. A load reaches the agent of the turn that made it and no
+              further, so without the second part the model asks again every
+              turn: one Keeper asked for [github_issue_read] on five
+              consecutive turns. Placing them here rather than widening after
+              the agent exists means the first request of the turn already
+              carries them, so no round trip is spent re-asking. *)
            listing.Keeper_identity_tool_search.tool
-           :: listing.Keeper_identity_tool_search.already_loaded)
+           :: listing.Keeper_identity_tool_search.already_used)
   ; cleanup =
       (fun () ->
         (* Turn end on both the ordinary and the raised path -- this thunk is

@@ -38,7 +38,7 @@ type turn_discovery =
 
 type placement =
   { tool : Agent_core.Tool.t
-  ; already_loaded : Agent_core.Tool.t list
+  ; already_used : Agent_core.Tool.t list
   ; observe_turn : unit -> turn_discovery
   }
 
@@ -224,31 +224,26 @@ let observe_turn ~keeper_name ~usage () =
     Loaded_unused loaded
 ;;
 
-(* What this conversation already asked for, read off its own ToolUse blocks.
+(* Which attached tools this conversation actually ran.
 
-   The names are the model's own argument array, not text parsed out of a
-   result: [names] is what it sent, so this reads a field rather than
-   interpreting prose. A name that is no longer offered -- the service was
-   detached, or renamed a tool -- does not match an entry and is dropped,
-   which is the same answer the listing gives for it today.
+   Read off the tools' own ToolUse blocks: a call the model made is a call the
+   model needed, and the block carries the tool's name directly. Nothing about
+   the listing is parsed -- the request for a tool is not evidence that the
+   tool was wanted, only that it looked wanted.
 
-   Success is not consulted: a load that failed still leaves its ToolUse in
-   history, so a tool that could not be loaded then is placed now. Placing a
-   tool the model asked for and could not have costs bytes; the other
-   direction loses a call. *)
-let already_loaded_from_history ~entries history =
-  let asked = Hashtbl.create 8 in
+   That distinction is the bound. Carrying every requested tool grows the
+   surface toward the full attached list on a long conversation: measured
+   2026-08-30 after one hour, polisher was at 111 tools of a possible 133 and
+   still climbing. Carrying only what ran stops where use stops -- 29 of 145
+   attached tools were called at all on the day the RFC measured, 20%. *)
+let already_used_from_history ~entries history =
+  let called = Hashtbl.create 8 in
   List.iter
     (fun (message : Agent_core.Types.message) ->
        List.iter
          (fun (block : Agent_core.Types.content_block) ->
             match block with
-            | Agent_core.Types.ToolUse { name; input; _ }
-              when String.equal name tool_name ->
-              (match requested_names input with
-               | Error (_ : string) -> ()
-               | Ok names -> List.iter (fun n -> Hashtbl.replace asked n ()) names)
-            | Agent_core.Types.ToolUse _
+            | Agent_core.Types.ToolUse { name; _ } -> Hashtbl.replace called name ()
             | Agent_core.Types.Text _
             | Agent_core.Types.Thinking _
             | Agent_core.Types.RedactedThinking _
@@ -261,7 +256,7 @@ let already_loaded_from_history ~entries history =
     history;
   List.filter_map
     (fun entry ->
-       if Hashtbl.mem asked entry.name then Some entry.callable else None)
+       if Hashtbl.mem called entry.name then Some entry.callable else None)
     entries
 ;;
 
@@ -313,7 +308,7 @@ let make ~keeper_name ~build { offered; agent_cell; history } =
           Agent_core.Tool.of_schema
             schema
             (Agent_core.Tool.ignoring_execution_env handler)
-      ; already_loaded = already_loaded_from_history ~entries history
+      ; already_used = already_used_from_history ~entries history
       ; observe_turn = observe_turn ~keeper_name ~usage
       }
 ;;

@@ -46,18 +46,32 @@ type turn_discovery =
 
 type placement =
   { tool : Agent_core.Tool.t  (** What the turn places. *)
-  ; already_loaded : Agent_core.Tool.t list
-        (** The tools this Keeper loaded earlier in the conversation, placed
-            with their schemas rather than behind the listing again.
+  ; already_used : Agent_core.Tool.t list
+        (** The attached tools this conversation has run, placed with their
+            schemas rather than behind the listing again.
 
-            Derived from [history], the way the Claude API, Claude Code, and
+            A load reaches the agent of the turn that made it and no further,
+            so without this the model re-asks every turn: measured 2026-08-30,
+            one Keeper asked for [github_issue_read] on five consecutive turns
+            and for [github_get_label] 34 times in a day, and 39 of 84 turns
+            that used the listing loaded a tool the turn then ended before
+            using.
+
+            Derived from history, the way the Claude API, Claude Code, and
             Hermes all carry a discovered tool forward: the conversation is
             the record, so a crash, a resume, or a failed turn needs no
-            reconciliation. Compaction drops the evidence with the messages,
-            and the model re-asks -- which is what it does today.
+            reconciliation.
 
-            Empty until the model asks for something, so a Keeper that never
-            uses the listing pays nothing for this. *)
+            Read from the tools' own [ToolUse] blocks, not from what was asked
+            for. Asking is not evidence of need, and carrying every request
+            grows the surface back toward the full attached list -- measured
+            an hour after that change shipped, one Keeper was at 111 tools of
+            a possible 133 and still climbing. Use stops where the work stops.
+
+            Empty until something runs, so a Keeper that never reaches its
+            attached services pays nothing for this. Compaction drops the
+            evidence with the messages and the model re-asks, which is what it
+            does today. *)
   ; observe_turn : unit -> turn_discovery
         (** Call once when the turn ends, on both the ordinary and the raised
             path, and records {!Loaded_unused} where an operator can read it.

@@ -176,6 +176,9 @@ val to_json : t -> Yojson.Safe.t
 type operator_disposition_kind =
   | Disp_pass
   | Disp_fail_open_next_runtime
+  | Disp_retry_later
+  (** The terminal turn did not fall through to another runtime. The Keeper
+      remains live and may retry on a later keepalive cycle. *)
   | Disp_pass_next_model
   | Disp_operator_action_required
   (** The turn is terminal and names a known operator-only repair. No runtime
@@ -200,10 +203,10 @@ type operator_disposition_reason =
   | Reason_runtime_fallback
   | Reason_transient_runtime_retry
   (** A retry-recoverable transient provider-runtime failure
-      ([api_error_timeout] / [api_error_network]) that the keeper's in-turn
-      retry self-healed on the SAME runtime — distinct from
-      [Reason_runtime_fallback] (cross-runtime fallback). Paired with
-      [Disp_fail_open_next_runtime]. *)
+      ([api_error_timeout] / [api_error_network]) that terminally failed this
+      turn after neither a degraded retry nor cross-runtime fallback occurred.
+      Paired with [Disp_retry_later]: a later keepalive cycle may retry, but the
+      receipt does not claim same-turn continuation. *)
   | Reason_capacity_backpressure
   (** Typed provider-capacity observation before a retry/rotation has completed.
       Paired with [Disp_fail_open_next_runtime]: the keeper keeps moving and

@@ -47,19 +47,23 @@ explicit claim의 철회·재생성만 다룬다.
 
 ## exact-head runtime
 
-- source commit: `ba77fd324f9083ef27d40a94d346b76bf5031ebb`
+- source commit: `1a74490e82642805af249c496c3947b026a54428`
 - binary SHA-256:
-  `2d839d6afb4192958477d3ddd29614b08f0ff6e12c58b73eb4f0b3bc966c38d2`
+  `0f163ad23d6e2e07f234e9a9092aa2d7e06e8fad7c667862f02714efef5d4897`
 - provider/model: `ollama` /
   `hf.co/unsloth/gemma-4-31B-it-qat-GGUF:UD-Q4_K_XL`
-- isolated port: `9498`
-- duration: `31000 ms`
+- isolated port: `9500`
+- duration: `36000 ms`
 - workspace verifier: `0`
-- tool sequence: `Read, Read, Write, Execute, keeper_memory_write`
+- tool sequence: `Read, Read, Execute, Write, Execute, keeper_memory_write`
 
 첫 prompt의 `memory_os_recall` block에는 stale claim이 0번 나타났다.
 `reason=source_changed`는 2번 나타났다. block text와 source path가 각각
 block projection과 전체 JSON에 한 번씩 들어가기 때문이다.
+
+선언한 stale source bytes의 seed SHA-256은
+`8e2e7e55dc8858471232e070c9cf7645af83775487a4e9b0eef7fce9dde508ab`
+였다. 마지막 newline을 포함한 값이다.
 
 최종 snapshot은 revision 3이었다. fact는 1개, invalidation은 0개였다.
 live `service.toml`과 fact의 source digest는 모두
@@ -68,10 +72,10 @@ live `service.toml`과 fact의 source digest는 모두
 
 원시 artifact SHA-256:
 
-- `evidence.json`: `e1e1049a…1976ab7`
-- `last-prompt.json`: `7bee9aa7…2293e1`
-- `memory-source-seed.json`: `511f6b2f…322a56e`
-- `memory-source-final.json`: `787b6137…406763`
+- `evidence.json`: `d22e19cb…63cdd5`
+- `last-prompt.json`: `e9de10ee…6261f`
+- `memory-source-seed.json`: `4b73d89c…9292ae3`
+- `memory-source-final.json`: `e8260234…68d2ed`
 
 전체 값과 exact prompt block은
 `benchmarks/context_recovery/results/20260830-source-r1/summary.json`에 있다.
@@ -87,7 +91,7 @@ live `service.toml`과 fact의 source digest는 모두
 | qwen3:8b, current case | 성공 | 성공 | 실패 | fail |
 
 추가 탐색 run까지 합치면 모델이 첫 토큰을 받기 전 stale claim 제거는
-8/8이었다. 이는 SHA 비교가 model call 전에 끝났기 때문이다. 하지만
+9/9이었다. 이는 SHA 비교가 model call 전에 끝났기 때문이다. 하지만
 자동 재생성은 deterministic하지 않다. 8B는 한 번은 권위 원본을 잘못
 고쳤고, 다음 번에는 workspace를 고친 뒤 `keeper_memory_write`를 호출하지
 않았다. invalidation이 남아 다음 turn에 false claim이 돌아오지 않은 것이
@@ -138,7 +142,8 @@ live `service.toml`과 fact의 source digest는 모두
 
 ## 실행 종료
 
-격리 포트 `9491`–`9498`에는 listener가 남지 않았다. 운영 `8935`는
+격리 포트 `9491`–`9500` 가운데 사용한 포트에는 listener가 남지 않았다.
+운영 `8935`는
 `status=ok`였다. `effective_base_path=/Users/dancer/me`,
 `effective_masc_root=/Users/dancer/me/.masc`, `roots_diverge=false`도 다시
 확인했다.
@@ -160,4 +165,4 @@ live `service.toml`과 fact의 source digest는 모두
   확인했다.
 - [근거] `git rev-parse HEAD`, `shasum -a 256
   _build/default/bin/main_eio.exe`, isolated runtime artifacts,
-  2026-08-30T12:54:22+09:00 확인, 신뢰도 High.
+  2026-08-30T13:15:42+09:00 확인, 신뢰도 High.

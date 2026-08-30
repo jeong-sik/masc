@@ -1,37 +1,39 @@
 {
   "schema_version": 1,
-  "recorded_at": "2026-08-30T12:54:22+09:00",
+  "recorded_at": "2026-08-30T13:15:42+09:00",
   "case_id": "l1-context-source-bound-refresh",
-  "source_commit": "ba77fd324f9083ef27d40a94d346b76bf5031ebb",
-  "binary_sha256": "2d839d6afb4192958477d3ddd29614b08f0ff6e12c58b73eb4f0b3bc966c38d2",
+  "source_commit": "1a74490e82642805af249c496c3947b026a54428",
+  "binary_sha256": "0f163ad23d6e2e07f234e9a9092aa2d7e06e8fad7c667862f02714efef5d4897",
   "exact_head_run": {
     "model": "hf.co/unsloth/gemma-4-31B-it-qat-GGUF:UD-Q4_K_XL",
     "provider": "ollama",
-    "port": 9498,
+    "port": 9500,
     "status": "ok",
     "verify_exit": 0,
-    "duration_ms": 31000,
+    "duration_ms": 36000,
     "stale_claim_matches_in_last_prompt": 0,
     "source_changed_matches_in_last_prompt": 2,
     "source_path_matches_in_last_prompt": 2,
     "final_revision": 3,
     "final_fact_count": 1,
     "final_invalidation_count": 0,
+    "declared_stale_source_sha256": "8e2e7e55dc8858471232e070c9cf7645af83775487a4e9b0eef7fce9dde508ab",
     "live_source_sha256": "0b79c1f7c5218e6a6bfa92266b0de96e7f506a9edc8eeb8b3ef91ecd4115abce",
     "final_fact_source_sha256": "0b79c1f7c5218e6a6bfa92266b0de96e7f506a9edc8eeb8b3ef91ecd4115abce",
     "tool_calls": [
       "Read",
       "Read",
+      "Execute",
       "Write",
       "Execute",
       "keeper_memory_write"
     ],
-    "memory_recall_block": "--- Memory OS Recall ---\nCurrent memory after source revalidation at 2026-08-30T03:53:50Z (memory_revision=absent source_revision=2).\n- [invalidated source=file:\"workspace/service.toml\" reason=source_changed checked=2026-08-30T03:53:50Z] Previous claim was discarded; re-read this source before writing a replacement.",
+    "memory_recall_block": "--- Memory OS Recall ---\nCurrent memory after source revalidation at 2026-08-30T04:14:54Z (memory_revision=absent source_revision=2).\n- [invalidated source=file:\"workspace/service.toml\" reason=source_changed checked=2026-08-30T04:14:54Z] Previous claim was discarded; re-read this source before writing a replacement.",
     "artifact_sha256": {
-      "evidence.json": "e1e1049a53982d44beef64ea52f490205057723b886a4cefa069591c01976ab7",
-      "last-prompt.json": "7bee9aa73f0ae2ab77d79d76093984105a8a9a7ff21bf77be5f40cf4232293e1",
-      "memory-source-seed.json": "511f6b2f212d112b258259a4745c40c0f4b796625fd8e554ebd7b2427322a56e",
-      "memory-source-final.json": "787b61373477a0ed9be541a2cdb79697439e7df58676b0c55cfe2818a1406763"
+      "evidence.json": "d22e19cbb6f4e8373c66582528b1f76c5427f61556213d0a07e096c85863cdd5",
+      "last-prompt.json": "e9de10eed0bcd8a3807183897270fc84f7d4911606e68b405ccba63da076261f",
+      "memory-source-seed.json": "4b73d89cbe82590ec16f647bb7871e7a5a643b037e46ef7eb484020099292ae3",
+      "memory-source-final.json": "e82602341ace8402276cf8b12050598c344042fcade535b230902ffdaa68d2ed"
     }
   },
   "adversarial_runs": [
@@ -77,14 +79,14 @@
     }
   ],
   "aggregate_observations": {
-    "runs_with_stale_claim_removed_before_model": 8,
-    "runs_observed": 8,
-    "current_case_full_successes": 5,
-    "current_case_runs": 6,
+    "runs_with_stale_claim_removed_before_model": 9,
+    "runs_observed": 9,
+    "current_case_full_successes": 6,
+    "current_case_runs": 7,
     "performance_claim": false
   },
   "shutdown_check": {
-    "isolated_ports": [9491, 9492, 9493, 9494, 9495, 9496, 9497, 9498],
+    "isolated_ports": [9491, 9492, 9493, 9494, 9495, 9496, 9497, 9498, 9500],
     "listeners_after_runs": [],
     "operating_8935_status": "ok",
     "operating_effective_base_path": "/Users/dancer/me",

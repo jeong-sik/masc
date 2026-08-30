@@ -15,7 +15,7 @@
 - 확인일시: `2026-08-30T23:29:06+09:00`
 - 신뢰도: `High`
 - 제한조건: one Keeper의 `Running -> Failing` typed accept rejection을 실측했다.
-- Delta: successful registry event CAS가 server-installed full-health invalidation observer를 호출한다.
+- Delta: successful registry event CAS가 server-installed full-health invalidation과 refresh wake를 호출한다.
 
 ## 검증
 
@@ -23,6 +23,7 @@
 - 2차: Event_bus listener wiring은 turn-failed event 부재로 실측 실패해 폐기했다.
 - 3차: registry observer wiring은 transition 직후 warming/refresh-requested를 반환하고 refresh 뒤
   failing/recovering/executable 1/1/1을 반환했다.
+- 4차: wake-enabled r45는 transition과 refreshed snapshot을 같은 초에 기록해 periodic wait를 제거했다.
 - 재현 결과: 성공. TTL이 current Keeper mutation을 숨기던 false-ready window를 제거했다.
 
 ## 불확실성

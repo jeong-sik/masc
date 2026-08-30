@@ -10,16 +10,17 @@ invalidation을 붙인 첫 시도는 `turn_failed`가 그 bus에 발행되지 �
 호출한다. server bootstrap이 observer를 full-health invalidation에 연결한다. 무효화 뒤 다음
 full response는 old ready fields 대신 `warming` placeholder와 `refresh_requested=true`를
 반환하고, background refresh가 current registry facts를 다시 채운다. observer 예외는 이미
-commit된 registry transition을 롤백하지 않는다.
+commit된 registry transition을 롤백하지 않는다. invalidation은 domain-safe wake stream에
+신호를 넣어 periodic 60초 sleep도 즉시 깨운다.
 
 ## exact identity
 
 - issue: `#31974`
 - source base: `f883b015cd`
-- product change head: `f9725bee1457a419001ed4eab255595956339812`
-- measurement composition: `8c5c6f6b36d74bd7f809d939c84fc42545086a22`
-- Linux/arm64 image: `sha256:5d1a8a0d10651d7a150455fe470597497686036c2ea617ce803e2bd815eedf7f`
-- binary SHA-256: `f657dd28551d1fe70f8b04d04f6c6d1d63a2bb87be0ed01a8b55e18150b4dfdc`
+- product change head: `4efc64e0f29ae1ce435dbfc8e0d04ae870e5b736`
+- measurement composition: `7810e6adab8f2e567018d292902dedc8467fc957`
+- Linux/arm64 image: `sha256:ac6eb4dd2dc2b68bcf07ceb2f947f516b0fbafefe3f35960be233dc5e22661b5`
+- binary SHA-256: `9faae9fd888e991fb56ffd98cd1cbcdc2b86139e9a571445f94988ce0fc4ee38`
 
 measurement composition은 제품 head에 old-stack Docker source-build input 보완만 더한다.
 
@@ -45,6 +46,18 @@ full health는 `overall/fleet=ok/ok`, running 1, failing 0을 반환했다. snap
 3. transition 뒤 첫 probe: overall/fleet/snapshot `warming`, refresh request true,
    computed time와 snapshot age null, last-good false.
 4. background refresh 뒤: failing/recovering/executable 1/1/1 current facts.
+
+## event-driven refresh r45
+
+r44는 truthful `warming`을 반환했지만 periodic refresh까지 기다릴 수 있었다. r45는 같은
+registry observer가 refresh loop wake stream에도 신호를 보낸다.
+
+- warm snapshot computed: `2026-08-30T14:37:24Z`
+- `Running -> Failing`: `2026-08-30T14:37:41Z`
+- refreshed snapshot `computed_at_unix=1788100661.15809`: 같은 14:37:41초
+- 14:37:58Z 첫 probe는 이미 ready current facts 1/1/1
+
+최대 60초 interval을 기다리지 않고 mutation 초에 current snapshot을 만들었다.
 
 refresh 뒤 overall/fleet `ok`는 이 base에 아직 #31960의 failing→degraded policy가 없기
 때문이다. 이 PR은 stale running snapshot 제거만 담당하며 해당 health policy를 주장하지 않는다.

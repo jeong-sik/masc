@@ -838,7 +838,12 @@ let run_turn
     in
     Turn_helpers.run_with_setup_cleanup ~cleanup:cleanup_agent_setup
     @@ fun () ->
-    let tools = s.Keeper_run_tools.tools in
+    (* Named for what it is: the surface handed to the lanes that cannot defer.
+       The Agent Core lane sends [agent_core_tools] and then widens it, so an
+       observation point that reaches for a bare [tools] is reaching for the
+       wrong list -- this name makes that a compile error rather than a silent
+       one. *)
+    let built_tools = s.Keeper_run_tools.tools in
     let agent_core_tools = s.Keeper_run_tools.agent_core_tools in
     let hooks = s.Keeper_run_tools.hooks in
     let acc = s.Keeper_run_tools.acc in
@@ -934,7 +939,10 @@ let run_turn
        Keeper_agent_run_phase0_telemetry.record
          ~meta
          ~turn_system_prompt
-         ~tools
+           (* Pre-dispatch: run_named's failover has not chosen a lane yet, so
+              nothing here knows which list will be sent. This records what the
+              turn was built with, which is the only answer available. *)
+         ~tools:built_tools
          ~history_messages
          ?user_blocks
          ~user_message
@@ -1076,7 +1084,7 @@ let run_turn
                         (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                       ?raw_trace
                       ~system_prompt:turn_system_prompt
-                      ~tools
+                      ~tools:built_tools
                       ~agent_core_tools
                       ~checkpoint_sink
                       ~initial_messages
@@ -1150,7 +1158,7 @@ let run_turn
                                ; tools =
                                    Keeper_agent_tool_surface.on_the_wire
                                      ~agent_cell:agent_ref
-                                     ~built:tools
+                                     ~built:built_tools
                                })
                       ~on_official_client_result_handoff:
                         s.Keeper_run_tools.observe_official_client_result_handoff

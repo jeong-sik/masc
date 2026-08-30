@@ -532,6 +532,124 @@ let with_temp_dir prefix f =
     (fun () -> f path)
 ;;
 
+let with_state_change_observer observer f =
+  Persistence.install_state_change_observer observer;
+  Fun.protect
+    ~finally:(fun () -> Persistence.install_state_change_observer ignore)
+    f
+;;
+
+let test_snapshot_commit_observer_exactly_once_and_failure_isolated () =
+  with_temp_dir "keeper-event-queue-observer-snapshot" (fun base_path ->
+    let keeper_name = "snapshot-observer-keeper" in
+    let source = stimulus "observer-source" 1.0 in
+    let notifications = ref 0 in
+    with_state_change_observer
+      (fun () -> incr notifications)
+      (fun () ->
+         (match
+            Persistence.enqueue_stimulus_if_absent_result
+              ~base_path
+              ~keeper_name
+              source
+          with
+          | Ok Persistence.Enqueued -> ()
+          | Ok Persistence.Already_present ->
+            Alcotest.fail "first source enqueue was reported as already present"
+          | Error detail -> Alcotest.fail detail);
+         Alcotest.(check int) "snapshot commit notifies once" 1 !notifications;
+         (match
+            Persistence.enqueue_stimulus_if_absent_result
+              ~base_path
+              ~keeper_name
+              source
+          with
+          | Ok Persistence.Already_present -> ()
+          | Ok Persistence.Enqueued ->
+            Alcotest.fail "duplicate source enqueue committed again"
+          | Error detail -> Alcotest.fail detail);
+         Alcotest.(check int) "no-op enqueue does not notify" 1 !notifications);
+    let second = stimulus "observer-failure-source" 2.0 in
+    with_state_change_observer
+      (fun () -> failwith "synthetic observer failure")
+      (fun () ->
+         (match
+            Persistence.enqueue_stimulus_if_absent_result
+              ~base_path
+              ~keeper_name
+              second
+          with
+          | Ok Persistence.Enqueued -> ()
+          | Ok Persistence.Already_present ->
+            Alcotest.fail "observer failure source already existed"
+          | Error detail ->
+            Alcotest.failf "observer failure relabelled committed enqueue: %s" detail);
+         let pending =
+           Persistence.load_pending_result ~base_path ~keeper_name
+           |> require_ok "load committed source after observer failure"
+         in
+         Alcotest.(check (list string))
+           "observer failure preserves committed snapshot"
+           [ "observer-source"; "observer-failure-source" ]
+           (post_ids pending)))
+;;
+
+let test_transition_wal_commit_observer_exactly_once () =
+  with_temp_dir "keeper-event-queue-observer-wal" (fun base_path ->
+    let keeper_name = "wal-observer-keeper" in
+    let source = stimulus "wal-observer-source" 1.0 in
+    Persistence.install_state_change_observer ignore;
+    Persistence.enqueue_stimulus_if_absent_result
+      ~base_path
+      ~keeper_name
+      source
+    |> require_ok "seed WAL observer source"
+    |> ignore;
+    let selection =
+      Persistence.select_when_result
+        ~base_path
+        ~keeper_name
+        ~now:(Unix.gettimeofday ())
+        ~ready:(fun _ -> true)
+      |> require_ok "select WAL observer source"
+      |> require_some "WAL observer selection"
+    in
+    let notifications = ref 0 in
+    with_state_change_observer
+      (fun () -> incr notifications)
+      (fun () ->
+         let first =
+           Persistence.terminalize_pending_turn_completed_result
+             ~base_path
+             ~keeper_name
+             ~applied_at:2.0
+             ~selection
+             ()
+           |> require_ok "commit observed transition WAL"
+         in
+         (match first with
+          | Persistence.Transition_applied _ -> ()
+          | Persistence.Transition_already_applied _
+          | Persistence.Transition_committed_followup_failed _ ->
+            Alcotest.fail "first terminal transition did not apply cleanly");
+         Alcotest.(check int) "WAL commit notifies once" 1 !notifications;
+         let replay =
+           Persistence.terminalize_pending_turn_completed_result
+             ~base_path
+             ~keeper_name
+             ~applied_at:3.0
+             ~selection
+             ()
+           |> require_ok "replay observed transition WAL"
+         in
+         (match replay with
+          | Persistence.Transition_already_applied _ -> ()
+          | Persistence.Transition_applied _
+          | Persistence.Transition_committed_followup_failed _ ->
+            Alcotest.fail "transition WAL replay committed again");
+         Alcotest.(check int) "WAL replay does not notify" 1 !notifications))
+;;
+
 let test_durable_peek_ack_restart () =
   with_temp_dir "keeper-pending-v12" (fun base_path ->
     let keeper_name = "fresh-keeper" in
@@ -1065,6 +1183,14 @@ let () =
             "durable in-flight selection rejects reinserted source"
             `Quick
             test_durable_inflight_selection_rejects_reinserted_source
+        ; Alcotest.test_case
+            "snapshot commit observer is exact and isolated"
+            `Quick
+            test_snapshot_commit_observer_exactly_once_and_failure_isolated
+        ; Alcotest.test_case
+            "transition WAL observer notifies exactly once"
+            `Quick
+            test_transition_wal_commit_observer_exactly_once
         ] )
       ]
 ;;

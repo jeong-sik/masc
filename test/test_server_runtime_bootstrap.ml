@@ -2965,7 +2965,12 @@ let test_health_response_full_query_uses_snapshot_cache () =
             "invalidated snapshot requests refresh"
             true
             (invalidated |> member "full_health_snapshot"
-             |> member "refresh_requested" |> to_bool)))
+             |> member "refresh_requested" |> to_bool);
+          Alcotest.(check int)
+            "full health publishes its bounded wake coalescing window"
+            100
+            (invalidated |> member "full_health_snapshot"
+             |> member "refresh_wakeup_coalesce_ms" |> to_int)))
 
 let test_full_health_refresh_timing_uses_dedicated_budget () =
   let interval_sec, timeout_sec, ttl_sec =
@@ -2981,7 +2986,12 @@ let test_full_health_refresh_timing_uses_dedicated_budget () =
   Alcotest.(check bool) "full health interval exceeds timeout" true
     (interval_sec > timeout_sec);
   Alcotest.(check bool) "snapshot ttl covers refresh interval" true
-    (ttl_sec >= interval_sec *. 2.0)
+    (ttl_sec >= interval_sec *. 2.0);
+  Alcotest.(check (float 0.0001))
+    "full health wake coalescing has a 100ms hard bound"
+    0.1
+    (Server_routes_http_runtime.For_testing
+     .full_health_refresh_wakeup_coalesce_sec ())
 
 let test_full_health_refresh_timeout_preserves_last_snapshot () =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();

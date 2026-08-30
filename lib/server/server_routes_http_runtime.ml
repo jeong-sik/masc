@@ -760,6 +760,8 @@ let full_health_snapshot_ttl_sec =
   Float.max 60.0 (full_health_refresh_interval_sec *. 2.0)
 ;;
 
+let full_health_refresh_wakeup_coalesce_sec = 0.1
+
 let with_full_health_snapshot_lock f =
   Stdlib.Mutex.protect full_health_snapshot_mu f
 
@@ -1216,6 +1218,8 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
       ("ttl_ms", `Int (int_of_float (full_health_snapshot_ttl_sec *. 1000.)));
       ("refresh_in_flight", `Bool refresh_in_flight);
       ("refresh_requested", `Bool refresh_requested);
+      ( "refresh_wakeup_coalesce_ms"
+      , `Int (int_of_float (full_health_refresh_wakeup_coalesce_sec *. 1000.)) );
       ( "refresh_started_at_unix",
         match refresh_started_at with
         | Some started_at -> `Float started_at
@@ -1296,6 +1300,7 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
         timeout_s = full_health_refresh_timeout_sec;
         on_failure = Some mark_full_health_snapshot_failure;
         wakeup = Some full_health_refresh_wakeup;
+        wakeup_coalesce_s = full_health_refresh_wakeup_coalesce_sec;
         warm_delay_s = 0.5;
         warn_first_failure = false;
       }
@@ -1336,6 +1341,10 @@ module For_testing = struct
     ( full_health_refresh_interval_sec,
       full_health_refresh_timeout_sec,
       full_health_snapshot_ttl_sec )
+
+  let full_health_refresh_wakeup_coalesce_sec () =
+    full_health_refresh_wakeup_coalesce_sec
+  ;;
 end
 
 let full_health_requested request =

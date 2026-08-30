@@ -1,0 +1,63 @@
+{
+  "schema": "masc.health_shared_basepath_lease.runtime_proof.v3",
+  "product_head": "407288a23a624514a3aa97fde976d1450e57ece8",
+  "measurement_head": "962541b20b",
+  "image_id": "sha256:027aaa432abca63d973272b2964246b93e99f9922e959605df0c48ff31ea2b17",
+  "binary_sha256": "1aef80025ae9bd65f1076346ed3c962f70015d7fcc4c048cc4810558ef88361b",
+  "measurement_composition": "product plus three already-main one-click build fixes",
+  "first": {
+    "runtime": "01a0540e-4607-7000-a969-e3c740471612",
+    "startup_elapsed_sec": 1.6665918827056885,
+    "before_second": {
+      "full": "ready",
+      "auth": "ok"
+    },
+    "after_second": {
+      "full": "ready",
+      "auth": "ok",
+      "env_token_verifies": true
+    },
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "second_same_volume": {
+    "started_at": "2026-08-30T19:03:38.736875263Z",
+    "finished_at": "2026-08-30T19:03:38.836378972Z",
+    "exit_code": 1,
+    "oom_killed": false,
+    "token_hash_unchanged": true,
+    "rejection": "Another MASC runtime already owns base path /app"
+  },
+  "successor_same_volume": {
+    "runtime": "01a0540e-5aa4-7000-bcb2-baecfc463a10",
+    "startup_elapsed_sec": 1.2728819847106934,
+    "full": "ready",
+    "auth": "ok",
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "concurrent_different_volume": {
+    "runtime": "01a0540e-5078-7000-9aed-94c9668c0a1d",
+    "startup_elapsed_sec": 1.7548210620880127,
+    "full": "ready",
+    "auth": "ok",
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "lock_layout": {
+    "lease_dir": "/app/.masc/runtime/base-path-lease",
+    "pid_lock_dir": "/tmp",
+    "shared_volume_pid_file_count": 0
+  },
+  "config_snapshot": {
+    "runtime": "01a05411-bbe3-7000-a923-c0142e686422",
+    "startup_elapsed_sec": 1.3994770050048828,
+    "exit_code": 0,
+    "oom_killed": false,
+    "env": "MASC_BASE_PATH_LEASE_DIR",
+    "value": "/app/.masc/runtime/base-path-lease",
+    "source": "env",
+    "raw_env_present": true,
+    "observed_via": "masc_config server"
+  }
+}

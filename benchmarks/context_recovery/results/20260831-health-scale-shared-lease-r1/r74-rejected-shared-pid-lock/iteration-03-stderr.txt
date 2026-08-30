@@ -1,0 +1,2 @@
+[2026-08-30 18:53:31] [INFO] [MCP] Tag registry initialized: 126 tools registered
+[WARN] PID 7 alive but unresponsive on port 8080; sending SIGTERM to reclaim

@@ -1,0 +1,27 @@
+{
+  "schema": "masc.health_shared_basepath_lease.rejected_pid_namespace_collision.v1",
+  "source_head": "dee02ce57e556aa91f342e2701f5319fe0db7292",
+  "image_id": "sha256:3d90430e8a37551b3928cbad7a18b342bda316437f7262a44a4baaa7be1108db",
+  "binary_sha256": "dc2efc123d2052d00ce0cb578230fb9c7bfff08bb13940a34fc9613e3eeeba75",
+  "first": {
+    "runtime": "01a05404-f551-7000-96a6-9977a06ae776",
+    "startup_elapsed_sec": 1.1954410076141357,
+    "exit_code": 137
+  },
+  "second": {
+    "runtime": "01a05404-ffdc-7000-925c-a6e7b3b6c6d0",
+    "startup_elapsed_sec": 1.1368699073791504,
+    "exit_code": 137
+  },
+  "third": {
+    "ready": false,
+    "exit_code": 143,
+    "elapsed_wall_sec": 0.346,
+    "observed": "PID 7 alive but unresponsive on port 8080; sending SIGTERM to reclaim"
+  },
+  "shared_stale_pid": {
+    "path": "/app/.masc/runtime/host-run/masc-8080.pid",
+    "value": 7
+  },
+  "cause": "shared PID file crossed PID namespaces; the new container also had a live unrelated PID 7"
+}

@@ -22,11 +22,12 @@
 - 2차: 20,000개 결정론적 값과 기존 sorted reference를 비교하고 100,000개 단조 입력으로 AVL 양쪽 경로를 확인했다.
 - 3차: Linux에서 같은 1M input과 같은 20-write/20-read 간격을 r95에 적용했다.
 - 4차: 정상 종료 뒤 같은 volume으로 replacement를 시작해 1,000,020개와 두 도구 percentile을 복구했다.
+- 5차: duration 1M개가 모두 고유한 r96을 새 volume에서 두 번 시작하고 같은 mixed load를 반복해 최악 node 수의 시간·메모리 경계를 확인했다.
 - 재현 결과: mixed read 평균/최대가 188.911/216.727ms에서 0.374/1.455ms로 줄었다. 총합과 exact percentile은 유지됐고 두 runtime 모두 exit 0/OOM false였다.
 
 ## 불확실성
 
-- 미확인 항목: 1M 모두 고유한 runtime 데이터, 장시간 heap churn, 다수 도구 분포, 전체 테스트, GitHub CI, Kubernetes/PVC.
+- 미확인 항목: 장시간 heap churn, 1M 초과, 다수 도구 분포, 전체 테스트, GitHub CI, Kubernetes/PVC.
 - 영향: duration이 모두 다르면 AVL node 메모리가 기존 list보다 커질 수 있다.
 - 추가 확인 필요: 고유 duration 1M과 장시간 쓰기 부하에서 heap/GC를 측정하고 필요하면 retention window를 별도 설계한다.
 
@@ -35,4 +36,3 @@
 - 영향 받는 영역: duration 저장, exact percentile 선택, 누적 평균.
 - 제약/배제: JSONL 형식, snapshot invalidation, HTTP shape, retention, 배포 volume은 바꾸지 않는다.
 - 롤백 조건: sorted reference와 percentile이 다르거나, 단조 입력에서 stack/시간 문제가 생기거나, 실측 메모리가 허용 범위를 넘으면 변경을 중단한다.
-

@@ -39,13 +39,29 @@ replacement를 시작했다. `hydrated 1000020`, 시작→hydration 1.687초, �
 총합 1,000,020이었다. `masc_config` 1M의 p50/p95/p99는 51/95/99로 유지됐고
 `masc_status` 20개의 percentile도 교체 전후가 같았다. replacement도 exit 0/OOM false였다.
 
+## r96 고유 duration 1M
+
+AVL node 수가 최대가 되는 입력도 별도 volume에서 측정했다. `0.001`부터 `1000.000`까지 서로 다른
+duration 1,000,000개와 깨진/형식 불일치 행 각 1,000개를 넣었다.
+
+- 첫 시작→hydration 로그 1.945초, 메모리 147.1MiB.
+- 첫 API 두 번은 0.400/0.399ms였다.
+- p50/p95/p99는 계산 기준과 같은 500.001/950/990이었다.
+- 같은 20-write/20-read에서 read 평균/최대는 0.337/0.469ms였다.
+- 관측 최고 메모리 151.8MiB, CPU 4.62%, 최종 총합 1,000,020.
+- replacement는 1.979초에 1,000,020개를 복구했고 첫 API는 0.393ms였다.
+- 두 runtime 모두 exit 0/OOM false였다.
+
+중복값 r95보다 시작 메모리는 약 68MiB 늘었다. 반면 시작 시간과 API/mixed latency는 같은 범위였다.
+따라서 1M 고유값에서 기능·시간·메모리 모두 현재 실측 범위 안에 있었다.
+
 ## 경계
 
 - tree는 불변이며 기존 `Stdlib.Mutex` 안에서 순수 계산만 한다. I/O나 Eio yield는 없다.
 - 같은 duration이 많으면 한 노드의 multiplicity로 압축된다. 모두 다른 값이면 노드 수는 호출 수와
   같아져 기존 list보다 노드당 메모리가 커질 수 있다.
 - duration을 삭제하는 sliding window는 아직 없다. retention은 재시작 시 JSONL day file 단위다.
-- 1M 모두 고유한 runtime 데이터, 장시간 heap churn, 다수 도구 분포는 아직 실측하지 않았다.
+- 장시간 heap churn, 1M 초과, 다수 도구 분포는 아직 실측하지 않았다.
 - 전체 테스트, GitHub CI, Kubernetes/PVC, published artifact는 확인 범위 밖이다.
 - `/Users/dancer/me/.masc`와 현재 8935 서버는 변경하거나 재시작하지 않았다.
 
@@ -54,4 +70,5 @@ replacement를 시작했다. `hydrated 1000020`, 시작→hydration 1.687초, �
 - [근거] exact sorted-reference/단조 입력 테스트, source/image/binary identity, 동일 1M input,
   r94/r95 mixed-load HTTP 시간, 실제 MCP calls, restart hydration/API/percentile, exit/OOM과 disk SHA,
   2026-08-31T06:20:55+09:00 확인, 신뢰도 High.
-
+- [근거] r96 고유 duration 1M의 hydration/API/mixed load/replacement, 정확한 percentile,
+  메모리/CPU 표본, exit/OOM, disk SHA를 2026-08-31T06:26:28+09:00 확인, 신뢰도 High.

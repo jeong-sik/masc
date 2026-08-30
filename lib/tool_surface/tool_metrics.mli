@@ -45,8 +45,9 @@ val replace_samples : ((sample -> unit) -> ('a, 'error) result) -> ('a, 'error) 
     Returns [None] if no calls have been recorded. *)
 val stats_for : string -> tool_stats option
 
-(** [all_stats ()] returns metrics for all recorded tools,
-    sorted by call count descending. *)
+(** [all_stats ()] returns an immutable metrics snapshot sorted by call count
+    descending. Repeated and concurrent reads reuse the snapshot until
+    [record], [replace_samples], or [clear] changes the metrics. *)
 val all_stats : unit -> tool_stats list
 
 (** [to_json stats] serializes a [tool_stats] to JSON. *)

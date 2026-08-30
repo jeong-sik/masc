@@ -41,6 +41,7 @@ type accumulator = {
     update.  Stdlib.Mutex because HTTP stats endpoints may run on a
     different domain. *)
 let metrics : accumulator StringMap.t ref = ref StringMap.empty
+let all_stats_cache : tool_stats list option ref = ref None
 let metrics_mu = Stdlib.Mutex.create ()
 
 let with_lock f = Stdlib.Mutex.protect metrics_mu f
@@ -80,7 +81,9 @@ let sample_of_result (result : Tool_result.result) =
 
 let record (result : Tool_result.result) =
   let sample = sample_of_result result in
-  with_lock (fun () -> metrics := add_sample !metrics sample)
+  with_lock (fun () ->
+    metrics := add_sample !metrics sample;
+    all_stats_cache := None)
 
 let replace_samples produce =
   let replacement = ref StringMap.empty in
@@ -88,7 +91,9 @@ let replace_samples produce =
   match produce add with
   | Error _ as error -> error
   | Ok value ->
-    with_lock (fun () -> metrics := !replacement);
+    with_lock (fun () ->
+      metrics := !replacement;
+      all_stats_cache := None);
     Ok value
 
 let percentile sorted_arr p =
@@ -123,13 +128,19 @@ let stats_for tool_name =
     | None -> None)
 
 let all_stats () =
-  let all =
-    with_lock (fun () ->
-      StringMap.fold (fun name acc lst ->
-        compute_stats name acc :: lst
-      ) !metrics [])
-  in
-  List.sort (fun a b -> Int.compare b.call_count a.call_count) all
+  with_lock (fun () ->
+    match !all_stats_cache with
+    | Some snapshot -> snapshot
+    | None ->
+      let snapshot =
+        StringMap.fold
+          (fun name acc list -> compute_stats name acc :: list)
+          !metrics
+          []
+        |> List.sort (fun a b -> Int.compare b.call_count a.call_count)
+      in
+      all_stats_cache := Some snapshot;
+      snapshot)
 
 let to_json (s : tool_stats) =
   `Assoc
@@ -147,7 +158,10 @@ let to_json (s : tool_stats) =
 let all_to_json () =
   `List (List.map to_json (all_stats ()))
 
-let clear () = with_lock (fun () -> metrics := StringMap.empty)
+let clear () =
+  with_lock (fun () ->
+    metrics := StringMap.empty;
+    all_stats_cache := None)
 
 (* Metrics are recorded only for handled dispatches. Other outcomes are
    counted by the dispatch telemetry path. *)

@@ -148,6 +148,49 @@ let test_replace_samples_keeps_snapshot_on_error () =
     1
     (Option.get (M.stats_for "live")).call_count
 
+let test_all_stats_reuses_and_invalidates_snapshot () =
+  setup ();
+  M.record (make_result ~name:"cached" ~success:true ~duration_ms:1.0);
+  let first = M.all_stats () in
+  let second = M.all_stats () in
+  Alcotest.(check bool) "sequential read reuses snapshot" true (first == second);
+  let concurrent =
+    List.init 8 (fun _ -> Domain.spawn M.all_stats) |> List.map Domain.join
+  in
+  Alcotest.(check bool)
+    "concurrent reads reuse snapshot"
+    true
+    (List.for_all (fun snapshot -> snapshot == first) concurrent);
+  M.record (make_result ~name:"cached" ~success:true ~duration_ms:2.0);
+  let after_record = M.all_stats () in
+  Alcotest.(check bool)
+    "record invalidates snapshot"
+    true
+    (after_record != first);
+  Alcotest.(check int)
+    "recomputed count"
+    2
+    (List.hd after_record).call_count;
+  let replace_result =
+    M.replace_samples (fun add ->
+      add
+        { M.tool_name = "replacement"
+        ; disposition = M.Failed
+        ; duration_ms = 3.0
+        };
+      Ok ())
+  in
+  Alcotest.(check (result unit string)) "replacement succeeds" (Ok ()) replace_result;
+  let after_replace = M.all_stats () in
+  Alcotest.(check bool)
+    "replacement invalidates snapshot"
+    true
+    (after_replace != after_record);
+  Alcotest.(check string)
+    "replacement published"
+    "replacement"
+    (List.hd after_replace).tool_name
+
 let () =
   Alcotest.run "Tool_metrics" [
     "recording", [
@@ -171,5 +214,11 @@ let () =
         "failed replacement keeps current snapshot"
         `Quick
         test_replace_samples_keeps_snapshot_on_error;
+    ];
+    "snapshot cache", [
+      Alcotest.test_case
+        "reuses reads and invalidates on writes"
+        `Quick
+        test_all_stats_reuses_and_invalidates_snapshot;
     ];
   ]

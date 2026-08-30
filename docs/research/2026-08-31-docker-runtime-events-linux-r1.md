@@ -111,6 +111,32 @@ canonical one-object-per-line 형식으로 고치면서 stacked commit identity�
 - `alive but unresponsive`/`sending SIGTERM` takeover log: 0건
 - same-volume contender: exit 1/OOM false, token hash 불변
 
+## r80/r81: production-shaped 최종 조합 rejection
+
+r80은 host macOS Dune artifact를 Linux image에 넣는 measurement provenance 오류였다.
+deployment preflight helper가 `Exec format error`로 약 80ms 만에 exit 1/OOM false가 됐다.
+제품 runtime 증거로 폐기하고 artifact를 보존했다.
+
+r81은 같은 source를 Linux OCaml builder에서 다시 만들었다. main과 preflight helper 모두
+AArch64 ELF임을 확인했다.
+
+- product head: `b85c82ec976f175bc795db5a49cc1956d8e99b07`
+- Linux builder image: `sha256:7e54d5324afbcf8fe0cf60f801bed91dfd2da4b4bf9170055ed9ff23f8d18d26`
+- production-shaped image: `sha256:1b564539795b0ff568867d685959bd47615ea2a8ac2e453e2e8ead45e48ed44c`
+- binary: `7956eda96b01c7c93bd54eed815b018c549cf818fc2e5f23cd79d56c016571e0`
+- preflight helper: `d0db776eb1b8596a53c0551a25ba89a945a288253f651e8d9d0558095b84eb77`
+- runtime: `01a0542e-9508-7000-b1f7-e5f5666d20aa`
+
+deployment preflight와 runtime-events ring 생성은 성공했다. 그러나 production image의 appuser가
+`/app/data/tool-metrics`를 만들 수 없어 startup은 `degraded`에 고정됐다. full-health snapshot과
+auth는 ready/ok였지만 product startup phase가 ready가 아니므로 release acceptance에서 제외했다.
+clean stop은 exit 0/OOM false였고 ring 1개를 0개로 정리했다.
+
+원인은 `Config_dir_resolver.data_dir ~base_path:"/app"`가 의도대로 `/app/data`를 반환하지만,
+production Dockerfile이 `/app/.masc`와 assets만 appuser 소유로 만들기 때문이다. one-click image는
+`/app` 전체를 appuser에 chown해 이 문제가 드러나지 않았다. 별도 issue
+[#32001](https://github.com/jeong-sik/masc/issues/32001)에 기록했다.
+
 ## 검증과 경계
 
 - rebased product HEAD focused build: `main_eio`, `main_stdio_eio`,
@@ -119,9 +145,10 @@ canonical one-object-per-line 형식으로 고치면서 stacked commit identity�
 - `bash -n`, `ocamlformat --check`, `git diff --check`: pass
 - JSON/JSONL parse, secret-string scan, SHA-256 manifest, evidence-record strict validation을 수행한다.
 - r79는 Linux/arm64 Docker Desktop local volume과 one-click image를 사용했다.
-- r71은 production-shaped local image였지만 폐기된 shared-PID base였다. 최종 product head의 release
-  artifact image는 아직 측정하지 않았다.
-- GitHub release published artifact, Kubernetes RWX, multi-host filesystem lock은 측정 범위 밖이다.
+- r81에서 최종 product head의 production-shaped local image를 측정했지만 `/app/data` permission
+  blocker 때문에 acceptance하지 않았다.
+- GitHub release published artifact, #32001 수정 후 production-shaped image, Kubernetes RWX,
+  multi-host filesystem lock은 측정 범위 밖이다.
 - full suite와 CI는 실행하거나 통과했다고 주장하지 않는다.
 
 ## 근거
@@ -129,6 +156,6 @@ canonical one-object-per-line 형식으로 고치면서 stacked commit identity�
 - [근거] OCaml 5.5 공식 Runtime_events API와 runtime tracing manual, 2026-08-31 확인,
   신뢰도 High.
 - [근거] r70 반례, r71-r73 preliminary artifacts, r77 rejected harness, r78 superseded run,
-  r79 source/image/binary/runtime
+  r79 one-click acceptance, r80 provenance rejection, r81 release blocker source/image/binary/helper/runtime
   identity, health, Docker inspect, ring path/stat/hash, contender rejection, token hash,
-  2026-08-31T04:28:14+09:00 확인, 신뢰도 High.
+  2026-08-31T04:42:49+09:00 확인, 신뢰도 High.

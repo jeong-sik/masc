@@ -1,0 +1,16 @@
+{
+  "schema": "masc.docker_runtime_events.release_data_dir_rejection.v1",
+  "product_head": "b85c82ec976f175bc795db5a49cc1956d8e99b07",
+  "image_id": "sha256:1b564539795b0ff568867d685959bd47615ea2a8ac2e453e2e8ead45e48ed44c",
+  "runtime": "01a0542e-9508-7000-b1f7-e5f5666d20aa",
+  "preflight": "ok",
+  "startup_phase": "degraded",
+  "startup_error": "Sys_error(\"/app/data/tool-metrics: Eio.Io Fs Permission_denied Unix_error (Permission denied, \\\"mkdirat\\\", \\\"/app/data\\\"),\\n  creating directory <fs:/app/data>\")",
+  "full_health_snapshot": "ready",
+  "auth": "ok",
+  "clean_exit_code": 0,
+  "oom_killed": false,
+  "event_file_before_clean_stop": 1,
+  "event_file_after_clean_stop": 0,
+  "rejected": true
+}

@@ -188,6 +188,9 @@ let test_append_failure_and_recovery_are_observable () =
         P.flush_now ~base_path;
         let failed = P.persistence_snapshot () in
         Alcotest.(check int) "failed row not counted as flushed" 0 failed.flushed_records;
+        Alcotest.(check int) "failed row remains pending" 1 failed.queue_depth;
+        Alcotest.(check int) "failed row enters retry queue" 1 failed.retry_queue_depth;
+        Alcotest.(check int) "no record remains in flight" 0 failed.in_flight_records;
         Alcotest.(check int) "append failure counted" 1 failed.append_failed_records;
         Alcotest.(check (option int))
           "failed row visible on last batch"
@@ -198,10 +201,11 @@ let test_append_failure_and_recovery_are_observable () =
           true
           (Option.is_some failed.last_append_error);
         Dated_jsonl.set_append_guard run_append;
-        P.enqueue (make_result ~name:"recovered-write" ~success:true ~duration_ms:2.0);
         P.flush_now ~base_path;
         let recovered = P.persistence_snapshot () in
-        Alcotest.(check int) "recovery row flushed" 1 recovered.flushed_records;
+        Alcotest.(check int) "retained row flushed after recovery" 1 recovered.flushed_records;
+        Alcotest.(check int) "retry queue drained" 0 recovered.retry_queue_depth;
+        Alcotest.(check int) "no pending rows after recovery" 0 recovered.queue_depth;
         Alcotest.(check int)
           "historical append failure retained"
           1
@@ -213,7 +217,11 @@ let test_append_failure_and_recovery_are_observable () =
         Alcotest.(check bool)
           "last append error clears after recovery"
           true
-          (Option.is_none recovered.last_append_error)))
+          (Option.is_none recovered.last_append_error);
+        Alcotest.(check (list string))
+          "the originally failed row is persisted"
+          [ "failed-write" ]
+          (read_records ~base_path |> List.map (string_field "tool_name"))))
 
 let test_high_watermark_wakes_flush_waiter clock =
   with_tmp_dir (fun _base_path ->

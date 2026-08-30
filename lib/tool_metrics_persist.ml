@@ -14,6 +14,14 @@
     @since 2.108.0 — Issue #3280 *)
 
 let flush_interval_s = Env_config.InternalTimers.metrics_flush_sec
+(** Retry failed storage at most as slowly as the normal default, while
+    respecting an operator's faster configured cadence. Without this delay a
+    queue already above the high watermark would wake immediately after every
+    failure and spin on an unavailable filesystem. *)
+let retry_backoff_s =
+  Float.min
+    flush_interval_s
+    Env_config.InternalTimers.default_metrics_flush_sec
 
 (* ── JSONL record format ────────────────────────────── *)
 
@@ -38,6 +46,8 @@ type persistence_snapshot = {
   observed_at_unix : float;
   writer_active : bool;
   queue_depth : int;
+  retry_queue_depth : int;
+  in_flight_records : int;
   queue_capacity : int;
   queue_high_watermark : int;
   queue_full_dropped_records : int;
@@ -93,6 +103,11 @@ let write_queue_capacity = 4096
 let write_queue_high_watermark = write_queue_capacity / 2
 let write_queue_mu = Mutex.create ()
 let write_queue : Yojson.Safe.t Queue.t = Queue.create ()
+(** Failed appends stay ahead of newer writes. [in_flight_records] reserves
+    their capacity slot while the writer is outside the short queue lock, so a
+    producer cannot consume that slot before a failed record is retained. *)
+let retry_queue : Yojson.Safe.t Queue.t = Queue.create ()
+let in_flight_records = ref 0
 let write_queue_changed = Eio.Condition.create ()
 let dropped_full_queue = Atomic.make 0
 let append_failed_records = Atomic.make 0
@@ -109,20 +124,44 @@ let store = Atomic.make None
 
 let with_write_queue_lock f = Mutex.protect write_queue_mu f
 
+let pending_record_count_locked () =
+  Queue.length retry_queue + Queue.length write_queue + !in_flight_records
+
 let take_queued_record () =
   with_write_queue_lock (fun () ->
-    if Queue.is_empty write_queue then None else Some (Queue.take write_queue))
+    let record =
+      match Queue.take_opt retry_queue with
+      | Some _ as record -> record
+      | None -> Queue.take_opt write_queue
+    in
+    Option.iter (fun _ -> Stdlib.incr in_flight_records) record;
+    record)
+
+let complete_queued_record () =
+  with_write_queue_lock (fun () -> Stdlib.decr in_flight_records)
+
+let retain_failed_record record =
+  with_write_queue_lock (fun () ->
+    Stdlib.decr in_flight_records;
+    Queue.add record retry_queue)
 
 let queued_record_count () =
-  with_write_queue_lock (fun () -> Queue.length write_queue)
+  with_write_queue_lock pending_record_count_locked
+
+let queue_depths () =
+  with_write_queue_lock (fun () ->
+    pending_record_count_locked (), Queue.length retry_queue, !in_flight_records)
 
 let persistence_snapshot () =
   let build = Build_identity.current () in
+  let queue_depth, retry_queue_depth, in_flight_records = queue_depths () in
   { runtime_instance_id = build.runtime_instance_id
   ; process_started_at = build.started_at
   ; observed_at_unix = Time_compat.now ()
   ; writer_active = Atomic.get writer_active
-  ; queue_depth = queued_record_count ()
+  ; queue_depth
+  ; retry_queue_depth
+  ; in_flight_records
   ; queue_capacity = write_queue_capacity
   ; queue_high_watermark = write_queue_high_watermark
   ; queue_full_dropped_records = Atomic.get dropped_full_queue
@@ -149,6 +188,8 @@ let persistence_snapshot_to_json snapshot =
     ; "observed_at_unix", `Float snapshot.observed_at_unix
     ; "writer_active", `Bool snapshot.writer_active
     ; "queue_depth", `Int snapshot.queue_depth
+    ; "retry_queue_depth", `Int snapshot.retry_queue_depth
+    ; "in_flight_records", `Int snapshot.in_flight_records
     ; "queue_capacity", `Int snapshot.queue_capacity
     ; "queue_high_watermark", `Int snapshot.queue_high_watermark
     ; "queue_full_dropped_records", `Int snapshot.queue_full_dropped_records
@@ -179,8 +220,10 @@ let await_flush_trigger ~clock ~interval_s =
 
 let drain_queue_without_store () =
   with_write_queue_lock (fun () ->
-    let dropped = Queue.length write_queue in
+    let dropped = pending_record_count_locked () in
     Queue.clear write_queue;
+    Queue.clear retry_queue;
+    in_flight_records := 0;
     dropped)
 
 let reset_for_testing () =
@@ -252,11 +295,11 @@ let enqueue (result : Tool_result.result) =
      evidence surface. *)
   let dropped_for_full_queue, wake_flush_fiber =
     with_write_queue_lock (fun () ->
-      if Queue.length write_queue >= write_queue_capacity
+      if pending_record_count_locked () >= write_queue_capacity
       then true, false
       else (
         Queue.add json write_queue;
-        false, Queue.length write_queue = write_queue_high_watermark))
+        false, pending_record_count_locked () = write_queue_high_watermark))
   in
   if wake_flush_fiber then Eio.Condition.broadcast write_queue_changed;
   if dropped_for_full_queue
@@ -308,13 +351,21 @@ let drain_to_store ~trigger (store : Dated_jsonl.t) : drain_report =
     | Some json ->
       (try
          Dated_jsonl.append store json;
-         Stdlib.incr written
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+         complete_queued_record ();
+         Stdlib.incr written;
+         drain ()
+       with
+       | Eio.Cancel.Cancelled _ as e ->
+         retain_failed_record json;
+         raise e
+       | exn ->
          let error = Stdlib.Printexc.to_string exn in
+         retain_failed_record json;
          Stdlib.incr failed;
          last_error := Some error;
-         Log.Metrics.error "tool_metrics_persist: append failed: %s" error);
-      drain ()
+         Log.Metrics.error
+           "tool_metrics_persist: append failed; retained for retry: %s"
+           error)
   in
   drain ();
   let report = { written = !written; failed = !failed; last_error = !last_error } in
@@ -345,7 +396,8 @@ let start_flush_fiber ~sw ~clock ~base_path =
              "tool_metrics_persist: flushed %d records to disk (trigger=%s, append_failed=%d)"
              report.written
              (trigger_to_string trigger)
-             report.failed
+             report.failed;
+         if report.failed > 0 then Eio.Time.sleep clock retry_backoff_s
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

@@ -74,6 +74,8 @@ let () =
                 true
                 (persistence |> member "process_started_at" |> to_string |> String.length > 0);
               let _ = persistence |> member "queue_depth" |> to_int in
+              let _ = persistence |> member "retry_queue_depth" |> to_int in
+              let _ = persistence |> member "in_flight_records" |> to_int in
               let _ = persistence |> member "queue_full_dropped_records" |> to_int in
               let _ = persistence |> member "append_failed_records" |> to_int in
               check bool

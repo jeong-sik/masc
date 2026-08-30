@@ -37,17 +37,28 @@ open Alcotest
    fd sentence eight — because the exec-stage shape repeats at the top level,
    inside pipeline, inside then, and inside then's pipeline. That is 4,158
    bytes of duplicated description, and JSON Schema names the fix ($defs and
-   $ref); nothing in this repository sends a $ref to a model yet, so whether
-   every provider resolves one is unverified and not a thing to guess at on the
-   surface every turn carries. Verify it, then collapse the repeats and bring
-   this number back down.
+   $ref). Sending one meant knowing every provider resolves it, which was not
+   a thing to guess at on the surface every turn carries. Both halves are done
+   now -- the probes below, then the collapse the paragraph after them
+   records.
 
-   Verification progress (2026-08-29): ollama-cloud minimax-m3 and
-   zai glm-4.6 both resolve $defs/$ref tool schemas correctly (live
-   probe: 200 + exact tool_call args). antigravity gemini lanes are
-   unverified — no direct API key on hand — and codex lanes are
-   unprobed, so a collapse must either expand for unverified
-   providers or wait until they are probed. *)
+   Every lane was probed with the same two-variant experiment: one logical
+   tool offered flat and with $defs/$ref, one prompt naming the same nested
+   values, compare the arguments the model produced. Each ran through its own
+   transport, so what was measured is the lane and not just the model behind
+   it -- codex over [app-server --stdio] dynamicTools, antigravity over the
+   stdio MCP config agy reads.
+
+     ollama-cloud minimax-m3   resolves, exact args   (2026-08-29)
+     zai glm-4.6               resolves, exact args   (2026-08-29)
+     codex app-server          resolves, exact args   (2026-08-30)
+     antigravity agy 1.1.22    resolves, exact args   (2026-08-30)
+
+   One caveat found on the way, for a lane that does not exist yet: Gemini's
+   legacy [parameters] field rejects $defs and $ref by name at payload
+   parsing, before auth ("Unknown name \"$defs\" ... Cannot find field"). agy
+   does not use that field, which is why its lane passes. A future
+   direct-Gemini lane must send [parametersJsonSchema]. *)
 (* Lowered from 85,000 on 2026-08-30, banking what naming Execute's repeated
    exec-stage shapes gave back: the surface measures 71,691 bytes across 83
    tools, down 2,925 from 74,616. Execute itself went 9,049 -> 6,118. That is

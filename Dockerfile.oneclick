@@ -82,6 +82,8 @@ RUN groupadd --system appgroup && useradd --system --gid appgroup appuser \
 
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app
+# The classic one-touch preset deliberately runs Execute inside this container.
+ENV MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
 # MASC_CONFIG_DIR intentionally unset: config resolves to /app/.masc/config
 # (Local_masc), the writable root the entrypoint seeds on the volume.
 

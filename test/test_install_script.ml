@@ -201,6 +201,7 @@ let release_workflow () =
 ;;
 
 let dockerfile () = read_file (Filename.concat (source_root ()) "Dockerfile")
+let oneclick_dockerfile () = read_file (Filename.concat (source_root ()) "Dockerfile.oneclick")
 let dockerignore () = read_file (Filename.concat (source_root ()) ".dockerignore")
 
 let project_version () =
@@ -627,6 +628,13 @@ let test_runtime_image_enforces_preflight_before_main () =
     "Docker context includes the deployment preflight helper"
     context
     "!masc-deployment-preflight-helper"
+;;
+
+let test_oneclick_image_opts_into_classic_local_sandbox () =
+  assert_contains
+    "one-click image explicitly enables its classic local sandbox"
+    (oneclick_dockerfile ())
+    "ENV MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1"
 ;;
 
 let test_binary_checks_use_install_environment () =
@@ -1421,6 +1429,10 @@ let () =
             "runtime image enforces preflight before main"
             `Quick
             test_runtime_image_enforces_preflight_before_main
+        ; test_case
+            "one-click image opts into classic local sandbox"
+            `Quick
+            test_oneclick_image_opts_into_classic_local_sandbox
         ; test_case
             "installer fetches deployment preflight companions"
             `Quick

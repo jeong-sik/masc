@@ -62,6 +62,21 @@
       "operator_broadcast_count": 0
     }
   },
+  "supplemental_rate_limit": {
+    "response_status": 429,
+    "response_type": "rate_limit_error",
+    "terminal_reason_code": "api_error_rate_limited",
+    "new_receipt_count": 4,
+    "operator_disposition": "retry_later",
+    "operator_disposition_reason": "provider_runtime_error",
+    "runtime_attempt_count": 1,
+    "runtime_lane_attempt_count": 1,
+    "fallback_applied": false,
+    "degraded_retry_applied": false,
+    "rotation_attempt_count": 0,
+    "deferred_next_runtime": null,
+    "container_exit_code": 0
+  },
   "focused_checks": {
     "terminal_reason_matrix_cases": 147200,
     "terminal_reason_matrix_mismatches": 0,
@@ -85,7 +100,9 @@
     "health-restart.json": "62442071409304a4be868803694ee0ce57e4b77f2c5da54d8d04185a279fa506",
     "server-first.log": "c96adddd0f2e9ed73a9fb568af27d5d59bdb310e85f02f1de8a0e471f49e25dd",
     "server-restart.log": "4f4afb179945be7f86a99ad09787ab986f0fe0783896f4651164c14923c6daed",
-    "test-terminal-reason.log": "aba8e74c6dad1814fef67499e568e1d708bb9ce5f781de601507ef5f31d7096d"
+    "test-terminal-reason.log": "aba8e74c6dad1814fef67499e568e1d708bb9ce5f781de601507ef5f31d7096d",
+    "supplemental-rate-limit-receipts.jsonl": "6362c00f4fc39167f08387588cfbc79878c33f96d08ca549b706147599d7330a",
+    "supplemental-rate-limit-server.log": "174a8e2a2fa224b3f36f9c73653af4355388f694b5626cf0c49925eac9f667e1"
   },
   "performance_claim": false
 }

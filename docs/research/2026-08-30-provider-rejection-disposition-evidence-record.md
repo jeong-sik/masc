@@ -27,6 +27,8 @@
 - 2차: independent field matrix 147,200건이 mismatch 0으로 통과했다.
 - 3차: fixed 최초 기동과 실제 `docker restart`에서 각각 4건, 총 8건이
   `retry_later / provider_runtime_error`를 기록했다.
+- 4차: 별도 isolated HTTP 429 rate-limit run 4건도 같은 disposition/reason과
+  fallback false를 기록했다.
 - 재현 결과: 성공. 8건 모두 attempt/lane attempt 1/1, fallback false,
   degraded retry false, rotation empty였다.
 

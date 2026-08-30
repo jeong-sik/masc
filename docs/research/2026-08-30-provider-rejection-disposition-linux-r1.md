@@ -85,6 +85,19 @@ fresh volume의 시작 시각 `2026-08-30T11:36:48Z` 이후 receipt만 분리했
 MASC와 fake-provider container를 모두 정지했다. MASC는 graceful shutdown 후 exit code
 0이었고 measurement volume은 보존했다.
 
+## supplemental 429 r32
+
+같은 fixed composition과 별도 internal provider로 HTTP 429
+`rate_limit_error / rate_limit_exceeded`를 반환했다. fresh volume의 네 Keeper는 4/4
+`api_error_rate_limited`, `retry_later / provider_runtime_error`를 기록했다. runtime
+facts는 모두 attempt/lane attempt 1/1, fallback false, degraded retry false, rotation
+empty였고 로그는 4/4 `deferred_next_runtime=none`이었다.
+
+이 run은 generic provider arm이 invalid request 한 wire에만 맞춘 분기가 아님을 확인한다.
+MASC와 fake-provider는 측정 직후 정지했고 MASC exit code는 0이었다. 실제 재시작 증거는
+위 r31에서 이미 동일 classifier에 대해 확보했으므로 r32는 fresh supplemental run으로만
+기록한다.
+
 ## focused 검증
 
 - `scripts/dune-local.sh build test/test_keeper_terminal_reason_typed.exe`
@@ -96,7 +109,8 @@ MASC와 fake-provider container를 모두 정지했다. MASC는 graceful shutdow
 ## 경계
 
 이 변경은 generic provider-runtime receipt의 truthfulness만 고친다. transient network,
-config/auth, internal error, runtime exhausted와 capacity-backpressure 분기는 바꾸지 않는다.
+config/auth, internal error, runtime exhausted와 typed capacity-backpressure 분기는 바꾸지
+않는다.
 운영 중인 8935 server와 deployed `/Users/dancer/me/.masc`는 건드리지 않았다.
 
 ## 근거

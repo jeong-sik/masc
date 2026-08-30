@@ -34,7 +34,8 @@ COPY --chown=opam:opam \
     scripts/opam-switch-rw-lock.sh \
     scripts/
 COPY --chown=opam:opam dune-project masc.opam ./
-RUN opam update -y \
+RUN opam repository set-url default https://opam.ocaml.org \
+    && opam update -y \
     && chmod +x scripts/opam-pin-external-deps.sh \
     && scripts/opam-pin-external-deps.sh --with-compact-protocol
 RUN ok=0; for attempt in 1 2 3; do \

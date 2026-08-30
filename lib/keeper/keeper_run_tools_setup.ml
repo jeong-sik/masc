@@ -364,6 +364,7 @@ let prepare_agent_setup
         { Keeper_identity_tool_search.offered =
             identity_offering.Keeper_identity_tools.offered
         ; agent_cell
+        ; history = history_messages
         }
       ?composition_plan_index
       ~skill_activation_context

@@ -23,6 +23,14 @@ type surface =
             execute. The two fields travel in one record because attached
             tools without a cell are tools this can name and never make
             callable. *)
+  ; history : Agent_core.Types.message list
+        (** The conversation this turn continues. A load reaches the agent of
+            the turn that made it and no further, so without this the model
+            re-asks for the same tool every turn: one Keeper asked for
+            [github_issue_read] on five consecutive turns and for
+            [github_get_label] 34 times in a day. Read, never written -- what
+            the model already asked for is in here as its own
+            [ToolUse] blocks, so there is no second copy to keep in step. *)
   }
 
 val tool_name : string
@@ -38,6 +46,18 @@ type turn_discovery =
 
 type placement =
   { tool : Agent_core.Tool.t  (** What the turn places. *)
+  ; already_loaded : Agent_core.Tool.t list
+        (** The tools this Keeper loaded earlier in the conversation, placed
+            with their schemas rather than behind the listing again.
+
+            Derived from [history], the way the Claude API, Claude Code, and
+            Hermes all carry a discovered tool forward: the conversation is
+            the record, so a crash, a resume, or a failed turn needs no
+            reconciliation. Compaction drops the evidence with the messages,
+            and the model re-asks -- which is what it does today.
+
+            Empty until the model asks for something, so a Keeper that never
+            uses the listing pays nothing for this. *)
   ; observe_turn : unit -> turn_discovery
         (** Call once when the turn ends, on both the ordinary and the raised
             path, and records {!Loaded_unused} where an operator can read it.

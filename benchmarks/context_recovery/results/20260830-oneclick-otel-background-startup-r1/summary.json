@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T17:42:29+09:00",
+  "source_change_commit": "10e994faa6fe332c5e2902a09119685309dee879",
+  "measurement_source_commit": "5f5b3086349ba5c3206dc473beba50af4c377717",
+  "image_digest": "sha256:0ca5b40b770641023cab274980f4f0d5effef0eba3c2a44aea7859de995d4ce2",
+  "binary_sha256": "adfaca2806c57fafcfb13a201fd692feac01998f84f8f2abbb0d2346b4d8200f",
+  "runtime_instance_ids": [
+    "01a051d3-8b7c-7000-83d5-0848e18e5eda",
+    "01a051d4-4182-7000-81c1-91b21433642a"
+  ],
+  "effective_base_path": "/app",
+  "effective_masc_root": "/app/.masc",
+  "provider_turn_executed": false,
+  "keeper_created": false,
+  "baseline": {
+    "measurement_source_commit": "7991c5f022ff3a8c2f70f3b1d8094790dd82cbcc",
+    "image_digest": "sha256:1d4151e50ffe31808551e74d45588fe64300263d3b895ee108b0db070fb3ac0a",
+    "binary_sha256": "8151f9db68043a56139adb79aa8460d8d85ff772b953c2500f52d9c46a565227",
+    "fresh_retry1_to_dashboard_seconds": 31.01758,
+    "restart_retry1_to_dashboard_seconds": 31.013894
+  },
+  "fixed": {
+    "fresh_listener_to_dashboard_ms": 0.215291,
+    "fresh_dashboard_to_retry1_ms": 0.386375,
+    "restart_listener_to_dashboard_ms": 0.809625,
+    "restart_dashboard_to_retry1_ms": 0.006125,
+    "fresh_retry_count": 5,
+    "restart_retry_count": 5,
+    "fresh_recovery_transition_count": 1,
+    "restart_recovery_transition_count": 1,
+    "background_fiber_crash_count": 0,
+    "fatal_error_count": 0,
+    "container_stopped": true,
+    "volume_preserved": true
+  },
+  "focused_checks": {
+    "build": "pass",
+    "existing_soft_failure_test": "1/1",
+    "background_non_blocking_test": "1/1",
+    "diff_check": "pass",
+    "ocamlformat_check": "pass"
+  },
+  "artifact_sha256": {
+    "image-build-with-git.log": "c58c0b7351c993a9a1746fd8d4e6ba356d1a9d80a90ce968071aa7bbad186da9",
+    "health-initial-after-retries.json": "ce1687c8b4a19b80a02e24b02b457d3b27676b232bdf929744b414d3bb8276a2",
+    "health-after-restart-retries.json": "3e2e668576a1d68d0712b963674ac002303beb8d62289022acd863941c0b9bc6",
+    "container-build-commit.txt": "45a1d049f0baf3212351741177924a85afeef881b84d4a3c12222d1cd9673c6b",
+    "container-binary-sha256.txt": "468d62770e24bc205d1b263d8cb049480d166e43d2213b2a75638bfdfd59c8cd",
+    "initial-window.log": "2f63d0973226482c292041451321b7492c8e0ac4dbc434668dade244d8a3c074",
+    "restart-window.log": "d073fbdd217afdb18bde682fce9b44ecc1a68a9c6265d17c40be5283fd7ba391",
+    "timeline-summary.json": "32effa52803b271f421b4bfb3e99f1042f1c38d4ccb90f4e5028c9d01885866c",
+    "error-counts.txt": "e87894944d90e2498ca00674ed2b1fb9692c8e7d8f69aec556447af017e2cd44"
+  },
+  "performance_claim": false
+}

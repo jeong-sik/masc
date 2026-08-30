@@ -1325,6 +1325,8 @@ let claim_and_start_keeper_persistence
   try
     Server_bootstrap_loops.start_keeper_loops
       ~claimed_persistence
+      ~invalidate_full_health_snapshot:
+        Server_routes_http_runtime.invalidate_full_health_snapshot
       ~sw
       ~clock
       ~net

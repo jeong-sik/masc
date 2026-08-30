@@ -12,6 +12,7 @@
 val enqueue : Tool_result.result -> unit
 (** [enqueue result] buffers a tool invocation record for eventual disk flush.
     Safe to call from any fiber. Records are batched and written periodically.
+    Reaching half of the bounded queue wakes the background writer early.
     If the bounded best-effort queue is full, the record is dropped instead of
     blocking the tool completion path. *)
 
@@ -37,7 +38,8 @@ val hydrate :
 val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
 (** [start_flush_fiber ~sw ~clock ~base_path] spawns a background fiber that
     drains buffered records to JSONL on the configured interval (0.5 seconds
-    by default). Also registers a shutdown hook to flush remaining records.
+    by default) or when the queue reaches its high watermark. Also registers a
+    shutdown hook to flush remaining records.
     [base_path] is the workspace root (e.g. [state.workspace_config.base_path]). *)
 
 val flush_now : base_path:string -> unit
@@ -55,3 +57,13 @@ val reset_for_testing : unit -> unit
     [start_flush_fiber] is invoked, or only after the [Eio.Switch.t]
     passed to [start_flush_fiber] has been cancelled so that no flush
     fiber is active. *)
+
+module For_testing : sig
+  val high_watermark : int
+  val queued_record_count : unit -> int
+
+  val await_flush_trigger :
+    clock:_ Eio.Time.clock ->
+    interval_s:float ->
+    [ `High_watermark | `Timer ]
+end

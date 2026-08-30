@@ -65,8 +65,14 @@ let sample_of_json json : Tool_metrics.sample option =
 (* ── Write queue ────────────────────────────────────── *)
 
 let write_queue_capacity = 4096
+(** Start the background writer at half capacity, leaving another 2,048 slots
+    for producers while the Eio fiber is scheduled and begins draining. The
+    completion path only performs the existing bounded enqueue plus a
+    lock-free condition broadcast. See issue #32011. *)
+let write_queue_high_watermark = write_queue_capacity / 2
 let write_queue_mu = Mutex.create ()
 let write_queue : Yojson.Safe.t Queue.t = Queue.create ()
+let write_queue_changed = Eio.Condition.create ()
 let dropped_full_queue = Atomic.make 0
 
 let store = Atomic.make None
@@ -76,6 +82,20 @@ let with_write_queue_lock f = Mutex.protect write_queue_mu f
 let take_queued_record () =
   with_write_queue_lock (fun () ->
     if Queue.is_empty write_queue then None else Some (Queue.take write_queue))
+
+let queued_record_count () =
+  with_write_queue_lock (fun () -> Queue.length write_queue)
+
+let await_flush_trigger ~clock ~interval_s =
+  match
+    Eio.Time.with_timeout clock interval_s (fun () ->
+      Eio.Condition.loop_no_mutex write_queue_changed (fun () ->
+        if queued_record_count () >= write_queue_high_watermark
+        then Some (Ok `High_watermark)
+        else None))
+  with
+  | Ok trigger -> trigger
+  | Error `Timeout -> `Timer
 
 let drain_queue_without_store () =
   with_write_queue_lock (fun () ->
@@ -88,7 +108,8 @@ let reset_for_testing () =
   if dropped > 0 then
     Log.Metrics.warn "tool_metrics_persist: reset dropped %d queued records" dropped;
   Atomic.set dropped_full_queue 0;
-  Atomic.set store None
+  Atomic.set store None;
+  Eio.Condition.broadcast write_queue_changed
 
 let rec get_or_create_store ~base_path : Dated_jsonl.t =
   let current = Atomic.get store in
@@ -140,14 +161,15 @@ let enqueue (result : Tool_result.result) =
      keeper turn open and amplify the outage. Drop best-effort metrics when
      the bounded queue is full; durable tool-call logs remain the stronger
      evidence surface. *)
-  let dropped_for_full_queue =
+  let dropped_for_full_queue, wake_flush_fiber =
     with_write_queue_lock (fun () ->
       if Queue.length write_queue >= write_queue_capacity
-      then true
+      then true, false
       else (
         Queue.add json write_queue;
-        false))
+        false, Queue.length write_queue = write_queue_high_watermark))
   in
+  if wake_flush_fiber then Eio.Condition.broadcast write_queue_changed;
   if dropped_for_full_queue
   then begin
     Otel_metric_store.inc_counter
@@ -189,11 +211,16 @@ let start_flush_fiber ~sw ~clock ~base_path =
     Log.Metrics.info "tool_metrics_persist: flush fiber started (interval=%.3gs)"
       flush_interval_s;
     let rec loop () =
-      Eio.Time.sleep clock flush_interval_s;
+      let trigger = await_flush_trigger ~clock ~interval_s:flush_interval_s in
       (try
          let n = drain_to_store store in
          if n > 0 then
-           Log.Metrics.info "tool_metrics_persist: flushed %d records to disk" n
+           Log.Metrics.info
+             "tool_metrics_persist: flushed %d records to disk (trigger=%s)"
+             n
+             (match trigger with
+              | `High_watermark -> "high_watermark"
+              | `Timer -> "timer")
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
@@ -211,3 +238,9 @@ let start_flush_fiber ~sw ~clock ~base_path =
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Metrics.error "tool_metrics_persist: shutdown flush failed: %s"
         (Stdlib.Printexc.to_string exn))
+
+module For_testing = struct
+  let high_watermark = write_queue_high_watermark
+  let queued_record_count = queued_record_count
+  let await_flush_trigger = await_flush_trigger
+end

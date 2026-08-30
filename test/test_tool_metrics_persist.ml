@@ -22,6 +22,12 @@ let eio_test name fn =
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     fn ())
 
+let eio_clock_test name fn =
+  Alcotest.test_case name `Quick (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    fn (Eio.Stdenv.clock env))
+
 let with_tmp_dir f =
   let dir = Filename.temp_dir "test-tool-metrics-persist-" "" in
   P.reset_for_testing ();
@@ -141,6 +147,39 @@ let test_enqueue_multidomain_drop_is_bounded () =
       4096
       (List.length (read_records ~base_path)))
 
+let test_high_watermark_wakes_flush_waiter clock =
+  with_tmp_dir (fun _base_path ->
+    Eio.Switch.run (fun sw ->
+      let observed, resolve_observed = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        let trigger =
+          P.For_testing.await_flush_trigger ~clock ~interval_s:10.0
+        in
+        Eio.Promise.resolve resolve_observed trigger);
+      Eio.Fiber.yield ();
+      let producer =
+        Domain.spawn (fun () ->
+          for i = 1 to P.For_testing.high_watermark do
+            P.enqueue
+              (make_result
+                 ~name:(Printf.sprintf "wake-tool-%04d" i)
+                 ~success:true
+                 ~duration_ms:1.0)
+          done)
+      in
+      Domain.join producer;
+      Alcotest.(check int)
+        "high-watermark records remain queued for the writer"
+        P.For_testing.high_watermark
+        (P.For_testing.queued_record_count ());
+      let trigger =
+        Eio.Time.with_timeout_exn clock 1.0 (fun () -> Eio.Promise.await observed)
+      in
+      Alcotest.(check bool)
+        "waiter wakes before the ten-second timer"
+        true
+        (trigger = `High_watermark)))
+
 let test_hydrate_replaces_metrics_and_skips_bad_rows () =
   with_tmp_dir (fun base_path ->
     Tool_metrics.clear ();
@@ -236,6 +275,9 @@ let () =
         ; eio_test
             "enqueue drops safely from multiple domains"
             test_enqueue_multidomain_drop_is_bounded
+        ; eio_clock_test
+            "cross-domain high watermark wakes the flush waiter"
+            test_high_watermark_wakes_flush_waiter
         ; eio_test
             "startup hydration restores current rows once"
             test_hydrate_replaces_metrics_and_skips_bad_rows

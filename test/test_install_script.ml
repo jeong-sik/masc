@@ -635,6 +635,14 @@ let test_runtime_image_enforces_preflight_before_main () =
     "image enters through the lease handoff wrapper"
     image
     {|ENTRYPOINT ["/usr/bin/tini", "--", "/app/masc-runtime-entrypoint"]|};
+  assert_contains
+    "release image creates the RFC-0121 bulk data sibling"
+    image
+    "mkdir -p /app/.masc /app/data";
+  assert_contains
+    "release image grants the runtime user access to bulk data"
+    image
+    "chown -R appuser:appgroup /app/.masc /app/data";
   List.iter
     (fun source ->
        assert_contains

@@ -22,11 +22,12 @@
 - 2차: 캐시 전 r92의 1M 16-way와 빈 저장소 16-way를 비교해 server-side tail amplification을 분리했다.
 - 3차: cache head를 Linux에서 다시 빌드하고 같은 1M input으로 cold/warm 16-way를 실행했다.
 - 4차: 별도 복제 volume에서 실제 `masc_config` 1회 뒤 첫 API가 1,000,001을 재계산하고 다음 API가 같은 값을 캐시에서 반환하는지 확인했다.
+- 5차: r94에서 실제 `masc_status` 20회와 API read 20회를 교차했다. 총합은 정확했지만 write마다 다음 read가 전체 정렬 비용을 냈고 후속 #32009로 분리했다.
 - 재현 결과: cold 평균/최대가 1.987/2.905초에서 0.190/0.203초로 줄었다. warm 평균/최대는 0.0016/0.0072초였다. 무효화 뒤 총합은 정확했고 두 컨테이너 모두 exit 0/OOM false였다.
 
 ## 불확실성
 
-- 미확인 항목: 호출과 API 조회가 동시에 계속되는 혼합 부하, 여러 도구 분포, 1M 초과, 전체 테스트, GitHub CI, Kubernetes/PVC.
+- 미확인 항목: 혼합 부하의 incremental percentile 개선, 여러 도구 분포, 1M 초과, 전체 테스트, GitHub CI, Kubernetes/PVC.
 - 영향: 쓰기가 매우 잦으면 캐시 hit 비율이 낮아져 정렬 비용이 다시 나타날 수 있다.
 - 추가 확인 필요: 혼합 부하를 별도 측정하고 필요할 때 percentile 자료구조 자체를 바꾼다.
 
@@ -35,4 +36,3 @@
 - 영향 받는 영역: `Tool_metrics.all_stats`의 계산 재사용과 세 쓰기 경로의 캐시 무효화.
 - 제약/배제: percentile 알고리즘, persisted JSONL 형식, `stats_for`, retention, 배포 volume은 바꾸지 않는다.
 - 롤백 조건: 새 호출 뒤 오래된 총합이 보이거나, 동시 reader가 서로 다른 snapshot을 보거나, 메모리 사용이 지속해서 증가하면 변경을 중단한다.
-

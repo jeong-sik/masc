@@ -51,6 +51,17 @@
 첫 조회가 다시 정렬 비용을 내면서 새 값을 반영하고, 다음 조회가 캐시를 쓴다. stale cache와
 중복 집계가 모두 없었다.
 
+## r94 쓰기·읽기 혼합 부하
+
+캐시를 먼저 채운 뒤 실제 `masc_status` 20회(50ms 간격)와 API 조회 20회(20ms 간격)를 함께
+실행했다. 첫 warm 조회는 0.582ms였다. 각 쓰기 뒤의 19개 조회는 최소 0.176초, 평균 0.189초,
+최대 0.217초였다. 20개 호출은 모두 HTTP 200/`isError=false`였고 총합은 정확히
+1,000,000→1,000,020으로 늘었다. 관측 최고치는 CPU 94.96%, 메모리 205.8MiB였다.
+
+동시 reader가 같은 generation을 읽는 중복 작업은 사라졌다. 그러나 write와 read가 교차하면 새
+generation마다 한 번은 전체 정렬한다. 이 PR의 작은 cache 범위를 넘는 자료구조 변경은 후속
+[#32009](https://github.com/jeong-sik/masc/issues/32009)에 기록했다.
+
 ## 검증과 경계
 
 - focused `main_eio` build 통과.
@@ -59,7 +70,7 @@
 - 반환하는 `tool_stats`와 list는 모두 불변이다. 외부 호출자가 캐시 내용을 바꿀 수 없다.
 - `stats_for`의 단일 도구 조회는 이번 변경 범위가 아니다.
 - 호출이 계속 들어오는 동안에는 매 호출이 캐시를 무효화한다. API 조회 빈도와 호출 빈도가 모두
-  높을 때의 비용은 별도 측정 대상이다.
+  높을 때는 r94처럼 generation마다 전체 정렬 비용이 남는다.
 - 메모리와 CPU는 `docker stats --no-stream` 표본이라 정밀 profile로 해석하지 않는다.
 - 전체 테스트, GitHub CI, Kubernetes/PVC, published artifact는 확인 범위 밖이다.
 - `/Users/dancer/me/.masc`와 현재 8935 서버는 변경하거나 재시작하지 않았다.
@@ -71,4 +82,6 @@
   신뢰도 High.
 - [근거] The Tail at Scale과 Straggler Mitigation at Scale 원문을 2026-08-31에 확인,
   신뢰도 High.
-
+- [근거] r94 1M retained rows에서 실제 `masc_status` 20회와 API read 20회를 교차 실행하고
+  요청 시간, 정확한 총합, CPU/메모리 표본, 종료 뒤 JSONL SHA-256을 확인,
+  2026-08-31T06:08:41+09:00 확인, 신뢰도 High.

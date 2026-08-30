@@ -17,6 +17,10 @@ r68은 Docker의 BasePath lease를 volume 안에서 공유한다. 같은 volume�
 snapshot도 유지됐다. 첫 번째 프로세스를 정상 종료한 뒤 후계 프로세스는 1.016초에 current-ready가
 됐다. 다른 volume을 쓴 프로세스는 첫 번째 프로세스와 동시에 정상 실행됐다.
 
+r69는 같은 수정에 운영 진단을 더했다. `masc_config` server snapshot이 실제
+`MASC_RUN_DIR=/app/.masc/runtime/host-run`과 source `env`를 반환했다. 코드 HEAD가 바뀌었으므로
+새 image에서 공유-volume 배타성 네 조건을 다시 측정했고 모두 유지됐다.
+
 ## 외부 근거와 적용
 
 - [Lemmalog 원문](https://pwning.systems/posts/llm-memory-program-analysis/)은 틀린 분석 문맥이
@@ -67,6 +71,7 @@ generation은 계속 0이었고 stale/error 표시는 없었다.
 ## 변경
 
 - `Host_config.host`와 `Host_config.resolve`가 명시적 `MASC_RUN_DIR`를 읽는다.
+- `masc_config` server snapshot이 `MASC_RUN_DIR`의 적용값과 출처를 보여준다.
 - 일반 Docker 이미지와 one-click 이미지가
   `MASC_RUN_DIR=/app/.masc/runtime/host-run`을 설정한다.
 - 두 entrypoint가 서버 시작 전에 이 디렉터리를 만들고 mode `0700`으로 맞춘다.
@@ -77,6 +82,7 @@ generation은 계속 0이었고 stale/error 표시는 없었다.
 
 - stacked base: `933b169732a14ca76e2a3f6d307979125d197daa` (`#31995` head)
 - product change: `ed0786e75453e36c9893a9a285f04538de189ee2`
+- config visibility change: `01ffbdb83f625b6e638f433c0e51175a515461b8`
 - measurement source: `da6f0b6a8bd695a39b68b0d586deb3ec8fca97e2`
 - image: `sha256:b732b674773a732be91bbaf41a4b9342d08a2e16bd6a6cccfbb3f53b16261eb3`
 - binary: `ddc3013a505423bb8c4ed7a60d6338138077120488727129ffd258458f1abd5b`
@@ -94,12 +100,29 @@ runtime도 auth `ok`, `env_token_verifies=true`, full snapshot `ready`를 유지
 `01a053e5-8575-7000-bc14-05691bf51461`이 1.016초에 current-ready가 됐다. 동시에 다른 volume의
 `01a053e5-2601-7000-a064-b7895abef368`도 ready/auth ok였고, 둘 다 exit 0/OOM false로 끝났다.
 
+## r69: 설정 가시성을 포함한 exact-head 재검증
+
+- measurement source: `9b17b1c6eb63a53d7d3a4598aea42e036ab9d65b`
+- image: `sha256:50632be4481bf8b8184855b4bd918be2d5a0fe3d9c9dd7e4a7fc41c0f8c13d47`
+- binary: `dc2efc123d2052d00ce0cb578230fb9c7bfff08bb13940a34fc9613e3eeeba75`
+- first runtime: `01a053ee-949d-7000-8703-b575d6564ee4`, current-ready 1.590초
+- second same-volume runtime: 약 98ms 뒤 exit 1/OOM false
+- successor: `01a053ef-8c6f-7000-a7d2-ffd8c04ddf42`, current-ready 1.568초
+- concurrent different-volume runtime: `01a053ef-82e4-7000-add0-68b246c39511`,
+  current-ready 1.704초
+
+MCP `masc_config`를 실제 runtime에 호출했다. server category의 `MASC_RUN_DIR` row는 value
+`/app/.masc/runtime/host-run`, source `env`, `raw_env_present=true`를 반환했다. 같은 volume의 두 번째
+runtime 전후 token hash는 같았고 첫 runtime auth/current도 유지됐다. 첫 runtime, successor,
+different-volume runtime은 exit 0/OOM false였다.
+
 ## 검증과 경계
 
 - focused build: `test_rfc_0085_pr6_host_config_from_env.exe`,
   `test_host_config_resolution.exe`, `bin/main_eio.exe`,
   `bin/deployment_preflight_helper.exe` pass
 - Host_config cases: 7/7 + 6/6 pass
+- env snapshot cases: 6/6 pass
 - 두 entrypoint `bash -n`, `git diff --check`: pass
 - Linux/arm64 one-click image에서 fresh shared volume과 fresh different volume을 사용했다.
 - 일반 release Dockerfile은 `MASC_RUN_DIR` 설정과 entrypoint shell만 확인했다. release artifact image
@@ -109,6 +132,7 @@ runtime도 auth `ok`, `env_token_verifies=true`, full snapshot `ready`를 유지
 
 ## 근거
 
-- [근거] r66/r67/r68 source, Linux image/binary/runtime identity, canonical HTTP health,
-  ledger, timeseries, Docker inspect, token hash, 2026-08-31T03:24:00+09:00 확인, 신뢰도 High.
+- [근거] r66/r67/r68/r69 source, Linux image/binary/runtime identity, canonical HTTP health,
+  MCP config snapshot, ledger, timeseries, Docker inspect, token hash,
+  2026-08-31T03:31:00+09:00 확인, 신뢰도 High.
 - [근거] 위 원문·논문·CUP 1차 자료, 2026-08-31 확인, 신뢰도 High.

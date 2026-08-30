@@ -3805,6 +3805,23 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
           (meta.name ^ ".toml")
       in
       write_file configuration_path "[keeper]\nautoboot = false\n";
+      let playground_paths =
+        Keeper_types_profile.all_sandbox_profiles
+        |> List.map (fun profile ->
+             Filename.concat
+               config.base_path
+               (Masc.Keeper_sandbox.host_root_rel_of_profile profile meta.name))
+        |> List.sort_uniq String.compare
+      in
+      List.iter
+        (fun path -> write_file (Filename.concat path "workspace/stale.txt") "stale")
+        playground_paths;
+      let unrelated_playground_path =
+        Filename.concat
+          config.base_path
+          ".masc/playground/unrelated/workspace/keep.txt"
+      in
+      write_file unrelated_playground_path "keep";
       let agent_path =
         Filename.concat
           (Workspace.agents_dir config)
@@ -3944,6 +3961,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         ; Auth.credential_file config.base_path meta.name
         ]
         @ sidecar_paths
+        @ playground_paths
       in
       List.iter
         (fun path ->
@@ -3951,6 +3969,8 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         removed_paths;
       check bool "unrelated agent artifact preserved" true
         (Sys.file_exists unrelated_path);
+      check bool "unrelated playground preserved" true
+        (Sys.file_exists unrelated_playground_path);
       check bool
         "exact workspace owner unbound"
         false

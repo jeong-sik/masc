@@ -359,7 +359,10 @@ let assemble_hooks
   let receipt_runtime_observation_ref = ctx.receipt_runtime_observation_ref in
   let receipt_lane_attempt_index_ref = ctx.receipt_lane_attempt_index_ref in
   let receipt_response_text_present_ref = ctx.receipt_response_text_present_ref in
-  let tools = ctx.tools in
+  (* The surface for the lanes that cannot defer. Naming it apart from the one
+     a request actually carried keeps an observation point from punning [~tools]
+     onto the wrong list. *)
+  let built_tools = ctx.tools in
   let turn_agent_cell = ctx.agent_cell in
   let all_tool_names = ctx.all_tool_names in
   let initial_schema_filter, initial_turn_lane =
@@ -1007,7 +1010,7 @@ let assemble_hooks
                   ~tools:
                     (Keeper_agent_tool_surface.on_the_wire
                        ~agent_cell:turn_agent_cell
-                       ~built:tools)
+                       ~built:built_tools)
                   ();
                 Eio.Fiber.yield ();
                 Agent_core.Hooks.AdjustParams
@@ -1029,7 +1032,7 @@ let assemble_hooks
         messages
     in
     Ok
-      { tools
+      { tools = built_tools
       ; agent_core_tools = ctx.agent_core_tools
       ; agent_cell = ctx.agent_cell
       ; cleanup = keeper_tools_cleanup

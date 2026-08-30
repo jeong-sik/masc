@@ -39,9 +39,13 @@ import tomllib
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-DEFAULT_CONFIG = os.path.expanduser("~/me/.masc/config/runtime.toml")
+# SSOT-R6 (#31902): the runtime root must resolve from an explicit base path
+# (MASC_BASE_PATH here, or --config), never from a literal home-anchored .masc.
+DEFAULT_BASE = Path(os.environ.get("MASC_BASE_PATH", str(Path.home() / "me")))
+DEFAULT_CONFIG = str(DEFAULT_BASE / ".masc" / "config" / "runtime.toml")
 
 # The prompt asks for a key the schema forbids. Nothing else about the request
 # is interesting; a bigger schema measures the same thing more slowly.
@@ -223,7 +227,11 @@ def measure(target: Target, runs: int, timeout: float) -> tuple[str, dict[str, i
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default=DEFAULT_CONFIG)
+    parser.add_argument(
+        "--config",
+        default=DEFAULT_CONFIG,
+        help="runtime.toml to read; default derives from MASC_BASE_PATH/.masc/config/runtime.toml",
+    )
     parser.add_argument("-n", "--runs", type=int, default=5)
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument(

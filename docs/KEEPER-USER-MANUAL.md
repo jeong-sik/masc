@@ -126,6 +126,10 @@ finished; 5,706 failed. Of those, the operator disposition on 5,405 was
 `fail_open_next_runtime` — the turn fell through to the next candidate in its
 lane and carried on.
 
+Current receipts do not use that label for a terminal preflight configuration
+error. They use `operator_action_required` with reason `preflight_config_error`:
+no next runtime is claimed until an operator repairs the configuration.
+
 The failures were not mostly bugs. The largest reason codes were
 `config_error`, `api_error_invalid_request`, `api_error_payment_required`, and
 `api_error_rate_limited`. Those are the states a single-candidate lane cannot

@@ -1035,7 +1035,7 @@ let dispatch_keeper_wake
           keeper_wake_activation_deferred_reason_fields reason
         in
         Log.Keeper.info
-          "schedule stimulus not enqueued; owner activation deferred, dispatch \
+          "schedule stimulus retained; owner activation deferred, dispatch \
            will retry schedule_id=%s keeper=%s reason=%s%s"
           request.schedule_id
           activation_keeper_name

@@ -50,6 +50,67 @@ let test_percentiles () =
     Alcotest.(check bool) "mean ~ 50.5" true (s.mean_ms >= 49.0 && s.mean_ms <= 52.0)
   | None -> Alcotest.fail "expected stats"
 
+let reference_percentile values p =
+  let sorted = Array.of_list values in
+  Array.sort Float.compare sorted;
+  let index =
+    Float.to_int
+      (Float.round (Float.of_int (Array.length sorted - 1) *. p))
+  in
+  sorted.(index)
+
+let test_incremental_percentiles_match_sorted_reference () =
+  setup ();
+  let random = Random.State.make [| 0x32009; 0x5eed |] in
+  let values =
+    List.init 20_000 (fun _ -> Float.of_int (Random.State.int random 1_000))
+  in
+  List.iter
+    (fun duration_ms ->
+       M.record
+         (make_result ~name:"reference" ~success:true ~duration_ms))
+    values;
+  match M.stats_for "reference" with
+  | None -> Alcotest.fail "expected reference stats"
+  | Some stats ->
+    Alcotest.(check int) "all samples retained" 20_000 stats.call_count;
+    Alcotest.(check (float 1e-12))
+      "p50 matches sorted reference"
+      (reference_percentile values 0.50)
+      stats.p50_ms;
+    Alcotest.(check (float 1e-12))
+      "p95 matches sorted reference"
+      (reference_percentile values 0.95)
+      stats.p95_ms;
+    Alcotest.(check (float 1e-12))
+      "p99 matches sorted reference"
+      (reference_percentile values 0.99)
+      stats.p99_ms
+
+let test_monotonic_unique_durations_remain_exact () =
+  setup ();
+  for value = 1 to 50_000 do
+    M.record
+      (make_result
+         ~name:"monotonic"
+         ~success:true
+         ~duration_ms:(Float.of_int value))
+  done;
+  for value = 50_000 downto 1 do
+    M.record
+      (make_result
+         ~name:"monotonic"
+         ~success:true
+         ~duration_ms:(Float.of_int value))
+  done;
+  match M.stats_for "monotonic" with
+  | None -> Alcotest.fail "expected monotonic stats"
+  | Some stats ->
+    Alcotest.(check int) "all monotonic samples retained" 100_000 stats.call_count;
+    Alcotest.(check (float 1e-12)) "monotonic p50" 25_001.0 stats.p50_ms;
+    Alcotest.(check (float 1e-12)) "monotonic p95" 47_500.0 stats.p95_ms;
+    Alcotest.(check (float 1e-12)) "monotonic p99" 49_500.0 stats.p99_ms
+
 let test_unknown_tool () =
   setup ();
   Alcotest.(check bool) "none" true (Option.is_none (M.stats_for "ghost"))
@@ -199,6 +260,14 @@ let () =
     ];
     "percentiles", [
       Alcotest.test_case "p50/p95/p99" `Quick test_percentiles;
+      Alcotest.test_case
+        "incremental values match sorted reference"
+        `Quick
+        test_incremental_percentiles_match_sorted_reference;
+      Alcotest.test_case
+        "monotonic unique values remain exact"
+        `Quick
+        test_monotonic_unique_durations_remain_exact;
     ];
     "aggregation", [
       Alcotest.test_case "sorted by count" `Quick test_all_stats_sorted;

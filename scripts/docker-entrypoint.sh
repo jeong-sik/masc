@@ -11,14 +11,15 @@ set -euo pipefail
 
 BASE_PATH="${MASC_BASE_PATH:-/app}"
 LEASE_DIR="${MASC_BASE_PATH_LEASE_DIR:?MASC_BASE_PATH_LEASE_DIR is required}"
+RUNTIME_EVENTS_DIR="${OCAML_RUNTIME_EVENTS_DIR:?OCAML_RUNTIME_EVENTS_DIR is required}"
 CONFIG_DIR="$BASE_PATH/.masc/config"
 SEED_DIR="/app/config-seed"
 TEAM="${MASC_TEAM_PRESET:-classic}"
 
 log() { printf '[entrypoint] %s\n' "$*" >&2; }
 
-mkdir -p "$LEASE_DIR"
-chmod 0700 "$LEASE_DIR"
+mkdir -p "$LEASE_DIR" "$RUNTIME_EVENTS_DIR"
+chmod 0700 "$LEASE_DIR" "$RUNTIME_EVENTS_DIR"
 mkdir -p "$CONFIG_DIR"
 
 # 1. Runtime and capability overlay first (runtime.toml must exist before the team is seeded, and the

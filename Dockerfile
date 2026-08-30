@@ -83,6 +83,7 @@ ENV PORT=8080
 ENV MASC_BASE_PATH=/app
 ENV MASC_CONFIG_DIR=/app/config
 ENV MASC_BASE_PATH_LEASE_DIR=/app/.masc/runtime/base-path-lease
+ENV OCAML_RUNTIME_EVENTS_DIR=/app/.masc/runtime/events
 
 VOLUME ["/app/.masc"]
 

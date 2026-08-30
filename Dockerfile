@@ -87,7 +87,7 @@ ENV MASC_CONFIG_DIR=/app/config
 ENV MASC_BASE_PATH_LEASE_DIR=/app/.masc/runtime/base-path-lease
 ENV OCAML_RUNTIME_EVENTS_DIR=/app/.masc/runtime/events
 
-VOLUME ["/app/.masc"]
+VOLUME ["/app/.masc", "/app/data"]
 
 EXPOSE 8080
 

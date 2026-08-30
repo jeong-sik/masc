@@ -78,7 +78,7 @@ RUN chmod +x /app/scripts/*.sh
 COPY --from=dashboard-builder /build/assets/dashboard /app/assets/dashboard
 
 RUN groupadd --system appgroup && useradd --system --gid appgroup appuser \
-    && mkdir -p /app/.masc && chown -R appuser:appgroup /app
+    && mkdir -p /app/.masc /app/data && chown -R appuser:appgroup /app
 
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app
@@ -87,7 +87,7 @@ ENV OCAML_RUNTIME_EVENTS_DIR=/app/.masc/runtime/events
 # MASC_CONFIG_DIR intentionally unset: config resolves to /app/.masc/config
 # (Local_masc), the writable root the entrypoint seeds on the volume.
 
-VOLUME ["/app/.masc"]
+VOLUME ["/app/.masc", "/app/data"]
 EXPOSE 8080
 STOPSIGNAL SIGTERM
 

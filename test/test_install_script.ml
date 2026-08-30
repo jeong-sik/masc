@@ -206,6 +206,10 @@ let dockerfile_oneclick () =
   read_file (Filename.concat (source_root ()) "Dockerfile.oneclick")
 ;;
 
+let docker_compose () =
+  read_file (Filename.concat (source_root ()) "docker-compose.yml")
+;;
+
 let container_runtime_entrypoint () =
   read_file (Filename.concat (source_root ()) "scripts/container-runtime-entrypoint.sh")
 ;;
@@ -624,6 +628,7 @@ let test_installer_fetches_deployment_preflight_companions () =
 let test_runtime_image_enforces_preflight_before_main () =
   let image = dockerfile () in
   let oneclick_image = dockerfile_oneclick () in
+  let compose = docker_compose () in
   let release_entrypoint = container_runtime_entrypoint () in
   let oneclick_entrypoint = docker_entrypoint () in
   let context = dockerignore () in
@@ -643,6 +648,30 @@ let test_runtime_image_enforces_preflight_before_main () =
     "release image grants the runtime user access to bulk data"
     image
     "chown -R appuser:appgroup /app/.masc /app/data";
+  List.iter
+    (fun source ->
+       assert_contains
+         "runtime image declares identity and bulk-data volumes"
+         source
+         {|VOLUME ["/app/.masc", "/app/data"]|})
+    [ image; oneclick_image ];
+  assert_contains
+    "one-click image creates bulk data before declaring its volume"
+    oneclick_image
+    "mkdir -p /app/.masc /app/data";
+  assert_contains
+    "compose persists release bulk data"
+    compose
+    "- masc-data:/app/data";
+  assert_contains
+    "compose persists one-click bulk data"
+    compose
+    "- masc-oneclick-data:/app/data";
+  assert_contains "compose declares release bulk volume" compose "masc-data:";
+  assert_contains
+    "compose declares one-click bulk volume"
+    compose
+    "masc-oneclick-data:";
   List.iter
     (fun source ->
        assert_contains

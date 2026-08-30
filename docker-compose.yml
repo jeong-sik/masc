@@ -39,6 +39,7 @@ services:
       OTEL_SERVICE_NAME: "masc"
     volumes:
       - masc-state:/app/.masc
+      - masc-data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 30s
@@ -75,6 +76,7 @@ services:
       OLLAMA_CLOUD_API_KEY: "${OLLAMA_CLOUD_API_KEY:-}"
     volumes:
       - masc-oneclick-state:/app/.masc
+      - masc-oneclick-data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 30s
@@ -150,7 +152,11 @@ services:
 volumes:
   masc-state:
     driver: local
+  masc-data:
+    driver: local
   masc-oneclick-state:
+    driver: local
+  masc-oneclick-data:
     driver: local
   victoriametrics-data:
     driver: local

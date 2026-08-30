@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T18:56:06+09:00",
+  "source_change_commit": "387fc7288d7a083967b73988b24ad583350c88b8",
+  "measurement_source_commit": "a4edc823369a7c01572f4d7f8cd4c21dd9c028a8",
+  "image_digest": "sha256:142da6d8405651ad074ac48bfef47ee4460957931dc61fbb6f439dca18b5127f",
+  "binary_sha256": "aaf108d7dbd09d261c4b03b53580f681f977046d0d1158571bf89f8e0ddad1c6",
+  "runtime_instance_ids": [
+    "01a05215-9322-7000-87f5-e5022cbc2f82",
+    "01a05215-edf9-7000-bcbd-46e3ef04fd6f"
+  ],
+  "baseline": {
+    "measurement_source_commit": "d8a5809049a7ad63be8d256cba82a37a63d43d4f",
+    "image_digest": "sha256:4507f9b0f2e5fece391198c29bbcf01ced9b25ccc5b9f5b4934dffe19cae2650",
+    "binary_sha256": "81eab09dfdd8dc65cb26a205a60cba585d2631c08d4fe68a32cd3918cff4249",
+    "provider_http_4xx_requests": 4,
+    "http_status": 401,
+    "request_body_bytes_min": 81822,
+    "request_body_bytes_max": 81988,
+    "keeper_cycle_failures": 4,
+    "turn_latency_ms_min": 235,
+    "turn_latency_ms_max": 240
+  },
+  "fixed_fresh": {
+    "autoboot_started": 4,
+    "autoboot_requested": 4,
+    "credential_config_failures": 4,
+    "provider_request_count": 0,
+    "http_401_count": 0,
+    "turn_latency_ms_min": 4,
+    "turn_latency_ms_max": 7
+  },
+  "fixed_restart": {
+    "restored_warmup_seconds_min": 65,
+    "restored_warmup_seconds_max": 74,
+    "credential_config_failures": 4,
+    "provider_request_count": 0,
+    "http_401_count": 0,
+    "turn_latency_ms_min": 9,
+    "turn_latency_ms_max": 10,
+    "overall_status": "ok",
+    "keeper_fleet_safety": "ok"
+  },
+  "airgap_control": {
+    "network_mode": "none",
+    "docker_health": "healthy",
+    "credential_config_failures": 4,
+    "provider_request_count": 0,
+    "http_401_count": 0,
+    "dns_failure_count": 0,
+    "network_unreachable_count": 0,
+    "turn_latency_ms_min": 4,
+    "turn_latency_ms_max": 7
+  },
+  "focused_checks": {
+    "provider_config_group": "52/52",
+    "keeper_turn_driver_accept": "38/38",
+    "diff_check": "pass",
+    "ocamlformat_check": "pass"
+  },
+  "shutdown": {
+    "fixed_container_exit_code": 0,
+    "airgap_container_exit_code": 0,
+    "containers_stopped": true,
+    "volumes_preserved": true
+  },
+  "artifact_sha256": {
+    "image-build.log": "629c6f330788a20f06c61718c7ac234c87e5b9566c7e973c9a36f3d1c6b77c73",
+    "image-identity.txt": "be25f3ee301ce8e204a296c4400606e8dbfc19fabcdfadf918e3c9bca6dc603c",
+    "container-build-commit.txt": "4af5e49ca8f42ca72d0f73f8e5eff9f387f55ea1461d0f10ada0367cf8c3e7ce",
+    "container-binary-sha256.txt": "5974b12cb433e26814619edb70ab005d56a9d9e802d3ac9a9b76e0f63db86b8b",
+    "server-fresh.log": "6bb64620a6bd567a447253d11d39bd276a14a3bd3dbb4349548472a6f2273c43",
+    "health-fresh.json": "db8ded7c8db0fa36504154c768f8799f5c9247749c19791821f9173fb08a182e",
+    "server-restart-final.log": "bcfdcbe977fd33f923a1ae8487026c45778ed5e7588e9f8f592d5e644fd326c0",
+    "health-restart.json": "878574264d25bb169797938374f23d1b21d8f6bfd0e4484a2e0676c54aa17fdb",
+    "server-airgap.log": "c255c18d673a52f895300c70214408e504d8300a24f2108af8448e719a9c944f",
+    "airgap-running-state.txt": "8959feb8bf735171295bf4be2ab69d5f0b0b4fc150465463ab4ec3aae371aa37"
+  },
+  "performance_claim": false
+}

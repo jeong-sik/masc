@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T20:24:48+09:00",
+  "issue": 31958,
+  "source_change_head": "cfbc540440c4542abf5f195bc920e5fd4bd08191",
+  "stacked_parent_head": "c1f7cc5c672b119da55ebac0903c1ba9577d0b87",
+  "measurement_source_commit": "e635edb7da7e4b72d3a8e389356dd9d48e8e5843",
+  "image_digest": "sha256:add2362949b81c6032d6f4460215039218be4395856dcc6a4be81ecc0561648d",
+  "binary_sha256": "35cdfd6a0cf0c62cc786a160789c295c5ecf7e1d989f6e34d540338a02459865",
+  "runtime_instance_ids": [
+    "01a05266-6266-7000-a28d-55123e3d005e",
+    "01a05267-f3f7-7000-b99d-3d9d816ee6cc"
+  ],
+  "policy": {
+    "transient_transport_exemption_budget_per_keeper": 3,
+    "later_failures_use_durable_accounting": true,
+    "success_resets_budget": true,
+    "keeper_lifecycle_remains_active": true,
+    "operator_action_required": false
+  },
+  "baseline": {
+    "measurement_source_commit": "776be0009277a2935ec71de7f8aa656f50503b15",
+    "image_digest": "sha256:4db8aae5071aa2807bec5ca664b7627e81bf5abcf97cfc0b47a27793cc798ef3",
+    "binary_sha256": "a61110401f8bfdbac14f9f1e2d96d2a9f341595090d02d558510418928876f54",
+    "runtime_instance_id": "01a05251-0e5e-7000-808c-e12ab7e46d5b",
+    "observation_seconds": 59,
+    "failure_receipt_count": 44,
+    "per_keeper_failure_count": 11,
+    "auto_recoverable_count": 44,
+    "consecutive_zero_count": 44,
+    "consecutive_nonzero_count": 0,
+    "overall_status": "ok",
+    "fleet_status": "ok",
+    "operator_action_required": false
+  },
+  "fixed": {
+    "first_start": {
+      "runtime_instance_id": "01a05266-6266-7000-a28d-55123e3d005e",
+      "failure_receipt_count": 72,
+      "per_keeper_failure_count": 18,
+      "exempted_count": 12,
+      "consecutive_zero_count": 12,
+      "consecutive_nonzero_count": 60,
+      "overall_status": "degraded",
+      "fleet_status": "degraded",
+      "blocker": "turn_failure_recovering",
+      "failing_keeper_count": 4,
+      "recovering_keeper_count": 4,
+      "executable_keeper_count": 4,
+      "operator_action_required": false
+    },
+    "restart": {
+      "runtime_instance_id": "01a05267-f3f7-7000-b99d-3d9d816ee6cc",
+      "failure_receipt_count": 40,
+      "per_keeper_failure_counts": {
+        "backend": 9,
+        "frontend": 11,
+        "qa": 11,
+        "tech_lead": 9
+      },
+      "exempted_count": 12,
+      "consecutive_zero_count": 12,
+      "consecutive_nonzero_count": 28,
+      "overall_status": "degraded",
+      "fleet_status": "degraded",
+      "blocker": "turn_failure_recovering",
+      "failing_keeper_count": 4,
+      "recovering_keeper_count": 4,
+      "executable_keeper_count": 4,
+      "operator_action_required": false
+    }
+  },
+  "focused_checks": {
+    "runtime_observation_failure_accounting": "11/11",
+    "recovering_health_case": "1/1",
+    "existing_config_health_case": "1/1",
+    "diff_check": "pass",
+    "ocamlformat_check": "pass"
+  },
+  "shutdown": {
+    "container_exit_code": 0,
+    "container_stopped": true,
+    "volume_preserved": true
+  },
+  "artifact_sha256": {
+    "image-build.log": "deccff9b08e42f077dfc26b44ec7fad3d1fa126a3ba5702e0952c1a112881b61",
+    "container-binary-sha256.txt": "e2fa0c96fb2dd04e005e8a1dcf918b05cf4a89bd9e120223078597c16230703e",
+    "health-first.json": "872e9508cbc9c7879de73fdcb4ad98ac887d8e4fe1f86ceb78f536f6dd1b34c9",
+    "health-restart.json": "eb201b7e90305d1dbf95d3e9abac89a661171e7417b8bb9ba6ee35dd1ae0d43c",
+    "receipt-summary-first.json": "8e2310f558fafe613c827d4cbc78c488215db34f4b43fe121358242e6e720ce6",
+    "receipt-summary-restart.json": "2ae9326e07ef53c9ad24c2b7ad5445ebfcbf374cff644826e4f96329cffa5fa3",
+    "server-first.log": "ce0923aa82c471ab4df85175c1649f94e7513937aacfebe409be785f3656b584",
+    "server-restart.log": "3bcee81add2f387ba5172d6aa94bb2280fa3bd3e29b9f8d1322cb6c8e68c3f6e",
+    "test-runtime-observation.log": "7df8984092a2da281de699195f64d7ad49d45326445e186079d7745576b5c89f",
+    "test-health-config.log": "3bfe66217f1c9da9ef330099242a385d89ba48829e318d5f36521372b505201e",
+    "test-health-recovering.log": "5c38a9ed379f858d8be0aef4ece03c08351808fb08b4ab023be78ae92f3a4bbe"
+  },
+  "performance_claim": false
+}

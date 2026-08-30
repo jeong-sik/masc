@@ -29,7 +29,10 @@ WORKDIR /src
 
 # Copy the external pin script + opam metadata first so the expensive
 # dependency layer is cached across ordinary source edits.
-COPY --chown=opam:opam scripts/opam-pin-external-deps.sh scripts/
+COPY --chown=opam:opam \
+    scripts/opam-pin-external-deps.sh \
+    scripts/opam-switch-rw-lock.sh \
+    scripts/
 COPY --chown=opam:opam dune-project masc.opam ./
 RUN opam update -y \
     && chmod +x scripts/opam-pin-external-deps.sh \

@@ -27,14 +27,15 @@
   못해 폐기했다.
 - 3차: owner-readiness 배치 r63은 start-to-current 1.823초, submissions 1, joins 0, timeout 0이었다.
 - 4차: r61 durable receipt/ledger 4/4와 r63 queue 252/latest stimulus 일치를 확인했다.
-- 5차: focused main_eio/bootstrap build와 cases 73–74 2/2, format/diff check, app exit 0을 확인했다.
+- 5차: cold empty-volume r64가 start-to-current 1.739초, submissions 1, joins 0, timeout 0으로
+  수렴했다.
+- 6차: focused main_eio/bootstrap build와 cases 73–74 2/2, format/diff check, app exit 0을 확인했다.
 - 재현 결과: 성공. 단순 병렬화 실패를 버리고 owner readiness 배치에서 current recovery를 97.1%
   단축했다.
 
 ## 불확실성
 
-- 미확인 항목: cold empty volume, multi-server, external PG latency, 더 큰 Keeper fleet, Draft PR
-  CI/review.
+- 미확인 항목: multi-server, external PG latency, 더 큰 Keeper fleet, Draft PR CI/review.
 - 영향: 다른 startup workload에서는 초기 full-health scan이 post-ready lanes와 자원 경쟁을 일으킬 수
   있다. generation invalidation은 false-ready publication을 막지만 총 startup CPU는 늘 수 있다.
 - 추가 확인 필요: cold-volume 및 larger-fleet restart pair, resource timing telemetry, Draft PR checks와

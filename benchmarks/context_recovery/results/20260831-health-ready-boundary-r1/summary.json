@@ -72,6 +72,23 @@
     "app_exit_code": 0,
     "oom_killed": false
   },
+  "cold_empty_volume_r64": {
+    "source_commit": "79a3254a81cf857f69d3888e3c87e13017d48c50",
+    "image_digest": "sha256:111b409d8764b1d9f28318a1e7824a75e967f986883a07a66924ea24de7f883f",
+    "binary_sha256": "feff50c3ef1d1ae6b5e2b8b5a315efe5b69063c469099525548f3db8d0e2057d",
+    "runtime_instance_id": "01a053d0-b878-7000-8364-558ce3d27b7e",
+    "started_at": "2026-08-30T17:56:22.666704964Z",
+    "first_current_computed_at_unix": 1788112584.405435,
+    "first_current_elapsed_sec": 1.7387301921844482,
+    "first_current_duration_ms": 8,
+    "worker_submissions_total": 1,
+    "worker_joins_total": 0,
+    "refresh_timeout_count": 0,
+    "queue_count": 0,
+    "final_ready_current": true,
+    "app_exit_code": 0,
+    "oom_killed": false
+  },
   "focused_checks": {
     "main_eio_build": "pass",
     "server_runtime_bootstrap_build": "pass",
@@ -91,7 +108,10 @@
     "r62-startup-timeseries.jsonl": "e11ebd36545d9c90bb5a9bd2b0ec7b8efba9b3c7ec4cdf8e319412493e0e7e04",
     "r63-health-final.json": "ebea95b4e649989e8fea90ab005894fe142cbec499e8eb04793154624cc5f781",
     "r63-selected.log": "95d0f9d4bf9144a8973c00a05b9f910599f1184f96b40c5e086ff6ff7a69bbe5",
-    "r63-startup-timeseries.jsonl": "6275a0c2c7ce8a6e97c7bdf3508ab078541360c414201abce76e7831d2744122"
+    "r63-startup-timeseries.jsonl": "6275a0c2c7ce8a6e97c7bdf3508ab078541360c414201abce76e7831d2744122",
+    "r64-cold-health-final.json": "d7ea2ab7abf8c2cd0c7aa19a861ef4f4f56b7a12aa7b8a050917625e6e1e1428",
+    "r64-cold-selected.log": "d6154f6b6987215ffdd37ba50945c0a65a0a8eb84523451482b700654bf37040",
+    "r64-cold-startup-timeseries.jsonl": "00d1a287a6003afb58e5046d63dfcd5476584c8e95a3b24a90bb8538ab6173f1"
   },
   "runtime_claim": true,
   "ci_claim": false

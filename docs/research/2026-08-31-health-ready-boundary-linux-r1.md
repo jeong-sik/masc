@@ -110,17 +110,33 @@ r61과 사실상 같았다.
 r61 62.882초 → r63 1.823초로 97.1% 감소했다. source identity가 다른 r62 negative run도 함께 보존해
 단순한 loop-start log를 성공 증거로 오인하지 않게 했다.
 
+## r64 cold empty volume
+
+같은 r63 source/image를 새 빈 volume에서 0.5 CPU로 부팅했다.
+
+- process start: `2026-08-30T17:56:22.666704964Z`
+- first current computed: `1788112584.405435` (`17:56:24.405435Z`)
+- process-start-to-current: 1.739초
+- compute duration: 8ms
+- submissions 1, joins 0, timeout 0
+- queue 0, ready/current
+- app exit 0, OOM false
+
+preserved-volume r63뿐 아니라 cold empty volume에서도 owner-readiness 배치가 같은 bounded pattern을
+유지했다. 이후 startup lifecycle invalidation은 별도 0.0초 refresh들로 수렴했다.
+
 ## 검증과 경계
 
 - focused build: `bin/main_eio.exe`, `test_server_runtime_bootstrap.exe` pass
 - main_eio cases 73–74: 2/2 pass
 - `ocamlformat --check`, `git diff --check`: pass
 - full suite와 CI는 실행/주장하지 않는다.
-- 한 Linux/arm64 process와 복제 volume의 restart pair다. cold empty volume, multi-server, PG-backed
-  dashboard 환경은 아직 측정하지 않았다.
+- 한 Linux/arm64 process의 preserved-volume restart와 cold empty-volume boot를 측정했다.
+  multi-server와 PG-backed dashboard 환경은 아직 측정하지 않았다.
 
 ## 근거
 
-- [근거] r61/r62/r63 committed source, Linux image/binary/runtime identity, canonical receipt/ledger,
-  sub-second startup timeseries, shutdown inspect, 2026-08-31T02:52:54+09:00 확인, 신뢰도 High.
+- [근거] r61/r62/r63/r64 committed source, Linux image/binary/runtime identity, canonical
+  receipt/ledger, sub-second startup timeseries, shutdown inspect, 2026-08-31T02:57:23+09:00 확인,
+  신뢰도 High.
 - [근거] Eio 공식 문서와 위 straggler 1차 논문, 2026-08-31 확인, 신뢰도 High.

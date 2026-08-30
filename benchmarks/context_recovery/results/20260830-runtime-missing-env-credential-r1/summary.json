@@ -55,6 +55,7 @@
   "focused_checks": {
     "provider_config_group": "52/52",
     "keeper_turn_driver_accept": "38/38",
+    "runtime_resolver_driver_lookup": "11/11",
     "diff_check": "pass",
     "ocamlformat_check": "pass"
   },

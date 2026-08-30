@@ -22,7 +22,8 @@
 ## 검증
 
 - 1차: baseline은 빈 key로 약 82KB 요청 네 건을 보내고 401을 받았다.
-- 2차: provider config 52개와 keeper turn driver 38개 focused tests가 통과했다.
+- 2차: provider config 52개, keeper turn driver 38개, runtime resolver 11개
+  focused tests가 통과했다.
 - 3차: fixed fresh/restart와 `--network none` 컨테이너에서 provider HTTP 흔적 없이
   모두 `provider_credential` 오류로 끝났다.
 - 재현 결과: 성공. dashboard `missing_auth`, dispatch-time transform, credential-free

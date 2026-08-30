@@ -90,15 +90,17 @@ config error가 나왔다. 차단 지점이 HTTP보다 앞이라는 런타임 �
 ## focused 검증
 
 - `git diff --check`
-- `ocamlformat --check` on five touched OCaml files
+- `ocamlformat --check` on six touched OCaml files
 - `scripts/dune-local.sh build test/test_runtime_provider_auth_headers.exe`
 - provider config group: 52/52
 - `scripts/dune-local.sh build test/test_keeper_turn_driver_accept.exe`
 - keeper turn driver accept: 38/38
+- `scripts/dune-local.sh build test/test_runtime_per_keeper_routing.exe`
+- runtime resolver driver lookup: 11/11
 
 새 테스트는 missing env 거부, dispatch transform 허용, credential-free provider
-허용을 고정한다. 기존 dashboard test도 `missing_auth` 상태에서 HTTP 호출 0을
-계속 확인한다.
+허용, non-Keeper Agent Core resolver 거부를 고정한다. 기존 dashboard test도
+`missing_auth` 상태에서 HTTP 호출 0을 계속 확인한다.
 
 ## 남은 경계
 

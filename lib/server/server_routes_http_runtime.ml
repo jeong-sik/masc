@@ -1238,6 +1238,11 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
 let mark_full_health_refresh_requested () =
   with_full_health_snapshot_lock (fun () -> full_health_refresh_requested := true)
 
+let invalidate_full_health_snapshot () =
+  with_full_health_snapshot_lock (fun () ->
+      full_health_snapshot := None;
+      full_health_refresh_requested := true)
+
 let full_health_snapshot_state () =
   with_full_health_snapshot_lock (fun () ->
       ( !full_health_snapshot,

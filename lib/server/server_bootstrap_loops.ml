@@ -1348,7 +1348,8 @@ let start_keeper_loops_owned
                     | Some event ->
                       Server_dashboard_http.patch_keeper_dependent_caches
                         ~keeper_name
-                        ~event
+                        ~event;
+                      Server_routes_http_runtime.invalidate_full_health_snapshot ()
                     | None ->
                       Otel_metric_store.inc_counter
                         Otel_metric_store.metric_keeper_lifecycle_malformed

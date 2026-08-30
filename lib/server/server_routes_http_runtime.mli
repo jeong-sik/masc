@@ -228,6 +228,11 @@ val make_health_response_json :
     synchronously run durable keeper scans; the Eio refresh loop started by
     {!start_full_health_snapshot_refresh_loop} performs those scans. *)
 
+val invalidate_full_health_snapshot : unit -> unit
+(** Drop the cached full-health fields and request a background refresh after a
+    live state mutation. Until refresh completes, [full=1] returns bounded
+    warming placeholders instead of a previously ready snapshot. *)
+
 val start_full_health_snapshot_refresh_loop :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

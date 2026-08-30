@@ -2936,7 +2936,25 @@ let test_health_response_full_query_uses_snapshot_cache () =
             "refreshed full health keeps recovery activation"
             "unavailable"
             (refreshed |> member "publication_recovery_activation"
-             |> member "status" |> to_string)))
+             |> member "status" |> to_string);
+          Server_routes_http_runtime.invalidate_full_health_snapshot ();
+          let invalidated =
+            Server_routes_http_runtime.make_health_response_json request
+          in
+          Alcotest.(check string)
+            "invalidated snapshot cannot retain ready overall status"
+            "warming"
+            (invalidated |> member "overall_status" |> to_string);
+          Alcotest.(check string)
+            "invalidated snapshot reports warming"
+            "warming"
+            (invalidated |> member "full_health_snapshot" |> member "status"
+             |> to_string);
+          Alcotest.(check bool)
+            "invalidated snapshot requests refresh"
+            true
+            (invalidated |> member "full_health_snapshot"
+             |> member "refresh_requested" |> to_bool)))
 
 let test_full_health_refresh_timing_uses_dedicated_budget () =
   let interval_sec, timeout_sec, ttl_sec =

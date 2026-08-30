@@ -136,7 +136,14 @@ let validate_agent_alias alias =
     Error (Printf.sprintf "invalid exact agent purge owner %S: %s" alias detail)
 ;;
 
-let exact_agent_aliases agent_names =
+let validate_keeper_agent_alias alias =
+  match Keeper_id.Keeper_name.of_string alias with
+  | Ok keeper_name -> Ok (Keeper_id.Keeper_name.to_string keeper_name)
+  | Error detail ->
+    Error (Printf.sprintf "invalid exact Keeper purge owner %S: %s" alias detail)
+;;
+
+let exact_agent_aliases ~validate_alias agent_names =
   let aliases =
     agent_names
     |> List.filter_map String_util.trim_nonempty
@@ -145,7 +152,7 @@ let exact_agent_aliases agent_names =
   let rec validate acc = function
     | [] -> Ok (List.rev acc)
     | alias :: rest ->
-      (match validate_agent_alias alias with
+      (match validate_alias alias with
        | Error _ as error -> error
        | Ok alias -> validate (alias :: acc) rest)
   in
@@ -180,7 +187,11 @@ let plain_agent_artifacts_exist config agent_name =
 ;;
 
 let resolve_plain_agent_target config requested_name =
-  match exact_agent_aliases (plain_agent_candidate_names requested_name) with
+  match
+    exact_agent_aliases
+      ~validate_alias:validate_agent_alias
+      (plain_agent_candidate_names requested_name)
+  with
   | Error detail -> Error (Invalid_plain_agent_name detail)
   | Ok [] -> Ok None
   | Ok (agent_name :: _) ->
@@ -318,8 +329,8 @@ let unbind_exact_workspace_agents config aliases =
          (Printexc.to_string exn))
 ;;
 
-let purge_agent_filesystem_artifacts config agent_names =
-  match exact_agent_aliases agent_names with
+let purge_agent_filesystem_artifacts ~validate_alias config agent_names =
+  match exact_agent_aliases ~validate_alias agent_names with
   | Error _ as error -> error
   | Ok aliases ->
     (match credential_plan config aliases with
@@ -422,7 +433,12 @@ let purge_dashboard_keeper_artifacts config operation =
     let rec remove = function
       | [] -> Ok ()
       | Agent_artifact_bundle aliases :: rest ->
-        (match purge_agent_filesystem_artifacts config aliases with
+        (match
+           purge_agent_filesystem_artifacts
+             ~validate_alias:validate_keeper_agent_alias
+             config
+             aliases
+         with
          | Error _ as error -> error
          | Ok _ -> remove rest)
       | artifact :: rest ->
@@ -791,7 +807,9 @@ let add_delete_action_routes router =
                         (plain_agent_resolve_error_to_string error)
                     | Ok (Some agent_name) ->
                       (match
-                         purge_agent_filesystem_artifacts config
+                         purge_agent_filesystem_artifacts
+                           ~validate_alias:validate_agent_alias
+                           config
                            [ agent_name ]
                        with
                        | Error msg ->

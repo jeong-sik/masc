@@ -3764,7 +3764,9 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
-      let initial = make_meta "dashboard-purge-finalize" in
+      let initial =
+        { (make_meta "dashboard-purge-finalize") with name = String.make 75 'p' }
+      in
       (match Keeper_meta_store.replace_snapshot config initial with
        | Ok () -> ()
        | Error detail -> fail detail);

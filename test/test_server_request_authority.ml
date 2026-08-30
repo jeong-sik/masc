@@ -576,25 +576,38 @@ let test_referer_keeps_separate_url_grammar () =
    | Error error -> fail (Masc_domain.masc_error_to_string error))
 ;;
 
-let test_wildcard_bind_keeps_explicit_loopback_aliases () =
+let test_wildcard_bind_keeps_internal_and_public_loopback_identities () =
   let policy =
     trust_policy
       ~bind_host:"0.0.0.0"
-      ~explicit_base_url:"http://127.0.0.1:8935"
+      ~bind_port:8080
+      ~explicit_base_url:"http://localhost:9546"
       ()
   in
-  let request_authority =
-    admitted_http1 ~policy [ "host", "localhost:8935" ]
+  let internal_authority =
+    admitted_http1 ~policy [ "host", "localhost:8080" ]
   in
   check_trust
-    "loopback alias uses explicit trust"
+    "internal listener keeps configured trust"
+    Authority.Configured_bind
+    internal_authority;
+  let public_authority =
+    admitted_http1 ~policy [ "host", "127.0.0.1:9546" ]
+  in
+  check_trust
+    "mapped loopback alias uses explicit trust"
     Authority.Explicit_trusted_host
-    request_authority;
+    public_authority;
   check_origin_admission
     "preserved Host alias remains exact origin"
     Server_auth.Same_origin
-    request_authority
-    [ "origin", "http://localhost:8935" ]
+    public_authority
+    [ "origin", "http://127.0.0.1:9546" ];
+  check_classification
+    `Untrusted
+    (Authority.classify_http1_request
+       ~trust_policy:policy
+       (http1_request ~headers:[ "host", "localhost:9999" ] "/"))
 ;;
 
 let test_auth_and_cors_consume_admitted_authority () =
@@ -768,9 +781,9 @@ let () =
             `Quick
             test_custom_trusted_https_origin
         ; test_case
-            "wildcard bind preserves explicit loopback aliases"
+            "wildcard bind preserves internal and public loopback identities"
             `Quick
-            test_wildcard_bind_keeps_explicit_loopback_aliases
+            test_wildcard_bind_keeps_internal_and_public_loopback_identities
         ; test_case
             "Referer keeps separate URL grammar"
             `Quick

@@ -264,7 +264,11 @@ let explicit_identity_of_base_url raw =
 
 let make_trust_policy ~bind_host ~bind_port ~explicit_base_url :
     (trust_policy, trust_policy_error) result =
-  match host_port_of_parts ~host:bind_host ~port:(Some bind_port) with
+  (* A wildcard is a socket bind address, never a wire authority. Keep the
+     listener's local identity reachable when a distinct public base URL is
+     also configured by folding it through the shared advertised-host rule. *)
+  let configured_host = Masc_network_defaults.normalize_advertised_host bind_host in
+  match host_port_of_parts ~host:configured_host ~port:(Some bind_port) with
   | None -> Error Malformed_bind_authority
   | Some bind_authority ->
     let configured_bind : trusted_identity =

@@ -14,6 +14,17 @@ type tool_stats = {
   mean_ms : float;
 }
 
+type disposition =
+  | Completed
+  | Deferred
+  | Failed
+
+type sample = {
+  tool_name : string;
+  disposition : disposition;
+  duration_ms : float;
+}
+
 (** Per-tool accumulator: we store all durations for percentile calc.
     Immutable record — updated by creating a new value and storing it
     in the StringMap ref under the lock. *)
@@ -34,26 +45,51 @@ let metrics_mu = Stdlib.Mutex.create ()
 
 let with_lock f = Stdlib.Mutex.protect metrics_mu f
 
-let record (result : Tool_result.result) =
-  let tool_name, duration_ms =
-    match result with
-    | Tool_result.Completed output | Tool_result.Deferred output ->
-      output.tool_name, output.duration_ms
-    | Tool_result.Failed failure -> failure.tool_name, failure.duration_ms
+let add_sample metrics (sample : sample) =
+  let acc =
+    match StringMap.find_opt sample.tool_name metrics with
+    | Some acc -> acc
+    | None -> { successes = 0; deferred = 0; failures = 0; durations = [] }
   in
-  with_lock (fun () ->
-    let acc = match StringMap.find_opt tool_name !metrics with
-      | Some a -> a
-      | None -> { successes = 0; deferred = 0; failures = 0; durations = [] }
-    in
-    let acc =
-      match result with
-      | Tool_result.Completed _ -> { acc with successes = acc.successes + 1 }
-      | Tool_result.Deferred _ -> { acc with deferred = acc.deferred + 1 }
-      | Tool_result.Failed _ -> { acc with failures = acc.failures + 1 }
-    in
-    let acc = { acc with durations = duration_ms :: acc.durations } in
-    metrics := StringMap.add tool_name acc !metrics)
+  let acc =
+    match sample.disposition with
+    | Completed -> { acc with successes = acc.successes + 1 }
+    | Deferred -> { acc with deferred = acc.deferred + 1 }
+    | Failed -> { acc with failures = acc.failures + 1 }
+  in
+  let acc = { acc with durations = sample.duration_ms :: acc.durations } in
+  StringMap.add sample.tool_name acc metrics
+
+let sample_of_result (result : Tool_result.result) =
+  match result with
+  | Tool_result.Completed output ->
+    { tool_name = output.tool_name
+    ; disposition = Completed
+    ; duration_ms = output.duration_ms
+    }
+  | Tool_result.Deferred output ->
+    { tool_name = output.tool_name
+    ; disposition = Deferred
+    ; duration_ms = output.duration_ms
+    }
+  | Tool_result.Failed failure ->
+    { tool_name = failure.tool_name
+    ; disposition = Failed
+    ; duration_ms = failure.duration_ms
+    }
+
+let record (result : Tool_result.result) =
+  let sample = sample_of_result result in
+  with_lock (fun () -> metrics := add_sample !metrics sample)
+
+let replace_samples produce =
+  let replacement = ref StringMap.empty in
+  let add sample = replacement := add_sample !replacement sample in
+  match produce add with
+  | Error _ as error -> error
+  | Ok value ->
+    with_lock (fun () -> metrics := !replacement);
+    Ok value
 
 let percentile sorted_arr p =
   let n = Array.length sorted_arr in
@@ -95,7 +131,7 @@ let all_stats () =
   in
   List.sort (fun a b -> Int.compare b.call_count a.call_count) all
 
-let to_json s =
+let to_json (s : tool_stats) =
   `Assoc
     [ ("tool_name", `String s.tool_name)
     ; ("call_count", `Int s.call_count)

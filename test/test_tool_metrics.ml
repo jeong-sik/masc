@@ -87,6 +87,67 @@ let test_all_to_json () =
   | `List l -> Alcotest.(check int) "2 entries" 2 (List.length l)
   | _ -> Alcotest.fail "expected List"
 
+let test_replace_samples_is_atomic_and_idempotent () =
+  setup ();
+  M.record (make_result ~name:"stale" ~success:true ~duration_ms:99.0);
+  let replace () =
+    M.replace_samples (fun add ->
+      add
+        { M.tool_name = "alpha"
+        ; disposition = M.Completed
+        ; duration_ms = 10.0
+        };
+      add
+        { M.tool_name = "alpha"
+        ; disposition = M.Deferred
+        ; duration_ms = 20.0
+        };
+      add
+        { M.tool_name = "beta"
+        ; disposition = M.Failed
+        ; duration_ms = 30.0
+        };
+      Ok "loaded")
+  in
+  Alcotest.(check (result string string))
+    "producer result"
+    (Ok "loaded")
+    (replace ());
+  Alcotest.(check bool) "old snapshot replaced" true
+    (Option.is_none (M.stats_for "stale"));
+  let alpha = Option.get (M.stats_for "alpha") in
+  Alcotest.(check int) "alpha calls" 2 alpha.call_count;
+  Alcotest.(check int) "alpha completed" 1 alpha.success_count;
+  Alcotest.(check int) "alpha deferred" 1 alpha.deferred_count;
+  Alcotest.(check (result string string))
+    "same producer can replace again"
+    (Ok "loaded")
+    (replace ());
+  Alcotest.(check int)
+    "second replacement does not double count"
+    2
+    (Option.get (M.stats_for "alpha")).call_count
+
+let test_replace_samples_keeps_snapshot_on_error () =
+  setup ();
+  M.record (make_result ~name:"live" ~success:true ~duration_ms:4.0);
+  let result =
+    M.replace_samples (fun add ->
+      add
+        { M.tool_name = "partial"
+        ; disposition = M.Completed
+        ; duration_ms = 1.0
+        };
+      Error "read failed")
+  in
+  Alcotest.(check (result string string)) "producer error" (Error "read failed") result;
+  Alcotest.(check bool) "partial snapshot not published" true
+    (Option.is_none (M.stats_for "partial"));
+  Alcotest.(check int)
+    "existing snapshot retained"
+    1
+    (Option.get (M.stats_for "live")).call_count
+
 let () =
   Alcotest.run "Tool_metrics" [
     "recording", [
@@ -100,5 +161,15 @@ let () =
       Alcotest.test_case "sorted by count" `Quick test_all_stats_sorted;
       Alcotest.test_case "to_json" `Quick test_to_json;
       Alcotest.test_case "all_to_json" `Quick test_all_to_json;
+    ];
+    "replacement", [
+      Alcotest.test_case
+        "sample replacement is atomic and idempotent"
+        `Quick
+        test_replace_samples_is_atomic_and_idempotent;
+      Alcotest.test_case
+        "failed replacement keeps current snapshot"
+        `Quick
+        test_replace_samples_keeps_snapshot_on_error;
     ];
   ]

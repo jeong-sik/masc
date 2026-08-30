@@ -22,6 +22,45 @@ let record_to_json (r : Tool_result.result) : Yojson.Safe.t =
     ; ("ts", `Float (Time_compat.now ()))
     ]
 
+type hydrate_report = {
+  loaded_records : int;
+  malformed_records : int;
+  invalid_records : int;
+  pruned_files : int;
+}
+
+let exact_string_field key json =
+  match Safe_ops.json_member_opt key json with
+  | Some (`String value) -> Some value
+  | Some _ | None -> None
+
+let exact_finite_number_field key json =
+  match Safe_ops.json_member_opt key json with
+  | Some (`Float value) when Float.is_finite value -> Some value
+  | Some (`Int value) -> Some (Float.of_int value)
+  | Some _ | None -> None
+
+let sample_of_json json : Tool_metrics.sample option =
+  match
+    ( exact_string_field "tool_name" json
+    , exact_string_field "disposition" json
+    , exact_finite_number_field "duration_ms" json
+    , exact_finite_number_field "ts" json )
+  with
+  | Some tool_name, Some disposition, Some duration_ms, Some ts
+    when String.trim tool_name <> "" && duration_ms >= 0.0 && ts >= 0.0 ->
+    let disposition =
+      match disposition with
+      | "completed" -> Some Tool_metrics.Completed
+      | "deferred" -> Some Tool_metrics.Deferred
+      | "failed" -> Some Tool_metrics.Failed
+      | _ -> None
+    in
+    Option.map
+      (fun disposition -> { Tool_metrics.tool_name; disposition; duration_ms })
+      disposition
+  | _ -> None
+
 (* ── Write queue ────────────────────────────────────── *)
 
 let write_queue_capacity = 4096
@@ -66,6 +105,32 @@ let rec get_or_create_store ~base_path : Dated_jsonl.t =
     if Atomic.compare_and_set store current (Some (base_path, candidate))
     then candidate
     else get_or_create_store ~base_path
+
+let hydrate ~base_path ~retention_days =
+  let store = get_or_create_store ~base_path in
+  let pruned_files = Dated_jsonl.prune store ~days:retention_days in
+  Tool_metrics.replace_samples (fun add ->
+    let loaded_records = ref 0 in
+    let malformed_records = ref 0 in
+    let invalid_records = ref 0 in
+    let read_result =
+      Dated_jsonl.iter_all_entries_result store (function
+        | Dated_jsonl.Malformed_json _ -> Stdlib.incr malformed_records
+        | Dated_jsonl.Parsed json ->
+          (match sample_of_json json with
+           | None -> Stdlib.incr invalid_records
+           | Some sample ->
+             add sample;
+             Stdlib.incr loaded_records))
+    in
+    Result.map
+      (fun () ->
+         { loaded_records = !loaded_records
+         ; malformed_records = !malformed_records
+         ; invalid_records = !invalid_records
+         ; pruned_files
+         })
+      read_result)
 
 let enqueue (result : Tool_result.result) =
   let json = record_to_json result in

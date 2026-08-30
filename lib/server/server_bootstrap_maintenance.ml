@@ -537,8 +537,35 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       ~sw
       ~clock
       ~base_path:(Mcp_server.workspace_config state).base_path;
-  (* Tool metrics JSONL persistence: flush buffered records to disk periodically.
-     The shared dispatch observer is the canonical write path for persisted
+  (* Restore retained tool metrics before installing the live observer. This
+     order prevents startup hydration from overwriting a call that completed
+     concurrently. A failed read leaves the current snapshot unchanged and is
+     visible to operators; persistence remains best-effort. *)
+  let tool_metrics_base_path = (Mcp_server.workspace_config state).base_path in
+  (try
+     match
+       Tool_metrics_persist.hydrate
+         ~base_path:tool_metrics_base_path
+         ~retention_days:(Env_config_core.jsonl_retention_days ())
+     with
+     | Ok report ->
+       Log.Metrics.info
+         "tool_metrics_persist: hydrated %d record(s), skipped malformed=%d invalid=%d, pruned=%d file(s)"
+         report.loaded_records
+         report.malformed_records
+         report.invalid_records
+         report.pruned_files
+     | Error error ->
+       Log.Metrics.warn
+         "tool_metrics_persist: startup hydration failed: %s"
+         (Dated_jsonl.read_error_to_string error)
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     Log.Metrics.warn
+       "tool_metrics_persist: startup hydration crashed: %s"
+       (Printexc.to_string exn));
+  (* The shared dispatch observer is the canonical write path for persisted
      tool metrics so keeper-internal calls are counted exactly once. *)
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
@@ -546,7 +573,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Tool_metrics.record r;
       Tool_metrics_persist.enqueue r
     | _ -> ());
-  Tool_metrics_persist.start_flush_fiber ~sw ~clock ~base_path:(Mcp_server.workspace_config state).base_path;
+  Tool_metrics_persist.start_flush_fiber
+    ~sw
+    ~clock
+    ~base_path:tool_metrics_base_path;
   (* RFC-0234 scheduled automation runner.  Public schedule tools and the
      dashboard-only approval route only mutate the durable ledger; this loop is
      the production caller that observes due rows and emits at-most-once generic wake signals.  It

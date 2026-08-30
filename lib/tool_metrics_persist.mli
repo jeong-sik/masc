@@ -1,7 +1,8 @@
 
 (** Tool_metrics_persist — JSONL disk persistence for tool metrics.
 
-    Periodically flushes in-memory tool invocation records to
+    Restores current-format tool invocation records at startup and periodically
+    flushes new in-memory records to
     [data/tool-metrics/YYYY-MM/DD.jsonl] via {!Dated_jsonl}.
 
     Flush failures are logged but do not affect server operation.
@@ -13,6 +14,25 @@ val enqueue : Tool_result.result -> unit
     Safe to call from any fiber. Records are batched and written periodically.
     If the bounded best-effort queue is full, the record is dropped instead of
     blocking the tool completion path. *)
+
+type hydrate_report = {
+  loaded_records : int;
+  malformed_records : int;
+  invalid_records : int;
+  pruned_files : int;
+}
+
+val hydrate :
+  base_path:string ->
+  retention_days:int ->
+  (hydrate_report, Dated_jsonl.read_error) result
+(** [hydrate ~base_path ~retention_days] prunes expired day files, streams the
+    remaining current-format rows into a replacement {!Tool_metrics} snapshot,
+    and publishes that snapshot only after the complete store was read.
+    Malformed JSON and rows that do not match the current record format are
+    counted and skipped. Repeating hydration replaces rather than appends, so
+    persisted calls are not double-counted. Call before installing live metric
+    producers. *)
 
 val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
 (** [start_flush_fiber ~sw ~clock ~base_path] spawns a background fiber that

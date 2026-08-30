@@ -545,10 +545,20 @@ type help =
   ; alternatives : string list
   }
 
+type loading =
+  | Always_loaded
+  | Deferrable
+
+let loading_to_string = function
+  | Always_loaded -> "always_loaded"
+  | Deferrable -> "deferrable"
+;;
+
 type loaded =
   { schema : Masc_domain.tool_schema
   ; keeper_projection : Masc_domain.tool_schema option
   ; help : help option
+  ; loading : loading
   }
 
 let help_of_pairs pairs =
@@ -785,6 +795,13 @@ let tool_of_pairs ~name pairs =
     | None -> Ok []
     | Some value -> params_of_value ~context:"params" value
   in
+  let* loading =
+    match List.assoc_opt "defer_loading" pairs with
+    | None -> Ok Always_loaded
+    | Some value ->
+      let* flag = as_bool ~context:"defer_loading" value in
+      Ok (if flag then Deferrable else Always_loaded)
+  in
   let* alternatives = alternatives_of_pairs ~context:"tool" pairs in
   let* keeper_projection =
     match List.assoc_opt "keeper_projection" pairs with
@@ -815,6 +832,7 @@ let tool_of_pairs ~name pairs =
         ; "one_of"
         ; "keeper_projection"
         ; "help"
+        ; "defer_loading"
         ]
     in
     let rec walk = function
@@ -833,6 +851,7 @@ let tool_of_pairs ~name pairs =
         }
     ; keeper_projection
     ; help
+    ; loading
     }
 ;;
 

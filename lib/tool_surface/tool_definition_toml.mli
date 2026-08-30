@@ -33,10 +33,32 @@ type help =
     table that declares nothing is a load error, because config without a
     payload has no consumer. *)
 
+(** Whether a tool's argument schema rides in every request, or is left out
+    until the model asks for it by name.
+
+    Declared per tool, not per source. A tool is not deferrable because of
+    where it came from — an attached service, a skill, a built-in descriptor —
+    but because this particular tool is rarely enough reached for its schema to
+    be worth the bytes it costs on every request of the turn. Grouping by
+    source is what {b RFC-0389} did and what PR #31728 removed: eight of nine
+    Keepers declared every group, so the axis bought nothing. *)
+type loading =
+  | Always_loaded
+      (** The schema rides in every request. This is the default: a tool that
+          says nothing about loading is loaded. *)
+  | Deferrable
+      (** Only the name and a summary ride, in the listing. The schema arrives
+          when the model names the tool, and only on a lane that can widen a
+          running turn. *)
+
+val loading_to_string : loading -> string
+
 type loaded =
   { schema : Masc_domain.tool_schema
   ; keeper_projection : Masc_domain.tool_schema option
   ; help : help option
+  ; loading : loading
+    (** From the file's [defer_loading] key; [Always_loaded] when absent. *)
   }
 (** One decoded tool definition. [schema] is the canonical schema published
     to MCP clients; [keeper_projection], when the file declares a

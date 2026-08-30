@@ -29,6 +29,10 @@ type cleanup_result =
   ; errors : string list
   }
 
+type cleanup_attempt =
+  | Cleanup_completed of cleanup_result
+  | Cleanup_skipped_command_unavailable of string
+
 type classified_error =
   { message : string
   ; failure_class : Keeper_sandbox_runtime_classify.docker_failure_class
@@ -353,15 +357,19 @@ val cleanup_stale_containers
 (** Interval-throttled wrapper used before launching keeper Docker
     containers. Concurrent fibers entering the same interval window are
     serialized by a CAS gate on the internal [last_cleanup_at] timestamp;
-    losers receive [None] and skip the sweep. A failed sweep remains an
-    explicit result and does not create a hidden retry delay. See
-    {!reset_last_cleanup_for_tests}. *)
+    losers receive [None] and skip the sweep. [command_available] lets a
+    capability-aware periodic caller avoid spawning a Docker CLI that is not
+    deployed while preserving the interval gate and an explicit typed skip.
+    Docker execution callers omit it and retain the existing spawn/error
+    behavior. A failed sweep remains an explicit result and does not create a
+    hidden retry delay. See {!reset_last_cleanup_for_tests}. *)
 val maybe_cleanup_stale_containers
   :  ?now:float
+  -> ?command_available:(string -> bool)
   -> base_path:string
   -> timeout_sec:float
   -> unit
-  -> cleanup_result option
+  -> cleanup_attempt option
 
 (** Reset the cleanup interval/backoff gates so the next call always runs a
     sweep. Test-only. *)

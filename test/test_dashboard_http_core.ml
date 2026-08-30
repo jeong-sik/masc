@@ -723,6 +723,31 @@ let test_run_dashboard_compute_with_pool_uses_executor_domain () =
   check bool "non-PG backend offloads to executor pool domain" true
     (result_domain <> caller_domain)
 
+let test_run_dashboard_compute_nested_cache_does_not_starve () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  Dashboard_cache.invalidate_all ();
+  let clock = Eio.Stdenv.clock env in
+  let exec_pool =
+    Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
+  in
+  Executor_pool_ref.For_testing.with_pool exec_pool @@ fun () ->
+  let result =
+    Server_dashboard_http_core.run_dashboard_compute
+      ~sw
+      ~clock
+      ~config
+      (fun ~config:_ ~sw:_ ->
+         Dashboard_cache.get_or_compute_with_timeout
+           "dashboard-runtime-nested-cache"
+           ~ttl:60.0
+           ~clock
+           ~timeout_sec:0.05
+           (fun () -> `String "ok"))
+  in
+  check string "nested cache compute completes on the current worker"
+    "ok"
+    Yojson.Safe.Util.(result |> to_string)
+
 let test_dashboard_shell_http_json_includes_paths () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let json = Server_dashboard_http_core.dashboard_shell_http_json config in
@@ -4268,6 +4293,8 @@ let () =
             test_run_dashboard_compute_without_pool_stays_in_current_domain;
           test_case "pool uses executor domain" `Quick
             test_run_dashboard_compute_with_pool_uses_executor_domain;
+          test_case "pool worker runs nested cache inline" `Quick
+            test_run_dashboard_compute_nested_cache_does_not_starve;
           test_case "shell payload includes paths diagnostics" `Quick
             test_dashboard_shell_http_json_includes_paths;
           test_case "shell runtime base_path prefers preserved input" `Quick

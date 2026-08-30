@@ -95,6 +95,20 @@ shutdown 후 exit code 0이었고 volume은 보존했다.
 success가 transient budget을 reset하는 것은 focused accounting test로 확인했다. 실제
 network recovery end-to-end는 실행하지 않았다.
 
+## supplemental rate-limit boundary r33
+
+더 최신 composition `b09c851dac888263fedb3cd10ad40b6f7a698f6f`, image
+`sha256:9b7cf86ab582bced204bec45f46c1e0831ee284e3a43e370b7155b60b35374f2`,
+binary `e4dcec243bcf6f3034972aee04d41e134fb0de2c557385906194dbc7046c1937`
+에서 internal fake provider가 HTTP 429를 반복 반환하게 했다.
+
+5초 cadence로 32건, Keeper별 8건의 `api_error_rate_limited`가 발생했다. 32건 모두
+처음부터 nonzero failure counter로 집계됐고 면제는 0건이었다. health는
+`degraded / turn_failure_recovering`, failing/recovering/executable 4/4/4, operator
+action false였다. 따라서 새 3회 budget은 typed network/timeout 경계에만 적용되고 rate
+limit의 기존 durable accounting을 약화하지 않는다. 측정 container는 exit code 0으로
+종료했다.
+
 ## 경계
 
 3회 면제는 crash accounting만 제어한다. Keeper lifecycle, retry scheduler, lane routing,

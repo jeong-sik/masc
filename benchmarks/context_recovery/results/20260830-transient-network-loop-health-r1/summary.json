@@ -77,6 +77,22 @@
     "diff_check": "pass",
     "ocamlformat_check": "pass"
   },
+  "supplemental_rate_limit_boundary": {
+    "measurement_source_commit": "b09c851dac888263fedb3cd10ad40b6f7a698f6f",
+    "image_digest": "sha256:9b7cf86ab582bced204bec45f46c1e0831ee284e3a43e370b7155b60b35374f2",
+    "binary_sha256": "e4dcec243bcf6f3034972aee04d41e134fb0de2c557385906194dbc7046c1937",
+    "terminal_reason_code": "api_error_rate_limited",
+    "failure_receipt_count": 32,
+    "per_keeper_failure_count": 8,
+    "exempted_count": 0,
+    "consecutive_zero_count": 0,
+    "consecutive_nonzero_count": 32,
+    "overall_status": "degraded",
+    "fleet_status": "degraded",
+    "blocker": "turn_failure_recovering",
+    "operator_action_required": false,
+    "container_exit_code": 0
+  },
   "shutdown": {
     "container_exit_code": 0,
     "container_stopped": true,
@@ -93,7 +109,10 @@
     "server-restart.log": "3bcee81add2f387ba5172d6aa94bb2280fa3bd3e29b9f8d1322cb6c8e68c3f6e",
     "test-runtime-observation.log": "7df8984092a2da281de699195f64d7ad49d45326445e186079d7745576b5c89f",
     "test-health-config.log": "3bfe66217f1c9da9ef330099242a385d89ba48829e318d5f36521372b505201e",
-    "test-health-recovering.log": "5c38a9ed379f858d8be0aef4ece03c08351808fb08b4ab023be78ae92f3a4bbe"
+    "test-health-recovering.log": "5c38a9ed379f858d8be0aef4ece03c08351808fb08b4ab023be78ae92f3a4bbe",
+    "supplemental-rate-limit-summary.json": "8f1d2b3d7266b037584bea21f173a935d00ca4b6fe88f0c96a5577159cc6f387",
+    "supplemental-rate-limit-health.json": "143d9313fd026de8e8412126c13fe75feba5414fca2f9f0264b5343679d6026c",
+    "supplemental-rate-limit-server.log": "0d4a1750fa7093c5171fed0a735fc4e1834bdb2ec1e8adfd12180381c6a73b55"
   },
   "performance_claim": false
 }

@@ -26,6 +26,8 @@
   case 1/1이 통과했다.
 - 3차: fixed 최초 기동은 12회만 면제하고 60회를 nonzero counter로 기록했으며 health가
   `degraded`였다. 실제 재시작도 12회만 면제하고 28회를 nonzero로 기록했다.
+- 4차: isolated HTTP 429 반복 32건은 면제 0, nonzero 32로 집계되고 같은 degraded
+  health로 수렴해 transport budget이 rate limit까지 넓어지지 않음을 확인했다.
 - 재현 결과: 성공. 두 runtime instance 모두 lifecycle/executable 4를 유지하면서
   `turn_failure_recovering`을 투영했고 operator action은 false였다.
 

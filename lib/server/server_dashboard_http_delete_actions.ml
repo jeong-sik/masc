@@ -407,6 +407,7 @@ let keeper_artifact_path config keeper_name artifact =
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
          ~keeper_id:keeper_name)
+  | Keeper_playground_bundles_artifact -> None
   | Keeper_configuration_artifact ->
     Some
       (Filename.concat
@@ -419,6 +420,15 @@ let keeper_artifact_path config keeper_name artifact =
          ~base_dir:config.Workspace.base_path
          ~keeper_name)
   | Agent_artifact_bundle _ -> None
+;;
+
+let keeper_playground_paths config keeper_name =
+  Keeper_types_profile.all_sandbox_profiles
+  |> List.map (fun profile ->
+       Filename.concat
+         config.Workspace.base_path
+         (Keeper_sandbox.host_root_rel_of_profile profile keeper_name))
+  |> List.sort_uniq String.compare
 ;;
 
 let purge_dashboard_keeper_artifacts config operation =
@@ -441,6 +451,13 @@ let purge_dashboard_keeper_artifacts config operation =
          with
          | Error _ as error -> error
          | Ok _ -> remove rest)
+      | Keeper_playground_bundles_artifact :: rest ->
+        (match
+           remove_paths_strict
+             (keeper_playground_paths config operation.keeper_name)
+         with
+         | Error _ as error -> error
+         | Ok () -> remove rest)
       | artifact :: rest ->
         (match keeper_artifact_path config operation.keeper_name artifact with
          | None ->
@@ -466,6 +483,7 @@ let purge_dashboard_keeper_artifacts config operation =
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
             | Keeper_memory_source_current_artifact
+            | Keeper_playground_bundles_artifact
             | Keeper_configuration_artifact
             | Keeper_chat_store_artifact
             | Agent_artifact_bundle _ -> ());
@@ -481,6 +499,7 @@ let purge_dashboard_keeper_artifacts config operation =
                | Keeper_memory_current_artifact
                | Keeper_memory_source_current_artifact
                | Keeper_memory_journal_artifact
+               | Keeper_playground_bundles_artifact
                | Keeper_configuration_artifact
                | Keeper_chat_store_artifact
                | Agent_artifact_bundle _ -> ());

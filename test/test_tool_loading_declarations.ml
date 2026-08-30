@@ -109,17 +109,6 @@ defer_loading = "yes"
       (Astring.String.is_infix ~affix:"defer_loading" message)
 ;;
 
-(* The fleet default, pinned so that turning the first tool deferrable is a
-   deliberate edit with a visible diff rather than a drift. *)
-let test_no_builtin_declares_deferral_yet () =
-  check
-    (list string)
-    "no built-in tool declares defer_loading yet"
-    []
-    (Tool_loading_declarations.deferrable_tool_names ())
-;;
-
-
 (* The swallow this module must not do: a file that cannot be read has to
    raise, because "declares nothing" and "could not be read" are the same
    answer at every call site. *)
@@ -180,7 +169,6 @@ let () =
         ; test_case "misplaced is rejected" `Quick
             test_declaration_after_a_params_table_is_rejected
         ; test_case "non-bool is rejected" `Quick test_non_bool_is_rejected
-        ; test_case "fleet declares none yet" `Quick test_no_builtin_declares_deferral_yet
         ; test_case "a malformed file raises" `Quick
             test_a_malformed_file_raises_rather_than_reading_as_absent
         ; test_case "a well-formed file reads through the same door" `Quick

@@ -34,14 +34,3 @@ let loading_of_tool name =
   | Some loading -> loading
   | None -> Tool_definition_toml.Always_loaded
 ;;
-
-let deferrable_tool_names () =
-  Hashtbl.fold
-    (fun name loading acc ->
-       match loading with
-       | Tool_definition_toml.Deferrable -> name :: acc
-       | Tool_definition_toml.Always_loaded -> acc)
-    (Lazy.force table)
-    []
-  |> List.sort String.compare
-;;

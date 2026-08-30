@@ -15,7 +15,16 @@
     A file that does not parse raises on first ask rather than answering
     [Always_loaded]: a misplaced declaration and no declaration are the same
     answer at every call site, so swallowing the error would make a
-    [defer_loading] nobody honours and nobody reports. *)
+    [defer_loading] nobody honours and nobody reports.
+
+    There is deliberately no "which tools defer" listing here. Such a list
+    reads as a roster the moment something takes it as input rather than as a
+    report, and a roster of tools loaded together is the group axis again.
+    Loading several tools as a unit is already a composition entry
+    ([keeper_compose_<name>]), which names its tools in [compositions.nodes]
+    along with their order and the data flowing between them -- and costs no
+    schema bytes at all, because the model calls the one composition rather
+    than the tools inside it. *)
 
 (** [loading_of_tool name] is what [config/tools/<name>.toml] declares.
 
@@ -36,9 +45,3 @@ val loading_of_declaration
   -> name:string
   -> contents:string
   -> Tool_definition_toml.loading
-
-(** Every tool name whose file declares [defer_loading = true], sorted.
-
-    For the gates and operator projections that ask what the fleet defers
-    without walking the tool surface itself. *)
-val deferrable_tool_names : unit -> string list

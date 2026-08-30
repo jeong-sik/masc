@@ -3103,6 +3103,38 @@ let test_lazy_startup_plan_groups_independent_tasks () =
         (Server_runtime_bootstrap.lazy_startup_task_names ())
   | _ -> Alcotest.fail "unexpected lazy startup group shape"
 
+let test_keeper_lifecycle_refresh_invalidates_projection_snapshot () =
+  with_temp_dir "keeper-lifecycle-projection" (fun dir ->
+    let config = Workspace.default_config dir in
+    let compute_count = ref 0 in
+    let read_snapshot () =
+      Dashboard_projection_cache.get_or_compute_snapshot_json
+        ~config
+        ~actor:(Some "lifecycle-test")
+        (fun _ ->
+           incr compute_count;
+           `Assoc [ "revision", `Int !compute_count ])
+    in
+    let revision =
+      Yojson.Safe.Util.(read_snapshot () |> member "revision" |> to_int)
+    in
+    Alcotest.(check int) "initial revision" 1 revision;
+    let cached_revision =
+      Yojson.Safe.Util.(read_snapshot () |> member "revision" |> to_int)
+    in
+    Alcotest.(check int) "snapshot is cached" 1 cached_revision;
+    Alcotest.(check int) "compute before lifecycle" 1 !compute_count;
+    Server_bootstrap_loops.For_testing.refresh_dashboard_for_keeper_lifecycle
+      ~config
+      ~keeper_name:"purged-keeper"
+      (Keeper_lifecycle_events.Custom_event
+         { verb = Keeper_lifecycle_events.Purged; phase = None });
+    let refreshed_revision =
+      Yojson.Safe.Util.(read_snapshot () |> member "revision" |> to_int)
+    in
+    Alcotest.(check int) "purge invalidates snapshot" 2 refreshed_revision;
+    Alcotest.(check int) "compute after lifecycle" 2 !compute_count)
+
 let test_startup_state_json () =
   Server_startup_state.reset ();
   Server_startup_state.mark_state_ready ()
@@ -4382,6 +4414,10 @@ let () =
             test_otel_exporter_setup_failure_is_soft;
           Alcotest.test_case "lazy startup plan parallelizes independent tasks"
             `Quick test_lazy_startup_plan_groups_independent_tasks;
+          Alcotest.test_case
+            "keeper lifecycle refresh invalidates projection snapshot"
+            `Quick
+            test_keeper_lifecycle_refresh_invalidates_projection_snapshot;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case

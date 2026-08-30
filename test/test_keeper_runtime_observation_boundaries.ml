@@ -4,6 +4,27 @@ module KPB = Keeper_provider_runtime_boundary
 module KTD = Keeper_turn_driver
 module EC = Keeper_error_classify
 
+let exemption_base_path = Filename.temp_dir "keeper-transient-exemption" ""
+
+module Test_failure = struct
+  include Keeper_unified_turn_failure
+
+  let note_turn_success keeper_name =
+    ignore
+      (Keeper_unified_turn_failure.note_turn_success
+         ~base_path:exemption_base_path
+         keeper_name)
+  ;;
+
+  let account_failure_counting ~keeper_name ~is_auto_recoverable err =
+    Keeper_unified_turn_failure.account_failure_counting
+      ~base_path:exemption_base_path
+      ~keeper_name
+      ~is_auto_recoverable
+      err
+  ;;
+end
+
 let raw_provider_timeout_error ~phase =
   Agent_core.Error.Provider
     (Llm_provider.Error.Timeout
@@ -158,7 +179,7 @@ let test_attributed_empty_completion_is_auto_recoverable () =
    [InvalidRequest] counter (companion change), not by the exemption
    budget. *)
 let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
-  let module KUF = Keeper_unified_turn_failure in
+  let module KUF = Test_failure in
   let keeper_name = "test-keeper-unmodeled-stop-reason" in
   KUF.note_turn_success keeper_name;
   let err =
@@ -190,7 +211,7 @@ let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
    [InvalidRequest] counter (companion change), not by the empty-completion
    budget. *)
 let test_generic_invalid_request_is_not_empty_completion () =
-  let module KUF = Keeper_unified_turn_failure in
+  let module KUF = Test_failure in
   let keeper_name = "test-keeper-generic-invalid-request" in
   KUF.note_turn_success keeper_name;
   let err =
@@ -214,7 +235,7 @@ let test_generic_invalid_request_is_not_empty_completion () =
    per keeper; once the budget is exhausted the failure counts toward crash
    again, and a success resets the budget. *)
 let test_empty_completion_exemption_budget_is_bounded () =
-  let module KUF = Keeper_unified_turn_failure in
+  let module KUF = Test_failure in
   let keeper_name = "test-keeper-empty-completion-budget" in
   KUF.note_turn_success keeper_name;
   let empty_err =
@@ -254,7 +275,7 @@ let test_empty_completion_exemption_budget_is_bounded () =
   KUF.note_turn_success keeper_name
 
 let test_transient_transport_exemption_budget_is_bounded () =
-  let module KUF = Keeper_unified_turn_failure in
+  let module KUF = Test_failure in
   let keeper_name = "test-keeper-transient-transport-budget" in
   let transient_err =
     Agent_core.Error.Api
@@ -268,6 +289,13 @@ let test_transient_transport_exemption_budget_is_bounded () =
       (KUF.account_failure_counting
          ~keeper_name ~is_auto_recoverable:true transient_err)
   done;
+  (match
+     Keeper_transient_transport_exemption_store.load
+       ~base_path:exemption_base_path
+       ~keeper_name
+   with
+   | Ok (Some 3) -> ()
+   | _ -> Alcotest.fail "durable transient budget was not three");
   Alcotest.(check bool)
     "transient transport past the budget counts toward crash"
     true
@@ -285,6 +313,32 @@ let test_transient_transport_exemption_budget_is_bounded () =
     (KUF.account_failure_counting
        ~keeper_name ~is_auto_recoverable:true transient_err);
   KUF.note_turn_success keeper_name
+
+let test_transient_transport_unknown_schema_fails_closed () =
+  let module KUF = Test_failure in
+  let keeper_name = "test-keeper-transient-schema" in
+  let transient_err =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.Timeout { message = "timeout"; phase = None })
+  in
+  KUF.note_turn_success keeper_name;
+  ignore
+    (KUF.account_failure_counting
+       ~keeper_name ~is_auto_recoverable:true transient_err);
+  let path =
+    Keeper_transient_transport_exemption_store.path_for
+      ~base_path:exemption_base_path
+      ~keeper_name
+  in
+  Out_channel.with_open_bin path (fun channel ->
+    output_string
+      channel
+      {|{"schema":"keeper.transient_transport_exemption.v0","count":1}|});
+  Alcotest.(check bool)
+    "unknown schema cannot grant a transient exemption"
+    true
+    (KUF.account_failure_counting
+       ~keeper_name ~is_auto_recoverable:true transient_err)
 
 let test_extra_system_context_preserves_typed_blocks () =
   let blocks =
@@ -332,6 +386,8 @@ let () =
           test_empty_completion_exemption_budget_is_bounded;
         Alcotest.test_case "transient transport exemption budget is bounded" `Quick
           test_transient_transport_exemption_budget_is_bounded;
+        Alcotest.test_case "transient transport unknown schema fails closed" `Quick
+          test_transient_transport_unknown_schema_fails_closed;
         Alcotest.test_case "extra system context preserves typed blocks" `Quick
           test_extra_system_context_preserves_typed_blocks;
       ] );

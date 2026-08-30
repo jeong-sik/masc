@@ -1,6 +1,7 @@
 (** Failure-path post-processing for [Keeper_unified_turn]. *)
 
 module EC = Keeper_error_classify
+module Transient_store = Keeper_transient_transport_exemption_store
 
 (* Compensating accounting for deterministic [InvalidRequest] failures (see
    the invariant note in [Keeper_error_classify] above
@@ -75,11 +76,18 @@ let empty_completion_exemptions : (string, int) Hashtbl.t = Hashtbl.create 8
     fleet incident. *)
 let transient_transport_exemption_budget = 3
 
-let transient_transport_exemptions : (string, int) Hashtbl.t = Hashtbl.create 8
-
-let note_turn_success keeper_name =
-  Hashtbl.remove empty_completion_exemptions keeper_name;
-  Hashtbl.remove transient_transport_exemptions keeper_name
+let note_turn_success ~base_path keeper_name =
+  match Transient_store.clear ~base_path ~keeper_name with
+  | Ok () ->
+    Hashtbl.remove empty_completion_exemptions keeper_name;
+    true
+  | Error error ->
+    Log.Keeper.error
+      ~keeper_name
+      "%s: retaining transient exemption because durable reset did not commit: %s"
+      keeper_name
+      (Transient_store.error_to_string error);
+    false
 ;;
 
 let empty_completion_exemption_exhausted ~keeper_name err =
@@ -116,30 +124,41 @@ let invalid_request_budget_exhausted ~keeper_name err =
     exhausted)
 ;;
 
-let transient_transport_exemption_exhausted ~keeper_name err =
+let transient_transport_exemption_exhausted ~base_path ~keeper_name err =
   if not (EC.is_transient_network_error err)
   then false
-  else (
-    let used =
-      Option.value
-        ~default:0
-        (Hashtbl.find_opt transient_transport_exemptions keeper_name)
-      + 1
-    in
-    Hashtbl.replace transient_transport_exemptions keeper_name used;
-    used > transient_transport_exemption_budget)
+  else
+    match Transient_store.load ~base_path ~keeper_name with
+    | Error error ->
+      Log.Keeper.error
+        ~keeper_name
+        "%s: transient exemption unavailable; counting failure toward crash: %s"
+        keeper_name
+        (Transient_store.error_to_string error);
+      true
+    | Ok persisted ->
+      let used = Option.value ~default:0 persisted + 1 in
+      (match Transient_store.save ~base_path ~keeper_name used with
+       | Ok () -> used > transient_transport_exemption_budget
+       | Error error ->
+         Log.Keeper.error
+           ~keeper_name
+           "%s: transient exemption unavailable; counting failure toward crash: %s"
+           keeper_name
+           (Transient_store.error_to_string error);
+         true)
 ;;
 
 (** Compute whether this failure observation advances the crash counter,
     consuming empty-completion exemption budget or invalid-request budget
     when applicable.  Call exactly once per failure observation, before
     {!record_failure_observation}. *)
-let account_failure_counting ~keeper_name ~is_auto_recoverable err =
+let account_failure_counting ~base_path ~keeper_name ~is_auto_recoverable err =
   (not is_auto_recoverable)
   || EC.is_runtime_exhausted_error err
   || empty_completion_exemption_exhausted ~keeper_name err
   || invalid_request_budget_exhausted ~keeper_name err
-  || transient_transport_exemption_exhausted ~keeper_name err
+  || transient_transport_exemption_exhausted ~base_path ~keeper_name err
 ;;
 
 let record_failure_observation

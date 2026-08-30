@@ -23,12 +23,13 @@ val transient_transport_exemption_budget : int
     crash counter per Keeper. Later consecutive failures use ordinary durable
     failure accounting while the Keeper lifecycle remains active. *)
 
-val note_turn_success : string -> unit
-(** Reset the Keeper's empty-completion and transient-transport exemption
-    budgets after a successful turn or an operator context clear. *)
+val note_turn_success : base_path:string -> string -> bool
+(** Durably reset the transient-transport exemption and clear the process-local
+    empty-completion budget after success/operator clear. *)
 
 val account_failure_counting
-  :  keeper_name:string
+  :  base_path:string
+  -> keeper_name:string
   -> is_auto_recoverable:bool
   -> Agent_core.Error.t
   -> bool

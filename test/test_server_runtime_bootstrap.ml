@@ -1233,6 +1233,24 @@ let test_otel_exporter_setup_failure_is_soft () =
     (Otel_spans.is_exporter_active ());
   Otel_spans.shutdown ~enabled:true ()
 
+let test_otel_exporter_setup_does_not_block_maintenance_wiring () =
+  Eio.Switch.run @@ fun sw ->
+  let started, resolve_started = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  let returned = ref false in
+  Server_bootstrap_maintenance.Otel_for_testing.start_exporter_background
+    ~sw
+    (fun () ->
+      Eio.Promise.resolve resolve_started ();
+      Eio.Promise.await release);
+  returned := true;
+  Eio.Promise.await started;
+  Alcotest.(check bool)
+    "maintenance wiring returns while exporter setup is blocked"
+    true
+    !returned;
+  Eio.Promise.resolve resolve_release ()
+
 let make_keeper_meta_json ?(name = "alpha")
     ?(trace_id = "trace-alpha-live")
     ?(updated_at = "2026-03-29T10:36:57Z") () =
@@ -4380,6 +4398,8 @@ let () =
             test_workspace_init_bootstraps_keeper_runtime_dirs;
           Alcotest.test_case "otel exporter setup failure is soft" `Quick
             test_otel_exporter_setup_failure_is_soft;
+          Alcotest.test_case "otel exporter setup is background" `Quick
+            test_otel_exporter_setup_does_not_block_maintenance_wiring;
           Alcotest.test_case "lazy startup plan parallelizes independent tasks"
             `Quick test_lazy_startup_plan_groups_independent_tasks;
           Alcotest.test_case "startup state json reports lazy failure" `Quick

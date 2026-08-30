@@ -54,6 +54,7 @@ let () =
 type operator_disposition_kind =
   | Disp_pass
   | Disp_fail_open_next_runtime
+  | Disp_retry_later
   | Disp_pass_next_model
   | Disp_operator_action_required
   | Disp_user_cancelled
@@ -63,6 +64,7 @@ type operator_disposition_kind =
 let operator_disposition_kind_to_string = function
   | Disp_pass -> "pass"
   | Disp_fail_open_next_runtime -> "fail_open_next_runtime"
+  | Disp_retry_later -> "retry_later"
   | Disp_pass_next_model -> "pass_next_model"
   | Disp_operator_action_required -> "operator_action_required"
   | Disp_user_cancelled -> "user_cancelled"
@@ -73,6 +75,7 @@ let operator_disposition_kind_to_string = function
 let operator_disposition_kind_of_string = function
   | "pass" -> Some Disp_pass
   | "fail_open_next_runtime" -> Some Disp_fail_open_next_runtime
+  | "retry_later" -> Some Disp_retry_later
   | "pass_next_model" -> Some Disp_pass_next_model
   | "operator_action_required" -> Some Disp_operator_action_required
   | "user_cancelled" -> Some Disp_user_cancelled
@@ -217,16 +220,12 @@ let operator_disposition (receipt : t)
     when provider_runtime_failure
          && Keeper_terminal_reason.is_transient_provider_runtime_failure
               terminal_reason ->
-    (* The reason is [Reason_transient_runtime_retry], not
-       [Reason_runtime_fallback]: this arm is reached only AFTER the
-       runtime-fallback arm above excluded [runtime_fallback_applied] /
-       [Runtime_passed_to_next_model], so by construction no cross-runtime
-       fallback happened — the turn recovered via the SAME runtime's in-turn
-       retry. [operator_disposition_reason] is serialised into receipt JSON
-       unconditionally (dashboard-visible), so collapsing this onto the
-       fallback label would mislabel every transient-recovery turn as a
-       genuine fallback. *)
-    Disp_fail_open_next_runtime, Reason_transient_runtime_retry
+    (* This terminal receipt has already excluded both same-turn degraded retry
+       and cross-runtime fallback.  The Keeper remains live and its keepalive
+       cadence may run another turn later, but this turn did not move to a next
+       runtime.  Keep that future scheduling contract distinct from observed
+       same-turn routing. *)
+    Disp_retry_later, Reason_transient_runtime_retry
   | _ when provider_runtime_failure ->
     Disp_fail_open_next_runtime, Reason_provider_runtime_error
   | Keeper_terminal_reason.Internal_error _ ->
@@ -475,6 +474,7 @@ let needs_operator_broadcast = function
   | Disp_operator_action_required | Disp_unknown -> true
   | Disp_pass
   | Disp_fail_open_next_runtime
+  | Disp_retry_later
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped -> false

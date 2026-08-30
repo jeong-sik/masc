@@ -43,6 +43,14 @@ type failure_reason =
           adapter, or runtime fails before useful keeper progress. A later
           idle watchdog should preserve this root cause instead of recasting
           the keeper as generically stale. *)
+  | Turn_configuration_error of
+      { code : string
+      ; field : string option
+      ; detail : string
+      }
+      (** Latched from a typed Agent Core configuration error. The current
+          process cannot repair this failure without an operator changing
+          configuration or environment. *)
   | Fiber_unresolved of fiber_drop_cause
   | Exception of string
   | Turn_overflow_failure
@@ -528,4 +536,3 @@ val lifecycle_event_origin_to_string : lifecycle_event_origin -> string
     is not a [Context_measured]. *)
 val pending_measurement_after_event :
   float -> registry_entry -> Keeper_state_machine.event -> turn_measurement option
-

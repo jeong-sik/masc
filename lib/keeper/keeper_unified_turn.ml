@@ -1141,6 +1141,7 @@ let run_keeper_cycle
                   in
                   (match
                      registry_failure_reason_of_terminal_reason
+                       ~core_error:err
                        terminal_reason
                        ~raw_error:e_str
                    with

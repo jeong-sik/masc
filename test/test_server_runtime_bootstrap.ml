@@ -2015,6 +2015,7 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
             counts = phase_counts;
             running_names = [];
             recovering_names = [];
+            configuration_blocked_names = [];
             phase_values = [];
             phase_details = [];
           }
@@ -2205,6 +2206,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             counts = phase_counts;
             running_names = [];
             recovering_names = [];
+            configuration_blocked_names = [];
             phase_values = [];
             phase_details = [];
           }
@@ -2448,6 +2450,7 @@ let test_health_json_capacity_uses_execution_snapshot () =
         { counts = phase_counts
         ; running_names
         ; recovering_names
+        ; configuration_blocked_names = []
         ; phase_values = []
         ; phase_details = []
         }
@@ -2672,6 +2675,88 @@ let test_health_json_distinguishes_failing_executable_keepers () =
             (fleet_safety |> member "blocker" |> to_string);
           Alcotest.(check bool) "health still asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool))))
+
+let test_health_json_blocks_terminal_configuration_failures () =
+  let keeper_name = "config-failing" in
+  let phase_counts : Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+    { running = 0; failing = 1; recovering = 1 }
+  in
+  let phase_snapshot : Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+    { counts = phase_counts
+    ; running_names = []
+    ; recovering_names = [ keeper_name ]
+    ; configuration_blocked_names = [ keeper_name ]
+    ; phase_values = [ keeper_name, Keeper_state_machine.Failing ]
+    ; phase_details = []
+    }
+  in
+  let execution_snapshot :
+      Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+    { owners = []; executable_names = [ keeper_name ] }
+  in
+  let fleet_safety =
+    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+      ~bootable_names:[ keeper_name ]
+      ~autoboot_scan:{ autoboot_names = [ keeper_name ]; read_errors = [] }
+      ~phase_snapshot
+      ~execution_snapshot
+      ~phase_counts
+      ~paused_keepers_json:(`Assoc [ "count", `Int 0 ])
+      ()
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check int) "failing fiber remains visible" 1
+    (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
+  Alcotest.(check int) "executable fiber remains visible" 1
+    (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
+  Alcotest.(check int) "configuration blocker count" 1
+    (fleet_safety |> member "configuration_blocked_keeper_count" |> to_int);
+  Alcotest.(check (list string))
+    "configuration blocker names"
+    [ keeper_name ]
+    (fleet_safety |> member "configuration_blocked_keeper_names" |> to_list
+     |> List.map to_string);
+  Alcotest.(check bool) "all targets blocked by configuration" true
+    (fleet_safety |> member "all_target_keepers_configuration_blocked" |> to_bool);
+  Alcotest.(check string) "fleet status" "blocked"
+    (fleet_safety |> member "status" |> to_string);
+  Alcotest.(check string) "typed blocker" "turn_configuration_error"
+    (fleet_safety |> member "blocker" |> to_string);
+  Alcotest.(check bool) "operator action required" true
+    (fleet_safety |> member "operator_action_required" |> to_bool);
+  let healthy_name = "healthy" in
+  let partial_phase_counts :
+      Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+    { running = 1; failing = 1; recovering = 1 }
+  in
+  let partial_phase_snapshot =
+    { phase_snapshot with
+      counts = partial_phase_counts
+    ; running_names = [ healthy_name ]
+    ; phase_values =
+        [ keeper_name, Keeper_state_machine.Failing
+        ; healthy_name, Keeper_state_machine.Running
+        ]
+    }
+  in
+  let partial =
+    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+      ~bootable_names:[ keeper_name; healthy_name ]
+      ~autoboot_scan:
+        { autoboot_names = [ keeper_name; healthy_name ]; read_errors = [] }
+      ~phase_snapshot:partial_phase_snapshot
+      ~execution_snapshot:
+        { owners = []; executable_names = [ keeper_name; healthy_name ] }
+      ~phase_counts:partial_phase_counts
+      ~paused_keepers_json:(`Assoc [ "count", `Int 0 ])
+      ()
+  in
+  Alcotest.(check bool) "partial fleet is not fully blocked" false
+    (partial |> member "all_target_keepers_configuration_blocked" |> to_bool);
+  Alcotest.(check string) "partial fleet is degraded" "degraded"
+    (partial |> member "status" |> to_string);
+  Alcotest.(check bool) "partial config failure still needs operator" true
+    (partial |> member "operator_action_required" |> to_bool)
 
 let test_health_json_reaction_ledger_unavailable_shape () =
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
@@ -4508,6 +4593,9 @@ let () =
           Alcotest.test_case
             "health json distinguishes failing executable keepers"
             `Quick test_health_json_distinguishes_failing_executable_keepers;
+          Alcotest.test_case
+            "health json blocks terminal configuration failures"
+            `Quick test_health_json_blocks_terminal_configuration_failures;
           Alcotest.test_case
             "health json reaction ledger unavailable shape"
             `Quick test_health_json_reaction_ledger_unavailable_shape;

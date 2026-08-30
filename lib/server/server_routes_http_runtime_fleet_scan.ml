@@ -362,6 +362,7 @@ type keeper_phase_snapshot =
   { counts : keeper_phase_counts
   ; running_names : string list
   ; recovering_names : string list
+  ; configuration_blocked_names : string list
   ; phase_values : (string * Keeper_state_machine.phase) list
   ; phase_details : (string * keeper_phase_detail) list
   }
@@ -412,6 +413,14 @@ let keeper_phase_snapshot ?base_path () =
             if is_recovering then entry.name :: acc.recovering_names
             else acc.recovering_names
           in
+          let configuration_blocked_names =
+            match entry.phase, entry.last_failure_reason with
+            | ( Keeper_state_machine.Failing
+              , Some (Keeper_registry.Turn_configuration_error _) )
+              when capacity_eligible ->
+              entry.name :: acc.configuration_blocked_names
+            | _ -> acc.configuration_blocked_names
+          in
           match entry.phase with
           | Keeper_state_machine.Running when capacity_eligible ->
             {
@@ -419,6 +428,7 @@ let keeper_phase_snapshot ?base_path () =
               counts = { counts with running = counts.running + 1 };
               running_names = entry.name :: acc.running_names;
               recovering_names;
+              configuration_blocked_names;
             }
           | Keeper_state_machine.Running ->
             acc
@@ -428,6 +438,7 @@ let keeper_phase_snapshot ?base_path () =
               counts =
                 { counts with failing = counts.failing + 1; recovering };
               recovering_names;
+              configuration_blocked_names;
             }
           | Keeper_state_machine.Failing ->
             acc
@@ -442,6 +453,7 @@ let keeper_phase_snapshot ?base_path () =
          counts = empty_keeper_phase_counts;
          running_names = [];
          recovering_names = [];
+         configuration_blocked_names = [];
          phase_values = [];
          phase_details = [];
        }
@@ -450,6 +462,8 @@ let keeper_phase_snapshot ?base_path () =
     snapshot with
     running_names = sorted_unique_strings snapshot.running_names;
     recovering_names = sorted_unique_strings snapshot.recovering_names;
+    configuration_blocked_names =
+      sorted_unique_strings snapshot.configuration_blocked_names;
     phase_values =
       List.sort (fun (a, _) (b, _) -> String.compare a b) snapshot.phase_values;
     phase_details =
@@ -1033,6 +1047,18 @@ let keeper_fleet_safety_health_json
     | Some snapshot -> snapshot.recovering_names
     | None -> []
   in
+  let configuration_blocked_names =
+    match phase_snapshot with
+    | Some snapshot ->
+      List.filter
+        (fun name -> List.exists (String.equal name) autoboot_scan.autoboot_names)
+        snapshot.configuration_blocked_names
+    | None -> []
+  in
+  let configuration_blocked_count = List.length configuration_blocked_names in
+  let all_target_keepers_configuration_blocked =
+    target_count > 0 && configuration_blocked_count >= target_count
+  in
   let active_task_owner_scan =
     match current_server_state_opt () with
     | Some state ->
@@ -1093,6 +1119,8 @@ let keeper_fleet_safety_health_json
   in
   let status =
     if no_executable_keeper_fibers then "blocked"
+    else if all_target_keepers_configuration_blocked then "blocked"
+    else if configuration_blocked_count > 0 then "degraded"
     else if reaction_capacity_below_target then "degraded"
     else if active_task_owner_without_executable_fiber then "degraded"
     else if backlog_observation_degraded then "degraded"
@@ -1104,6 +1132,7 @@ let keeper_fleet_safety_health_json
   let blocker =
     if keeper_bootstrap_blocked then Some "keeper_bootstrap_disabled"
     else if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
+    else if configuration_blocked_count > 0 then Some "turn_configuration_error"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
     else if active_task_owner_without_executable_fiber
     then Some "active_task_owner_without_executable_fiber"
@@ -1135,6 +1164,11 @@ let keeper_fleet_safety_health_json
     ; "recovering_keeper_fiber_count", `Int phase_counts.recovering
     ; ( "recovering_keeper_names"
       , `List (List.map (fun name -> `String name) recovering_names) )
+    ; "configuration_blocked_keeper_count", `Int configuration_blocked_count
+    ; ( "configuration_blocked_keeper_names"
+      , `List (List.map (fun name -> `String name) configuration_blocked_names) )
+    ; ( "all_target_keepers_configuration_blocked"
+      , `Bool all_target_keepers_configuration_blocked )
     ; "executable_keeper_fiber_count", `Int executable_count
     ; ( "executable_keeper_names"
       , `List (List.map (fun name -> `String name) executable_names) )
@@ -1195,6 +1229,7 @@ let keeper_fleet_safety_health_json
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers
+           || configuration_blocked_count > 0
            || reaction_capacity_below_target
            || keeper_bootstrap_blocked
            || active_task_owner_without_executable_fiber) )

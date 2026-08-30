@@ -1603,6 +1603,13 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       (match mark_owner_state_ready () with
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
+      (* Full-health has its own off-domain worker, timeout, and warm delay.
+         Start it at the owner-readiness boundary so post-ready lanes and
+         auxiliary prewarms cannot leave current diagnostics requested-but-idle. *)
+      Server_routes_http_runtime.start_full_health_snapshot_refresh_loop
+        ~sw
+        ~clock
+        ~request_authority:background_request_authority;
       let path_diagnostics = activated_owner.path_diagnostics in
       let resolved_base, masc_dir =
         start_post_ready_owner_lanes ~sw ~clock ~env state
@@ -1797,13 +1804,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
         ~clock
         ~broadcast_digest:
           Server_dashboard_http_execution_surfaces.broadcast_operator_digest;
-      (* Full-health has its own off-domain worker, timeout, and warm delay.
-         Start its loop independently so a slow shell prewarm cannot leave
-         restart diagnostics requested-but-idle. *)
-      Server_routes_http_runtime.start_full_health_snapshot_refresh_loop
-        ~sw
-        ~clock
-        ~request_authority:background_request_authority;
       (* Pre-warm shell cache in a separate fiber so it cannot block
          lazy startup tasks or later keeper loop startup
          (#keeper-bootstrap-stuck). *)

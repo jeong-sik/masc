@@ -116,6 +116,7 @@ let with_bundle f =
         { Keeper_identity_tool_search.offered =
             offered [ "jira_search"; "confluence_search" ]
         ; agent_cell = ref None
+        ; history = []
         }
       ~capability_surface
       ()

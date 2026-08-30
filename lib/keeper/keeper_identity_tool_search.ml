@@ -22,6 +22,7 @@
 type surface =
   { offered : Keeper_identity_tools.offered_tool list
   ; agent_cell : Agent_core.Agent.t option ref
+  ; history : Agent_core.Types.message list
   }
 
 type entry =
@@ -37,6 +38,7 @@ type turn_discovery =
 
 type placement =
   { tool : Agent_core.Tool.t
+  ; already_loaded : Agent_core.Tool.t list
   ; observe_turn : unit -> turn_discovery
   }
 
@@ -222,7 +224,48 @@ let observe_turn ~keeper_name ~usage () =
     Loaded_unused loaded
 ;;
 
-let make ~keeper_name ~build { offered; agent_cell } =
+(* What this conversation already asked for, read off its own ToolUse blocks.
+
+   The names are the model's own argument array, not text parsed out of a
+   result: [names] is what it sent, so this reads a field rather than
+   interpreting prose. A name that is no longer offered -- the service was
+   detached, or renamed a tool -- does not match an entry and is dropped,
+   which is the same answer the listing gives for it today.
+
+   Success is not consulted: a load that failed still leaves its ToolUse in
+   history, so a tool that could not be loaded then is placed now. Placing a
+   tool the model asked for and could not have costs bytes; the other
+   direction loses a call. *)
+let already_loaded_from_history ~entries history =
+  let asked = Hashtbl.create 8 in
+  List.iter
+    (fun (message : Agent_core.Types.message) ->
+       List.iter
+         (fun (block : Agent_core.Types.content_block) ->
+            match block with
+            | Agent_core.Types.ToolUse { name; input; _ }
+              when String.equal name tool_name ->
+              (match requested_names input with
+               | Error (_ : string) -> ()
+               | Ok names -> List.iter (fun n -> Hashtbl.replace asked n ()) names)
+            | Agent_core.Types.ToolUse _
+            | Agent_core.Types.Text _
+            | Agent_core.Types.Thinking _
+            | Agent_core.Types.RedactedThinking _
+            | Agent_core.Types.ToolResult _
+            | Agent_core.Types.Image _
+            | Agent_core.Types.Document _
+            | Agent_core.Types.ReasoningDetails _
+            | Agent_core.Types.Audio _ -> ())
+         message.Agent_core.Types.content)
+    history;
+  List.filter_map
+    (fun entry ->
+       if Hashtbl.mem asked entry.name then Some entry.callable else None)
+    entries
+;;
+
+let make ~keeper_name ~build { offered; agent_cell; history } =
   match offered with
   | [] -> None
   | _ :: _ ->
@@ -270,6 +313,7 @@ let make ~keeper_name ~build { offered; agent_cell } =
           Agent_core.Tool.of_schema
             schema
             (Agent_core.Tool.ignoring_execution_env handler)
+      ; already_loaded = already_loaded_from_history ~entries history
       ; observe_turn = observe_turn ~keeper_name ~usage
       }
 ;;

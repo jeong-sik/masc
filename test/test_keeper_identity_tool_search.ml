@@ -67,18 +67,18 @@ let build (offer : Keeper_identity_tools.offered_tool) =
           }))
 ;;
 
-let placement ?(agent_cell = ref None) offering =
+let placement ?(agent_cell = ref None) ?(history = []) offering =
   Keeper_identity_tool_search.make
     ~keeper_name:"search-test"
     ~build
-    { Keeper_identity_tool_search.offered = offering; agent_cell }
+    { Keeper_identity_tool_search.offered = offering; agent_cell; history }
 ;;
 
-let search ?agent_cell offering =
+let search ?agent_cell ?history offering =
   Option.map
     (fun (p : Keeper_identity_tool_search.placement) ->
        p.Keeper_identity_tool_search.tool)
-    (placement ?agent_cell offering)
+    (placement ?agent_cell ?history offering)
 ;;
 
 let the_tool offering =
@@ -380,6 +380,108 @@ let test_a_turn_that_loaded_and_called_nothing_names_what_it_loaded () =
       (p.Keeper_identity_tool_search.observe_turn ()))
 ;;
 
+
+(* One assistant message asking the listing for [names], the shape the model
+   leaves behind in history when it loads a tool. *)
+let asked_for names =
+  { Agent_core.Types.role = Agent_core.Types.Assistant
+  ; content =
+      [ Agent_core.Types.ToolUse
+          { id = "toolu_fixture"
+          ; name = Keeper_identity_tool_search.tool_name
+          ; input =
+              `Assoc [ "names", `List (List.map (fun n -> `String n) names) ]
+          }
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+let already_loaded ?history offering =
+  match placement ?history offering with
+  | Some p ->
+    List.map
+      (fun (t : Agent_core.Tool.t) -> t.Agent_core.Tool.schema.name)
+      p.Keeper_identity_tool_search.already_loaded
+    |> List.sort String.compare
+  | None -> fail "an attached service was offered and produced no placement"
+;;
+
+(* The turn that made a load is the only one it reaches, so a Keeper that
+   works on one thing across several turns re-asks for the same tool every
+   time. Live on 2026-08-30: one Keeper asked for [github_issue_read] on five
+   consecutive turns and for [github_get_label] 34 times in a day. *)
+let test_a_tool_asked_for_earlier_comes_back_with_its_schema () =
+  check
+    (list string)
+    "the tool this conversation asked for is placed again"
+    [ "atlassian_jira_search" ]
+    (already_loaded
+       ~history:[ asked_for [ "atlassian_jira_search" ] ]
+       (offered [ "jira_search", "Search issues"; "confluence_search", "Search pages" ]))
+;;
+
+let test_a_conversation_that_never_asked_carries_nothing () =
+  check
+    (list string)
+    "a Keeper that never used the listing pays nothing for this"
+    []
+    (already_loaded (offered [ "jira_search", "Search issues" ]))
+;;
+
+(* Detached service, renamed tool: the name no longer matches an entry, and
+   nothing is placed for it. Same answer the listing itself gives today. *)
+let test_a_name_no_longer_offered_is_not_placed () =
+  check
+    (list string)
+    "a name that is no longer offered is dropped"
+    []
+    (already_loaded
+       ~history:[ asked_for [ "atlassian_jira_search" ] ]
+       (offered [ "confluence_search", "Search pages" ]))
+;;
+
+let test_repeated_asks_place_the_tool_once () =
+  check
+    (list string)
+    "asking twice does not place the tool twice"
+    [ "atlassian_jira_search" ]
+    (already_loaded
+       ~history:[ asked_for [ "atlassian_jira_search" ]
+               ; asked_for [ "atlassian_jira_search" ]
+               ]
+       (offered [ "jira_search", "Search issues" ]))
+;;
+
+(* Only this listing's calls count. Another tool's arguments may carry a
+   [names] array of its own, and reading those would place tools nobody
+   asked for. *)
+let test_another_tools_arguments_are_not_read () =
+  let other_tool_call =
+    { Agent_core.Types.role = Agent_core.Types.Assistant
+    ; content =
+        [ Agent_core.Types.ToolUse
+            { id = "toolu_other"
+            ; name = "some_other_tool"
+            ; input = `Assoc [ "names", `List [ `String "atlassian_jira_search" ] ]
+            }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  check
+    (list string)
+    "a names array belonging to another tool is not read"
+    []
+    (already_loaded
+       ~history:[ other_tool_call ]
+       (offered [ "jira_search", "Search issues" ]))
+;;
+
 let () =
   run
     "keeper_identity_tool_search"
@@ -394,6 +496,18 @@ let () =
             test_the_listing_costs_less_than_the_schemas
         ; test_case "cuts a long summary without breaking a character" `Quick
             test_a_long_summary_is_cut_without_breaking_a_character
+        ] )
+    ; ( "carried across turns"
+      , [ test_case "a tool asked for earlier comes back with its schema" `Quick
+            test_a_tool_asked_for_earlier_comes_back_with_its_schema
+        ; test_case "a conversation that never asked carries nothing" `Quick
+            test_a_conversation_that_never_asked_carries_nothing
+        ; test_case "a name no longer offered is not placed" `Quick
+            test_a_name_no_longer_offered_is_not_placed
+        ; test_case "repeated asks place the tool once" `Quick
+            test_repeated_asks_place_the_tool_once
+        ; test_case "another tool's arguments are not read" `Quick
+            test_another_tools_arguments_are_not_read
         ] )
     ; ( "loading"
       , [ test_case "makes a named tool callable in the running agent" `Quick

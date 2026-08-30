@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T23:29:06+09:00",
+  "issue": 31974,
+  "source_change_head": "f9725bee1457a419001ed4eab255595956339812",
+  "measurement_source_commit": "8c5c6f6b36d74bd7f809d939c84fc42545086a22",
+  "image_digest": "sha256:5d1a8a0d10651d7a150455fe470597497686036c2ea617ce803e2bd815eedf7f",
+  "binary_sha256": "f657dd28551d1fe70f8b04d04f6c6d1d63a2bb87be0ed01a8b55e18150b4dfdc",
+  "baseline": {
+    "transition": "running_to_failing",
+    "snapshot_age_ms": 27526,
+    "ttl_ms": 60000,
+    "overall_status": "ok",
+    "fleet_status": "ok",
+    "stale_reason": null,
+    "refresh_requested": false
+  },
+  "failed_poc": {
+    "boundary": "lifecycle_event_bus_listener",
+    "accepted": false,
+    "reason": "turn_failed was not published on that listener"
+  },
+  "fixed": {
+    "transition": "running_to_failing",
+    "terminal_reason": "accept_rejected",
+    "immediate": {
+      "overall_status": "warming",
+      "fleet_status": "warming",
+      "snapshot_status": "warming",
+      "refresh_requested": true,
+      "computed_at_unix": null,
+      "snapshot_age_ms": null
+    },
+    "after_refresh": {
+      "failing_keeper_count": 1,
+      "recovering_keeper_count": 1,
+      "executable_keeper_count": 1,
+      "health_policy_claimed": false
+    }
+  },
+  "focused_checks": {
+    "server_build": "pass",
+    "snapshot_cache_case": "1/1",
+    "diff_check": "pass",
+    "ocamlformat_check": "pass"
+  },
+  "shutdown": {
+    "app_exit_code": 0,
+    "provider_exit_code": 137,
+    "volume_preserved": true
+  },
+  "artifact_sha256": {
+    "health-before-failure.json": "afca89b58e0b9042207bb36a25022e4fffd5cb16022579b3b564f4bd1aec0766",
+    "health-immediate-after-transition.json": "e17ef2c85c1e1d955d5bb3a3700b8479e895e3e389538c973ae22ffa25c658e6",
+    "health-after-refresh.json": "ed7df7f2d828ea3ca62684e9ad62b690e080fef011a07615fc6d35f609e1d607",
+    "transition-selected.log": "c12b14406696087d1b9d76aa5eb9aaf32e9348c0da21524446ec70adfd1965ad"
+  },
+  "performance_claim": false
+}

@@ -71,7 +71,7 @@ let tool_names tools =
 
 (* No descriptors, so the only difference between the two shapes is the one
    under test. *)
-let with_bundle f =
+let with_bundle ?(history = []) f =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -116,12 +116,27 @@ let with_bundle f =
         { Keeper_identity_tool_search.offered =
             offered [ "jira_search"; "confluence_search" ]
         ; agent_cell = ref None
-        ; history = []
+        ; history
         }
       ~capability_surface
       ()
   in
   Fun.protect ~finally:bundle.Keeper_tools_agent_core.cleanup (fun () -> f bundle)
+;;
+
+let called name =
+  { Agent_core.Types.role = Agent_core.Types.Assistant
+  ; content =
+      [ Agent_core.Types.ToolUse
+          { id = "toolu_fixture"
+          ; name
+          ; input = `Assoc []
+          }
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
 ;;
 
 let test_the_official_client_lanes_get_the_tools_themselves () =
@@ -185,6 +200,45 @@ let test_the_agent_core_shape_is_what_the_projection_expects () =
          (tool_names bundle.Keeper_tools_agent_core.agent_core_tools)))
 ;;
 
+let test_a_carried_tool_is_part_of_the_agent_core_identity_projection () =
+  let jira = "atlassian_jira_search" in
+  with_bundle ~history:[ called jira ] (fun bundle ->
+    let actual = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
+    let identity_names =
+      Keeper_run_tools_setup.agent_core_identity_names
+        ~attached_names:[ jira; "atlassian_confluence_search" ]
+        ~actual_names:actual
+    in
+    check
+      (list string)
+      "the listing and the carried schema are both projected"
+      [ jira; Keeper_identity_tool_search.tool_name ]
+      identity_names;
+    let expected =
+      Keeper_run_tools_setup.expected_model_tool_names
+        ~skill_catalog:Keeper_skill_catalog.empty
+        ~identity_names
+        ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
+        ()
+    in
+    check
+      (list string)
+      "the carried surface no longer produces a false projection mismatch"
+      expected
+      (List.sort_uniq String.compare actual))
+;;
+
+let test_an_unknown_actual_tool_stays_out_of_the_identity_expectation () =
+  let jira = "atlassian_jira_search" in
+  check
+    (list string)
+    "a configured carried tool is expected, an unknown actual tool is not"
+    [ jira; Keeper_identity_tool_search.tool_name ]
+    (Keeper_run_tools_setup.agent_core_identity_names
+       ~attached_names:[ jira ]
+       ~actual_names:[ jira; "unconfigured_service_tool" ])
+;;
+
 let () =
   run
     "attached tools lane scope"
@@ -201,6 +255,14 @@ let () =
             "builds the agent core shape the projection expects"
             `Quick
             test_the_agent_core_shape_is_what_the_projection_expects
+        ; test_case
+            "projects an attached tool carried from history"
+            `Quick
+            test_a_carried_tool_is_part_of_the_agent_core_identity_projection
+        ; test_case
+            "does not explain an unknown actual tool"
+            `Quick
+            test_an_unknown_actual_tool_stays_out_of_the_identity_expectation
         ] )
     ]
 ;;

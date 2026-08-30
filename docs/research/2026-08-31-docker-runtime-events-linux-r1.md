@@ -18,6 +18,10 @@ auth/current 상태는 바뀌지 않았다. 후계와 다른 volume runtime도 �
 r72 one-click image도 같은 exact source에서 1.185초에 current-ready가 됐고 전용 디렉터리에
 `6.events`를 만들었다. exit 0/OOM false로 끝났다.
 
+r73은 production-shaped image를 SIGKILL했다. 64MiB `6.events`가 volume에 남았지만 후계
+runtime은 이를 stale dump로 판정해 지우고 `7.events`를 만들었다. 후계는 1.078초에 ready가 됐고,
+정상 종료 뒤 events directory의 ring file 수는 0이었다.
+
 ## 공식 근거
 
 [OCaml 5.5 Runtime_events 공식 API](https://ocaml.org/manual/5.5/api/Runtime_events.html)는 tracing이
@@ -86,6 +90,24 @@ config root는 release image 계약대로 `/app/config`였다. events directory�
 - events directory: mode 700, UID/GID 999, file `6.events`
 - auth ok, exit 0/OOM false
 
+## r73 SIGKILL 후계 복구
+
+- source/image: r71과 같음
+- first runtime: `01a05400-3d9a-7000-9652-beee7d59cccc`, current-ready 1.075초
+- fault: Docker SIGKILL, exit 137/OOM false
+- crash remnant: `6.events`, inode 2729492, 68,167,744 bytes
+- successor: `01a05400-b76a-7000-8932-9dfe30e1995b`, current-ready 1.078초
+- successor log: `removed stale dump 6.events (pid 6 no longer exists)`
+- successor ring: `7.events`, 68,167,744 bytes
+- successor clean stop: exit 0/OOM false, 남은 `.events` 파일 0개
+
+SIGKILL 직후 hash는 process 종료 시 mmap의 마지막 변경이 반영돼 실행 중 hash와 달랐다. inode,
+size, mtime은 같았고 파일 존재를 직접 확인했다. 후계가 stale file을 삭제한 뒤 다른 PID 이름으로
+새 ring을 만들었으므로 이전 hash를 current ring 증거로 재사용하지 않았다.
+
+이 결과에 맞춰 `Masc_runtime_events.mli`도 고쳤다. 정상 종료에서는 OCaml runtime이 ring file을
+지우며, stale pruning의 실제 대상은 SIGKILL 같은 비정상 종료가 남긴 파일이다.
+
 ## 검증과 경계
 
 - `test_install_script`: 44/44 pass
@@ -99,5 +121,6 @@ config root는 release image 계약대로 `/app/config`였다. events directory�
 ## 근거
 
 - [근거] OCaml 5.5 공식 Runtime_events API, 2026-08-31 확인, 신뢰도 High.
-- [근거] r70/r71/r72 source, image, binary/helper, runtime health, Docker inspect, ring file,
-  preflight rejection, token hash, 2026-08-31T03:46:00+09:00 확인, 신뢰도 High.
+- [근거] r70/r71/r72/r73 source, image, binary/helper, runtime health, Docker inspect, ring file,
+  preflight rejection, token hash, SIGKILL/clean-stop recovery,
+  2026-08-31T03:50:00+09:00 확인, 신뢰도 High.

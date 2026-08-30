@@ -618,6 +618,67 @@ let test_thread_resume_sends_dynamic_tools () =
           |> Yojson.Safe.Util.to_string))
 ;;
 
+(* The app-server takes two encodings of [dynamicTools] and refuses a mix. The
+   legacy one is tagged ["type": "function"] and cannot defer -- it answers
+   [deferLoading: true] with "deferred dynamic tool must include a namespace"
+   and has nowhere to put one. So the tag has to be absent and the namespace
+   present, together, or the whole thread/start is rejected. A test that
+   checked only one of them would pass on a spec the server will not take. *)
+let test_dynamic_tools_are_declared_deferred_under_one_namespace () =
+  let capture_path = Filename.temp_file "masc-codex-defer-requests-" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove capture_path)
+    (fun () ->
+       let tool : Runtime_codex_app_server.dynamic_tool =
+         { name = "masc_probe"
+         ; description = "Return a deterministic fixture marker"
+         ; input_schema = `Assoc [ "type", `String "object" ]
+         ; call =
+             (fun ~call_id:_ _ ->
+               { success = true; content = "unused"; abort_turn = None })
+         }
+       in
+       with_fixture
+         ~capture_path
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun path ->
+            match run_fixture ~dynamic_tools:[ tool ] path with
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> ());
+       let requests =
+         In_channel.with_open_bin capture_path (fun input ->
+           In_channel.input_lines input |> List.map Yojson.Safe.from_string)
+       in
+       let tool_json =
+         List.find (fun json -> Yojson.Safe.Util.member "id" json = `Int 3) requests
+         |> Yojson.Safe.Util.member "params"
+         |> Yojson.Safe.Util.member "dynamicTools"
+         |> Yojson.Safe.Util.to_list
+         |> List.hd
+       in
+       check
+         bool
+         "the legacy type tag is absent, so this is the canonical encoding"
+         true
+         (Yojson.Safe.Util.member "type" tool_json = `Null);
+       check
+         string
+         "every tool is declared under one namespace"
+         "masc"
+         (Yojson.Safe.Util.member "namespace" tool_json |> Yojson.Safe.Util.to_string);
+       check
+         bool
+         "and deferred, which is what the namespace is required for"
+         true
+         (Yojson.Safe.Util.member "deferLoading" tool_json |> Yojson.Safe.Util.to_bool))
+;;
+
 let test_thread_resume_rejects_identity_mismatch () =
   let wrong_thread =
     {|{"id":3,"result":{"thread":{"id":"thread-other"},"model":"gpt-fixture"}}|}
@@ -3669,6 +3730,10 @@ let () =
             "thread resume sends dynamic tools"
             `Quick
             test_thread_resume_sends_dynamic_tools
+        ; test_case
+            "dynamic tools are declared deferred under one namespace"
+            `Quick
+            test_dynamic_tools_are_declared_deferred_under_one_namespace
         ; test_case
             "thread resume rejects identity mismatch"
             `Quick

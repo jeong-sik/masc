@@ -41,7 +41,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-DEFAULT_CONFIG = os.path.expanduser("~/me/.masc/config/runtime.toml")
+DEFAULT_BASE = os.environ.get("MASC_BASE_PATH", os.path.expanduser("~/me"))
+DEFAULT_CONFIG = os.path.join(DEFAULT_BASE, ".masc", "config", "runtime.toml")
 
 # The prompt asks for a key the schema forbids. Nothing else about the request
 # is interesting; a bigger schema measures the same thing more slowly.

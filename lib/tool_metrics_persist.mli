@@ -11,21 +11,28 @@
 
     @since 2.108.0 — Issue #3280 *)
 
-val enqueue : Tool_result.result -> unit
-(** [enqueue result] buffers a tool invocation record for eventual disk flush.
+val enqueue : base_path:string -> Tool_result.result -> unit
+(** [enqueue ~base_path result] publishes an atomic pending-spool file before
+    buffering the invocation record for eventual batched JSONL flush.
+    A successful publication survives process termination after [enqueue]
+    returns; this is not a host power-loss or network-filesystem guarantee.
     Safe to call from any fiber. Records are batched and written periodically.
     Reaching half of the bounded queue wakes the background writer early.
     If the bounded best-effort queue is full, the record is dropped instead of
     blocking the tool completion path. A record whose disk append fails stays
     inside the same capacity bound and is retried before newer records. The
     background writer applies a bounded retry delay rather than spinning while
-    storage remains unavailable. *)
+    storage remains unavailable. If pending publication fails, the record stays
+    in the memory queue and the failure is visible in [persistence_snapshot]. *)
 
 type hydrate_report = {
   loaded_records : int;
   malformed_records : int;
   invalid_records : int;
   pruned_files : int;
+  recovered_pending_records : int;
+  deduplicated_pending_records : int;
+  invalid_pending_files : int;
 }
 
 type persistence_snapshot = {
@@ -36,10 +43,14 @@ type persistence_snapshot = {
   queue_depth : int;
   retry_queue_depth : int;
   in_flight_records : int;
+  spooling_records : int;
+  spool_backed_queue_depth : int;
   queue_capacity : int;
   queue_high_watermark : int;
   queue_full_dropped_records : int;
   append_failed_records : int;
+  spool_write_failed_records : int;
+  spool_delete_failed_records : int;
   flushed_records : int;
   flush_batches : int;
   last_flush_trigger : string option;
@@ -47,12 +58,15 @@ type persistence_snapshot = {
   last_flush_failed_rows : int option;
   last_flush_at_unix : float option;
   last_append_error : string option;
+  last_spool_error : string option;
 }
 
 val persistence_snapshot : unit -> persistence_snapshot
 (** Current-process observation of the bounded persistence queue and writer.
-    [queue_depth] includes ready, retry, and in-flight records. Counters start
-    at zero on process start and are not hydrated from JSONL.
+    [queue_depth] includes ready, retry, in-flight, and still-publishing spool
+    records. [spool_backed_queue_depth] is the subset already represented by
+    an atomic pending file. Counters start at zero on process start and are not
+    hydrated from JSONL.
 
     [append_failed_records] counts failed append attempts; the same retained
     record can contribute more than once while storage remains unavailable. *)
@@ -103,4 +117,7 @@ module For_testing : sig
     clock:_ Eio.Time.clock ->
     interval_s:float ->
     [ `High_watermark | `Timer ]
+
+  val set_pending_write_guard :
+    (string -> string -> (unit, string) result) -> unit
 end

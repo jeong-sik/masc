@@ -47,6 +47,10 @@ let read_records ~base_path =
     Dated_jsonl.iter_all store (fun json -> records := json :: !records);
     List.rev !records)
 
+let pending_records ~base_path =
+  let dir = Filename.concat base_path "data/tool-metrics-pending" in
+  if Sys.file_exists dir then Fs_compat.read_dir dir else []
+
 let string_field key json =
   match Safe_ops.json_string_opt key json with
   | Some value -> value
@@ -78,16 +82,20 @@ let write_old_record ~base_path json =
 
 let test_enqueue_flush_current_records () =
   with_tmp_dir (fun base_path ->
-    P.enqueue (make_result ~name:"alpha" ~success:true ~duration_ms:10.0);
-    P.enqueue (make_result ~name:"alpha" ~success:false ~duration_ms:5.0);
-    P.enqueue
+    P.enqueue ~base_path (make_result ~name:"alpha" ~success:true ~duration_ms:10.0);
+    P.enqueue ~base_path (make_result ~name:"alpha" ~success:false ~duration_ms:5.0);
+    P.enqueue ~base_path
       (R.Deferred
          { R.tool_name = "alpha"
          ; data = `Null
          ; metadata = None
          ; duration_ms = 3.0
          });
-    P.enqueue (make_result ~name:"beta" ~success:true ~duration_ms:20.0);
+    P.enqueue ~base_path (make_result ~name:"beta" ~success:true ~duration_ms:20.0);
+    Alcotest.(check int)
+      "four durable pending files published before flush"
+      4
+      (List.length (pending_records ~base_path));
     P.flush_now ~base_path;
     let records = read_records ~base_path in
     Alcotest.(check int) "four records written" 4 (List.length records);
@@ -96,6 +104,13 @@ let test_enqueue_flush_current_records () =
       [ "completed"; "failed"; "deferred"; "completed" ]
       (List.map (string_field "disposition") records);
     Alcotest.(check bool)
+      "every current row carries a durable record id"
+      true
+      (List.for_all
+         (fun json ->
+           String.length (string_field "record_id" json) = 36)
+         records);
+    Alcotest.(check bool)
       "removed success-bit format is not emitted"
       true
       (List.for_all
@@ -103,6 +118,10 @@ let test_enqueue_flush_current_records () =
          records);
     let snapshot = P.persistence_snapshot () in
     Alcotest.(check int) "queue drained" 0 snapshot.queue_depth;
+    Alcotest.(check int)
+      "pending files removed after final append"
+      0
+      (List.length (pending_records ~base_path));
     Alcotest.(check int) "four records flushed" 4 snapshot.flushed_records;
     Alcotest.(check int) "one flush batch" 1 snapshot.flush_batches;
     Alcotest.(check int) "no append failures" 0 snapshot.append_failed_records;
@@ -117,18 +136,23 @@ let test_enqueue_flush_current_records () =
 
 let test_reset_discards_queued_records () =
   with_tmp_dir (fun base_path ->
-    P.enqueue (make_result ~name:"alpha" ~success:true ~duration_ms:1.0);
+    P.enqueue ~base_path (make_result ~name:"alpha" ~success:true ~duration_ms:1.0);
     P.reset_for_testing ();
     P.flush_now ~base_path;
     Alcotest.(check int)
       "reset leaves no persisted rows"
       0
-      (List.length (read_records ~base_path)))
+      (List.length (read_records ~base_path));
+    Alcotest.(check int)
+      "reset only discards memory and preserves durable pending row"
+      1
+      (List.length (pending_records ~base_path)))
 
 let test_enqueue_drops_when_queue_full () =
   with_tmp_dir (fun base_path ->
+    P.For_testing.set_pending_write_guard (fun _path _content -> Ok ());
     for i = 1 to 4101 do
-      P.enqueue
+      P.enqueue ~base_path
         (make_result
            ~name:(Printf.sprintf "tool-%04d" i)
            ~success:true
@@ -159,10 +183,11 @@ let test_enqueue_drops_when_queue_full () =
 
 let test_enqueue_multidomain_drop_is_bounded () =
   with_tmp_dir (fun base_path ->
+    P.For_testing.set_pending_write_guard (fun _path _content -> Ok ());
     let spawn producer =
       Domain.spawn (fun () ->
         for i = 1 to 1500 do
-          P.enqueue
+          P.enqueue ~base_path
             (make_result
                ~name:(Printf.sprintf "domain-%d-tool-%04d" producer i)
                ~success:true
@@ -184,7 +209,8 @@ let test_append_failure_and_recovery_are_observable () =
       ~finally:(fun () -> Dated_jsonl.set_append_guard run_append)
       (fun () ->
         Dated_jsonl.set_append_guard (fun _ -> raise (Failure "forced append failure"));
-        P.enqueue (make_result ~name:"failed-write" ~success:true ~duration_ms:1.0);
+        P.enqueue ~base_path
+          (make_result ~name:"failed-write" ~success:true ~duration_ms:1.0);
         P.flush_now ~base_path;
         let failed = P.persistence_snapshot () in
         Alcotest.(check int) "failed row not counted as flushed" 0 failed.flushed_records;
@@ -192,6 +218,14 @@ let test_append_failure_and_recovery_are_observable () =
         Alcotest.(check int) "failed row enters retry queue" 1 failed.retry_queue_depth;
         Alcotest.(check int) "no record remains in flight" 0 failed.in_flight_records;
         Alcotest.(check int) "append failure counted" 1 failed.append_failed_records;
+        Alcotest.(check int)
+          "failed row remains spool-backed"
+          1
+          failed.spool_backed_queue_depth;
+        Alcotest.(check int)
+          "pending file remains until final append"
+          1
+          (List.length (pending_records ~base_path));
         Alcotest.(check (option int))
           "failed row visible on last batch"
           (Some 1)
@@ -206,6 +240,10 @@ let test_append_failure_and_recovery_are_observable () =
         Alcotest.(check int) "retained row flushed after recovery" 1 recovered.flushed_records;
         Alcotest.(check int) "retry queue drained" 0 recovered.retry_queue_depth;
         Alcotest.(check int) "no pending rows after recovery" 0 recovered.queue_depth;
+        Alcotest.(check int)
+          "recovery removes pending file"
+          0
+          (List.length (pending_records ~base_path));
         Alcotest.(check int)
           "historical append failure retained"
           1
@@ -223,8 +261,121 @@ let test_append_failure_and_recovery_are_observable () =
           [ "failed-write" ]
           (read_records ~base_path |> List.map (string_field "tool_name"))))
 
+let test_pending_spool_recovers_after_memory_loss () =
+  with_tmp_dir (fun base_path ->
+    Tool_metrics.clear ();
+    Fun.protect
+      ~finally:Tool_metrics.clear
+      (fun () ->
+        P.enqueue ~base_path
+          (make_result ~name:"crash-window" ~success:true ~duration_ms:7.0);
+        Alcotest.(check int)
+          "accepted row is durable before final flush"
+          1
+          (List.length (pending_records ~base_path));
+        P.reset_for_testing ();
+        let report =
+          match P.hydrate ~base_path ~retention_days:30 with
+          | Ok report -> report
+          | Error error ->
+            Alcotest.failf
+              "hydrate failed: %s"
+              (Dated_jsonl.read_error_to_string error)
+        in
+        Alcotest.(check int) "no final rows existed" 0 report.loaded_records;
+        Alcotest.(check int)
+          "pending row recovered"
+          1
+          report.recovered_pending_records;
+        Alcotest.(check int)
+          "recovered row restored in aggregate"
+          1
+          (Option.get (Tool_metrics.stats_for "crash-window")).call_count;
+        Alcotest.(check int)
+          "recovered row re-enters retry queue"
+          1
+          (P.persistence_snapshot ()).retry_queue_depth;
+        P.flush_now ~base_path;
+        Alcotest.(check int)
+          "recovered row reaches final JSONL"
+          1
+          (List.length (read_records ~base_path));
+        Alcotest.(check int)
+          "pending file removed after recovery flush"
+          0
+          (List.length (pending_records ~base_path))))
+
+let test_pending_spool_deduplicates_final_row () =
+  with_tmp_dir (fun base_path ->
+    Tool_metrics.clear ();
+    Fun.protect
+      ~finally:Tool_metrics.clear
+      (fun () ->
+        P.enqueue ~base_path
+          (make_result ~name:"dedup-window" ~success:true ~duration_ms:9.0);
+        let pending_name = List.hd (pending_records ~base_path) in
+        let pending_path =
+          Filename.concat
+            (Filename.concat base_path "data/tool-metrics-pending")
+            pending_name
+        in
+        let json = Yojson.Safe.from_string (Fs_compat.load_file pending_path) in
+        let store =
+          Dated_jsonl.create
+            ~base_dir:(Filename.concat base_path "data/tool-metrics")
+            ()
+        in
+        Dated_jsonl.append store json;
+        P.reset_for_testing ();
+        let report =
+          match P.hydrate ~base_path ~retention_days:30 with
+          | Ok report -> report
+          | Error error ->
+            Alcotest.failf
+              "hydrate failed: %s"
+              (Dated_jsonl.read_error_to_string error)
+        in
+        Alcotest.(check int) "final row loaded once" 1 report.loaded_records;
+        Alcotest.(check int)
+          "stale pending row deduplicated"
+          1
+          report.deduplicated_pending_records;
+        Alcotest.(check int)
+          "deduplicated row not queued again"
+          0
+          (P.persistence_snapshot ()).queue_depth;
+        Alcotest.(check int)
+          "stale pending file removed"
+          0
+          (List.length (pending_records ~base_path));
+        Alcotest.(check int)
+          "aggregate contains one call"
+          1
+          (Option.get (Tool_metrics.stats_for "dedup-window")).call_count))
+
+let test_spool_failure_falls_back_to_observable_memory_queue () =
+  with_tmp_dir (fun base_path ->
+    P.For_testing.set_pending_write_guard (fun _path _content ->
+      Error "forced spool failure");
+    P.enqueue ~base_path
+      (make_result ~name:"spool-failed" ~success:true ~duration_ms:1.0);
+    let snapshot = P.persistence_snapshot () in
+    Alcotest.(check int) "row remains queued" 1 snapshot.queue_depth;
+    Alcotest.(check int) "row is not spool-backed" 0 snapshot.spool_backed_queue_depth;
+    Alcotest.(check int) "spool failure counted" 1 snapshot.spool_write_failed_records;
+    Alcotest.(check bool)
+      "spool error visible"
+      true
+      (Option.is_some snapshot.last_spool_error);
+    P.flush_now ~base_path;
+    Alcotest.(check int)
+      "memory fallback still reaches final JSONL"
+      1
+      (List.length (read_records ~base_path)))
+
 let test_high_watermark_wakes_flush_waiter clock =
-  with_tmp_dir (fun _base_path ->
+  with_tmp_dir (fun base_path ->
+    P.For_testing.set_pending_write_guard (fun _path _content -> Ok ());
     Eio.Switch.run (fun sw ->
       let observed, resolve_observed = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
@@ -236,7 +387,7 @@ let test_high_watermark_wakes_flush_waiter clock =
       let producer =
         Domain.spawn (fun () ->
           for i = 1 to P.For_testing.high_watermark do
-            P.enqueue
+            P.enqueue ~base_path
               (make_result
                  ~name:(Printf.sprintf "wake-tool-%04d" i)
                  ~success:true
@@ -327,6 +478,10 @@ let test_hydrate_replaces_metrics_and_skips_bad_rows () =
         Alcotest.(check int) "one malformed JSON row skipped" 1 report.malformed_records;
         Alcotest.(check int) "three invalid rows skipped" 3 report.invalid_records;
         Alcotest.(check int) "old day file pruned" 1 report.pruned_files;
+        Alcotest.(check int)
+          "no pending rows recovered"
+          0
+          report.recovered_pending_records;
         Alcotest.(check bool) "expired row absent" true
           (Option.is_none (Tool_metrics.stats_for "expired"));
         let alpha = Option.get (Tool_metrics.stats_for "alpha") in
@@ -364,6 +519,15 @@ let () =
         ; eio_test
             "append failure and recovery remain observable"
             test_append_failure_and_recovery_are_observable
+        ; eio_test
+            "pending spool recovers after in-memory state is lost"
+            test_pending_spool_recovers_after_memory_loss
+        ; eio_test
+            "startup deduplicates final rows with stale pending files"
+            test_pending_spool_deduplicates_final_row
+        ; eio_test
+            "spool failures stay observable with memory fallback"
+            test_spool_failure_falls_back_to_observable_memory_queue
         ; eio_clock_test
             "cross-domain high watermark wakes the flush waiter"
             test_high_watermark_wakes_flush_waiter

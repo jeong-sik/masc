@@ -550,8 +550,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      with
      | Ok report ->
        Log.Metrics.info
-         "tool_metrics_persist: hydrated %d record(s), skipped malformed=%d invalid=%d, pruned=%d file(s)"
+         "tool_metrics_persist: hydrated %d record(s), recovered pending=%d deduplicated pending=%d invalid pending=%d, skipped malformed=%d invalid=%d, pruned=%d file(s)"
          report.loaded_records
+         report.recovered_pending_records
+         report.deduplicated_pending_records
+         report.invalid_pending_files
          report.malformed_records
          report.invalid_records
          report.pruned_files
@@ -571,7 +574,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     match outcome, result with
     | Dispatch_outcome.Handled, Some r ->
       Tool_metrics.record r;
-      Tool_metrics_persist.enqueue r
+      Tool_metrics_persist.enqueue ~base_path:tool_metrics_base_path r
     | _ -> ());
   Tool_metrics_persist.start_flush_fiber
     ~sw

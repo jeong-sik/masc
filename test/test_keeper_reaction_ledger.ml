@@ -141,6 +141,13 @@ let read_recent_rows ~base_path ~keeper_name ~limit =
       entries
 ;;
 
+let with_state_change_observer observer f =
+  Keeper_reaction_ledger.install_state_change_observer observer;
+  Fun.protect
+    ~finally:(fun () -> Keeper_reaction_ledger.install_state_change_observer ignore)
+    f
+;;
+
 let require_complete_evidence label = function
   | Error error ->
     failf
@@ -194,6 +201,68 @@ let test_event_queue_stimulus_and_turn_reaction () =
     "turn_started"
     "kind"
     (reaction_row |> member "reaction")
+;;
+
+let test_direct_append_state_change_observer_contract () =
+  let notifications = ref 0 in
+  with_state_change_observer
+    (fun () -> incr notifications)
+    (fun () ->
+       with_temp_base @@ fun base_path ->
+       let keeper_name = "observer-keeper" in
+       let stimulus = board_stimulus ~post_id:"observer-post" () in
+       Keeper_reaction_ledger.record_event_queue_stimulus
+         ~base_path
+         ~keeper_name
+         stimulus;
+       check int "successful stimulus append notifies" 1 !notifications;
+       Keeper_reaction_ledger.record_event_queue_turn_started
+         ~base_path
+         ~keeper_name
+         stimulus;
+       check int "successful turn-start append notifies" 2 !notifications;
+       let rows = read_recent_rows ~base_path ~keeper_name ~limit:10 in
+       check int "both notified rows are durable" 2 (List.length rows));
+  notifications := 0;
+  with_state_change_observer
+    (fun () -> incr notifications)
+    (fun () ->
+       with_temp_base @@ fun base_path ->
+       let keeper_name = "append-failure-keeper" in
+       let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+       mkdir_p (Filename.dirname ledger_dir);
+       write_file ledger_dir "not a directory";
+       let append_failed =
+         try
+           Keeper_reaction_ledger.record_event_queue_stimulus
+             ~base_path
+             ~keeper_name
+             (board_stimulus ~post_id:"append-failure" ());
+           false
+         with
+         | _ -> true
+       in
+       check bool "ledger append fails" true append_failed;
+       check int "failed append does not notify" 0 !notifications)
+;;
+
+let test_direct_append_observer_failure_is_isolated () =
+  with_state_change_observer
+    (fun () -> failwith "observer fault")
+    (fun () ->
+       with_temp_base @@ fun base_path ->
+       let keeper_name = "observer-failure-keeper" in
+       let stimulus = board_stimulus ~post_id:"observer-failure" () in
+       Keeper_reaction_ledger.record_event_queue_stimulus
+         ~base_path
+         ~keeper_name
+         stimulus;
+       Keeper_reaction_ledger.record_event_queue_turn_started
+         ~base_path
+         ~keeper_name
+         stimulus;
+       let rows = read_recent_rows ~base_path ~keeper_name ~limit:10 in
+       check int "observer failure preserves both durable rows" 2 (List.length rows))
 ;;
 
 
@@ -1218,6 +1287,14 @@ let () =
             "unexpected schema rows cannot double-count current occurrences"
             `Quick
             test_unexpected_schema_rows_are_quarantined_without_double_counting
+        ; test_case
+            "direct append observer follows persistence"
+            `Quick
+            test_direct_append_state_change_observer_contract
+        ; test_case
+            "direct append observer failure is isolated"
+            `Quick
+            test_direct_append_observer_failure_is_isolated
         ; test_case
             "quarantine remains keeper-local"
             `Quick

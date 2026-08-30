@@ -22,6 +22,18 @@ type reaction_decode_error = Unknown_reaction_kind of string
 
 module Event_id_set = Set.Make (String)
 
+let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
+let install_state_change_observer observer = Atomic.set state_change_observer observer
+
+let notify_state_change_observer ~keeper_name =
+  try (Atomic.get state_change_observer) () with
+  | exn ->
+    Log.Keeper.warn
+      "reaction ledger state-change observer failed keeper=%s: %s"
+      keeper_name
+      (Printexc.to_string exn)
+;;
+
 (* The storage namespace and row schema advance together. Readers inspect
    exactly this namespace, keeping exact evidence under one authority. *)
 let storage_generation = "v7"
@@ -285,7 +297,8 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
 let record_event_queue_stimulus ~base_path ~keeper_name stimulus =
   Dated_jsonl.append
     (store_for_base_path ~base_path ~keeper_name)
-    (stimulus_json ~keeper_name stimulus)
+    (stimulus_json ~keeper_name stimulus);
+  notify_state_change_observer ~keeper_name
 ;;
 
 let event_queue_turn_started_json ~keeper_name stimulus =
@@ -311,7 +324,8 @@ let event_queue_turn_started_json ~keeper_name stimulus =
 let record_event_queue_turn_started ~base_path ~keeper_name stimulus =
   Dated_jsonl.append
     (store_for_base_path ~base_path ~keeper_name)
-    (event_queue_turn_started_json ~keeper_name stimulus)
+    (event_queue_turn_started_json ~keeper_name stimulus);
+  notify_state_change_observer ~keeper_name
 ;;
 
 let reaction_kind_of_transition = function

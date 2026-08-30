@@ -381,13 +381,15 @@ seed_case_source_memory() {
     return 2
   fi
 
-  local age_sec observed_at source_path stale_source claim digest snapshot_path
+  local age_sec observed_at source_path claim digest snapshot_path
   age_sec="$(jq -r '.age_sec | floor' "${declaration}")"
   observed_at=$(( $(date +%s) - age_sec ))
   source_path="$(jq -r '.source_path' "${declaration}")"
-  stale_source="$(jq -rj '.stale_source' "${declaration}")"
   claim="$(jq -r '.claim' "${declaration}")"
-  digest="sha256:$(printf '%s' "${stale_source}" | shasum -a 256 | awk '{print $1}')"
+  # Keep the declared bytes exact. Command substitution strips trailing
+  # newlines, so only the digest output may cross that boundary; the source
+  # bytes stream directly from jq into shasum.
+  digest="sha256:$(jq -rj '.stale_source' "${declaration}" | shasum -a 256 | awk '{print $1}')"
   snapshot_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-source-current.json"
   mkdir -p "$(dirname "${snapshot_path}")"
   jq -n \

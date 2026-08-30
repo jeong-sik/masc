@@ -33,7 +33,8 @@ val make_trust_policy :
 (** Build the only live-request Host trust policy.  [bind_host]/[bind_port]
     are the actual listener identity and [explicit_base_url] is the configured
     public identity (normally [MASC_HTTP_BASE_URL]).  No request header is a
-    trust-policy input. *)
+    trust-policy input. A wildcard bind host is represented by the configured
+    loopback peer because wildcard addresses cannot be wire authorities. *)
 
 val trust_policy_error_to_string : trust_policy_error -> string
 

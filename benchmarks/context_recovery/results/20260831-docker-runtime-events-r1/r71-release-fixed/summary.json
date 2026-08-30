@@ -1,0 +1,59 @@
+{
+  "schema": "masc.release_runtime_events_and_shared_lease.runtime_proof.v1",
+  "source_head": "dee02ce57e556aa91f342e2701f5319fe0db7292",
+  "image_id": "sha256:3d90430e8a37551b3928cbad7a18b342bda316437f7262a44a4baaa7be1108db",
+  "binary_sha256": "dc2efc123d2052d00ce0cb578230fb9c7bfff08bb13940a34fc9613e3eeeba75",
+  "preflight_helper_sha256": "10e76b3801729f95d8aa832e4bf3745d69c4151d8d5db6310c49b7205dddf7bc",
+  "image_kind": "production-shaped locally-built; not a published release artifact",
+  "runtime_events": {
+    "directory": "/app/.masc/runtime/events",
+    "mode": "700",
+    "owner_uid": 999,
+    "first_file": "7.events",
+    "first_started_without_override": true
+  },
+  "first": {
+    "runtime": "01a053fa-16ac-7000-9291-c9fc1b05ebc6",
+    "startup_elapsed_sec": 1.0665459632873535,
+    "config_root": {
+      "path": "/app/config",
+      "exists": true,
+      "source": "env"
+    },
+    "before_second": {
+      "full": "ready",
+      "auth": "ok"
+    },
+    "after_second": {
+      "full": "ready",
+      "auth": "ok",
+      "env_token_verifies": true
+    },
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "second_same_volume": {
+    "started_at": "2026-08-30T18:41:51.78320438Z",
+    "finished_at": "2026-08-30T18:41:51.850013589Z",
+    "exit_code": 124,
+    "oom_killed": false,
+    "token_hash_unchanged": true,
+    "rejection": "deployment preflight helper: workspace writer lease is already owned"
+  },
+  "successor_same_volume": {
+    "runtime": "01a053fa-ce8b-7000-b29c-fe9152106bf4",
+    "startup_elapsed_sec": 1.065648078918457,
+    "full": "ready",
+    "auth": "ok",
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "concurrent_different_volume": {
+    "runtime": "01a053fa-c6fd-7000-8059-0b5ad68227da",
+    "startup_elapsed_sec": 1.0638220310211182,
+    "full": "ready",
+    "auth": "ok",
+    "exit_code": 0,
+    "oom_killed": false
+  }
+}

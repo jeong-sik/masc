@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T17:57:04+09:00",
+  "source_change_commit": "da9e8d4f90988856f7bf56f23fd3c4584354bb38",
+  "measurement_source_commit": "0c18efde2e953e80d04dd1c7555a808cc3e1cce2",
+  "image_digest": "sha256:22a5ea44acf8afef75508599c317d3fc0b3f92dc74b97123c49fd0c66ab1e92e",
+  "binary_sha256": "5fa2a1e7b64af77b95dab38f063234949c26c9588793ed6786ccf559e0d3e77d",
+  "runtime_instance_ids": [
+    "01a051e1-73a7-7000-a13d-f56ed911d570",
+    "01a051e1-ba33-7000-b983-b08133510994",
+    "01a051e2-c549-7000-837f-d07cd4196da3"
+  ],
+  "compose_projection": {
+    "published_port": 9546,
+    "target_port": 8080,
+    "masc_http_base_url": "http://localhost:9546",
+    "config_validation": "pass"
+  },
+  "same_image_control": {
+    "masc_http_base_url_present": false,
+    "normal_mapped_host_status": 400,
+    "forced_internal_host_status": 200,
+    "container_exit_code": 0
+  },
+  "fixed": {
+    "normal_127_host_status": 200,
+    "normal_localhost_status": 200,
+    "dashboard_final_status": 200,
+    "first_restart_normal_status": 200,
+    "second_restart_normal_status": 200,
+    "foreign_host_status": 400,
+    "foreign_host_after_restart_status": 400,
+    "wrong_loopback_port_status": 400,
+    "container_exit_code": 0,
+    "volumes_preserved": true
+  },
+  "artifact_sha256": {
+    "image-build.log": "a200959838e7a999e4c2ca70cdad3f71ece17dc29d853adeae20d2da8d5b68f0",
+    "compose-config-9546.json": "1d5018f716ae0467e1f75eec640d1bc312149cd5b5258d926f53b9233ff0b893",
+    "container-build-commit.txt": "af46d38795789a3f1a66806da2857f460d07736d7a6c461f142056df75963eb8",
+    "container-binary-sha256.txt": "27de48497d9f6467637c9a237dcbe7ea17539d59c26d08bd0bfa5451ff3189cb",
+    "health-normal-localhost.json": "701e75f7c529be2c7217c808304d6050a27a477032efce8798cdc079a50d0124",
+    "health-after-restart-ready.json": "95738fc212b7ddcaca097ac92d28724f48a53be2d7350f25e98fc0a9419df667",
+    "health-second-restart.json": "9b66aa19c8c1ca6102286f5608111546f24cbf0fec5f60142a807c5174b3934f",
+    "health-attacker.json": "9899c6d6b7c6164b2154cfa135c99258254e3c157c23efc5ab8e4a30f28da73f",
+    "health-wrong-port.json": "9899c6d6b7c6164b2154cfa135c99258254e3c157c23efc5ab8e4a30f28da73f",
+    "control-normal-host.json": "9899c6d6b7c6164b2154cfa135c99258254e3c157c23efc5ab8e4a30f28da73f",
+    "control-internal-host.json": "04c7b14a36b91e5df217b7f689073486301a57aa9813cb8fe1f96268b950c6f2",
+    "fixed-server-full.log": "75454770d6ec483a6f8f5f2fc5af49b0c10ffdc3353762de8c47b8386b874e26",
+    "control-server-full.log": "cc7b2964e6f98814142f0fd4c156aaa729391a783c0c3c9a187c9e2ea6f6d1d7"
+  },
+  "performance_claim": false
+}

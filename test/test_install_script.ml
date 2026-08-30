@@ -641,6 +641,13 @@ let test_oneclick_image_stamps_copied_dashboard_bundle () =
 RUN touch /app/assets/dashboard/.build-stamp"
 ;;
 
+let test_oneclick_image_opts_into_classic_local_sandbox () =
+  assert_contains
+    "one-click image explicitly enables its classic local sandbox"
+    (oneclick_dockerfile ())
+    "ENV MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1"
+;;
+
 let test_binary_checks_use_install_environment () =
   let script = install_script () in
   assert_not_contains
@@ -1437,6 +1444,10 @@ let () =
             "one-click image stamps copied dashboard bundle"
             `Quick
             test_oneclick_image_stamps_copied_dashboard_bundle
+        ; test_case
+            "one-click image opts into classic local sandbox"
+            `Quick
+            test_oneclick_image_opts_into_classic_local_sandbox
         ; test_case
             "installer fetches deployment preflight companions"
             `Quick

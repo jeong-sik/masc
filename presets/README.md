@@ -47,7 +47,9 @@ Docker container. With `sandbox_profile = "docker"` each keeper Execute would
 spawn a nested container (Docker-in-Docker), which needs a mounted host docker
 socket and fails closed on a plain `docker compose up`. The classic-team demo
 keepers collaborate over the board/tasks/chat and do not require
-container-isolated shell execution to show the dashboard working.
+container-isolated shell execution to show the dashboard working. The
+one-click image therefore sets `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1` explicitly;
+the global server default remains fail-closed outside that image.
 Root fix: when running the server natively on a host (not in a container),
 override to `sandbox_profile = "docker"` per keeper for real Execute isolation,
 or mount `/var/run/docker.sock` into the server container and switch back.

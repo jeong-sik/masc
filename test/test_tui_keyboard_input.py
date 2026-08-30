@@ -1557,7 +1557,18 @@ def run_terminal_scenario(
     finally:
         if process is not None and process.poll() is None:
             kill_process_group(process)
-            process.wait(timeout=10.0)
+            try:
+                process.wait(timeout=10.0)
+            except subprocess.TimeoutExpired:
+                # A raise here replaces whatever the body raised, and the
+                # body's exception is the one that says why the scenario
+                # failed. Four scenarios were reported as
+                # "Command ... timed out after 10.0 seconds" -- the cleanup
+                # struggling to reap a TUI that was already wedged -- with the
+                # assertion that got them there thrown away. Only re-raise
+                # when the body finished cleanly and this is the failure.
+                if sys.exc_info()[0] is None:
+                    raise
         os.close(master_fd)
         os.close(slave_fd)
 
@@ -2465,6 +2476,19 @@ def quit_from_compact_message(
     os.write(master_fd, b"q")
 
 
+def block_stderr_redirect(base_path: str) -> None:
+    """Put a file where masc_tui wants its log directory.
+
+    [redirect_stderr_off_terminal] opens <base>/.masc/logs/masc-tui-<pid>.log
+    and gives up on any Unix_error or Sys_error, leaving stderr on the
+    terminal. A regular file at .masc/logs makes both the mkdir and the open
+    fail, which is the state a read-only or full disk produces.
+    """
+    masc = Path(base_path) / ".masc"
+    masc.mkdir(parents=True, exist_ok=True)
+    (masc / "logs").write_text("", encoding="utf-8")
+
+
 def repair_after_console_diagnostic(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -2476,31 +2500,24 @@ def repair_after_console_diagnostic(
     start = len(output)
     keeper_path = Path(base_path) / ".masc" / "keepers" / "alpha.json"
     keeper_path.write_text("{", encoding="utf-8")
-    # The diagnostic goes to the log, not the frame. Console_sink writes to
-    # stderr and masc_tui points fd 2 at <base>/.masc/logs/masc-tui-<pid>.log
-    # for exactly this reason -- "so writing to stderr cannot land in the
-    # frame". This scenario waited for it on the PTY, which only worked while
-    # that redirect was failing: it opened the log with O_CREAT without making
-    # the directory, so a fresh base path left stderr on the terminal. Once
-    # that was fixed the diagnostic went where it was always meant to go, and
-    # the wait timed out. What the scenario is actually about -- a broken
-    # keeper file is reported and a repaired one redraws -- is unchanged.
-    deadline = time.time() + 3.0
-    logs_dir = Path(base_path) / ".masc" / "logs"
-    while True:
-        found = any(
-            CONSOLE_DIAGNOSTIC.decode() in log.read_text(errors="replace")
-            for log in sorted(logs_dir.glob("masc-tui-*.log"))
-        ) if logs_dir.is_dir() else False
-        if found:
-            break
-        if time.time() > deadline:
-            raise AssertionError(
-                f"the decode diagnostic never reached the log under {logs_dir}"
-            )
-        read_available(master_fd, output)
-        time.sleep(0.05)
-    diagnostic_end = len(output)
+    # This scenario is about the surface repairing itself after a console
+    # line lands in the frame, which only happens when masc_tui cannot move
+    # stderr off the terminal. [block_stderr_redirect] makes that real by
+    # putting a file where the log directory has to go, so the open fails the
+    # way a read-only or full disk would.
+    #
+    # Before masc#31881 the redirect failed on every temporary root -- the log
+    # was opened with O_CREAT and nothing made the directory -- so the leak
+    # happened by accident and this scenario passed without arranging it.
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        CONSOLE_DIAGNOSTIC,
+        start=start,
+        timeout=3.0,
+    )
+    diagnostic_end = output.find(CONSOLE_DIAGNOSTIC, start) + len(CONSOLE_DIAGNOSTIC)
     keeper_path.write_text(json.dumps(keeper_metadata("alpha")), encoding="utf-8")
     wait_for_output(
         process,
@@ -8651,6 +8668,7 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper selection identity",
         interact=keeper_selection_identity_interaction,
         http_fixtures=overview_event_http_fixtures(),
+        prepare_workspace=block_stderr_redirect,
     )
     run_terminal_scenario(
         executable,
@@ -8668,6 +8686,7 @@ def run_keyboard_regression(executable: str) -> None:
         refresh=0.05,
         http_fixtures=overview_event_http_fixtures(),
         http_requests=unreliable_roster_requests,
+        prepare_workspace=block_stderr_redirect,
     )
     run_terminal_scenario(
         executable,
@@ -8762,6 +8781,7 @@ def run_keyboard_regression(executable: str) -> None:
         executable,
         description="console diagnostic repair",
         interact=repair_after_console_diagnostic,
+        prepare_workspace=block_stderr_redirect,
         refresh=0.05,
     )
     run_terminal_scenario(

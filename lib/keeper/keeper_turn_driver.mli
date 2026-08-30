@@ -56,6 +56,17 @@ val quota_ordered_deferred_runtime_lane :
 val equal_deferred_runtime_lane :
   deferred_runtime_lane -> deferred_runtime_lane -> bool
 
+val restore_deferred_runtime_lane :
+  assignment_id:string ->
+  failed_runtime_id:string ->
+  next_runtime_id:string ->
+  later_runtime_ids:string list ->
+  failure:Agent_core.Error.t ->
+  deferred_runtime_lane
+(** Rebuild a lane suffix from the strict durable checkpoint owned by MASC.
+    Runtime ids remain frozen; no current runtime-table lookup or compatibility
+    fallback occurs at this boundary. *)
+
 type named_run_result =
   { run_result : Runtime_agent.run_result
   ; selected_runtime_id : string

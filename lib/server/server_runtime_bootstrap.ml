@@ -1603,6 +1603,13 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       (match mark_owner_state_ready () with
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
+      (* Full-health has its own off-domain worker, timeout, and warm delay.
+         Start it at the owner-readiness boundary so post-ready lanes and
+         auxiliary prewarms cannot leave current diagnostics requested-but-idle. *)
+      Server_routes_http_runtime.start_full_health_snapshot_refresh_loop
+        ~sw
+        ~clock
+        ~request_authority:background_request_authority;
       let path_diagnostics = activated_owner.path_diagnostics in
       let resolved_base, masc_dir =
         start_post_ready_owner_lanes ~sw ~clock ~env state
@@ -1805,7 +1812,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
         let outer_timeout_sec =
           Env_config_runtime.Dashboard.shell_prewarm_outer_timeout_sec
         in
-        (try
+        try
            match Eio.Time.with_timeout clock outer_timeout_sec (fun () ->
              Server_dashboard_http.warm_shell_cache state;
              Ok ())
@@ -1819,13 +1826,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
          | exn ->
              Log.Dashboard.warn "shell cache pre-warm failed: %s"
              (Printexc.to_string exn));
-        (* Full-health scans are heavier than the probe path. Start them after
-           shell prewarm has either succeeded or exhausted its own budget so
-           cold-start diagnostics do not contend with the shell's first render. *)
-        Server_routes_http_runtime.start_full_health_snapshot_refresh_loop
-          ~sw
-          ~clock
-          ~request_authority:background_request_authority);
       ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

@@ -82,7 +82,7 @@ RUN groupadd --system appgroup && useradd --system --gid appgroup appuser \
 
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app
-ENV MASC_RUN_DIR=/app/.masc/runtime/host-run
+ENV MASC_BASE_PATH_LEASE_DIR=/app/.masc/runtime/base-path-lease
 # MASC_CONFIG_DIR intentionally unset: config resolves to /app/.masc/config
 # (Local_masc), the writable root the entrypoint seeds on the volume.
 

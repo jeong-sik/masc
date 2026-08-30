@@ -44,18 +44,26 @@ let test_data_dir_field_reads_env () =
     check (option string) "data_dir field reflects env" (Some "/var/lib/masc") h.data_dir)
 ;;
 
-let test_run_dir_field_reads_env () =
-  with_env "MASC_RUN_DIR" (Some "/run/masc") (fun () ->
+let test_base_path_lease_dir_field_reads_env () =
+  with_env "MASC_BASE_PATH_LEASE_DIR" (Some "/run/masc-lease") (fun () ->
     let h = Host_config.host () in
-    check string "run_dir field reflects env" "/run/masc" h.run_dir)
+    check
+      string
+      "base_path_lease_dir field reflects env"
+      "/run/masc-lease"
+      h.base_path_lease_dir)
 ;;
 
-let test_resolve_run_dir_field_reads_env () =
-  with_env "MASC_RUN_DIR" (Some "/run/masc-resolved") (fun () ->
+let test_resolve_base_path_lease_dir_field_reads_env () =
+  with_env "MASC_BASE_PATH_LEASE_DIR" (Some "/run/masc-lease-resolved") (fun () ->
     match Host_config.resolve () with
     | Error msg -> failf "resolve failed: %s" msg
     | Ok h ->
-      check string "resolved run_dir reflects env" "/run/masc-resolved" h.run_dir)
+      check
+        string
+        "resolved base_path_lease_dir reflects env"
+        "/run/masc-lease-resolved"
+        h.base_path_lease_dir)
 ;;
 
 let test_empty_env_yields_none () =
@@ -78,8 +86,14 @@ let () =
       , [ test_case "base_path" `Quick test_base_path_field_reads_env
         ; test_case "config_dir" `Quick test_config_dir_field_reads_env
         ; test_case "data_dir" `Quick test_data_dir_field_reads_env
-        ; test_case "run_dir" `Quick test_run_dir_field_reads_env
-        ; test_case "resolved run_dir" `Quick test_resolve_run_dir_field_reads_env
+        ; test_case
+            "base path lease dir"
+            `Quick
+            test_base_path_lease_dir_field_reads_env
+        ; test_case
+            "resolved base path lease dir"
+            `Quick
+            test_resolve_base_path_lease_dir_field_reads_env
         ] )
     ; ( "empty env semantics"
       , [ test_case "empty -> None" `Quick test_empty_env_yields_none ] )

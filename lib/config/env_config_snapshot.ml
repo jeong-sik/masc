@@ -333,8 +333,8 @@ let path_entries =
       "Config directory override; None when unset";
     entry ~default:"(none)" Env_config_core.data_dir_env_key
       "Data directory override; None=<base_path>/data";
-    entry ~default:"(host temp directory)" "MASC_RUN_DIR"
-      "Host runtime directory for PID and BasePath lease files";
+    entry ~default:"(host temp directory)" "MASC_BASE_PATH_LEASE_DIR"
+      "Cross-process BasePath ownership lease directory";
   ]
 
 let session_entries =

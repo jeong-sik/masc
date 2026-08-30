@@ -82,7 +82,7 @@ RUN chown -R appuser:appgroup /app/assets
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app
 ENV MASC_CONFIG_DIR=/app/config
-ENV MASC_RUN_DIR=/app/.masc/runtime/host-run
+ENV MASC_BASE_PATH_LEASE_DIR=/app/.masc/runtime/base-path-lease
 
 VOLUME ["/app/.masc"]
 

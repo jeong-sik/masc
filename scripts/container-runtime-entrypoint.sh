@@ -3,8 +3,12 @@
 set -euo pipefail
 
 BASE_PATH="${MASC_BASE_PATH:?MASC_BASE_PATH is required}"
+RUN_DIR="${MASC_RUN_DIR:?MASC_RUN_DIR is required}"
 HELPER=/app/masc-deployment-preflight-helper
 GATE=/app/masc-check-runtime-deployment-preflight
+
+mkdir -p "$RUN_DIR"
+chmod 0700 "$RUN_DIR"
 
 if [[ $# -eq 0 ]]; then
   set -- /app/masc --port "${PORT:-8080}" --base-path "$BASE_PATH"

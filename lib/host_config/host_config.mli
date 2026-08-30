@@ -59,10 +59,10 @@ type t =
             from [host ()]; configurable via env in [resolve]. *)
   ; run_dir : string
         (** Host-selected root for runtime state files (PID locks, sockets).
-            Default [<tmp>] from [host ()]. BasePath ownership establishes its
-            current-UID private lease directory below this root and rejects an
-            unprotected group/world-writable root; callers do not select a
-            fallback. *)
+            [MASC_RUN_DIR] overrides the default [<tmp>] root. BasePath
+            ownership establishes its current-UID private lease directory
+            below this root and rejects an unprotected group/world-writable
+            root; callers do not select a fallback. *)
   ; policy_dir : string
         (** Directory for runtime policy files.  Default [<tmp>] from
             [host ()]. *)
@@ -102,9 +102,9 @@ val resolve : ?base_path:string -> unit -> (t, string) result
     [Filename.get_temp_dir_name ()] (honours [TMPDIR]).  Binary paths
     fall back to the [coreutils_defaults] record.
 
-    The path env-var-derived fields are populated
-    from [Sys.getenv_opt] at call time; [host ()] reflects the *current*
-    process environment, not a snapshot from boot. *)
+    The path env-var-derived fields, including [run_dir] from [MASC_RUN_DIR],
+    are populated from [Sys.getenv_opt] at call time; [host ()] reflects the
+    *current* process environment, not a snapshot from boot. *)
 val host : unit -> t
 
 (** [from_env ()] is an alias for [host ()] emphasising that the

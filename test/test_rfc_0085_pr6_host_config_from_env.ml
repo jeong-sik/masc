@@ -44,6 +44,20 @@ let test_data_dir_field_reads_env () =
     check (option string) "data_dir field reflects env" (Some "/var/lib/masc") h.data_dir)
 ;;
 
+let test_run_dir_field_reads_env () =
+  with_env "MASC_RUN_DIR" (Some "/run/masc") (fun () ->
+    let h = Host_config.host () in
+    check string "run_dir field reflects env" "/run/masc" h.run_dir)
+;;
+
+let test_resolve_run_dir_field_reads_env () =
+  with_env "MASC_RUN_DIR" (Some "/run/masc-resolved") (fun () ->
+    match Host_config.resolve () with
+    | Error msg -> failf "resolve failed: %s" msg
+    | Ok h ->
+      check string "resolved run_dir reflects env" "/run/masc-resolved" h.run_dir)
+;;
+
 let test_empty_env_yields_none () =
   with_env "MASC_BASE_PATH" (Some "") (fun () ->
     let h = Host_config.host () in
@@ -64,6 +78,8 @@ let () =
       , [ test_case "base_path" `Quick test_base_path_field_reads_env
         ; test_case "config_dir" `Quick test_config_dir_field_reads_env
         ; test_case "data_dir" `Quick test_data_dir_field_reads_env
+        ; test_case "run_dir" `Quick test_run_dir_field_reads_env
+        ; test_case "resolved run_dir" `Quick test_resolve_run_dir_field_reads_env
         ] )
     ; ( "empty env semantics"
       , [ test_case "empty -> None" `Quick test_empty_env_yields_none ] )

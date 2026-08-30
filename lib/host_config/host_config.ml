@@ -87,7 +87,7 @@ let host () =
        then Test
        else Production)
   ; log_dir = tmp
-  ; run_dir = tmp
+  ; run_dir = Option.value (get_opt "MASC_RUN_DIR") ~default:tmp
   ; policy_dir = tmp
   ; base_path =
       (* RFC-0085 PR-9 — base_path field carries the *normalised* value
@@ -200,7 +200,7 @@ let resolve ?base_path () =
     ; sandbox_workspace_root
     ; test_mode
     ; log_dir = tmp
-    ; run_dir = tmp
+    ; run_dir = Option.value (get_opt "MASC_RUN_DIR") ~default:tmp
     ; policy_dir = tmp
     ; base_path =
         get_opt "MASC_BASE_PATH"

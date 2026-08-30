@@ -48,8 +48,6 @@ type write_error =
   | Source_read_failed of string
   | Store_write_failed of string
 
-val write_error_detail : write_error -> string
-
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 val read_for_keepers_dir :

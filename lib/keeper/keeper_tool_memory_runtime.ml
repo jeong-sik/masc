@@ -592,26 +592,40 @@ let keeper_memory_write_with_outcome
             ()
         with
         | Ok snapshot ->
-          let source_sha256 =
+          (match
             List.find_map
               (fun fact ->
                  if String.equal fact.Keeper_memory_source_current.source.path source_path
                  then Some fact.source.sha256
                  else None)
               snapshot.facts
-            |> Option.value ~default:""
-          in
-          respond
-            ~memory_revision:snapshot.revision
-            ~ok:true
-            ~error_kind:No_memory_write_error
-            [ "rows_written", `Int 1
-            ; "revision", `Int snapshot.revision
-            ; "outcome", `String "persisted_source_bound_current"
-            ; "store", `String "source_bound_current_memory"
-            ; "source_path", `String source_path
-            ; "source_sha256", `String source_sha256
-            ]
+           with
+           | Some source_sha256 ->
+             respond
+               ~memory_revision:snapshot.revision
+               ~ok:true
+               ~error_kind:No_memory_write_error
+               [ "rows_written", `Int 1
+               ; "revision", `Int snapshot.revision
+               ; "outcome", `String "persisted_source_bound_current"
+               ; "store", `String "source_bound_current_memory"
+               ; "source_path", `String source_path
+               ; "source_sha256", `String source_sha256
+               ]
+           | None ->
+             let detail =
+               Printf.sprintf
+                 "source-bound memory commit omitted its written path: %s"
+                 source_path
+             in
+             Log.Keeper.warn
+               "explicit source-bound memory write invariant failed keeper=%s: %s"
+               meta.name
+               detail;
+             respond
+               ~ok:false
+               ~error_kind:Persistence_failed
+               [ "detail", `String detail ])
         | Error (Keeper_memory_source_current.Source_read_failed detail) ->
           respond
             ~effect_disposition:Tool_result.Proven_pre_effect

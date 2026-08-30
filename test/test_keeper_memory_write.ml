@@ -423,6 +423,48 @@ let test_source_bound_write_refuses_unrecallable_payload () =
   | Error detail -> Alcotest.fail detail
 ;;
 
+let test_source_bound_rewrite_renews_first_seen () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "source-rewrite-time" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let source_path = "source.txt" in
+  Fs_compat.mkdir_p sandbox_root;
+  (match
+     Fs_compat.save_file_atomic (Filename.concat sandbox_root source_path) "value\n"
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let write ~now ~claim =
+    match
+      Masc.Keeper_memory_source_current.upsert_file_fact
+        ~config
+        ~meta
+        ~keepers_dir
+        ~now
+        ~claim
+        ~source_path
+        ()
+    with
+    | Ok snapshot -> List.hd snapshot.facts
+    | Error
+        ( Masc.Keeper_memory_source_current.Source_read_failed detail
+        | Masc.Keeper_memory_source_current.Store_write_failed detail ) ->
+      Alcotest.fail detail
+  in
+  let first = write ~now:100.0 ~claim:"first wording" in
+  let rewritten = write ~now:200.0 ~claim:"corrected wording" in
+  Alcotest.(check (float 0.0)) "initial claim timestamp" 100.0 first.first_seen;
+  Alcotest.(check (float 0.0))
+    "corrected claim gets its own timestamp"
+    200.0
+    rewritten.first_seen
+;;
+
 let test_invalid_write_is_proven_pre_effect () =
   with_temp_dir
   @@ fun base_path ->
@@ -639,6 +681,10 @@ let () =
             "source write refuses an unrecallable payload"
             `Quick
             test_source_bound_write_refuses_unrecallable_payload
+        ; Alcotest.test_case
+            "source rewrite renews the claim timestamp"
+            `Quick
+            test_source_bound_rewrite_renews_first_seen
         ; Alcotest.test_case
             "tools isolate config BasePath from ambient decoy"
             `Quick

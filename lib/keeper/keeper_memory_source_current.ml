@@ -44,10 +44,6 @@ type write_error =
   | Source_read_failed of string
   | Store_write_failed of string
 
-let write_error_detail = function
-  | Source_read_failed detail | Store_write_failed detail -> detail
-;;
-
 let path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ suffix)
 ;;
@@ -440,7 +436,10 @@ let upsert_file_fact
           let first_seen =
             List.find_map
               (fun fact ->
-                 if String.equal fact.source.path source_path
+                 if
+                   String.equal fact.source.path source_path
+                   && String.equal fact.claim claim
+                   && String.equal fact.source.sha256 incoming_source.sha256
                  then Some fact.first_seen
                  else None)
               snapshot.facts
@@ -504,13 +503,22 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
                  | Ok content when String.equal (sha256 content) fact.source.sha256 ->
                    fact :: facts, invalidations
                  | Ok _ ->
+                   Log.Keeper.warn
+                     "source-bound memory invalidated keeper=%s source=%S reason=source_changed"
+                     meta.Keeper_meta_contract.name
+                     fact.source.path;
                    ( facts
                    , { source_path = fact.source.path
                      ; invalidated_at = now
                      ; reason = Source_changed
                      }
                      :: invalidations )
-                 | Error _ ->
+                 | Error detail ->
+                   Log.Keeper.warn
+                     "source-bound memory invalidated keeper=%s source=%S reason=source_unavailable detail=%s"
+                     meta.Keeper_meta_contract.name
+                     fact.source.path
+                     detail;
                    ( facts
                    , { source_path = fact.source.path
                      ; invalidated_at = now

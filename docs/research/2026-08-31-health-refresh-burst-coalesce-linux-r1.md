@@ -93,10 +93,15 @@ ledger-to-ready 112.205ms였다. 이는 100ms fixed bound + 약 12ms compute다.
 - full suite와 CI는 실행/주장하지 않는다.
 - 61-schedule burst 한 쌍의 결과이며 장시간 연속 부하는 아직 측정하지 않았다.
 
+초기 `create-responses.txt` 합본은 각 SSE 파일의 마지막 빈 줄만 보존해 receipt 증거로 사용할 수
+없으므로 폐기했다. 중지된 컨테이너의 원본 `response-*.txt`를 다시 추출하고 SSE JSON-RPC와 HTTP
+429 JSON을 request별 canonical JSONL로 파싱했다. r57 manifest는 64행(accepted 61, HTTP 429 3),
+r58은 61행(accepted 61)이며 accepted row의 필수 ID 누락과 `isError=true`는 모두 0이다. 새 manifest
+hash는 결과 summary에 기록했다.
+
 ## 근거
 
 - [근거] exact committed source, Linux image/binary identity, authenticated schedule responses,
   complete debug refresh logs, durable row timestamps, 2026-08-31T01:43:22+09:00 확인,
   신뢰도 High.
 - [근거] Hada 원문 및 위 논문/USENIX 1차 출처, 같은 시각 확인, 신뢰도 High.
-

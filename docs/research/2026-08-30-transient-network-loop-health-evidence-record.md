@@ -22,10 +22,11 @@
 ## 검증
 
 - 1차: baseline은 59초에 44회 실패하면서 44/44 `consecutive=0`, health `ok`였다.
-- 2차: failure accounting 11/11, recovering-health pure case 1/1, 기존 config-health
+- 2차: failure accounting 12/12, recovering-health pure case 1/1, 기존 config-health
   case 1/1이 통과했다.
-- 3차: fixed 최초 기동은 12회만 면제하고 60회를 nonzero counter로 기록했으며 health가
-  `degraded`였다. 실제 재시작도 12회만 면제하고 28회를 nonzero로 기록했다.
+- 3차: 최초 fixed 측정은 restart가 Keeper별 3회 exemption을 다시 주는 lifetime gap을
+  드러냈다. 보강 r41은 restart 전 durable count 3, restart 첫 failure에서 count 4와
+  `consecutive=1`을 기록했다.
 - 4차: isolated HTTP 429 반복 32건은 면제 0, nonzero 32로 집계되고 같은 degraded
   health로 수렴해 transport budget이 rate limit까지 넓어지지 않음을 확인했다.
 - 재현 결과: 성공. 두 runtime instance 모두 lifecycle/executable 4를 유지하면서
@@ -34,7 +35,7 @@
 ## 불확실성
 
 - 미확인 항목: 실제 network recovery 뒤 success가 budget과 fleet phase를 reset하는
-  end-to-end Linux 경로.
+  end-to-end Linux 경로와 durable I/O fault injection.
 - 영향: success reset은 focused test로만 검증했다.
 - 추가 확인 필요: stacked Draft PR CI와 review bot 결과를 확인한다.
 

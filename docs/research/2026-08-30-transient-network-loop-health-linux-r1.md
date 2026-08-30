@@ -15,7 +15,7 @@ action은 false다.
 
 ## exact identity
 
-- source change head: `cfbc540440c4542abf5f195bc920e5fd4bd08191`
+- source change head: `7fdf7f751caf23760d41042b278e0b1c17b2df84`
 - stacked parent head: `c1f7cc5c672b119da55ebac0903c1ba9577d0b87`
 - Linux measurement composition/embedded commit:
   `e635edb7da7e4b72d3a8e389356dd9d48e8e5843`
@@ -67,8 +67,9 @@ recovery를 막지 않으면서 outage evidence가 더는 0에 고정되지 않�
 
 ## 실제 재시작
 
-같은 container/volume을 `docker restart --timeout 20`으로 재시작했다. process-local
-budget은 다시 시작됐지만, 새 runtime instance에서도 bound는 동일하게 작동했다.
+같은 container/volume을 `docker restart --timeout 20`으로 재시작했다. 이 최초 측정은
+process-local budget이 다시 시작돼 새 runtime instance가 Keeper별 3회 exemption을 다시
+받는 restart-lifetime gap도 함께 드러냈다.
 
 - 재시작 뒤 terminal DNS failure/receipt: 40건
 - exempted / `consecutive=0`: 12건, Keeper별 정확히 3건
@@ -82,11 +83,32 @@ Keeper별 warmup이 65–74초로 달라 observation 종료 시 receipt 수는 9
 모든 Keeper는 동일한 3회 면제 뒤 nonzero counter로 전환했다. 최종 container는 graceful
 shutdown 후 exit code 0이었고 volume은 보존했다.
 
+## restart persistence 보강 r41
+
+위 gap을 닫은 제품 commit은 `7fdf7f751caf23760d41042b278e0b1c17b2df84`다. old stack의
+Docker source-build 입력만 보완한 measurement composition은
+`0b41576e8cf772d68f375057c91f62dbfb892645`, Linux/arm64 image는
+`sha256:43d7c771b882b70c5035083eb4840e5b2a8fb85279b8b9b04cc260cdc0156c30`,
+binary는 `2431a31c9f04a3856435e21035b7429fd1abc895b3f9555ffeae045617931588`다.
+
+network-none에서 한 Keeper만 15초 cadence로 실행했다.
+
+- restart 전 DNS failure 3건: 모두 `consecutive=0`
+- durable record: current schema, `count=3`
+- clean shutdown: exit 0
+- restart 첫 DNS failure: durable `count=4`, 즉시 `consecutive=1` / `turn_failed(1)`
+- final shutdown: exit 0
+
+따라서 restart는 더 이상 transient exemption budget을 새로 주지 않는다. r41 health snapshot은
+refresh 전에 읽혀 `ok`였으므로 새 health 증거로 사용하지 않는다. fleet health의
+`degraded / turn_failure_recovering` 증거는 앞선 r29 장기 관측과 focused cases가 담당한다.
+
 ## focused 검증
 
 - `scripts/dune-local.sh build test/test_keeper_runtime_observation_boundaries.exe
   test/test_server_runtime_bootstrap.exe`
-- runtime observation/failure accounting: 11/11
+- runtime observation/failure accounting: 12/12
+- durable process-boundary count와 unknown schema fail-closed 포함
 - recovering health case: bootstrap 47, 1/1
 - existing config blocker case: bootstrap 46, 1/1
 - `git diff --check`

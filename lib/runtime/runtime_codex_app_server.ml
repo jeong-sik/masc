@@ -22,6 +22,7 @@ type config =
   ; admission_timeout_s : float
   ; timeout_s : float option
   ; wall_clock_ceiling_s : float option
+  ; output_schema : Yojson.Safe.t option
   }
 
 let default_timeout_s = 300.0
@@ -46,6 +47,7 @@ let default_config () =
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
   ; wall_clock_ceiling_s = None
+  ; output_schema = None
   }
 ;;
 
@@ -1023,7 +1025,15 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
           ]
           @ optional_field
               "effort"
-              (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)));
+              (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)
+          @ (match config.output_schema with
+             | None -> []
+             (* v2 TurnStartParams.outputSchema: "Optional JSON Schema used to
+                constrain the final assistant message for this turn." Unlike the
+                Antigravity CLI there is no second field to read -- the schema
+                binds the message itself, so the existing text path already
+                carries the constrained answer. *)
+             | Some schema -> [ "outputSchema", schema ])));
   on_turn_dispatched ();
   (* The complete request is now outside this process. Admission stays finite
      through dispatch; only the subsequent model turn adopts its declared

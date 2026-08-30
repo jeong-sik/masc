@@ -58,16 +58,21 @@ val run_panelist
     exactly as before. It does not move [admission_timeout_s], which bounds
     waiting for admission rather than the answer.
 
-    [output_schema] is a JSON Schema the client enforces on its own final
-    answer -- [--json-schema] on both the Claude and Antigravity CLIs. The
-    mechanism is validation with a re-prompt, not constrained decoding, and
+    [output_schema] is a JSON Schema the client holds its own answer to. Every
+    official client has a channel for one and no two are the same shape:
+    [--json-schema] on the Claude and Antigravity CLIs, [outputSchema] on the
+    Codex v2 [turn/start] request. On the two CLIs the mechanism is validation
+    with a re-prompt, not constrained decoding, and
     the answer returned here is then the validated value rather than the
     narrated text: the Antigravity result event was measured on 2026-08-30
     carrying a fenced draft in [response] while [structured_output] held the
-    object that passed. Codex takes no schema on this transport -- the
-    [--output-schema] flag belongs to [codex exec], and the app-server
-    [turn/start] request has no field for one -- so a schema is ignored there
-    and the prompt-carried instruction stays the only channel.
+    object that passed.
+
+    Codex carries it too, by a third route: the v2 [turn/start] request takes
+    [outputSchema], which its own generated protocol schema describes as
+    constraining the final assistant message. That binds the message itself, so
+    there is no second field to prefer — the text returned here is already the
+    constrained one.
 
     [base_dir] is the directory the official client is spawned in. There is no
     global accessor for the MASC base path, so callers thread it down from

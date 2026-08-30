@@ -448,6 +448,9 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                     | Some 0.0 -> None
                     | Some s -> Some s)
                ; wall_clock_ceiling_s = None
+    (* A probe asks whether the client answers at all; it has no domain schema
+       to hold the answer to. *)
+    ; output_schema = None
                }
              in
              (match

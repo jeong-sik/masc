@@ -618,6 +618,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name
            | Some seconds -> Some seconds)
       ; wall_clock_ceiling_s =
           Runtime_inference.resolve_wall_clock_ceiling_s ~runtime_id
+      (* A keeper turn is a conversation, not a schema contract: nothing
+         downstream parses its text against a domain schema. *)
+      ; output_schema = None
       }
     in
     let terminal_error = ref None in

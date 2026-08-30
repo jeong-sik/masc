@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T20:39:38+09:00",
+  "issue": 31961,
+  "source_change_head": "7d0630db1dbbe5c5aa380b9dc7ba23d737ea79e5",
+  "stacked_parent_head": "19b990e23a058112806b2facefbca95c1e25292d",
+  "measurement_source_commit": "b09c851dac888263fedb3cd10ad40b6f7a698f6f",
+  "image_digest": "sha256:9b7cf86ab582bced204bec45f46c1e0831ee284e3a43e370b7155b60b35374f2",
+  "binary_sha256": "e4dcec243bcf6f3034972aee04d41e134fb0de2c557385906194dbc7046c1937",
+  "runtime_instance_ids": [
+    "01a05275-36e0-7000-844d-e10807133acf",
+    "01a05275-8570-7000-9c57-597ceff103b8"
+  ],
+  "fake_provider": {
+    "network": "isolated_internal_docker",
+    "response_status": 400,
+    "response_type": "invalid_request_error",
+    "models_get_count": 2,
+    "chat_completions_post_count": 8,
+    "authorization_header_present_count": 10,
+    "external_provider_request_count": 0
+  },
+  "baseline": {
+    "measurement_source_commit": "e635edb7da7e4b72d3a8e389356dd9d48e8e5843",
+    "image_digest": "sha256:add2362949b81c6032d6f4460215039218be4395856dcc6a4be81ecc0561648d",
+    "binary_sha256": "35cdfd6a0cf0c62cc786a160789c295c5ecf7e1d989f6e34d540338a02459865",
+    "new_receipt_count": 4,
+    "terminal_reason_code": "api_error_invalid_request",
+    "operator_disposition": "fail_open_next_runtime",
+    "operator_disposition_reason": "provider_runtime_error",
+    "runtime_attempt_count": 1,
+    "runtime_lane_attempt_count": 1,
+    "fallback_applied": false,
+    "degraded_retry_applied": false,
+    "fallback_reason": null,
+    "rotation_attempt_count": 0,
+    "deferred_next_runtime": null
+  },
+  "fixed": {
+    "first_start": {
+      "started_at": "2026-08-30T11:36:48Z",
+      "runtime_instance_id": "01a05275-36e0-7000-844d-e10807133acf",
+      "new_receipt_count": 4,
+      "keeper_count": 4
+    },
+    "restart": {
+      "restarted_at": "2026-08-30T11:37:08Z",
+      "runtime_instance_id": "01a05275-8570-7000-9c57-597ceff103b8",
+      "new_receipt_count": 4,
+      "keeper_count": 4
+    },
+    "receipt_invariants": {
+      "terminal_reason_code": "api_error_invalid_request",
+      "operator_disposition": "retry_later",
+      "operator_disposition_reason": "provider_runtime_error",
+      "runtime_attempt_count": 1,
+      "runtime_lane_attempt_count": 1,
+      "fallback_applied": false,
+      "degraded_retry_applied": false,
+      "fallback_reason": null,
+      "rotation_attempt_count": 0,
+      "operator_broadcast_count": 0
+    }
+  },
+  "focused_checks": {
+    "terminal_reason_matrix_cases": 147200,
+    "terminal_reason_matrix_mismatches": 0,
+    "terminal_reason_suite": "pass",
+    "diff_check": "pass",
+    "ocamlformat_check": "pass"
+  },
+  "shutdown": {
+    "container_exit_code": 0,
+    "container_stopped": true,
+    "fake_provider_stopped": true,
+    "volume_preserved": true
+  },
+  "artifact_sha256": {
+    "image-build.log": "3dbc4e57ae44eb3233b16a80c4826ca5a3ce49d18e9c00173a9f1698705bf622",
+    "container-binary-sha256.txt": "738e44569b493711e064dd51b26f61dfedca3420d9e75d3228727bab6e561d00",
+    "fake-provider-run.log": "f25fab0a2179e46a342fa202bece4e5e17da323e0158d61972c37dee7ec235ea",
+    "receipts-first.jsonl": "ffa9477208d172a02070d52e9743451d9fac43c6934acab7d4bcc25384932760",
+    "receipts-restart.jsonl": "a6655c22d81b015bf40de25f26b383b4a360931afe091db82d33ce688734b413",
+    "health-first.json": "faebc5f02ca62309bda6a00a344242c12388031659d787fe6b3ca43324549da4",
+    "health-restart.json": "62442071409304a4be868803694ee0ce57e4b77f2c5da54d8d04185a279fa506",
+    "server-first.log": "c96adddd0f2e9ed73a9fb568af27d5d59bdb310e85f02f1de8a0e471f49e25dd",
+    "server-restart.log": "4f4afb179945be7f86a99ad09787ab986f0fe0783896f4651164c14923c6daed",
+    "test-terminal-reason.log": "aba8e74c6dad1814fef67499e568e1d708bb9ce5f781de601507ef5f31d7096d"
+  },
+  "performance_claim": false
+}

@@ -2993,6 +2993,102 @@ let test_full_health_refresh_timing_uses_dedicated_budget () =
     (Server_routes_http_runtime.For_testing
      .full_health_refresh_wakeup_coalesce_sec ())
 
+let test_full_health_refresh_worker_survives_waiter_cancellation () =
+  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
+  Eio.Switch.run (fun sw ->
+      let worker_started, resolve_worker_started = Eio.Promise.create () in
+      let release_worker, resolve_release_worker = Eio.Promise.create () in
+      let first_waiter_done, resolve_first_waiter_done = Eio.Promise.create () in
+      let second_waiter_done, resolve_second_waiter_done = Eio.Promise.create () in
+      let compute_count = ref 0 in
+      let compute () =
+        incr compute_count;
+        Eio.Promise.resolve resolve_worker_started ();
+        Eio.Promise.await release_worker
+      in
+      Eio.Fiber.fork ~sw (fun () ->
+          let outcome =
+            Eio.Fiber.first
+              (fun () ->
+                 Server_routes_http_runtime.For_testing
+                 .run_full_health_refresh_worker ~sw ~compute;
+                 `Completed)
+              (fun () ->
+                 Eio.Promise.await worker_started;
+                 `Caller_cancelled)
+          in
+          Eio.Promise.resolve resolve_first_waiter_done outcome);
+      (match Eio.Promise.await first_waiter_done with
+       | `Caller_cancelled -> ()
+       | `Completed -> Alcotest.fail "first waiter unexpectedly completed");
+      Eio.Fiber.fork ~sw (fun () ->
+          Server_routes_http_runtime.For_testing.run_full_health_refresh_worker
+            ~sw
+            ~compute:(fun () -> Alcotest.fail "joined waiter submitted a worker");
+          Eio.Promise.resolve resolve_second_waiter_done ());
+      let submissions, joins, active, generation, snapshot_present,
+          refresh_requested =
+        Server_routes_http_runtime.For_testing.full_health_refresh_worker_stats ()
+      in
+      Alcotest.(check int) "one worker submitted" 1 submissions;
+      Alcotest.(check int) "second waiter joined" 1 joins;
+      Alcotest.(check bool) "worker survives caller cancellation" true active;
+      Alcotest.(check int) "no invalidation yet" 0 generation;
+      Alcotest.(check bool) "snapshot is not published early" false snapshot_present;
+      Alcotest.(check bool) "no retry requested" false refresh_requested;
+      Eio.Promise.resolve resolve_release_worker ();
+      Eio.Promise.await second_waiter_done;
+      let submissions, joins, active, _, snapshot_present, refresh_requested =
+        Server_routes_http_runtime.For_testing.full_health_refresh_worker_stats ()
+      in
+      Alcotest.(check int) "compute ran exactly once" 1 !compute_count;
+      Alcotest.(check int) "submission count stays one" 1 submissions;
+      Alcotest.(check int) "join count stays one" 1 joins;
+      Alcotest.(check bool) "worker settles" false active;
+      Alcotest.(check bool) "late worker publishes current result" true snapshot_present;
+      Alcotest.(check bool) "settled result needs no retry" false refresh_requested)
+
+let test_full_health_refresh_worker_discards_dirty_generation () =
+  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
+  Eio.Switch.run (fun sw ->
+      let worker_started, resolve_worker_started = Eio.Promise.create () in
+      let release_worker, resolve_release_worker = Eio.Promise.create () in
+      let worker_done, resolve_worker_done = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+          Server_routes_http_runtime.For_testing.run_full_health_refresh_worker
+            ~sw
+            ~compute:(fun () ->
+              Eio.Promise.resolve resolve_worker_started ();
+              Eio.Promise.await release_worker);
+          Eio.Promise.resolve resolve_worker_done ());
+      Eio.Promise.await worker_started;
+      Server_routes_http_runtime.invalidate_full_health_snapshot ();
+      Eio.Promise.resolve resolve_release_worker ();
+      Eio.Promise.await worker_done;
+      let submissions, joins, active, generation, snapshot_present,
+          refresh_requested =
+        Server_routes_http_runtime.For_testing.full_health_refresh_worker_stats ()
+      in
+      Alcotest.(check int) "dirty worker submitted once" 1 submissions;
+      Alcotest.(check int) "dirty worker had no join" 0 joins;
+      Alcotest.(check bool) "dirty worker settles" false active;
+      Alcotest.(check int) "invalidation advances generation" 1 generation;
+      Alcotest.(check bool) "dirty result is discarded" false snapshot_present;
+      Alcotest.(check bool) "dirty result requests retry" true refresh_requested;
+      Server_routes_http_runtime.For_testing.run_full_health_refresh_worker
+        ~sw
+        ~compute:Fun.id;
+      let submissions, _, active, generation, snapshot_present,
+          refresh_requested =
+        Server_routes_http_runtime.For_testing.full_health_refresh_worker_stats ()
+      in
+      Alcotest.(check int) "retry submits one successor" 2 submissions;
+      Alcotest.(check bool) "successor settles" false active;
+      Alcotest.(check int) "successor uses current generation" 1 generation;
+      Alcotest.(check bool) "successor publishes current result" true snapshot_present;
+      Alcotest.(check bool) "successor clears retry request" false refresh_requested);
+  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ()
+
 let test_full_health_refresh_timeout_preserves_last_snapshot () =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
   let request = Httpun.Request.create `GET "/health?full=1" in
@@ -4510,6 +4606,12 @@ let () =
           Alcotest.test_case "full health refresh timeout is independent"
             `Quick
             test_full_health_refresh_timing_uses_dedicated_budget;
+          Alcotest.test_case
+            "full health worker survives waiter cancellation" `Quick
+            test_full_health_refresh_worker_survives_waiter_cancellation;
+          Alcotest.test_case
+            "full health worker discards dirty generation" `Quick
+            test_full_health_refresh_worker_discards_dirty_generation;
           Alcotest.test_case
             "full health refresh timeout preserves last snapshot" `Quick
             test_full_health_refresh_timeout_preserves_last_snapshot;

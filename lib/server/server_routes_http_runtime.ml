@@ -736,6 +736,7 @@ let full_health_snapshot = ref None
 let full_health_refresh_in_flight = ref false
 let full_health_refresh_started_at = ref None
 let full_health_refresh_requested = ref false
+let full_health_refresh_wakeup = Eio.Stream.create max_int
 (* Consecutive [/health?full=1] refresh failures (timeouts or
    exceptions).  Reset to 0 on every successful
    [store_full_health_snapshot]; incremented inside
@@ -1241,7 +1242,8 @@ let mark_full_health_refresh_requested () =
 let invalidate_full_health_snapshot () =
   with_full_health_snapshot_lock (fun () ->
       full_health_snapshot := None;
-      full_health_refresh_requested := true)
+      full_health_refresh_requested := true);
+  Eio.Stream.add full_health_refresh_wakeup ()
 
 let full_health_snapshot_state () =
   with_full_health_snapshot_lock (fun () ->
@@ -1293,6 +1295,7 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
         with
         timeout_s = full_health_refresh_timeout_sec;
         on_failure = Some mark_full_health_snapshot_failure;
+        wakeup = Some full_health_refresh_wakeup;
         warm_delay_s = 0.5;
         warn_first_failure = false;
       }
@@ -1318,7 +1321,10 @@ module For_testing = struct
         full_health_refresh_in_flight := false;
         full_health_refresh_started_at := None;
         full_health_refresh_requested := false;
-        full_health_consecutive_failures := 0)
+        full_health_consecutive_failures := 0);
+    while Option.is_some (Eio.Stream.take_nonblocking full_health_refresh_wakeup) do
+      ()
+    done
 
   let refresh_full_health_snapshot_now ?(listener = "http/1.1")
       ~request_authority request =

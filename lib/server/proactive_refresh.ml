@@ -46,6 +46,7 @@ type config = {
   failure_threshold : int;
   timeout_s : float;
   on_failure : (failure -> unit) option;
+  wakeup : unit Eio.Stream.t option;
   warm_delay_s : float;
   warn_first_failure : bool;
 }
@@ -58,6 +59,7 @@ let default_config ~label ~interval_s =
     failure_threshold = 3;
     timeout_s = 10.0;
     on_failure = None;
+    wakeup = None;
     warm_delay_s = 0.0;
     warn_first_failure = true;
   }
@@ -159,9 +161,18 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
     Log.Dashboard.info "starting %s refresh loop" config.label;
     let consecutive_failures = ref 0 in
     let current_interval = ref config.interval_s in
+    let wait_for_interval_or_wakeup seconds =
+      match config.wakeup with
+      | None -> Eio.Time.sleep clock seconds
+      | Some stream ->
+        Eio.Fiber.first
+          (fun () -> Eio.Time.sleep clock seconds)
+          (fun () -> Eio.Stream.take stream);
+        while Option.is_some (Eio.Stream.take_nonblocking stream) do () done
+    in
     let rec loop () =
       let jitter = Random.float (!current_interval *. 0.25) in
-      Eio.Time.sleep clock (!current_interval +. jitter);
+      wait_for_interval_or_wakeup (!current_interval +. jitter);
       let t0 = Time_compat.now () in
       (try
          match

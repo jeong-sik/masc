@@ -2476,15 +2476,31 @@ def repair_after_console_diagnostic(
     start = len(output)
     keeper_path = Path(base_path) / ".masc" / "keepers" / "alpha.json"
     keeper_path.write_text("{", encoding="utf-8")
-    wait_for_output(
-        process,
-        master_fd,
-        output,
-        CONSOLE_DIAGNOSTIC,
-        start=start,
-        timeout=3.0,
-    )
-    diagnostic_end = output.find(CONSOLE_DIAGNOSTIC, start) + len(CONSOLE_DIAGNOSTIC)
+    # The diagnostic goes to the log, not the frame. Console_sink writes to
+    # stderr and masc_tui points fd 2 at <base>/.masc/logs/masc-tui-<pid>.log
+    # for exactly this reason -- "so writing to stderr cannot land in the
+    # frame". This scenario waited for it on the PTY, which only worked while
+    # that redirect was failing: it opened the log with O_CREAT without making
+    # the directory, so a fresh base path left stderr on the terminal. Once
+    # that was fixed the diagnostic went where it was always meant to go, and
+    # the wait timed out. What the scenario is actually about -- a broken
+    # keeper file is reported and a repaired one redraws -- is unchanged.
+    deadline = time.time() + 3.0
+    logs_dir = Path(base_path) / ".masc" / "logs"
+    while True:
+        found = any(
+            CONSOLE_DIAGNOSTIC.decode() in log.read_text(errors="replace")
+            for log in sorted(logs_dir.glob("masc-tui-*.log"))
+        ) if logs_dir.is_dir() else False
+        if found:
+            break
+        if time.time() > deadline:
+            raise AssertionError(
+                f"the decode diagnostic never reached the log under {logs_dir}"
+            )
+        read_available(master_fd, output)
+        time.sleep(0.05)
+    diagnostic_end = len(output)
     keeper_path.write_text(json.dumps(keeper_metadata("alpha")), encoding="utf-8")
     wait_for_output(
         process,

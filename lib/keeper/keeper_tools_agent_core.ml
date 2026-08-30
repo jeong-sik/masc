@@ -29,9 +29,16 @@ type gate_replay_delivery =
       Keeper_tool_execution.terminal_effect_receipt option
   }
 
+type attached_surface =
+  { offered : Keeper_identity_tools.offered_tool list
+  ; agent_cell : Agent_core.Agent.t option ref
+  ; history : Agent_core.Types.message list
+  }
+
 type tool_bundle =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
+  ; deferred_builtin_names : string list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option

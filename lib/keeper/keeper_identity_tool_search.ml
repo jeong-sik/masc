@@ -19,8 +19,13 @@
    [agent.tools] before the history sees it, so the call would disappear
    rather than fail. *)
 
+type deferred =
+  { tool : Agent_core.Tool.t
+  ; summary : string
+  }
+
 type surface =
-  { offered : Keeper_identity_tools.offered_tool list
+  { deferred : deferred list
   ; agent_cell : Agent_core.Agent.t option ref
   ; history : Agent_core.Types.message list
   }
@@ -260,19 +265,19 @@ let already_used_from_history ~entries history =
     entries
 ;;
 
-let make ~keeper_name ~build { offered; agent_cell; history } =
-  match offered with
+let make ~keeper_name { deferred; agent_cell; history } =
+  match deferred with
   | [] -> None
   | _ :: _ ->
     let usage = { loaded = Atomic.make []; used = Atomic.make [] } in
     let entries =
       List.map
-        (fun (offer : Keeper_identity_tools.offered_tool) ->
-           { name = offer.Keeper_identity_tools.schema.name
-           ; summary = summary_of offer.Keeper_identity_tools.schema.description
-           ; callable = observed usage (build offer)
+        (fun (d : deferred) ->
+           { name = d.tool.Agent_core.Tool.schema.name
+           ; summary = d.summary
+           ; callable = observed usage d.tool
            })
-        offered
+        deferred
     in
     let schema =
       match

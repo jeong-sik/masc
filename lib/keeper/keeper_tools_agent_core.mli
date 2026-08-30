@@ -34,6 +34,23 @@ type gate_replay_delivery =
       Keeper_tool_execution.terminal_effect_receipt option
   }
 
+(** What a Keeper is attached to, before the turn decides how to show it.
+
+    The bundle takes this rather than a finished listing because deciding what
+    to hold back is its job: an attached tool is held by default, and a
+    built-in is held when its own tool file declares it, and those two have to
+    end up in one listing. *)
+type attached_surface =
+  { offered : Keeper_identity_tools.offered_tool list
+  ; agent_cell : Agent_core.Agent.t option ref
+        (** Filled by [Runtime_agent.run] at agent creation, before any tool
+            of that agent can run. Travels with [offered] because tools
+            without a cell are tools that can be named and never called. *)
+  ; history : Agent_core.Types.message list
+        (** The conversation this turn continues, read to find which held
+            tools it has already run. *)
+  }
+
 type tool_bundle =
   { tools : Agent_core.Tool.t list
     (** Every tool this turn can run, attached-service tools included as
@@ -45,6 +62,14 @@ type tool_bundle =
         schemas replaced by one listing tool that hands them over on request
         (RFC-attached-service-tool-scoping). Only this lane can widen a
         running turn's tool set. *)
+  ; deferred_builtin_names : string list
+        (** The built-ins this turn holds behind the listing, because their
+            own tool files declare [defer_loading = true].
+
+            Reported so the projection check can subtract them: a tool leaving
+            the request is what this does, and an invariant that stopped
+            noticing would stop being one. Empty on the surface that carries
+            every tool as a schema. *)
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option

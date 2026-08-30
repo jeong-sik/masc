@@ -5,6 +5,10 @@ measurable success condition: metric and target_value (RFC-0387 B1). Use \
 masc_goal_transition for lifecycle changes."""
 additional_properties = false
 
+# Held back from the request until the model asks for it by name. Not
+# called once on 2026-08-29 or 2026-08-30 across the fleet.
+defer_loading = true
+
 [[params]]
 name = "id"
 type = "string"

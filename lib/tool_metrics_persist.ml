@@ -5,7 +5,8 @@
 
     Design:
     - Each tool call is serialized as a single JSONL line.
-    - Records are buffered in a bounded best-effort queue and flushed every 5 minutes.
+    - Records are buffered in a bounded best-effort queue and flushed on the
+      configured interval (0.5 seconds by default).
     - All I/O failures are caught and logged (best-effort persistence).
 
     @since 2.108.0 — Issue #3280 *)

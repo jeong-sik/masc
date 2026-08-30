@@ -36,8 +36,8 @@ val hydrate :
 
 val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
 (** [start_flush_fiber ~sw ~clock ~base_path] spawns a background fiber that
-    drains buffered records to JSONL every 5 minutes.  Also registers a
-    shutdown hook to flush remaining records.
+    drains buffered records to JSONL on the configured interval (0.5 seconds
+    by default). Also registers a shutdown hook to flush remaining records.
     [base_path] is the workspace root (e.g. [state.workspace_config.base_path]). *)
 
 val flush_now : base_path:string -> unit

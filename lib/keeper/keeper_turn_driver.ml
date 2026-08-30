@@ -1238,19 +1238,34 @@ let run_named
         Error err, None, Keeper_provider_attempt_effect.No_effect_observed
       | Ok provider_config ->
         (match
-           validate_provider_request_cap
-             ~runtime_id:attempt_runtime_id
-             provider_config
+           Runtime.validate_dispatch_credential ~provider_config runtime
          with
-         | Error err ->
+         | Error credential_error ->
            Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-           Error err, None, Keeper_provider_attempt_effect.No_effect_observed
-         | Ok max_request_body_bytes ->
-          let candidate = Runtime_candidate.of_provider_config provider_config in
-          (* Cached provider health is observation only. Every eligible runtime
-             reaches the real provider boundary; only the resulting typed error
-             may drive fallback. *)
-          let name = Printf.sprintf "agent_core-%s" attempt_runtime_id in
+           ( Error
+               (Agent_core.Error.Config
+                  (Agent_core.Error.InvalidConfig
+                     { field = "provider_credential"
+                     ; detail =
+                         Runtime.dispatch_credential_error_to_string credential_error
+                     }))
+           , None
+           , Keeper_provider_attempt_effect.No_effect_observed )
+         | Ok () ->
+          (match
+             validate_provider_request_cap
+               ~runtime_id:attempt_runtime_id
+               provider_config
+           with
+           | Error err ->
+             Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+             Error err, None, Keeper_provider_attempt_effect.No_effect_observed
+           | Ok max_request_body_bytes ->
+            let candidate = Runtime_candidate.of_provider_config provider_config in
+            (* Cached provider health is observation only. Every eligible runtime
+               reaches the real provider boundary; only the resulting typed error
+               may drive fallback. *)
+            let name = Printf.sprintf "agent_core-%s" attempt_runtime_id in
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
@@ -1374,7 +1389,7 @@ let run_named
           in
           ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
           , checkpoint_after
-          , Keeper_provider_attempt_effect.No_effect_observed )))
+          , Keeper_provider_attempt_effect.No_effect_observed ))))
        )
     attempt_candidates
 

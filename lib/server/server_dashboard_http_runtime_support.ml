@@ -16,21 +16,12 @@ let run_dashboard_compute ?(mode = Offloaded_readonly) ?runtime ~sw ~clock
   in
   let offloaded () =
     match Executor_pool_ref.get () with
-    | Some pool -> (
-        try
-          match
-            Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
-                Eio.Switch.run run_in_pool)
-          with
-          | `Done value -> value
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-            Log.Dashboard.warn
-              "dashboard offload failed, using inline compute: %s"
-              (Printexc.to_string exn);
-            fallback ())
     | None -> fallback ()
+    | Some _ ->
+      (match
+         Executor_pool_ref.submit_or_inline (fun () -> Eio.Switch.run run_in_pool)
+       with
+       | `Done value -> value)
   in
   match mode with
   | Inline_shared -> fallback ()

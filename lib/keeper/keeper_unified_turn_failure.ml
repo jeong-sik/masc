@@ -61,8 +61,25 @@ let empty_completion_exemption_budget = 5
 
 let empty_completion_exemptions : (string, int) Hashtbl.t = Hashtbl.create 8
 
+(** A network or timeout failure can be a short provider incident, but an
+    indefinitely exempt transport pins [turn_consecutive_failures] at zero and
+    makes an all-Keeper outage look healthy forever.  Three exempted cycles
+    preserve ordinary transient recovery; the fourth and later consecutive
+    failures use durable crash accounting until a successful turn resets the
+    budget.
+
+    Constitution exception (named bound + rationale): this gates only crash
+    ACCOUNTING, never the Keeper lifecycle or retry scheduler.  At the default
+    five-minute cadence, the fourth failure makes a persistent outage visible
+    after roughly fifteen minutes without turning a single network blip into a
+    fleet incident. *)
+let transient_transport_exemption_budget = 3
+
+let transient_transport_exemptions : (string, int) Hashtbl.t = Hashtbl.create 8
+
 let note_turn_success keeper_name =
-  Hashtbl.remove empty_completion_exemptions keeper_name
+  Hashtbl.remove empty_completion_exemptions keeper_name;
+  Hashtbl.remove transient_transport_exemptions keeper_name
 ;;
 
 let empty_completion_exemption_exhausted ~keeper_name err =
@@ -99,6 +116,20 @@ let invalid_request_budget_exhausted ~keeper_name err =
     exhausted)
 ;;
 
+let transient_transport_exemption_exhausted ~keeper_name err =
+  if not (EC.is_transient_network_error err)
+  then false
+  else (
+    let used =
+      Option.value
+        ~default:0
+        (Hashtbl.find_opt transient_transport_exemptions keeper_name)
+      + 1
+    in
+    Hashtbl.replace transient_transport_exemptions keeper_name used;
+    used > transient_transport_exemption_budget)
+;;
+
 (** Compute whether this failure observation advances the crash counter,
     consuming empty-completion exemption budget or invalid-request budget
     when applicable.  Call exactly once per failure observation, before
@@ -108,6 +139,7 @@ let account_failure_counting ~keeper_name ~is_auto_recoverable err =
   || EC.is_runtime_exhausted_error err
   || empty_completion_exemption_exhausted ~keeper_name err
   || invalid_request_budget_exhausted ~keeper_name err
+  || transient_transport_exemption_exhausted ~keeper_name err
 ;;
 
 let record_failure_observation

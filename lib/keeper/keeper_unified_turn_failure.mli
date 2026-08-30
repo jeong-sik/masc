@@ -18,9 +18,14 @@ val empty_completion_exemption_budget : int
 (** Maximum number of consecutive empty-completion failures exempted from the
     crash counter per keeper before the exemption is exhausted. *)
 
+val transient_transport_exemption_budget : int
+(** Maximum number of consecutive network/timeout failures exempted from the
+    crash counter per Keeper. Later consecutive failures use ordinary durable
+    failure accounting while the Keeper lifecycle remains active. *)
+
 val note_turn_success : string -> unit
-(** Reset the keeper's empty-completion exemption budget after a successful
-    turn or an operator context clear. *)
+(** Reset the Keeper's empty-completion and transient-transport exemption
+    budgets after a successful turn or an operator context clear. *)
 
 val account_failure_counting
   :  keeper_name:string
@@ -28,8 +33,8 @@ val account_failure_counting
   -> Agent_core.Error.t
   -> bool
 (** Compute whether this failure observation advances the crash counter,
-    consuming empty-completion exemption budget or invalid-request budget
-    when applicable.  Call exactly once per failure observation, before
+    consuming empty-completion, transient-transport, or invalid-request budget
+    when applicable. Call exactly once per failure observation, before
     {!record_failure_observation}. *)
 
 val record_failure_observation
@@ -42,5 +47,5 @@ val record_failure_observation
 (** Record explicit failure evidence without rewriting Keeper lifecycle or
     escalating a numeric streak into pause/crash.
     [counts_toward_crash] must come from {!account_failure_counting} so the
-    empty-completion exemption budget and the invalid-request consecutive
-    counter are each consumed exactly once. *)
+    bounded exemption budgets and the invalid-request consecutive counter are
+    each consumed exactly once. *)

@@ -629,13 +629,14 @@ let is_context_overflow (err : Agent_core.Error.t) : bool =
      [recoverable_runtime_failure_reason] maps it to [Capacity_backpressure]
      and [degraded_rotation_after_recoverable_error] walks the untried
      runtime catalog once, then stops (it never invents a timed retry cycle).
-   - transient network: exempt from Keeper crash accounting. Rotation does not
-     apply ([recoverable_runtime_failure_reason] returns [None] for
+   - transient network: initially exempt from Keeper crash accounting. Rotation
+     does not apply ([recoverable_runtime_failure_reason] returns [None] for
      network/timeout errors and the failure route is [Retry_after_observed
      Network_transient]). The heartbeat durably moves the exact source to its
-     urgency-lane tail, so a persistently failing transport cannot monopolize
-     other independent queued sources. The source is
-     retained with a new incarnation and may be retried after independent work.
+     urgency-lane tail, so it cannot monopolize other independent queued
+     sources. [account_failure_counting] bounds the exemption separately so a
+     persistent fleet-wide transport outage becomes durable failing evidence
+     instead of retrying forever with [consecutive] pinned at zero.
    - context overflow: NOT exempt (#26546). A provider overflow without a
      state-changing successor has no evidence that
      mechanical retry will fit. The ordinary consecutive-failure threshold

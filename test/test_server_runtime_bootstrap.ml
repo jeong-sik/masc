@@ -2740,6 +2740,42 @@ let test_health_json_blocks_terminal_configuration_failures () =
   Alcotest.(check bool) "partial config failure still needs operator" true
     (partial |> member "operator_action_required" |> to_bool)
 
+let test_health_json_degrades_recovering_turn_failures () =
+  let keeper_name = "transient-failing" in
+  let phase_counts : Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+    { running = 0; failing = 1; recovering = 1 }
+  in
+  let phase_snapshot : Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+    { counts = phase_counts
+    ; running_names = []
+    ; recovering_names = [ keeper_name ]
+    ; configuration_blocked_names = []
+    ; phase_values = [ keeper_name, Keeper_state_machine.Failing ]
+    ; phase_details = []
+    }
+  in
+  let fleet_safety =
+    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+      ~bootable_names:[ keeper_name ]
+      ~autoboot_scan:{ autoboot_names = [ keeper_name ]; read_errors = [] }
+      ~phase_snapshot
+      ~execution_snapshot:{ owners = []; executable_names = [ keeper_name ] }
+      ~phase_counts
+      ~paused_keepers_json:(`Assoc [ "count", `Int 0 ])
+      ()
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check int) "recovering failure remains executable" 1
+    (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
+  Alcotest.(check int) "recovering failure count" 1
+    (fleet_safety |> member "recovering_keeper_fiber_count" |> to_int);
+  Alcotest.(check string) "recovering fleet is degraded" "degraded"
+    (fleet_safety |> member "status" |> to_string);
+  Alcotest.(check string) "recovering blocker is explicit" "turn_failure_recovering"
+    (fleet_safety |> member "blocker" |> to_string);
+  Alcotest.(check bool) "automatic recovery does not demand operator action" false
+    (fleet_safety |> member "operator_action_required" |> to_bool)
+
 let test_health_json_reaction_ledger_unavailable_shape () =
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect
@@ -4540,6 +4576,9 @@ let () =
           Alcotest.test_case
             "health json blocks terminal configuration failures"
             `Quick test_health_json_blocks_terminal_configuration_failures;
+          Alcotest.test_case
+            "health json degrades recovering turn failures"
+            `Quick test_health_json_degrades_recovering_turn_failures;
           Alcotest.test_case
             "health json reaction ledger unavailable shape"
             `Quick test_health_json_reaction_ledger_unavailable_shape;

@@ -150,18 +150,25 @@ let record_failure_observation
       ~error_text
   =
   let base_path = config.base_path in
-  if counts_toward_crash
-  then (
-    Keeper_registry.increment_turn_failures ~base_path meta.name;
+  let count =
+    if counts_toward_crash
+    then (
+      let count =
+        Keeper_turn_failure_streak.increment
+          ~base_path
+          ~keeper_name:meta.name
+      in
     Health.record_failure
       ~agent_name:meta.name
-      ~reason:(Keeper_types_profile.short_preview error_text))
-  else
+        ~reason:(Keeper_types_profile.short_preview error_text);
+      count)
+    else (
     Log.Keeper.info
       "%s: auto-recoverable turn failure (not counted toward crash threshold): %s"
       meta.name
-      (Keeper_types_profile.short_preview error_text);
-  let count = Keeper_registry.get_turn_failures ~base_path meta.name in
+        (Keeper_types_profile.short_preview error_text);
+      Keeper_registry.get_turn_failures ~base_path meta.name)
+  in
   if EC.is_runtime_exhausted_error err && count > 0
   then
     Keeper_registry.set_failure_reason

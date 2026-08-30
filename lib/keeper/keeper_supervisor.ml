@@ -368,6 +368,22 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
               ()
           | Error
               (Keeper_keepalive_launch_transaction.Registration_failed
+                 (`Restart
+                    (Keeper_registry.Restart_turn_failure_streak_unavailable
+                       { keeper_name; detail }))) ->
+            Log.Keeper.error
+              "%s: restart refused because durable turn failure streak is unavailable: %s"
+              keeper_name
+              detail;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:
+                [ "keeper", keeper_name
+                ; "outcome", "turn_failure_streak_unavailable"
+                ]
+              ()
+          | Error
+              (Keeper_keepalive_launch_transaction.Registration_failed
                  (`Replaced current)) ->
             Log.Keeper.info
               "%s: supervisor restart retained newer lane phase=%s"

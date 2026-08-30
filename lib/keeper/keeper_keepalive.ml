@@ -716,6 +716,10 @@ let start_keepalive_outcome_to_string = function
   | Keepalive_registration_rejected
       (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
     Printf.sprintf "event queue unavailable for %s: %s" keeper_name detail
+  | Keepalive_registration_rejected
+      (Keeper_registry.Registration_turn_failure_streak_unavailable
+         { keeper_name; detail }) ->
+    Printf.sprintf "turn failure streak unavailable for %s: %s" keeper_name detail
   | Keepalive_fiber_start_rejected error ->
     Printf.sprintf
       "Fiber_started rejected: %s"
@@ -963,6 +967,18 @@ let start_keepalive
            detail;
          Keepalive_registration_rejected
            (Keeper_registry.Registration_event_queue_unavailable
+              { keeper_name; detail })
+       | Error
+           (Keeper_keepalive_launch_transaction.Registration_failed
+              (`Registration
+                 (Keeper_registry.Registration_turn_failure_streak_unavailable
+                    { keeper_name; detail }))) ->
+         Log.Keeper.error
+           "start_keepalive: registry turn failure streak unavailable keeper=%s: %s"
+           keeper_name
+           detail;
+         Keepalive_registration_rejected
+           (Keeper_registry.Registration_turn_failure_streak_unavailable
               { keeper_name; detail })
        | Error
            (Keeper_keepalive_launch_transaction.Lifecycle_open_failed

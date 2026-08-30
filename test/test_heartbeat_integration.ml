@@ -616,6 +616,30 @@ let test_crashed_cycle_records_turn_failure () =
       | KSM.Turn_succeeded -> ()
       | _ -> fail "expected Turn_succeeded when no failures recorded")
 
+let test_turn_status_preserves_configuration_failure_reason () =
+  let configuration_reason =
+    R.Turn_configuration_error
+      { code = "invalid_config"
+      ; field = Some "provider_credential"
+      ; detail = "required provider credential is missing"
+      }
+  in
+  (match
+     KHL.failure_reason_after_turn_status
+       ~turn_fail_count:1
+       (Some configuration_reason)
+   with
+   | Some (R.Turn_configuration_error { field = Some field; _ }) ->
+     check string "configuration field" "provider_credential" field
+   | Some reason ->
+     failf "configuration reason was overwritten: %s" (R.failure_reason_to_string reason)
+   | None -> fail "configuration reason was cleared");
+  match KHL.failure_reason_after_turn_status ~turn_fail_count:2 None with
+  | Some (R.Turn_consecutive_failures count) -> check int "fallback count" 2 count
+  | Some reason ->
+    failf "expected generic turn failure, got %s" (R.failure_reason_to_string reason)
+  | None -> fail "expected generic turn failure"
+
 let test_operator_interrupt_skips_turn_accounting () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4797,6 +4821,8 @@ let () =
         test_fresh_presence_preserves_turn_failures;
       test_case "crashed cycle surfaces as turn failure" `Quick
         test_crashed_cycle_records_turn_failure;
+      test_case "turn status preserves configuration failure" `Quick
+        test_turn_status_preserves_configuration_failure_reason;
       test_case "operator interrupt skips turn accounting" `Quick
         test_operator_interrupt_skips_turn_accounting;
     ];

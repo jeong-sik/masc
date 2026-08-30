@@ -354,6 +354,15 @@ let turn_status_event ~turn_fail_count : Keeper_state_machine.event =
   else Keeper_state_machine.Turn_succeeded
 ;;
 
+let failure_reason_after_turn_status ~turn_fail_count current =
+  if turn_fail_count <= 0
+  then current
+  else
+    match current with
+    | Some (Keeper_registry.Turn_configuration_error _) -> current
+    | Some _ | None -> Some (Keeper_registry.Turn_consecutive_failures turn_fail_count)
+;;
+
 (* Whether the event queue still holds any pending entry. Read errors are
    logged and answered [false]: the cycle then sleeps the cadence and the
    next intake reports the same error through its own path. *)
@@ -1234,11 +1243,19 @@ let run_heartbeat_loop
                (turn_status_event
                   ~turn_fail_count);
              if turn_fail_count > 0
-             then
+             then (
+               let current_failure_reason =
+                 Keeper_registry.get
+                   ~base_path:ctx.config.base_path
+                   m.name
+                 |> fun entry -> Option.bind entry (fun entry -> entry.last_failure_reason)
+               in
                Keeper_registry.set_failure_reason
                  ~base_path:ctx.config.base_path
                  m.name
-                 (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
+                 (failure_reason_after_turn_status
+                    ~turn_fail_count
+                    current_failure_reason));
              (* Phase 1: work-as-heartbeat — renew point (b).
                 After turn, call Workspace.heartbeat to prove workspace I/O health.
                 On success: reset consecutive_failures.

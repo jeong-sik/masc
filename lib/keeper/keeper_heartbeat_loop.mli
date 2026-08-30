@@ -186,6 +186,14 @@ val connector_attention_settlement_of_disposition :
 val turn_status_event :
   turn_fail_count:int -> Keeper_state_machine.event
 
+val failure_reason_after_turn_status :
+  turn_fail_count:int ->
+  Keeper_registry.failure_reason option ->
+  Keeper_registry.failure_reason option
+(** Preserve a typed configuration root cause when the post-turn heartbeat
+    records its generic consecutive-failure observation. Other failures keep
+    the existing consecutive-count projection. *)
+
 (** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
     The caller classifies lifecycle state and fd/disk pressure
     with {!classify_turn_intake_admission} BEFORE this is invoked, so this

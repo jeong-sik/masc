@@ -1,0 +1,15 @@
+{
+  "schema": "masc.docker_bulk_data.oneclick_volume_owner_rejection.v1",
+  "product_head": "a895984f6861001d697424945afcf249543136e0",
+  "image_id": "sha256:15c18e6eb52d4c0ef6f78dd166c34103193ee4bd9f54145cd78f3b29c9c952c8",
+  "runtime": "01a05444-2cc2-7000-9aef-4e53f897391b",
+  "startup_phase": "degraded",
+  "startup_error": "Sys_error(\"/app/data/tool-metrics: Eio.Io Fs Permission_denied Unix_error (Permission denied, \\\"mkdirat\\\", \\\"/app/data/tool-metrics\\\"),\\n  creating directory <fs:/app/data/tool-metrics>\")",
+  "data_dir": {
+    "mode": "755",
+    "owner": "0:0"
+  },
+  "clean_exit_code": 0,
+  "oom_killed": false,
+  "rejected": true
+}

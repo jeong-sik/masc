@@ -1,0 +1,36 @@
+{
+  "Id": "9ae415377794c35abcc5deab72e4d2c73ea373d9928f6b41b72827d0b77852ba",
+  "Name": "/masc-r86-a",
+  "State": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 56426,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-08-30T20:10:25.122216007Z",
+    "FinishedAt": "0001-01-01T00:00:00Z",
+    "Health": {
+      "Status": "starting",
+      "FailingStreak": 0,
+      "Log": []
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "volume",
+      "Name": "masc-r86-state",
+      "Destination": "/app/.masc",
+      "RW": true
+    },
+    {
+      "Type": "volume",
+      "Name": "masc-r86-data",
+      "Destination": "/app/data",
+      "RW": true
+    }
+  ]
+}

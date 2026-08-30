@@ -579,6 +579,8 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
         "keeper first-event timeout resolved: disabled (no first-event bound)");
   Keeper_task_owner_backend.install_hooks ();
   Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation ();
+  Keeper_registry.install_state_change_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot;
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net

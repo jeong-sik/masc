@@ -1,5 +1,8 @@
 # One-click host-port authority Linux runtime R1
 
+> 판정: public mapped Host는 복구했지만 container 내부 `localhost:8080`
+> healthcheck가 400으로 퇴행한 rejected intermediate다. 최종 판정은 R2를 따른다.
+
 ## 결과
 
 공식 one-click compose는 `${MASC_HOST_PORT:-8935}:8080`을 publish하고
@@ -94,6 +97,10 @@ fixed와 control container는 모두 graceful shutdown exit 0이었다. 두 volu
 reverse proxy, HTTPS, public DNS를 쓰는 deployment는 기존처럼 operator가 자신의
 canonical `MASC_HTTP_BASE_URL`을 명시해야 한다. 이 변경은 proxy header를 trust
 source로 승격하지 않는다.
+
+R1 뒤 추가 검사에서 explicit public URL이 wildcard bind의 자동 loopback identity를
+대체해 내부 healthcheck가 400임을 확인했다. 이 rollback 조건 때문에 R1 단독
+변경은 출하할 수 없으며 R2가 이를 수정한다.
 
 ## 근거
 

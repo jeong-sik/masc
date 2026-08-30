@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "verdict": "rejected_intermediate",
   "recorded_at": "2026-08-30T17:57:04+09:00",
   "source_change_commit": "da9e8d4f90988856f7bf56f23fd3c4584354bb38",
   "measurement_source_commit": "0c18efde2e953e80d04dd1c7555a808cc3e1cce2",
@@ -31,6 +32,7 @@
     "foreign_host_status": 400,
     "foreign_host_after_restart_status": 400,
     "wrong_loopback_port_status": 400,
+    "internal_listener_health_status": 400,
     "container_exit_code": 0,
     "volumes_preserved": true
   },

@@ -6,7 +6,7 @@
 - 작성자: `Codex`
 - 결정 ID: `oneclick-host-port-authority-linux-r1`
 - 적용 대상: one-click compose published HTTP identity
-- 결정 상태: `추적 필요`
+- 결정 상태: `보류`
 
 ## 근거
 
@@ -29,8 +29,10 @@
   시 200임을 확인했다.
 - 3차: fixed fresh/two restarts는 정상 mapped Host와 dashboard 200을 유지하고,
   foreign Host와 wrong-port loopback Host는 400으로 차단했다.
-- 재현 결과: 성공. advertised identity가 usable해졌고 fail-closed Host boundary는
-  유지됐다.
+- 4차: container 내부 공식 healthcheck URL `localhost:8080/health`가 400으로
+  퇴행함을 확인했다.
+- 재현 결과: 부분 성공 후 기각. public identity는 usable했지만 internal listener
+  identity가 사라져 R2 보강이 필요하다.
 
 ## 불확실성
 

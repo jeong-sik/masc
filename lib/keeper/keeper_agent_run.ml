@@ -70,6 +70,11 @@ type request_evidence =
   { wire_observation : Turn_record.request_wire_observation
   ; prompt_blocks : Turn_record.prompt_block list
   ; input_messages : Agent_core.Types.message list option
+  ; tools : Agent_core.Tool.t list
+    (** The surface this request carried, from
+        {!Keeper_agent_tool_surface.on_the_wire}. Not the list the turn was
+        built with: the Agent Core lane sends a listing in place of the
+        attached-service schemas and widens its own set mid-turn. *)
   }
 
 (* What the queue held when the turn decided to yield. The decision itself is
@@ -1142,6 +1147,10 @@ let run_turn
                                ; prompt_blocks = acc.prompt_blocks
                                ; input_messages =
                                    !current_request_input_messages_ref
+                               ; tools =
+                                   Keeper_agent_tool_surface.on_the_wire
+                                     ~agent_cell:agent_ref
+                                     ~built:tools
                                })
                       ~on_official_client_result_handoff:
                         s.Keeper_run_tools.observe_official_client_result_handoff
@@ -1217,10 +1226,15 @@ let run_turn
                  let usage = Inference_utils.usage_of_response result.response in
                  let ctx_composition =
                    match !request_evidence_ref with
-                   | Some { prompt_blocks; input_messages = Some input_messages; _ } ->
+                   | Some
+                       { prompt_blocks
+                       ; input_messages = Some input_messages
+                       ; tools = request_tools
+                       ; _
+                       } ->
                      Keeper_agent_prompt_metrics.build_ctx_composition_metrics
                        ~prompt_blocks
-                       ~tools
+                       ~tools:request_tools
                        ~input_messages
                        ~actual_input_tokens:(Some usage.input_tokens)
                    | Some { input_messages = None; _ } | None ->
@@ -1498,12 +1512,13 @@ let run_turn
           | Some
               { prompt_blocks
               ; input_messages = Some input_messages
+              ; tools = request_tools
               ; _
               } ->
             let segments =
               (Keeper_agent_prompt_metrics.build_ctx_composition_metrics
                  ~prompt_blocks
-                 ~tools
+                 ~tools:request_tools
                  ~input_messages
                  ~actual_input_tokens:None)
                 .segments

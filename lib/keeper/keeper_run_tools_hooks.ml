@@ -360,6 +360,7 @@ let assemble_hooks
   let receipt_lane_attempt_index_ref = ctx.receipt_lane_attempt_index_ref in
   let receipt_response_text_present_ref = ctx.receipt_response_text_present_ref in
   let tools = ctx.tools in
+  let turn_agent_cell = ctx.agent_cell in
   let all_tool_names = ctx.all_tool_names in
   let initial_schema_filter, initial_turn_lane =
     compute_tool_surface
@@ -1003,7 +1004,10 @@ let assemble_hooks
                   ~extra_system_context:ctx
                   ~user_message
                   ~history_messages:messages
-                  ~tools
+                  ~tools:
+                    (Keeper_agent_tool_surface.on_the_wire
+                       ~agent_cell:turn_agent_cell
+                       ~built:tools)
                   ();
                 Eio.Fiber.yield ();
                 Agent_core.Hooks.AdjustParams

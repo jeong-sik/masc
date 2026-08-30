@@ -1281,6 +1281,60 @@ let test_validate_allows_local_with_hatch () =
       | Ok () -> ()
       | Error err -> fail ("hatch must allow local: " ^ err))
 
+(* task-895: parse used to read its fields and silently drop the rest — a
+   caller sending merge_existing / keep_warm / stash_untracked watched the
+   field vanish with no error. The gate must reject every key the parse body
+   does not consume, and the known set must stay derived from that body,
+   not from a stale schema list. *)
+let test_parse_rejects_unknown_keys () =
+  with_test_context @@ fun ctx ->
+  List.iter
+    (fun (label, field) ->
+       match
+         Keeper_turn_up_args.parse ctx
+           (`Assoc [ "name", `String "unknown-args-fixture"; field ])
+       with
+       | Error result ->
+         check bool (label ^ " rejected as unknown") true
+           (contains "[turn_up_arg_unknown] unknown keeper_up argument(s):"
+              (Keeper_types_profile.tool_result_body result))
+       | Ok _ -> failf "%s was silently accepted" label)
+    [ "merge_existing", ("merge_existing", `Bool true)
+    ; "keep_warm", ("keep_warm", `Bool false)
+    ; "stash_untracked", ("stash_untracked", `String "yes")
+    ];
+  check (list string) "known set is exactly the parse-consumed keys"
+    (List.sort String.compare
+       [ "name"; "runtime_id"; "autoboot_enabled"; "mention_targets"
+       ; "max_context_override"; "proactive_enabled"; "sandbox_profile"
+       ; "remote_endpoint"; "network_mode"; "tools"; "skills"; "instructions"
+       ])
+    (List.sort String.compare Keeper_turn_up_args.known_turn_up_args);
+  (match
+     Keeper_turn_up_args.parse ctx
+       (`Assoc
+          [ "name", `String "unknown-args-fixture"
+          ; "zzz_late", `Bool true
+          ; "aaa_early", `Bool true
+          ])
+   with
+   | Error result ->
+     let body = Keeper_types_profile.tool_result_body result in
+     check bool "every unknown key is named" true
+       (contains "aaa_early" body && contains "zzz_late" body)
+   | Ok _ -> fail "multiple unknown keys were silently accepted");
+  (match
+     Keeper_turn_up_args.parse ctx
+       (`Assoc
+          [ "name", `String "unknown-args-fixture"
+          ; "instructions", `String "still fine"
+          ])
+   with
+   | Ok _ -> ()
+   | Error result ->
+     failf "known key rejected: %s"
+       (Keeper_types_profile.tool_result_body result))
+
 let () =
   match Array.to_list Sys.argv with
   | [ _
@@ -1309,6 +1363,12 @@ let () =
             "explicit mention_targets normalize and dedupe"
             `Quick
             test_resolve_mention_targets_normalizes_explicit_values
+        ] )
+    ; ( "unknown_keys"
+      , [ test_case
+            "unknown arguments are rejected, not silently dropped"
+            `Quick
+            test_parse_rejects_unknown_keys
         ] )
     ; ( "sandbox_profile"
       , [ test_case

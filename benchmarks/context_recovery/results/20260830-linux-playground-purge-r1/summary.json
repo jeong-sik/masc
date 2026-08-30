@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T15:08:10+09:00",
+  "keeper_name_length": 128,
+  "model": "ollama/qwen3:8b",
+  "baseline": {
+    "source_commit": "d667ddb4a4aed8c1e3d1c383d10de91b089f756e",
+    "image_digest": "sha256:151e4a32ca648cc3f18b967853257939a4d61a12ccc9bfc15a0be71e4d61f9b4",
+    "binary_sha256": "624ef4ae20875902f347f0f60aa2dd8f25a60c24934566d371d11e10ff5443c6",
+    "source_refresh_state": "Succeeded",
+    "source_revision": 2,
+    "source_fact_count": 0,
+    "source_invalidation_count": 1,
+    "source_refresh_response": "LINUX_SOURCE_REFRESH_OK",
+    "source_refresh_dynamic_context_bytes": 0,
+    "purge_http_status": 202,
+    "purge_operation_id": "shutdown-fe1954a1-74b8-474b-b34d-837732918340",
+    "core_artifacts_present_after_purge": 0,
+    "playground_present_after_purge": true,
+    "same_process_recreate_error": "chat_operation_store_readonly",
+    "restart_recreate_state": "Succeeded",
+    "restart_recreate_response": "RECREATE_CONTENT:mode=current-linux-r1"
+  },
+  "fixed": {
+    "source_commit": "f57c1f14b8825f5a6622ef0fdc0e744a4f794488",
+    "image_digest": "sha256:2999ca517f3b234195392f5b0716666d9ff2fffdca965155cef75c7317b8838e",
+    "binary_sha256": "3af3197406c210a3268c57448aa8e2b2c3017e3de56dad746508bb9c1a5422d0",
+    "purge_http_status": 202,
+    "purge_operation_id": "shutdown-3576e211-da4b-4ef4-9f03-c33a6056424a",
+    "core_and_playground_artifacts_present_after_purge": 0,
+    "recreate_operation_state": "Succeeded",
+    "recreate_response": "RECREATE_ABSENT",
+    "recreate_dynamic_context_bytes": 0,
+    "stale_content_matches": 0,
+    "stale_claim_matches": 0,
+    "source_snapshot_present": false,
+    "recreate_latency_ms": 178343
+  },
+  "focused_checks": {
+    "build": "pass",
+    "dashboard_purge_integration": "1/1"
+  },
+  "open_followups": [31926, 31927],
+  "artifact_sha256": {
+    "baseline_memory_source_after_turn.json": "c331e23b4ba89e77ec9e0ae70058bf8922dd51ef93da0a3f783bc4428514b2a2",
+    "baseline_last_prompt.json": "7075f940e4cf4b0d07e2da29049dfcbedc1c352513bfa8a991a2fc6fdd04b529",
+    "baseline_keeper_chat.jsonl": "bbf92cc958ae8f5f707c974b1e0365949dd3dc9711062875d0e44be9556410f5",
+    "baseline_keeper_metrics.jsonl": "326897d7dc1cc86764a9ccc8ffef495665b1ecf42d2e9a5cb6f466db64241160",
+    "baseline_purge_response.json": "80bd6b9c1ba242175a117cad7e236b0f933214340850bd533dd43774305c7a2f",
+    "baseline_post_purge_paths.txt": "5f3c75c90d8a24189cd03d4755a8473cf00ebe1ef24ef7803ee279c0a0d3f9cf",
+    "baseline_recreate_chat.jsonl": "1ae12b715ef5c806cfb7d95599d07b92e53c5581ffdff67e0d2d6dcf3c26ebd0",
+    "fixed_purge_response.json": "64f073afbed8e645a1a2d18549886f45caab4ceef62643042a75daeb7717ccf4",
+    "fixed_post_purge_paths.txt": "7f8bae7a647c515bc0ee4f51d284aef15da1dc7f034056c1623a62b7ee589a0b",
+    "fixed_recreate_operation.json": "0291a23f2198c1f31ac358aad9778cfdc14aea6ec8359ffa46fde42e156b4b46",
+    "fixed_recreate_chat.jsonl": "add2d3df457689cda58b0715894b85bfbed9042a39af2787e1dba1d67a6f7f2c",
+    "fixed_recreate_metrics.jsonl": "32dee7d56e979208896ec3683dd32fb6741aa95e5746921de5ffd39bbd5399c8",
+    "fixed_recreate_last_prompt.json": "ff75bf4b7b7ec6abca4bea7d02b5a1e94b6ff5223dbba5a22915bfaee69f8338"
+  },
+  "performance_claim": false
+}

@@ -647,11 +647,11 @@ let test_runtime_image_enforces_preflight_before_main () =
        assert_contains
          "entrypoint prepares the runtime-events directory"
          source
-         {|mkdir -p "$RUN_DIR" "$RUNTIME_EVENTS_DIR"|};
+         {|mkdir -p "$LEASE_DIR" "$RUNTIME_EVENTS_DIR"|};
        assert_contains
          "entrypoint restricts the runtime-events directory"
          source
-         {|chmod 0700 "$RUN_DIR" "$RUNTIME_EVENTS_DIR"|})
+         {|chmod 0700 "$LEASE_DIR" "$RUNTIME_EVENTS_DIR"|})
     [ release_entrypoint; oneclick_entrypoint ];
   assert_contains
     "Docker context includes the main release executable"

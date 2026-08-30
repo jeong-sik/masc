@@ -542,32 +542,74 @@ let update_locked
   =
   Fs_compat.mkdir_p keepers_dir;
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  (* File_lock_eio.with_lock appends ".lock" itself; a pre-suffixed path
-     locked "<snapshot>.lock.lock" and left a stray file per keeper. *)
-  File_lock_eio.with_lock ?clock snapshot_path (fun () ->
-    let* previous =
-      match Fs_compat.load_file_opt snapshot_path with
-      | None -> Ok None
-      | Some content ->
-        let+ snapshot = parse snapshot_path content in
-        Some snapshot
-    in
-    let* next = build previous in
-    let content = Yojson.Safe.pretty_to_string (to_json next) ^ "\n" in
-    match Fs_compat.save_file_atomic snapshot_path content with
-    | Ok () ->
-      append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
-      Ok next
-    | Error message ->
-      Error
-        (Printf.sprintf
-           "current Memory OS atomic write failed path=%s: %s"
-           snapshot_path
-           message))
+  Keeper_memory_os_aggregate_lock.with_lock
+    ?clock
+    ~keepers_dir
+    ~keeper_id
+    (fun () ->
+       (* File_lock_eio.with_lock appends ".lock" itself; a pre-suffixed path
+          locked "<snapshot>.lock.lock" and left a stray file per keeper. *)
+       File_lock_eio.with_lock ?clock snapshot_path (fun () ->
+         let* previous =
+           match Fs_compat.load_file_opt snapshot_path with
+           | None -> Ok None
+           | Some content ->
+             let+ snapshot = parse snapshot_path content in
+             Some snapshot
+         in
+         let* source_payload =
+           match
+             Keeper_memory_source_current.read_for_keepers_dir
+               ~keepers_dir
+               ~keeper_id
+           with
+           | Ok None -> Ok ""
+           | Ok (Some snapshot) ->
+             Ok
+               (Keeper_memory_source_current.render_payload
+                  snapshot.facts
+                  snapshot.invalidations)
+           | Error detail -> Error detail
+         in
+         let* next = build ~source_payload previous in
+         let content = Yojson.Safe.pretty_to_string (to_json next) ^ "\n" in
+         match Fs_compat.save_file_atomic snapshot_path content with
+         | Ok () ->
+           append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
+           Ok next
+         | Error message ->
+           Error
+             (Printf.sprintf
+                "current Memory OS atomic write failed path=%s: %s"
+                snapshot_path
+                message)))
+;;
+
+let combined_measure ~max_bytes ~source_payload facts =
+  let ordinary_bytes = Keeper_memory_os_budget.rendered_bytes facts in
+  let source_bytes = String.length source_payload in
+  let separator_bytes =
+    if ordinary_bytes > 0 && source_bytes > 0 then 1 else 0
+  in
+  let saturated_add left right =
+    if left > Int.max_int - right then Int.max_int else left + right
+  in
+  let actual_bytes =
+    ordinary_bytes
+    |> saturated_add source_bytes
+    |> saturated_add separator_bytes
+  in
+  let measurement : Keeper_memory_os_budget.measurement =
+    { actual_bytes; max_bytes }
+  in
+  if actual_bytes <= max_bytes
+  then Keeper_memory_os_budget.Fits measurement
+  else Keeper_memory_os_budget.Exceeds measurement
 ;;
 
 let make_snapshot
       ~max_fact_bytes
+      ~source_payload
       ~previous
       ~now
       ~source
@@ -580,11 +622,11 @@ let make_snapshot
     | Some snapshot -> snapshot.facts, snapshot.revision + 1
   in
   let max_fact_bytes = max 1 max_fact_bytes in
-  match Keeper_memory_os_budget.measure ~max_bytes:max_fact_bytes facts with
+  match combined_measure ~max_bytes:max_fact_bytes ~source_payload facts with
   | Exceeds { actual_bytes; max_bytes } ->
     Error
       (Printf.sprintf
-         "Memory OS rendered fact payload exceeds byte budget actual_bytes=%d max_bytes=%d"
+         "combined Memory OS rendered payload exceeds byte budget actual_bytes=%d max_bytes=%d"
          actual_bytes
          max_bytes)
   | Fits _ ->
@@ -609,7 +651,12 @@ let replace
       ~facts
       ()
   =
-  update_locked ?clock ?dropped_statements ~keepers_dir ~keeper_id (fun previous ->
+  update_locked
+    ?clock
+    ?dropped_statements
+    ~keepers_dir
+    ~keeper_id
+    (fun ~source_payload previous ->
     let observed_revision =
       Option.map (fun snapshot -> snapshot.revision) previous
     in
@@ -623,6 +670,7 @@ let replace
     else
       make_snapshot
         ~max_fact_bytes
+        ~source_payload
         ~previous
         ~now
         ~source
@@ -639,7 +687,11 @@ let upsert_fact
       ~source
       incoming
   =
-  update_locked ?clock ~keepers_dir ~keeper_id (fun previous ->
+  update_locked
+    ?clock
+    ~keepers_dir
+    ~keeper_id
+    (fun ~source_payload previous ->
     let current_facts =
       match previous with
       | None -> []
@@ -664,7 +716,7 @@ let upsert_fact
        larger than the whole budget still fails closed below. *)
     let facts =
       match
-        Keeper_memory_os_budget.measure ~max_bytes:max_fact_bytes facts
+        combined_measure ~max_bytes:max_fact_bytes ~source_payload facts
       with
       | Fits _ -> facts
       | Exceeds _ ->
@@ -684,8 +736,9 @@ let upsert_fact
           | [] -> remaining
           | _ :: rest ->
             (match
-               Keeper_memory_os_budget.measure
+               combined_measure
                  ~max_bytes:max_fact_bytes
+                 ~source_payload
                  (incoming_fact @ remaining)
              with
              | Fits _ -> remaining
@@ -700,6 +753,7 @@ let upsert_fact
     in
     make_snapshot
       ~max_fact_bytes
+      ~source_payload
       ~previous
       ~now
       ~source

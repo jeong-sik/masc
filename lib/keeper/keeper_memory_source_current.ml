@@ -108,10 +108,15 @@ let render_fact fact =
 
 let render_invalidation invalidation =
   Printf.sprintf
-    "- [invalidated source=file:%S reason=%s checked=%s] Previous claim was discarded; re-read this source before writing a replacement."
+    "- [invalidated source=file:%S reason=%s] Old claim removed; re-read source."
     invalidation.source_path
     (invalidation_reason_to_string invalidation.reason)
-    (Masc_domain.iso8601_of_unix_seconds invalidation.invalidated_at)
+;;
+
+let render_payload facts invalidations =
+  List.map render_fact facts
+  @ List.map render_invalidation invalidations
+  |> String.concat "\n"
 ;;
 
 let source_to_json source =
@@ -374,19 +379,18 @@ let update_locked ?clock ~keepers_dir ~keeper_id build =
     if changed then save_snapshot path next else Ok next)
 ;;
 
-let validate_recall_budget ~keepers_dir ~keeper_id ~facts ~invalidations =
-  let* ordinary_facts =
-    match Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id with
-    | Ok None -> Ok []
-    | Ok (Some snapshot) -> Ok snapshot.facts
-    | Error detail -> Error detail
+let combined_payload ordinary source =
+  match String.equal ordinary "", String.equal source "" with
+  | true, _ -> source
+  | _, true -> ordinary
+  | false, false -> ordinary ^ "\n" ^ source
+;;
+
+let validate_recall_budget ~ordinary_payload ~facts ~invalidations =
+  let source_payload = render_payload facts invalidations in
+  let actual_bytes =
+    combined_payload ordinary_payload source_payload |> String.length
   in
-  let lines =
-    List.map Keeper_memory_os_budget.render_fact ordinary_facts
-    @ List.map render_fact facts
-    @ List.map render_invalidation invalidations
-  in
-  let actual_bytes = String.length (String.concat "\n" lines) in
   let max_bytes = Env_config.KeeperMemoryOs.recall_facts_max_bytes () in
   if actual_bytes <= max_bytes
   then Ok ()
@@ -403,6 +407,7 @@ let upsert_file_fact
       ~config
       ~meta
       ~keepers_dir
+      ~ordinary_payload
       ~now
       ~claim
       ~source_path
@@ -424,11 +429,16 @@ let upsert_file_fact
     | Error detail -> Error (Source_read_failed detail)
     | Ok content ->
       let incoming_source = { path = source_path; sha256 = sha256 content } in
-      update_locked
+      Keeper_memory_os_aggregate_lock.with_lock
         ?clock
         ~keepers_dir
         ~keeper_id:meta.Keeper_meta_contract.name
-        (fun previous ->
+        (fun () ->
+           update_locked
+             ?clock
+             ~keepers_dir
+             ~keeper_id:meta.Keeper_meta_contract.name
+             (fun previous ->
       let previous_facts, previous_invalidations, revision, first_seen =
         match previous with
         | None -> [], [], 1, now
@@ -458,10 +468,10 @@ let upsert_file_fact
           (fun invalidation -> not (String.equal invalidation.source_path source_path))
           previous_invalidations
       in
+      let* ordinary_payload = ordinary_payload () in
       let* () =
         validate_recall_budget
-          ~keepers_dir
-          ~keeper_id:meta.Keeper_meta_contract.name
+          ~ordinary_payload
           ~facts
           ~invalidations
       in
@@ -472,7 +482,7 @@ let upsert_file_fact
           ; facts
           ; invalidations
           }
-        , true ))
+        , true )))
       |> Result.map_error (fun detail -> Store_write_failed detail)
 ;;
 

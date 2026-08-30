@@ -586,6 +586,16 @@ let keeper_memory_write_with_outcome
             ~config
             ~meta
             ~keepers_dir
+            ~ordinary_payload:(fun () ->
+              match
+                Keeper_memory_os_current.read_for_keepers_dir
+                  ~keepers_dir
+                  ~keeper_id:meta.name
+              with
+              | Ok None -> Ok ""
+              | Ok (Some snapshot) ->
+                Ok (Keeper_memory_os_budget.render_facts snapshot.facts)
+              | Error detail -> Error detail)
             ~now:(Time_compat.now ())
             ~claim:body
             ~source_path

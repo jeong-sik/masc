@@ -80,7 +80,11 @@ let resolve_runtime_providers ~runtime_id () =
   let runtime_id = String.trim runtime_id in
   let provider_config_of_runtime rt =
     match rt.Runtime.execution with
-    | Runtime_execution.Agent_core provider_config -> Ok provider_config
+    | Runtime_execution.Agent_core provider_config ->
+      (match Runtime.validate_dispatch_credential ~provider_config rt with
+       | Ok () -> Ok provider_config
+       | Error error ->
+         Error (Runtime.dispatch_credential_error_to_string error))
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
       ->

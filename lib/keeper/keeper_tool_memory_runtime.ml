@@ -671,6 +671,8 @@ let keeper_memory_write_with_outcome
          ; "revision", `Int snapshot.revision
          ; "outcome", `String "persisted_current_snapshot"
          ; "store", `String "current_memory_snapshot"
+         ; "facts_removed", `Int (List.length snapshot.change.removed)
+         ; "facts_retained", `Int snapshot.change.retained
          ]
      | Error detail ->
        Log.Keeper.warn

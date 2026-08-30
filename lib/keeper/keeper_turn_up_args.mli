@@ -59,11 +59,6 @@ val known_turn_up_args : string list
     key the caller sent. *)
 val turn_up_arg_unknown : string list -> tool_result
 
-(** Reject [`Assoc] fields not in [known_turn_up_args]. Non-object envelopes
-    pass: the required-name check rejects those with the missing field. *)
-val validate_no_unknown_keys :
-  Yojson.Safe.t -> (unit, tool_result) result
-
 (** Resolve mention targets with dedupe + blank filter. [None] falls through to
     [fallback_targets] → [[name]]; [Some []] is an explicit clear. *)
 val resolve_mention_targets :

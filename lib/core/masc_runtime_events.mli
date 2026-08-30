@@ -28,12 +28,13 @@ val prune_stale_dumps : dir:string -> unit
 (** Remove [<pid>.events] ring-buffer dumps in [dir] whose owning process no
     longer exists.
 
-    [Runtime_events.start] writes the buffer as [<pid>.events] in the process
-    working directory and never removes it, so without this a checkout gains
-    one dump per run. A dump belonging to a live process is left alone: a
-    consumer (Olly, an in-process cursor) may be reading it. Existence is
-    probed with signal 0; [EPERM] and any other error count as live, since
-    deleting a buffer under an active reader is worse than leaving a file.
+    [Runtime_events.start] writes the buffer as [<pid>.events]. The OCaml
+    runtime removes it after a normal process exit, but an ungraceful exit can
+    leave the dump behind. This pass removes those crash remnants before they
+    accumulate. A dump belonging to a live process is left alone: a consumer
+    (Olly, an in-process cursor) may be reading it. Existence is probed with
+    signal 0; [EPERM] and any other error count as live, since deleting a
+    buffer under an active reader is worse than leaving a file.
 
     Only stems that are plain decimal digits are treated as pids, so files like
     [0x10.events] or [olly.events] are left alone. Setting

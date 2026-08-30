@@ -29,5 +29,8 @@
   "rows_visible_before_replacement_call": 1,
   "rows_after_replacement": 2,
   "payload_unchanged_across_replacement_before_new_call": true,
-  "api_read_after_replacement": true
+  "api_read_after_replacement": false,
+  "api_endpoint_reachable": true,
+  "api_total_calls_before_replacement_call": 0,
+  "api_hydrates_persisted_rows": false
 }

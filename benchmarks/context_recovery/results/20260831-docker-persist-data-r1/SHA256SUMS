@@ -22,7 +22,7 @@ d00f9d9d2eebcc28ddcdd84407c888b620ba372750976defcc8edbab4aa50f7a  benchmarks/con
 fed551c9b4221edd5479f5bc16df5785f3b408fcacaed252f842337a794e22ff  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r83-container-replacement/image-inspect.json
 a028f4984e6fcc20f2117c492260d85f8c8d50eb98b1178081c61d60d4b4c7fb  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r83-container-replacement/source-composition.txt
 aa9d8239b35a47d4fb315ab65acda4576293d09533f760c8ab0754b2c8f28e95  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r83-container-replacement/state-volume.txt
-a6979ebc23fd67676b01f4db2d078dff083e79d50d2f5e8c642fc2d1ba60ad26  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r83-container-replacement/summary.json
+58429173a79be74ce67b785e10613a34648b7ac5edec2f5e8648f3f9b30b8355  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r83-container-replacement/summary.json
 675041b04c52f47979f0ff7066b58602cc3cea38b62ee037ffbfbf4e3e647020  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r83-container-replacement/tool-metrics-after-a-sha256.txt
 f477feeac5c57ffe40db21e3973706ef57388d48de7d564cc6abe7ee23d9e777  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r83-container-replacement/tool-metrics-after-a.jsonl
 0b889646269325e7613aebf8451b7adc95c9781146f788f7bc79f2034032af90  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r83-container-replacement/tool-metrics-after-b-sha256.txt
@@ -66,7 +66,7 @@ bd789ef81cafecb40da36dcc9eff8834aa0cce64fd3a0222ca1a737abd364734  benchmarks/con
 9118ec7962100cf5275e9d9dd78a3bba2f1a40771dd79c1d48ad10c54ad2962a  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r85-oneclick-replacement/image-inspect.json
 9b55ecaad290156c96fb7ca5847544f012f60e74b75b580f9ff500c6d4d7ccf6  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r85-oneclick-replacement/source-composition.txt
 d95e897f2db178ce8bef7e7ab67f698e2ec280f258da5ef3219d5341ff6c58ae  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r85-oneclick-replacement/state-volume.txt
-6927a9d5f72f0ba0f3a4596d48bba5e831effaa0659db7f15c2b40d17555e4d4  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r85-oneclick-replacement/summary.json
+48f4d87694d6f00f393091d7c5d632426ea241a1e9b98ff90f5e343a6e3145fe  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r85-oneclick-replacement/summary.json
 a358efccd8eb7810ce91ba4d43b6a08a4ed81d81ccb3e0fa282bbd7459d71793  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r85-oneclick-replacement/tool-metrics-after-a-sha256.txt
 1070d32a99b4a2b29ee7f9535b876fa2fc48db748522fc16d799da7802ff4643  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r85-oneclick-replacement/tool-metrics-after-a.jsonl
 a3d47a66def6f6b264261f8ef3dc1a9ff9c2d257e122c55dadc211aaaca71c67  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r85-oneclick-replacement/tool-metrics-after-b-sha256.txt
@@ -97,7 +97,7 @@ c0bb6827ebf239c870a151f3162f3daf411e2ae2ae98f5c53976954918c6b5fb  benchmarks/con
 59ef43f6518d1b98731e2781cf2587381ee9947904f0347a31407bb8f626f635  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r86-production-replacement/image-inspect.json
 8b85b5f818cc15da0aefa705039ce21d84352ed4bfbc8d017e8e823642166b4e  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r86-production-replacement/source-composition.txt
 2a0889415eb9dd82816bbcba029c31c675f690528fd2608d1c9244729b9e271c  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r86-production-replacement/state-volume.txt
-6ff0f17d5516bb99520bbde84f46fed78dac269e44f15b1eeb42682ed4c154cf  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r86-production-replacement/summary.json
+4f06bbdc4f5359acabae6aad68b2928109e98d95851f12a6e0ef58839112e1e3  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r86-production-replacement/summary.json
 fd66b36a82807e2ce921ff365c7111b0cc001d0befc3c93414c8285c963cfeae  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r86-production-replacement/tool-metrics-after-a-sha256.txt
 90e7aab358f5e6a041ab2891340e8337fda2537fbd5ba3a990bda1a01dcbafb6  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r86-production-replacement/tool-metrics-after-a.jsonl
 be93f37f78e7a80c467b3aad856772106d1974e5302d339134415b22f643e8db  benchmarks/context_recovery/results/20260831-docker-persist-data-r1/r86-production-replacement/tool-metrics-after-b-sha256.txt

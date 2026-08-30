@@ -19,7 +19,9 @@ named volume root가 UID/GID 0:0이 됐고 startup이 tool-metrics permission er
 
 최종 head에서 r85 one-click과 r86 production을 각각 container replacement했다. 두 surface 모두
 서로 다른 두 runtime이 startup ready/auth ok/clean exit 0이었다. 첫 call 뒤 1 row, replacement의
-새 call 전 동일 1 row, 두 번째 call 뒤 2 rows였다. replacement API도 persisted metrics를 읽었다.
+새 call 전 동일 1 row, 두 번째 call 뒤 2 rows였다. 그러나 replacement의
+`/api/v1/tool-metrics`는 HTTP 200이면서 `total_calls=0`이었다. Disk JSONL은 보존됐지만 현재
+dashboard API가 restart 시 이를 hydrate하지 않는다는 별도 반례다.
 
 ## 변경
 
@@ -39,7 +41,7 @@ named volume root가 UID/GID 0:0이 됐고 startup이 tool-metrics permission er
 - runtime B: `01a05442-273f-7000-b82e-947dbc11d687`
 - both startup ready/auth ok/clean exit 0
 - rows: A stop 뒤 1, B call 전 동일 bytes 1, B stop 뒤 2
-- B `/api/v1/tool-metrics`: persisted aggregate read success
+- B `/api/v1/tool-metrics`: HTTP 200, `total_calls=0`; persisted JSONL hydrate 없음
 
 이후 one-click owner fix로 product head가 바뀌었으므로 production surface도 r86에서 갱신했다.
 
@@ -65,7 +67,7 @@ one-click image layer에 `/app/data`가 존재하지 않았으므로 named volum
 - runtime B: `01a0544a-5b68-7000-a219-c82c4b92e1d3`
 - both startup ready/auth ok/clean exit 0
 - rows: 1 → replacement call 전 identical 1 → 2
-- replacement API read: pass
+- replacement API: reachable, `total_calls=0`; persisted JSONL hydrate 없음
 - image declared volumes: `/app/.masc`, `/app/data`
 
 measurement head는 product head에 이미 main에 병합된 one-click build fix 3개만 더한 합성본이다.
@@ -79,12 +81,13 @@ measurement head는 product head에 이미 main에 병합된 one-click build fix
 - runtime B: `01a0544b-7ded-7000-b041-fb93918a3f7b`
 - both startup ready/auth ok/clean exit 0
 - rows: 1 → replacement call 전 identical 1 → 2
-- replacement API read: pass
+- replacement API: reachable, `total_calls=0`; persisted JSONL hydrate 없음
 - both containers mounted the same named `state` and `data` volumes read-write
 - image declared volumes: `/app/.masc`, `/app/data`
 
-실제 JSONL row의 `tool_name`은 `masc_config`였다. marker file이 아니라 MASC producer와 shutdown
-flush, 다음 runtime의 HTTP consumer까지 연결했다.
+실제 JSONL row의 `tool_name`은 `masc_config`였다. marker file이 아니라 MASC producer, shutdown
+flush, 다음 runtime의 byte-identical disk read까지 연결했다. HTTP consumer는 persisted file을
+반영하지 않아 별도 문제로 분리한다.
 
 ## 검증과 경계
 
@@ -96,11 +99,14 @@ flush, 다음 runtime의 HTTP consumer까지 연결했다.
 - plain `docker run --rm`이 자동 생성한 anonymous `/app/data` volume을 자동 재연결해주지는 않는다.
   replacement persistence는 compose named volume 또는 사용자가 동일 volume을 다시 mount할 때 성립한다.
 - 기존 배포가 이미 container writable layer에 쓴 `/app/data`를 자동 migration하지 않는다.
+- `/api/v1/tool-metrics`는 persisted JSONL을 hydrate하지 않는다. 이 PR은 storage retention만
+  증명하며 dashboard/runtime aggregate continuity를 주장하지 않는다. 별도 issue
+  [#32005](https://github.com/jeong-sik/masc/issues/32005)에 기록했다.
 - GitHub published artifact, Kubernetes PVC/RWX, multi-host filesystem은 측정 범위 밖이다.
 - full suite와 CI는 실행하거나 통과했다고 주장하지 않는다.
 
 ## 근거
 
 - [근거] r83-r86 source/image/runtime/mount identity, MCP producer calls, shutdown-flushed JSONL,
-  byte-identical replacement read, HTTP metrics consumer, Docker/compose volume contracts,
-  2026-08-31T05:10:38+09:00 확인, 신뢰도 High.
+  byte-identical replacement disk read, HTTP consumer zero-count counterexample, Docker/compose volume
+  contracts, 2026-08-31T05:15:05+09:00 확인, 신뢰도 High.

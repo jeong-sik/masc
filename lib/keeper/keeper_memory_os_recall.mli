@@ -19,7 +19,9 @@ val render_context
 val enabled : unit -> bool
 
 val render_if_enabled
-  :  keepers_dir:string
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> keepers_dir:string
   -> keeper_id:string
   -> now:float
   -> unit

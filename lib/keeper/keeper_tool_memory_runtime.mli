@@ -41,6 +41,9 @@ val keeper_context_status_json
     - [title] — short hook (≤120 chars). May be empty; then [content]
       stands alone.
     - [content] — body. Required; must be non-empty.
+    - [source_path] — optional keeper-visible regular file. When present, the
+      claim enters the source-bound current store and is revalidated before
+      every recall instead of entering the ordinary Memory OS snapshot.
 
     Returns a JSON string with [{ok, error_kind, ...}]:
     - On success: [ok=true], [rows_written], [outcome], [store].
@@ -64,6 +67,9 @@ type memory_write_error_kind =
   | Title_too_long
   | Content_empty
   | Content_too_long
+  | Source_path_invalid
+  | Source_path_too_long
+  | Source_read_failed
   | Persistence_failed
   | No_memory_write_error
 
@@ -71,7 +77,9 @@ val memory_write_error_kind_to_string : memory_write_error_kind -> string
 
 type memory_write_validation =
   | Memory_write_ok of
-      { body : string }
+      { body : string
+      ; source_path : string option
+      }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind
       ; extras : (string * Yojson.Safe.t) list

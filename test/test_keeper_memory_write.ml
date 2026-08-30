@@ -9,6 +9,14 @@ let make_args ~title ~content =
   `Assoc [ "title", `String title; "content", `String content ]
 ;;
 
+let make_source_args ~title ~content ~source_path =
+  `Assoc
+    [ "title", `String title
+    ; "content", `String content
+    ; "source_path", `String source_path
+    ]
+;;
+
 let error_label = Runtime.memory_write_error_kind_to_string
 
 let assert_invalid ~expected = function
@@ -98,6 +106,19 @@ let match_texts json =
   | _ -> Alcotest.fail "expected matches array"
 ;;
 
+let contains ~needle haystack =
+  let needle_length = String.length needle in
+  let haystack_length = String.length haystack in
+  let rec loop index =
+    if index + needle_length > haystack_length
+    then false
+    else if String.sub haystack index needle_length = needle
+    then true
+    else loop (index + 1)
+  in
+  needle_length = 0 || loop 0
+;;
+
 let fact claim : Masc.Keeper_memory_os_types.fact =
   let now = Time_compat.now () in
   { claim
@@ -135,7 +156,17 @@ let test_validation_taxonomy () =
   |> assert_invalid ~expected:"title_too_long";
   Runtime.validate_memory_write_args
     (make_args ~title:"" ~content:(String.make 4097 'x'))
-  |> assert_invalid ~expected:"content_too_long"
+  |> assert_invalid ~expected:"content_too_long";
+  Runtime.validate_memory_write_args
+    (make_source_args ~title:"" ~content:"body" ~source_path:"   ")
+  |> assert_invalid ~expected:"source_path_invalid";
+  Runtime.validate_memory_write_args
+    (`Assoc
+       [ "title", `String ""
+       ; "content", `String "body"
+       ; "source_path", `List []
+       ])
+  |> assert_invalid ~expected:"source_path_invalid"
 ;;
 
 let test_valid_body_composition () =
@@ -202,6 +233,194 @@ let test_write_comes_back_through_recall () =
     "producer timestamp recorded"
     true
     (fact.Masc.Keeper_memory_os_types.first_seen > 0.0)
+;;
+
+let test_source_bound_write_discards_stale_claim_and_recreates () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "source-bound-write" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let source_path = "config/region.txt" in
+  let host_source_path = Filename.concat sandbox_root source_path in
+  Fs_compat.mkdir_p (Filename.dirname host_source_path);
+  let write_source contents =
+    match Fs_compat.save_file_atomic host_source_path contents with
+    | Ok () -> ()
+    | Error detail -> Alcotest.fail detail
+  in
+  let write_claim content =
+    Runtime.keeper_memory_write_with_outcome
+      ~config
+      ~meta
+      ~args:(make_source_args ~title:"" ~content ~source_path)
+    |> fun execution -> execution.Masc.Keeper_tool_execution.raw_output
+    |> Yojson.Safe.from_string
+  in
+  let render () =
+    Masc.Keeper_memory_os_recall.render_if_enabled
+      ~config
+      ~meta
+      ~keepers_dir
+      ~keeper_id:meta.name
+      ~now:(Time_compat.now ())
+      ()
+    |> Option.value ~default:""
+  in
+  write_source "region=us-west-1\n";
+  let first_write = write_claim "The deployment region is us-west-1." in
+  Alcotest.(check string)
+    "source-bound store is explicit"
+    "source_bound_current_memory"
+    (string_field "store" first_write);
+  Alcotest.(check int)
+    "ordinary current memory remains untouched"
+    0
+    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
+  let first_prompt = render () in
+  Alcotest.(check bool)
+    "unchanged source claim reaches recall"
+    true
+    (contains ~needle:"deployment region is us-west-1" first_prompt);
+  Alcotest.(check bool)
+    "source digest is visible"
+    true
+    (contains ~needle:"source_sha256=sha256:" first_prompt);
+  write_source "region=eu-west-1\n";
+  let invalidated_prompt = render () in
+  Alcotest.(check bool)
+    "stale claim is absent after source change"
+    false
+    (contains ~needle:"deployment region is us-west-1" invalidated_prompt);
+  Alcotest.(check bool)
+    "typed invalidation persists in recall"
+    true
+    (contains ~needle:"reason=source_changed" invalidated_prompt);
+  let stale_search =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:
+        (`Assoc
+           [ "query", `String "us-west-1"
+           ; "source", `String "memory"
+           ; "limit", `Int 10
+           ])
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check (list string))
+    "memory search cannot recover the stale claim"
+    []
+    (match_texts stale_search);
+  let status =
+    Runtime.keeper_context_status_json
+      ~config
+      ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check int)
+    "status exposes the pending invalidation"
+    1
+    (int_field "source_memory_invalidations_total" status);
+  let source_snapshot =
+    match
+      Masc.Keeper_memory_source_current.read_for_keepers_dir
+        ~keepers_dir
+        ~keeper_id:meta.name
+    with
+    | Ok (Some snapshot) -> snapshot
+    | Ok None -> Alcotest.fail "source-bound snapshot disappeared"
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check int)
+    "stale source fact removed"
+    0
+    (List.length source_snapshot.facts);
+  Alcotest.(check int)
+    "pending invalidation retained"
+    1
+    (List.length source_snapshot.invalidations);
+  let replacement_write = write_claim "The deployment region is eu-west-1." in
+  Alcotest.(check string)
+    "replacement uses source-bound store"
+    "source_bound_current_memory"
+    (string_field "store" replacement_write);
+  let replacement_prompt = render () in
+  Alcotest.(check bool)
+    "replacement claim reaches recall"
+    true
+    (contains ~needle:"deployment region is eu-west-1" replacement_prompt);
+  Alcotest.(check bool)
+    "replacement clears pending invalidation"
+    false
+    (contains ~needle:"reason=source_changed" replacement_prompt);
+  let replacement_search =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:
+        (`Assoc
+           [ "query", `String "eu-west-1"
+           ; "source", `String "memory"
+           ; "limit", `Int 10
+           ])
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check (list string))
+    "memory search sees the recreated claim"
+    [ "The deployment region is eu-west-1." ]
+    (match_texts replacement_search)
+;;
+
+let test_source_bound_write_refuses_unrecallable_payload () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "source-budget" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let source_path = "source.txt" in
+  Fs_compat.mkdir_p sandbox_root;
+  (match
+     Fs_compat.save_file_atomic
+       (Filename.concat sandbox_root source_path)
+       "authoritative value\n"
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  with_env "MASC_KEEPER_MEMORY_OS_RECALL_FACTS_MAX_BYTES" "32" (fun () ->
+    let response =
+      Runtime.keeper_memory_write_with_outcome
+        ~config
+        ~meta
+        ~args:
+          (make_source_args
+             ~title:""
+             ~content:"This claim cannot fit the configured recall payload."
+             ~source_path)
+      |> fun execution -> execution.Masc.Keeper_tool_execution.raw_output
+      |> Yojson.Safe.from_string
+    in
+    Alcotest.(check string)
+      "unrecallable source claim is not reported persisted"
+      "persistence_failed"
+      (string_field "error_kind" response));
+  match
+    Masc.Keeper_memory_source_current.read_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id:meta.name
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "over-budget source claim reached persistence"
+  | Error detail -> Alcotest.fail detail
 ;;
 
 let test_invalid_write_is_proven_pre_effect () =
@@ -412,6 +631,14 @@ let () =
             "write comes back through recall"
             `Quick
             test_write_comes_back_through_recall
+        ; Alcotest.test_case
+            "source change discards stale claim until recreation"
+            `Quick
+            test_source_bound_write_discards_stale_claim_and_recreates
+        ; Alcotest.test_case
+            "source write refuses an unrecallable payload"
+            `Quick
+            test_source_bound_write_refuses_unrecallable_payload
         ; Alcotest.test_case
             "tools isolate config BasePath from ambient decoy"
             `Quick

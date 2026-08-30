@@ -779,6 +779,8 @@ let assemble_hooks
                         state, so it is domain-safe on the shared pool. *)
                      Domain_pool_ref.submit_io_or_inline (fun () ->
                        Keeper_memory_os_recall.render_if_enabled
+                         ~config
+                         ~meta
                          ~keepers_dir:memory_os_keepers_dir
                          ~keeper_id:meta.name
                          ~now:(Time_compat.now ())

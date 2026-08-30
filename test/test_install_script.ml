@@ -201,6 +201,9 @@ let release_workflow () =
 ;;
 
 let dockerfile () = read_file (Filename.concat (source_root ()) "Dockerfile")
+let oneclick_dockerfile () =
+  read_file (Filename.concat (source_root ()) "Dockerfile.oneclick")
+;;
 let dockerignore () = read_file (Filename.concat (source_root ()) ".dockerignore")
 
 let project_version () =
@@ -627,6 +630,15 @@ let test_runtime_image_enforces_preflight_before_main () =
     "Docker context includes the deployment preflight helper"
     context
     "!masc-deployment-preflight-helper"
+;;
+
+let test_oneclick_image_stamps_copied_dashboard_bundle () =
+  let image = oneclick_dockerfile () in
+  assert_contains
+    "one-click image stamps the final copied dashboard bundle"
+    image
+    "COPY --from=dashboard-builder /build/assets/dashboard /app/assets/dashboard\n\
+RUN touch /app/assets/dashboard/.build-stamp"
 ;;
 
 let test_binary_checks_use_install_environment () =
@@ -1421,6 +1433,10 @@ let () =
             "runtime image enforces preflight before main"
             `Quick
             test_runtime_image_enforces_preflight_before_main
+        ; test_case
+            "one-click image stamps copied dashboard bundle"
+            `Quick
+            test_oneclick_image_stamps_copied_dashboard_bundle
         ; test_case
             "installer fetches deployment preflight companions"
             `Quick

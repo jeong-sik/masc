@@ -81,6 +81,7 @@ COPY scripts/seed-team.sh scripts/docker-entrypoint.sh /app/scripts/
 RUN chmod +x /app/scripts/*.sh
 
 COPY --from=dashboard-builder /build/assets/dashboard /app/assets/dashboard
+RUN touch /app/assets/dashboard/.build-stamp
 
 RUN groupadd --system appgroup && useradd --system --gid appgroup appuser \
     && mkdir -p /app/.masc && chown -R appuser:appgroup /app

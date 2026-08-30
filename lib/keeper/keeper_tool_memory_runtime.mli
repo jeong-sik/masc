@@ -33,8 +33,9 @@ val keeper_context_status_json
 
 (** Explicit memory write surface.
 
-    Atomically adds a durable claim to the current Memory OS snapshot, the only
-    store an explicit write reaches.
+    Without [source_path], atomically adds a durable claim to the ordinary
+    current Memory OS snapshot. With [source_path], writes only the
+    source-bound current store.
     Body is stored as [**title** content] when [title] is non-empty.
 
     Args (JSON object):

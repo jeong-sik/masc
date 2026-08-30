@@ -1236,6 +1236,58 @@ let runtime_or_fail ?(provider = runpod_provider) () =
       "expected runtime binding to materialize: %s"
       (Runtime.string_of_drop_reason reason)
 
+let agent_core_provider_config_or_fail runtime =
+  match runtime.Runtime.execution with
+  | Runtime_execution.Agent_core provider_config -> provider_config
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _ ->
+    fail "expected Agent Core runtime"
+
+let test_dispatch_rejects_missing_declared_env_credential () =
+  let env_key = "MASC_TEST_DISPATCH_CREDENTIAL_MISSING_5D72C48E" in
+  with_env env_key "" (fun () ->
+    let provider =
+      { runpod_provider with credentials = Some (Runtime_schema.Env env_key) }
+    in
+    let runtime = runtime_or_fail ~provider () in
+    let provider_config = agent_core_provider_config_or_fail runtime in
+    match Runtime.validate_dispatch_credential ~provider_config runtime with
+    | Error
+        (Runtime.Required_env_credential_missing
+           { provider_id; env_key = actual_env_key }) ->
+      check string "provider id" "runpod_mtp" provider_id;
+      check string "env key" env_key actual_env_key
+    | Error error ->
+      failf
+        "expected missing env credential, got: %s"
+        (Runtime.dispatch_credential_error_to_string error)
+    | Ok () -> fail "expected dispatch credential validation to fail")
+
+let test_dispatch_accepts_transformed_or_credential_free_provider () =
+  let env_key = "MASC_TEST_DISPATCH_CREDENTIAL_TRANSFORM_0187ABCE" in
+  with_env env_key "" (fun () ->
+    let provider =
+      { runpod_provider with credentials = Some (Runtime_schema.Env env_key) }
+    in
+    let runtime = runtime_or_fail ~provider () in
+    let provider_config = agent_core_provider_config_or_fail runtime in
+    let transformed_provider_config =
+      { provider_config with
+        Llm_provider.Provider_config.api_key =
+          Llm_provider.Secret.of_string "injected-at-dispatch"
+      }
+    in
+    check (result unit reject) "transformed credential" (Ok ())
+      (Runtime.validate_dispatch_credential
+         ~provider_config:transformed_provider_config
+         runtime));
+  let provider = { runpod_provider with credentials = None } in
+  let runtime = runtime_or_fail ~provider () in
+  let provider_config = agent_core_provider_config_or_fail runtime in
+  check (result unit reject) "credential-free provider" (Ok ())
+    (Runtime.validate_dispatch_credential ~provider_config runtime)
+
 let test_runtime_of_binding_preserves_failure_reason () =
   let cfg =
     { Runtime_schema.providers = [ runpod_provider ]
@@ -2119,6 +2171,14 @@ let () =
             "runtime binding materialization preserves failure reason"
             `Quick
             test_runtime_of_binding_preserves_failure_reason
+        ; test_case
+            "dispatch rejects missing declared env credential"
+            `Quick
+            test_dispatch_rejects_missing_declared_env_credential
+        ; test_case
+            "dispatch accepts transformed or credential-free provider"
+            `Quick
+            test_dispatch_accepts_transformed_or_credential_free_provider
         ; test_case
             "adapter stamps declared provider id"
             `Quick

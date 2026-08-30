@@ -117,7 +117,7 @@ let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s ~output_schem
   }
 ;;
 
-let codex_config ~runtime_id ~system_prompt ~override_s
+let codex_config ~runtime_id ~system_prompt ~override_s ~output_schema
   (execution : Runtime_execution.codex_app_server)
   : Runtime_codex_app_server.config
   =
@@ -129,6 +129,7 @@ let codex_config ~runtime_id ~system_prompt ~override_s
   ; timeout_s =
       resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
   ; wall_clock_ceiling_s = None
+  ; output_schema
   }
 ;;
 
@@ -219,7 +220,9 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
                ~runtime_id
                (Runtime_claude_code.error_to_string error))))
   | Runtime_execution.Codex_app_server execution ->
-    let config = codex_config ~runtime_id ~system_prompt ~override_s:timeout_s execution in
+    let config =
+      codex_config ~runtime_id ~system_prompt ~override_s:timeout_s ~output_schema execution
+    in
     (match Runtime_codex_app_server.run_turn ~mgr ~clock ~cwd config ~prompt ~images:[] with
      | Ok (result : Runtime_codex_app_server.turn_result) -> Ok result.text
      | Error error ->

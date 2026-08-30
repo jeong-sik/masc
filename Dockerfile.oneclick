@@ -47,7 +47,8 @@ RUN ok=0; for attempt in 1 2 3; do \
 COPY --chown=opam:opam . .
 RUN opam exec -- dune build --release bin/main_eio.exe \
     && cp _build/default/bin/main_eio.exe /tmp/masc \
-    && (strip /tmp/masc || true)
+    && chmod u+w /tmp/masc \
+    && strip /tmp/masc
 
 # ---- Stage 2: dashboard SPA -------------------------------------------------
 FROM node:22-slim AS dashboard-builder

@@ -127,6 +127,10 @@ fallback이 관측되지 않은 최종 network/timeout 오류는 `retry_later`�
 `transient_runtime_retry`를 기록합니다. 현재 턴은 끝났고 Keeper는 살아 있어 이후
 keepalive 주기에 다시 시도할 수 있지만, 다른 레인 후보를 실행했다고 주장하지 않습니다.
 
+invalid request나 response parse failure처럼 fallback이 관측되지 않은 다른 최종 provider
+오류도 `retry_later`를 씁니다. 사유는 `provider_runtime_error`로 유지해 transient network
+recovery로 가장하지 않습니다.
+
 실패의 대부분은 버그가 아니었습니다. 가장 많았던 사유는 `config_error`,
 `api_error_invalid_request`, `api_error_payment_required`,
 `api_error_rate_limited` 입니다. 전부 후보가 하나뿐인 레인이 못 버티는 상황입니다.

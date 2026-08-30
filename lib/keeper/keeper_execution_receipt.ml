@@ -227,7 +227,10 @@ let operator_disposition (receipt : t)
        same-turn routing. *)
     Disp_retry_later, Reason_transient_runtime_retry
   | _ when provider_runtime_failure ->
-    Disp_fail_open_next_runtime, Reason_provider_runtime_error
+    (* No degraded retry or cross-runtime fallback was observed above.  The
+       Keeper remains live and may try another turn later, but this terminal
+       receipt cannot claim a same-turn lane transition. *)
+    Disp_retry_later, Reason_provider_runtime_error
   | Keeper_terminal_reason.Internal_error _ ->
     Disp_fail_open_next_runtime, Reason_internal_error
   | Config_or_auth _

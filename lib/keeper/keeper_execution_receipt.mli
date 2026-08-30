@@ -213,6 +213,10 @@ type operator_disposition_reason =
       no operator broadcast is emitted, while the receipt does not falsely
       claim [Reason_runtime_fallback]. *)
   | Reason_provider_runtime_error
+  (** A terminal provider rejection or parse/runtime failure after neither a
+      degraded retry nor cross-runtime fallback occurred. Paired with
+      [Disp_retry_later]: a later keepalive cycle may retry, but the receipt
+      does not claim same-turn lane continuation. *)
   | Reason_internal_error
   | Reason_input_required
   | Reason_cancelled

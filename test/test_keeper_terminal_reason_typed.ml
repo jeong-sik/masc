@@ -227,7 +227,7 @@ let frozen_operator_disposition (receipt : R.t)
     && frozen_is_transient_provider_runtime_failure terminal_reason
   then R.Disp_retry_later, R.Reason_transient_runtime_retry
   else if provider_runtime_failure
-  then R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error
+  then R.Disp_retry_later, R.Reason_provider_runtime_error
   else if
     String.equal terminal_reason "internal_error"
     || String.equal terminal_reason "internal_unhandled_exception"
@@ -766,13 +766,16 @@ let () =
     }
   in
   let got = R.operator_disposition receipt in
-  let want = R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error in
+  let want = R.Disp_retry_later, R.Reason_provider_runtime_error in
   check
     (Printf.sprintf
        "provider parse marker disposition want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
-    (got = want)
+    (got = want);
+  check
+    "terminal provider rejection retry-later does not page the operator"
+    (not (R.needs_operator_broadcast (fst got)))
 ;;
 
 let () =

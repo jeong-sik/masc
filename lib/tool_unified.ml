@@ -58,14 +58,36 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
 
 (** Summary report for dashboard. *)
 let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
-  let total = Tool_registry.total_calls () in
-  let distinct = Tool_registry.distinct_tools_called () in
-  let top_20 = Tool_registry.get_top_n 20 in
+  let metrics = Tool_metrics.all_stats () in
+  let total =
+    List.fold_left
+      (fun count (stats : Tool_metrics.tool_stats) -> count + stats.call_count)
+      0
+      metrics
+  in
+  let distinct = List.length metrics in
+  let rec take count = function
+    | [] -> []
+    | _ when count <= 0 -> []
+    | item :: rest -> item :: take (count - 1) rest
+  in
+  let top_20 = take 20 metrics in
   let all_names = Config.all_tool_names () in
   let allowed_names =
     List.filter (fun name -> Tool_catalog.is_visible name) all_names
   in
-  let never_called = Tool_registry.get_never_called allowed_names in
+  let called_names =
+    List.fold_left
+      (fun names (stats : Tool_metrics.tool_stats) ->
+         Set_util.StringSet.add stats.tool_name names)
+      Set_util.StringSet.empty
+      metrics
+  in
+  let never_called =
+    List.filter
+      (fun name -> not (Set_util.StringSet.mem name called_names))
+      allowed_names
+  in
   let total_count = List.length all_names in
   let visible_count = List.length allowed_names in
   let hidden_count = total_count - visible_count in
@@ -83,21 +105,22 @@ let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
   `Assoc [
     ("total_calls", `Int total);
     ("distinct_tools_called", `Int distinct);
-    ("top_20",
-     `List (List.map (fun (name, stats) ->
-       let latency = match Tool_metrics.stats_for name with
-         | Some s ->
-           [ ("p50_ms", `Float s.p50_ms); ("p95_ms", `Float s.p95_ms)
-           ; ("p99_ms", `Float s.p99_ms); ("mean_ms", `Float s.mean_ms)
-           ; ("success_count", `Int s.success_count)
-           ; ("failure_count", `Int s.failure_count) ]
-         | None -> []
-       in
-       `Assoc ([
-         ("name", `String name);
-         ("call_count", `Int (Atomic.get stats.Tool_registry.call_count));
-       ] @ latency)
-     ) top_20));
+    ( "top_20"
+    , `List
+        (List.map
+           (fun (stats : Tool_metrics.tool_stats) ->
+              `Assoc
+                [ "name", `String stats.tool_name
+                ; "call_count", `Int stats.call_count
+                ; "p50_ms", `Float stats.p50_ms
+                ; "p95_ms", `Float stats.p95_ms
+                ; "p99_ms", `Float stats.p99_ms
+                ; "mean_ms", `Float stats.mean_ms
+                ; "success_count", `Int stats.success_count
+                ; "failure_count", `Int stats.failure_count
+                ])
+           top_20) )
+    ;
     ("never_called_count", `Int (List.length never_called));
     ("tool_distribution", tool_dist);
     ("registered_count", `Int (Tool_dispatch.registered_count ()));

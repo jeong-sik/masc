@@ -762,6 +762,17 @@ let test_runtime_git_probe_argv_disables_optional_locks () =
     [ "git"; "-C"; "/tmp/demo"; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
     (Runtime.git_rev_parse_short_probe_argv "/tmp/demo")
 
+let test_runtime_git_probes_skip_when_command_is_unavailable () =
+  let module Runtime = Server_dashboard_http_runtime_info in
+  let getenv = function
+    | "PATH" -> Some ""
+    | _ -> None
+  in
+  Alcotest.(check bool)
+    "empty deployment PATH has no Git probe capability"
+    false
+    (Runtime.git_probe_command_available ~getenv ())
+
 (* RFC-0372 Phase 5 — the compute must leave the caller's domain.
 
    HTTP connections are fibers on one domain, and a pure compute never yields,
@@ -933,6 +944,8 @@ let () =
             (test_runtime_git_upstream_cache_returns_stale_and_refreshes ~clock);
           test_case "runtime git probe disables optional locks" `Quick
             test_runtime_git_probe_argv_disables_optional_locks;
+          test_case "runtime git probes skip an unavailable command" `Quick
+            test_runtime_git_probes_skip_when_command_is_unavailable;
         ] );
       ( "timeout",
         [

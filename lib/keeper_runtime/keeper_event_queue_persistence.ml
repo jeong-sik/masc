@@ -1,6 +1,18 @@
 module Owner_lock = Keeper_event_queue_owner_lock
 module State = Keeper_event_queue_state
 
+let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
+let install_state_change_observer observer = Atomic.set state_change_observer observer
+
+let notify_state_change_observer ~keeper_name =
+  try (Atomic.get state_change_observer) () with
+  | exn ->
+    Log.Keeper.warn
+      "event queue state-change observer failed keeper=%s: %s"
+      keeper_name
+      (Printexc.to_string exn)
+;;
+
 type owner_identity = Owner_lock.t
 type owner_identity_error = Owner_lock.resolve_error
 
@@ -162,7 +174,9 @@ let save_state_unlocked_with ~strict_parent_sync owner state =
   let path = snapshot_path_of_owner owner in
   let save = if strict_parent_sync then save_json_atomic_strict else save_json_atomic in
   match save path (State.to_yojson state) with
-  | Ok () -> Ok ()
+  | Ok () ->
+    notify_state_change_observer ~keeper_name;
+    Ok ()
   | Error message ->
     Error
       (Printf.sprintf
@@ -1060,6 +1074,10 @@ let commit_transition_unlocked_with
                        { receipt; stage = `Projection; detail }
                    , pending )))
        in
+       let continue_after_wal_commit () =
+         notify_state_change_observer ~keeper_name:(keeper_name_of_owner owner);
+         continue_after_commit ()
+       in
        (match
           Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
             path
@@ -1083,7 +1101,8 @@ let commit_transition_unlocked_with
                (Fs_compat.private_jsonl_append_error_to_string error)
                (Fs_compat.private_jsonl_operation_failure_to_string
                   cleanup_failure))
-        | Private_file_succeeded _committed_end_offset -> continue_after_commit ()
+        | Private_file_succeeded _committed_end_offset ->
+          continue_after_wal_commit ()
         | Private_file_succeeded_with_cleanup_failure
             { value = _committed_end_offset; cleanup_failure } ->
           Log.Keeper.error
@@ -1091,7 +1110,7 @@ let commit_transition_unlocked_with
             (keeper_name_of_owner owner)
             path
             (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-          continue_after_commit ()))
+          continue_after_wal_commit ()))
      | [] | [ _ ] | _ :: _ :: _ ->
        Error "transition commit did not produce its canonical outbox entry")
 ;;

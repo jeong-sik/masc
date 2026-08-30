@@ -5,14 +5,10 @@ val max_consecutive_invalid_request_failures : int
     without crash accounting before the observation degrades to ordinary
     consecutive-failure accounting. *)
 
-val note_invalid_request_failure : keeper_name:string -> bool
+val note_invalid_request_failure : base_path:string -> keeper_name:string -> bool
 (** Record one deterministic [InvalidRequest] failure for [keeper_name];
     returns [true] once the consecutive count exceeds
     [max_consecutive_invalid_request_failures]. *)
-
-val reset_invalid_request_failures : keeper_name:string -> unit
-(** Clear the consecutive [InvalidRequest] count after a successful turn or
-    an operator state clear. *)
 
 val empty_completion_exemption_budget : int
 (** Maximum number of consecutive empty-completion failures exempted from the
@@ -23,12 +19,15 @@ val transient_transport_exemption_budget : int
     crash counter per Keeper. Later consecutive failures use ordinary durable
     failure accounting while the Keeper lifecycle remains active. *)
 
-val note_turn_success : string -> unit
-(** Reset the Keeper's empty-completion and transient-transport exemption
-    budgets after a successful turn or an operator context clear. *)
+val reset_failure_exemptions : base_path:string -> keeper_name:string -> bool
+(** Durably reset the invalid-request and empty-completion budgets and clear
+    the process-local transient-transport budget after a successful turn or
+    operator context clear. [false] retains every budget and keeps success
+    health from hiding the unresolved accounting state. *)
 
 val account_failure_counting
-  :  keeper_name:string
+  :  base_path:string
+  -> keeper_name:string
   -> is_auto_recoverable:bool
   -> Agent_core.Error.t
   -> bool

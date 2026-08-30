@@ -1027,7 +1027,10 @@ let run_keeper_cycle
                   let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
                   let counts_toward_crash =
                     Keeper_unified_turn_failure.account_failure_counting
-                      ~keeper_name:meta.name ~is_auto_recoverable err
+                      ~base_path:config.base_path
+                      ~keeper_name:meta.name
+                      ~is_auto_recoverable
+                      err
                   in
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)

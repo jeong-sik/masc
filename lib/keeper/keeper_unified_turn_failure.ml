@@ -1,6 +1,7 @@
 (** Failure-path post-processing for [Keeper_unified_turn]. *)
 
 module EC = Keeper_error_classify
+module Exemption_store = Keeper_failure_exemption_store
 
 (* Compensating accounting for deterministic [InvalidRequest] failures (see
    the invariant note in [Keeper_error_classify] above
@@ -8,9 +9,8 @@ module EC = Keeper_error_classify
    counter, so without its own bound a poisoned checkpoint would re-emit the
    same 400 every cycle with [consecutive] pinned at 0 — the same shape as
    the 2026-07-21 provider-parse-rejection incident. The counter is
-   process-local, which is where the unbounded loop lives; once the bound is
-   exceeded the observation degrades to ordinary (durable) crash accounting,
-   so restarts cannot reset the bound either.
+   durable across process restart. Once the bound is exceeded the observation
+   degrades to ordinary durable crash accounting.
 
    Constitution exception (named bound + rationale): this number gates only
    crash ACCOUNTING, never the keeper lifecycle — the keeper stays active
@@ -22,21 +22,27 @@ module EC = Keeper_error_classify
    before durable accounting resumes. *)
 let max_consecutive_invalid_request_failures = 3
 
-let invalid_request_consecutive : (string, int) Hashtbl.t = Hashtbl.create 8
-
-let note_invalid_request_failure ~keeper_name =
-  let n =
-    (match Hashtbl.find_opt invalid_request_consecutive keeper_name with
-     | Some n -> n
-     | None -> 0)
-    + 1
-  in
-  Hashtbl.replace invalid_request_consecutive keeper_name n;
-  n > max_consecutive_invalid_request_failures
+let persist_exemption_increment ~base_path ~keeper_name update =
+  match Exemption_store.load ~base_path ~keeper_name with
+  | Error error -> Error error
+  | Ok persisted ->
+    let state = update (Option.value ~default:Exemption_store.zero persisted) in
+    Result.map (fun () -> state) (Exemption_store.save ~base_path ~keeper_name state)
 ;;
 
-let reset_invalid_request_failures ~keeper_name =
-  Hashtbl.remove invalid_request_consecutive keeper_name
+let note_invalid_request_failure ~base_path ~keeper_name =
+  match
+    persist_exemption_increment ~base_path ~keeper_name (fun state ->
+      { state with invalid_request_count = state.invalid_request_count + 1 })
+  with
+  | Ok state -> state.invalid_request_count > max_consecutive_invalid_request_failures
+  | Error error ->
+    Log.Keeper.error
+      ~keeper_name
+      "%s: invalid-request exemption unavailable; counting failure toward crash: %s"
+      keeper_name
+      (Exemption_store.error_to_string error);
+    true
 ;;
 
 (** Bounded compensating accounting for the empty-completion exemption in
@@ -47,8 +53,8 @@ let reset_invalid_request_failures ~keeper_name =
     parse-rejection loop.  Each keeper gets
     [empty_completion_exemption_budget] consecutive exempted empty-completion
     failures; the next one counts toward the crash threshold again.  A
-    successful turn (or an operator context clear) resets the budget via
-    {!note_turn_success}.
+    successful turn (or an operator context clear) resets the durable budget
+    via {!reset_failure_exemptions}.
 
     Constitution exception (named bound + rationale): like the
     [InvalidRequest] bound above, this gates crash ACCOUNTING only, not the
@@ -58,8 +64,6 @@ let reset_invalid_request_failures ~keeper_name =
     consecutive exempted failures — for the provider to recover across
     cycles before the failure class degrades to durable crash accounting. *)
 let empty_completion_exemption_budget = 5
-
-let empty_completion_exemptions : (string, int) Hashtbl.t = Hashtbl.create 8
 
 (** A network or timeout failure can be a short provider incident, but an
     indefinitely exempt transport pins [turn_consecutive_failures] at zero and
@@ -77,34 +81,47 @@ let transient_transport_exemption_budget = 3
 
 let transient_transport_exemptions : (string, int) Hashtbl.t = Hashtbl.create 8
 
-let note_turn_success keeper_name =
-  Hashtbl.remove empty_completion_exemptions keeper_name;
-  Hashtbl.remove transient_transport_exemptions keeper_name
+let reset_failure_exemptions ~base_path ~keeper_name =
+  match Exemption_store.clear ~base_path ~keeper_name with
+  | Ok () ->
+    Hashtbl.remove transient_transport_exemptions keeper_name;
+    true
+  | Error error ->
+    Log.Keeper.error
+      ~keeper_name
+      "%s: retaining failure exemption state because durable reset did not commit: %s"
+      keeper_name
+      (Exemption_store.error_to_string error);
+    false
 ;;
 
-let empty_completion_exemption_exhausted ~keeper_name err =
+let empty_completion_exemption_exhausted ~base_path ~keeper_name err =
   if not (EC.is_empty_completion_error err)
   then false
-  else (
-    let used =
-      Option.value
-        ~default:0
-        (Hashtbl.find_opt empty_completion_exemptions keeper_name)
-      + 1
-    in
-    Hashtbl.replace empty_completion_exemptions keeper_name used;
-    used > empty_completion_exemption_budget)
+  else
+    match
+      persist_exemption_increment ~base_path ~keeper_name (fun state ->
+        { state with empty_completion_count = state.empty_completion_count + 1 })
+    with
+    | Ok state -> state.empty_completion_count > empty_completion_exemption_budget
+    | Error error ->
+      Log.Keeper.error
+        ~keeper_name
+        "%s: empty-completion exemption unavailable; counting failure toward crash: %s"
+        keeper_name
+        (Exemption_store.error_to_string error);
+      true
 ;;
 
 (* Consume one [InvalidRequest] budget unit for [keeper_name] when [err] is
    in that class; returns [true] once the consecutive bound is exceeded.
    Separate counter from the empty-completion budget above — the two
    exemption classes never share units. *)
-let invalid_request_budget_exhausted ~keeper_name err =
+let invalid_request_budget_exhausted ~base_path ~keeper_name err =
   if not (EC.is_invalid_request_error err)
   then false
   else (
-    let exhausted = note_invalid_request_failure ~keeper_name in
+    let exhausted = note_invalid_request_failure ~base_path ~keeper_name in
     if exhausted
     then
       Log.Keeper.warn
@@ -134,11 +151,11 @@ let transient_transport_exemption_exhausted ~keeper_name err =
     consuming empty-completion exemption budget or invalid-request budget
     when applicable.  Call exactly once per failure observation, before
     {!record_failure_observation}. *)
-let account_failure_counting ~keeper_name ~is_auto_recoverable err =
+let account_failure_counting ~base_path ~keeper_name ~is_auto_recoverable err =
   (not is_auto_recoverable)
   || EC.is_runtime_exhausted_error err
-  || empty_completion_exemption_exhausted ~keeper_name err
-  || invalid_request_budget_exhausted ~keeper_name err
+  || empty_completion_exemption_exhausted ~base_path ~keeper_name err
+  || invalid_request_budget_exhausted ~base_path ~keeper_name err
   || transient_transport_exemption_exhausted ~keeper_name err
 ;;
 

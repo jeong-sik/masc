@@ -4,6 +4,14 @@ module KPB = Keeper_provider_runtime_boundary
 module KTD = Keeper_turn_driver
 module EC = Keeper_error_classify
 
+let with_temp_dir prefix f =
+  let dir = Filename.temp_dir prefix "" in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+    (fun () -> f dir)
+;;
+
 let raw_provider_timeout_error ~phase =
   Agent_core.Error.Provider
     (Llm_provider.Error.Timeout
@@ -158,9 +166,9 @@ let test_attributed_empty_completion_is_auto_recoverable () =
    [InvalidRequest] counter (companion change), not by the exemption
    budget. *)
 let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
+  with_temp_dir "unmodeled-stop-reason" @@ fun base_path ->
   let module KUF = Keeper_unified_turn_failure in
   let keeper_name = "test-keeper-unmodeled-stop-reason" in
-  KUF.note_turn_success keeper_name;
   let err =
     Agent_core.Error.Api
       (Llm_provider.Retry.InvalidRequest
@@ -181,8 +189,8 @@ let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
   Alcotest.(check bool)
     "invalid request does not consume the empty-completion exemption budget"
     false
-    (KUF.account_failure_counting ~keeper_name ~is_auto_recoverable:true err);
-  KUF.note_turn_success keeper_name
+    (KUF.account_failure_counting
+       ~base_path ~keeper_name ~is_auto_recoverable:true err)
 
 (* A generic 400 [InvalidRequest] is not an empty-completion exemption
    either: main (#25592) classifies it as auto-recoverable, and its
@@ -190,9 +198,9 @@ let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
    [InvalidRequest] counter (companion change), not by the empty-completion
    budget. *)
 let test_generic_invalid_request_is_not_empty_completion () =
+  with_temp_dir "generic-invalid-request" @@ fun base_path ->
   let module KUF = Keeper_unified_turn_failure in
   let keeper_name = "test-keeper-generic-invalid-request" in
-  KUF.note_turn_success keeper_name;
   let err =
     Agent_core.Error.Api
       (Llm_provider.Retry.InvalidRequest
@@ -207,16 +215,16 @@ let test_generic_invalid_request_is_not_empty_completion () =
   Alcotest.(check bool)
     "generic InvalidRequest does not consume the empty-completion budget"
     false
-    (KUF.account_failure_counting ~keeper_name ~is_auto_recoverable:true err);
-  KUF.note_turn_success keeper_name
+    (KUF.account_failure_counting
+       ~base_path ~keeper_name ~is_auto_recoverable:true err)
 
 (* Bounded compensating accounting: the empty-completion exemption is capped
    per keeper; once the budget is exhausted the failure counts toward crash
    again, and a success resets the budget. *)
 let test_empty_completion_exemption_budget_is_bounded () =
+  with_temp_dir "empty-completion-budget" @@ fun base_path ->
   let module KUF = Keeper_unified_turn_failure in
   let keeper_name = "test-keeper-empty-completion-budget" in
-  KUF.note_turn_success keeper_name;
   let empty_err =
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
@@ -233,58 +241,62 @@ let test_empty_completion_exemption_budget_is_bounded () =
       (Printf.sprintf "exempted empty completion %d does not count toward crash" i)
       false
       (KUF.account_failure_counting
-         ~keeper_name ~is_auto_recoverable:true empty_err)
+         ~base_path ~keeper_name ~is_auto_recoverable:true empty_err)
   done;
   Alcotest.(check bool)
     "a non-empty auto-recoverable failure does not consume the budget"
     false
     (KUF.account_failure_counting
-       ~keeper_name ~is_auto_recoverable:true transient_err);
+       ~base_path ~keeper_name ~is_auto_recoverable:true transient_err);
   Alcotest.(check bool)
     "empty completion past the budget counts toward crash"
     true
     (KUF.account_failure_counting
-       ~keeper_name ~is_auto_recoverable:true empty_err);
-  KUF.note_turn_success keeper_name;
+       ~base_path ~keeper_name ~is_auto_recoverable:true empty_err);
+  Alcotest.(check bool)
+    "success reset commits"
+    true
+    (KUF.reset_failure_exemptions ~base_path ~keeper_name);
   Alcotest.(check bool)
     "success resets the exemption budget"
     false
     (KUF.account_failure_counting
-       ~keeper_name ~is_auto_recoverable:true empty_err);
-  KUF.note_turn_success keeper_name
+       ~base_path ~keeper_name ~is_auto_recoverable:true empty_err)
 
 let test_transient_transport_exemption_budget_is_bounded () =
+  with_temp_dir "transient-transport-budget" @@ fun base_path ->
   let module KUF = Keeper_unified_turn_failure in
   let keeper_name = "test-keeper-transient-transport-budget" in
   let transient_err =
     Agent_core.Error.Api
       (Llm_provider.Retry.Timeout { message = "timeout"; phase = None })
   in
-  KUF.note_turn_success keeper_name;
   for i = 1 to KUF.transient_transport_exemption_budget do
     Alcotest.(check bool)
       (Printf.sprintf "exempted transient transport %d does not count" i)
       false
       (KUF.account_failure_counting
-         ~keeper_name ~is_auto_recoverable:true transient_err)
+         ~base_path ~keeper_name ~is_auto_recoverable:true transient_err)
   done;
   Alcotest.(check bool)
     "transient transport past the budget counts toward crash"
     true
     (KUF.account_failure_counting
-       ~keeper_name ~is_auto_recoverable:true transient_err);
+       ~base_path ~keeper_name ~is_auto_recoverable:true transient_err);
   Alcotest.(check bool)
     "later failures stay crash-accounted until success"
     true
     (KUF.account_failure_counting
-       ~keeper_name ~is_auto_recoverable:true transient_err);
-  KUF.note_turn_success keeper_name;
+       ~base_path ~keeper_name ~is_auto_recoverable:true transient_err);
+  Alcotest.(check bool)
+    "transient reset commits"
+    true
+    (KUF.reset_failure_exemptions ~base_path ~keeper_name);
   Alcotest.(check bool)
     "success resets the transient transport budget"
     false
     (KUF.account_failure_counting
-       ~keeper_name ~is_auto_recoverable:true transient_err);
-  KUF.note_turn_success keeper_name
+       ~base_path ~keeper_name ~is_auto_recoverable:true transient_err)
 
 let test_extra_system_context_preserves_typed_blocks () =
   let blocks =

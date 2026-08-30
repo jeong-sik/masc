@@ -194,7 +194,7 @@ type t =
   ; operation_projection : operation_projection Atomic.t
   ; turn_in_flight : turn_in_flight option Atomic.t
   ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option Atomic.t
-  ; operation_store : Chat_operation_store.t
+  ; mutable operation_store : Chat_operation_store.t
   ; now : unit -> float
   ; closed : bool Atomic.t
   ; closed_p : unit Eio.Promise.t
@@ -389,6 +389,58 @@ let read_operation_inventory operation_store =
   run_operation_store ~label:"keeper chat operation inventory" (fun () ->
     Chat_operation_store.inventory operation_store)
   |> Result.map_error owner_error_of_operation_error
+;;
+
+let reopen_operation_store_if_missing t =
+  let path = Chat_operation_store.path t.operation_store in
+  let path_exists =
+    run_operation_store ~label:"probe Keeper chat operation store path" (fun () ->
+      Ok (Sys.file_exists path))
+  in
+  match path_exists with
+  | Error error -> Error (owner_error_of_operation_error error)
+  | Ok true -> Ok ()
+  | Ok false ->
+    let prepare_parent =
+      run_operation_store ~label:"recreate Keeper chat operation store parent" (fun () ->
+        let parent = Filename.dirname path in
+        (try Unix.mkdir parent 0o755 with
+         | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+        if Sys.is_directory parent
+        then Ok ()
+        else
+          Error
+            (Chat_operation_store.Store_unavailable
+               (Printf.sprintf
+                  "Keeper chat operation store parent is not a directory: %s"
+                  parent)))
+    in
+    (match prepare_parent with
+     | Error error -> Error (owner_error_of_operation_error error)
+     | Ok () ->
+       (match
+          run_operation_store ~label:"close purged Keeper chat operation store" (fun () ->
+            Chat_operation_store.close t.operation_store)
+        with
+        | Error error -> Error (owner_error_of_operation_error error)
+        | Ok () ->
+          (match
+             run_operation_store ~label:"reopen purged Keeper chat operation store" (fun () ->
+               Chat_operation_store.open_or_create ~path)
+           with
+           | Error error -> Error (owner_error_of_operation_error error)
+           | Ok operation_store ->
+             (match read_operation_inventory operation_store with
+              | Error error ->
+                ignore (Chat_operation_store.close operation_store : (unit, _) result);
+                Error error
+              | Ok inventory ->
+                t.operation_store <- operation_store;
+                t.store_error := None;
+                Atomic.set
+                  t.operation_projection
+                  (operation_projection_of_inventory inventory);
+                Ok ()))))
 ;;
 
 let mark_operation_store_unavailable t =
@@ -663,6 +715,17 @@ let start
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
           loop state shutdown_operation_id
         | Command (Apply_meta command, resolve) ->
+          let operation_store_ready =
+            match command, (Keeper_owner_reducer.projection state).meta with
+            | Keeper_owner_reducer.Create _, None ->
+              reopen_operation_store_if_missing t
+            | _ -> Ok ()
+          in
+          (match operation_store_ready with
+           | Error error ->
+             Eio.Promise.resolve resolve (Error error);
+             loop state shutdown_operation_id
+           | Ok () ->
           (match !(t.store_error) with
            | Some detail ->
              Eio.Promise.resolve resolve (Error (Store_unavailable detail));
@@ -680,9 +743,9 @@ let start
                  | Ok state ->
                    Eio.Promise.resolve
                      resolve
-                     (Ok (Keeper_owner_reducer.projection state).meta);
+                   (Ok (Keeper_owner_reducer.projection state).meta);
                    start_child_if_needed state shutdown_operation_id;
-                   loop state shutdown_operation_id)))
+                   loop state shutdown_operation_id))))
         | Command (Exact_operation operation_id, resolve) ->
           let response =
             run_operation_read t ~label:"lookup Keeper chat operation" (fun () ->

@@ -54,6 +54,7 @@ type dashboard_purge_artifact =
   | Keeper_memory_current_artifact
   | Keeper_memory_source_current_artifact
   | Keeper_memory_journal_artifact
+  | Keeper_playground_bundles_artifact
   | Keeper_configuration_artifact
   | Keeper_chat_store_artifact
   | Agent_artifact_bundle of string list
@@ -457,6 +458,10 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_memory_current_artifact
   ; Keeper_memory_source_current_artifact
   ; Keeper_memory_journal_artifact
+    (* A Keeper can change sandbox profiles across lifetimes. Remove every
+       backend-scoped root for the exact name so a same-name successor cannot
+       inherit files from an earlier Local, Docker, microVM, or SSH lane. *)
+  ; Keeper_playground_bundles_artifact
   ; Keeper_configuration_artifact
     (* The chat store is a top-level per-keeper file
        (.masc/keeper_chat/<name>.jsonl), so it sits outside the runtime

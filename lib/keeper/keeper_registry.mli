@@ -34,10 +34,14 @@ type registration_error =
       { keeper_name : string
       ; detail : string
       }
+  | Registration_turn_failure_streak_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
 
 (** Production registration gate: the final registry CAS is serialized with
-    Keeper shutdown reservation. Event-queue loading remains outside the
-    non-yielding fence critical section. A live [intake_token] preserves an
+    Keeper shutdown reservation. Durable event-queue and turn-failure-streak
+    loading remains outside the non-yielding fence critical section. A live [intake_token] preserves an
     already-open create transaction through registry installation without
     reacquiring the same per-Keeper intake mutex. *)
 val register_offline_if_admitted :
@@ -63,11 +67,16 @@ type register_restarting_error =
       { keeper_name : string
       ; detail : string
       }
+  | Restart_turn_failure_streak_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
 
 (** Register a keeper that is about to relaunch after a crash.
     The entry starts in [Restarting] and must receive [Fiber_started] when the
     replacement fiber launches. Durable pause admission is checked by the
-    caller before this registration CAS. *)
+    caller before this registration CAS; the durable turn-failure streak is
+    restored before the entry becomes visible. *)
 val register_restarting :
   base_path:string -> string -> keeper_meta ->
   (registry_entry, register_restarting_error) result

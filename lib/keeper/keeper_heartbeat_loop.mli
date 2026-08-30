@@ -120,8 +120,8 @@ val decide_keepalive_cycle_action :
     record success or failure and leaves selected stimuli pending.
     [Turn_cycle_crashed] means the cycle's catch-all swallowed an exception to
     keep the keeper fiber alive (T6 audit), or a durable event-queue transition
-    did not commit. The failure has already been recorded via
-    [Keeper_registry.increment_turn_failures], so the caller dispatches
+    did not commit. The failure has already been recorded via the durable
+    [Keeper_turn_failure_streak] boundary, so the caller dispatches
     [Turn_failed]. [Turn_cycle_busy] preserves its typed admission reason and
     must not dispatch either turn status or refresh the work-as-heartbeat
     lease. *)

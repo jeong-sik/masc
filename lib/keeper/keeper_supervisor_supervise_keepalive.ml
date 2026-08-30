@@ -206,6 +206,12 @@ let supervise_keepalive
          Log.Keeper.error
            "supervisor registry event queue unavailable keeper=%s: %s"
            keeper_name
+           detail
+       | Keeper_registry.Registration_turn_failure_streak_unavailable
+           { keeper_name; detail } ->
+         Log.Keeper.error
+           "supervisor registry turn failure streak unavailable keeper=%s: %s"
+           keeper_name
            detail)
     | Keeper_keepalive_launch_transaction.Lifecycle_open_failed
         { error; rollback_error } ->

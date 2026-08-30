@@ -570,6 +570,83 @@ let test_fresh_presence_preserves_turn_failures () =
       | Some phase -> check string "heartbeat alone stays failing" "failing" (KSM.phase_to_string phase)
       | None -> fail "expected registered keeper phase")
 
+let test_turn_failure_streak_survives_registry_restart () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  let base_path = temp_dir "turn-failure-streak-restart" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.For_testing.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+      let meta = make_meta "failure-streak-restart" in
+      let register () =
+        ignore (R.For_testing.register ~base_path meta.name meta)
+      in
+      register ();
+      ignore
+        (Masc.Keeper_turn_failure_streak.increment
+           ~base_path
+           ~keeper_name:meta.name);
+      check int "first process count" 1 (R.get_turn_failures ~base_path meta.name);
+      R.For_testing.clear ();
+      register ();
+      check int "first restart restores one" 1
+        (R.get_turn_failures ~base_path meta.name);
+      (match R.get ~base_path meta.name with
+       | Some { last_failure_reason = Some (R.Turn_consecutive_failures 1); _ } -> ()
+       | Some _ -> fail "restart did not restore the typed failure reason"
+       | None -> fail "restart did not register the Keeper");
+      ignore
+        (Masc.Keeper_turn_failure_streak.increment
+           ~base_path
+           ~keeper_name:meta.name);
+      check int "restart advances to two" 2 (R.get_turn_failures ~base_path meta.name);
+      R.For_testing.clear ();
+      register ();
+      check int "second restart restores two" 2
+        (R.get_turn_failures ~base_path meta.name);
+      check bool
+        "successful turn reset committed"
+        true
+        (Masc.Keeper_turn_failure_streak.reset
+           ~base_path
+           ~keeper_name:meta.name);
+      check int "successful turn reset" 0 (R.get_turn_failures ~base_path meta.name);
+      R.For_testing.clear ();
+      register ();
+      check int "reset remains zero after restart" 0
+        (R.get_turn_failures ~base_path meta.name))
+;;
+
+let test_turn_failure_streak_unknown_schema_fails_closed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  let base_path = temp_dir "turn-failure-streak-schema" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.For_testing.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+      let meta = make_meta "failure-streak-schema" in
+      let path =
+        Masc.Keeper_turn_failure_streak_store.path_for
+          ~base_path
+          ~keeper_name:meta.name
+      in
+      write_file
+        path
+        {|{"schema":"keeper.turn_failure_streak.v0","count":9}|};
+      match R.register_offline_if_admitted ~base_path meta.name meta with
+      | Error (R.Registration_turn_failure_streak_unavailable _) ->
+        check bool "malformed state is not registered" true
+          (Option.is_none (R.get ~base_path meta.name))
+      | Error _ -> fail "unknown schema returned the wrong registration error"
+      | Ok _ -> fail "unknown streak schema must not be treated as a fresh zero")
+;;
+
 (** T6 audit: a swallowed keepalive-cycle exception must surface as a
     turn failure. [record_crashed_cycle_failure] (called by the
     [run_keepalive_unified_turn] catch-all) increments the same
@@ -4795,6 +4872,10 @@ let () =
       eio_test "turn crash flow" test_crash_turn_failures;
       test_case "fresh presence preserves turn failures" `Quick
         test_fresh_presence_preserves_turn_failures;
+      test_case "turn failure streak survives registry restart" `Quick
+        test_turn_failure_streak_survives_registry_restart;
+      test_case "turn failure streak rejects unknown schema" `Quick
+        test_turn_failure_streak_unknown_schema_fails_closed;
       test_case "crashed cycle surfaces as turn failure" `Quick
         test_crashed_cycle_records_turn_failure;
       test_case "operator interrupt skips turn accounting" `Quick

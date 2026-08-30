@@ -691,6 +691,69 @@ let test_invalid_write_is_proven_pre_effect () =
     (Option.is_none result.Masc.Keeper_tool_execution.terminal_effect_receipt)
 ;;
 
+(* Budget eviction is part of the write contract: when the incoming fact
+   pushes the rendered payload over the recall byte budget, [upsert_fact]
+   evicts the oldest facts to fit. The receipt used to report only
+   rows_written and revision, so the model never learned that its own
+   write retired an existing fact. *)
+let test_write_reports_budget_eviction () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "budget-eviction" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let budget = Env_config.KeeperMemoryOs.recall_facts_max_bytes () in
+  let seeded_claim = String.make (max 1 (budget / 2 - 128)) 'a' in
+  let younger_claim = String.make (max 1 (budget / 2 - 128)) 'b' in
+  (* Distinct claims keep identities distinct; explicit [first_seen] makes
+     the eviction order independent of clock resolution. *)
+  let oldest = { (fact seeded_claim) with first_seen = 1000.0 } in
+  let younger = { (fact younger_claim) with first_seen = 2000.0 } in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ oldest; younger ];
+  let incoming_claim = String.make 600 'c' in
+  let write_response =
+    Runtime.keeper_memory_write_with_outcome
+      ~config
+      ~meta
+      ~args:(make_args ~title:"" ~content:incoming_claim)
+    |> fun result -> result.Masc.Keeper_tool_execution.raw_output
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check bool)
+    "write succeeds under budget pressure"
+    true
+    (match json_field "ok" write_response with
+     | `Bool value -> value
+     | _ -> false);
+  Alcotest.(check int)
+    "receipt reports the evicted fact count"
+    1
+    (int_field "facts_removed" write_response);
+  Alcotest.(check int)
+    "receipt reports the retained fact count"
+    1
+    (int_field "facts_retained" write_response);
+  let claims =
+    current_facts ~keepers_dir ~keeper_id:meta.name
+    |> List.map (fun stored -> stored.Masc.Keeper_memory_os_types.claim)
+  in
+  Alcotest.(check int) "store shrank to fit the budget" 2 (List.length claims);
+  Alcotest.(check bool)
+    "the oldest seeded fact was evicted"
+    true
+    (not (List.exists (fun claim -> String.equal claim seeded_claim) claims));
+  Alcotest.(check bool)
+    "the younger seeded fact survived"
+    true
+    (List.exists (fun claim -> String.equal claim younger_claim) claims);
+  Alcotest.(check bool)
+    "the incoming fact is stored"
+    true
+    (List.exists (fun claim -> String.equal claim incoming_claim) claims)
+;;
+
 let test_search_filters_exact_substring_without_ranking () =
   with_temp_dir
   @@ fun base_path ->
@@ -900,6 +963,10 @@ let () =
             "invalidation rendering only shrinks payload"
             `Quick
             test_invalidation_rendering_is_monotone
+        ; Alcotest.test_case
+            "write reports budget eviction"
+            `Quick
+            test_write_reports_budget_eviction
         ; Alcotest.test_case
             "tools isolate config BasePath from ambient decoy"
             `Quick

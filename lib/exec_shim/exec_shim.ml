@@ -195,6 +195,11 @@ let parse_config content =
               |> List.filter (fun s -> s <> "") in
           Ok { remote_root = root; env_allowlist }))
 
+(* Read here rather than through Env_config_core: the shim is a standalone
+   binary deployed to the remote host, where masc's config layer does not
+   exist. Its dune stanza names exec_ssh_protocol and unix and nothing else,
+   and pulling the config library across would ship that whole layer to every
+   exec host. The env-read ratchet counts this site for that reason. *)
 let config_path () =
   match Sys.getenv_opt config_env_var with
   | Some p when p <> "" -> p

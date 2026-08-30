@@ -13,6 +13,10 @@
 
 include Keeper_sandbox_runtime_setup
 
+type cleanup_attempt =
+  | Cleanup_completed of cleanup_result
+  | Cleanup_skipped_command_unavailable of string
+
 type inspected_container =
   { owner_pid : int option
   ; started_at : float option
@@ -710,8 +714,13 @@ let last_cleanup_at : float Atomic.t = Atomic.make 0.0
 let reset_last_cleanup_for_tests () =
   Atomic.set last_cleanup_at 0.0
 
-let maybe_cleanup_stale_containers ?(now = Unix.gettimeofday ()) ~base_path
-    ~timeout_sec () =
+let maybe_cleanup_stale_containers
+      ?(now = Unix.gettimeofday ())
+      ?(command_available = fun _ -> true)
+      ~base_path
+      ~timeout_sec
+      ()
+  =
   if not (Env_config_sandbox.Cleanup.enabled ())
   then None
   else (
@@ -720,7 +729,14 @@ let maybe_cleanup_stale_containers ?(now = Unix.gettimeofday ()) ~base_path
     if now -. prev < interval
     then None
     else if Atomic.compare_and_set last_cleanup_at prev now
-    then Some (cleanup_stale_containers ~now ~base_path ~timeout_sec ())
+    then (
+      let command = docker_command () in
+      if command_available command
+      then
+        Some
+          (Cleanup_completed
+             (cleanup_stale_containers ~now ~base_path ~timeout_sec ()))
+      else Some (Cleanup_skipped_command_unavailable command))
     else None)
 ;;
 

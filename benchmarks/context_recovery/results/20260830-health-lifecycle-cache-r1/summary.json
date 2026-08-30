@@ -61,7 +61,8 @@
     "health-after-refresh.json": "ed7df7f2d828ea3ca62684e9ad62b690e080fef011a07615fc6d35f609e1d607",
     "transition-selected.log": "c12b14406696087d1b9d76aa5eb9aaf32e9348c0da21524446ec70adfd1965ad",
     "wakeup-health-before-failure.json": "bdf6c0bede0c9ef2f59cca0655595b62d9a9796707b95f2dae362eaf99b50e47",
-    "wakeup-health-ready.json": "2d0dfe90b977adfdbb4f23ac441dfa8a640bfc477d1e673ac0056deffaaf4eb4",
+    "wakeup-health-immediate-after-transition.json": "2d0dfe90b977adfdbb4f23ac441dfa8a640bfc477d1e673ac0056deffaaf4eb4",
+    "wakeup-health-ready-after-wakeup.json": "9cf2775d636b572d50da44074507afb033085149fc6f17a0648500185bcfc76f",
     "wakeup-timeline.log": "8205ef03adbb49b7c24b6cfc0afcd9c985f0d61ef2d11f38f34369acf1406d4d"
   },
   "performance_claim": false

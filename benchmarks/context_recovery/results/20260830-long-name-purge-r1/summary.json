@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T14:14:04+09:00",
+  "source_commit": "f04d50dff57b3a49143f8786aebdec5f321a426b",
+  "binary_sha256": "39ceeef14183564c97527e66eff17105f8da3592a3d27b0a2d1b202e7d81521b",
+  "keeper_name": "coding-eval-ollama-qwen3-8b-l1-context-source-bound-refresh-source-bound-r1",
+  "keeper_name_length": 75,
+  "seed": {
+    "port": 9515,
+    "model": "qwen3:8b",
+    "status": "ok",
+    "verify_exit": 0,
+    "duration_ms": 57000,
+    "final_source_revision": 3,
+    "final_fact_count": 1,
+    "final_invalidation_count": 0,
+    "artifact_sha256": {
+      "evidence.json": "5bc9360a7d7b36e137cbd75675333018713496a1767230f8c02abffc6c7fd262",
+      "last-prompt.json": "f42261e7b8fdd632524a1fc47ae3b06dee1666943bd40779aa7bc779298419bb",
+      "memory-source-final.json": "39a7c4cefc5272ad8a2cceb7e6990fbb98e7463dbbff54bc00addcb7392df8b4"
+    }
+  },
+  "purge": {
+    "port": 9516,
+    "http_status": 202,
+    "operation_id": "shutdown-a8870a13-7926-45e8-9b93-01f9de62bfa1",
+    "source_snapshot_present_after": false,
+    "keeper_config_present_after": false,
+    "runtime_directory_present_after": false,
+    "keeper_meta_present_after": false,
+    "completion_or_recovery_error_matches": 0,
+    "artifact_sha256": {
+      "purge-response.json": "fb3efac127867b86a4b5c5a71bbda8ea04f3c02c5f74cee28938d71d8636c125",
+      "post-purge-state.json": "1d6a8de1e17d778a18561d2471879bc5f431ec661e1d53b2a15e32942f0469f7"
+    }
+  },
+  "same_name_recreate": {
+    "port": 9517,
+    "operation_state": "Succeeded",
+    "outcome_ref": "trace-1788066799732-00000#1",
+    "assistant_response": "LONG_PURGE_OK",
+    "dynamic_context_bytes": 0,
+    "last_prompt_http_status": 404,
+    "source_snapshot_present": false,
+    "completion_or_recovery_error_matches": 0,
+    "artifact_sha256": {
+      "operation-final.json": "0559aae73fe327a68f9070d5392302190c517e8aacf82c0cd822c8e544e78c1d",
+      "keeper-metrics.jsonl": "c54b5412d1b3fb766e2b89cc45cd5e86144ea8d9a46489a7715398a9ac52a5b4",
+      "keeper-chat.jsonl": "dffce1ea6290bdd18cff9874a4db9e2ed552fc894e7e189cc48fef75350c24e1",
+      "post-recreate-state.json": "f384d3da41645b81ac9f64421b8425047d49565b33beb4b0cff9bacaecce3783"
+    }
+  },
+  "focused_checks": {
+    "dashboard_purge_resolution": "1/1",
+    "dashboard_purge_completion": "1/1"
+  },
+  "isolated_ports_stopped": [9515, 9516, 9517],
+  "performance_claim": false
+}

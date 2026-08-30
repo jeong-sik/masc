@@ -151,6 +151,13 @@ let operation_id value =
 let operation_source = `Assoc [ "kind", `String "dashboard" ]
 let operation_input text = `Assoc [ "message", `String text ]
 
+let with_state_change_observer observer f =
+  Owner.install_state_change_observer observer;
+  Fun.protect
+    ~finally:(fun () -> Owner.install_state_change_observer ignore)
+    f
+;;
+
 let test_operation_payload_preserves_connector_route () =
   let continuation =
     match
@@ -1027,6 +1034,136 @@ let test_operation_lifecycle_is_durable_and_projected () =
   match replay.operation.state with
   | Chat_operation.Succeeded _ -> ()
   | state -> fail ("terminal replay changed state: " ^ Chat_operation.state_to_string state)
+;;
+
+let test_health_state_change_observer_tracks_owner_projections () =
+  let notifications = ref 0 in
+  with_state_change_observer
+    (fun () -> incr notifications)
+    (fun () ->
+       Eio_main.run @@ fun _env ->
+       Eio.Switch.run @@ fun sw ->
+       let owner =
+         owner_ok
+           (start_owner
+              ~sw
+              ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+              ~keeper_name:"health-state-change"
+              ~initial_meta:(Some (make_meta "health-state-change")))
+       in
+       let operation_id = operation_id "kmsg-health-state-change" in
+       let accepted =
+         owner_ok
+           (Owner.submit_operation
+              owner
+              ~operation_id
+              ~source:operation_source
+              ~input:(operation_input "observe me"))
+       in
+       check bool "new submission is accepted" false accepted.existing;
+       check int "queued projection notifies once" 1 !notifications;
+       let replay =
+         owner_ok
+           (Owner.submit_operation
+              owner
+              ~operation_id
+              ~source:operation_source
+              ~input:(operation_input "observe me"))
+       in
+       check bool "same submission is an idempotent replay" true replay.existing;
+       check int "idempotent replay does not notify" 1 !notifications;
+       (match
+          Owner.submit_operation
+            owner
+            ~operation_id
+            ~source:operation_source
+            ~input:(operation_input "different input")
+        with
+        | Error (Owner.Operation_rejected _) -> ()
+        | Error error -> fail (Owner.error_to_string error)
+        | Ok _ -> fail "conflicting submission was accepted");
+       check int "rejected submission does not notify" 1 !notifications;
+       ignore (Option.get (owner_ok (Owner.claim_next_operation owner)));
+       check int "running projection notifies once" 2 !notifications;
+       check bool
+         "second claim is a no-op"
+         true
+         (Option.is_none (owner_ok (Owner.claim_next_operation owner)));
+       check int "no-op claim does not notify" 2 !notifications;
+       ignore
+         (owner_ok
+            (Owner.succeed_running_operation owner ~operation_id ~outcome_ref:"turn:health"));
+       check int "terminal projection notifies once" 3 !notifications;
+       let turn_result = Owner.run_autonomous_if_idle owner (fun () -> ()) in
+       (match turn_result with
+        | Ok (`Ran ()) -> ()
+        | Ok (`Busy block) -> fail (Owner.autonomous_block_to_string block)
+        | Error error -> fail (Owner.error_to_string error));
+       check int "turn start and finish each notify" 5 !notifications;
+       let first = Keeper_shutdown_types.Operation_id.generate () in
+       let successor = Keeper_shutdown_types.Operation_id.generate () in
+       ignore (owner_ok (Owner.begin_shutdown owner ~operation_id:first));
+       check int "shutdown reservation notifies" 6 !notifications;
+       ignore (owner_ok (Owner.begin_shutdown owner ~operation_id:first));
+       check int "shutdown replay does not notify" 6 !notifications;
+       ignore
+         (owner_ok
+            (Owner.transition_shutdown
+               owner
+               ~from_operation_id:first
+               ~to_operation_id:(Some successor)));
+       check int "shutdown successor notifies" 7 !notifications;
+       ignore
+         (owner_ok
+            (Owner.transition_shutdown
+               owner
+               ~from_operation_id:first
+               ~to_operation_id:(Some successor)));
+       check int "shutdown transition replay does not notify" 7 !notifications;
+       ignore
+         (owner_ok
+            (Owner.transition_shutdown
+               owner
+               ~from_operation_id:successor
+               ~to_operation_id:None));
+       check int "shutdown release notifies" 8 !notifications)
+;;
+
+let test_health_state_change_observer_failure_is_isolated () =
+  with_state_change_observer
+    (fun () -> failwith "observer fault")
+    (fun () ->
+       Eio_main.run @@ fun _env ->
+       Eio.Switch.run @@ fun sw ->
+       let owner =
+         owner_ok
+           (start_owner
+              ~sw
+              ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+              ~keeper_name:"health-observer-failure"
+              ~initial_meta:(Some (make_meta "health-observer-failure")))
+       in
+       let operation_id = operation_id "kmsg-health-observer-failure" in
+       let accepted =
+         owner_ok
+           (Owner.submit_operation
+              owner
+              ~operation_id
+              ~source:operation_source
+              ~input:(operation_input "observer must not alter result"))
+       in
+       check bool "observer failure preserves acceptance" false accepted.existing;
+       ignore (Option.get (owner_ok (Owner.claim_next_operation owner)));
+       let terminal =
+         owner_ok
+           (Owner.succeed_running_operation owner ~operation_id ~outcome_ref:"turn:ok")
+       in
+       match terminal.state with
+       | Chat_operation.Succeeded _ -> ()
+       | state ->
+         fail
+           ("observer failure altered terminal result: "
+            ^ Chat_operation.state_to_string state))
 ;;
 
 let test_operation_executor_claims_latest_input_and_drains_fifo () =
@@ -2764,6 +2901,14 @@ let () =
             "operation lifecycle is durable and projected"
             `Quick
             test_operation_lifecycle_is_durable_and_projected
+        ; test_case
+            "health observer tracks Owner projection mutations"
+            `Quick
+            test_health_state_change_observer_tracks_owner_projections
+        ; test_case
+            "health observer failure is isolated"
+            `Quick
+            test_health_state_change_observer_failure_is_isolated
         ; test_case
             "operation executor claims latest input and drains FIFO"
             `Quick

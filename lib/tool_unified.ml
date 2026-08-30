@@ -125,4 +125,6 @@ let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
     ("tool_distribution", tool_dist);
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
     ("runtime_metrics", runtime_metrics ());
+    ( "persistence"
+    , Tool_metrics_persist.(persistence_snapshot () |> persistence_snapshot_to_json) );
   ]

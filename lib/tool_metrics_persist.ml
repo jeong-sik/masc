@@ -8,6 +8,8 @@
     - Records are buffered in a bounded best-effort queue and flushed on the
       configured interval (0.5 seconds by default).
     - All I/O failures are caught and logged (best-effort persistence).
+    - A process-scoped snapshot exposes queue, drop, flush, and append-failure
+      state without presenting those counters as hydrated lifetime totals.
 
     @since 2.108.0 — Issue #3280 *)
 
@@ -28,6 +30,25 @@ type hydrate_report = {
   malformed_records : int;
   invalid_records : int;
   pruned_files : int;
+}
+
+type persistence_snapshot = {
+  runtime_instance_id : string;
+  process_started_at : string;
+  observed_at_unix : float;
+  writer_active : bool;
+  queue_depth : int;
+  queue_capacity : int;
+  queue_high_watermark : int;
+  queue_full_dropped_records : int;
+  append_failed_records : int;
+  flushed_records : int;
+  flush_batches : int;
+  last_flush_trigger : string option;
+  last_flush_rows : int option;
+  last_flush_failed_rows : int option;
+  last_flush_at_unix : float option;
+  last_append_error : string option;
 }
 
 let exact_string_field key json =
@@ -74,6 +95,15 @@ let write_queue_mu = Mutex.create ()
 let write_queue : Yojson.Safe.t Queue.t = Queue.create ()
 let write_queue_changed = Eio.Condition.create ()
 let dropped_full_queue = Atomic.make 0
+let append_failed_records = Atomic.make 0
+let flushed_records = Atomic.make 0
+let flush_batches = Atomic.make 0
+let writer_active = Atomic.make false
+let last_flush_trigger = Atomic.make None
+let last_flush_rows = Atomic.make None
+let last_flush_failed_rows = Atomic.make None
+let last_flush_at_unix = Atomic.make None
+let last_append_error = Atomic.make None
 
 let store = Atomic.make None
 
@@ -85,6 +115,56 @@ let take_queued_record () =
 
 let queued_record_count () =
   with_write_queue_lock (fun () -> Queue.length write_queue)
+
+let persistence_snapshot () =
+  let build = Build_identity.current () in
+  { runtime_instance_id = build.runtime_instance_id
+  ; process_started_at = build.started_at
+  ; observed_at_unix = Time_compat.now ()
+  ; writer_active = Atomic.get writer_active
+  ; queue_depth = queued_record_count ()
+  ; queue_capacity = write_queue_capacity
+  ; queue_high_watermark = write_queue_high_watermark
+  ; queue_full_dropped_records = Atomic.get dropped_full_queue
+  ; append_failed_records = Atomic.get append_failed_records
+  ; flushed_records = Atomic.get flushed_records
+  ; flush_batches = Atomic.get flush_batches
+  ; last_flush_trigger = Atomic.get last_flush_trigger
+  ; last_flush_rows = Atomic.get last_flush_rows
+  ; last_flush_failed_rows = Atomic.get last_flush_failed_rows
+  ; last_flush_at_unix = Atomic.get last_flush_at_unix
+  ; last_append_error = Atomic.get last_append_error
+  }
+
+let option_to_json encode = function
+  | Some value -> encode value
+  | None -> `Null
+
+let persistence_snapshot_to_json snapshot =
+  `Assoc
+    [ "schema", `String "masc.tool_metrics.persistence.v1"
+    ; "scope", `String "current_process"
+    ; "runtime_instance_id", `String snapshot.runtime_instance_id
+    ; "process_started_at", `String snapshot.process_started_at
+    ; "observed_at_unix", `Float snapshot.observed_at_unix
+    ; "writer_active", `Bool snapshot.writer_active
+    ; "queue_depth", `Int snapshot.queue_depth
+    ; "queue_capacity", `Int snapshot.queue_capacity
+    ; "queue_high_watermark", `Int snapshot.queue_high_watermark
+    ; "queue_full_dropped_records", `Int snapshot.queue_full_dropped_records
+    ; "append_failed_records", `Int snapshot.append_failed_records
+    ; "flushed_records", `Int snapshot.flushed_records
+    ; "flush_batches", `Int snapshot.flush_batches
+    ; ( "last_flush_trigger"
+      , option_to_json (fun value -> `String value) snapshot.last_flush_trigger )
+    ; "last_flush_rows", option_to_json (fun value -> `Int value) snapshot.last_flush_rows
+    ; ( "last_flush_failed_rows"
+      , option_to_json (fun value -> `Int value) snapshot.last_flush_failed_rows )
+    ; ( "last_flush_at_unix"
+      , option_to_json (fun value -> `Float value) snapshot.last_flush_at_unix )
+    ; ( "last_append_error"
+      , option_to_json (fun value -> `String value) snapshot.last_append_error )
+    ]
 
 let await_flush_trigger ~clock ~interval_s =
   match
@@ -108,6 +188,15 @@ let reset_for_testing () =
   if dropped > 0 then
     Log.Metrics.warn "tool_metrics_persist: reset dropped %d queued records" dropped;
   Atomic.set dropped_full_queue 0;
+  Atomic.set append_failed_records 0;
+  Atomic.set flushed_records 0;
+  Atomic.set flush_batches 0;
+  Atomic.set writer_active false;
+  Atomic.set last_flush_trigger None;
+  Atomic.set last_flush_rows None;
+  Atomic.set last_flush_failed_rows None;
+  Atomic.set last_flush_at_unix None;
+  Atomic.set last_append_error None;
   Atomic.set store None;
   Eio.Condition.broadcast write_queue_changed
 
@@ -183,44 +272,80 @@ let enqueue (result : Tool_result.result) =
 
 (* ── Flush logic ────────────────────────────────────── *)
 
-let drain_to_store (store : Dated_jsonl.t) : int =
-  let count = ref 0 in
+type drain_report = {
+  written : int;
+  failed : int;
+  last_error : string option;
+}
+
+let trigger_to_string = function
+  | `High_watermark -> "high_watermark"
+  | `Manual -> "manual"
+  | `Shutdown -> "shutdown"
+  | `Timer -> "timer"
+
+let record_drain_report ~trigger report =
+  let attempted = report.written + report.failed in
+  if attempted > 0
+  then begin
+    Atomic.incr flush_batches;
+    ignore (Atomic.fetch_and_add flushed_records report.written : int);
+    ignore (Atomic.fetch_and_add append_failed_records report.failed : int);
+    Atomic.set last_flush_trigger (Some (trigger_to_string trigger));
+    Atomic.set last_flush_rows (Some report.written);
+    Atomic.set last_flush_failed_rows (Some report.failed);
+    Atomic.set last_flush_at_unix (Some (Time_compat.now ()));
+    Atomic.set last_append_error report.last_error
+  end
+
+let drain_to_store ~trigger (store : Dated_jsonl.t) : drain_report =
+  let written = ref 0 in
+  let failed = ref 0 in
+  let last_error = ref None in
   let rec drain () =
     match take_queued_record () with
     | None -> ()
     | Some json ->
       (try
          Dated_jsonl.append store json;
-         Stdlib.incr count
+         Stdlib.incr written
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         Log.Metrics.error "tool_metrics_persist: append failed: %s"
-           (Stdlib.Printexc.to_string exn));
+         let error = Stdlib.Printexc.to_string exn in
+         Stdlib.incr failed;
+         last_error := Some error;
+         Log.Metrics.error "tool_metrics_persist: append failed: %s" error);
       drain ()
   in
   drain ();
-  !count
+  let report = { written = !written; failed = !failed; last_error = !last_error } in
+  record_drain_report ~trigger report;
+  report
 
 let flush_now ~base_path =
   let store = get_or_create_store ~base_path in
-  let flushed = drain_to_store store in
-  Log.Metrics.debug "tool_metrics_persist: flushed %d records" flushed
+  let report = drain_to_store ~trigger:`Manual store in
+  Log.Metrics.debug
+    "tool_metrics_persist: flushed %d records (append_failed=%d)"
+    report.written
+    report.failed
 
 let start_flush_fiber ~sw ~clock ~base_path =
   let store = get_or_create_store ~base_path in
+  Atomic.set writer_active true;
+  Eio.Switch.on_release sw (fun () -> Atomic.set writer_active false);
   Eio.Fiber.fork ~sw (fun () ->
     Log.Metrics.info "tool_metrics_persist: flush fiber started (interval=%.3gs)"
       flush_interval_s;
     let rec loop () =
       let trigger = await_flush_trigger ~clock ~interval_s:flush_interval_s in
       (try
-         let n = drain_to_store store in
-         if n > 0 then
+         let report = drain_to_store ~trigger store in
+         if report.written > 0 || report.failed > 0 then
            Log.Metrics.info
-             "tool_metrics_persist: flushed %d records to disk (trigger=%s)"
-             n
-             (match trigger with
-              | `High_watermark -> "high_watermark"
-              | `Timer -> "timer")
+             "tool_metrics_persist: flushed %d records to disk (trigger=%s, append_failed=%d)"
+             report.written
+             (trigger_to_string trigger)
+             report.failed
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
@@ -232,9 +357,12 @@ let start_flush_fiber ~sw ~clock ~base_path =
   (* Register shutdown hook to drain remaining records *)
   Shutdown.register ~name:"tool_metrics_persist_flush" ~priority:25 (fun () ->
     try
-      let n = drain_to_store store in
-      if n > 0 then
-        Log.Metrics.info "tool_metrics_persist: shutdown flush wrote %d records" n
+      let report = drain_to_store ~trigger:`Shutdown store in
+      if report.written > 0 || report.failed > 0 then
+        Log.Metrics.info
+          "tool_metrics_persist: shutdown flush wrote %d records (append_failed=%d)"
+          report.written
+          report.failed
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Metrics.error "tool_metrics_persist: shutdown flush failed: %s"
         (Stdlib.Printexc.to_string exn))

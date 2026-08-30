@@ -100,7 +100,20 @@ let test_enqueue_flush_current_records () =
       true
       (List.for_all
          (fun json -> Safe_ops.json_bool_opt "success" json = None)
-         records))
+         records);
+    let snapshot = P.persistence_snapshot () in
+    Alcotest.(check int) "queue drained" 0 snapshot.queue_depth;
+    Alcotest.(check int) "four records flushed" 4 snapshot.flushed_records;
+    Alcotest.(check int) "one flush batch" 1 snapshot.flush_batches;
+    Alcotest.(check int) "no append failures" 0 snapshot.append_failed_records;
+    Alcotest.(check (option string))
+      "manual trigger visible"
+      (Some "manual")
+      snapshot.last_flush_trigger;
+    Alcotest.(check (option int))
+      "last flush row count visible"
+      (Some 4)
+      snapshot.last_flush_rows)
 
 let test_reset_discards_queued_records () =
   with_tmp_dir (fun base_path ->
@@ -121,11 +134,28 @@ let test_enqueue_drops_when_queue_full () =
            ~success:true
            ~duration_ms:1.0)
     done;
+    let full_snapshot = P.persistence_snapshot () in
+    Alcotest.(check int) "queue capacity visible" 4096 full_snapshot.queue_capacity;
+    Alcotest.(check int)
+      "high watermark visible"
+      2048
+      full_snapshot.queue_high_watermark;
+    Alcotest.(check int) "queue depth bounded" 4096 full_snapshot.queue_depth;
+    Alcotest.(check int)
+      "five queue-full drops visible"
+      5
+      full_snapshot.queue_full_dropped_records;
     P.flush_now ~base_path;
     Alcotest.(check int)
       "bounded queue persists only capacity"
       4096
-      (List.length (read_records ~base_path)))
+      (List.length (read_records ~base_path));
+    let drained_snapshot = P.persistence_snapshot () in
+    Alcotest.(check int) "full queue drained" 0 drained_snapshot.queue_depth;
+    Alcotest.(check int)
+      "queue-full drops remain visible after drain"
+      5
+      drained_snapshot.queue_full_dropped_records)
 
 let test_enqueue_multidomain_drop_is_bounded () =
   with_tmp_dir (fun base_path ->
@@ -146,6 +176,44 @@ let test_enqueue_multidomain_drop_is_bounded () =
       "multi-domain producers persist only capacity"
       4096
       (List.length (read_records ~base_path)))
+
+let test_append_failure_and_recovery_are_observable () =
+  with_tmp_dir (fun base_path ->
+    let run_append f = f () in
+    Fun.protect
+      ~finally:(fun () -> Dated_jsonl.set_append_guard run_append)
+      (fun () ->
+        Dated_jsonl.set_append_guard (fun _ -> raise (Failure "forced append failure"));
+        P.enqueue (make_result ~name:"failed-write" ~success:true ~duration_ms:1.0);
+        P.flush_now ~base_path;
+        let failed = P.persistence_snapshot () in
+        Alcotest.(check int) "failed row not counted as flushed" 0 failed.flushed_records;
+        Alcotest.(check int) "append failure counted" 1 failed.append_failed_records;
+        Alcotest.(check (option int))
+          "failed row visible on last batch"
+          (Some 1)
+          failed.last_flush_failed_rows;
+        Alcotest.(check bool)
+          "append error visible"
+          true
+          (Option.is_some failed.last_append_error);
+        Dated_jsonl.set_append_guard run_append;
+        P.enqueue (make_result ~name:"recovered-write" ~success:true ~duration_ms:2.0);
+        P.flush_now ~base_path;
+        let recovered = P.persistence_snapshot () in
+        Alcotest.(check int) "recovery row flushed" 1 recovered.flushed_records;
+        Alcotest.(check int)
+          "historical append failure retained"
+          1
+          recovered.append_failed_records;
+        Alcotest.(check (option int))
+          "latest batch recovered"
+          (Some 0)
+          recovered.last_flush_failed_rows;
+        Alcotest.(check bool)
+          "last append error clears after recovery"
+          true
+          (Option.is_none recovered.last_append_error)))
 
 let test_high_watermark_wakes_flush_waiter clock =
   with_tmp_dir (fun _base_path ->
@@ -285,6 +353,9 @@ let () =
         ; eio_test
             "enqueue drops safely from multiple domains"
             test_enqueue_multidomain_drop_is_bounded
+        ; eio_test
+            "append failure and recovery remain observable"
+            test_append_failure_and_recovery_are_observable
         ; eio_clock_test
             "cross-domain high watermark wakes the flush waiter"
             test_high_watermark_wakes_flush_waiter

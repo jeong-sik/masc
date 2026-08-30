@@ -5,7 +5,9 @@
     flushes new in-memory records to
     [data/tool-metrics/YYYY-MM/DD.jsonl] via {!Dated_jsonl}.
 
-    Flush failures are logged but do not affect server operation.
+    Flush failures are logged but do not affect server operation. The
+    process-scoped snapshot keeps queue loss and recovery visible separately
+    from the hydrated aggregate tool statistics.
 
     @since 2.108.0 — Issue #3280 *)
 
@@ -22,6 +24,32 @@ type hydrate_report = {
   invalid_records : int;
   pruned_files : int;
 }
+
+type persistence_snapshot = {
+  runtime_instance_id : string;
+  process_started_at : string;
+  observed_at_unix : float;
+  writer_active : bool;
+  queue_depth : int;
+  queue_capacity : int;
+  queue_high_watermark : int;
+  queue_full_dropped_records : int;
+  append_failed_records : int;
+  flushed_records : int;
+  flush_batches : int;
+  last_flush_trigger : string option;
+  last_flush_rows : int option;
+  last_flush_failed_rows : int option;
+  last_flush_at_unix : float option;
+  last_append_error : string option;
+}
+
+val persistence_snapshot : unit -> persistence_snapshot
+(** Current-process observation of the bounded persistence queue and writer.
+    Counters start at zero on process start and are not hydrated from JSONL. *)
+
+val persistence_snapshot_to_json : persistence_snapshot -> Yojson.Safe.t
+(** Current-only JSON projection. Absent last-event fields are JSON [null]. *)
 
 val hydrate :
   base_path:string ->

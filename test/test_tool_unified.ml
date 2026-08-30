@@ -56,6 +56,34 @@ let () =
               let _ = report |> member "tool_distribution" in
               (* RFC-0084 host-config-cleanup-J — dispatch_v2_enabled removed *)
               let _ = report |> member "registered_count" |> to_int in
+              let persistence = report |> member "persistence" in
+              check string
+                "persistence schema"
+                "masc.tool_metrics.persistence.v1"
+                (persistence |> member "schema" |> to_string);
+              check string
+                "persistence scope"
+                "current_process"
+                (persistence |> member "scope" |> to_string);
+              check bool
+                "runtime identity present"
+                true
+                (persistence |> member "runtime_instance_id" |> to_string |> String.length > 0);
+              check bool
+                "process start present"
+                true
+                (persistence |> member "process_started_at" |> to_string |> String.length > 0);
+              let _ = persistence |> member "queue_depth" |> to_int in
+              let _ = persistence |> member "queue_full_dropped_records" |> to_int in
+              let _ = persistence |> member "append_failed_records" |> to_int in
+              check bool
+                "missing last trigger remains null"
+                true
+                (persistence |> member "last_flush_trigger" = `Null);
+              check bool
+                "missing last error remains null"
+                true
+                (persistence |> member "last_append_error" = `Null);
               ());
           test_case "tool_distribution has visibility buckets" `Quick (fun () ->
               let report = Tool_unified.summary_report () in

@@ -135,7 +135,8 @@ let add_agent_api_routes router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
 
-  (* Tool metrics -- restart-safe aggregate stats for dashboard *)
+  (* Tool metrics -- restart-safe aggregates plus an explicitly
+     current-process persistence queue snapshot. *)
   |> Http.Router.get "/api/v1/tool-metrics" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json =

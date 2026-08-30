@@ -72,15 +72,25 @@ remote_endpoint = "fixture"
 |};
     (* RFC-0121: the endpoint resolver reads .masc/config/runtime.toml — the
        live layout — not the .masc root this fixture used to write to. *)
-    write_file (Filename.concat base_path ".masc/config/runtime.toml")
-      {|[exec.ssh.endpoints.fixture]
-host = "fixture.invalid"
-user = "masc"
-remote_root = "/srv/masc/playground"
-connect_timeout_sec = 1
-max_concurrent_sessions = 2
-env_allowlist = ["LANG"]
-|};
+        write_file
+      (Filename.concat base_path ".masc/config/runtime.toml")
+(* R00: derive the fixture table from the typed record via
+         Exec_ssh_endpoint.to_toml, the strict decoder mirror, so the
+         fixture cannot drift from what Runtime_toml accepts. *)
+      (Exec_ssh_endpoint.to_toml
+         Exec_ssh_endpoint.
+           { name = "fixture"
+           ; host = "fixture.invalid"
+           ; user = "masc"
+           ; port = default_port
+           ; identity_file = default_identity_file ~name:"fixture"
+           ; known_hosts_file = default_known_hosts_file ~name:"fixture"
+           ; remote_root = "/srv/masc/playground"
+           ; connect_timeout_sec = 1
+           ; max_concurrent_sessions = 2
+           ; env_allowlist = [ "LANG" ]
+           ; capabilities = []
+           });
     f ~config ~meta ~playground)
 ;;
 

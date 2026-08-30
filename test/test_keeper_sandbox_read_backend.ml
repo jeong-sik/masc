@@ -369,11 +369,16 @@ let test_run_command_remote_ssh_endpoint_error_before_image_guard () =
          in
          loop 0)
 
+(* The fake shim trailer must speak the current wire version:
+   Exec_ssh_protocol.protocol_version (= 2, rendered by
+   Exec_ssh_protocol.render_trailer). It carried v=1 and was never
+   exercised before RFC-0121 moved the fixture to the live runtime.toml
+   path — the dead-path fixture hid this drift (task-888). *)
 let fake_ssh_success_script =
   {|#!/bin/sh
 cat >/dev/null 2>/dev/null &
 printf 'remote-file-content'
-printf '\036{"masc_exec_result":{"v":1,"exit":0,"signal":null,"timed_out":false,"shim_error":null}}\036' >&2
+printf '\036{"masc_exec_result":{"v":2,"exit":0,"signal":null,"timed_out":false,"shim_error":null}}\036' >&2
 exit 0
 |}
 
@@ -394,14 +399,25 @@ remote_endpoint = "fixture"
 |};
   (* RFC-0121: the endpoint resolver reads .masc/config/runtime.toml — the live
      layout — not the .masc root this fixture used to write to. *)
-  write_file (Filename.concat base ".masc/config/runtime.toml")
-    {|[exec.ssh.endpoints.fixture]
-host = "fixture.invalid"
-user = "masc"
-remote_root = "/srv/masc/playground"
-connect_timeout_sec = 1
-max_concurrent_sessions = 2
-|};
+    write_file
+    (Filename.concat base ".masc/config/runtime.toml")
+    (* R00: derive the fixture table from the typed record via
+       Exec_ssh_endpoint.to_toml, the strict decoder mirror, so the
+       fixture cannot drift from what Runtime_toml accepts. *)
+    (Exec_ssh_endpoint.to_toml
+       Exec_ssh_endpoint.
+         { name = "fixture"
+         ; host = "fixture.invalid"
+         ; user = "masc"
+         ; port = default_port
+         ; identity_file = default_identity_file ~name:"fixture"
+         ; known_hosts_file = default_known_hosts_file ~name:"fixture"
+         ; remote_root = "/srv/masc/playground"
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 2
+         ; env_allowlist = []
+         ; capabilities = []
+         });
   let missing_host_path =
     Filename.concat
       (Keeper_sandbox.host_root_abs_of_meta ~config meta)

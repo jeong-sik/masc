@@ -89,3 +89,42 @@ type t =
         warned about and ignored at parse time. Default [[]]. *)
   }
 [@@deriving show, eq]
+let string_array values = Otoml.TomlArray (List.map (fun s -> Otoml.TomlString s) values)
+
+(** R00 serialization contract: derive the fixture/roundtrip TOML form from
+    [t] itself instead of hand-writing it per test. [Runtime_toml]'s decoder
+    is the consumer SSOT; this encoder is its type-derived mirror, so a field
+    rename or a new knob cannot drift between what tests write and what the
+    loader reads. The table body carries ONLY the keys the strict decoder
+    accepts — the endpoint name is the table header key, not a field, and a
+    stray [name] entry would fail the whole load. *)
+let toml_of_endpoint (endpoint : t) : Otoml.t =
+  Otoml.TomlTable
+    [ ("host", Otoml.string endpoint.host)
+    ; ("user", Otoml.string endpoint.user)
+    ; ("port", Otoml.integer endpoint.port)
+    ; ("identity_file", Otoml.string endpoint.identity_file)
+    ; ("known_hosts_file", Otoml.string endpoint.known_hosts_file)
+    ; ("remote_root", Otoml.string endpoint.remote_root)
+    ; ("connect_timeout_sec", Otoml.integer endpoint.connect_timeout_sec)
+    ; ("max_concurrent_sessions", Otoml.integer endpoint.max_concurrent_sessions)
+    ; ("env_allowlist", string_array endpoint.env_allowlist)
+    ; ("capabilities", string_array endpoint.capabilities)
+    ]
+
+(** Serialize one endpoint as the standard TOML text of its
+    [exec.ssh.endpoints.<name>] table, ready to be a section of runtime.toml.
+    The path is built as nested tables — a dotted literal key would make the
+    printer emit one quoted header key instead of the section path. *)
+let to_toml (endpoint : t) : string =
+  Otoml.Printer.to_string
+    (Otoml.TomlTable
+       [ ( "exec"
+         , Otoml.TomlTable
+             [ ( "ssh"
+               , Otoml.TomlTable
+                   [ ( "endpoints"
+                     , Otoml.TomlTable [ (endpoint.name, toml_of_endpoint endpoint) ] )
+                   ] )
+             ] )
+       ])

@@ -68,3 +68,14 @@ type t =
         warned about and ignored at parse time. Default [[]]. *)
   }
 [@@deriving show, eq]
+
+val toml_of_endpoint : t -> Otoml.t
+(** R00 serialization contract: derive the fixture/roundtrip TOML form from
+    [t] itself instead of hand-writing it per test. [Runtime_toml]'s decoder
+    is the consumer SSOT; this encoder is its type-derived mirror. Emits only
+    the endpoint table (no [exec.ssh.endpoints] wrapper) so several endpoints
+    can be composed into one runtime.toml. *)
+
+val to_toml : t -> string
+(** Serialize one endpoint as the standard TOML text of its
+    [exec.ssh.endpoints.<name>] table, ready to be a section of runtime.toml. *)

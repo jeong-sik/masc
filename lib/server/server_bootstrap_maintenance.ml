@@ -6,6 +6,17 @@ let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
 let log_server_fiber_crash =
   Server_bootstrap_loops_fiber.log_server_fiber_crash
 
+let start_otel_exporter_background ~sw setup =
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "otel_exporter_setup")
+    setup
+;;
+
+module Otel_for_testing = struct
+  let start_exporter_background = start_otel_exporter_background
+end
+
 let schedule_runner_interval_sec = Server_schedule_runner_policy.interval_sec
 
 let record_schedule_runner_tick_outcome outcome =
@@ -670,7 +681,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~clock
     ~masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state))
     ();
-  Otel_spans.setup_exporter ~sw env;
+  start_otel_exporter_background ~sw (fun () -> Otel_spans.setup_exporter ~sw env);
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
   (* RFC-0217 S4-2: wire AGENT_CORE OTLP exporter so AGENT_CORE spans/metrics reach the
      same collector as MASC-native telemetry.  The endpoint is read from

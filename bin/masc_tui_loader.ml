@@ -672,9 +672,9 @@ let load_schedules ~(host : string) ~(port : int) :
 
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int)
-    ~(sort_by : string) :
+    ~(sort_by : string) ~(hearth : string option) :
     (board_post list, string) result =
-  match fetch_board ~host ~port ~sort_by with
+  match fetch_board ~host ~port ~sort_by ~hearth with
   | Error err -> Error ("board load failed: " ^ err)
   | Ok json ->
       let* posts = required_list_field json "posts" in

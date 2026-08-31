@@ -1242,11 +1242,22 @@ let post_keeper_ask_answer ~(host : string) ~(port : int)
   post_json ~host ~port ~path:"/api/v1/keepers/ask-answer"
     ~body:(Yojson.Safe.to_string payload)
 
-(** Fetch /api/v1/board (post list) in the operator-selected server order. *)
-let fetch_board ~(host : string) ~(port : int)
-    ~(sort_by : string) : (Yojson.Safe.t, string) result =
+(** Fetch /api/v1/board (post list) in the operator-selected server order,
+    optionally narrowed to one hearth.
+
+    The narrowing is the server's, not a filter over what arrived: the listing
+    is paged, and a client-side filter over one page of a board where 71% of
+    posts sit in a single hearth would show three rows and call it the
+    hearth. *)
+let fetch_board ~(host : string) ~(port : int) ~(sort_by : string)
+    ~(hearth : string option) : (Yojson.Safe.t, string) result =
+  let narrowing =
+    match hearth with
+    | None -> ""
+    | Some hearth -> "&hearth=" ^ percent_encode_query_value hearth
+  in
   get_json ~host ~port
-    ~path:("/api/v1/board?sort_by=" ^ sort_by)
+    ~path:("/api/v1/board?sort_by=" ^ sort_by ^ narrowing)
 
 (** POST /api/v1/tools/masc_board_post. The draft follows the commit-message
     shape -- first line is the title, the rest is the body -- and the server

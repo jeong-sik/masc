@@ -2362,9 +2362,20 @@ let render_board_list (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let count = List.length state.board_posts in
-  let header = Printf.sprintf "%s (%d)  order:%s  %s  %s"
+  (* Which sub-board is being read. Said only when the list is narrowed: "all
+     hearths" is what a reader assumes, and 24 of them share this board with
+     1550 of 2171 posts in one, so a narrowed list that did not say so would
+     look like a board that had gone quiet. *)
+  let hearth =
+    match state.board_hearth with
+    | None -> ""
+    | Some hearth ->
+        Printf.sprintf "  %shearth:%s%s" Ansi.cyan
+          (Terminal_text.single_line hearth) Ansi.reset
+  in
+  let header = Printf.sprintf "%s (%d)  order:%s%s  %s  %s"
     (screen_title " MASC Board")
-    count (board_sort_label state.board_sort) timestamp
+    count (board_sort_label state.board_sort) hearth timestamp
     (connection_badge state) in
 
   box_top buf cols;
@@ -2487,7 +2498,7 @@ let render_board_list (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         "j/k:move  right/Enter:read  s:sort  Y:copy link  v/V:vote  w:write  r:refresh  Tab:next");
+         "j/k:move  right/Enter:read  s:sort  f:hearth  Y:copy link  v/V:vote  w:write  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
       ~cols buf

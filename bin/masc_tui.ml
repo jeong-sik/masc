@@ -5,6 +5,7 @@ open Masc_tui_loader
 
 module Approval = Masc_tui_operator_projection
 module Board_detail = Masc_tui_board_detail
+module Board_hearth = Masc_tui_board_hearth
 module Board_selection = Masc_tui_board_selection
 module Frame_presenter = Masc_tui_frame_presenter
 module Approval_authority = Masc_tui_approval_authority
@@ -5094,6 +5095,8 @@ let leave_missing_board_detail state =
 let apply_board_list_load state = function
   | Ok posts ->
       replace_board_posts state posts;
+      if Option.is_none state.board_hearth then
+        state.board_hearths <- Board_hearth.vocabulary posts;
       state.board_list_error <- None;
       leave_missing_board_detail state
   | Error err ->
@@ -5270,7 +5273,7 @@ let refresh_status results =
   | _ -> Masc_tui_types.Degraded
 
 let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
-    ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Only the Overview row shows this, so a refresh on another surface does not
      spend a request on it. [None] leaves whatever the last read observed. *)
@@ -5290,7 +5293,8 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
   in
   let http_board =
     when_needed needs.needs_board (fun () ->
-        load_board_list ~host ~port ~sort_by:(board_sort_label board_sort))
+        load_board_list ~host ~port ~sort_by:(board_sort_label board_sort)
+          ~hearth:board_hearth)
   in
   let http_planning =
     when_needed needs.needs_planning (fun () -> load_planning ~host ~port)
@@ -5317,7 +5321,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
   }
 
 let load_http_surfaces ~host ~port ~approval_generation ~board_sort
-    ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~(needs : Masc_tui_types.surface_needs) =
   let http_overview = load_overview ~host ~port in
   let http_approvals =
     Option.map
@@ -5331,7 +5335,7 @@ let load_http_surfaces ~host ~port ~approval_generation ~board_sort
   let http_server_identity = load_server_identity ~host ~port in
   let http_scoped =
     load_http_scoped_surfaces ~host ~port ~approval_generation:None ~board_sort
-      ~needs
+      ~board_hearth ~needs
   in
   { http_overview; http_approvals; http_scoped; http_server_identity }
 
@@ -5686,7 +5690,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         enqueue_async mailbox
           (Http_refresh_done
              (load_http_surfaces ~host ~port ~approval_generation
-                ~board_sort:state.board_sort ~needs))
+                ~board_sort:state.board_sort
+                ~board_hearth:state.board_hearth ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -5704,7 +5709,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           (fun () ->
              apply_http_surfaces state
                (load_http_surfaces ~host ~port ~approval_generation
-                  ~board_sort:state.board_sort ~needs))
+                  ~board_sort:state.board_sort
+                ~board_hearth:state.board_hearth ~needs))
   end
 
 let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
@@ -5732,7 +5738,8 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
         enqueue_async mailbox
           (Http_scoped_refresh_done
              (load_http_scoped_surfaces ~host ~port
-                ~approval_generation ~board_sort:state.board_sort ~needs))
+                ~approval_generation ~board_sort:state.board_sort
+                ~board_hearth:state.board_hearth ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -5750,7 +5757,8 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           (fun () ->
              apply_http_scoped_surfaces state
                (load_http_scoped_surfaces ~host ~port
-                  ~approval_generation ~board_sort:state.board_sort ~needs))
+                  ~approval_generation ~board_sort:state.board_sort
+                ~board_hearth:state.board_hearth ~needs))
   end
 
 let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
@@ -12751,6 +12759,25 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Changes
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
+       | Some "f" | Some "F"
+         when state.view = Board && state.board_mode <> Board_compose ->
+           (* All, then each hearth the unnarrowed list showed, busiest first,
+              then all again. The narrowing is the server's -- see
+              [fetch_board] -- so this refetches rather than filtering the
+              page in hand. *)
+           state.board_hearth <-
+             Board_hearth.next ~current:state.board_hearth
+               ~vocabulary:state.board_hearths;
+           state.board_cursor <- 0;
+           state.board_mode <- Board_list;
+           add_event state "system"
+             (match state.board_hearth with
+              | None -> "Board: every hearth"
+              | Some hearth -> "Board hearth: " ^ hearth);
+           start_http_refresh state ~host:server_peer_host ~port:state.port
+             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox:async_messages
        | Some "f" | Some "F" when state.view = Planning ->
            (* Client-side over the loaded goals: no refetch. *)
            state.planning_filter <- next_planning_filter state.planning_filter;

@@ -266,7 +266,7 @@ let connector_attention_outcome_of_route
 let record_crashed_cycle_failure ~base_path ~keeper_name exn =
   (* Capture the backtrace before any other call can clobber it. *)
   let backtrace = Printexc.get_backtrace () in
-  Keeper_registry.increment_turn_failures ~base_path keeper_name;
+  ignore (Keeper_turn_failure_streak.increment ~base_path ~keeper_name);
   Health.record_failure
     ~agent_name:keeper_name
     ~reason:(Keeper_types_profile.short_preview (Printexc.to_string exn));

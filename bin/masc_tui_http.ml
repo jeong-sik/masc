@@ -2003,7 +2003,7 @@ let post_connector_unbind ~(host : string) ~(port : int) ~(connector : string)
 (** One [resources/list] over the MCP endpoint, on an open session. *)
 let call_mcp_resources_list ~(host : string) ~(port : int)
     ~(session_id : string) ~(request_id : string) :
-    ((string * string) list, string) result =
+    (Masc_tui_mcp.resource list, string) result =
   let headers =
     json_headers
       (("Accept", "application/json, text/event-stream")

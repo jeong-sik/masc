@@ -1358,6 +1358,8 @@ type async_msg =
   | Fusion_detail_loaded of
       int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
+  | Repository_changes_loaded of
+      string * (Masc.Tui_decode.repository_change_snapshot, string) result
   (* Carries the keeper it was asked about. The surface can be pointed at a
      different keeper while a load is in flight, and an answer that did not
      say whose it was would be filed under whoever is selected when it
@@ -3125,6 +3127,29 @@ let launch_repositories_load state ~mailbox =
       enqueue_async mailbox
         (Repositories_loaded (Error "Eio switch is unavailable"))
 
+let launch_repository_changes_load state ~mailbox ~repository_id =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_loader.load_repository_changes ~host ~port ~repository_id
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Repository_changes_loaded (repository_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Repository_changes_loaded
+           (repository_id, Error "Eio switch is unavailable"))
+
 (* Where the change is on this machine.
 
    All three shapes resolve inside the keeper's own bundle, because that is
@@ -3506,7 +3531,10 @@ let search_row_cursor state =
       if Option.is_some state.verification_detail_request_id then None
       else Some state.verification_cursor
   | Harness -> Some state.harness_cursor
-  | Repositories -> Some state.repositories_cursor
+  | Repositories ->
+      Some
+        (if state.repository_changes_open then state.repository_changes_cursor
+         else state.repositories_cursor)
   | Connectors -> Some state.connectors_cursor
   | Runtime -> Some state.runtime_cursor
   | System_logs -> Some state.system_logs_cursor
@@ -3558,8 +3586,15 @@ let search_land state index =
       state.harness_cursor <- index;
       follow state.harness_scroll (fun s -> state.harness_scroll <- s)
   | Repositories ->
-      state.repositories_cursor <- index;
-      follow state.repositories_scroll (fun s -> state.repositories_scroll <- s)
+      if state.repository_changes_open then begin
+        state.repository_changes_cursor <- index;
+        follow state.repository_changes_scroll
+          (fun s -> state.repository_changes_scroll <- s)
+      end
+      else begin
+        state.repositories_cursor <- index;
+        follow state.repositories_scroll (fun s -> state.repositories_scroll <- s)
+      end
   | Connectors ->
       state.connectors_cursor <- index;
       follow state.connectors_scroll (fun s -> state.connectors_scroll <- s)
@@ -8229,6 +8264,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.repositories <- Some snapshot;
           state.repositories_error <- None
       | Error detail -> state.repositories_error <- Some detail)
+  | Repository_changes_loaded (repository_id, result) ->
+      if
+        state.repository_changes_open
+        && Option.equal String.equal state.repository_changes_repo_id
+             (Some repository_id)
+      then
+        (match result with
+         | Ok snapshot ->
+             state.repository_changes <- Some snapshot;
+             state.repository_changes_error <- None
+         | Error detail -> state.repository_changes_error <- Some detail)
   | Keeper_chat_file_changes_loaded (generation, keeper_name, result) ->
       let still_current =
         generation = state.msg_file_changes_generation
@@ -11805,7 +11851,15 @@ and is loaded on demand through keeper_skill.
                      launch_fusion_detail_load state ~mailbox:async_messages
                        ~run_id)
             | Repositories ->
-                launch_repositories_load state ~mailbox:async_messages
+                if state.repository_changes_open then
+                  (match state.repository_changes_repo_id with
+                   | Some repository_id ->
+                       state.repository_changes <- None;
+                       state.repository_changes_error <- None;
+                       launch_repository_changes_load state
+                         ~mailbox:async_messages ~repository_id
+                   | None -> ())
+                else launch_repositories_load state ~mailbox:async_messages
             | Changes -> (
                 match state.changes_keeper with
                 | Some keeper_name ->
@@ -12022,7 +12076,17 @@ and is loaded on demand through keeper_skill.
                   (* Changes opens from the roster, so Esc goes back to the
                      roster rather than to Overview. *)
                   state.view <- Keepers Keeper_list
-            | Repositories | Connectors | Runtime
+            | Repositories ->
+                if state.repository_changes_open then begin
+                  state.repository_changes_open <- false;
+                  state.repository_changes_repo_id <- None;
+                  state.repository_changes <- None;
+                  state.repository_changes_error <- None;
+                  state.repository_changes_cursor <- 0;
+                  state.repository_changes_scroll <- 0
+                end
+                else state.view <- Overview
+            | Connectors | Runtime
             | Config | Tools
             | System_logs -> state.view <- Overview)
        | Some "left" ->
@@ -12098,6 +12162,13 @@ and is loaded on demand through keeper_skill.
                 state.harness_detail <- None;
                 state.harness_detail_scroll <- 0
             | Resources -> state.resource_focus <- Left_pane
+            | Repositories when state.repository_changes_open ->
+                state.repository_changes_open <- false;
+                state.repository_changes_repo_id <- None;
+                state.repository_changes <- None;
+                state.repository_changes_error <- None;
+                state.repository_changes_cursor <- 0;
+                state.repository_changes_scroll <- 0
             | Changes ->
                 state.changes_diff_row <- None;
                 state.changes_diff_scroll <- 0;
@@ -12377,12 +12448,22 @@ and is loaded on demand through keeper_skill.
                    state.harness_cursor <- cursor;
                    state.harness_scroll <- scroll)
             | Repositories ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(1)
-                     ~cursor:state.repositories_cursor ~scroll:state.repositories_scroll
-                 in
-                 state.repositories_cursor <- cursor;
-                 state.repositories_scroll <- scroll)
+                if state.repository_changes_open then
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:1
+                      ~cursor:state.repository_changes_cursor
+                      ~scroll:state.repository_changes_scroll
+                  in
+                  state.repository_changes_cursor <- cursor;
+                  state.repository_changes_scroll <- scroll
+                else
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:1
+                      ~cursor:state.repositories_cursor
+                      ~scroll:state.repositories_scroll
+                  in
+                  state.repositories_cursor <- cursor;
+                  state.repositories_scroll <- scroll
             | Changes -> (
                 (* An open diff owns the scroll keys: the list is behind it and
                    moving both would put the cursor somewhere the operator
@@ -12673,12 +12754,22 @@ and is loaded on demand through keeper_skill.
                    state.harness_cursor <- cursor;
                    state.harness_scroll <- scroll)
             | Repositories ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(-1)
-                     ~cursor:state.repositories_cursor ~scroll:state.repositories_scroll
-                 in
-                 state.repositories_cursor <- cursor;
-                 state.repositories_scroll <- scroll)
+                if state.repository_changes_open then
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:(-1)
+                      ~cursor:state.repository_changes_cursor
+                      ~scroll:state.repository_changes_scroll
+                  in
+                  state.repository_changes_cursor <- cursor;
+                  state.repository_changes_scroll <- scroll
+                else
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:(-1)
+                      ~cursor:state.repositories_cursor
+                      ~scroll:state.repositories_scroll
+                  in
+                  state.repositories_cursor <- cursor;
+                  state.repositories_scroll <- scroll
             | Changes -> (
                 match state.changes_diff_row with
                 | Some _ ->
@@ -12963,6 +13054,31 @@ and is loaded on demand through keeper_skill.
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
                         state.changes_tree_diff_path <- None))
+            | Repositories when state.repository_changes_open -> (
+                match state.repository_changes, state.repository_changes_repo_id with
+                | Some snapshot, Some repository_id ->
+                    (match
+                       List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                         state.repository_changes_cursor
+                     with
+                     | None -> ()
+                     | Some change ->
+                         state.code_scope <- Code_scope_repo repository_id;
+                         let parent = Filename.dirname change.rc_path in
+                         state.code_dir <-
+                           (if String.equal parent "." then "" else parent);
+                         state.code_cursor <- 0;
+                         state.code_entries <- [];
+                         state.code_entries_error <- None;
+                         state.code_file <- None;
+                         state.code_file_error <- None;
+                         state.code_focus_file <- Left_pane;
+                         state.view <- Code;
+                         launch_code_entries_load state
+                           ~mailbox:async_messages;
+                         launch_code_file_load state ~mailbox:async_messages
+                           ~path:change.rc_path)
+                | _ -> ())
             | Repositories -> (
                 (* Enter opens the repository's own tree on the Code surface,
                    through the ?repo_id= axis its row already names. *)
@@ -13065,6 +13181,34 @@ and is loaded on demand through keeper_skill.
                 state.runtime_pick_cursor <- 0;
                 state.view <- Keepers Keeper_list
             | None -> state.view <- Keepers Keeper_list)
+       | Some "d" when state.view = Repositories ->
+           if state.repository_changes_open then
+             (match state.repository_changes_repo_id with
+              | Some repository_id ->
+                  state.repository_changes <- None;
+                  state.repository_changes_error <- None;
+                  launch_repository_changes_load state
+                    ~mailbox:async_messages ~repository_id
+              | None -> ())
+           else
+             (match state.repositories with
+              | None -> add_event state "error" "no repositories loaded yet"
+              | Some snapshot ->
+                  (match
+                     List.nth_opt snapshot.Masc.Tui_decode.rs_repositories
+                       state.repositories_cursor
+                   with
+                   | None -> add_event state "error" "no repository under the cursor"
+                   | Some repo ->
+                       let repository_id = repo.Masc.Tui_decode.rp_id in
+                       state.repository_changes_open <- true;
+                       state.repository_changes_repo_id <- Some repository_id;
+                       state.repository_changes <- None;
+                       state.repository_changes_error <- None;
+                       state.repository_changes_cursor <- 0;
+                       state.repository_changes_scroll <- 0;
+                       launch_repository_changes_load state
+                         ~mailbox:async_messages ~repository_id))
        | Some "G" when state.view = Acting ->
            (* Past the end on purpose; the frame clamps it to the last page.
               The held count rather than max_int, because an event arriving

@@ -313,6 +313,41 @@ let test_status_summary_uses_read_only_git_conventions () =
 	                "sets GIT_OPTIONAL_LOCKS env key" true
 	                (String_util.contains_substring joined "\"GIT_OPTIONAL_LOCKS\"")))
 
+let test_status_files_preserve_paths_and_axes () =
+  with_temp_dir (fun tmp ->
+      let source = Filename.concat tmp "source" in
+      init_local_repo source;
+      (match run_cmd ~cwd:source [ "git"; "checkout"; "-b"; "status-files" ] with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("git checkout status-files failed: " ^ e));
+      let tracked_name = "tracked name.txt" in
+      let tracked = Filename.concat source tracked_name in
+      write_file tracked "committed\n";
+      (match run_cmd ~cwd:source [ "git"; "add"; tracked_name ] with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("git add failed: " ^ e));
+      (match run_cmd ~cwd:source [ "git"; "commit"; "-m"; "tracked path" ] with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("git commit failed: " ^ e));
+      write_file tracked "modified\n";
+      write_file (Filename.concat source "새 파일.txt") "new\n";
+      let repo = sample_repo ~url:source source in
+      match Repo_git.status_files ~repository:repo () with
+      | Error e -> Alcotest.fail ("status files failed: " ^ e)
+      | Ok files ->
+          let find path = List.find_opt (fun row -> row.Repo_git.path = path) files in
+          (match find tracked_name with
+           | None -> Alcotest.fail "tracked path missing"
+           | Some row ->
+               Alcotest.(check bool) "tracked is unstaged" true row.unstaged;
+               Alcotest.(check bool) "tracked is not staged" false row.staged);
+          (match find "새 파일.txt" with
+           | None -> Alcotest.fail "untracked UTF-8 path missing"
+           | Some row ->
+               Alcotest.(check bool) "new path is untracked" true row.untracked;
+               Alcotest.(check bool) "new path is not conflicted" false
+                 row.conflicted))
+
 let test_origin_head_branch_preserves_slash_branch () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
@@ -376,6 +411,8 @@ let () =
 	            test_status_summary_counts_porcelain_rows;
 	          Alcotest.test_case "uses read-only git conventions" `Quick
 	            test_status_summary_uses_read_only_git_conventions;
+	          Alcotest.test_case "lists exact changed paths and axes" `Quick
+	            test_status_files_preserve_paths_and_axes;
 	        ] );
 	      ( "origin_head_branch",
 	        [

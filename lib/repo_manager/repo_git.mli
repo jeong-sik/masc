@@ -32,6 +32,15 @@ type status_summary = {
 }
 (** Summary parsed from Git's porcelain-v1 status contract. *)
 
+type status_file = {
+  path : string;
+  staged : bool;
+  unstaged : bool;
+  untracked : bool;
+  conflicted : bool;
+}
+(** One changed path from Git's NUL-delimited porcelain-v1 contract. *)
+
 val clone : repository:repository -> (unit, string) result
 (** [clone ~repository] clones [repository.url] into [repository.local_path]. *)
 
@@ -127,3 +136,10 @@ val status_summary :
     [git --no-optional-locks status --porcelain=v1] with
     [GIT_OPTIONAL_LOCKS=0]. It returns [Error _] instead of inventing a clean
     result when Git cannot inspect the repository. *)
+
+val status_files :
+  ?timeout_sec:float -> repository:repository -> unit -> (status_file list, string) result
+(** [status_files ~repository] returns every staged, unstaged, untracked, or
+    conflicted path. It uses porcelain-v1's NUL-delimited form, so spaces,
+    newlines, non-ASCII bytes, and Git's display quoting never change a path's
+    identity. Rename detection is disabled so every row has exactly one path. *)

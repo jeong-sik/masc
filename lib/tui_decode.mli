@@ -544,6 +544,20 @@ type repository_snapshot = {
   rs_total : int;
 }
 
+type repository_change = {
+  rc_path : string;
+  rc_staged : bool;
+  rc_unstaged : bool;
+  rc_untracked : bool;
+  rc_conflicted : bool;
+}
+
+type repository_change_snapshot = {
+  rcs_repository_id : string;
+  rcs_changes : repository_change list;
+  rcs_total : int;
+}
+
 (** One verdict the harness recorded: which gate ran on which task, what it
     decided, and which evaluator decided it. *)
 type harness_verdict = {
@@ -1381,6 +1395,9 @@ val join_runtime_surface :
 
 val decode_repository_snapshot :
   Yojson.Safe.t -> (repository_snapshot, string) result
+
+val decode_repository_change_snapshot :
+  Yojson.Safe.t -> (repository_change_snapshot, string) result
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result

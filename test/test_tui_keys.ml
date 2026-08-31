@@ -106,9 +106,9 @@ let test_tools_footer_carries_the_keeper_axis () =
     "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [/]:Keeper  e:edit Skill  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
-let test_repositories_footer_offers_the_code_tree () =
-  check str "repositories names the Enter jump"
-    "j/k:scroll  Enter:browse  a:add  Esc:overview  r:refresh  Tab:next  q:quit"
+let test_repositories_footer_offers_code_and_git_changes () =
+  check str "repositories names the Code and Git changes paths"
+    "j/k:scroll  Enter:browse  d:Git changes  a:add  Left / Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Repositories)
 
 let test_verification_footer_carries_the_verdict_keys () =
@@ -593,8 +593,8 @@ let () =
             test_lanes_scroll_reserves_standalone_matrix_rows
         ; Alcotest.test_case "Harness links to Overview task" `Quick
             test_harness_footer_links_to_overview_task
-        ; Alcotest.test_case "Repositories offers the Code tree" `Quick
-            test_repositories_footer_offers_the_code_tree
+        ; Alcotest.test_case "Repositories offers Code and Git changes" `Quick
+            test_repositories_footer_offers_code_and_git_changes
         ; Alcotest.test_case "Verification carries the verdict keys" `Quick
             test_verification_footer_carries_the_verdict_keys
         ; Alcotest.test_case "Fusion pins the shared list projection" `Quick

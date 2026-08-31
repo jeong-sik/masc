@@ -327,6 +327,35 @@ let handle_list_branches state id req reqd =
           in
           Http.Response.json_value ~request:req json reqd)
 
+let repository_change_json (change : Repo_git.status_file) =
+  `Assoc
+    [ ("path", `String change.path)
+    ; ("staged", `Bool change.staged)
+    ; ("unstaged", `Bool change.unstaged)
+    ; ("untracked", `Bool change.untracked)
+    ; ("conflicted", `Bool change.conflicted)
+    ]
+
+let handle_list_repository_changes state id req reqd =
+  let base_path = base_path_of_state state in
+  match Repo_store.find ~base_path id with
+  | Error msg -> json_response ~status:`Not_found req reqd (json_error msg)
+  | Ok repo ->
+      let local_path = Repo_store.local_path ~base_path repo in
+      let repository = { repo with local_path } in
+      (match Repo_git.status_files ~repository () with
+       | Error msg ->
+           json_response ~status:`Internal_server_error req reqd
+             (json_error msg)
+       | Ok changes ->
+           Http.Response.json_value ~request:req
+             (`Assoc
+                [ ("repository_id", `String id)
+                ; ("changes", `List (List.map repository_change_json changes))
+                ; ("total", `Int (List.length changes))
+                ])
+             reqd)
+
 let handle_get_repository_path state req reqd =
   match extract_repo_id (Http.Request.path req) with
   | None | Some "" ->
@@ -336,6 +365,7 @@ let handle_get_repository_path state req reqd =
       match path_parts rest with
       | [id] -> handle_get_repository state id req reqd
       | [id; "branches"] -> handle_list_branches state id req reqd
+      | [id; "changes"] -> handle_list_repository_changes state id req reqd
       | _ ->
           json_response ~status:`Not_found req reqd
             (json_error "unknown repository endpoint"))

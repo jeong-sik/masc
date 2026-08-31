@@ -733,8 +733,13 @@ error instead of redrawing it as an empty result.
 `Stored as:`가 함께 표시되고, 담당 Keeper는 `Keepers:`에서 확인할 수 있다.
 
 Right 또는 `Enter`를 누르면 선택한 저장소 범위의 Code 화면으로 이동한다.
-저장소의 Git 변경 사항과 Keeper가 남긴 작업 기록은 서로 다른 정보이므로,
-현재 Changes 화면은 아래 설명처럼 선택한 Keeper의 기록을 계속 보여준다.
+`d`를 누르면 선택한 저장소의 현재 Git 변경 파일을 연다. 각 행은 staged,
+worktree, untracked, conflict 상태를 구분한다. 이 목록에서 `Enter`를 누르면
+해당 파일을 저장소 범위의 Code 화면에서 연다. Left 또는 `Esc`는 저장소
+목록으로 돌아간다.
+
+저장소의 Git 변경 사항과 Keeper가 남긴 작업 기록은 서로 다른 정보다.
+아래 Changes 화면은 선택한 Keeper가 지난 24시간 동안 남긴 기록을 보여준다.
 
 ### Changes
 
@@ -913,6 +918,7 @@ Per surface:
 | `a` twice | Verification | Approve the row under the cursor |
 | `x` | Verification | Reject it, with a reason through `$EDITOR` |
 | Right / `Enter` | Repositories | Browse the repository's tree on the Code surface |
+| `d` | Repositories | Show the repository's current Git working-tree changes |
 | Right / `Enter` | Code | Drill into a directory / open the file |
 | Left / `Esc` | Code | Close the overlay, then the file, then climb a directory |
 | `/`, `n` / `N` | Code | Jump the tree cursor to a match |

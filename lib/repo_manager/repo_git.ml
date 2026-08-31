@@ -102,6 +102,14 @@ type status_summary = {
   conflicted_files : int;
 }
 
+type status_file = {
+  path : string;
+  staged : bool;
+  unstaged : bool;
+  untracked : bool;
+  conflicted : bool;
+}
+
 let empty_status_summary =
   { changed_files = 0
   ; staged_files = 0
@@ -176,7 +184,7 @@ let status_summary_of_porcelain_lines lines =
     lines
 ;;
 
-let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
+let run_git_raw ~cwd ?(env = []) ?timeout_sec args : (string, string) result =
   let argv = "git" :: "-C" :: cwd :: args in
   let envp = merge_env env in
   let status, stdout, stderr =
@@ -184,9 +192,12 @@ let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
       ~env:envp ?timeout_sec argv
   in
   match status with
-  | Unix.WEXITED 0 -> Ok (split_lines stdout)
+  | Unix.WEXITED 0 -> Ok stdout
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
     Error (git_failure_detail args status stdout stderr)
+
+let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
+  Result.map split_lines (run_git_raw ~cwd ~env ?timeout_sec args)
 
 let clone ~repository =
   let env = non_interactive_git_env in
@@ -406,3 +417,69 @@ let status_summary ?(timeout_sec = inspection_timeout_sec) ~repository () =
   with
   | Stdlib.Error msg -> Stdlib.Error msg
   | Stdlib.Ok lines -> status_summary_of_porcelain_lines lines
+
+let status_file_of_porcelain_record record =
+  if String.length record < 4 || not (Char.equal record.[2] ' ')
+  then Stdlib.Error "git status --porcelain=v1 -z returned a malformed status row"
+  else
+    let x = record.[0] in
+    let y = record.[1] in
+    let path = String.sub record 3 (String.length record - 3) in
+    if not (is_porcelain_status_char x && is_porcelain_status_char y)
+    then
+      Stdlib.Error
+        (Printf.sprintf
+           "git status --porcelain=v1 -z returned unknown status row %S"
+           record)
+    else if String.equal path ""
+    then Stdlib.Error "git status --porcelain=v1 -z returned a status row without a path"
+    else
+      let untracked = Char.equal x '?' && Char.equal y '?' in
+      let ignored = Char.equal x '!' && Char.equal y '!' in
+      let conflicted = is_unmerged_status x y in
+      if ignored
+      then Stdlib.Ok None
+      else if
+        ((Char.equal x '?' || Char.equal y '?') && not untracked)
+        || ((Char.equal x '!' || Char.equal y '!') && not ignored)
+        || ((Char.equal x 'U' || Char.equal y 'U') && not conflicted)
+      then
+        Stdlib.Error
+          (Printf.sprintf
+             "git status --porcelain=v1 -z returned unknown status row %S"
+             record)
+      else
+        Stdlib.Ok
+          (Some
+             { path
+             ; staged = not conflicted && not untracked && not (Char.equal x ' ')
+             ; unstaged = not conflicted && not untracked && not (Char.equal y ' ')
+             ; untracked
+             ; conflicted
+             })
+
+let status_files_of_porcelain_z output =
+  let records = String.split_on_char '\000' output in
+  let records =
+    match List.rev records with
+    | "" :: rest -> List.rev rest
+    | _ -> records
+  in
+  let ( let* ) = Result.bind in
+  List.fold_left
+    (fun result record ->
+      let* files = result in
+      let* file = status_file_of_porcelain_record record in
+      Stdlib.Ok (Option.fold ~none:files ~some:(fun row -> row :: files) file))
+    (Stdlib.Ok []) records
+  |> Result.map List.rev
+
+let status_files ?(timeout_sec = inspection_timeout_sec) ~repository () =
+  match
+    run_git_raw ~cwd:repository.local_path ~env:read_only_git_env ~timeout_sec
+      [ "--no-optional-locks"; "status"; "--porcelain=v1"; "-z"
+      ; "--no-renames"; "--untracked-files=normal"
+      ]
+  with
+  | Stdlib.Error msg -> Stdlib.Error msg
+  | Stdlib.Ok output -> status_files_of_porcelain_z output

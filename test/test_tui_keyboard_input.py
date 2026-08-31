@@ -5806,7 +5806,7 @@ def repositories_path_interaction(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    """Show the resolved path at two widths, then enter the repository."""
+    """Show paths, inspect Git changes, then enter the repository."""
     tab_until(process, master_fd, output, b"MASC Repositories")
     narrow = resize_and_wait(
         process,
@@ -5835,6 +5835,44 @@ def repositories_path_interaction(
                 raise AssertionError(
                     f"{width}-column Repositories omitted {needle!r}: {plain!r}"
                 )
+    changes_wide = send_and_wait(
+        process, master_fd, output, b"d", b"lib/changed file.ml"
+    )
+    changes_narrow = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=18,
+        columns=80,
+        needle=b"lib/changed file.ml",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    for width, frame in ((80, changes_narrow), (140, changes_wide)):
+        changes_plain = CSI_RE.sub(b"", frame).decode("utf-8")
+        for needle in (
+            "MASC Repository Changes",
+            "staged+worktree",
+            "lib/changed file.ml",
+            "untracked",
+            "새 파일.txt",
+        ):
+            if needle not in changes_plain:
+                raise AssertionError(
+                    f"{width}-column Repository Git changes omitted "
+                    f"{needle!r}: {changes_plain!r}"
+                )
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=140,
+        needle=b"lib/changed file.ml",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Repositories")
     code = send_and_wait(process, master_fd, output, b"\r", b"src")
     code_plain = CSI_RE.sub(b"", code).decode("utf-8")
     if "masc ▸ /" not in code_plain:
@@ -9099,6 +9137,19 @@ def run_planning_review_regression(executable: str) -> None:
 def run_repositories_regression(executable: str) -> None:
     fixtures = keeper_runtime_http_fixtures()
     fixtures[REPOSITORIES_PATH] = repositories_fixture()
+    fixtures["/api/v1/repositories/masc/changes"] = (
+        200,
+        {
+            "repository_id": "masc",
+            "changes": [
+                {"path": "lib/changed file.ml", "staged": True,
+                 "unstaged": True, "untracked": False, "conflicted": False},
+                {"path": "새 파일.txt", "staged": False,
+                 "unstaged": False, "untracked": True, "conflicted": False},
+            ],
+            "total": 2,
+        },
+    )
     fixtures["/api/v1/workspace/children?path=&limit=2000&repo_id=masc"] = (
         200,
         [
@@ -9109,7 +9160,7 @@ def run_repositories_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="Repositories show resolved path and enter the Code tree",
+        description="Repositories show paths, Git changes, and the Code tree",
         interact=repositories_path_interaction,
         http_fixtures=fixtures,
     )

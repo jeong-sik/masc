@@ -452,6 +452,13 @@ type runtime_mode =
   | Runtime_lanes
   | Runtime_all
 
+(** Stable identity of the Runtime row opened for detail. The cursor is only a
+    position and can move to another runtime after refresh; detail stays bound
+    to the exact lane/runtime pair the operator opened. *)
+type runtime_detail_target =
+  | Runtime_lane_candidate of { lane_id : string; runtime_id : string }
+  | Runtime_catalog_entry of { runtime_id : string }
+
 (** Planning surface sub-mode *)
 type planning_mode =
   | Planning_list
@@ -1873,6 +1880,8 @@ type state = {
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
   mutable runtime_surface_error: string option;
   mutable runtime_surface_scroll: int;
+  mutable runtime_detail_target: runtime_detail_target option;
+  mutable runtime_detail_scroll: int;
   (* The lane a fallback is being added to, and where the picker sits in the
      runtime catalogue. Both are cleared when the picker closes: a cursor kept
      across visits opens the list part-way down for no reason the reader gave. *)
@@ -2505,6 +2514,8 @@ let create_state
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;
+  runtime_detail_target = None;
+  runtime_detail_scroll = 0;
   runtime_lane_pick = None;
   runtime_lane_pick_cursor = 0;
   runtime_lane_error = None;
@@ -2764,6 +2775,7 @@ type clamped_scroll =
   | Verification_detail_scroll of int
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
+  | Runtime_detail_scroll of int
   | Planning_detail_scroll of int
   | Lane_run_detail_scroll of int
   (* An open diff's rows are built by the drawing, out of the recorded before
@@ -2792,6 +2804,7 @@ let apply_clamped_scroll (state : state) = function
       state.verification_detail_scroll <- value
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
+  | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Lane_run_detail_scroll value -> state.lane_run_detail_scroll <- value
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
@@ -3111,7 +3124,8 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
          | None -> 0
          | Some s -> List.length s.Tui_decode.cs_connectors)
   | Runtime ->
-      Some
+      if Option.is_some state.runtime_detail_target then None
+      else Some
         { sc_count =
             (* The two views draw different lists, and the scroll bound is the
                list being drawn. Reading candidates in both stopped the roster

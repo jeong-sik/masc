@@ -10927,7 +10927,8 @@ and is loaded on demand through keeper_skill.
             | _ -> ())
        | Some "e" | Some "E"
          when state.view = Runtime
-              && state.runtime_mode = Masc_tui_types.Runtime_lanes ->
+              && state.runtime_mode = Masc_tui_types.Runtime_lanes
+              && Option.is_none state.runtime_detail_target ->
            (* Add a failover candidate to the lane under the cursor. The
               catalogue is fetched on open so the list is the server's now. *)
            (* The lane under the row cursor. Rows are lane-by-candidate, so
@@ -11827,6 +11828,9 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_runtime ->
                 set_runtime_config_cursor_near state ~direction
                   ~target:(state.runtime_config_cursor + (direction * page))
+            | Runtime when Option.is_some state.runtime_detail_target ->
+                state.runtime_detail_scroll <-
+                  max 0 (state.runtime_detail_scroll + (direction * page))
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
@@ -12161,8 +12165,13 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- 0
                 end
                 else state.view <- Overview
-            | Memory | Connectors | Runtime
-            | Config | Tools
+            | Runtime ->
+                if Option.is_some state.runtime_detail_target then begin
+                  state.runtime_detail_target <- None;
+                  state.runtime_detail_scroll <- 0
+                end
+                else state.view <- Overview
+            | Memory | Connectors | Config | Tools
             | System_logs -> state.view <- Overview)
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
@@ -12267,9 +12276,12 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_scroll <- 0
                  | Lanes_lane_notice _ -> state.lanes_mode <- Lanes_overview
                  | Lanes_overview -> ())
+            | Runtime ->
+                state.runtime_detail_target <- None;
+                state.runtime_detail_scroll <- 0
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Approvals
-            | Memory | Repositories | Connectors | Runtime | Config | Tools
+            | Memory | Repositories | Connectors | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
@@ -12569,12 +12581,16 @@ and is loaded on demand through keeper_skill.
                  state.connectors_cursor <- cursor;
                  state.connectors_scroll <- scroll)
             | Runtime ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(1)
-                     ~cursor:state.runtime_cursor ~scroll:state.runtime_surface_scroll
-                 in
-                 state.runtime_cursor <- cursor;
-                 state.runtime_surface_scroll <- scroll)
+                if Option.is_some state.runtime_detail_target then
+                  state.runtime_detail_scroll <- state.runtime_detail_scroll + 1
+                else
+                  (let cursor, scroll =
+                     move_row_cursor state ~delta:1
+                       ~cursor:state.runtime_cursor
+                       ~scroll:state.runtime_surface_scroll
+                   in
+                   state.runtime_cursor <- cursor;
+                   state.runtime_surface_scroll <- scroll)
             | Tools -> state.tools_scroll <-
                   move_surface_scroll state ~rows:(surface_rows state) ~delta:(1)
                     ~current:state.tools_scroll
@@ -12884,12 +12900,17 @@ and is loaded on demand through keeper_skill.
                  state.connectors_cursor <- cursor;
                  state.connectors_scroll <- scroll)
             | Runtime ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(-1)
-                     ~cursor:state.runtime_cursor ~scroll:state.runtime_surface_scroll
-                 in
-                 state.runtime_cursor <- cursor;
-                 state.runtime_surface_scroll <- scroll)
+                if Option.is_some state.runtime_detail_target then
+                  state.runtime_detail_scroll <-
+                    max 0 (state.runtime_detail_scroll - 1)
+                else
+                  (let cursor, scroll =
+                     move_row_cursor state ~delta:(-1)
+                       ~cursor:state.runtime_cursor
+                       ~scroll:state.runtime_surface_scroll
+                   in
+                   state.runtime_cursor <- cursor;
+                   state.runtime_surface_scroll <- scroll)
             | Tools ->
                 if state.tools_scroll > 0 then
                   state.tools_scroll <-
@@ -13203,10 +13224,38 @@ and is loaded on demand through keeper_skill.
                         state.view <- Code;
                         launch_code_entries_load state
                           ~mailbox:async_messages))
+            | Runtime ->
+                (match state.runtime_surface, state.runtime_mode with
+                 | Some snapshot, Runtime_lanes ->
+                     (match List.nth_opt snapshot.Masc.Tui_decode.rss_candidates
+                              state.runtime_cursor with
+                      | None -> ()
+                      | Some row ->
+                          state.runtime_detail_target <-
+                            Some
+                              (Runtime_lane_candidate
+                                 { lane_id = row.rcr_lane_id
+                                 ; runtime_id = row.rcr_runtime.ro_id
+                                 });
+                          state.runtime_detail_scroll <- 0)
+                 | Some snapshot, Runtime_all ->
+                     (match
+                        List.nth_opt
+                          snapshot.Masc.Tui_decode.rss_resolved.rrs_runtimes
+                          state.runtime_cursor
+                      with
+                      | None -> ()
+                      | Some runtime ->
+                          state.runtime_detail_target <-
+                            Some
+                              (Runtime_catalog_entry
+                                 { runtime_id = runtime.ro_id });
+                          state.runtime_detail_scroll <- 0)
+                 | None, _ -> ())
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting
-            | Connectors | Runtime | Config | Resources | Tools
+            | Connectors | Config | Resources | Tools
             | System_logs -> ())
        (* Changes reads one keeper's file writes and already binds to the
           roster cursor on entry, so it opens from the roster rather than
@@ -13612,7 +13661,9 @@ and is loaded on demand through keeper_skill.
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_librarian_input_read ()
-       | Some "p" | Some "P" when state.view = Runtime ->
+       | Some "p" | Some "P"
+         when state.view = Runtime
+              && Option.is_none state.runtime_detail_target ->
            (* The lane view answers what each lane calls and in what order.
               It cannot answer what this workspace could call: a runtime no
               lane names is absent from it, which is exactly the runtime an

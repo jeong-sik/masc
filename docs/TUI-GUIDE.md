@@ -891,6 +891,14 @@ probe read fails, resolved lanes still render: a last-good probe is retained,
 or cold candidates are `unobserved`. If the resolved identity read fails, the
 last joined rows stay visible under the error.
 
+`j`/`k` selects a row in both `Lanes` and `All runtimes`. Right or `Enter`
+opens an untruncated detail view bound to that exact runtime identity. It shows
+the complete runtime id, provider and model, every lane using it, candidate
+position, dispatch blocker/default state, last-success timestamp, and the
+probe's status, transport, timestamp, latency, HTTP result, and error when
+those observations exist. `PgUp`/`PgDn` pages the detail; Left or `Esc` returns
+to the same list row.
+
 ### Config
 
 Config is five views over the runtime's settings. Press `p` to move through

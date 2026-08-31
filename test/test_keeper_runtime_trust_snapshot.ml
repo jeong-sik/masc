@@ -628,6 +628,9 @@ let test_operator_disposition_display_uses_typed_parser () =
   check_case ~operator_disposition:"fail_open_next_runtime"
     ~operator_disposition_reason:"manual_review" ~expected_disposition:"Pass"
     ~expected_reason:"manual_review";
+  check_case ~operator_disposition:"retry_later"
+    ~operator_disposition_reason:"transient_runtime_retry"
+    ~expected_disposition:"Pass" ~expected_reason:"transient_runtime_retry";
   check_case ~operator_disposition:"operator_action_required"
     ~operator_disposition_reason:"preflight_config_error"
     ~expected_disposition:"Blocked" ~expected_reason:"preflight_config_error";

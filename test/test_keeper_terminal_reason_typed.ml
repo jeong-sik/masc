@@ -225,7 +225,7 @@ let frozen_operator_disposition (receipt : R.t)
   else if
     provider_runtime_failure
     && frozen_is_transient_provider_runtime_failure terminal_reason
-  then R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry
+  then R.Disp_retry_later, R.Reason_transient_runtime_retry
   else if provider_runtime_failure
   then R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error
   else if
@@ -549,6 +549,7 @@ let disp_pair_to_string (d, r) =
 let operator_disposition_kinds =
   [ R.Disp_pass
   ; R.Disp_fail_open_next_runtime
+  ; R.Disp_retry_later
   ; R.Disp_pass_next_model
   ; R.Disp_operator_action_required
   ; R.Disp_user_cancelled
@@ -733,13 +734,17 @@ let () =
     }
   in
   let got = R.operator_disposition receipt in
-  let want = R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry in
+  let want = R.Disp_retry_later, R.Reason_transient_runtime_retry in
   check
     (Printf.sprintf
        "provider timeout marker disposition want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want)
+  ;
+  check
+    "terminal transient retry-later does not page the operator"
+    (not (R.needs_operator_broadcast (fst got)))
 ;;
 
 let () =

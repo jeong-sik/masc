@@ -35,8 +35,9 @@ let typed_input_command_text
       ({ source; _ } : Keeper_tool_execute_typed_input.execute_input)
   =
   match source with
-  (* The script is already the command line this wants to render. *)
-  | Keeper_tool_execute_typed_input.Script script -> script
+  (* The script is already the command line this wants to render. The shell
+     that runs it is not part of the line the caller wrote. *)
+  | Keeper_tool_execute_typed_input.Script { text; shell = _ } -> text
   | Keeper_tool_execute_typed_input.Staged { program = { head; tail }; _ } ->
     head :: tail
     |> List.map (fun (stage : Keeper_tool_execute_typed_input.exec_stage) ->

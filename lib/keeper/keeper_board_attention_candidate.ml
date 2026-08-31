@@ -999,16 +999,46 @@ let judgment_source_of_yojson ~context json =
 let judgment_of_yojson json =
   let context = "candidate.status.judgment" in
   let* fields = assoc ~context json in
-  let* () =
-    exact_fields ~context [ "verdict"; "slot_id"; "source"; "judged_at" ] fields
-  in
   let* verdict_json = field ~context "verdict" fields in
   let* verdict = Keeper_board_attention_judgment.of_yojson verdict_json in
   let* slot_id_json = field ~context "slot_id" fields in
   let* slot_id = string_json ~context:(context ^ ".slot_id") slot_id_json in
-  let* source_json = field ~context "source" fields in
   let* source =
-    judgment_source_of_yojson ~context:(context ^ ".source") source_json
+    match List.assoc_opt "source" fields with
+    | Some source_json ->
+      let* () =
+        exact_fields ~context [ "verdict"; "slot_id"; "source"; "judged_at" ] fields
+      in
+      judgment_source_of_yojson ~context:(context ^ ".source") source_json
+    | None ->
+      (* schema v5 stored exact-attempt provenance directly on the judgment.
+         #32025 moved it under [source] but the live ledgers are append-only,
+         so rejecting the old rows kills every Board attention worker before
+         it can reach a new candidate. Decode that one closed legacy shape as
+         the equivalent typed source; the writer remains new-shape only. *)
+      let* () =
+        exact_fields
+          ~context
+          [ "verdict"
+          ; "slot_id"
+          ; "call_id"
+          ; "plan_fingerprint"
+          ; "request_body_sha256"
+          ; "judged_at"
+          ]
+          fields
+      in
+      let* call_id_json = field ~context "call_id" fields in
+      let* call_id = string_json ~context:(context ^ ".call_id") call_id_json in
+      let* plan_json = field ~context "plan_fingerprint" fields in
+      let* plan_fingerprint =
+        string_json ~context:(context ^ ".plan_fingerprint") plan_json
+      in
+      let* request_json = field ~context "request_body_sha256" fields in
+      let* request_body_sha256 =
+        string_json ~context:(context ^ ".request_body_sha256") request_json
+      in
+      Ok (Exact_attempt { call_id; plan_fingerprint; request_body_sha256 })
   in
   let* judged_at_json = field ~context "judged_at" fields in
   let* judged_at = float_json ~context:(context ^ ".judged_at") judged_at_json in

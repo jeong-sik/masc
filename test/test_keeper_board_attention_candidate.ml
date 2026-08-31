@@ -385,6 +385,79 @@ let test_codec_and_context_identity_are_strict () =
    | Ok _ -> Alcotest.fail "duplicate keeper_context authority was accepted")
 ;;
 
+let legacy_exact_attempt_judgment = function
+  | `Assoc fields ->
+    let required name =
+      match List.assoc_opt name fields with
+      | Some value -> value
+      | None -> Alcotest.fail ("new judgment is missing " ^ name)
+    in
+    let source_fields =
+      match required "source" with
+      | `Assoc source_fields -> source_fields
+      | _ -> Alcotest.fail "new judgment source is not an object"
+    in
+    let source_required name =
+      match List.assoc_opt name source_fields with
+      | Some value -> value
+      | None -> Alcotest.fail ("exact-attempt source is missing " ^ name)
+    in
+    `Assoc
+      [ "verdict", required "verdict"
+      ; "slot_id", required "slot_id"
+      ; "call_id", source_required "call_id"
+      ; "plan_fingerprint", source_required "plan_fingerprint"
+      ; "request_body_sha256", source_required "request_body_sha256"
+      ; "judged_at", required "judged_at"
+      ]
+  | _ -> Alcotest.fail "new judgment is not an object"
+;;
+
+let test_legacy_exact_attempt_judgment_decodes_without_rewriting_the_writer () =
+  let rewrite_field key rewrite = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if String.equal field key
+              then field, rewrite value
+              else field, value)
+           fields)
+    | _ -> Alcotest.fail ("expected object while rewriting field " ^ key)
+  in
+  let original =
+    { (candidate (signal "post-legacy-judgment")) with
+      status =
+        A.Judged
+          { judgment = judgment J.Relevant
+          ; last_delivery_failure = None
+          }
+    }
+  in
+  let legacy =
+    A.candidate_to_json original
+    |> rewrite_field "status" (fun status ->
+      rewrite_field "judgment" legacy_exact_attempt_judgment status)
+  in
+  Alcotest.(check bool)
+    "legacy durable judgment"
+    true
+    (ok "decode legacy judgment" (A.candidate_of_json legacy) = original);
+  match A.candidate_to_json original with
+  | `Assoc fields ->
+    (match List.assoc_opt "status" fields with
+     | Some (`Assoc status_fields) ->
+       (match List.assoc_opt "judgment" status_fields with
+        | Some (`Assoc judgment_fields) ->
+          Alcotest.(check bool)
+            "writer emits source"
+            true
+            (List.mem_assoc "source" judgment_fields)
+        | _ -> Alcotest.fail "written status has no judgment object")
+     | _ -> Alcotest.fail "written candidate has no status object")
+  | _ -> Alcotest.fail "written candidate is not an object"
+;;
+
 let rewrite_assoc_field key rewrite = function
   | `Assoc fields ->
     `Assoc
@@ -1091,6 +1164,10 @@ let () =
             "vote signal codec round trips without widening other rows"
             `Quick
             test_vote_signal_codec_round_trips_without_widening_other_rows
+        ; Alcotest.test_case
+            "legacy exact-attempt judgment remains readable"
+            `Quick
+            test_legacy_exact_attempt_judgment_decodes_without_rewriting_the_writer
         ; Alcotest.test_case
             "status view preserves resumability and quarantine"
             `Quick

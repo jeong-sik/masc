@@ -881,7 +881,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          (match
             Keeper_sandbox_runtime.maybe_cleanup_stale_containers
               ~command_available:Executable_path.command_available
-              ~base_path:(Mcp_server.workspace_config state).base_path
               ~timeout_sec:
                 (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
               ()

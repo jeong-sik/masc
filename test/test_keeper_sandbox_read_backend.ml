@@ -1339,7 +1339,6 @@ let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   let result =
     Keeper_sandbox_runtime.cleanup_stale_containers
       ~now:1000.0
-      ~base_path:base
       ~timeout_sec:5.0 ()
   in
   Alcotest.(check int) "scanned labeled containers" 2 result.scanned;
@@ -1352,6 +1351,36 @@ let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   Alcotest.(check bool) "keeps fresh container" false
     (String_util.contains_substring log "rm -f -v fresh-container")
 
+(* The sweep has to reach a container this base path did not create. Every
+   stopped keeper sandbox on the host on 2026-08-31 -- 18 of them, oldest from
+   2026-06-11 -- carried a base-path hash that no live process had: a
+   benchmark or a test spawns masc under a scratch root, and once that run
+   ends no later sweep ever hashes to it again.
+
+   Pinned on the query rather than on what got removed. The outcome test
+   above passes just as happily with the reach narrowed back to one base
+   path, because its fixture only ever offers containers from one. *)
+let test_cleanup_stale_containers_reaches_every_base_path () =
+  with_fake_docker fake_docker_cleanup_script @@ fun () ->
+  let base = temp_dir () in
+  let log_path = fake_docker_log_path () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "KEEPER_TEST_PID" (string_of_int (Unix.getpid ())) @@ fun () ->
+  let (_ : Keeper_sandbox_runtime.cleanup_result) =
+    Keeper_sandbox_runtime.cleanup_stale_containers ~now:1000.0 ~timeout_sec:5.0 ()
+  in
+  match
+    read_file log_path
+    |> String.split_on_char '\n'
+    |> List.find_opt (fun line -> String.starts_with ~prefix:"ps " line)
+  with
+  | None -> Alcotest.fail "the sweep never listed containers"
+  | Some line ->
+    Alcotest.(check bool) "keeps the masc ownership boundary" true
+      (String_util.contains_substring line "masc.mcp.component=keeper-sandbox");
+    Alcotest.(check bool) "does not scope the sweep to one base path" false
+      (String_util.contains_substring line "base_path_hash")
+
 let test_cleanup_stale_containers_accepts_concurrent_disappearance () =
   with_fake_docker fake_docker_cleanup_disappeared_script @@ fun () ->
   let base = temp_dir () in
@@ -1360,7 +1389,6 @@ let test_cleanup_stale_containers_accepts_concurrent_disappearance () =
   let result =
     Keeper_sandbox_runtime.cleanup_stale_containers
       ~now:1000.0
-      ~base_path:base
       ~timeout_sec:5.0 ()
   in
   Alcotest.(check int) "scanned snapshot containers" 2 result.scanned;
@@ -1384,7 +1412,6 @@ let test_cleanup_stale_containers_preserves_present_failure () =
   let result =
     Keeper_sandbox_runtime.cleanup_stale_containers
       ~now:1000.0
-      ~base_path:base
       ~timeout_sec:5.0 ()
   in
   Alcotest.(check int) "scanned present container" 1 result.scanned;
@@ -1412,7 +1439,6 @@ let test_maybe_cleanup_disappearance_allows_next_interval () =
   let first =
     Keeper_sandbox_runtime.maybe_cleanup_stale_containers
       ~now:1000.0
-      ~base_path:base
       ~timeout_sec:5.0 ()
   in
   (match first with
@@ -1425,7 +1451,6 @@ let test_maybe_cleanup_disappearance_allows_next_interval () =
   let second =
     Keeper_sandbox_runtime.maybe_cleanup_stale_containers
       ~now:1011.0
-      ~base_path:base
       ~timeout_sec:5.0 ()
   in
   Alcotest.(check bool)
@@ -1452,7 +1477,6 @@ let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
      Eio.Fiber.fork ~sw (fun () ->
        let result =
          Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-           ~base_path:base
            ~timeout_sec:5.0
            ()
        in
@@ -1498,7 +1522,7 @@ let test_maybe_cleanup_stale_containers_retries_next_explicit_interval () =
   Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
   let first =
     Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-      ~now:1000.0 ~base_path:base ~timeout_sec:5.0 ()
+      ~now:1000.0 ~timeout_sec:5.0 ()
   in
   (match first with
    | Some (Keeper_sandbox_runtime.Cleanup_completed result) ->
@@ -1509,7 +1533,7 @@ let test_maybe_cleanup_stale_containers_retries_next_explicit_interval () =
    | None -> Alcotest.fail "expected first cleanup to run");
   let retried =
     Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-      ~now:1011.0 ~base_path:base ~timeout_sec:5.0 ()
+      ~now:1011.0 ~timeout_sec:5.0 ()
   in
   Alcotest.(check bool) "cleanup retries at the next configured interval" true
     (Option.is_some retried);
@@ -1541,7 +1565,6 @@ let test_maybe_cleanup_skips_unavailable_command_without_spawn () =
       ~command_available:(fun command ->
         observed_command := Some command;
         false)
-      ~base_path:base
       ~timeout_sec:5.0
       ()
   in
@@ -1560,7 +1583,6 @@ let test_maybe_cleanup_skips_unavailable_command_without_spawn () =
     Keeper_sandbox_runtime.maybe_cleanup_stale_containers
       ~now:1001.0
       ~command_available:(fun _ -> false)
-      ~base_path:base
       ~timeout_sec:5.0
       ()
   in
@@ -2499,6 +2521,8 @@ let run_tests ~clock () =
             test_sandbox_container_label_args_include_owner_scope;
           Alcotest.test_case "cleanup removes stale scoped containers" `Quick
             test_cleanup_stale_containers_removes_only_stale_masc_scope;
+          Alcotest.test_case "cleanup reaches every base path" `Quick
+            test_cleanup_stale_containers_reaches_every_base_path;
           Alcotest.test_case "cleanup accepts concurrent disappearance" `Quick
             test_cleanup_stale_containers_accepts_concurrent_disappearance;
           Alcotest.test_case "cleanup preserves failure for present container" `Quick

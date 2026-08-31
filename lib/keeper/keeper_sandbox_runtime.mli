@@ -349,10 +349,28 @@ val remove_persistent_containers
 
 val cleanup_stale_containers
   :  ?now:float
-  -> base_path:string
   -> timeout_sec:float
   -> unit
   -> cleanup_result
+(** Sweep every keeper sandbox on the host, whatever base path made it.
+
+    The ownership boundary is the [masc.mcp.component=keeper-sandbox] label,
+    and what a container's fate is remains {!cleanup_result}'s per-container
+    decision: nothing running is touched. Scoping the listing to the caller's
+    own base-path hash added no guard on top of that and cost the sweep every
+    container it did not create -- a benchmark or a test runs masc under a
+    scratch root, and once that process exits no later sweep hashes to it
+    again. Measured 2026-08-31: 18 stopped sandboxes across 16 base-path
+    hashes, none of them a live one, the oldest two and a half months old.
+
+    A stopped container is worth nothing to its own owner either.
+    [Keeper_turn_sandbox_runtime] answers [Docker_container_stopped] by
+    force-deleting the name and booting fresh, so no sweep can race an
+    adoption that would have happened.
+
+    Shutdown removal stays per keeper: see {!remove_persistent_containers},
+    which still selects by keeper and base path because it is removing one
+    keeper's containers on purpose rather than collecting what is dead. *)
 
 (** Interval-throttled wrapper used before launching keeper Docker
     containers. Concurrent fibers entering the same interval window are
@@ -366,7 +384,6 @@ val cleanup_stale_containers
 val maybe_cleanup_stale_containers
   :  ?now:float
   -> ?command_available:(string -> bool)
-  -> base_path:string
   -> timeout_sec:float
   -> unit
   -> cleanup_attempt option

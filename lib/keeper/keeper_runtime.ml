@@ -307,12 +307,12 @@ let ensure_keeper_meta_with_cause config name =
     let target_mention_targets =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
     (* Defense-in-depth (#11080 sibling): keeper sandbox_profile MUST be
-       declared. The previous behaviour silently fell through to
-       [default_sandbox_profile = Local] when TOML omitted the key,
-       which strips docker isolation from any operator who forgets to
-       set it. Reject at
-       reconcile time so the keeper visibly fails to boot rather than
-       running un-sandboxed.
+       declared. The behaviour before #32078 fell through to a default that
+       named host execution, so an operator who forgot the key got no
+       isolation and no error. There is no such default now, and no host arm
+       to fall through to; this rejects at reconcile time so the keeper
+       visibly fails to boot rather than booting on a profile nobody
+       chose.
 
        Every Keeper must declare a TOML sandbox profile. The
        [Keeper_types_profile.default_sandbox_profile] constant is left

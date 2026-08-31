@@ -83,10 +83,6 @@ val resolve_sandbox_profile :
     [Keeper_meta_contract.missing_required_sandbox_profile_error], which names
     the field and the allowed values.
 
-    A caller that wants the playground states [local] and keeps the
-    [MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1] hatch; under [Local] a fresh keeper's
-    writes stay inside [.masc/playground/<keeper_name>/].
-
     [requested] is the caller's raw string; an unparseable one is treated as absent,
     since the gate rejects those first. *)
 

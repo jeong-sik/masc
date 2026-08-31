@@ -29,11 +29,12 @@ val turn_profile_and_meta :
     meta with that snapshot overlaid.
 
     Durable keeper JSON carries no config fields, so [entry_meta] always holds
-    the decoder's placeholder [sandbox_profile = Local] and the keeper TOML is
-    the only source that can say [docker]. Loading the defaults without
-    applying them ran every heartbeat turn's [Execute] on the host against a
-    [docker] declaration (#30982); returning the pair keeps the two halves
-    from drifting apart again. *)
+    the decoder's placeholder [sandbox_profile] and the keeper TOML is the only
+    source that states one. Loading the defaults without applying them ran
+    every heartbeat turn's [Execute] against the placeholder rather than the
+    declaration (#30982) -- on the host, back when a host arm existed
+    (#32078). Returning the pair keeps the two halves from drifting apart
+    again. *)
 
 val build_runtime_execution
   :  meta:Keeper_meta_contract.keeper_meta

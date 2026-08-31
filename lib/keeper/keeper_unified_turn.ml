@@ -766,10 +766,11 @@ let run_keeper_cycle
                   omits the TOML-owned fields on purpose
                   ([Keeper_meta_contract.effective_meta_result]), so adopting
                   it whole handed the rest of the turn a meta whose
-                  sandbox_profile had reverted to the decoder's [Local] --
-                  a keeper whose TOML said docker then ran Execute on the
-                  host while the status API, which overlays separately, kept
-                  answering docker (#31178).
+                  sandbox_profile had reverted to the decoder's placeholder --
+                  a keeper whose TOML said docker then ran Execute somewhere
+                  else while the status API, which overlays separately, kept
+                  answering docker (#31178). The host arm that made it "on the
+                  host" is gone (#32078); the drift it describes is not.
 
                   [effective_meta_of_profile_defaults] exists for exactly this
                   second overlay: the turn loaded [entry_profile_defaults]

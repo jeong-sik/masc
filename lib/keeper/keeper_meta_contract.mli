@@ -258,8 +258,9 @@ val effective_meta_result :
     once must not re-read the profile between them, or two reads of the same
     turn can disagree; it loads once and applies with this.
 
-    Rejects a resolved [Local] profile unless the local-playground hatch
-    ([MASC_EXEC_ALLOW_LOCAL_PLAYGROUND]) is set. *)
+    Rejects a keeper with no profile source at all: the placeholder the
+    decoder fills in is not an answer, and since #32078 there is no host arm
+    for it to mean. *)
 val effective_meta_of_profile_defaults :
      Keeper_types_profile.keeper_profile_defaults
   -> keeper_meta

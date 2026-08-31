@@ -1029,6 +1029,15 @@
   %{workspace_root}/lib/keeper/keeper_turn.ml)
  (libraries alcotest ast_grep masc_test_deps))
 
+; masc#28983: what a finished process's status means for the answer, asked
+; without starting one. The dispatch-site half needs the source, hence ast_grep.
+
+(test
+ (name test_keeper_tool_execute_exit_report)
+ (modules test_keeper_tool_execute_exit_report)
+ (deps %{workspace_root}/lib/keeper/keeper_tool_execute_runtime.ml)
+ (libraries alcotest ast_grep masc_test_deps))
+
 (test
  (name test_tool_call_log_requeue_on_failure)
  (modules test_tool_call_log_requeue_on_failure)

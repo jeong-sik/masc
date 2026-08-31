@@ -27,6 +27,15 @@ val last_successful_export : unit -> float option
     or export failures since the last successful connection. *)
 val consecutive_failures : unit -> int
 
+(** Stop the currently installed export backend's send loop. The probe
+    supervisor remains: a reachable collector installs a fresh backend. *)
+val stop_current_export_backend : unit -> unit
+
+(** Persistently override the enabled resolution. [false] also retires the
+    exporter's probe supervisor on its next tick, so a runtime telemetry
+    disable fully stops OTel fibers. *)
+val set_runtime_enabled : bool -> unit
+
 (** Setup OTLP exporter with a custom setup thunk.
     No-op when [enabled=false]. Sets [is_exporter_active] accordingly. *)
 val setup_exporter_with :

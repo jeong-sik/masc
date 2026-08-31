@@ -9,6 +9,7 @@
   alcotest
   eio
   eio_main
+  eio.unix
   masc
   masc.otel_spans
   opentelemetry

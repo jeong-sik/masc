@@ -52,32 +52,41 @@ let test_outage_marks_inactive_then_restarts () =
   let port = 19000 + Unix.getpid () mod 1000 in
   let endpoint = Printf.sprintf "http://127.0.0.1:%d" port in
   let first = listen_probe_target ~sw env port in
-  Masc.Otel_spans.setup_exporter ~endpoint ~probe_interval:0.05 ~sw env;
+  Otel_spans.setup_exporter ~endpoint ~probe_interval:0.05 ~sw env;
   check bool "exporter active with collector up"
     true
-    (wait_until ~clock ~timeout:5.0 Masc.Otel_spans.is_exporter_active);
+    (wait_until ~clock ~timeout:5.0 Otel_spans.is_exporter_active);
   (* Collector dies: connections refused, three probes fail, exporter marks
      itself inactive. *)
   Eio.Flow.close first;
   check bool "exporter inactive after collector death"
     false
     (not (wait_until ~clock ~timeout:5.0
-            (fun () -> not (Masc.Otel_spans.is_exporter_active ()))));
-  (* Collector returns on the same port: the health probe restarts the
+            (fun () -> not (Otel_spans.is_exporter_active ()))));
+  (* Collector returns on the same port: the probe supervisor restarts the
      exporter instead of leaving [exporter_active] latched false. *)
-  ignore (listen_probe_target ~sw env port);
+  let second = listen_probe_target ~sw env port in
   check bool "exporter restarts when collector returns"
     true
-    (wait_until ~clock ~timeout:5.0 Masc.Otel_spans.is_exporter_active);
-  Opentelemetry_client_cohttp_eio.remove_backend ()
+    (wait_until ~clock ~timeout:5.0 Otel_spans.is_exporter_active);
+  (* Tear the fibers down so [Eio_main.run] can return: listeners closed
+     (their accept loops exit), backend stopped, supervisor retired by the
+     runtime disable. *)
+  Eio.Flow.close second;
+  Otel_spans.set_runtime_enabled false;
+  Otel_spans.stop_current_export_backend ();
+  Opentelemetry_client_cohttp_eio.remove_backend ();
+  Eio.Time.sleep clock 0.7
 ;;
 
 let () =
   run
     "otel_export_health_pause"
-    [ test_case
-        "collector outage deactivates the exporter and restart restores it"
-        `Quick
-        test_outage_marks_inactive_then_restarts
+    [ ( "health"
+      , [ test_case
+            "collector outage deactivates the exporter and restart restores it"
+            `Quick
+            test_outage_marks_inactive_then_restarts
+        ] )
     ]
 ;;

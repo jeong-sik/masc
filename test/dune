@@ -2449,6 +2449,7 @@
 (include stanzas/test_otel_trace_context.inc)
 
 (include stanzas/test_otel_otlp_export_e2e.inc)
+(include stanzas/test_otel_export_health_pause.inc)
 
 
 (include stanzas/test_shutdown_flag.inc)

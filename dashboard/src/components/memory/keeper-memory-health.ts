@@ -1,8 +1,9 @@
 // KeeperMemoryHealth — per-keeper current-memory snapshot observability.
 //
 // Read-only diagnostic surface for Lab > 키퍼 메모리 상태.
-// Shows the single current snapshot revision, exact latest delta, read failures,
-// and Librarian lane pressure. There is no legacy event/fact-store or GC view.
+// Shows ordinary and source-bound current snapshots, exact latest delta, read
+// failures, and Librarian lane pressure. There is no legacy event/fact-store or
+// GC view.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
@@ -16,6 +17,7 @@ import {
 import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 
 const SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'snapshot_read_error'
+const SOURCE_SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'source_snapshot_read_error'
 const LIBRARIAN_LANE_BUSY_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_lane_busy'
 const LIBRARIAN_FAILURES_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_failures'
 const LIBRARIAN_STARVATION_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_starvation'
@@ -47,9 +49,13 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const error = hasErrorAlert(alerts)
   const warn = alerts.length > 0
   const readErrorWarn = hasTargetAlert(alerts, SNAPSHOT_READ_ERROR_TARGET)
+  const sourceReadErrorWarn = hasTargetAlert(alerts, SOURCE_SNAPSHOT_READ_ERROR_TARGET)
   const laneBusyWarn = hasTargetAlert(alerts, LIBRARIAN_LANE_BUSY_TARGET)
   const starving = hasTargetAlert(alerts, LIBRARIAN_STARVATION_TARGET)
   const librarianFailing = starving || hasTargetAlert(alerts, LIBRARIAN_FAILURES_TARGET)
+  const visionReasons = entry.vision_ingest_error_reasons
+    .map(reason => `${reason.reason} ×${reason.count}`)
+    .join(', ')
 
   return html`
     <tr class=${error ? 'kmh-row--error' : warn ? 'kmh-row--warn' : ''}>
@@ -79,6 +85,22 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
             : starving
               ? html`<span class="kmh-badge kmh-badge--error">없음</span>`
               : html`<span class="kmh-badge kmh-badge--muted">없음</span>`}
+      </td>
+      <td>
+        ${sourceReadErrorWarn
+          ? html`<span class="kmh-badge kmh-badge--warn" title=${entry.source_read_error ?? ''}>오류</span>`
+          : entry.source_snapshot_present
+            ? html`<span class="kmh-badge kmh-badge--ok" title=${formatBytes(entry.source_snapshot_bytes)}>
+                r${entry.source_revision} · ${entry.source_facts} / 무효 ${entry.source_invalidations}
+              </span>`
+            : html`<span class="kmh-badge kmh-badge--muted">없음</span>`}
+      </td>
+      <td>
+        ${entry.vision_ingest_errors > 0
+          ? html`<span class="kmh-badge kmh-badge--warn" title=${visionReasons}>
+              ${entry.vision_ingest_errors}
+            </span>`
+          : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
       </td>
       <td>
         ${alerts.length > 0
@@ -153,6 +175,7 @@ export function KeeperMemoryHealth() {
   const totalAlerts = data.alert_summary.total_alerts
   const errorAlerts = data.alert_summary.error_alerts
   const readErrorWarn = data.alert_summary.snapshot_read_error_keepers > 0
+  const sourceReadErrorWarn = data.alert_summary.source_snapshot_read_error_keepers > 0
   const laneBusyWarn = data.alert_summary.librarian_lane_busy_keepers > 0
   const starvingKeepers = data.alert_summary.librarian_starving_keepers
   const librarianFailureClass = starvingKeepers > 0
@@ -187,10 +210,34 @@ export function KeeperMemoryHealth() {
             <span class="kmh-stat-label">최근 제거</span>
             <span class="kmh-stat-value">−${data.totals.removed}</span>
           </div>
+          <div class="kmh-stat" data-stat-key="source-facts">
+            <span class="kmh-stat-label">소스 사실</span>
+            <span class="kmh-stat-value">${data.totals.source_facts.toLocaleString()}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="source-invalidations">
+            <span class="kmh-stat-label">소스 무효화</span>
+            <span class="kmh-stat-value">${data.totals.source_invalidations.toLocaleString()}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="source-snapshot-bytes">
+            <span class="kmh-stat-label">소스 크기</span>
+            <span class="kmh-stat-value">${formatBytes(data.totals.source_snapshot_bytes)}</span>
+          </div>
           <div class="kmh-stat" data-stat-key="read-errors">
             <span class="kmh-stat-label">읽기 오류</span>
             <span class=${`kmh-stat-value${readErrorWarn ? ' kmh-stat-value--warn' : ''}`}>
               ${data.totals.read_errors}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="source-read-errors">
+            <span class="kmh-stat-label">소스 읽기 오류</span>
+            <span class=${`kmh-stat-value${sourceReadErrorWarn ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.totals.source_read_errors}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="vision-ingest-errors">
+            <span class="kmh-stat-label">Vision ingest 오류</span>
+            <span class=${`kmh-stat-value${data.totals.vision_ingest_errors > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.totals.vision_ingest_errors}
             </span>
           </div>
           <div class="kmh-stat" data-stat-key="librarian-lane-busy">
@@ -206,7 +253,7 @@ export function KeeperMemoryHealth() {
             </span>
           </div>
           <div class="kmh-stat" data-stat-key="starving-keepers">
-            <span class="kmh-stat-label">메모리 없는 키퍼</span>
+            <span class="kmh-stat-label">일반 기억 없는 키퍼</span>
             <span class=${`kmh-stat-value${starvingKeepers > 0 ? ' kmh-stat-value--error' : ''}`}>
               ${starvingKeepers}
             </span>
@@ -232,7 +279,7 @@ export function KeeperMemoryHealth() {
       </div>
 
       ${data.keepers.length === 0
-        ? html`<p class="kmh-empty">등록된 current-memory snapshot 없음.</p>`
+        ? html`<p class="kmh-empty">등록된 current-memory snapshot 또는 Keeper 없음.</p>`
         : html`
           <div class="kmh-table-wrap">
             <table class="kmh-table">
@@ -247,6 +294,8 @@ export function KeeperMemoryHealth() {
                   <th>lane busy</th>
                   <th>실패</th>
                   <th>snapshot</th>
+                  <th>source snapshot</th>
+                  <th>Vision 오류</th>
                   <th>경보</th>
                 </tr>
               </thead>

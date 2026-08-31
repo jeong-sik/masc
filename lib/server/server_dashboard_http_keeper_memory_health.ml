@@ -13,6 +13,21 @@ type keeper_health =
   ; vision_ingest_errors : int
   ; vision_ingest_error_reasons : (string * int) list
   ; read_error : string option
+  ; source_revision : int
+  ; source_facts : int
+  ; source_invalidations : int
+  ; source_snapshot_bytes : int
+  ; source_snapshot_present : bool
+  ; source_read_error : string option
+  }
+
+type source_health =
+  { revision : int
+  ; facts : int
+  ; invalidations : int
+  ; snapshot_bytes : int
+  ; snapshot_present : bool
+  ; read_error : string option
   }
 
 let librarian_lane_busy_metric =
@@ -71,6 +86,7 @@ let configured_keeper_ids ~keepers_dir =
 let health_keeper_ids ~keepers_dir =
   configured_keeper_ids ~keepers_dir
   @ Keeper_memory_os_current.list_keeper_ids_for_keepers_dir ~keepers_dir
+  @ Keeper_memory_source_current.list_keeper_ids_for_keepers_dir ~keepers_dir
   |> List.sort_uniq String.compare
 ;;
 
@@ -100,7 +116,40 @@ let vision_ingest_error_count_for_keeper keeper_id =
     (vision_errors_for_keeper keeper_id)
 ;;
 
+let source_health ~keepers_dir keeper_id =
+  let snapshot_path =
+    Keeper_memory_source_current.path_for_keepers_dir ~keepers_dir ~keeper_id
+  in
+  match
+    Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+  with
+  | Ok None ->
+    { revision = 0
+    ; facts = 0
+    ; invalidations = 0
+    ; snapshot_bytes = 0
+    ; snapshot_present = false
+    ; read_error = None
+    }
+  | Ok (Some snapshot) ->
+    { revision = snapshot.revision
+    ; facts = List.length snapshot.facts
+    ; invalidations = List.length snapshot.invalidations
+    ; snapshot_bytes = file_size_bytes snapshot_path
+    ; snapshot_present = true
+    ; read_error = None
+    }
+  | Error message ->
+    { revision = 0
+    ; facts = 0
+    ; invalidations = 0
+    ; snapshot_bytes = file_size_bytes snapshot_path
+    ; snapshot_present = false
+    ; read_error = Some message
+    }
+;;
 let keeper_health ~keepers_dir keeper_id =
+  let source_health = source_health ~keepers_dir keeper_id in
   let snapshot_path =
     Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id
   in
@@ -121,6 +170,12 @@ let keeper_health ~keepers_dir keeper_id =
         vision_ingest_error_count_for_keeper keeper_id
     ; vision_ingest_error_reasons = vision_errors_for_keeper keeper_id
     ; read_error = None
+    ; source_revision = source_health.revision
+    ; source_facts = source_health.facts
+    ; source_invalidations = source_health.invalidations
+    ; source_snapshot_bytes = source_health.snapshot_bytes
+    ; source_snapshot_present = source_health.snapshot_present
+    ; source_read_error = source_health.read_error
     }
   | Ok (Some snapshot) ->
     { keeper_id
@@ -136,6 +191,12 @@ let keeper_health ~keepers_dir keeper_id =
         vision_ingest_error_count_for_keeper keeper_id
     ; vision_ingest_error_reasons = vision_errors_for_keeper keeper_id
     ; read_error = None
+    ; source_revision = source_health.revision
+    ; source_facts = source_health.facts
+    ; source_invalidations = source_health.invalidations
+    ; source_snapshot_bytes = source_health.snapshot_bytes
+    ; source_snapshot_present = source_health.snapshot_present
+    ; source_read_error = source_health.read_error
     }
   | Error message ->
     { keeper_id
@@ -151,6 +212,12 @@ let keeper_health ~keepers_dir keeper_id =
         vision_ingest_error_count_for_keeper keeper_id
     ; vision_ingest_error_reasons = vision_errors_for_keeper keeper_id
     ; read_error = Some message
+    ; source_revision = source_health.revision
+    ; source_facts = source_health.facts
+    ; source_invalidations = source_health.invalidations
+    ; source_snapshot_bytes = source_health.snapshot_bytes
+    ; source_snapshot_present = source_health.snapshot_present
+    ; source_read_error = source_health.read_error
     }
 ;;
 
@@ -166,7 +233,7 @@ let alert_json ~code ~severity ~target ~label ~message ~value =
     ]
 ;;
 
-let alerts h =
+let alerts (h : keeper_health) =
   let read_error_alert =
     match h.read_error with
     | None -> []
@@ -176,6 +243,19 @@ let alerts h =
           ~severity:"warn"
           ~target:"snapshot_read_error"
           ~label:"읽기"
+          ~message
+          ~value:1.0
+      ]
+  in
+  let source_read_error_alert =
+    match h.source_read_error with
+    | None -> []
+    | Some message ->
+      [ alert_json
+          ~code:"source_snapshot_read_error"
+          ~severity:"warn"
+          ~target:"source_snapshot_read_error"
+          ~label:"소스 읽기"
           ~message
           ~value:1.0
       ]
@@ -215,7 +295,11 @@ let alerts h =
           ~target:"librarian_starvation"
           ~label:"Librarian"
           ~message:
-            "Librarian runs failed and no current-memory snapshot exists; the keeper is running memoryless and cannot leave that state on its own."
+            (if h.source_snapshot_present
+             then
+               "Librarian runs failed and no ordinary current-memory snapshot exists. A source-bound snapshot remains available, but it does not demonstrate or repair Librarian selection."
+             else
+               "Librarian runs failed and no ordinary or source-bound current-memory snapshot exists; the keeper is running memoryless and cannot leave that state on its own.")
           ~value:(float_of_int h.librarian_failures)
       ]
   in
@@ -240,7 +324,8 @@ let alerts h =
           ~value:(float_of_int h.vision_ingest_errors)
       ]
   in
-  read_error_alert @ lane_busy_alert @ failure_alert @ vision_ingest_alert
+  read_error_alert @ source_read_error_alert @ lane_busy_alert @ failure_alert
+  @ vision_ingest_alert
 ;;
 
 let alert_severity = function
@@ -251,7 +336,7 @@ let alert_severity = function
   | _ -> "warn"
 ;;
 
-let keeper_health_entry_to_json h =
+let keeper_health_entry_to_json (h : keeper_health) =
   `Assoc
     [ "keeper_id", `String h.keeper_id
     ; "revision", `Int h.revision
@@ -273,6 +358,15 @@ let keeper_health_entry_to_json h =
       , match h.read_error with
         | Some message -> `String message
         | None -> `Null )
+    ; "source_revision", `Int h.source_revision
+    ; "source_facts", `Int h.source_facts
+    ; "source_invalidations", `Int h.source_invalidations
+    ; "source_snapshot_bytes", `Int h.source_snapshot_bytes
+    ; "source_snapshot_present", `Bool h.source_snapshot_present
+    ; ( "source_read_error"
+      , match h.source_read_error with
+        | Some message -> `String message
+        | None -> `Null )
     ; "alerts", `List (alerts h)
     ]
 ;;
@@ -285,8 +379,10 @@ let keeper_memory_health_http_json ~base_path =
   let entries =
     health_keeper_ids ~keepers_dir
     |> List.map (keeper_health ~keepers_dir)
-    |> List.sort (fun left right ->
-      compare right.snapshot_bytes left.snapshot_bytes)
+    |> List.sort (fun (left : keeper_health) (right : keeper_health) ->
+      compare
+        (right.snapshot_bytes + right.source_snapshot_bytes)
+        (left.snapshot_bytes + left.source_snapshot_bytes))
   in
   let sum field =
     List.fold_left (fun total entry -> total + field entry) 0 entries
@@ -299,7 +395,7 @@ let keeper_memory_health_http_json ~base_path =
          all_alerts)
   in
   `Assoc
-    [ "schema", `String "keeper.memory_os.current_health.v1"
+    [ "schema", `String "keeper.memory_os.current_health.v2"
     ; "generated_at", `Float generated_at
     ; ( "cadence_counter_entries"
       , `Int (Keeper_librarian_runtime.cadence_counter_entries ()) )
@@ -310,6 +406,11 @@ let keeper_memory_health_http_json ~base_path =
           ; "snapshot_bytes", `Int (sum (fun entry -> entry.snapshot_bytes))
           ; "added", `Int (sum (fun entry -> entry.added))
           ; "removed", `Int (sum (fun entry -> entry.removed))
+          ; "source_facts", `Int (sum (fun entry -> entry.source_facts))
+          ; ( "source_invalidations"
+            , `Int (sum (fun entry -> entry.source_invalidations)) )
+          ; ( "source_snapshot_bytes"
+            , `Int (sum (fun entry -> entry.source_snapshot_bytes)) )
           ; ( "librarian_lane_busy"
             , `Int (sum (fun entry -> entry.librarian_lane_busy)) )
           ; ( "librarian_failures"
@@ -320,6 +421,12 @@ let keeper_memory_health_http_json ~base_path =
             , `Int
                 (sum (fun entry ->
                    match entry.read_error with
+                   | Some _ -> 1
+                   | None -> 0)) )
+          ; ( "source_read_errors"
+            , `Int
+                (sum (fun entry ->
+                   match entry.source_read_error with
                    | Some _ -> 1
                    | None -> 0)) )
           ] )
@@ -336,6 +443,12 @@ let keeper_memory_health_http_json ~base_path =
             , `Int
                 (sum (fun entry ->
                    match entry.read_error with
+                   | Some _ -> 1
+                   | None -> 0)) )
+          ; ( "source_snapshot_read_error_keepers"
+            , `Int
+                (sum (fun entry ->
+                   match entry.source_read_error with
                    | Some _ -> 1
                    | None -> 0)) )
           ; ( "librarian_lane_busy_keepers"

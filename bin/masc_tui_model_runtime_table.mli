@@ -1,12 +1,12 @@
 (** One row per model binding in runtime.toml, for the pane that answers
     "which knobs are actually set on this model".
 
-    The two knobs live in different tables. [reasoning-effort] is read from
-    [\[models.NAME\]] and [max-tokens] from [\[PROVIDER.NAME\]]
+    The knobs live in different tables. [reasoning-effort] and [temperature]
+    are read from [\[models.NAME\]] and [max-tokens] from [\[PROVIDER.NAME\]]
     (runtime_toml.ml:1102 and the binding parser respectively). Reading the
     file top to bottom hides that split across hundreds of lines, so an
     operator adding a knob copies whichever sibling they happened to scroll
-    past. This table puts both columns beside the model name.
+    past. This table puts all three columns beside the model name.
 
     Absence is a value here, not a blank: a binding with no effort sends no
     [reasoning_effort] field, and Ollama then turns thinking on by itself
@@ -19,6 +19,8 @@ type row =
   ; provider : string  (** Section prefix: [ollama_cloud], [glm-coding], ... *)
   ; api_name : string option  (** [api-name] when the binding renames the model. *)
   ; reasoning_effort : string option  (** From [\[models.NAME\]]. *)
+  ; temperature : string option
+        (** From [\[models.NAME\]], preserving the source spelling. *)
   ; max_tokens : int option  (** From [\[PROVIDER.NAME\]]. *)
   }
 

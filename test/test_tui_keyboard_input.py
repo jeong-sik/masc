@@ -7320,6 +7320,77 @@ def code_lane_interaction(
 RUNTIME_PROBE_PATH = "/api/v1/dashboard/runtime-probe"
 RUNTIME_PROBE_FORCE_PATH = f"{RUNTIME_PROBE_PATH}?force=1"
 RUNTIME_RESOLVED_PATH = "/api/v1/runtime/resolved"
+RUNTIME_CONFIG_RAW_PATH = "/api/v1/runtime/config/raw"
+
+
+def config_navigation_source() -> str:
+    lines = [
+        "# operator notes stay visible",
+        "first-value = 1",
+        "# another note",
+        "",
+        "second-value = 2",
+    ]
+    lines.extend(f"# context row {index}" for index in range(5, 27))
+    lines.extend(
+        [
+            "[models.alpha]",
+            "temperature = 0.7",
+            'reasoning-effort = "high"',
+            "# model comment",
+            "[ollama_cloud.alpha]",
+            "max-tokens = 16384",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def config_navigation_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Config")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"first-value = ",
+            start=0,
+            timeout=3.0,
+        )
+
+        next_field = send_and_wait(
+            process, master_fd, output, b"j", b"second-value = "
+        )
+        if b"second-value = " not in CSI_RE.sub(b"", next_field):
+            raise AssertionError("j did not skip comments and blank rows")
+
+        page_down = send_and_wait(
+            process, master_fd, output, b"\x1b[6~", b"temperature = "
+        )
+        if b"temperature = " not in CSI_RE.sub(b"", page_down):
+            raise AssertionError("PgDn did not land on the next page's value")
+
+        page_up = send_and_wait(
+            process, master_fd, output, b"\x1b[5~", b"second-value = "
+        )
+        if b"second-value = " not in CSI_RE.sub(b"", page_up):
+            raise AssertionError("PgUp did not return to the previous value")
+
+        models = send_and_wait(process, master_fd, output, b"p", b"MASC Models")
+        models_plain = CSI_RE.sub(b"", models)
+        for needle in (b"temperature", b"0.7", b"high", b"16384"):
+            if needle not in models_plain:
+                raise AssertionError(
+                    f"Models pane omitted {needle!r}: {models_plain!r}"
+                )
+        os.write(master_fd, b"q")
+
+    return interact
 
 
 def runtime_probe_provider(
@@ -9166,6 +9237,23 @@ def run_repositories_regression(executable: str) -> None:
     )
 
 
+def run_config_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    fixtures[RUNTIME_CONFIG_RAW_PATH] = (
+        200,
+        {
+            "path": "/workspace/config/runtime.toml",
+            "source_text": config_navigation_source(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Config value navigation, paging, and model temperature",
+        interact=config_navigation_interaction(),
+        http_fixtures=fixtures,
+    )
+
+
 def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
@@ -9179,10 +9267,14 @@ def main() -> None:
         run_repositories_regression(os.path.abspath(sys.argv[1]))
         print("tui Repositories regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "config":
+        run_config_regression(os.path.abspath(sys.argv[1]))
+        print("tui Config regression: PASS")
+        return
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
-            "[cli-base-path|planning-review|repositories]"
+            "[cli-base-path|planning-review|repositories|config]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

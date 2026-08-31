@@ -34,6 +34,16 @@ let test_rows_split_at_newlines () =
   in
   Alcotest.(check int) "two rows" 2 (List.length rows)
 
+let test_assignment_rows_ignore_strings_and_comments () =
+  let rows =
+    Masc_tui_code_lexer.rows_of_source ~language:(Some "toml")
+      "# example = false\nname = \"a=b\"\n[models.alpha]\nplain text"
+  in
+  Alcotest.(check (list bool))
+    "only the real assignment is navigable"
+    [ false; true; false; false ]
+    (List.map Masc_tui_code_lexer.row_has_assignment rows)
+
 let test_an_unlexed_language_stays_one_plain_span () =
   let rows =
     Masc_tui_code_lexer.rows_of_source ~language:(Some "brainfuck") "+[->+<]"
@@ -273,6 +283,9 @@ let () =
     ; ( "rows"
       , [ Alcotest.test_case "rows split at newlines" `Quick
             test_rows_split_at_newlines
+        ; Alcotest.test_case
+            "assignment rows ignore strings and comments"
+            `Quick test_assignment_rows_ignore_strings_and_comments
         ; Alcotest.test_case "an unlexed language stays one plain span" `Quick
             test_an_unlexed_language_stays_one_plain_span
         ] )

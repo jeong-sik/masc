@@ -47,3 +47,8 @@ val rows_of_segments : segment list -> segment list list
 val rows_of_source : language:string option -> string -> segment list list
 (** A whole file, lexed once and split into rows. [None] or an unlexed
     language keeps every row a single plain-code segment. *)
+
+val row_has_assignment : segment list -> bool
+(** True when a lexed configuration row contains an equals sign in code,
+    rather than inside a string or comment. This is a navigation fact; the
+    server-side parser remains the write authority. *)

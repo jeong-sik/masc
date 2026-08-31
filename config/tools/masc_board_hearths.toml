@@ -1,2 +1,7 @@
 name = "masc_board_hearths"
 description = "List active hearths (topic categories) with post counts"
+
+# Held back from the request until the model asks for it by name.
+# Called 8 times across the whole fleet over 2026-08-25..08-31, against
+# a schema charged to every provider request of every turn.
+defer_loading = true

@@ -4,6 +4,11 @@ Submit an AI curation snapshot for the board. This records summary, recommended 
 ordering, highlights, tag suggestions, answer matches, rationale, and provenance \
 without mutating board posts/comments/votes."""
 
+# Held back from the request until the model asks for it by name.
+# Called 19 times across the whole fleet over 2026-08-25..08-31, against
+# a schema charged to every provider request of every turn.
+defer_loading = true
+
 [[params]]
 name = "submitted_by"
 type = "string"

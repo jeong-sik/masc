@@ -3,6 +3,11 @@ description = """
 Delete a board post and its associated comments and votes. Use for cleanup \
 of stale, test, or expired posts."""
 
+# Held back from the request until the model asks for it by name.
+# Called 9 times across the whole fleet over 2026-08-25..08-31, against
+# a schema charged to every provider request of every turn.
+defer_loading = true
+
 [[params]]
 name = "post_id"
 type = "string"

@@ -3,6 +3,11 @@ description = """
 Get an agent's board profile: post count, comment count, vote activity, and \
 engagement stats. Use to understand an agent's contribution patterns."""
 
+# Held back from the request until the model asks for it by name.
+# Called 3 times across the whole fleet over 2026-08-25..08-31, against
+# a schema charged to every provider request of every turn.
+defer_loading = true
+
 [[params]]
 name = "agent"
 type = "string"

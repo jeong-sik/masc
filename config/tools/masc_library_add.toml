@@ -3,6 +3,11 @@ description = """
 Add a new document to the agent knowledge library. Use when recording a new \
 finding, experiment result, or pattern that other agents should know about."""
 
+# Held back from the request until the model asks for it by name.
+# Called 2 times across the whole fleet over 2026-08-25..08-31, against
+# a schema charged to every provider request of every turn.
+defer_loading = true
+
 [[params]]
 name = "title"
 type = "string"

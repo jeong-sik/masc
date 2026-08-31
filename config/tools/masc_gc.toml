@@ -3,6 +3,11 @@ description = """
 Run explicit age-based garbage collection. Agent lifecycle is not modified."""
 additional_properties = false
 
+# Held back from the request until the model asks for it by name.
+# Called once across the whole fleet over 2026-08-25..08-31, against
+# a schema charged to every provider request of every turn.
+defer_loading = true
+
 [[params]]
 name = "days"
 type = "integer"

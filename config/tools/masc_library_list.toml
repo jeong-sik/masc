@@ -4,3 +4,8 @@ List all documents in the agent knowledge library with title, source, \
 author, created date, and tags. Use when browsing available knowledge or \
 checking if a topic is already documented. Pair with masc_library_read to \
 fetch a specific document or masc_library_search to query by content."""
+
+# Held back from the request until the model asks for it by name.
+# Called 3 times across the whole fleet over 2026-08-25..08-31, against
+# a schema charged to every provider request of every turn.
+defer_loading = true

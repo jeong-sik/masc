@@ -5,6 +5,11 @@ highlights, tag suggestions, answer matches, rationale, and operator-auditable \
 provenance. Returns null when no snapshot has been submitted \
 yet."""
 
+# Held back from the request until the model asks for it by name.
+# Called 3 times across the whole fleet over 2026-08-25..08-31, against
+# a schema charged to every provider request of every turn.
+defer_loading = true
+
 [keeper_projection]
 description = """
 Read the latest AI curation snapshot for the board, including summary, \

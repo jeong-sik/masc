@@ -1734,11 +1734,17 @@ type state = {
           and 1550 of this workspace's 2171 posts sit in [verification] alone,
           so a filter over one page would show a handful of rows and call them
           the hearth. *)
-  mutable board_hearths: string list;
-      (** The hearths the unnarrowed list last showed, which is what [f]
-          cycles. Refreshed only from an unnarrowed load: taking it from every
-          load would collapse the cycle to the one hearth already selected,
-          and there would be no key back out to a third. *)
+  mutable board_hearths: (string * int) list;
+      (** Every hearth on the board and how many posts it holds, busiest
+          first, as [/api/v1/board/hearths] counts them.
+
+          This was read off whichever listing had last arrived, which made it
+          two things at once and both of them wrong. It could not offer a
+          hearth whose posts all fell outside the page, and it had to be
+          refreshed only from unnarrowed loads or the cycle collapsed to the
+          one hearth already chosen. The board's own census has neither
+          problem, and it carries the counts -- so [f] stops being a walk
+          through names a reader cannot see the size of. *)
   mutable board_scroll: int;
   mutable board_mode: board_mode;
   mutable board_focus: pane_focus;

@@ -1274,6 +1274,10 @@ type http_scoped_surface_results = {
      dropping it. *)
   http_asks: (Tui_decode.asks_snapshot, string) result option;
   http_board: (board_post list, string) result option;
+  (* The board's hearth census rides with its listing: the two are read for
+     one surface and a cycle keyed on a census the listing has outgrown walks
+     names that are no longer there. *)
+  http_board_hearths: ((string * int) list, string) result option;
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
   http_fleet_safety: (Tui_decode.fleet_safety, string) result option;
@@ -5165,11 +5169,17 @@ let leave_missing_board_detail state =
       leave_board_detail state
   | Board_list | Board_read _ | Board_compose -> ()
 
+let apply_board_hearths_load state = function
+  | Ok census -> state.board_hearths <- census
+  | Error _ ->
+      (* The census is what [f] walks. A failed read keeps the last one rather
+         than emptying it: a cycle that has gone quiet because one request
+         failed is worse than a cycle one refresh out of date. *)
+      ()
+
 let apply_board_list_load state = function
   | Ok posts ->
       replace_board_posts state posts;
-      if Option.is_none state.board_hearth then
-        state.board_hearths <- Board_hearth.vocabulary posts;
       state.board_list_error <- None;
       leave_missing_board_detail state
   | Error err ->
@@ -5369,6 +5379,9 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
         load_board_list ~host ~port ~sort_by:(board_sort_label board_sort)
           ~hearth:board_hearth)
   in
+  let http_board_hearths =
+    when_needed needs.needs_board (fun () -> load_board_hearths ~host ~port)
+  in
   let http_planning =
     when_needed needs.needs_planning (fun () -> load_planning ~host ~port)
   in
@@ -5387,6 +5400,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
   ; http_approvals
   ; http_asks
   ; http_board
+  ; http_board_hearths
   ; http_planning
   ; http_system_logs
   ; http_fleet_safety
@@ -5417,6 +5431,7 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_approval_observation state) results.http_approvals;
   Option.iter (apply_asks_load state) results.http_asks;
   Option.iter (apply_board_list_load state) results.http_board;
+  Option.iter (apply_board_hearths_load state) results.http_board_hearths;
   Option.iter (apply_planning_load state) results.http_planning;
   Option.iter (apply_system_logs_load state) results.http_system_logs;
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
@@ -12985,7 +13000,7 @@ and is loaded on demand through keeper_skill.
               page in hand. *)
            state.board_hearth <-
              Board_hearth.next ~current:state.board_hearth
-               ~vocabulary:state.board_hearths;
+               ~census:state.board_hearths;
            state.board_cursor <- 0;
            state.board_mode <- Board_list;
            add_event state "system"

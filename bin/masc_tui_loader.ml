@@ -488,6 +488,41 @@ let decode_board_post ?(require_body = false) json =
       bp_kind;
     }
 
+(* The board's own hearth census: name and post count, over the whole board.
+   Sorted busiest first here rather than trusted from the wire, so the pane's
+   order is its own statement and not a property of whichever query answered.
+   An entry missing either half is dropped -- a hearth with no name cannot be
+   narrowed to, and one with no count cannot be weighed. *)
+let decode_board_hearths json =
+  match Yojson.Safe.Util.member "hearths" json with
+  | `List items ->
+      Ok
+        (items
+        |> List.filter_map (fun item ->
+               match
+                 ( Yojson.Safe.Util.member "name" item
+                 , Yojson.Safe.Util.member "count" item )
+               with
+               | `String name, `Int count when String.trim name <> "" ->
+                   Some (String.trim name, count)
+               | _ -> None)
+        |> List.sort (fun (left_name, left) (right_name, right) ->
+               match Int.compare right left with
+               | 0 -> String.compare left_name right_name
+               | order -> order))
+  | `Null -> Ok []
+  | value ->
+      Error
+        (Printf.sprintf "board hearths must be a list: %s"
+           (Yojson.Safe.to_string value))
+
+(** Load the hearth census from /api/v1/board/hearths. *)
+let load_board_hearths ~(host : string) ~(port : int) :
+    ((string * int) list, string) result =
+  match fetch_board_hearths ~host ~port with
+  | Error err -> Error ("board hearths load failed: " ^ err)
+  | Ok json -> decode_board_hearths json
+
 let decode_board_posts json_list =
   decode_list "posts" decode_board_post json_list
 

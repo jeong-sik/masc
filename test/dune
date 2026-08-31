@@ -3276,7 +3276,7 @@
 (test
  (name test_tui_board_hearth)
  (modules test_tui_board_hearth)
- (libraries alcotest masc_tui_board_hearth masc_tui_types))
+ (libraries alcotest masc_tui_board_hearth))
 
 (test
  (name test_tui_board_score)

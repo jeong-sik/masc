@@ -12,45 +12,48 @@ related: ["execute-subset-dispositions", "0394", "0091"]
 
 # The subset judges; the sandbox contains
 
+`Execute` is the only tool in the six surveyed products whose parse result is
+what runs. Everywhere else the parser answers one question and the original
+string goes to a shell. This RFC proposes masc join them for the `script`
+field, keep the typed path for `argv` and `pipeline`, and let the profile's
+sandbox be the containment it already is.
+
 ## 1. What this asks to reopen
 
-`RFC-execute-subset-dispositions` §4 rejected two things:
+`RFC-execute-subset-dispositions` §4 rejected:
 
 > **Drop the subset and gate only at the OS boundary,** as Codex and pi.dev do.
 > Same objection: their model resolves the residue with a human prompt, which
 > unattended keepers do not have.
 
-> **Escalate refusals to an approving keeper.** [...] A keeper waiting on
-> another keeper's approval is a delegation contract with a response
-> obligation, forbidden by `instructions/projects.md`.
+It also rejected escalating refusals to an approving keeper, on the grounds
+that a keeper waiting on another keeper is a delegation contract. **That second
+rejection still holds and nothing here proposes touching it.** No approval
+keeper, no human prompt, nothing waits.
 
-Both were right when written, on 2026-08-24. The second still is, and this RFC
-does not propose it. The first rested on a fact about the fleet that stopped
-being true four days later.
+The first rested on a fact about the fleet that stopped being true four days
+later, and on a reading of the surveyed products that their source does not
+support.
 
 ## 2. What changed under it
 
 | date | |
 |---|---|
-| 2026-08-24 | `RFC-execute-subset-dispositions` written. Profiles available: `Local`, `Docker`, `Remote_ssh`. |
-| 2026-08-28 | `Micro_vm` lands (#31253) — one guest kernel per keeper through Apple's `container` CLI, network `none` by default. |
+| 2026-08-24 | `RFC-execute-subset-dispositions` written. Profiles: `Local`, `Docker`, `Remote_ssh`. |
+| 2026-08-28 | `Micro_vm` lands (#31253) — one guest kernel per keeper via Apple's `container` CLI, network `none` by default. |
 | 2026-08-30 | Three keepers move to it. |
 | 2026-08-31 | `Local` is removed (#32078). A keeper declares `docker`, `microvm`, or `remote_ssh`, or it is refused at config load. |
 
-The live fleet, 2026-08-31: `remote_ssh` 5, `microvm` 3, `docker` 1, host 0.
+Live fleet on 2026-08-31: `remote_ssh` 5, `microvm` 3, `docker` 1, host **0**.
 
-§4's objection was that the industry answer needs a human at the end. What the
-survey below actually found is that the human is the *fallback for the
-sandbox-less case*, not the mechanism. Codex's
-`render_decision_for_unmatched_command` returns **Allow** for a
+And the prompt §4 worried about is not the mechanism. Read from source:
+Codex's `render_decision_for_unmatched_command` returns **Allow** for a
 not-known-dangerous command when a sandbox is present, and prompts only when
-there is none. Claude Code states the same trade openly: `autoAllowBashIfSandboxed`
-means a sandboxed command runs without a prompt unless a rule says otherwise.
+there is none. Claude Code states the same trade outright in
+`autoAllowBashIfSandboxed`. The human is the fallback for the sandbox-less
+case. Every masc keeper now has the sandbox.
 
-So the question §4 answered was "who says yes when the parser cannot?" and the
-answer the surveyed products give is "nobody — the boundary already did."
-
-## 3. What is actually costing us
+## 3. What the subset is actually holding
 
 `tools/costume_census` over `<base-path>/.masc/tool_calls/2026-08/*.jsonl`,
 31 days, run 2026-08-31 with the counter corrected in #32075:
@@ -59,173 +62,185 @@ answer the surveyed products give is "nobody — the boundary already did."
 execute=45381  argv_form=43821  costumes=6815  lowered=5680
 ```
 
-So §3.7 step 4 already takes 83% of the shell costumes under the gate. The
-remaining **1,135** run as opaque `argv:["bash";"-c";S]` — no `Path_scope`, no
-redirect policy, no connector rules — because the subset cannot represent what
-is inside:
+Three populations, and they want different things:
 
-```
-   656  param_expansion       36  subshell
-   128  cmd_subst             28  glob_brace
-    89  parse_error            4  proc_subst
-    76  heredoc                3  background
-   115  representable, held back by a guard
-```
+| | count | what it is |
+|---|---|---|
+| genuine `argv` | 37,006 | `["git";"log";"--oneline"]` — never wanted a shell |
+| shell costumes | 6,815 | `["bash";"-c";S]` — wanted a shell, smuggled one |
+| no top-level argv | 1,560 | `script` / `pipeline` / `then` forms |
 
-They are not refused. They run. The gate simply does not see them, and
-`escaped_shell` tells the caller afterwards what it should have written.
+The typed path's irreplaceable value is the first row: a call that is naturally
+argv gets no shell, so word splitting and substitution are not policed, they
+are **absent**. That is worth keeping and this RFC keeps it.
 
-Refusing them instead would break work that runs today — §3.7 says so and is
-right. That leaves the third option §4 did not have available: **run them
-inside the boundary the keeper already has.**
+The second row is the problem. Of 6,815 costumes, 5,680 are lowered into the
+IR by `RFC-execute-subset-dispositions` §3.7 step 4; the other **1,135 run as
+opaque programs** — no `Path_scope`, no redirect policy, no connector rules.
+They are not refused. They run. The gate does not see them.
 
-## 4. Proposal
+Meanwhile the `script` field, which *does* cross the gate, refuses what the
+subset cannot represent: 32 refusals over three days
+(`redirect` 10, `cmd_subst` 8, `subshell` 8, `param_expansion` 4, `background` 2).
 
-One rule, stated per profile:
+So the same text is refused through one field and executed unwatched through
+another. Which field it arrives in decides.
 
-| profile | a script outside the subset |
+## 4. Proposal: the field names the execution model
+
+| field | model |
 |---|---|
-| `Micro_vm` | delegate to a real shell in the guest |
-| `Docker` | delegate to a real shell in the container |
-| `Remote_ssh` | delegate to a real shell on the endpoint |
+| `argv`, `pipeline` | typed. argv spawn, no shell. **Unchanged.** |
+| `script` | a real shell, inside the keeper's sandbox |
 
-Delegation means what every surveyed product does: hand the original text to
-`sh -c` on the far side of the boundary, and let the boundary be the boundary.
+`script` becomes what every surveyed product's `command` parameter is: text
+handed to `sh -c` on the far side of the boundary. Its current promise —
+"parsed rather than handed to a shell" — is retired.
 
-All three, and the reason is narrower than "the boundary is good enough". A
-shell already runs on each of them. `Keeper_sandbox_ssh.runner` takes `~argv`
-and runs it on the endpoint verbatim; the Docker and guest runners do the
-same. So `argv:["bash";"-c";S]` is a real shell on every profile today, and
-the only thing this RFC changes about *reach* is nothing. What it changes is
-whether that shell arrives through the gate or around it.
+The routing key is the field the caller chose. Not the content, not a
+substring, not a heuristic.
 
-Which is why the proposal is not complete without its other half.
+### 4.1 One door
 
-What does **not** change:
+An `argv` whose program is a shell with `-c` is a `script` in an argv costume.
+It normalizes to `script` and takes the shell path.
 
-- The subset still runs for everything it can represent. It is not a fallback
-  path; it is the first one, and it is what gives a representable script path
-  scope and redirect policy. This RFC does not propose deleting it, and §4's
-  "drop the subset" is not what is asked here.
-- `Keeper_gate.decide` still runs on every Execute call, before any of this.
-  Delegation is about what the shell may contain, not about who authorized the
-  call.
-- No approval keeper. No human prompt. Nothing waits on anything. §4's second
-  rejection stands untouched.
-- `escaped_shell` advice keeps riding back, because a caller that learns to
-  write the typed form still gets path scope, and delegation does not.
+That is `RFC-execute-subset-dispositions` §3.5's "one door", finished. Step 4
+walked through it for the representable; this is the rest of the sentence, and
+it closes the smuggling route rather than widening it: after this there is no
+way to reach a shell that the gate did not route.
 
-## 5. Why this is not "drop the subset"
+§3.7 declined a blanket flip because the gate would have **refused** the
+non-representable, breaking work that runs. Nothing is refused here.
 
-The distinction §4 could not make in August is between a parser used as an
-*executor* and a parser used as a *judge*.
+### 4.2 All three profiles
 
-Today masc is the only product of the six surveyed where the parse result is
-what runs. Everywhere else — Claude Code, Codex, OpenClaw, Hermes — the parser
-answers one question ("can I produce a trustworthy argv?") and the original
-string is what executes. Claude Code's own parser header says it outright:
+`Micro_vm`, `Docker`, `Remote_ssh` all delegate. The reason is narrower than
+"the boundary is good enough": a shell already runs on each of them.
+`Keeper_sandbox_ssh.runner` takes `~argv` and runs it on the endpoint
+verbatim; the Docker and guest runners do the same. `argv:["bash";"-c";S]` is
+a real shell on every profile today. This RFC changes nothing about *reach* —
+only about whether the gate saw it.
+
+There is no fourth profile, and no host arm to answer for (#32078).
+
+## 5. Why not route by content
+
+The alternative — keep `script` typed when the subset can represent it, shell
+when it cannot — was this RFC's first draft. It is rejected.
+
+**It makes the execution model invisible.** Editing a script would flip it:
+
+```
+script: "ls *.ml"            typed  — glob expanded inside Path_scope
+script: "ls *.ml && date"    typed
+script: "ls *.ml $(pwd)"     shell  — glob now expanded by the shell
+```
+
+The caller cannot see that boundary, and `RFC-execute-subset-dispositions` §5
+already named this exact hazard as "the one that can regress".
+
+Two paths do exist in the products surveyed, but they are split **by tool**,
+and the model picks: Claude Code's Read/Glob/Grep against Bash, Codex's
+`apply_patch` against `exec_command`. Nobody splits inside one tool by whether
+a parser happened to cope.
+
+**It puts the subset on a treadmill.** §4 of the parent RFC said it: *"Every
+arm is also a new divergence surface `shell_ir_oracle` must pin."* Under
+content routing, widening the grammar moves calls from shell to typed — every
+fidelity improvement is a behaviour change, and the convergence point is
+reimplementing bash.
+
+**And the product that invested most in that parser refuses to execute from
+it.** Claude Code reimplemented tree-sitter-bash in 4,436 lines of TypeScript,
+validated against a 3,449-input golden corpus, and its header says:
 
 > The key design property is FAIL-CLOSED [...] This is NOT a sandbox. It does
 > not prevent dangerous commands from running. It answers exactly one
-> question.
+> question: "Can we produce a trustworthy argv[] for each simple command in
+> this string?" If yes, downstream code can match argv[0] against permission
+> rules [...] If no, ask the user.
 
-masc gets something real from being the odd one out: the typed path has no
-shell, so command substitution and word splitting are not *policed*, they are
-*absent*. That is worth keeping for the 83%.
+masc executes from a much smaller parser. That is the asymmetry this RFC ends.
 
-What it does not get is a boundary for the other 17%, because those already
-run — through the side door, unjudged. This RFC does not lower the boundary
-for them. It raises it from "nothing" to "the guest kernel."
+## 6. What the parser becomes
 
-## 6. The other half: the side door closes
+It stays, and it stops being load-bearing for execution:
 
-Delegation on its own is relabelling. `argv:["bash";"-c";S]` reaches the same
-shell it reaches today, and the gate learns nothing. The change is only worth
-making if the same commit removes the way around it: a costume whose script the
-subset cannot represent is delegated *by the gate*, on the profile's authority,
-rather than smuggled past it as an opaque program.
+- **Policy.** It still produces `Path_scope` for what it can parse, and that
+  classification can keep feeding telemetry and rules without deciding the
+  execution model.
+- **Advice.** `Subset_rewrite` keeps telling a caller that a heredoc is the
+  `stdin` field and that `;` wants two calls. It rides back as `escaped_shell`
+  the same way, and now it is advice about a better form rather than the
+  explanation for a refusal.
+- **Refusal, where refusal is the point.** A judge can still say no —
+  to a dangerous pattern, to a path outside the workspace. That is a
+  different question from "can I represent this", and separating them is
+  what lets the parser improve without moving execution.
 
-That is what makes the profile the routing key rather than a label. It is also
-what `RFC-execute-subset-dispositions` §3.5 already called "one door" — step 4
-walked through it for the representable, and this is the rest of the same
-sentence.
+`Parsed.reason_too_complex` stops being a disposition and becomes a
+classification. The arms that exist to refuse want re-reading; that is a
+follow-up, not this RFC.
 
-The rule that made a blanket flip wrong there still holds and is satisfied
-here: §3.7 declined to route the non-representable through the gate because
-the gate would have *refused* them, breaking work that runs. Delegation does
-not refuse them. It runs them, in the place they already run.
+## 7. What this gives up
 
-## 7. Open questions
+- **`Path_scope` on redirect targets inside `script`.** Containment moves to
+  the sandbox mount, which is where it already was for the 1,135. What is lost
+  is the *label* — "this redirect pointed outside the workspace" — not the
+  containment. §6 keeps the judge able to compute it; wiring it to telemetry
+  is a choice, not a requirement.
+- **Enforcement of the typed form.** Today a `script` with `$(...)` is refused
+  and the caller has to write something better. After this it runs, and the
+  advice is only advice. The measured cost of the enforcement is 32 refusals
+  in three days; the measured cost of the escape it creates is 1,135 unwatched
+  calls a month.
+- **The lowering of 5,680 representable costumes.** They move from typed to
+  shell. What they lose is `Path_scope` and redirect policy inside a sandbox
+  mount that already bounds them; what the fleet gains is one execution model
+  per field.
 
-**`Remote_ssh` was open in the first draft of this RFC and is not any more.**
-The hesitation was that it is the least isolated of the three: five of nine
-keepers, all on `127.0.0.1:2222`, one `masc-ssh-testbed` container with a unix
-user and a `/opt/masc-playground-<name>` root each, and `network_mode = "none"`
-*rejected* for the profile (`remote_ssh_no_network_mode`), so the endpoint has
-network and keepers are separated from each other by file permissions rather
-than by a kernel.
+## 8. What has to be true first
 
-All of that is true and none of it is about this decision. The question is not
-whether the endpoint is isolated enough to host a shell — it hosts one now,
-for every keeper on the profile, through the same `~argv` the runner has always
-taken. Declining to delegate there would leave the side door as the only way to
-run those scripts, which is the situation this RFC exists to end.
-
-Its isolation is worth improving. That is a different RFC, and it does not gate
-this one.
-
-**What does the tap record?** `shell_costume` currently reports `finding` and
-`lowered`. A delegated script is neither lowered nor escaped; it is a third
-disposition, and the census that decides the next step has to be able to
-count it.
-
-**Does anything become unreachable?** If delegation lands,
-`Parsed.reason_too_complex` stops being a refusal for backend keepers and
-becomes a routing signal. `Subset_rewrite` still has a job (it writes the
-advice), but the arms that exist to *refuse* would want re-reading.
-
-## 8. What would have to be true first
-
-- A keeper's profile is available at the Execute dispatch site. It already is
+- The profile is available at the Execute dispatch site — it is
   (`dispatch_sandbox`, `sandbox_profile_label` in `keeper_tool_execute_runtime.ml`).
-- The Docker and SSH runners can carry an arbitrary `sh -c` payload. The
-  `Sandbox_target.runner` closure already takes an argv, so this is
-  `["sh"; "-c"; script]` rather than new plumbing.
-- The census can tell delegated from lowered from escaped, so the effect is
-  measurable after the fact rather than argued before it.
+- The runners carry an arbitrary payload — they do; `Sandbox_target.runner`
+  takes an argv, so this is `["sh"; "-c"; script]`.
+- The census can tell shell from typed from advised, so the effect is
+  measurable afterwards rather than argued beforehand.
+- `argv → script` normalization is byte-exact: the same text through either
+  field must produce the same child. `RFC-execute-subset-dispositions` §5
+  already asks for this test.
 
 ## 9. Workaround self-check (CLAUDE.md bar)
 
-- **Telemetry-as-fix?** No. §6 asks for a third disposition in the tap, but the
-  change is what executes, not what is counted.
-- **String/substring classifier?** None added. The routing key is a typed
-  `sandbox_profile`, and the parse result stays the closed
-  `reason_too_complex`.
-- **N-of-M?** The rule is stated for all three profiles and none is deferred.
-  §6 is the reason: delegating on some profiles while the side door stays open
-  on the rest would be exactly the partial migration this bar forbids.
-- **Catch-all added?** No. The per-profile match is exhaustive by construction.
+- **Telemetry-as-fix?** No. This changes what executes.
+- **String/substring classifier?** The opposite. The routing key is a schema
+  field name; the smuggling route this closes is precisely the string-shaped
+  one (`argv[0]` happening to be a shell).
+- **N-of-M?** All three profiles, both fields, stated together. §4.2 is
+  explicit that no profile is deferred, because deferring one would leave the
+  side door open for it — the partial migration this bar forbids.
+- **Catch-all added?** No. The field match is two arms and the profile match
+  is three, both exhaustive.
 - **Cap/cooldown/dedup/repair?** None.
 - **Test backdoor?** None.
-- **Second SSOT?** The profile stays the one in the keeper TOML. This RFC adds
-  a consumer, not a second declaration.
-- **Acknowledged risk.** Delegation gives up path scope and redirect policy for
-  the scripts it covers. Today those scripts have neither, so the change is
-  not a loss — but if step 4's coverage ever grew to include them, delegation
-  would be the weaker of the two and should lose. The ordering has to be
-  lower-first, always, or the subset quietly stops being the first path.
-- **Acknowledged risk, second.** Closing the side door (§6) makes
-  `argv:["bash";"-c";S]` route by profile rather than run as written. On a
-  profile that delegates, that is the same shell; there is no profile left that
-  does not, because `Local` is gone (#32078). If a non-containing profile is
-  ever added, this RFC's rule has to be answered for it before it ships.
+- **Second SSOT?** The field the caller chose is the single declaration. The
+  costume normalization in §4.1 removes the second one.
+- **Acknowledged risk.** §7 lists what goes. The sharpest is that a keeper can
+  now write `$(...)` in `script` and have it run. It already could, by writing
+  `argv:["bash";"-c";"$(...)"]`, on every profile, unwatched. This RFC makes
+  that visible rather than possible.
 
 ## 10. Sources
 
-Product behaviour in §2 and §5 was read from source on 2026-08-31: Claude Code
-(leaked 2026-03-31 tree, `utils/bash/ast.ts`, `sandbox-adapter.ts`),
-openai/codex (`core/src/exec_policy.rs`, `sandboxing/src/seatbelt.rs`),
-openclaw (`src/agents/bash-tools.exec.ts`, `src/infra/exec-approvals.ts`),
+Product behaviour read from source on 2026-08-31: Claude Code (leaked
+2026-03-31 tree — `utils/bash/ast.ts`, `utils/bash/bashParser.ts`,
+`sandbox-adapter.ts`), openai/codex (`core/src/exec_policy.rs`,
+`shell-command/src/bash.rs`, `sandboxing/src/seatbelt.rs`), openclaw
+(`src/agents/bash-tools.exec.ts`, `src/infra/exec-approvals.ts`),
 NousResearch/hermes-agent (`tools/terminal_tool.py`), badlogic/pi-mono
-(`packages/coding-agent/src/core/tools/bash.ts`). Fleet and corpus figures from
-`~/me/.masc/config/keepers/*.toml` and `tools/costume_census`.
+(`packages/coding-agent/src/core/tools/bash.ts`). Fleet figures from
+`~/me/.masc/config/keepers/*.toml`; corpus figures from
+`tools/costume_census`; refusal counts from `shell_costume` records in
+`<base-path>/.masc/logs/`.

@@ -1042,18 +1042,44 @@ let attention_severity_color = function
 
 let task_line (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
+  (* The icon and the status word share one color so the row's state reads at
+     a glance: in-flight rows in cyan, waiting rows dimmed. Terminal states
+     never reach this list ([active_tasks_of_domain] filters them); they keep
+     the default so a future caller showing one is visible rather than wrong. *)
+  let status_color =
+    match task.status with
+    | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Ansi.cyan
+    | Masc_domain.AwaitingVerification _ -> Theme.warn ()
+    | Masc_domain.Todo -> Ansi.dim
+    | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ""
+  in
   let assignee =
     match Masc_domain.task_assignee_of_status task.status with
     | Some name -> Printf.sprintf " @%s" (Terminal_text.single_line name)
     | None -> ""
   in
-  Printf.sprintf "%s [%s] %s (%s%s) %s"
+  let goal_tag =
+    match task.goal_ids with
+    | [] -> ""
+    | goal :: _ ->
+        Printf.sprintf " %s%s%s" Ansi.gray
+          (Terminal_text.single_line goal)
+          Ansi.reset
+  in
+  Printf.sprintf "%s%s%s %s[%s]%s %s %s(%s%s)%s %s%s"
+    status_color
     (task_status_icon task.status)
+    Ansi.reset
+    Ansi.dim
     (Terminal_text.single_line task.id)
+    Ansi.reset
     (Terminal_text.single_line task.title)
+    status_color
     status
     assignee
+    Ansi.reset
     (priority_indicator task.priority)
+    goal_tag
 
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows =

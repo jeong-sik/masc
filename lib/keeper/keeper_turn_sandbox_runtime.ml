@@ -822,7 +822,6 @@ let teardown_keeper_sandbox_by_name
            ())
   in
   match backend with
-  | Keeper_sandbox.Local
   | Keeper_sandbox.Remote_ssh -> Ok ()
   | Keeper_sandbox.Docker ->
     Keeper_sandbox_runtime.remove_persistent_containers
@@ -848,7 +847,6 @@ let teardown_keeper_sandbox
   =
   let backend =
     match meta.sandbox_profile with
-    | Local -> Keeper_sandbox.Local
     | Docker -> Keeper_sandbox.Docker
     | Micro_vm -> Keeper_sandbox.Micro_vm
     | Remote_ssh -> Keeper_sandbox.Remote_ssh

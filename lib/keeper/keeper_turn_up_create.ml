@@ -64,10 +64,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         (Keeper_meta_contract.missing_required_sandbox_profile_error
            ~keeper_name:p.name
            p.profile_defaults)
-    | Some sandbox_profile ->
-      Result.map
-        (fun () -> sandbox_profile)
-        (validate_sandbox_settings_with_profile ~sandbox_profile)
+    | Some sandbox_profile -> Ok sandbox_profile
   in
     match sandbox_profile_res with
     | Error err ->

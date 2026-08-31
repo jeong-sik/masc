@@ -144,25 +144,6 @@ module Preflight = struct
 end
 
 (* --------------------------------------------------------------- *)
-(* Gate — local playground kill switch                             *)
-(* --------------------------------------------------------------- *)
-
-module Gate = struct
-  let env_key = "MASC_EXEC_ALLOW_LOCAL_PLAYGROUND"
-
-  (* Literal key at the call site (not [env_key]) so the CI lint
-     [check-feature-flag-consistency.sh] sees the registry consumer;
-     it greps for [get_bool "MASC_*"] literals. *)
-  let allow_local_playground () =
-    Feature_flag_registry.get_bool "MASC_EXEC_ALLOW_LOCAL_PLAYGROUND"
-
-  let disabled_message =
-    "sandbox_profile \"local\" is disabled: the local playground is off \
-     (fail-closed). Set sandbox_profile = \"docker\", or set \
-     MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1 for dev/test only."
-end
-
-(* --------------------------------------------------------------- *)
 (* Shell_timeout — typed-bucket SSOT                               *)
 (* --------------------------------------------------------------- *)
 

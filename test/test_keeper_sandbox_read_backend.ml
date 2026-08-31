@@ -100,12 +100,8 @@ let make_meta ~name ~sandbox =
 
 (* ── should_route_read profile policy ────────────────────────────── *)
 
-let test_legacy_keeper_never_routes () =
-  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types_profile_sandbox.Local in
-  Alcotest.(check bool) "legacy keeper never routes through docker"
-    false
-    (Keeper_sandbox_read_backend.should_route_read ~meta)
-
+(* The case that answered [false] was the [Local] profile, and it is gone:
+   every profile a keeper may declare routes reads through its backend. *)
 let test_docker_keeper_routes () =
   let meta =
     make_meta ~name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2305,8 +2301,6 @@ let run_tests ~clock () =
     [
       ( "should_route_read",
         [
-          Alcotest.test_case "legacy never routes" `Quick
-            test_legacy_keeper_never_routes;
           Alcotest.test_case "docker keeper routes" `Quick
             test_docker_keeper_routes;
           Alcotest.test_case "docker second keeper also routes" `Quick

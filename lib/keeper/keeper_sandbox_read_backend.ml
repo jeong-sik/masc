@@ -11,12 +11,17 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+(* Constant since the host profile was removed: every profile a keeper may
+   declare is hardened, so this answers [true] for all of them. The match is
+   kept exhaustive rather than collapsed to [fun _ -> true] so a profile added
+   later has to state its own answer. The host-read branch that callers still
+   carry behind [should_route_read] is now unreachable and is removed
+   separately. *)
 let is_hardened = function
   | Docker -> true
   (* A per-container VM is at least as hardened as a container, so reads
      route through the guest the same way. *)
   | Micro_vm -> true
-  | Local -> false
   | Remote_ssh -> true
 
 let should_route_read ~(meta : keeper_meta) : bool =
@@ -43,7 +48,7 @@ let container_path_of_host ~(config : Workspace.config) ~(meta : keeper_meta) ~h
     in
     Keeper_remote_path.host_to_remote ~base_path:config.base_path
       ~endpoint ~keeper:meta.name host_path
-  | Local | Docker | Micro_vm ->
+  | Docker | Micro_vm ->
     let host_root = host_playground_root ~config ~meta in
     let host_norm =
       Keeper_alerting_path.normalize_path_for_check host_path

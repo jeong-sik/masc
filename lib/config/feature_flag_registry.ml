@@ -111,11 +111,6 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active };
 
-  { env_name = "MASC_EXEC_ALLOW_LOCAL_PLAYGROUND";
-    description = "Escape hatch: allow the disabled local sandbox profile (dev/test only)";
-    default = false; category = "keeper";
-    lifecycle = Active };
-
   (* ── Dashboard ────────────────────────────────────────────── *)
   { env_name = "MASC_DASHBOARD_FIXTURES_ENABLED";
     description = "Load dashboard fixture data for testing";

@@ -110,7 +110,7 @@ let test_container_path_translation_under_sandbox () =
       Unix.mkdir explicit_cwd 0o755;
       let local_meta =
         { (make_docker_meta ~name:"local-explicit-path") with
-          sandbox_profile = Keeper_types_profile_sandbox.Local
+          sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
         }
       in
       let raw =
@@ -337,7 +337,7 @@ let test_prompt_keeps_caller_owned_workspace_generation () =
       let config = Workspace.default_config admitted_base in
       let meta =
         { (make_docker_meta ~name:"caller-config-pin") with
-          sandbox_profile = Keeper_types_profile_sandbox.Local
+          sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
         }
       in
       let expected_root =

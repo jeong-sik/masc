@@ -1212,10 +1212,15 @@ let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
     "an explicit request overrides the TOML default"
     true
     (A.resolve_sandbox_profile
-       ~requested:"local"
+       ~requested:"microvm"
        ~fallback:(Some Keeper_types_profile_toml_io.Docker)
        ()
-     = Some Keeper_types_profile_toml_io.Local);
+     = Some Keeper_types_profile_toml_io.Micro_vm);
+  check
+    bool
+    "\"local\" no longer names a profile"
+    true
+    (A.resolve_sandbox_profile ~requested:"local" ~fallback:None () = None);
   check
     bool
     "no request keeps the TOML default"
@@ -1250,36 +1255,6 @@ let contains needle haystack =
   let n = String.length needle and h = String.length haystack in
   let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
   scan 0
-
-let hatch_key = "MASC_EXEC_ALLOW_LOCAL_PLAYGROUND"
-
-(* Every case restores the cleared state so no empty-string value leaks into
-   the next case (registry reads are fresh per call, but env is process-global). *)
-let with_hatch value f =
-  Unix.putenv hatch_key value;
-  Fun.protect ~finally:(fun () -> Unix.putenv hatch_key "") f
-
-let test_validate_rejects_local_when_gate_off () =
-  let module A = Keeper_turn_up_args in
-  with_hatch "" (fun () ->
-      match A.validate_sandbox_profile_allowed ~profile:Keeper_types_profile_sandbox.Local with
-      | Error msg ->
-        check bool "rejection names the hatch" true (contains hatch_key msg)
-      | Ok () -> fail "local profile must be rejected when the gate is off")
-
-let test_validate_allows_docker_when_gate_off () =
-  let module A = Keeper_turn_up_args in
-  with_hatch "" (fun () ->
-      match A.validate_sandbox_profile_allowed ~profile:Keeper_types_profile_sandbox.Docker with
-      | Ok () -> ()
-      | Error err -> fail ("docker must stay allowed: " ^ err))
-
-let test_validate_allows_local_with_hatch () =
-  let module A = Keeper_turn_up_args in
-  with_hatch "true" (fun () ->
-      match A.validate_sandbox_profile_allowed ~profile:Keeper_types_profile_sandbox.Local with
-      | Ok () -> ()
-      | Error err -> fail ("hatch must allow local: " ^ err))
 
 (* task-895: parse used to read its fields and silently drop the rest — a
    caller sending merge_existing / keep_warm / stash_untracked watched the
@@ -1327,6 +1302,9 @@ let test_parse_rejects_unknown_keys () =
      Keeper_turn_up_args.parse ctx
        (`Assoc
           [ "name", `String "unknown-args-fixture"
+          (* The tool schema defaults this to "docker"; [parse] is called
+             directly here, so the fixture states what the schema would. *)
+          ; "sandbox_profile", `String "docker"
           ; "instructions", `String "still fine"
           ])
    with
@@ -1375,18 +1353,6 @@ let () =
             "requested profile wins over the TOML fallback"
             `Quick
             test_requested_sandbox_profile_wins_over_the_toml_fallback
-        ; test_case
-            "local profile rejected when the gate is off"
-            `Quick
-            test_validate_rejects_local_when_gate_off
-        ; test_case
-            "docker profile allowed when the gate is off"
-            `Quick
-            test_validate_allows_docker_when_gate_off
-        ; test_case
-            "local profile allowed with the hatch set"
-            `Quick
-            test_validate_allows_local_with_hatch
         ; test_case
             "remote endpoint required and registry-resolved"
             `Quick

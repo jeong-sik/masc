@@ -32,17 +32,16 @@ Exact direct-mention tokens that can wake the keeper in workspace traffic \
 [[params]]
 name = "sandbox_profile"
 type = "string"
-enum = ["local", "docker", "microvm", "remote_ssh"]
+enum = ["docker", "microvm", "remote_ssh"]
 default = "docker"
 description = """
 Sandbox isolation profile. Pass explicitly: \"docker\" for containerized \
 execution. \"microvm\" runs each guest as a lightweight VM through \
 Apple's container CLI (host needs the CLI and the sandbox image already \
-present; network defaults to none like docker). \"local\" is fail-closed \
-and only resolves when the dev/test hatch \
-MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1 is set. \"remote_ssh\" targets the \
+present; network defaults to none like docker). \"remote_ssh\" targets the \
 SSH remote execution lane (Phase 1; requires remote_endpoint in the \
-keeper TOML, runner lands with the lane)."""
+keeper TOML, runner lands with the lane). There is no host profile: every \
+keeper runs under one of these three."""
 
 [[params]]
 name = "remote_endpoint"

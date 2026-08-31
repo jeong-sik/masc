@@ -70,7 +70,7 @@ let make_meta ~name () =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
     { meta with
-      sandbox_profile = Keeper_types_profile_sandbox.Local
+      sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
     ; always_allow = Some true
     }
   | Error e -> Alcotest.fail e

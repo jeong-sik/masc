@@ -1041,7 +1041,7 @@ def keeper_roster_meta(name: str) -> dict[str, object]:
         "trace_id": f"trace-{name}",
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
-        "sandbox_profile": "local",
+        "sandbox_profile": "docker",
     }
 
 
@@ -4172,7 +4172,7 @@ def seed_playground_workspace(base_path: str) -> None:
     scenario about the first."""
     Path(base_path, ".masc", "config", "keepers").mkdir(parents=True, exist_ok=True)
     Path(base_path, ".masc", "config", "keepers", "alpha.toml").write_text(
-        '[keeper]\nsandbox_profile = "local"\n', encoding="utf-8"
+        '[keeper]\nsandbox_profile = "docker"\n', encoding="utf-8"
     )
     Path(base_path, ".masc", "playground", "alpha").mkdir(parents=True, exist_ok=True)
 

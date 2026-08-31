@@ -127,7 +127,6 @@ let uses_backend ~config:_ ~meta ~cwd:_ =
      the same turn runtime, which builds Apple [container] argv for every
      CLI it starts (#31225, #31178). *)
   | Keeper_types_profile_sandbox.Micro_vm, _ -> true
-  | Keeper_types_profile_sandbox.Local, _ -> false
   (* remote_ssh does not route through the (Docker) sandbox backend —
      answering [true] would silently downgrade it to Docker and [false]
      only means "not the Docker backend": the typed Execute dispatch
@@ -196,10 +195,7 @@ let run_command_with_status ~config ~meta ~timeout_sec ~host ~backend =
   (* [Micro_vm] routes exactly as on main: [uses_backend] classifies it as
      the sandbox backend, and the docker-shell entrypoints refuse the
      profile themselves before building an argv. *)
-  | ( Keeper_types_profile_sandbox.Docker
-    | Keeper_types_profile_sandbox.Micro_vm
-    | Keeper_types_profile_sandbox.Local )
-    , _
+  | (Keeper_types_profile_sandbox.Docker | Keeper_types_profile_sandbox.Micro_vm), _
     ->
     (match route_for ~config ~meta ~cwd:backend.route_cwd with
      | Sandbox_backend ->

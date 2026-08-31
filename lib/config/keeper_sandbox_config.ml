@@ -5,7 +5,6 @@
     project that profile to the backend-scoped storage root. *)
 
 type sandbox_profile =
-  | Local
   | Docker
   | Micro_vm
   | Remote_ssh
@@ -13,23 +12,19 @@ type sandbox_profile =
 exception Invalid_keeper_sandbox_config of string
 
 let sandbox_profile_to_string = function
-  | Local -> "local"
   | Docker -> "docker"
   | Micro_vm -> "microvm"
   | Remote_ssh -> "remote_ssh"
 
 let sandbox_profile_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
-  | "local" -> Some Local
   | "docker" -> Some Docker
   | "microvm" -> Some Micro_vm
   | "remote_ssh" -> Some Remote_ssh
   | _ -> None
 
 let valid_sandbox_profile_strings =
-  List.map sandbox_profile_to_string [ Local; Docker; Micro_vm; Remote_ssh ]
-
-let default_sandbox_profile = Local
+  List.map sandbox_profile_to_string [ Docker; Micro_vm; Remote_ssh ]
 
 let keeper_toml_path ~base_path ~agent_name =
   let keeper_name = Playground_paths.sanitize_keeper_name agent_name in
@@ -41,9 +36,22 @@ let keeper_toml_path ~base_path ~agent_name =
        "keepers")
     (keeper_name ^ ".toml")
 
+(* No default.  A keeper whose profile is absent used to become [Local], which
+   was host execution, and the boundary that stopped it was a feature flag
+   defaulting to off -- so the missing declaration was answered twice, once
+   permissively and once not.  Absence is now the error it always described:
+   there is no profile under which this keeper may run. *)
+let undeclared_message ~path ~what =
+  Printf.sprintf
+    "%s: %s. Set keeper.sandbox_profile to one of: %s"
+    path
+    what
+    (String.concat ", " valid_sandbox_profile_strings)
+;;
+
 let load_declared_profile ~path =
   if not (Sys.file_exists path)
-  then Ok default_sandbox_profile
+  then Error (undeclared_message ~path ~what:"no keeper TOML, so no sandbox profile")
   else
     match Safe_ops.read_file_safe path with
     | Error e -> Error (Printf.sprintf "cannot read %s: %s" path e)
@@ -52,7 +60,7 @@ let load_declared_profile ~path =
         | Error msg -> Error (Printf.sprintf "%s: %s" path msg)
         | Ok toml -> (
             match Otoml.find_opt toml Otoml.get_string [ "keeper"; "sandbox_profile" ] with
-            | None -> Ok default_sandbox_profile
+            | None -> Error (undeclared_message ~path ~what:"no sandbox_profile declared")
             | Some raw -> (
                 match sandbox_profile_of_string raw with
                 | Some profile -> Ok profile
@@ -72,7 +80,6 @@ let sandbox_profile_of_agent ~base_path ~agent_name =
 
 let host_root_rel_of_profile profile name =
   match profile with
-  | Local -> Playground_paths.bundle_root name
   | Docker ->
       Printf.sprintf "%s/docker/%s/"
         Playground_paths.all_playgrounds_prefix

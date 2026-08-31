@@ -774,11 +774,6 @@
 (test
  (name test_keeper_tool_execute_stream_close)
  (modules test_keeper_tool_execute_stream_close)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries masc_test_deps))
 
 ; Extracted from the big (tests ...) group above: a handful of typed-dispatch
@@ -788,11 +783,6 @@
 (test
  (name test_keeper_sandbox_docker_route)
  (modules test_keeper_sandbox_docker_route)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
@@ -805,11 +795,6 @@
 (test
  (name test_broadcast_wakeup_policy)
  (modules test_broadcast_wakeup_policy)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
@@ -822,11 +807,6 @@
 (test
  (name test_keeper_supervisor)
  (modules test_keeper_supervisor)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
@@ -840,11 +820,6 @@
 (test
  (name test_channel_gate_connector_routes)
  (modules test_channel_gate_connector_routes)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
@@ -953,11 +928,6 @@
 (test
  (name test_operator_control_snapshot)
  (modules test_operator_control_snapshot test_operator_control_support)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries masc_test_deps masc.keeper_identity))
 
 ; Extracted from the big (tests ...) group above: the cases pass
@@ -968,11 +938,6 @@
 (test
  (name test_keeper_create_admission_transaction)
  (modules test_keeper_create_admission_transaction)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries masc_test_deps))
 
 ; Extracted from the big (tests ...) group above: most fixtures declare
@@ -983,11 +948,6 @@
 (test
  (name test_keeper_effective_meta_overlay)
  (modules test_keeper_effective_meta_overlay)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries
   masc_test_deps
   masc_schedule
@@ -1661,11 +1621,6 @@
 (test
  (name test_dashboard_namespace_truth)
  (modules test_dashboard_namespace_truth)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries masc_test_deps))
 
 ; Extracted from the Group 3 (tests ...) list above: the config-sync fixture
@@ -1676,11 +1631,6 @@
 (test
  (name test_dashboard_http_core)
  (modules test_dashboard_http_core)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries
   masc_test_deps
   masc_test_runtime
@@ -1698,10 +1648,6 @@
  (modules test_server_bootstrap_durable_demand_owner)
  (libraries alcotest masc_test_deps masc_test_runtime))
 
-; MASC_EXEC_ALLOW_LOCAL_PLAYGROUND: a bootstrap fixture TOML seeds
-; sandbox_profile = "local" (incidental — the suite measures server runtime
-; bootstrap/health wiring, not sandbox isolation), and keeper-up validation
-; now rejects Local fail-closed without the hatch.
 (test
  (name test_server_runtime_bootstrap)
  (modules test_server_runtime_bootstrap)
@@ -1712,22 +1658,16 @@
   bigstringaf)
  (deps ../bin/main_eio.exe)
   (action
-   (setenv MASC_EXEC_ALLOW_LOCAL_PLAYGROUND true
-    (setenv MASC_MAIN_EIO_EXE %{dep:../bin/main_eio.exe} (run %{test})))))
+   (setenv MASC_MAIN_EIO_EXE %{dep:../bin/main_eio.exe} (run %{test}))))
 
 ; Stable dashboard behavior contracts only. The HTTP core executable also
 ; contains source-shape assertions, so CI selects its behavior suite; the
-; briefing executable is behavior-only and runs in full. The HTTP core run
-; carries the local-playground hatch: its config-sync fixture seeds
-; sandbox_profile = "local", incidental to the behavior contracts.
+; briefing executable is behavior-only and runs in full.
 (rule
  (alias runtest-dashboard-http-behavior-contracts)
  (action
   (progn
-   (setenv
-    MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-    true
-    (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts"))
+   (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts")
    (run %{exe:test_dashboard_briefing.exe}))))
 
 (test
@@ -1908,18 +1848,9 @@
   unix
   yojson))
 
-; MASC_EXEC_ALLOW_LOCAL_PLAYGROUND: the keeper meta fixtures carry no
-; sandbox_profile, which resolves to Local (incidental — the suite measures
-; schedule consumer dispatch and occurrence recovery, not sandbox
-; isolation), and dispatch now rejects Local fail-closed without the hatch.
 (test
  (name test_schedule_consumer_dispatch)
  (modules test_schedule_consumer_dispatch)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries masc_test_deps masc_schedule masc_server))
 
 (test
@@ -1936,19 +1867,9 @@
   unix
   yojson))
 
-; MASC_EXEC_ALLOW_LOCAL_PLAYGROUND: the schedule tool fixtures create a
-; keeper whose sandbox_profile resolves to Local (incidental — the suite
-; measures schedule tool create/list/get/cancel wiring, not sandbox
-; isolation), and keeper-up validation now rejects Local fail-closed without
-; the hatch.
 (test
  (name test_schedule_tool_wiring)
  (modules test_schedule_tool_wiring)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries masc_test_deps masc_schedule))
 
 ; Typed TOML field resolution.
@@ -2926,19 +2847,6 @@
   (source_tree ../lib)
   (source_tree ../bin)))
 
-; Regression for local-overrotation: Execute / tool_execute must not route
-; sandbox_profile=local through Docker merely because DockerPlayground is on.
-
-(test
- (name test_keeper_local_profile_docker_playground)
- (modules test_keeper_local_profile_docker_playground)
- (action
-  (setenv
-   MASC_KEEPER_DOCKER_PLAYGROUND
-   true
-   (run %{test})))
- (libraries masc_test_deps))
-
 
 (include stanzas/test_keeper_wire_capture_suppression.inc)
 
@@ -3860,11 +3768,6 @@
  (modules test_keeper_composition_async_broker)
  (libraries masc_test_deps masc_schedule multimodal bigstringaf
    masc.keeper_checkpoint_ref masc.embedded_config masc.tool_spawn))
-
-(test
- (name test_keeper_local_playground_gate)
- (modules test_keeper_local_playground_gate)
- (libraries masc_test_deps))
 
 (test
  (name test_keeper_remote_ssh_profile)

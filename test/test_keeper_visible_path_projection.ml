@@ -85,7 +85,7 @@ let write_file path content =
 ;;
 
 let make_meta
-      ?(sandbox = Keeper_types_profile_sandbox.Local)
+      ?(sandbox = Keeper_types_profile_sandbox.Remote_ssh)
       ?(always_allow = false)
       name
   =

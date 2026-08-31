@@ -8,7 +8,6 @@ let current_task_id_opt (meta : keeper_meta) =
 let backend_of_meta (meta : keeper_meta) =
   match meta.sandbox_profile with
   | Docker -> "docker"
-  | Local -> "local"
   | Micro_vm -> "microvm"
   | Remote_ssh -> "remote_ssh"
 

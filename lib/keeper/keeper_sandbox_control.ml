@@ -533,10 +533,11 @@ let preflight_status ~timeout_sec =
 let preflight_ok (preflight : Keeper_sandbox_runtime.docker_preflight option) =
   Option.map (fun (p : Keeper_sandbox_runtime.docker_preflight) -> p.ok) preflight
 
+(* The [Local] arm that opened this went with the profile: every keeper runs
+   under a backend now, so the answer is about containers from the first
+   line. *)
 let container_mode (meta : keeper_meta) containers =
-  if meta.sandbox_profile = Local then
-    "local"
-  else if
+  if
     List.exists
       (fun (c : Keeper_sandbox_runtime.live_container) ->
         c.container_kind = Some managed_kind && c.running = Some true)
@@ -549,9 +550,9 @@ let container_mode (meta : keeper_meta) containers =
     | Network_inherit -> "oneshot_or_managed_inherit"
 
 let why_no_container (meta : keeper_meta) ~preflight containers =
-  if meta.sandbox_profile = Local then
-    Some "sandbox_profile=local"
-  else if containers <> [] then
+  (* "sandbox_profile=local" was the first answer here. No keeper can report
+     it now, so the reasons below are the whole list. *)
+  if containers <> [] then
     None
   else
     match preflight_ok preflight with

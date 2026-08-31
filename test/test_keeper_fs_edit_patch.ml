@@ -97,7 +97,7 @@ let rec ensure_dir path =
     if p <> path then ensure_dir p;
     Unix.mkdir path 0o755)
 
-let make_meta ?(sandbox = Keeper_types_profile_sandbox.Local) name =
+let make_meta ?(sandbox = Keeper_types_profile_sandbox.Remote_ssh) name =
   let json =
     `Assoc
       [
@@ -121,7 +121,7 @@ let with_eio_fs f =
     ~clock:(Eio.Stdenv.clock env);
   f ~fs ~sw ()
 
-let setup ?(sandbox = Keeper_types_profile_sandbox.Local) f =
+let setup ?(sandbox = Keeper_types_profile_sandbox.Remote_ssh) f =
   with_eio_fs @@ fun ~fs ~sw () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
@@ -1414,7 +1414,7 @@ let () =
             "Local outside-referent endpoint semantics are operation-specific"
             `Quick
             (test_outside_referent_endpoint_semantics
-               ~sandbox:Keeper_types_profile_sandbox.Local
+               ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
                ~with_runtime:false);
           Alcotest.test_case
             "Docker outside-referent endpoint semantics are operation-specific"
@@ -1430,13 +1430,13 @@ let () =
             "local symlink component swap cannot escape allowed root"
             `Quick
             (test_symlink_component_swap_cannot_escape_allowed_root
-               ~sandbox:Keeper_types_profile_sandbox.Local
+               ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
                ~with_runtime:false);
           Alcotest.test_case
             "local sandbox root swap keeps pinned capability"
             `Quick
             (test_sandbox_root_swap_after_open_keeps_pinned_capability
-               ~sandbox:Keeper_types_profile_sandbox.Local
+               ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
                ~with_runtime:false);
           Alcotest.test_case
             "Docker runtime symlink component swap cannot escape allowed root"

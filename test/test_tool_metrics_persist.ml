@@ -51,6 +51,10 @@ let pending_records ~base_path =
   let dir = Filename.concat base_path "data/tool-metrics-pending" in
   if Sys.file_exists dir then Fs_compat.read_dir dir else []
 
+let fallback_pending_records ~base_path =
+  let dir = Filename.concat base_path ".masc/tool-metrics-pending" in
+  if Sys.file_exists dir then Fs_compat.read_dir dir else []
+
 let loss_marker_path ~base_path = function
   | `Bulk_data -> Filename.concat base_path "data/tool-metrics-loss-marker.json"
   | `Runtime_state_fallback ->
@@ -610,25 +614,166 @@ let test_pending_spool_deduplicates_final_row () =
           1
           (Option.get (Tool_metrics.stats_for "dedup-window")).call_count))
 
-let test_spool_failure_falls_back_to_observable_memory_queue () =
+let test_primary_spool_failure_uses_runtime_state_fallback () =
+  with_tmp_dir (fun base_path ->
+    Tool_metrics.clear ();
+    Fun.protect
+      ~finally:Tool_metrics.clear
+      (fun () ->
+        P.For_testing.set_pending_write_guard (fun _path _content ->
+          Error "forced spool failure");
+        P.enqueue ~base_path
+          (make_result ~name:"spool-failed" ~success:true ~duration_ms:1.0);
+        let snapshot = P.persistence_snapshot () in
+        Alcotest.(check int) "row remains queued" 1 snapshot.queue_depth;
+        Alcotest.(check int) "row remains spool-backed" 1 snapshot.spool_backed_queue_depth;
+        Alcotest.(check int)
+          "row uses runtime-state fallback"
+          1
+          snapshot.fallback_spool_backed_queue_depth;
+        Alcotest.(check int)
+          "primary spool failure counted"
+          1
+          snapshot.spool_write_failed_records;
+        Alcotest.(check int)
+          "fallback spool succeeds"
+          0
+          snapshot.spool_fallback_write_failed_records;
+        Alcotest.(check bool)
+          "primary spool error visible"
+          true
+          (Option.is_some snapshot.last_spool_error);
+        Alcotest.(check int)
+          "one fallback pending file exists"
+          1
+          (List.length (fallback_pending_records ~base_path));
+        P.reset_for_testing ();
+        let report =
+          match P.hydrate ~base_path ~retention_days:30 with
+          | Ok report -> report
+          | Error error ->
+            Alcotest.failf
+              "hydrate failed: %s"
+              (Dated_jsonl.read_error_to_string error)
+        in
+        Alcotest.(check int) "one pending row recovered" 1 report.recovered_pending_records;
+        Alcotest.(check int)
+          "fallback recovery is explicit"
+          1
+          report.recovered_fallback_pending_records;
+        Alcotest.(check int)
+          "recovered aggregate keeps the row"
+          1
+          (Option.get (Tool_metrics.stats_for "spool-failed")).call_count;
+        P.flush_now ~base_path;
+        Alcotest.(check int)
+          "fallback pending row reaches final JSONL"
+          1
+          (List.length (read_records ~base_path));
+        Alcotest.(check int)
+          "fallback pending file is removed after final append"
+          0
+          (List.length (fallback_pending_records ~base_path))))
+
+let test_both_spool_writes_fail_to_observable_memory_queue () =
   with_tmp_dir (fun base_path ->
     P.For_testing.set_pending_write_guard (fun _path _content ->
-      Error "forced spool failure");
+      Error "forced primary spool failure");
+    P.For_testing.set_pending_fallback_write_guard (fun _path _content ->
+      Error "forced fallback spool failure");
     P.enqueue ~base_path
-      (make_result ~name:"spool-failed" ~success:true ~duration_ms:1.0);
+      (make_result ~name:"spool-memory-only" ~success:true ~duration_ms:1.0);
     let snapshot = P.persistence_snapshot () in
     Alcotest.(check int) "row remains queued" 1 snapshot.queue_depth;
     Alcotest.(check int) "row is not spool-backed" 0 snapshot.spool_backed_queue_depth;
-    Alcotest.(check int) "spool failure counted" 1 snapshot.spool_write_failed_records;
+    Alcotest.(check int)
+      "primary spool failure counted"
+      1
+      snapshot.spool_write_failed_records;
+    Alcotest.(check int)
+      "fallback spool failure counted"
+      1
+      snapshot.spool_fallback_write_failed_records;
     Alcotest.(check bool)
-      "spool error visible"
+      "fallback spool error visible"
       true
-      (Option.is_some snapshot.last_spool_error);
+      (Option.is_some snapshot.last_spool_fallback_error);
     P.flush_now ~base_path;
     Alcotest.(check int)
-      "memory fallback still reaches final JSONL"
+      "memory-only row can still reach final JSONL"
       1
       (List.length (read_records ~base_path)))
+
+let test_duplicate_primary_and_fallback_pending_files_are_loaded_once () =
+  with_tmp_dir (fun base_path ->
+    Tool_metrics.clear ();
+    Fun.protect
+      ~finally:Tool_metrics.clear
+      (fun () ->
+        P.enqueue ~base_path
+          (make_result ~name:"duplicate-spool" ~success:true ~duration_ms:1.0);
+        let name = List.hd (pending_records ~base_path) in
+        let primary_path =
+          Filename.concat
+            (Filename.concat base_path "data/tool-metrics-pending")
+            name
+        in
+        let fallback_dir = Filename.concat base_path ".masc/tool-metrics-pending" in
+        let fallback_path = Filename.concat fallback_dir name in
+        Fs_compat.mkdir_p fallback_dir;
+        Fs_compat.save_file fallback_path (Fs_compat.load_file primary_path);
+        P.reset_for_testing ();
+        let report =
+          match P.hydrate ~base_path ~retention_days:30 with
+          | Ok report -> report
+          | Error error ->
+            Alcotest.failf
+              "hydrate failed: %s"
+              (Dated_jsonl.read_error_to_string error)
+        in
+        Alcotest.(check int) "one pending row recovered" 1 report.recovered_pending_records;
+        Alcotest.(check int)
+          "duplicate pending source counted"
+          1
+          report.deduplicated_pending_records;
+        Alcotest.(check int)
+          "duplicate fallback file removed"
+          0
+          (List.length (fallback_pending_records ~base_path));
+        Alcotest.(check int)
+          "aggregate loads duplicate id once"
+          1
+          (Option.get (Tool_metrics.stats_for "duplicate-spool")).call_count))
+
+let test_invalid_fallback_pending_dir_does_not_block_final_hydration () =
+  with_tmp_dir (fun base_path ->
+    let fallback_path = Filename.concat base_path ".masc/tool-metrics-pending" in
+    Fs_compat.mkdir_p (Filename.dirname fallback_path);
+    Fs_compat.save_file fallback_path "not-a-directory";
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat base_path "data/tool-metrics")
+        ()
+    in
+    Dated_jsonl.append store
+      (persisted_record
+         ~tool_name:"survives-fallback-pending-read-failure"
+         ~disposition:"completed"
+         ~duration_ms:1.0);
+    let report =
+      match P.hydrate ~base_path ~retention_days:30 with
+      | Ok report -> report
+      | Error error ->
+        Alcotest.failf
+          "hydrate failed: %s"
+          (Dated_jsonl.read_error_to_string error)
+    in
+    Alcotest.(check int) "final row still loads" 1 report.loaded_records;
+    Alcotest.(check int) "invalid pending source counted" 1 report.invalid_pending_files;
+    Alcotest.(check int)
+      "invalid fallback source counted"
+      1
+      report.invalid_fallback_pending_files)
 
 let test_high_watermark_wakes_flush_waiter clock =
   with_tmp_dir (fun base_path ->
@@ -783,8 +928,17 @@ let () =
             "startup deduplicates final rows with stale pending files"
             test_pending_spool_deduplicates_final_row
         ; eio_test
-            "spool failures stay observable with memory fallback"
-            test_spool_failure_falls_back_to_observable_memory_queue
+            "primary spool failures use the runtime-state fallback"
+            test_primary_spool_failure_uses_runtime_state_fallback
+        ; eio_test
+            "both spool failures stay observable with memory fallback"
+            test_both_spool_writes_fail_to_observable_memory_queue
+        ; eio_test
+            "duplicate primary and fallback pending files load once"
+            test_duplicate_primary_and_fallback_pending_files_are_loaded_once
+        ; eio_test
+            "invalid fallback pending dir does not block final hydration"
+            test_invalid_fallback_pending_dir_does_not_block_final_hydration
         ; eio_test
             "expired loss markers are not current evidence"
             test_expired_loss_marker_is_not_current_evidence

@@ -48,8 +48,10 @@ type hydrate_report = {
   invalid_records : int;
   pruned_files : int;
   recovered_pending_records : int;
+  recovered_fallback_pending_records : int;
   deduplicated_pending_records : int;
   invalid_pending_files : int;
+  invalid_fallback_pending_files : int;
   invalid_loss_marker_sources : loss_marker_source list;
 }
 
@@ -63,11 +65,13 @@ type persistence_snapshot = {
   in_flight_records : int;
   spooling_records : int;
   spool_backed_queue_depth : int;
+  fallback_spool_backed_queue_depth : int;
   queue_capacity : int;
   queue_high_watermark : int;
   queue_full_dropped_records : int;
   append_failed_records : int;
   spool_write_failed_records : int;
+  spool_fallback_write_failed_records : int;
   spool_delete_failed_records : int;
   loss_marker_write_failed_records : int;
   loss_marker_fallback_write_failed_records : int;
@@ -79,6 +83,7 @@ type persistence_snapshot = {
   last_flush_at_unix : float option;
   last_append_error : string option;
   last_spool_error : string option;
+  last_spool_fallback_error : string option;
   last_loss_marker_error : string option;
   last_loss_marker_fallback_error : string option;
 }
@@ -145,10 +150,20 @@ let write_queue_capacity = 4096
     issue #32011. *)
 let write_queue_high_watermark = write_queue_capacity / 2
 let write_queue_mu = Mutex.create ()
+
+type pending_location =
+  | Bulk_data
+  | Runtime_state_fallback
+
+type pending_file = {
+  path : string;
+  location : pending_location;
+}
+
 type queued_record = {
   record_id : string;
   json : Yojson.Safe.t;
-  pending_path : string option;
+  pending_file : pending_file option;
 }
 
 let write_queue : queued_record Queue.t = Queue.create ()
@@ -162,6 +177,7 @@ let write_queue_changed = Eio.Condition.create ()
 let dropped_full_queue = Atomic.make 0
 let append_failed_records = Atomic.make 0
 let spool_write_failed_records = Atomic.make 0
+let spool_fallback_write_failed_records = Atomic.make 0
 let spool_delete_failed_records = Atomic.make 0
 let loss_marker_write_failed_records = Atomic.make 0
 let loss_marker_fallback_write_failed_records = Atomic.make 0
@@ -174,6 +190,7 @@ let last_flush_failed_rows = Atomic.make None
 let last_flush_at_unix = Atomic.make None
 let last_append_error = Atomic.make None
 let last_spool_error = Atomic.make None
+let last_spool_fallback_error = Atomic.make None
 let last_loss_marker_error = Atomic.make None
 let last_loss_marker_fallback_error = Atomic.make None
 
@@ -183,6 +200,7 @@ let default_pending_write path content =
     Fs_compat.save_file_atomic path content)
 
 let pending_write = Atomic.make default_pending_write
+let pending_fallback_write = Atomic.make default_pending_write
 let loss_marker_write = Atomic.make default_pending_write
 let loss_marker_fallback_write = Atomic.make default_pending_write
 let current_loss_marker : sourced_loss_marker option Atomic.t = Atomic.make None
@@ -201,11 +219,15 @@ let pending_record_count_locked () =
   + Hashtbl.length in_flight_records
   + !spooling_records
 
-let spool_backed_record_count_locked () =
+let pending_file_count_locked matches =
   let count_queue queue =
     Queue.fold
       (fun count record ->
-        count + Option.fold ~none:0 ~some:(fun _ -> 1) record.pending_path)
+        count
+        + Option.fold
+            ~none:0
+            ~some:(fun pending -> if matches pending then 1 else 0)
+            record.pending_file)
       0
       queue
   in
@@ -213,9 +235,20 @@ let spool_backed_record_count_locked () =
   + count_queue write_queue
   + Hashtbl.fold
       (fun _ record count ->
-        count + Option.fold ~none:0 ~some:(fun _ -> 1) record.pending_path)
+        count
+        + Option.fold
+            ~none:0
+            ~some:(fun pending -> if matches pending then 1 else 0)
+            record.pending_file)
       in_flight_records
       0
+
+let spool_backed_record_count_locked () =
+  pending_file_count_locked (fun _ -> true)
+
+let fallback_spool_backed_record_count_locked () =
+  pending_file_count_locked (fun pending ->
+    pending.location = Runtime_state_fallback)
 
 let take_queued_record () =
   with_write_queue_lock (fun () ->
@@ -246,12 +279,13 @@ let queue_depths () =
     , Queue.length retry_queue
     , Hashtbl.length in_flight_records
     , !spooling_records
-    , spool_backed_record_count_locked () ))
+    , spool_backed_record_count_locked ()
+    , fallback_spool_backed_record_count_locked () ))
 
 let persistence_snapshot () =
   let build = Build_identity.current () in
   let queue_depth, retry_queue_depth, in_flight_records, spooling_records,
-      spool_backed_queue_depth =
+      spool_backed_queue_depth, fallback_spool_backed_queue_depth =
     queue_depths ()
   in
   { runtime_instance_id = build.runtime_instance_id
@@ -263,11 +297,14 @@ let persistence_snapshot () =
   ; in_flight_records
   ; spooling_records
   ; spool_backed_queue_depth
+  ; fallback_spool_backed_queue_depth
   ; queue_capacity = write_queue_capacity
   ; queue_high_watermark = write_queue_high_watermark
   ; queue_full_dropped_records = Atomic.get dropped_full_queue
   ; append_failed_records = Atomic.get append_failed_records
   ; spool_write_failed_records = Atomic.get spool_write_failed_records
+  ; spool_fallback_write_failed_records =
+      Atomic.get spool_fallback_write_failed_records
   ; spool_delete_failed_records = Atomic.get spool_delete_failed_records
   ; loss_marker_write_failed_records = Atomic.get loss_marker_write_failed_records
   ; loss_marker_fallback_write_failed_records =
@@ -280,6 +317,7 @@ let persistence_snapshot () =
   ; last_flush_at_unix = Atomic.get last_flush_at_unix
   ; last_append_error = Atomic.get last_append_error
   ; last_spool_error = Atomic.get last_spool_error
+  ; last_spool_fallback_error = Atomic.get last_spool_fallback_error
   ; last_loss_marker_error = Atomic.get last_loss_marker_error
   ; last_loss_marker_fallback_error = Atomic.get last_loss_marker_fallback_error
   }
@@ -301,11 +339,15 @@ let persistence_snapshot_to_json (snapshot : persistence_snapshot) =
     ; "in_flight_records", `Int snapshot.in_flight_records
     ; "spooling_records", `Int snapshot.spooling_records
     ; "spool_backed_queue_depth", `Int snapshot.spool_backed_queue_depth
+    ; ( "fallback_spool_backed_queue_depth"
+      , `Int snapshot.fallback_spool_backed_queue_depth )
     ; "queue_capacity", `Int snapshot.queue_capacity
     ; "queue_high_watermark", `Int snapshot.queue_high_watermark
     ; "queue_full_dropped_records", `Int snapshot.queue_full_dropped_records
     ; "append_failed_records", `Int snapshot.append_failed_records
     ; "spool_write_failed_records", `Int snapshot.spool_write_failed_records
+    ; ( "spool_fallback_write_failed_records"
+      , `Int snapshot.spool_fallback_write_failed_records )
     ; "spool_delete_failed_records", `Int snapshot.spool_delete_failed_records
     ; ( "loss_marker_write_failed_records"
       , `Int snapshot.loss_marker_write_failed_records )
@@ -324,6 +366,10 @@ let persistence_snapshot_to_json (snapshot : persistence_snapshot) =
       , option_to_json (fun value -> `String value) snapshot.last_append_error )
     ; ( "last_spool_error"
       , option_to_json (fun value -> `String value) snapshot.last_spool_error )
+    ; ( "last_spool_fallback_error"
+      , option_to_json
+          (fun value -> `String value)
+          snapshot.last_spool_fallback_error )
     ; ( "last_loss_marker_error"
       , option_to_json (fun value -> `String value) snapshot.last_loss_marker_error )
     ; ( "last_loss_marker_fallback_error"
@@ -429,6 +475,7 @@ let reset_for_testing () =
   Atomic.set dropped_full_queue 0;
   Atomic.set append_failed_records 0;
   Atomic.set spool_write_failed_records 0;
+  Atomic.set spool_fallback_write_failed_records 0;
   Atomic.set spool_delete_failed_records 0;
   Atomic.set loss_marker_write_failed_records 0;
   Atomic.set loss_marker_fallback_write_failed_records 0;
@@ -441,9 +488,11 @@ let reset_for_testing () =
   Atomic.set last_flush_at_unix None;
   Atomic.set last_append_error None;
   Atomic.set last_spool_error None;
+  Atomic.set last_spool_fallback_error None;
   Atomic.set last_loss_marker_error None;
   Atomic.set last_loss_marker_fallback_error None;
   Atomic.set pending_write default_pending_write;
+  Atomic.set pending_fallback_write default_pending_write;
   Atomic.set loss_marker_write default_pending_write;
   Atomic.set loss_marker_fallback_write default_pending_write;
   Atomic.set current_loss_marker None;
@@ -477,6 +526,14 @@ let pending_dir ~base_path =
 
 let pending_path ~base_path ~record_id =
   Filename.concat (pending_dir ~base_path) (record_id ^ ".json")
+
+let pending_fallback_dir ~base_path =
+  Filename.concat
+    (Config_dir_resolver.masc_root ~base_path)
+    "tool-metrics-pending"
+
+let pending_fallback_path ~base_path ~record_id =
+  Filename.concat (pending_fallback_dir ~base_path) (record_id ^ ".json")
 
 let loss_marker_path ~base_path =
   Filename.concat
@@ -676,50 +733,93 @@ type pending_record = {
   sample : Tool_metrics.sample;
 }
 
-let load_pending_records ~base_path =
-  let dir = pending_dir ~base_path in
-  if not (Sys.file_exists dir)
-  then [], 0
-  else
-    Fs_compat.read_dir dir
-    |> List.fold_left
-         (fun (records, invalid) name ->
-           let path = Filename.concat dir name in
-           let parse () =
-             if not (String.ends_with ~suffix:".json" name)
-             then None
-             else
-               let record_id =
-                 String.sub name 0 (String.length name - String.length ".json")
-               in
-               match Random_id.parse_uuid_v7 record_id with
-               | Error _ -> None
-               | Ok record_id ->
-                 let json = Yojson.Safe.from_string (Fs_compat.load_file path) in
-                 (match exact_string_field "record_id" json, sample_of_json json with
-                  | Some embedded_id, Some sample
-                    when String.equal embedded_id record_id ->
-                    Some
-                      { queued = { record_id; json; pending_path = Some path }
-                      ; sample
-                      }
-                  | _ -> None)
-           in
-           if Fs_compat.is_atomic_orphan_name name
-           then records, invalid
-           else
-             let parsed =
-               try Ok (parse ()) with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | Yojson.Json_error _ | Sys_error _ | Unix.Unix_error _ -> Error ()
+let load_pending_records_from_dir ~location dir =
+  try
+    if not (Sys.file_exists dir)
+    then [], 0
+    else
+      Fs_compat.read_dir dir
+      |> List.fold_left
+           (fun (records, invalid) name ->
+             let path = Filename.concat dir name in
+             let parse () =
+               if not (String.ends_with ~suffix:".json" name)
+               then None
+               else
+                 let record_id =
+                   String.sub name 0 (String.length name - String.length ".json")
+                 in
+                 match Random_id.parse_uuid_v7 record_id with
+                 | Error _ -> None
+                 | Ok record_id ->
+                   let json = Yojson.Safe.from_string (Fs_compat.load_file path) in
+                   (match exact_string_field "record_id" json, sample_of_json json with
+                    | Some embedded_id, Some sample
+                      when String.equal embedded_id record_id ->
+                      Some
+                        { queued =
+                            { record_id
+                            ; json
+                            ; pending_file = Some { path; location }
+                            }
+                        ; sample
+                        }
+                    | _ -> None)
              in
-             match parsed with
-             | Ok (Some record) -> record :: records, invalid
-             | Ok None | Error () -> records, invalid + 1)
-         ([], 0)
+             if Fs_compat.is_atomic_orphan_name name
+             then records, invalid
+             else
+               let parsed =
+                 try Ok (parse ()) with
+                 | Eio.Cancel.Cancelled _ as exn -> raise exn
+                 | Yojson.Json_error _ | Sys_error _ | Unix.Unix_error _ -> Error ()
+               in
+               match parsed with
+               | Ok (Some record) -> record :: records, invalid
+               | Ok None | Error () -> records, invalid + 1)
+           ([], 0)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Sys_error _ | Unix.Unix_error _ -> [], 1
+
+let load_pending_records ~base_path =
+  let primary_records, invalid_primary =
+    load_pending_records_from_dir
+      ~location:Bulk_data
+      (pending_dir ~base_path)
+  in
+  let fallback_records, invalid_fallback =
+    load_pending_records_from_dir
+      ~location:Runtime_state_fallback
+      (pending_fallback_dir ~base_path)
+  in
+  primary_records @ fallback_records, invalid_primary + invalid_fallback,
+  invalid_fallback
+
+let deduplicate_loaded_pending_records records =
+  let seen = Hashtbl.create (List.length records) in
+  List.fold_left
+    (fun (unique, duplicates) pending ->
+      if Hashtbl.mem seen pending.queued.record_id
+      then
+        let duplicate = Option.get pending.queued.pending_file in
+        unique, duplicate :: duplicates
+      else begin
+        Hashtbl.add seen pending.queued.record_id ();
+        pending :: unique, duplicates
+      end)
+    ([], [])
+    records
+  |> fun (unique, duplicates) -> List.rev unique, List.rev duplicates
 
 let enqueue_recovered_record record =
   with_write_queue_lock (fun () -> Queue.add record retry_queue)
+
+let write_pending_file write ~path content =
+  try write path content with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Sys_error _ | Unix.Unix_error _ | Failure _) as exn ->
+    Error (Printexc.to_string exn)
 
 let hydrate ~base_path ~retention_days =
   let store = get_or_create_store ~base_path in
@@ -731,7 +831,15 @@ let hydrate ~base_path ~retention_days =
   Atomic.set current_loss_marker loss_marker;
   Atomic.set current_loss_marker_invalid_sources invalid_loss_marker_sources;
   Atomic.set loss_marker_published_this_process false;
-  let pending_records, invalid_pending_files = load_pending_records ~base_path in
+  let loaded_pending_records, invalid_pending_files, invalid_fallback_pending_files =
+    load_pending_records ~base_path
+  in
+  let pending_records, duplicate_pending_files =
+    deduplicate_loaded_pending_records loaded_pending_records
+  in
+  List.iter
+    (fun pending -> ignore (remove_pending_file pending.path))
+    duplicate_pending_files;
   let pending_ids = Hashtbl.create (List.length pending_records) in
   List.iter
     (fun pending -> Hashtbl.replace pending_ids pending.queued.record_id ())
@@ -759,18 +867,24 @@ let hydrate ~base_path ~retention_days =
     Result.map
       (fun () ->
          let recovered_pending_records = ref 0 in
-         let deduplicated_pending_records = ref 0 in
+         let recovered_fallback_pending_records = ref 0 in
+         let deduplicated_pending_records = ref (List.length duplicate_pending_files) in
          List.iter
            (fun pending ->
              if Hashtbl.mem persisted_pending_ids pending.queued.record_id
              then begin
-               ignore (remove_pending_file (Option.get pending.queued.pending_path));
+               let pending_file = Option.get pending.queued.pending_file in
+               ignore (remove_pending_file pending_file.path);
                Stdlib.incr deduplicated_pending_records
              end
              else begin
                add pending.sample;
                enqueue_recovered_record pending.queued;
-               Stdlib.incr recovered_pending_records
+               Stdlib.incr recovered_pending_records;
+               if
+                 (Option.get pending.queued.pending_file).location
+                 = Runtime_state_fallback
+               then Stdlib.incr recovered_fallback_pending_records
              end)
            (List.rev pending_records);
          { loaded_records = !loaded_records
@@ -778,8 +892,11 @@ let hydrate ~base_path ~retention_days =
          ; invalid_records = !invalid_records
          ; pruned_files
          ; recovered_pending_records = !recovered_pending_records
+         ; recovered_fallback_pending_records =
+             !recovered_fallback_pending_records
          ; deduplicated_pending_records = !deduplicated_pending_records
          ; invalid_pending_files
+         ; invalid_fallback_pending_files
          ; invalid_loss_marker_sources
          })
       read_result)
@@ -813,29 +930,44 @@ let enqueue ~base_path (result : Tool_result.result) =
     let record_id = Random_id.uuid_v7 () in
     let json = record_to_json ~record_id result in
     let path = pending_path ~base_path ~record_id in
-    let write_result =
-      try Atomic.get pending_write path (Yojson.Safe.to_string json ^ "\n") with
+    let content = Yojson.Safe.to_string json ^ "\n" in
+    let pending_file =
+      try
+        match write_pending_file (Atomic.get pending_write) ~path content with
+        | Ok () -> Some { path; location = Bulk_data }
+        | Error error ->
+          ignore (Atomic.fetch_and_add spool_write_failed_records 1 : int);
+          Atomic.set last_spool_error (Some error);
+          Log.Metrics.error
+            "tool_metrics_persist: bulk-data pending spool write failed; trying runtime-state fallback: %s"
+            error;
+          let fallback_path = pending_fallback_path ~base_path ~record_id in
+          (match
+             write_pending_file
+               (Atomic.get pending_fallback_write)
+               ~path:fallback_path
+               content
+           with
+           | Ok () ->
+             Atomic.set last_spool_fallback_error None;
+             Some { path = fallback_path; location = Runtime_state_fallback }
+           | Error fallback_error ->
+             ignore
+               (Atomic.fetch_and_add spool_fallback_write_failed_records 1 : int);
+             Atomic.set last_spool_fallback_error (Some fallback_error);
+             Log.Metrics.error
+               "tool_metrics_persist: runtime-state pending spool fallback write failed; retaining in memory: %s"
+               fallback_error;
+             None)
+      with
       | Eio.Cancel.Cancelled _ as exn ->
         with_write_queue_lock (fun () -> Stdlib.decr spooling_records);
         raise exn
-      | (Sys_error _ | Unix.Unix_error _ | Failure _) as exn ->
-        Error (Printexc.to_string exn)
-    in
-    let pending_path =
-      match write_result with
-      | Ok () -> Some path
-      | Error error ->
-        ignore (Atomic.fetch_and_add spool_write_failed_records 1 : int);
-        Atomic.set last_spool_error (Some error);
-        Log.Metrics.error
-          "tool_metrics_persist: pending spool write failed; retaining in memory: %s"
-          error;
-        None
     in
     let wake_flush_fiber =
       with_write_queue_lock (fun () ->
         Stdlib.decr spooling_records;
-        Queue.add { record_id; json; pending_path } write_queue;
+        Queue.add { record_id; json; pending_file } write_queue;
         pending_record_count_locked () = write_queue_high_watermark)
     in
     if wake_flush_fiber then Eio.Condition.broadcast write_queue_changed
@@ -900,8 +1032,8 @@ let drain_to_store ~trigger (store : Dated_jsonl.t) : drain_report =
          complete_queued_record record;
          Stdlib.incr written;
          Option.iter
-           (fun path -> ignore (remove_pending_file path))
-           record.pending_path;
+           (fun pending -> ignore (remove_pending_file pending.path))
+           record.pending_file;
          drain ())
   in
   drain ();
@@ -961,6 +1093,8 @@ module For_testing = struct
   let queued_record_count = queued_record_count
   let await_flush_trigger = await_flush_trigger
   let set_pending_write_guard guard = Atomic.set pending_write guard
+  let set_pending_fallback_write_guard guard =
+    Atomic.set pending_fallback_write guard
   let set_loss_marker_write_guard guard = Atomic.set loss_marker_write guard
   let set_loss_marker_fallback_write_guard guard =
     Atomic.set loss_marker_fallback_write guard

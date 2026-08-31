@@ -22,8 +22,10 @@ val enqueue : base_path:string -> Tool_result.result -> unit
     blocking the tool completion path. A record whose disk append fails stays
     inside the same capacity bound and is retried before newer records. The
     background writer applies a bounded retry delay rather than spinning while
-    storage remains unavailable. If pending publication fails, the record stays
-    in the memory queue and the failure is visible in [persistence_snapshot]. *)
+    storage remains unavailable. If the bulk-data pending publication fails,
+    [enqueue] attempts an independent runtime-state pending file under [.masc]
+    before falling back to memory only. Both failures remain visible in
+    [persistence_snapshot]. *)
 
 type loss_marker_source =
   [ `Bulk_data
@@ -36,8 +38,10 @@ type hydrate_report = {
   invalid_records : int;
   pruned_files : int;
   recovered_pending_records : int;
+  recovered_fallback_pending_records : int;
   deduplicated_pending_records : int;
   invalid_pending_files : int;
+  invalid_fallback_pending_files : int;
   invalid_loss_marker_sources : loss_marker_source list;
 }
 
@@ -51,11 +55,13 @@ type persistence_snapshot = {
   in_flight_records : int;
   spooling_records : int;
   spool_backed_queue_depth : int;
+  fallback_spool_backed_queue_depth : int;
   queue_capacity : int;
   queue_high_watermark : int;
   queue_full_dropped_records : int;
   append_failed_records : int;
   spool_write_failed_records : int;
+  spool_fallback_write_failed_records : int;
   spool_delete_failed_records : int;
   loss_marker_write_failed_records : int;
   loss_marker_fallback_write_failed_records : int;
@@ -67,6 +73,7 @@ type persistence_snapshot = {
   last_flush_at_unix : float option;
   last_append_error : string option;
   last_spool_error : string option;
+  last_spool_fallback_error : string option;
   last_loss_marker_error : string option;
   last_loss_marker_fallback_error : string option;
 }
@@ -75,8 +82,9 @@ val persistence_snapshot : unit -> persistence_snapshot
 (** Current-process observation of the bounded persistence queue and writer.
     [queue_depth] includes ready, retry, in-flight, and still-publishing spool
     records. [spool_backed_queue_depth] is the subset already represented by
-    an atomic pending file. Counters start at zero on process start and are not
-    hydrated from JSONL.
+    an atomic pending file; [fallback_spool_backed_queue_depth] is the subset
+    stored under the independent runtime-state root. Counters start at zero on
+    process start and are not hydrated from JSONL.
 
     [append_failed_records] counts failed append attempts; the same retained
     record can contribute more than once while storage remains unavailable. *)
@@ -155,6 +163,9 @@ module For_testing : sig
     [ `High_watermark | `Timer ]
 
   val set_pending_write_guard :
+    (string -> string -> (unit, string) result) -> unit
+
+  val set_pending_fallback_write_guard :
     (string -> string -> (unit, string) result) -> unit
 
   val set_loss_marker_write_guard :

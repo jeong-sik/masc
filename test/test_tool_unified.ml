@@ -78,9 +78,15 @@ let () =
               let _ = persistence |> member "in_flight_records" |> to_int in
               let _ = persistence |> member "spooling_records" |> to_int in
               let _ = persistence |> member "spool_backed_queue_depth" |> to_int in
+              let _ =
+                persistence |> member "fallback_spool_backed_queue_depth" |> to_int
+              in
               let _ = persistence |> member "queue_full_dropped_records" |> to_int in
               let _ = persistence |> member "append_failed_records" |> to_int in
               let _ = persistence |> member "spool_write_failed_records" |> to_int in
+              let _ =
+                persistence |> member "spool_fallback_write_failed_records" |> to_int
+              in
               let _ = persistence |> member "spool_delete_failed_records" |> to_int in
               let _ = persistence |> member "loss_marker_write_failed_records" |> to_int in
               let _ =
@@ -100,6 +106,10 @@ let () =
                 "missing last spool error remains null"
                 true
                 (persistence |> member "last_spool_error" = `Null);
+              check bool
+                "missing last spool fallback error remains null"
+                true
+                (persistence |> member "last_spool_fallback_error" = `Null);
               check bool
                 "missing last loss marker error remains null"
                 true

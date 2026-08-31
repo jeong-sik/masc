@@ -1330,6 +1330,11 @@ let add_routes ~sw ~clock router =
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
              let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+             (* NDT-OK: the dispatch-boundary clock the tool contract takes
+                as [start_time] — the same reading the cancel route above and
+                the MCP dispatch take at their boundaries. It times the call
+                and anchors an absent [requested_at_unix]; no deterministic
+                branch reads it. *)
              let start_time = Unix.gettimeofday () in
              let result =
                Tool_schedule.handle_create

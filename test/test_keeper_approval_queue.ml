@@ -1771,6 +1771,91 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
+let test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-pre-effect-replay-failure" in
+  let input = `Assoc [ "target", `String "unavailable-sandbox" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let approval_id = submit ~base_path ~keeper_name ~input in
+       (match
+          aq_resolve
+            ~base_path
+            ~id:approval_id
+            ~decision:Rule_types.Decision.Approve
+        with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let resolution =
+         durable_resolution_opt ~base_path ~keeper_name ~approval_id
+         |> require_some "approved resolution was not delivered"
+       in
+       (match
+          Masc.Keeper_gate_replay.For_testing.settle_pre_effect_failure
+            ~base_path
+            ~approval_id
+            ~operation:"external-effect"
+            ~detail:"sandbox unavailable before effect"
+        with
+        | Ok
+            { Masc.Keeper_gate_replay.outcome =
+                Failed { journal = Replay_journal_recorded; _ }
+            ; terminal_effect_receipt = None
+            } -> ()
+        | Ok execution ->
+          Alcotest.failf
+            "pre-effect failure did not settle durably: %s"
+            (Masc.Keeper_gate_replay.outcome_to_string execution.outcome)
+        | Error detail -> Alcotest.fail detail);
+       (match AQ.approved_resolution_delivery ~base_path ~id:approval_id with
+        | Ok
+            { state = AQ.Resolution_consumed
+            ; replay_outcome = Some (AQ.Replay_failed _)
+            ; _
+            } -> ()
+        | Ok _ -> Alcotest.fail "pre-effect failure left an actionable grant"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       Alcotest.(check bool)
+         "failed replay is visible in chat"
+         true
+         (Chat_store.approval_lifecycle_phase_present
+            ~base_dir:base_path
+            ~keeper_name
+            ~approval_id
+            ~phase:Chat_store.Approval_replay_failed);
+       (match
+          AQ.ensure_settled_continuation_chat_projection
+            ~base_path
+            ~keeper_name
+            ~resolution
+        with
+        | Ok AQ.Continuation_projection_recorded -> ()
+        | Ok AQ.Continuation_projection_not_ready ->
+          Alcotest.fail "terminal failure did not unblock continuation"
+        | Error detail -> Alcotest.fail detail);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       (match AQ.approved_resolution_delivery ~base_path ~id:approval_id with
+        | Ok
+            { state = AQ.Resolution_consumed
+            ; replay_outcome = Some (AQ.Replay_failed _)
+            ; _
+            } -> ()
+        | Ok _ -> Alcotest.fail "restart revived the failed replay grant"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       Alcotest.(check bool)
+         "continuation receipt survives restart"
+         true
+         (AQ.continuation_chat_projection_present
+            ~base_path
+            ~keeper_name
+            ~approval_id))
+;;
+
 let test_exact_binding_codec_validates_entry_identity () =
   let base_path = temp_dir () in
   Fun.protect
@@ -4853,6 +4938,10 @@ let () =
             "cycle grant binds origin and is consumed once"
             `Quick
             test_cycle_grant_uses_exact_effect_and_is_consumed_once
+        ; Alcotest.test_case
+            "pre-effect replay failure retires grant and continues"
+            `Quick
+            test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation
         ; Alcotest.test_case
             "exact binding codec validates identity and current causes"
             `Quick

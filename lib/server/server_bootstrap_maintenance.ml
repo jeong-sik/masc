@@ -884,36 +884,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          in
          if rl_reaped > 0
          then Log.Server.info "Reaped %d stale rate-limit buckets" rl_reaped;
-         (* Keeper sandbox: remove Docker containers when owner_pid is dead,
-             the container is stopped, or its explicit ttl_sec has elapsed.
-             Containers without an explicit TTL do not expire by age. Throttled by
-             MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC (default 5min); this
-             loop ticks faster but the helper short-circuits when called too
-             soon. *)
-         (match
-            Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-              ~command_available:Executable_path.command_available
-              ~timeout_sec:
-                (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
-              ()
-          with
-          | None -> ()
-          | Some (Keeper_sandbox_runtime.Cleanup_skipped_command_unavailable command) ->
-            Log.Server.info
-              "Sandbox cleanup skipped: Docker CLI is not available on PATH (%s)"
-              command
-          | Some (Keeper_sandbox_runtime.Cleanup_completed result) ->
-            if result.removed > 0 || result.already_absent > 0 || result.errors <> []
-            then (
-              Log.Server.info
-                "Sandbox cleanup: scanned=%d removed=%d already_absent=%d errors=%d"
-                result.scanned
-                result.removed
-                result.already_absent
-                (List.length result.errors);
-              List.iter
-                (fun err -> Log.Server.warn "Sandbox cleanup error: %s" err)
-                result.errors));
          (* Periodic JSONL prune: every 24h, clean dated JSONL files *)
          let now = Unix.gettimeofday () in
          if now -. !last_prune >= Masc_time_constants.day

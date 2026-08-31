@@ -108,9 +108,6 @@ let test_defaults_pinned () =
   check bool "Hardening.require_userns default" false
     (S.Hardening.require_userns ());
   (* Cleanup *)
-  check bool "Cleanup.enabled default" true (S.Cleanup.enabled ());
-  check approx "Cleanup.interval_sec default" 300.0
-    (S.Cleanup.interval_sec ());
   (* Runtime *)
   check string "Runtime.docker_image default" "masc-keeper-sandbox:local"
     (S.Runtime.docker_image ());

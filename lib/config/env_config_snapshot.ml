@@ -251,10 +251,6 @@ let keeper_sandbox_entries =
       "Fail closed unless Docker reports rootless mode";
     entry ~default:"false" "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
       "Fail closed unless Docker reports userns support";
-    entry ~default:"true" "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
-      "Best-effort cleanup for stale MASC keeper sandbox containers";
-    entry ~default:"300" "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
-      "Minimum seconds between automatic keeper sandbox cleanup sweeps";
   ]
 
 let internal_timer_entries =

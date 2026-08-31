@@ -68,58 +68,5 @@ let () =
                    (String.equal "none")
                    (String.split_on_char '-' name)))
         ] )
-    ; ( "sweep_decision"
-      , [ test_case "persistent survives a dead owner" `Quick
-            (fun () ->
-              check bool
-                "a running persistent container of a dead process stays"
-                false
-                (Masc.Keeper_sandbox_runtime.For_testing.should_remove_container
-                   ~now:1_000_000.0
-                   ~owner_pid:(Some 999_999)
-                   ~started_at:(Some 900_000.0)
-                   ~running:(Some true)
-                   ~ttl_sec:None
-                   ~container_kind:
-                     (Some Masc.Keeper_sandbox_runtime.persistent_container_kind)))
-        ; test_case "persistent is removed once stopped" `Quick
-            (fun () ->
-              check bool
-                "a stopped persistent container goes"
-                true
-                (Masc.Keeper_sandbox_runtime.For_testing.should_remove_container
-                   ~now:1_000_000.0
-                   ~owner_pid:(Some 999_999)
-                   ~started_at:(Some 900_000.0)
-                   ~running:(Some false)
-                   ~ttl_sec:None
-                   ~container_kind:
-                     (Some Masc.Keeper_sandbox_runtime.persistent_container_kind)))
-        ; test_case "turn container still follows its dead owner" `Quick
-            (fun () ->
-              check bool
-                "a running turn container of a dead process goes"
-                true
-                (Masc.Keeper_sandbox_runtime.For_testing.should_remove_container
-                   ~now:1_000_000.0
-                   ~owner_pid:(Some 999_999)
-                   ~started_at:(Some 900_000.0)
-                   ~running:(Some true)
-                   ~ttl_sec:None
-                   ~container_kind:
-                     (Some Masc.Keeper_sandbox_runtime.turn_container_kind)))
-        ; test_case "unlabelled kind still follows the old rules" `Quick
-            (fun () ->
-              check bool
-                "no kind and a dead owner goes (pre-existing default)"
-                true
-                (Masc.Keeper_sandbox_runtime.For_testing.should_remove_container
-                   ~now:1_000_000.0
-                   ~owner_pid:(Some 999_999)
-                   ~started_at:(Some 900_000.0)
-                   ~running:(Some true)
-                   ~ttl_sec:None
-                   ~container_kind:None))
-        ] )
     ]
 ;;

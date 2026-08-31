@@ -546,11 +546,6 @@ let run_docker_shell_command_with_status_internal
                       be a directory, not a file)"
                      cwd)
               | Ok () -> (
-                let _cleanup =
-                  Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-                    ~timeout_sec
-                    ()
-                in
                 match ensure_keeper_sandbox_runtime ~timeout_sec with
                 | Error err -> sandbox_error err
                 | Ok seccomp_args ->

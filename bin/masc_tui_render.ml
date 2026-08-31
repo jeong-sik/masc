@@ -2405,6 +2405,61 @@ let render_board_compose (state : state) =
   finish_frame_with_strip state ~surface_key:"board-compose" ~cursor:Frame_presenter.Hidden ~rows
     ~cols buf
 
+(* Rows the Board list spends before any post: the box, its title and the
+   hearth census under it, the column header and its rule, then the closing
+   rule, the border, the detail line and the footer. Nine until the census
+   line joined them; naming it is what lets a tenth reader check the
+   arithmetic instead of trusting a literal that two places have to agree
+   on. *)
+let board_list_chrome_rows = 10
+
+(* Every hearth on the board and how many posts it holds, with the one being
+   read marked. [f] walked this list and drew none of it, so narrowing was a
+   press into the dark: a reader could not see which hearths existed, which
+   held most of the board, or where in the cycle they had got to.
+
+   Counts come from the board's own census rather than the page on screen.
+   The page is one listing of fifty and the hearth it belongs to may hold
+   hundreds; a count taken from it would understate every hearth and
+   understate the crowded ones most. *)
+let board_hearth_census_line ~cols (state : state) =
+  match state.board_hearths with
+  | [] ->
+      Ansi.dim
+      ^ "  hearths: none counted yet \xe2\x80\x94 f narrows once they are"
+      ^ Ansi.reset
+  | census ->
+      let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
+      let entry (name, count) =
+        let selected = Option.equal String.equal state.board_hearth (Some name) in
+        let text = Printf.sprintf "%s %d" (Terminal_text.single_line name) count in
+        if selected then Ansi.reverse ^ text ^ Ansi.reset
+        else Ansi.dim ^ text ^ Ansi.reset
+      in
+      (* What fits, then how many it could not carry. The board here holds
+         eleven hearths and a narrow pane holds four of them; a row sized by
+         how many exist is a row that runs off the edge on the next one. *)
+      let rec take kept used = function
+        | [] -> (List.rev kept, 0)
+        | (name, count) :: rest ->
+            let width =
+              Message_layout.display_width
+                (Printf.sprintf "%s %d" name count)
+              + if kept = [] then 0 else 3
+            in
+            if used + width > max 8 (cols - 26) then
+              (List.rev kept, 1 + List.length rest)
+            else take ((name, count) :: kept) (used + width) rest
+      in
+      let kept, dropped = take [] 0 census in
+      let shown =
+        List.map entry kept |> String.concat (Ansi.dim ^ "  \xc2\xb7  " ^ Ansi.reset)
+      in
+      Printf.sprintf "  %shearths%s %s%s%s" Ansi.dim Ansi.reset shown
+        (if dropped = 0 then ""
+         else Printf.sprintf "%s  \xc2\xb7  +%d%s" Ansi.dim dropped Ansi.reset)
+        (Printf.sprintf "%s   %d posts%s" Ansi.dim total Ansi.reset)
+
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -2434,6 +2489,7 @@ let render_board_list (state : state) =
 
   box_top buf cols;
   box_line buf cols header;
+  box_line buf cols (board_hearth_census_line ~cols state);
   box_divider buf cols;
   (* The header is laid out by the same arithmetic as the rows below it,
      because a header laid out by its own is a header that stops describing
@@ -2465,13 +2521,13 @@ let render_board_list (state : state) =
      | Some err -> render_list_error err
      | None ->
          box_line buf cols (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset));
-    for _ = 1 to rows - 9 do
+    for _ = 1 to rows - board_list_chrome_rows do
       box_empty buf cols
     done
   end else begin
     Option.iter render_list_error board_list_error;
     let error_rows = if Option.is_some board_list_error then 1 else 0 in
-    let content_height = max 0 (rows - 9 - error_rows) in
+    let content_height = max 0 (rows - board_list_chrome_rows - error_rows) in
     let scroll_offset =
       if state.board_cursor >= content_height then
         state.board_cursor - content_height + 1

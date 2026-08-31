@@ -1259,6 +1259,14 @@ let fetch_board ~(host : string) ~(port : int) ~(sort_by : string)
   get_json ~host ~port
     ~path:("/api/v1/board?sort_by=" ^ sort_by ^ narrowing)
 
+(** Fetch /api/v1/board/hearths: every sub-board and how many posts sit in it,
+    counted over the whole board rather than over one listing page. The pane
+    cycles through these, and a vocabulary read off a page cannot offer a
+    hearth whose posts all fall outside it. *)
+let fetch_board_hearths ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/board/hearths"
+
 (** POST /api/v1/tools/masc_board_post. The draft follows the commit-message
     shape -- first line is the title, the rest is the body -- and the server
     stamps the author from the agent header, so the payload carries text

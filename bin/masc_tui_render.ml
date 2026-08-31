@@ -5993,6 +5993,68 @@ let keeper_message_layout_entries (state : state) ~keeper_name ~chat_cols =
   in
   layout_entries
 
+(* Where the pane has to scroll to put a message holding [query] on screen, and
+   which message that is.
+
+   Two numbers, because a caller needs both: the scroll to move to, and the
+   position to start the next search strictly older than. The scroll is
+   measured the only way it can be -- the physical rows the entries newer than
+   the match render to, at this pane's width, through the same layout the
+   frame draws. Counting messages instead would land somewhere else on every
+   conversation that wraps.
+
+   Newest first. A search over a conversation starts at what was just said and
+   walks back, which is also the direction [msg_scroll] counts.
+
+   [older_than] is a position in the same list, not an identity: the list is
+   rebuilt per call and a message cannot move within it while the pane is
+   parked, since rows only arrive at the newer end. A match at or newer than
+   it is skipped, so repeating a search walks rather than returning to the
+   newest match every time.
+
+   Measured over committed rows only, so a turn arriving while the operator
+   searches cannot move the answer. With one on screen the match lands that
+   turn's height above the bottom edge rather than on it -- context below a
+   result, and it settles to the exact position when the turn ends.
+
+   Pure. The renderer does not mutate state, and a search that scrolled the
+   pane itself would be the exception that ends that. *)
+let keeper_message_find_scroll (state : state) ~keeper_name ~query ~older_than =
+  let query = String.trim query in
+  if String.equal query "" then None
+  else
+    let _, cols = get_terminal_size () in
+    let chat_cols =
+      Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
+    in
+    let entries =
+      keeper_message_layout_entries state ~keeper_name ~chat_cols
+    in
+    let needle = String.lowercase_ascii query in
+    let count = List.length entries in
+    let ceiling = match older_than with None -> count | Some at -> at in
+    let matched =
+      List.filteri (fun index _ -> index < ceiling) entries
+      |> List.mapi (fun index (entry : Message_layout.entry) -> (index, entry))
+      |> List.rev
+      |> List.find_opt (fun (_, (entry : Message_layout.entry)) ->
+             Masc_tui_types.palette_contains ~needle entry.body)
+    in
+    match matched with
+    | None -> None
+    | Some (at, _) ->
+        (* Everything newer than the match, which is exactly what a scroll
+           position counts back over. *)
+        let newer = List.filteri (fun index _ -> index > at) entries in
+        let scroll =
+          Message_layout.total_rows
+            ~markdown:(cached_chat_markdown ~theme:(Chat_theme.snapshot ()))
+            ~origin:state.msg_origin_display
+            ~inner_width:(max 1 (framed_inner_width chat_cols))
+            newer
+        in
+        Some (scroll, at)
+
 let render_keeper_message (state : state) =
   (* The chat surface draws its own composer, so it keeps the whole terminal
      rather than reserving the shared row for a second one. *)

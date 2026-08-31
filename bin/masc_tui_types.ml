@@ -1688,6 +1688,15 @@ type state = {
     (board_post * board_comment list) Masc_tui_board_detail.t;
   mutable board_list_error: string option;
   mutable board_cursor: int;
+  mutable msg_find: string;
+      (** What [/find] was last given on this pane, or [""] before it is used.
+          Kept so the arg-less form continues the same search instead of
+          asking for the text again. *)
+  mutable msg_find_at: int option;
+      (** The index in the conversation of the message [/find] last landed on,
+          counted from the oldest. The next search starts strictly older than
+          it, which is what makes repeating [/find] walk backwards through the
+          matches rather than returning to the newest one. *)
   mutable board_sort: board_sort;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
@@ -2338,6 +2347,8 @@ let create_state
   board_detail = Masc_tui_board_detail.initial;
   board_list_error = None;
   board_cursor = 0;
+  msg_find = "";
+  msg_find_at = None;
   board_sort = Board_hot;
   board_scroll = 0;
   board_mode = Board_list;

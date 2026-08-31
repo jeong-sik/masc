@@ -199,6 +199,27 @@ type fusion_run_status =
       frs_error : string;
     }
 
+type fusion_run_stage =
+  | Fusion_stage_accepted
+  | Fusion_stage_panel of { frs_expected : int }
+  | Fusion_stage_judge of
+      { frs_expected : int
+      ; frs_answered : int
+      ; frs_failed : int
+      }
+  | Fusion_stage_computed of
+      { frs_expected : int
+      ; frs_answered : int
+      ; frs_failed : int
+      }
+  | Fusion_stage_recording_evidence of
+      { frs_expected : int
+      ; frs_answered : int
+      ; frs_failed : int
+      }
+  | Fusion_stage_completed
+  | Fusion_stage_failed
+
 type fusion_run = {
   fur_run_id : string;
   fur_keeper : string;
@@ -206,6 +227,9 @@ type fusion_run = {
   fur_topology : Fusion_types.fusion_topology;
   fur_started_at : float;
   fur_status : fusion_run_status;
+  fur_stage : fusion_run_stage;
+  fur_decision : string option;
+  fur_summary : string option;
 }
 
 type fusion_snapshot = {
@@ -4144,6 +4168,57 @@ let fusion_run_status_to_string = function
   | Fusion_completed -> "completed"
   | Fusion_failed _ -> "failed"
 
+let fusion_run_stage_to_string = function
+  | Fusion_stage_accepted -> "accepted"
+  | Fusion_stage_panel _ -> "panel"
+  | Fusion_stage_judge _ -> "judge"
+  | Fusion_stage_computed _ -> "computed"
+  | Fusion_stage_recording_evidence _ -> "recording evidence"
+  | Fusion_stage_completed -> "completed"
+  | Fusion_stage_failed -> "failed"
+
+let decode_fusion_progress_counts progress =
+  let* frs_expected = required_int_field progress "panel_expected" in
+  let* frs_answered = required_int_field progress "panel_answered" in
+  let* frs_failed = required_int_field progress "panel_failed" in
+  if frs_expected < 0 || frs_answered < 0 || frs_failed < 0 then
+    Error "fusion progress counts must be non-negative"
+  else if frs_answered + frs_failed <> frs_expected then
+    Error "fusion answered + failed counts must equal panel_expected"
+  else Ok (frs_expected, frs_answered, frs_failed)
+
+let decode_fusion_stage ~status ~stage ~progress =
+  match status, stage, progress with
+  | Fusion_running, "accepted", `Assoc _ -> Ok Fusion_stage_accepted
+  | Fusion_running, "panel", (`Assoc _ as progress) ->
+      let* frs_expected = required_int_field progress "panel_expected" in
+      if frs_expected < 0 then
+        Error "fusion panel_expected must be non-negative"
+      else Ok (Fusion_stage_panel { frs_expected })
+  | Fusion_running, "judge", (`Assoc _ as progress) ->
+      let* frs_expected, frs_answered, frs_failed =
+        decode_fusion_progress_counts progress
+      in
+      Ok (Fusion_stage_judge { frs_expected; frs_answered; frs_failed })
+  | Fusion_running, "computed", (`Assoc _ as progress) ->
+      let* frs_expected, frs_answered, frs_failed =
+        decode_fusion_progress_counts progress
+      in
+      Ok (Fusion_stage_computed { frs_expected; frs_answered; frs_failed })
+  | Fusion_running, "recording_evidence", (`Assoc _ as progress) ->
+      let* frs_expected, frs_answered, frs_failed =
+        decode_fusion_progress_counts progress
+      in
+      Ok
+        (Fusion_stage_recording_evidence
+           { frs_expected; frs_answered; frs_failed })
+  | Fusion_completed, "completed", `Null -> Ok Fusion_stage_completed
+  | Fusion_failed _, "failed", `Null -> Ok Fusion_stage_failed
+  | _ ->
+      Error
+        (Printf.sprintf "fusion status/stage/progress disagree: status=%s stage=%S"
+           (fusion_run_status_to_string status) stage)
+
 let decode_fusion_run json =
   let* fur_run_id = required_string_field json "run_id" in
   let* fur_keeper = required_string_field json "keeper" in
@@ -4166,6 +4241,22 @@ let decode_fusion_run json =
         Ok (Fusion_failed { frs_failure_code; frs_error })
     | other -> Error (Printf.sprintf "unknown fusion run status %S" other)
   in
+  let* stage = required_string_field json "stage" in
+  let* progress = required_member json "progress" in
+  let* fur_stage = decode_fusion_stage ~status:fur_status ~stage ~progress in
+  let* fur_decision = optional_string_field json "decision" in
+  let* fur_summary = optional_string_field json "summary" in
+  let* () =
+    match fur_status, fur_decision, fur_summary with
+    | Fusion_completed, None, None
+    | Fusion_completed, Some _, Some _
+    | Fusion_running, None, None
+    | Fusion_failed _, None, None -> Ok ()
+    | Fusion_completed, (Some _ | None), (Some _ | None) ->
+        Error "fusion completion decision and summary must appear together"
+    | (Fusion_running | Fusion_failed _), (Some _ | None), (Some _ | None) ->
+        Error "only a completed Fusion run may carry decision and summary"
+  in
   Ok
     { fur_run_id
     ; fur_keeper
@@ -4173,6 +4264,9 @@ let decode_fusion_run json =
     ; fur_topology
     ; fur_started_at
     ; fur_status
+    ; fur_stage
+    ; fur_decision
+    ; fur_summary
     }
 
 let decode_fusion_snapshot json =

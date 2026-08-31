@@ -90,6 +90,34 @@ let test_persist_failure_detail () =
   | None -> fail "expected replayed run"
 ;;
 
+let test_persist_success_summary () =
+  let path = fresh_path "-summary.jsonl" in
+  let t = R.create ~path () in
+  R.register_running t ~run_id:"r-summary" ~keeper:"k" ~preset:"p"
+    ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.mark_completed t ~run_id:"r-summary"
+    ~outcome:
+      (R.Succeeded_with_summary
+         { decision = "recommend — ship"; summary = "The panel reached consensus." });
+  let content = Fs_compat.load_file path in
+  let event2 = parse (List.nth (String.split_on_char '\n' content) 1) in
+  let completion = object_ event2 "completion" in
+  check string "persisted decision" "recommend — ship" (str completion "decision");
+  check string "persisted summary" "The panel reached consensus."
+    (str completion "summary");
+  let replayed = R.replay path in
+  match R.get replayed ~run_id:"r-summary" with
+  | Some
+      { R.status =
+          R.Completed (R.Succeeded_with_summary { decision; summary })
+      ; _
+      } ->
+    check string "replayed decision" "recommend — ship" decision;
+    check string "replayed summary" "The panel reached consensus." summary
+  | Some _ -> fail "expected replayed success summary"
+  | None -> fail "expected replayed run"
+;;
+
 (* (2) Replay prunes completed runs to the newest [max_completed_retained]
    without resurrecting register-only rows as live work after restart. *)
 let test_replay_prunes_completed () =
@@ -225,6 +253,8 @@ let () =
     [ ( "rfc-0266-phase-d"
       , [ test_case "register+complete append JSONL" `Quick test_persist_register_complete
         ; test_case "failure detail survives replay" `Quick test_persist_failure_detail
+        ; test_case "success summary survives replay" `Quick
+            test_persist_success_summary
         ; test_case
             "replay prunes completed and drops stale running runs"
             `Quick

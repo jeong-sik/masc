@@ -9,6 +9,14 @@ let render_decision (d : Fusion_types.judge_decision) : string =
   | Fusion_types.Insufficient { missing_for_decision } ->
     Printf.sprintf "insufficient — missing: %s" (String.concat ", " missing_for_decision)
 
+let registry_preview ~max_bytes text =
+  text
+  |> String.map (function '\n' | '\r' | '\t' -> ' ' | char -> char)
+  |> String.trim
+  |> String_util.utf8_safe ~max_bytes ~suffix:"..."
+  |> String_util.to_string
+;;
+
 let render_judge (j : Fusion_types.judge_synthesis) : string =
   (* 명시적 구조분해 — judge_synthesis에 필드가 추가되면 이 패턴이 컴파일 에러를
      내어 렌더 누락을 강제 감지한다(레코드 dot-access는 미사용 필드를 경고하지
@@ -597,7 +605,11 @@ let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~j
          match judge with
          | Ok j ->
            Fusion_run_registry.mark_completed registry ~run_id
-             ~outcome:Fusion_run_registry.Succeeded;
+             ~outcome:
+               (Fusion_run_registry.Succeeded_with_summary
+                  { decision = registry_preview ~max_bytes:160 (render_decision j.decision)
+                  ; summary = registry_preview ~max_bytes:240 j.resolved_answer
+                  });
            broadcast_run_status ~registry ~run_id;
            wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel
              ~terminal:

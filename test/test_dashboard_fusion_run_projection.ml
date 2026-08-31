@@ -101,6 +101,27 @@ let test_list_and_unknown_detail_responses () =
     "list run id"
     "fusion-list-run"
     Yojson.Safe.Util.(list_json |> member "runs" |> index 0 |> member "run_id" |> to_string);
+  check string
+    "new run exposes accepted stage"
+    "accepted"
+    Yojson.Safe.Util.(list_json |> member "runs" |> index 0 |> member "stage" |> to_string);
+  check json
+    "accepted stage has an explicit empty progress object"
+    (`Assoc [])
+    Yojson.Safe.Util.(list_json |> member "runs" |> index 0 |> member "progress");
+  Fusion_run_registry.mark_progress registry ~run_id:"fusion-list-run"
+    ~progress:
+      (Fusion_run_registry.Progress_judge_running
+         { expected = 3; answered = 2; failed = 1 });
+  let progressing_json =
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
+      ~registry
+  in
+  let progressing = Yojson.Safe.Util.(progressing_json |> member "runs" |> index 0) in
+  check string "list exposes live judge stage" "judge"
+    Yojson.Safe.Util.(progressing |> member "stage" |> to_string);
+  check int "list exposes answered count" 2
+    Yojson.Safe.Util.(progressing |> member "progress" |> member "panel_answered" |> to_int);
   let status, json =
     Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
       ~registry
@@ -246,7 +267,9 @@ let test_detail_uses_exact_typed_board_origin () =
   Fusion_run_registry.mark_completed
     registry
     ~run_id:recorded_run_id
-    ~outcome:Fusion_run_registry.Succeeded;
+    ~outcome:
+      (Fusion_run_registry.Succeeded_with_summary
+         { decision = "answer"; summary = "answer-sentinel" });
   let recorded_status, recorded_json =
     Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
       ~registry
@@ -263,6 +286,10 @@ let test_detail_uses_exact_typed_board_origin () =
     "exact indexed post is returned"
     (Board.Post_id.to_string post.id)
     Yojson.Safe.Util.(post_json |> member "id" |> to_string);
+  check string "completed decision is projected" "answer"
+    Yojson.Safe.Util.(recorded_json |> member "run" |> member "decision" |> to_string);
+  check string "completed summary is projected" "answer-sentinel"
+    Yojson.Safe.Util.(recorded_json |> member "run" |> member "summary" |> to_string);
   check string
     "returned post keeps typed run origin"
     recorded_run_id

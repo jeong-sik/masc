@@ -735,27 +735,34 @@ to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 ### Fusion
 
-The retained Fusion run registry is the list. It shows only facts that list
-actually owns: start time, lifecycle status, keeper, preset, topology, and run
-id. The cursor follows run id across refreshes, so a newly sorted row cannot
-silently change what `Enter` opens.
+The retained Fusion run registry is the list. While a run is active, `STATE`
+shows the exact process-local stage: `accepted`, `panel(N)`, `judge(A/F)`,
+`computed(A/F)`, or `recording(A/F)`. A successful terminal row also carries a
+bounded decision and resolved-answer preview when the current producer wrote
+them; replayed legacy rows remain valid without that preview. The cursor
+follows run id across refreshes, so a newly sorted row cannot silently change
+what `Enter` opens.
 
 ```
  MASC Fusion (19 runs)  18:31:04  [connected]
-   TIME     STATUS    KEEPER           PRESET     TOPOLOGY   RUN
- > 16:42:11 completed rw-e0-r9         trio       simple     kmsg-386bed...
-   16:40:07 failed    analyst          trio       simple     kmsg-942ab1...
+   TIME     AGE     STATE              KEEPER           PRESET     RUN
+ > 16:42:11 14s     judge(2/1)         rw-e0-r9         trio       kmsg-386bed...
+   16:40:07 2m      completed          analyst          trio       kmsg-942ab1...
   j/k:move  Enter:detail  r:refresh  Tab:next  q:quit  | Port: 8935
 ```
 
 The detail is a separate exact read. Lifecycle remains the Registry fact;
 evidence comes only from a Board post whose typed origin is
-`source=fusion` with the same `fusion_run_id`. `recorded` puts the judge result,
-resolved answer, and reason first, followed by the question and every panel
-answer or failure in server order. The panel header summarizes answered/failed
-counts and tokens; it does not calculate a majority, minimum answer count,
-timeout verdict, cost verdict, or any other local conclusion. `PgUp`/`PgDn`
-scroll a page at a time.
+`source=fusion` with the same `fusion_run_id`. The header repeats the current
+stage and its panel counts. `recorded` puts the judge result, resolved answer,
+and reason first, followed by the question and every panel answer or failure in
+server order. Question, successful panel answers, judge resolution, reason, and
+the terminal summary use the TUI Markdown renderer; typed failures stay plain
+so their exact reason text is not reinterpreted. The panel header summarizes
+answered/failed counts and tokens; it does not calculate a majority, minimum
+answer count, timeout verdict, cost verdict, or any other local conclusion.
+The open list and exact detail refresh on the existing two-second dashboard
+cadence; `PgUp`/`PgDn` scroll a page at a time.
 
 `pending` is legal only while the Registry row is running. `absent` means the
 retained completed/failed run has no current Board projection; it does not

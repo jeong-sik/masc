@@ -1,5 +1,9 @@
 type outcome =
   | Succeeded
+  | Succeeded_with_summary of
+      { decision : string
+      ; summary : string
+      }
   | Failed of
       { reason : string
       ; code : string
@@ -9,6 +13,25 @@ type run_status =
   | Running
   | Completed of outcome
 
+type progress =
+  | Progress_accepted
+  | Progress_panel_running of { expected : int }
+  | Progress_judge_running of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
+  | Progress_computed of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
+  | Progress_recording_evidence of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
+
 type run =
   { run_id : string
   ; keeper : string
@@ -16,6 +39,7 @@ type run =
   ; topology : Fusion_types.fusion_topology
   ; started_at : float
   ; status : run_status
+  ; progress : progress option
   }
 
 module Payload = struct
@@ -68,6 +92,12 @@ module Payload = struct
 
   let completion_to_yojson = function
     | Succeeded -> `Assoc [ "outcome", `String "succeeded" ]
+    | Succeeded_with_summary { decision; summary } ->
+      `Assoc
+        [ "outcome", `String "succeeded"
+        ; "decision", `String decision
+        ; "summary", `String summary
+        ]
     | Failed { reason; code } ->
       `Assoc
         [ "outcome", `String "failed"
@@ -83,9 +113,21 @@ module Payload = struct
     match label with
     | "succeeded" ->
       let* () =
-        Run_registry_core.Json.exact_fields ~required:[ "outcome" ] fields
+        Run_registry_core.Json.exact_fields ~required:[ "outcome" ]
+          ~optional:[ "decision"; "summary" ] fields
       in
-      Ok Succeeded
+      let* decision =
+        Run_registry_core.Json.optional_string_field "decision" fields
+      in
+      let* summary =
+        Run_registry_core.Json.optional_string_field "summary" fields
+      in
+      (match decision, summary with
+       | None, None -> Ok Succeeded
+       | Some decision, Some summary ->
+         Ok (Succeeded_with_summary { decision; summary })
+       | Some _, None | None, Some _ ->
+         Error "succeeded fusion completion requires decision and summary together")
     | "failed" ->
       let* () =
         Run_registry_core.Json.exact_fields
@@ -101,31 +143,65 @@ end
 
 module Store = Run_registry_core.Make (Payload)
 
-type t = Store.t
+type t =
+  { store : Store.t
+  ; progress_by_run : (string, progress) Hashtbl.t
+  ; progress_mutex : Stdlib.Mutex.t
+  }
 
 let storage_filename = "fusion-runs.jsonl"
-let create = Store.create
-let replay = Store.replay
+let create ?path () =
+  { store = Store.create ?path ()
+  ; progress_by_run = Hashtbl.create 16
+  ; progress_mutex = Stdlib.Mutex.create ()
+  }
+;;
+
+let replay path =
+  { store = Store.replay path
+  ; progress_by_run = Hashtbl.create 16
+  ; progress_mutex = Stdlib.Mutex.create ()
+  }
+;;
+
 let max_completed_retained = Store.max_completed_retained
-let cut_replay_log = Store.cut_replay_log
+let cut_replay_log ~execute path = Store.cut_replay_log ~execute path
 
 let register_running t ~run_id ~keeper ~preset ~topology ~started_at =
-  Store.register t ~id:run_id ~started_at
-    ~registration:{ Payload.keeper; preset; topology }
+  Store.register t.store ~id:run_id ~started_at
+    ~registration:{ Payload.keeper; preset; topology };
+  Stdlib.Mutex.protect t.progress_mutex (fun () ->
+    Hashtbl.replace t.progress_by_run run_id Progress_accepted)
+;;
+
+let mark_progress t ~run_id ~progress =
+  match Store.get t.store ~id:run_id with
+  | Some { status = Store.Running; _ } ->
+    Stdlib.Mutex.protect t.progress_mutex (fun () ->
+      Hashtbl.replace t.progress_by_run run_id progress)
+  | Some { status = Store.Completed _; _ } | None -> ()
 ;;
 
 let mark_completed t ~run_id ~outcome =
-  match Store.complete t ~id:run_id ~completion:outcome with
-  | `Completed -> ()
+  match Store.complete t.store ~id:run_id ~completion:outcome with
+  | `Completed ->
+    Stdlib.Mutex.protect t.progress_mutex (fun () ->
+      Hashtbl.remove t.progress_by_run run_id)
   | `Unknown -> ()
   | `Persistence_failed failure -> raise (Sys_error failure.detail)
 ;;
 
-let run_of_entry (entry : Store.entry) =
-  let status =
+let run_of_entry t (entry : Store.entry) =
+  let status, progress =
     match entry.status with
-    | Store.Running -> Running
-    | Store.Completed outcome -> Completed outcome
+    | Store.Running ->
+      let progress =
+        Stdlib.Mutex.protect t.progress_mutex (fun () ->
+          Hashtbl.find_opt t.progress_by_run entry.id)
+        |> Option.value ~default:Progress_accepted
+      in
+      Running, Some progress
+    | Store.Completed outcome -> Completed outcome, None
   in
   { run_id = entry.id
   ; keeper = entry.registration.keeper
@@ -133,19 +209,70 @@ let run_of_entry (entry : Store.entry) =
   ; topology = entry.registration.topology
   ; started_at = entry.started_at
   ; status
+  ; progress
   }
 ;;
 
-let list_runs t = List.map run_of_entry (Store.list_entries t)
-let get t ~run_id = Option.map run_of_entry (Store.get t ~id:run_id)
+let list_runs t =
+  let entries = Store.list_entries t.store in
+  Stdlib.Mutex.protect t.progress_mutex (fun () ->
+    Hashtbl.filter_map_inplace
+      (fun run_id progress ->
+         if
+           List.exists
+             (fun (entry : Store.entry) ->
+                String.equal entry.id run_id
+                &&
+                match entry.status with
+                | Store.Running -> true
+                | Store.Completed _ -> false)
+             entries
+         then Some progress
+         else None)
+      t.progress_by_run);
+  List.map (run_of_entry t) entries
+;;
+
+let get t ~run_id = Option.map (run_of_entry t) (Store.get t.store ~id:run_id)
 
 let status_label = function
   | Running -> "running"
-  | Completed Succeeded -> "completed"
+  | Completed (Succeeded | Succeeded_with_summary _) -> "completed"
   | Completed (Failed _) -> "failed"
 ;;
 
+let progress_stage = function
+  | Progress_accepted -> "accepted"
+  | Progress_panel_running _ -> "panel"
+  | Progress_judge_running _ -> "judge"
+  | Progress_computed _ -> "computed"
+  | Progress_recording_evidence _ -> "recording_evidence"
+;;
+
+let progress_to_yojson = function
+  | Progress_accepted -> `Assoc []
+  | Progress_panel_running { expected } ->
+    `Assoc [ "panel_expected", `Int expected ]
+  | Progress_judge_running { expected; answered; failed }
+  | Progress_computed { expected; answered; failed }
+  | Progress_recording_evidence { expected; answered; failed } ->
+    `Assoc
+      [ "panel_expected", `Int expected
+      ; "panel_answered", `Int answered
+      ; "panel_failed", `Int failed
+      ]
+;;
+
 let run_to_yojson run =
+  let stage, progress_json =
+    match run.status, run.progress with
+    | Running, Some progress -> progress_stage progress, progress_to_yojson progress
+    | Running, None -> "accepted", `Assoc []
+    | Completed (Succeeded | Succeeded_with_summary _), None ->
+      "completed", `Null
+    | Completed (Failed _), None -> "failed", `Null
+    | Completed _, Some _ -> "completed", `Null
+  in
   let base =
     [ "run_id", `String run.run_id
     ; "keeper", `String run.keeper
@@ -153,15 +280,19 @@ let run_to_yojson run =
     ; "topology", `String (Fusion_types.fusion_topology_to_string run.topology)
     ; "started_at", `Float run.started_at
     ; "status", `String (status_label run.status)
+    ; "stage", `String stage
+    ; "progress", progress_json
     ]
   in
-  let failure_fields =
+  let outcome_fields =
     match run.status with
     | Running | Completed Succeeded -> []
+    | Completed (Succeeded_with_summary { decision; summary }) ->
+      [ "decision", `String decision; "summary", `String summary ]
     | Completed (Failed { reason; code }) ->
       [ "error", `String reason; "failure_code", `String code ]
   in
-  `Assoc (base @ failure_fields)
+  `Assoc (base @ outcome_fields)
 ;;
 
 type global_install_error = Already_installed

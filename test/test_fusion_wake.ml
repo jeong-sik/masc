@@ -595,9 +595,18 @@ let test_emit_success_projects_board_chat_and_registry () =
     match Fusion_run_registry.get registry ~run_id with
     | Some
         { Fusion_run_registry.status =
+            Fusion_run_registry.Completed
+              (Fusion_run_registry.Succeeded_with_summary { decision; summary })
+        ; _
+        } ->
+      check string "registry decision preview" ("answer — " ^ resolved_answer)
+        decision;
+      check string "registry resolved-answer preview" resolved_answer summary
+    | Some
+        { Fusion_run_registry.status =
             Fusion_run_registry.Completed Fusion_run_registry.Succeeded
         ; _
-        } -> ()
+        } -> fail "current sink success must publish its semantic summary"
     | Some
         { Fusion_run_registry.status =
             Fusion_run_registry.Completed (Fusion_run_registry.Failed _)
@@ -1050,9 +1059,18 @@ let test_tool_handle_async_success_projects_running_then_completed () =
     match Fusion_run_registry.get registry ~run_id with
     | Some
         { Fusion_run_registry.status =
+            Fusion_run_registry.Completed
+              (Fusion_run_registry.Succeeded_with_summary { decision; summary })
+        ; _
+        } ->
+      check string "async registry decision preview"
+        ("answer — " ^ resolved_answer) decision;
+      check string "async registry resolved-answer preview" resolved_answer summary
+    | Some
+        { Fusion_run_registry.status =
             Fusion_run_registry.Completed Fusion_run_registry.Succeeded
         ; _
-        } -> ()
+        } -> fail "current async sink success must publish its semantic summary"
     | Some
         { Fusion_run_registry.status =
             Fusion_run_registry.Completed (Fusion_run_registry.Failed _)

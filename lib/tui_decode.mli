@@ -902,6 +902,31 @@ type fusion_run_status =
 
 val fusion_run_status_to_string : fusion_run_status -> string
 
+(** Typed live computation stage. Panel counts are producer facts; completed
+    and failed are terminal stage/status pairs rather than inferred progress. *)
+type fusion_run_stage =
+  | Fusion_stage_accepted
+  | Fusion_stage_panel of { frs_expected : int }
+  | Fusion_stage_judge of
+      { frs_expected : int
+      ; frs_answered : int
+      ; frs_failed : int
+      }
+  | Fusion_stage_computed of
+      { frs_expected : int
+      ; frs_answered : int
+      ; frs_failed : int
+      }
+  | Fusion_stage_recording_evidence of
+      { frs_expected : int
+      ; frs_answered : int
+      ; frs_failed : int
+      }
+  | Fusion_stage_completed
+  | Fusion_stage_failed
+
+val fusion_run_stage_to_string : fusion_run_stage -> string
+
 type fusion_run = {
   fur_run_id : string;
   fur_keeper : string;
@@ -909,6 +934,13 @@ type fusion_run = {
   fur_topology : Fusion_types.fusion_topology;
   fur_started_at : float;
   fur_status : fusion_run_status;
+  fur_stage : fusion_run_stage;
+  (** Process-local stage for running rows, or the exact terminal stage. *)
+  fur_decision : string option;
+  fur_summary : string option;
+  (** Bounded semantic terminal preview. Both fields are present together only
+      for successes written by the current producer; legacy success rows have
+      neither. *)
 }
 
 type fusion_snapshot = {

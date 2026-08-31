@@ -4705,15 +4705,23 @@ def memory_journal_timeline_interaction() -> Interaction:
         )
         frame_end = output.find(FRAME_END, last_row_end) + len(FRAME_END)
         visible = bytes(output[start:frame_end])
+        # The kind tag carries its own colour, so SGR lands between the
+        # bracket, the word inside it, and the text after it. A flat byte
+        # needle spanning that boundary cannot match a coloured tag -- the two
+        # below were written while the tag was drawn in the body's colour.
+        tag = rb"(?:\x1b\[[0-9;]*m)*"
         for needle in (
-            b"[fact] the Runtime probe shares",
+            re.compile(
+                rb"\[" + tag + rb"fact" + tag + rb"\]" + tag
+                + rb" the Runtime probe shares"
+            ),
             b"one provider endpoint",
-            b"[constraint] probe",
+            re.compile(rb"\[" + tag + rb"constraint" + tag + rb"\]" + tag + rb" probe"),
             b"every model separately",
             b"drop memory-old-probe-rule",
             b"superseded by provider grouping",
         ):
-            if needle not in visible:
+            if find_needle(visible, needle) < 0:
                 raise AssertionError(f"Memory timeline did not draw {needle!r}: {visible!r}")
 
         # The changed facts ride a ```diff fence, which is what colours the two

@@ -4789,9 +4789,13 @@ let seek_in_chat state ~target ~restart =
       notice ~role:Message_error "/find needs a Keeper selected on the roster"
   | Some keeper_name -> (
       let older_than = if restart then None else state.msg_find_at in
+      (* Normalised here, at the door the operator's text comes through.
+         [msg_find] keeps what they typed, because that is what the pane
+         echoes back to them. *)
       match
         Masc_tui_render.keeper_message_find_scroll state ~keeper_name
-          ~query:state.msg_find ~older_than
+          ~needle:(String.lowercase_ascii (String.trim state.msg_find))
+          ~older_than
       with
       | Some (scroll, at) ->
           state.msg_find_at <- Some at;

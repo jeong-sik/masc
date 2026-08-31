@@ -6017,11 +6017,15 @@ let keeper_message_layout_entries (state : state) ~keeper_name ~chat_cols =
    turn's height above the bottom edge rather than on it -- context below a
    result, and it settles to the exact position when the turn ends.
 
+   [needle] is trimmed and lower-cased by its caller, which is where the
+   operator's text enters -- the same contract {!Masc_tui_types.palette_contains}
+   states, and it keeps case folding out of a module whose one rule about
+   [String.lowercase_ascii] is that it does not appear here.
+
    Pure. The renderer does not mutate state, and a search that scrolled the
    pane itself would be the exception that ends that. *)
-let keeper_message_find_scroll (state : state) ~keeper_name ~query ~older_than =
-  let query = String.trim query in
-  if String.equal query "" then None
+let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than =
+  if String.equal needle "" then None
   else
     let _, cols = get_terminal_size () in
     let chat_cols =
@@ -6030,7 +6034,6 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~query ~older_than =
     let entries =
       keeper_message_layout_entries state ~keeper_name ~chat_cols
     in
-    let needle = String.lowercase_ascii query in
     let count = List.length entries in
     let ceiling = match older_than with None -> count | Some at -> at in
     let matched =

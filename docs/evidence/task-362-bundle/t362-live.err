@@ -1,0 +1,6 @@
+[2026-09-01 04:58:49] [INFO] [MCP] Tag registry initialized: 126 tools registered
+[2026-09-01 04:58:49] [INFO] [Misc] model_catalog: deployment overlay /Users/dancer/me/.masc/config/agent-core-models-overlay.toml installed onto embedded catalog
+probing 1 runtime(s) x 1 projected tool(s) x 1 attempt(s)
+[2026-09-01 04:58:52] [INFO] [runtime_agent] Claude Code subscription turn starting (subscription_type=team)
+[2026-09-01 04:59:03] [INFO] [runtime_agent] Claude Code subscription turn completed (session_id=01a05967-3a17-7000-850e-6437ad2a537a turn_id=c6750edf-c12c-4608-9ccd-e8f34c6d00b1 model=claude-haiku-4-5-20251001)
+  claude_code.claude-haiku-4-5                   keeper_time_now        #1  invoked keeper_time_now in 13.5s

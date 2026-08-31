@@ -9,6 +9,7 @@ let post ?hearth id =
   ; bp_votes = 0
   ; bp_comment_count = 0
   ; bp_created_at = "2026-08-31T00:00:00Z"
+  ; bp_updated_at = 0.
   ; bp_hearth = hearth
   ; bp_kind = None
   }

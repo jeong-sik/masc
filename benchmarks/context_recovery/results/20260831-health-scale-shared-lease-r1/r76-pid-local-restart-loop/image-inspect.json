@@ -1,0 +1,22 @@
+{
+  "Id": "sha256:027aaa432abca63d973272b2964246b93e99f9922e959605df0c48ff31ea2b17",
+  "RepoDigests": [
+    "masc-oneclick@sha256:027aaa432abca63d973272b2964246b93e99f9922e959605df0c48ff31ea2b17"
+  ],
+  "Architecture": "arm64",
+  "Os": "linux",
+  "Config": {
+    "Env": [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "PORT=8080",
+      "MASC_BASE_PATH=/app",
+      "MASC_BASE_PATH_LEASE_DIR=/app/.masc/runtime/base-path-lease"
+    ],
+    "Entrypoint": [
+      "/usr/bin/tini",
+      "--",
+      "/app/scripts/docker-entrypoint.sh"
+    ],
+    "Cmd": null
+  }
+}

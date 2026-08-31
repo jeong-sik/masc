@@ -11,6 +11,7 @@ let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
 let running_count_atomic = Atomic.make 0
 module Orphan_drops = Keeper_registry_orphan_drops
 module Error_tracking = Keeper_registry_error_tracking
+module Turn_failure_streak_store = Keeper_turn_failure_streak_store
 
 let registry_entry_validation_error_label = function
   | Healthy -> "healthy"
@@ -419,6 +420,10 @@ type registration_error =
       { keeper_name : string
       ; detail : string
       }
+  | Registration_turn_failure_streak_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
 
 let register_with_state_result
       ?lifecycle_token
@@ -455,6 +460,22 @@ let register_with_state_result
   with
   | Error detail -> Error (Registration_event_queue_unavailable { keeper_name = name; detail })
   | Ok initial_event_queue ->
+  match Turn_failure_streak_store.load ~base_path ~keeper_name:name with
+  | Error error ->
+    Error
+      (Registration_turn_failure_streak_unavailable
+         { keeper_name = name
+         ; detail = Turn_failure_streak_store.error_to_string error
+         })
+  | Ok persisted_turn_failure_streak ->
+  let initial_turn_failure_streak =
+    Option.value ~default:0 persisted_turn_failure_streak
+  in
+  let initial_failure_reason =
+    if initial_turn_failure_streak > 0
+    then Some (Turn_consecutive_failures initial_turn_failure_streak)
+    else None
+  in
   let entry =
     { base_path
     ; name
@@ -474,8 +495,8 @@ let register_with_state_result
     ; last_restart_ts = 0.0
     ; crash_log = []
     ; last_error = None
-    ; last_failure_reason = None
-    ; turn_consecutive_failures = 0
+    ; last_failure_reason = initial_failure_reason
+    ; turn_consecutive_failures = initial_turn_failure_streak
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty
@@ -592,6 +613,13 @@ let register_with_state ~base_path name meta ~phase ~conditions =
          "keeper registration event queue unavailable keeper=%s: %s"
          keeper_name
          detail)
+  | Error
+      (Registration_turn_failure_streak_unavailable { keeper_name; detail }) ->
+    invalid_arg
+      (Printf.sprintf
+         "keeper registration turn failure streak unavailable keeper=%s: %s"
+         keeper_name
+         detail)
   | Error (Registration_shutdown_reserved _) ->
     invalid_arg "unchecked registry registration observed a shutdown fence"
   | Error Registration_intake_token_not_live ->
@@ -672,6 +700,10 @@ type register_restarting_error =
       { keeper_name : string
       ; detail : string
       }
+  | Restart_turn_failure_streak_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
 
 let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name meta
   : (registry_entry, register_restarting_error) result
@@ -708,6 +740,22 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
   with
   | Error detail -> Error (Restart_event_queue_unavailable { keeper_name = name; detail })
   | Ok initial_event_queue ->
+  match Turn_failure_streak_store.load ~base_path ~keeper_name:name with
+  | Error error ->
+    Error
+      (Restart_turn_failure_streak_unavailable
+         { keeper_name = name
+         ; detail = Turn_failure_streak_store.error_to_string error
+         })
+  | Ok persisted_turn_failure_streak ->
+  let initial_turn_failure_streak =
+    Option.value ~default:0 persisted_turn_failure_streak
+  in
+  let initial_failure_reason =
+    if initial_turn_failure_streak > 0
+    then Some (Turn_consecutive_failures initial_turn_failure_streak)
+    else None
+  in
   let new_entry =
     { base_path
     ; name
@@ -727,8 +775,8 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; last_restart_ts = 0.0
     ; crash_log = []
     ; last_error = None
-    ; last_failure_reason = None
-    ; turn_consecutive_failures = 0
+    ; last_failure_reason = initial_failure_reason
+    ; turn_consecutive_failures = initial_turn_failure_streak
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty

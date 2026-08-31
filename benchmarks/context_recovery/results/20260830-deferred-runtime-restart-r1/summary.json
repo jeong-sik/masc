@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T21:34:34+09:00",
+  "issue": 31965,
+  "related_issue": 31966,
+  "source_base_head": "b4e0f6073909b2f84f71f15957b9368e077cdbb9",
+  "source_change_head": "6fa7d730eba9f59b1a6b79fbd5df5facd979d1ec",
+  "measurement_source_commit": "739b74b70cb408e0dfae5a5259b7e65397a5a6bd",
+  "image_digest": "sha256:e894da37947d844bfbc7c1ca957ea879ad6fb874451a29b0b294321a6b7848b6",
+  "binary_sha256": "7449701d56587e30118933314b9a1e77e6de417d330779ba3008277cb646b722",
+  "restarted_runtime_instance_id": "01a052a7-ddfd-7000-950e-551d35d588ca",
+  "lane": {
+    "candidate_count": 2,
+    "candidates": [
+      "ollama_cloud.ollama-cloud-glm-5-3-flash",
+      "ollama_cloud.deepseek-v4-flash"
+    ],
+    "provider_response_status": 200,
+    "provider_response_shape": "thinking_only",
+    "external_provider_request_count": 0
+  },
+  "baseline": {
+    "measurement_source_commit": "8ca359b870c7bb78c01f762717ad3eead00e480b",
+    "image_digest": "sha256:588c862ee3c2d0ff79f16aec1faebf00c1d43b7f48323d4a7f461dae7db18820",
+    "binary_sha256": "73636f643d4206edfbc7495b5e924e2065ca8d83db19d0fb643cb72c54bbc9f3",
+    "first_receipt_count": 4,
+    "restart_receipt_count": 4,
+    "first_provider_model": "glm-5.3-flash",
+    "restart_provider_model": "glm-5.3-flash",
+    "restart_checkpoint_turn_count": 1,
+    "deferred_runtime": "ollama_cloud.deepseek-v4-flash"
+  },
+  "fixed": {
+    "first_start": {
+      "started_at": "2026-08-30T12:30:27Z",
+      "receipt_count": 4,
+      "provider_chat_post_count": 4,
+      "provider_model": "glm-5.3-flash",
+      "durable_suffix_count": 4
+    },
+    "restart": {
+      "restarted_at": "2026-08-30T12:32:08Z",
+      "restore_log_count": 4,
+      "receipt_count": 4,
+      "provider_chat_post_count": 4,
+      "provider_model": "deepseek-v4-flash",
+      "failed_primary_provider_post_count": 0,
+      "checkpoint_turn_count": 1,
+      "degraded_retry_applied": true,
+      "durable_suffix_count_after_outcome": 0
+    },
+    "health": {
+      "overall_status": "degraded",
+      "blocker": "turn_failure_recovering",
+      "failing_keeper_count": 4,
+      "recovering_keeper_count": 4,
+      "executable_keeper_count": 4,
+      "operator_action_required": false,
+      "effective_base_path": "/app",
+      "effective_masc_root": "/app/.masc"
+    }
+  },
+  "focused_checks": {
+    "test_count": 49,
+    "test_failures": 0,
+    "durable_typed_round_trip": "pass",
+    "unknown_schema_fail_closed": "pass",
+    "diff_check": "pass",
+    "ocamlformat_check": "pass"
+  },
+  "shutdown": {
+    "app_exit_code": 0,
+    "app_stopped": true,
+    "fake_provider_exit_code": 137,
+    "fake_provider_stopped": true,
+    "volume_preserved": true
+  },
+  "artifact_sha256": {
+    "baseline_receipts_first.jsonl": "f68666ebfc8b5c0845380598a9d375f11a2b436ae8c70fe3a7adff1421cde7fe",
+    "baseline_receipts_restart.jsonl": "c8041614958d685f73dfb84d07612fb87e7e97160c92ba3d66bc9b9b1c5439a6",
+    "image-build.log": "b300413192b16a9f24e85241bc21ebe67d983a5c7bc09de8ebce5dd00f764b25",
+    "container-binary-sha256.txt": "73bf74234f2aec995cac2e4953b8e8b0aa00e82b724b922f56608c18740ff148",
+    "receipts-first.jsonl": "cd6bf5fbccc7393cb79c92fae9248eea5324e947dfd3e093a25e3703c44f8f40",
+    "receipts-restart.jsonl": "ade67afe92fcd0c505b97369d9f75d3eca3a299bb3290dff02377f6db9684e26",
+    "durable-suffix-first.jsonl": "1945d709bacd7c1cf5065785dfb26c6dea7dcda3b839085c2a4b0588b9f59775",
+    "durable-suffix-after-restart.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fake-provider-first.log": "134d335fec8e9bdc55eca81bea1579d0e7c0efbe721d0838ceca58c6e0c45037",
+    "fake-provider-restart-slice.log": "0967e6ccd5fae5949c357871e758891cb6115f6d23289b1cc3b99de70e8dbc09",
+    "restart-restore.log": "0c6757cab8e32409ce676e8c823279676606a27eb6d38815305b234bb8e2d67f",
+    "server-restart-selected.log": "45b439b82717b5705246fd75fd2aebb6e4e7cc9ef31c9b73436f31708823605d",
+    "health-restart.json": "03bc7edf1126cf78ee4e2e744839cfd352dbfdde172c3891148b5537a6e35cbc",
+    "focused-test.log": "6e698b956a25d28365f1a9efc1c40e0dee1677c6e974889e03eb2f56f9a7fa1f"
+  },
+  "performance_claim": false
+}

@@ -616,7 +616,8 @@ let is_context_overflow (err : Agent_core.Error.t) : bool =
 
 (* Invariant for this predicate: the exemption gate is
    [Keeper_unified_turn_failure.account_failure_counting].  When it returns
-   [false], [record_failure_observation] skips [increment_turn_failures], so
+   [false], [record_failure_observation] skips the durable turn-failure streak
+   increment, so
    every exempted class must carry its own compensating accounting.  Without
    one, "not counted toward crash" means the keeper retries the same failure
    forever with [consecutive] pinned at 0.

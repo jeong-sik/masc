@@ -1,0 +1,4 @@
+[entrypoint] seeded team preset: classic
+[entrypoint] starting masc on 0.0.0.0:8080 (base-path=/app, team=classic)
+[2026-08-30 19:17:56] [INFO] [MCP] Tag registry initialized: 126 tools registered
+[FATAL] Another MASC runtime (PID 7) already owns base path /app

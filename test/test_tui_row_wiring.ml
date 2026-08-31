@@ -89,6 +89,35 @@ let test_the_detail_pane_compares_before_repeating_the_operation () =
    Measured from the rows now, the way the Approvals and Fusion tables measure
    theirs. The rule that builds the subject moved out of the row loop for it,
    so the width and the cell cannot read different strings. *)
+(* A wake that fired and a wake that was acted on read the same. [LAST WAKE]
+   reports the dispatch and [DELIVERY EVIDENCE] one word of verdict, and the
+   reaction ledger folds four separate observations into that word -- so a
+   Keeper that took the wake and never started a turn looked like one that
+   did.
+
+   The four are on the wire on every row that has evidence at all (5/5 in the
+   live workspace, with reaction_kind and the quarantine count beside them).
+   This pins that the detail reads them rather than the verdict alone. *)
+let test_the_schedule_detail_says_what_became_of_the_wake () =
+  let steps =
+    [ "sch_wake_seen"
+    ; "sch_turn_started"
+    ; "sch_queue_ack_seen"
+    ; "sch_wake_cancelled"
+    ]
+  in
+  List.iter
+    (fun step ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the turn block reads %s" step)
+        true
+        (reads ~binding_name:"schedule_turn_rows" ~fields:[ step ] > 0))
+    steps;
+  Alcotest.(check bool) "and the detail draws that block" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"schedule_detail_lines" ~callee:"schedule_turn_rows"
+     > 0)
+
 let test_the_schedule_subject_is_measured_not_given_the_line () =
   (* Twice: once to measure the column, once to fill the cell. One call would
      mean the width came from somewhere else, which is the state this replaced. *)
@@ -200,6 +229,8 @@ let () =
             test_a_lane_mark_says_what_its_colour_says
         ; Alcotest.test_case "the schedule subject is measured" `Quick
             test_the_schedule_subject_is_measured_not_given_the_line
+        ; Alcotest.test_case "the schedule detail says what became of the wake"
+            `Quick test_the_schedule_detail_says_what_became_of_the_wake
         ; Alcotest.test_case "a turn on a keeper that is not running stops"
             `Quick test_a_turn_on_a_keeper_that_is_not_running_stops_moving
         ; Alcotest.test_case "a lane that cannot admit says why" `Quick

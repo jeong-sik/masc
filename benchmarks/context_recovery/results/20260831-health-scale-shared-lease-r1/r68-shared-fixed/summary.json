@@ -1,0 +1,45 @@
+{
+  "schema": "masc.health_shared_basepath_lease.runtime_proof.v1",
+  "source_head": "da6f0b6a8bd695a39b68b0d586deb3ec8fca97e2",
+  "image_id": "sha256:b732b674773a732be91bbaf41a4b9342d08a2e16bd6a6cccfbb3f53b16261eb3",
+  "binary_sha256": "ddc3013a505423bb8c4ed7a60d6338138077120488727129ffd258458f1abd5b",
+  "first": {
+    "runtime": "01a053e4-3fdf-7000-9368-2e8512d18394",
+    "startup_elapsed_sec": 1.6932461261749268,
+    "before_second": {
+      "full": "ready",
+      "auth": "ok",
+      "env_token_verifies": true
+    },
+    "after_second": {
+      "full": "ready",
+      "auth": "ok",
+      "env_token_verifies": true
+    },
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "second_same_volume": {
+    "exit_code": 1,
+    "oom_killed": false,
+    "token_hash_unchanged": true,
+    "rejection": "Another MASC runtime already owns base path /app"
+  },
+  "successor_same_volume": {
+    "runtime": "01a053e5-8575-7000-bc14-05691bf51461",
+    "startup_elapsed_sec": 1.0158560276031494,
+    "full": "ready",
+    "auth": "ok",
+    "env_token_verifies": true,
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "concurrent_different_volume": {
+    "runtime": "01a053e5-2601-7000-a064-b7895abef368",
+    "startup_elapsed_sec": 1.5934820175170898,
+    "full": "ready",
+    "auth": "ok",
+    "exit_code": 0,
+    "oom_killed": false
+  }
+}

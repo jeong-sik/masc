@@ -1,0 +1,30 @@
+{
+  "Id": "8e08d337b4b44a103c8f10bd3dda8f787d158e7c52a49607281deec0e041fa31",
+  "Name": "/masc-runtime-events-r74-03",
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 143,
+    "Error": "",
+    "StartedAt": "2026-08-30T18:53:31.232587135Z",
+    "FinishedAt": "2026-08-30T18:53:31.578880593Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 0,
+      "Log": []
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "volume",
+      "Name": "masc-runtime-events-r74-data",
+      "Destination": "/app/.masc",
+      "RW": true
+    }
+  ]
+}

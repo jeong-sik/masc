@@ -1,0 +1,36 @@
+{
+  "Id": "05144cc5cb7eb328509b733eb9f5801dcc15e8a580cd50f966914b0b86e8d68a",
+  "Name": "/masc-r83-a",
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-08-30T20:00:12.982380501Z",
+    "FinishedAt": "2026-08-30T20:00:15.206575169Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 0,
+      "Log": []
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "volume",
+      "Name": "masc-r83-state",
+      "Destination": "/app/.masc",
+      "RW": true
+    },
+    {
+      "Type": "volume",
+      "Name": "masc-r83-data",
+      "Destination": "/app/data",
+      "RW": true
+    }
+  ]
+}

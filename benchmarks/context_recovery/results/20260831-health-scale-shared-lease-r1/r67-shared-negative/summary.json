@@ -1,0 +1,34 @@
+{
+  "schema": "masc.health_shared_volume_negative.runtime_proof.v1",
+  "source_head": "79a3254a81cf857f69d3888e3c87e13017d48c50",
+  "image_id": "sha256:111b409d8764b1d9f28318a1e7824a75e967f986883a07a66924ea24de7f883f",
+  "binary_sha256": "feff50c3ef1d1ae6b5e2b8b5a315efe5b69063c469099525548f3db8d0e2057d",
+  "shared_volume": true,
+  "runtime_a": "01a053d8-bee3-7000-8367-512b866de7a0",
+  "runtime_b": "01a053d9-4a38-7000-b967-92a7801ef98e",
+  "both_reached_ready": true,
+  "durable_schedule": {
+    "schedule_id": "r67-shared-one",
+    "ledger_rows": 1,
+    "dispatch_log_count_a": 1,
+    "dispatch_log_count_b": 0
+  },
+  "false_ready_observation": {
+    "first_observed_at": "2026-08-30T18:06:08.415897000Z",
+    "last_observed_at": "2026-08-30T18:06:19.360390000Z",
+    "runtime_a_queue": 33,
+    "runtime_b_queue": 32,
+    "runtime_b_status": "ready",
+    "runtime_b_stale_reason": null,
+    "runtime_b_converged_at": "2026-08-30T18:06:20.543048000Z"
+  },
+  "auth_corruption": {
+    "runtime_a_status": "degraded",
+    "runtime_a_env_token_verifies": false,
+    "runtime_a_missing": ["token_hash_mismatch"],
+    "runtime_b_status": "ok"
+  },
+  "runtime_a_exit_code": 0,
+  "runtime_b_exit_code": 0,
+  "oom_killed": false
+}

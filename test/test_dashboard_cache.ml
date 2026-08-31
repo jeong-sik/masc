@@ -324,8 +324,16 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
       Atomic.set Workspace_hooks.on_task_mutation_fn previous;
       Dashboard_cache.invalidate_all ())
     (fun () ->
-      Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation ();
+      let full_health_invalidations = ref 0 in
+      Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation
+        ~invalidate_full_health_snapshot:(fun () ->
+          incr full_health_invalidations)
+        ();
       (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
+      Alcotest.(check int)
+        "full health invalidated once"
+        1
+        !full_health_invalidations;
       Alcotest.(check bool)
         "pre-mutation execution publication rejected"
         false

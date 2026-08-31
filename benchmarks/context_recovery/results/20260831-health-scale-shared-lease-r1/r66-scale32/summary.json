@@ -1,0 +1,43 @@
+{
+  "schema": "masc.health_scale32.runtime_proof.v1",
+  "source_head": "79a3254a81cf857f69d3888e3c87e13017d48c50",
+  "image_id": "sha256:111b409d8764b1d9f28318a1e7824a75e967f986883a07a66924ea24de7f883f",
+  "binary_sha256": "feff50c3ef1d1ae6b5e2b8b5a315efe5b69063c469099525548f3db8d0e2057d",
+  "runtime_instance_id": "01a053d6-3433-7000-b871-f338670ea944",
+  "conditions": {
+    "platform": "linux/arm64",
+    "startup_cpu": 0.5,
+    "load_cpu": 0.1,
+    "configured_keepers": 32,
+    "autoboot_enabled": false
+  },
+  "startup": {
+    "process_start_to_current_sec": 1.637,
+    "snapshot_compute_ms": 46,
+    "worker_submissions": 1,
+    "worker_joins": 0
+  },
+  "load": {
+    "schedule_requests": 32,
+    "accepted": 32,
+    "durable_ledger_rows": 32,
+    "unique_schedule_ids": 32,
+    "unique_stimulus_ids": 32,
+    "ledger_recorded_span_sec": 15.501,
+    "due_to_current_sec": 27.292,
+    "final_queue_count": 32,
+    "final_pending_count": 32,
+    "final_invalidation_generation": 64,
+    "final_worker_submissions": 12,
+    "final_worker_joins": 0,
+    "discarded_dirty_results": 9,
+    "component_timed_out": false,
+    "stimulus_id_sets_equal": true
+  },
+  "expected_degradation": {
+    "overall_health": "degraded",
+    "reason": "all keepers were autoboot-disabled, so 32 retained stimuli had no owner lifecycle"
+  },
+  "exit_code": 0,
+  "oom_killed": false
+}

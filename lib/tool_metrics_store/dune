@@ -1,0 +1,16 @@
+(include_subdirs no)
+
+(library
+ (name tool_metrics_store)
+ (public_name masc.tool_metrics_store)
+ (wrapped false)
+ (modules tool_metrics_store)
+ (libraries
+  fs_compat
+  masc.config
+  masc.config_dir_resolver
+  masc_core
+  sqlite3
+  threads
+  unix
+  yojson))

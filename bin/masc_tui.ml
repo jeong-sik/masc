@@ -6604,6 +6604,107 @@ let verification_cursor_row state =
    verdict. The task id is captured at arm time, so moving the cursor between
    presses re-arms for the new row rather than approving the one the operator
    left. Reject is not armed -- its $EDITOR reason form is the confirmation. *)
+(* Opening a detail is one move -- read the row under the cursor, name it, put
+   the pane at the top of it, fetch what the detail needs -- and each surface
+   spelled that move inside its own Enter arm, guarded on the detail not being
+   open yet.
+
+   [ / ] needs the same move with the opposite guard: the detail IS open and
+   the cursor just moved. Spelled twice, the two would drift, and the shape
+   that drifts here is "which loads run on open" -- a step that forgot one
+   draws the previous row's evidence under the new row's title.
+
+   So the move comes out, ungated, and the two callers bring their own guard.
+   The list each reads is the list its own surface draws: Planning filters and
+   sorts before indexing, and indexing the unsorted goals would open whichever
+   goal happens to sit at that position in the store. *)
+
+let open_planning_detail state ~mailbox =
+  let goals =
+    match state.planning with
+    | None -> []
+    | Some p ->
+        planning_visible_goals ~filter:state.planning_filter
+          ~sort:state.planning_sort p.pl_goals
+  in
+  match List.nth_opt goals state.planning_cursor with
+  | None -> ()
+  | Some g ->
+      state.planning_mode <- Planning_detail g.pg_id;
+      state.planning_scroll <- 0;
+      state.goal_timeline <- None;
+      launch_goal_timeline_load state ~mailbox g.pg_id
+
+let open_schedule_detail state =
+  match state.schedules with
+  | None -> ()
+  | Some snapshot ->
+      Option.iter
+        (fun row ->
+          state.schedule_detail_id <- Some row.sch_schedule_id;
+          state.schedule_scroll <- 0)
+        (List.nth_opt snapshot.scs_rows state.schedule_cursor)
+
+let open_verification_detail state ~mailbox =
+  let requests =
+    match state.verification with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.vs_requests
+  in
+  match List.nth_opt requests state.verification_cursor with
+  | None -> ()
+  | Some row ->
+      state.verification_detail_request_id <-
+        Some row.Masc.Tui_decode.vr_request_id;
+      state.verification_detail_scroll <- 0;
+      state.verification_evidence <- None;
+      launch_verification_evidence_load state ~mailbox
+        row.Masc.Tui_decode.vr_task_id
+
+let open_harness_detail state =
+  match state.harness with
+  | None -> ()
+  | Some snapshot ->
+      Option.iter
+        (fun verdict ->
+          state.harness_detail <-
+            Some (verdict.Masc.Tui_decode.hv_task_id, verdict.hv_at);
+          state.harness_detail_scroll <- 0)
+        (List.nth_opt snapshot.Masc.Tui_decode.hs_verdicts
+           state.harness_cursor)
+
+let open_fusion_detail state ~mailbox =
+  let runs =
+    match state.fusion_runs with
+    | None -> []
+    | Some snapshot -> snapshot.fus_runs
+  in
+  match List.nth_opt runs state.fusion_cursor with
+  | None -> ()
+  | Some run ->
+      state.fusion_mode <- Fusion_detail run.fur_run_id;
+      state.fusion_scroll <- 0;
+      state.fusion_detail <- None;
+      state.fusion_detail_error <- None;
+      launch_fusion_detail_load state ~mailbox ~run_id:run.fur_run_id
+
+(* One step through the list a detail was opened from, without closing it.
+   Reading a queue meant Esc, move, Enter for every row -- three keys to do
+   what one does on Changes and the Keeper detail tabs, both of which already
+   spell it [ / ].
+
+   [count] is the surface's own list length, so a step past either end stays
+   put rather than wrapping: a reader walking a queue wants to arrive at the
+   end and know it, not to reappear at the top. *)
+let step_detail_cursor ~count ~cursor ~delta ~set_cursor ~reopen =
+  if count > 0 then begin
+    let next = max 0 (min (count - 1) (cursor + delta)) in
+    if next <> cursor then begin
+      set_cursor next;
+      reopen ()
+    end
+  end
+
 let handle_verification_approve_key state ~mailbox =
   match verification_cursor_row state with
   | None -> ()
@@ -10872,6 +10973,88 @@ and is loaded on demand through keeper_skill.
                 state.identity_view_error <- None;
                 launch_identity_view state ~mailbox:async_messages keeper.k_name
             | _, Detail_info | _, Detail_secrets | None, _ -> ())
+       (* One step through the list a detail was opened from, on every surface
+          that has one. Each reuses the same open the Enter arm uses, so a
+          step cannot fetch less than an open does. Guarded on the detail
+          being open: with the list showing, [ / ] is free for the surface to
+          mean something else, and on Changes and the Keeper detail tabs it
+          already does. *)
+       | Some (("[" | "]") as bracket)
+         when state.view = Schedules && Option.is_some state.schedule_detail_id ->
+           step_detail_cursor
+             ~count:
+               (match state.schedules with
+                | None -> 0
+                | Some snapshot -> List.length snapshot.scs_rows)
+             ~cursor:state.schedule_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.schedule_cursor <- n)
+             ~reopen:(fun () -> open_schedule_detail state)
+       | Some (("[" | "]") as bracket)
+         when state.view = Verification
+              && Option.is_some state.verification_detail_request_id ->
+           step_detail_cursor
+             ~count:
+               (match state.verification with
+                | None -> 0
+                | Some s -> List.length s.Masc.Tui_decode.vs_requests)
+             ~cursor:state.verification_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.verification_cursor <- n)
+             ~reopen:(fun () ->
+               open_verification_detail state ~mailbox:async_messages)
+       | Some (("[" | "]") as bracket)
+         when state.view = Harness && Option.is_some state.harness_detail ->
+           step_detail_cursor
+             ~count:
+               (match state.harness with
+                | None -> 0
+                | Some s -> List.length s.Masc.Tui_decode.hs_verdicts)
+             ~cursor:state.harness_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.harness_cursor <- n)
+             ~reopen:(fun () -> open_harness_detail state)
+       | Some (("[" | "]") as bracket)
+         when state.view = Planning
+              && (match state.planning_mode with
+                  | Planning_detail _ -> true
+                  | Planning_list -> false) ->
+           step_detail_cursor
+             ~count:
+               (match state.planning with
+                | None -> 0
+                | Some p ->
+                    List.length
+                      (planning_visible_goals ~filter:state.planning_filter
+                         ~sort:state.planning_sort p.pl_goals))
+             ~cursor:state.planning_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.planning_cursor <- n)
+             ~reopen:(fun () ->
+               open_planning_detail state ~mailbox:async_messages)
+       | Some (("[" | "]") as bracket)
+         when state.view = Fusion
+              && (match state.fusion_mode with
+                  | Fusion_detail _ -> true
+                  | Fusion_list -> false) ->
+           step_detail_cursor
+             ~count:
+               (match state.fusion_runs with
+                | None -> 0
+                | Some snapshot -> List.length snapshot.fus_runs)
+             ~cursor:state.fusion_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.fusion_cursor <- n)
+             ~reopen:(fun () -> open_fusion_detail state ~mailbox:async_messages)
+       (* Approvals holds no id -- the detail is a flag over the row under the
+          cursor -- so stepping is the cursor move, and the pane follows. *)
+       | Some (("[" | "]") as bracket)
+         when state.view = Approvals && state.approval_detail_open ->
+           step_detail_cursor ~count:(List.length (approval_items state))
+             ~cursor:state.approval_cursor
+             ~delta:(if bracket = "]" then 1 else -1)
+             ~set_cursor:(fun n -> state.approval_cursor <- n)
+             ~reopen:(fun () -> state.approval_detail_scroll <- 0)
        | Some (("[" | "]") as bracket) when state.view = Board ->
            step_board_read state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
@@ -12715,77 +12898,27 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | Board_read _ | Board_compose -> ())
             | Schedules ->
-                (match state.schedule_detail_id, state.schedules with
-                 | None, Some snapshot ->
-                     Option.iter
-                       (fun row ->
-                          state.schedule_detail_id <- Some row.sch_schedule_id;
-                          state.schedule_scroll <- 0)
-                       (List.nth_opt snapshot.scs_rows state.schedule_cursor)
-                 | Some _, _ | None, None -> ())
+                (match state.schedule_detail_id with
+                 | None -> open_schedule_detail state
+                 | Some _ -> ())
             | Verification ->
                 (match state.verification_detail_request_id with
                  | Some _ -> ()
                  | None ->
-                     Option.iter
-                       (fun row ->
-                          state.verification_detail_request_id <-
-                            Some row.Masc.Tui_decode.vr_request_id;
-                          state.verification_detail_scroll <- 0;
-                          state.verification_evidence <- None;
-                          launch_verification_evidence_load state
-                            ~mailbox:async_messages
-                            row.Masc.Tui_decode.vr_task_id)
-                       (verification_cursor_row state))
+                     open_verification_detail state ~mailbox:async_messages)
             | Harness ->
-                (match state.harness_detail, state.harness with
-                 | None, Some snapshot ->
-                     Option.iter
-                       (fun verdict ->
-                          state.harness_detail <-
-                            Some
-                              ( verdict.Masc.Tui_decode.hv_task_id
-                              , verdict.hv_at );
-                          state.harness_detail_scroll <- 0)
-                       (List.nth_opt snapshot.Masc.Tui_decode.hs_verdicts
-                          state.harness_cursor)
-                 | Some _, _ | None, None -> ())
+                (match state.harness_detail with
+                 | None -> open_harness_detail state
+                 | Some _ -> ())
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
-                     let goals =
-                       match state.planning with
-                       | None -> []
-                       | Some p ->
-                           planning_visible_goals ~filter:state.planning_filter
-                             ~sort:state.planning_sort p.pl_goals
-                     in
-                     (match List.nth_opt goals state.planning_cursor with
-                      | Some g ->
-                          state.planning_mode <- Planning_detail g.pg_id;
-                          state.planning_scroll <- 0;
-                          state.goal_timeline <- None;
-                          launch_goal_timeline_load state
-                            ~mailbox:async_messages g.pg_id
-                      | None -> ())
+                     open_planning_detail state ~mailbox:async_messages
                  | Planning_detail _ -> ())
             | Fusion ->
                 (match state.fusion_mode with
                  | Fusion_list ->
-                     let runs =
-                       match state.fusion_runs with
-                       | None -> []
-                       | Some snapshot -> snapshot.fus_runs
-                     in
-                     (match List.nth_opt runs state.fusion_cursor with
-                      | Some run ->
-                          state.fusion_mode <- Fusion_detail run.fur_run_id;
-                          state.fusion_scroll <- 0;
-                          state.fusion_detail <- None;
-                          state.fusion_detail_error <- None;
-                          launch_fusion_detail_load state
-                            ~mailbox:async_messages ~run_id:run.fur_run_id
-                      | None -> ())
+                     open_fusion_detail state ~mailbox:async_messages
                  | Fusion_detail _ -> ())
             | Changes -> (
                 (* The row under the cursor, read as the lines it removed and

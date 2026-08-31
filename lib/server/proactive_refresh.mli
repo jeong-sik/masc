@@ -29,6 +29,10 @@ type config = {
   failure_threshold : int;  (** Consecutive failures before backoff kicks in. *)
   timeout_s : float;        (** Per-attempt timeout. *)
   on_failure : (failure -> unit) option;  (** Called on timeout or exception. *)
+  wakeup : unit Eio.Stream.t option;  (** Optional event-driven refresh signal. *)
+  wakeup_coalesce_s : float;
+      (** Fixed leading-edge window after a wake signal. Sibling signals are
+          drained before one compute; the bound avoids debounce starvation. *)
   warm_delay_s : float;    (** Delay before cold-start warm-cache compute (0.0 = immediate). *)
   warn_first_failure : bool;  (** Log a warning on the very first refresh failure. *)
 }
@@ -54,6 +58,13 @@ val start :
     [compute] produces a value; [on_result] stores it (typically writing
     to a ref).  Warm-cache and recurring runs live in child fibers owned by
     [sw], with every attempt bounded by [config.timeout_s].
+
+    When [config.wakeup] is provided, queued signals interrupt the recurring
+    sleep. If [wakeup_coalesce_s] is positive, the first signal opens that
+    fixed leading-edge window; sibling signals are then drained before one
+    compute. Signals arriving during compute remain queued for the next
+    bounded window. The stream must have enough capacity that mutation-side
+    writers cannot block.
 
     When [config.on_failure] is set, it is called on timeout or exception,
     allowing callers to record the failure (e.g. mark_cached_surface_error). *)

@@ -1,0 +1,1 @@
+/app/.masc/runtime/events mode=700 uid=999 gid=999 type=directory

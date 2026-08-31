@@ -336,8 +336,10 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         ~config ~keeper_name:name
         (Keeper_state_machine.Operator_clear_requested { preserve_system; reason });
       (* Clear registry failure state *)
-      Keeper_registry.set_failure_reason ~base_path:config.base_path name None;
-      Keeper_registry.reset_turn_failures ~base_path:config.base_path name;
+      ignore
+        (Keeper_turn_failure_streak.reset
+           ~base_path:config.base_path
+           ~keeper_name:name);
       Keeper_unified_turn_failure.reset_invalid_request_failures ~keeper_name:name;
       Keeper_unified_turn_failure.note_turn_success name;
       Log.Keeper.warn

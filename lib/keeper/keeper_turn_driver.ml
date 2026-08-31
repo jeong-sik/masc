@@ -144,6 +144,16 @@ let equal_deferred_runtime_lane left right =
   && String.equal left.next_runtime_id right.next_runtime_id
   && left.later_runtime_ids = right.later_runtime_ids
 
+let restore_deferred_runtime_lane ~assignment_id ~failed_runtime_id
+      ~next_runtime_id ~later_runtime_ids ~failure =
+  { assignment_id
+  ; failed_runtime_id
+  ; next_runtime_id
+  ; later_runtime_ids
+  ; failure
+  }
+;;
+
 let project_provider_attempt_result ~replay_prefix_projection provider_result =
   let turn_result =
     match provider_result with
@@ -1399,12 +1409,8 @@ module For_testing = struct
 
   let make_deferred_runtime_lane ~assignment_id ~failed_runtime_id
         ~next_runtime_id ~later_runtime_ids ~failure =
-    { assignment_id
-    ; failed_runtime_id
-    ; next_runtime_id
-    ; later_runtime_ids
-    ; failure
-    }
+    restore_deferred_runtime_lane ~assignment_id ~failed_runtime_id
+      ~next_runtime_id ~later_runtime_ids ~failure
   ;;
 
   let project_provider_attempt_result = project_provider_attempt_result

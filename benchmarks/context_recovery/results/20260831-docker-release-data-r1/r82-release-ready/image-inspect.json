@@ -1,0 +1,26 @@
+{
+  "Id": "sha256:89fff286971ca8aee856543d950815572bc33c80eb1eff5858f7dd4a4dab12b5",
+  "RepoDigests": [
+    "masc-release-proof@sha256:89fff286971ca8aee856543d950815572bc33c80eb1eff5858f7dd4a4dab12b5"
+  ],
+  "Architecture": "arm64",
+  "Os": "linux",
+  "Config": {
+    "Env": [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "PORT=8080",
+      "MASC_BASE_PATH=/app",
+      "MASC_CONFIG_DIR=/app/config",
+      "MASC_BASE_PATH_LEASE_DIR=/app/.masc/runtime/base-path-lease",
+      "OCAML_RUNTIME_EVENTS_DIR=/app/.masc/runtime/events"
+    ],
+    "Entrypoint": [
+      "/usr/bin/tini",
+      "--",
+      "/app/masc-runtime-entrypoint"
+    ],
+    "Cmd": [
+      "/app/masc"
+    ]
+  }
+}

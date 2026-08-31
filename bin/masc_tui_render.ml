@@ -3603,6 +3603,57 @@ let render_schedule_list (state : state) =
   finish_surface state ~surface_key:"schedules" ~rows:terminal_rows
       ~cols buf
 
+(* What became of the wake. The pane could say a schedule fired and stop
+   there: [LAST WAKE] reports the dispatch and [DELIVERY EVIDENCE] reports one
+   word of verdict, and neither answers "did the Keeper do anything". The
+   reaction ledger records four steps and the projection folds all four into
+   that one word, so a wake delivered to a Keeper that never took a turn reads
+   the same as one that did.
+
+   Drawn only when the ledger said something. A schedule that has not fired
+   has no trail, and four rows of "--" under it would be four rows saying the
+   same nothing the empty [LAST WAKE] block already says. *)
+let schedule_turn_rows
+      ~(field : ?style:string -> string -> string -> string * string)
+      (row : schedule_row) =
+  let observed =
+    [ row.sch_wake_seen
+    ; row.sch_turn_started
+    ; row.sch_queue_ack_seen
+    ; row.sch_wake_cancelled
+    ]
+  in
+  if List.for_all Option.is_none observed then []
+  else
+    (* [None] is not [false]. A step the ledger never spoke about draws the
+       same dash every unknown draws on this pane, in the dim every unknown
+       takes -- claiming "no" for it would report a failure nobody observed. *)
+    let step ?(bad_when_true = false) label = function
+      | None -> field label "\xe2\x80\x94"
+      | Some value ->
+          let tone =
+            if value = bad_when_true then Theme.bad () else Theme.ok ()
+          in
+          field ~style:tone label (if value then "yes" else "no")
+    in
+    [ Ansi.dim, ""
+    ; Ansi.bold, "  TURN"
+    ; step "Wake seen" row.sch_wake_seen
+    ; step "Turn started" row.sch_turn_started
+    ; step "Queue ack" row.sch_queue_ack_seen
+    ; step ~bad_when_true:true "Cancelled" row.sch_wake_cancelled
+    ; field "Reaction kind" (Option.value ~default:"\xe2\x80\x94" row.sch_reaction_kind)
+    ; field
+        ~style:
+          (match row.sch_reaction_quarantined with
+           | Some count when count > 0 -> Theme.warn ()
+           | Some _ | None -> Ansi.dim)
+        "Quarantined"
+        (match row.sch_reaction_quarantined with
+         | None -> "\xe2\x80\x94"
+         | Some count -> string_of_int count)
+    ]
+
 let schedule_detail_lines ~width (row : schedule_row) =
   let field ?(style = Ansi.reset) label value =
     ( style
@@ -3695,6 +3746,7 @@ let schedule_detail_lines ~width (row : schedule_row) =
              row.sch_reaction_projection_status)
         "Reaction" reaction
     ]
+  @ schedule_turn_rows ~field row
 
 let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
   box_top buf cols;

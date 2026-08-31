@@ -155,6 +155,8 @@ let for_surface = function
       ; b Act "Enter" "read the whole ask" ~help:"j/k scrolls it; Esc goes back"
       ; b Act "y" "confirm"
       ; b Act "n" "deny"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "e" "external Gate lane"
           ~help:"cycle manual / auto_judge / always_allow for calls into \
                  attached outside services"
@@ -168,6 +170,8 @@ let for_surface = function
       ; b Act "Left / Esc" "back"
       ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
       ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "c" "complete" ~help:"complete goal"
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
@@ -178,6 +182,8 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
       ; b Act "Right / Enter" "details" ~help:"open schedule details"
       ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
       ; b Act "Y" "copy link" ~help:"copy the selected schedule reference"
       ]
@@ -187,6 +193,8 @@ let for_surface = function
       ; b Navigate "v" "next Planning tab" ~help:"on to Verdicts, then Goals"
       ; b Act "Right / Enter" "details" ~help:"read the request and evidence"
       ; b Act "Left / Esc" "back" ~help:"back to the verification queue"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
       ; b Act "x" "reject" ~help:"reject with a reason ($EDITOR form)"
       ]
@@ -197,6 +205,8 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "verdict" ~help:"open the full harness verdict"
       ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "y" "agree" ~help:"record the machine's verdict as yours"
       ; b Act "n" "overrule" ~help:"record the opposite verdict; $EDITOR takes the reason"
       ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
@@ -209,6 +219,8 @@ let for_surface = function
       [ b Navigate "j/k" "move"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Enter" "detail" ~help:"Right or Enter opens detail"
+      ; b Navigate "[ / ]" "previous / next"
+          ~help:"while a detail is open, step to the row before or after it"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
       ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]

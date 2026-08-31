@@ -69,6 +69,18 @@ let test_host_entry_still_names_its_constant () =
   | many -> failf "MASC_HTTP_HOST appears %d times" (List.length many)
 ;;
 
+let test_base_path_lease_directory_is_visible () =
+  match entry_default ~env_name:"MASC_BASE_PATH_LEASE_DIR" with
+  | [ reported ] ->
+    check
+      string
+      "the snapshot reports the host run-directory fallback"
+      "(host temp directory)"
+      reported
+  | [] -> fail "MASC_BASE_PATH_LEASE_DIR is absent from the operator snapshot"
+  | many -> failf "MASC_BASE_PATH_LEASE_DIR appears %d times" (List.length many)
+;;
+
 let test_collector_reads_environment_once () =
   let reads = ref 0 in
   let getenv name =
@@ -130,6 +142,10 @@ let () =
             "the host precedent still holds"
             `Quick
             test_host_entry_still_names_its_constant
+        ; test_case
+            "base path lease directory is visible"
+            `Quick
+            test_base_path_lease_directory_is_visible
         ; test_case
             "collector reads environment once"
             `Quick

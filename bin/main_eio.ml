@@ -575,8 +575,10 @@ let run_cmd host port cli_base_path =
     (Server_base_path_guard.enforce
        { resolved_base_path with normalized_base_path = canonical_base_path });
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
-  let run_dir = (Host_config.host ()).run_dir in
-  let _base_path_lease = acquire_base_path_lock ~run_dir canonical_base_path in
+  let lease_dir = (Host_config.host ()).base_path_lease_dir in
+  let _base_path_lease =
+    acquire_base_path_lock ~run_dir:lease_dir canonical_base_path
+  in
   acquire_pid_lock port;
   Log.init_from_env ();
   (* Report a fresh takeover breadcrumb at boot: after a SIGKILL escalation

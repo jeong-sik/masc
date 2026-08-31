@@ -14,6 +14,7 @@ open Keeper_execution
 open Keeper_keepalive_signal
 module Observations = Keeper_heartbeat_loop_observations
 module Cycle = Keeper_heartbeat_loop_cycle
+module Deferred_runtime_store = Keeper_deferred_runtime_lane_store
 
 (* Presence/identity sync extracted to
    [Keeper_heartbeat_loop_presence] (godfile decomp). *)
@@ -265,7 +266,7 @@ let connector_attention_outcome_of_route
 let record_crashed_cycle_failure ~base_path ~keeper_name exn =
   (* Capture the backtrace before any other call can clobber it. *)
   let backtrace = Printexc.get_backtrace () in
-  Keeper_registry.increment_turn_failures ~base_path keeper_name;
+  ignore (Keeper_turn_failure_streak.increment ~base_path ~keeper_name);
   Health.record_failure
     ~agent_name:keeper_name
     ~reason:(Keeper_types_profile.short_preview (Printexc.to_string exn));
@@ -1032,7 +1033,37 @@ let run_heartbeat_loop
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_core.Context.create () in
-  let deferred_runtime_lane_ref = ref None in
+  let deferred_runtime_lane_ref =
+    match
+      Deferred_runtime_store.load
+        ~base_path:ctx.config.base_path
+        ~keeper_name:m.name
+    with
+    | Ok restored ->
+      Option.iter
+        (fun (hint : Keeper_turn_driver.deferred_runtime_lane) ->
+           Log.Keeper.info
+             ~keeper_name:m.name
+             "%s: restored durable frozen runtime lane suffix failed_runtime=%s next_runtime=%s remaining=%d"
+             m.name
+             hint.failed_runtime_id
+             hint.next_runtime_id
+             (List.length hint.later_runtime_ids))
+        restored;
+      ref restored
+    | Error error ->
+      let detail = Deferred_runtime_store.error_to_string error in
+      Keeper_registry.set_failure_reason
+        ~base_path:ctx.config.base_path
+        m.name
+        (Some (Keeper_registry.Exception detail));
+      Log.Keeper.error
+        ~keeper_name:m.name
+        "%s: refusing autonomous turns because durable deferred runtime authority is unreadable: %s"
+        m.name
+        detail;
+      raise Keeper_registry.Keeper_fiber_crash
+  in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first
@@ -1197,14 +1228,39 @@ let run_heartbeat_loop
                 false
             in
             let deferred_runtime_lane = !deferred_runtime_lane_ref in
+            let deferred_runtime_lane_consumed = ref false in
+            let replacement_deferred_runtime_lane_recorded = ref false in
             let on_deferred_runtime_consumed () =
               Option.iter
                 (fun expected ->
-                   ignore
-                     (consume_deferred_runtime_lane_hint
-                        deferred_runtime_lane_ref
-                        expected))
+                   if
+                     consume_deferred_runtime_lane_hint
+                       deferred_runtime_lane_ref
+                       expected
+                   then deferred_runtime_lane_consumed := true)
                 deferred_runtime_lane
+            in
+            let record_deferred_runtime_lane hint =
+              replacement_deferred_runtime_lane_recorded := true;
+              deferred_runtime_lane_ref := Some hint;
+              match
+                Deferred_runtime_store.save
+                  ~base_path:ctx.config.base_path
+                  ~keeper_name:m.name
+                  hint
+              with
+              | Ok () -> ()
+              | Error error ->
+                let detail = Deferred_runtime_store.error_to_string error in
+                Keeper_registry.set_failure_reason
+                  ~base_path:ctx.config.base_path
+                  m.name
+                  (Some (Keeper_registry.Exception detail));
+                Log.Keeper.error
+                  ~keeper_name:m.name
+                  "%s: deferred runtime suffix remains process-local because durable publication failed: %s"
+                  m.name
+                  detail
             in
             let r =
               run_keepalive_unified_turn
@@ -1217,9 +1273,38 @@ let run_heartbeat_loop
                 ~shared_context
                 ~deferred_runtime_lane
                 ~on_deferred_runtime_consumed
-                ~record_deferred_runtime_lane:
-                  (fun hint -> deferred_runtime_lane_ref := Some hint)
+                ~record_deferred_runtime_lane
             in
+            (* Consumption is committed only after the cycle has a typed
+               outcome. A process crash after dispatch but before this point
+               leaves the durable suffix in place, so restart retries the
+               successor instead of resurrecting the already-failed prefix. A
+               failure that freezes a smaller tail replaces the file above. *)
+            (if
+              !deferred_runtime_lane_consumed
+              && not !replacement_deferred_runtime_lane_recorded
+            then (
+              match
+                Deferred_runtime_store.clear
+                  ~base_path:ctx.config.base_path
+                  ~keeper_name:m.name
+              with
+              | Ok () -> ()
+              | Error error ->
+                (* Keep process memory aligned with the still-present durable
+                   file. Retrying the successor is safer than silently falling
+                   back to the failed lane prefix. *)
+                deferred_runtime_lane_ref := deferred_runtime_lane;
+                let detail = Deferred_runtime_store.error_to_string error in
+                Keeper_registry.set_failure_reason
+                  ~base_path:ctx.config.base_path
+                  m.name
+                  (Some (Keeper_registry.Exception detail));
+                Log.Keeper.error
+                  ~keeper_name:m.name
+                  "%s: durable deferred runtime suffix consumption did not commit: %s"
+                  m.name
+                  detail));
             Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
             turn_running := false;
             Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running;

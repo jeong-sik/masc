@@ -1,5 +1,6 @@
 module Runtime_manifest = Masc.Keeper_runtime_manifest
 module Driver = Masc.Keeper_turn_driver
+module Deferred_store = Masc.Keeper_deferred_runtime_lane_store
 
 let contains ~needle haystack =
   let needle_len = String.length needle in
@@ -2167,6 +2168,79 @@ let test_deferred_hint_refs_are_not_shared () =
     true
     (Option.is_some !second)
 
+let rec remove_tree path =
+  match Unix.lstat path with
+  | { st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path
+    |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+    Unix.rmdir path
+  | _ -> Unix.unlink path
+  | exception Unix.Unix_error _ -> ()
+;;
+
+let with_deferred_store f =
+  let base_path = Filename.temp_dir "masc-deferred-runtime-" "" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
+;;
+
+let test_deferred_hint_survives_store_restart_and_clears_after_settlement () =
+  with_deferred_store (fun base_path ->
+    let original =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"lane.restart"
+        ~failed_runtime_id:"runtime.a"
+        ~next_runtime_id:"runtime.b"
+        ~later_runtime_ids:[ "runtime.c" ]
+        ~failure:(accept_empty_no_progress_error "runtime.a")
+    in
+    (match Deferred_store.save ~base_path ~keeper_name:"backend" original with
+     | Ok () -> ()
+     | Error error ->
+       Alcotest.failf "save failed: %s" (Deferred_store.error_to_string error));
+    let restored =
+      match Deferred_store.load ~base_path ~keeper_name:"backend" with
+      | Ok (Some hint) -> hint
+      | Ok None -> Alcotest.fail "restart lost the durable deferred suffix"
+      | Error error ->
+        Alcotest.failf "load failed: %s" (Deferred_store.error_to_string error)
+    in
+    Alcotest.(check (list string))
+      "restart starts from frozen successor"
+      [ "runtime.b"; "runtime.c" ]
+      (Driver.deferred_runtime_ids restored);
+    Alcotest.(check bool)
+      "typed accept rejection survives durable codec"
+      true
+      (match Driver.classify_masc_internal_error restored.failure with
+       | Some (Driver.Accept_rejected { reason_kind; _ }) ->
+         reason_kind = Some Driver.Accept_no_usable_progress
+       | _ -> false);
+    (match Deferred_store.clear ~base_path ~keeper_name:"backend" with
+     | Ok () -> ()
+     | Error error ->
+       Alcotest.failf "clear failed: %s" (Deferred_store.error_to_string error));
+    match Deferred_store.load ~base_path ~keeper_name:"backend" with
+    | Ok None -> ()
+    | Ok (Some _) -> Alcotest.fail "settled suffix remained replayable"
+    | Error error ->
+      Alcotest.failf "post-clear load failed: %s" (Deferred_store.error_to_string error))
+;;
+
+let test_deferred_store_rejects_unknown_schema_without_fallback () =
+  with_deferred_store (fun base_path ->
+    let path = Deferred_store.path_for ~base_path ~keeper_name:"backend" in
+    let dir = Filename.dirname path in
+    Fs_compat.mkdir_p dir;
+    write_file path {|{"schema":"keeper.deferred_runtime_lane.v0"}|};
+    match Deferred_store.load ~base_path ~keeper_name:"backend" with
+    | Error (Deferred_store.Malformed _) -> ()
+    | Error error ->
+      Alcotest.failf
+        "expected malformed current-only schema, got %s"
+        (Deferred_store.error_to_string error)
+    | Ok _ -> Alcotest.fail "unknown schema must not fall back to a fresh lane")
+;;
+
 let test_missing_deferred_successor_is_typed_error () =
   match
     Driver.For_testing.resolve_runtime_candidates
@@ -2394,6 +2468,14 @@ let () =
             "deferred hint refs are not shared"
             `Quick
             test_deferred_hint_refs_are_not_shared;
+          Alcotest.test_case
+            "deferred hint survives restart and settles durably"
+            `Quick
+            test_deferred_hint_survives_store_restart_and_clears_after_settlement;
+          Alcotest.test_case
+            "deferred store rejects unknown schema"
+            `Quick
+            test_deferred_store_rejects_unknown_schema_without_fallback;
           Alcotest.test_case
             "missing deferred successor is typed error"
             `Quick

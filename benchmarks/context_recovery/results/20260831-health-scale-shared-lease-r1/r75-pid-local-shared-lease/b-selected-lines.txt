@@ -1,0 +1,1 @@
+/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/docker-shared-basepath-lease-20260831/benchmarks/context_recovery/results/20260831-health-scale-shared-lease-r1/r75-pid-local-shared-lease/b-stderr.txt:[FATAL] Another MASC runtime (PID 7) already owns base path /app

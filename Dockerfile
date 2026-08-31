@@ -64,9 +64,11 @@ RUN chmod +x \
 # Create non-root user for runtime
 RUN groupadd --system appgroup && useradd --system --gid appgroup appuser
 
-# Runtime state lives under MASC_BASE_PATH=/app, which resolves durable JSONL
-# storage to /app/.masc. Keep it separate from the immutable config seed below.
-RUN mkdir -p /app/.masc && chown -R appuser:appgroup /app/.masc
+# Runtime state lives under MASC_BASE_PATH=/app. Identity/config state resolves
+# under /app/.masc, while RFC-0121 bulk tool data resolves to sibling /app/data.
+# Both must be writable by the non-root runtime user.
+RUN mkdir -p /app/.masc /app/data \
+    && chown -R appuser:appgroup /app/.masc /app/data
 
 # Copy all config files. CI may generate additional JSON alongside tracked files.
 # MASC_CONFIG_DIR points here, so this is the image-baked config root, not
@@ -82,8 +84,10 @@ RUN chown -R appuser:appgroup /app/assets
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app
 ENV MASC_CONFIG_DIR=/app/config
+ENV MASC_BASE_PATH_LEASE_DIR=/app/.masc/runtime/base-path-lease
+ENV OCAML_RUNTIME_EVENTS_DIR=/app/.masc/runtime/events
 
-VOLUME ["/app/.masc"]
+VOLUME ["/app/.masc", "/app/data"]
 
 EXPOSE 8080
 

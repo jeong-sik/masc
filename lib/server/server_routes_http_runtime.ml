@@ -731,11 +731,41 @@ type full_health_snapshot = {
   section_timings : (string * int) list;
 }
 
+type full_health_refresh_worker = {
+  id : int;
+  completion : unit Eio.Promise.or_exn;
+  started_generation : int;
+  mutable failure_reported : bool;
+}
+
 let full_health_snapshot_mu = Stdlib.Mutex.create ()
 let full_health_snapshot = ref None
 let full_health_refresh_in_flight = ref false
 let full_health_refresh_started_at = ref None
 let full_health_refresh_requested = ref false
+(* Capacity-1 mailbox, not a queue: the refresh state lives in
+   [full_health_refresh_requested] and this stream only carries "something
+   changed". A second pending wakeup would tell the consumer nothing the
+   first one did not, so extra ones are coalesced away rather than buffered.
+   [max_int] here was an unbounded stream on the invalidation path -- the
+   shape that exhausted the heap in #10777 when its consumer fiber stalled. *)
+let full_health_refresh_wakeup = Eio.Stream.create 1
+
+(* Makes the is_empty check and the add atomic. Without it two invalidations
+   can both see an empty stream and the second blocks on the full one, which
+   would stall whichever hot path called it. *)
+let full_health_refresh_wakeup_mu = Eio.Mutex.create ()
+
+let signal_full_health_refresh_wakeup () =
+  Eio.Mutex.use_rw ~protect:true full_health_refresh_wakeup_mu (fun () ->
+      if Eio.Stream.is_empty full_health_refresh_wakeup
+      then Eio.Stream.add full_health_refresh_wakeup ())
+;;
+let full_health_invalidation_generation = ref 0
+let full_health_active_worker = ref None
+let full_health_next_worker_id = ref 0
+let full_health_worker_submissions = ref 0
+let full_health_worker_joins = ref 0
 (* Consecutive [/health?full=1] refresh failures (timeouts or
    exceptions).  Reset to 0 on every successful
    [store_full_health_snapshot]; incremented inside
@@ -758,6 +788,8 @@ let full_health_refresh_interval_sec =
 let full_health_snapshot_ttl_sec =
   Float.max 60.0 (full_health_refresh_interval_sec *. 2.0)
 ;;
+
+let full_health_refresh_wakeup_coalesce_sec = 0.1
 
 let with_full_health_snapshot_lock f =
   Stdlib.Mutex.protect full_health_snapshot_mu f
@@ -1004,22 +1036,25 @@ let compute_full_health_snapshot ?(listener = "http/1.1") ~request_authority
         section_timings = List.rev !section_timings_ref;
       }
 
+let store_full_health_snapshot_locked snapshot ~refresh_requested =
+  full_health_snapshot := Some snapshot;
+  full_health_refresh_in_flight := false;
+  full_health_refresh_started_at := None;
+  full_health_refresh_requested := refresh_requested;
+  (* Successful refresh — clear consecutive-failure counter so the
+     critical alarm only re-fires after another N successive
+     failures.  A snapshot is "successful" iff [failure] is None;
+     the inline error path in [compute_full_health_snapshot]
+     routes through here too, so guard on the field. *)
+  match snapshot.failure with
+  | None -> full_health_consecutive_failures := 0
+  | Some _ -> ()
+
 let store_full_health_snapshot snapshot =
   with_full_health_snapshot_lock (fun () ->
-      full_health_snapshot := Some snapshot;
-      full_health_refresh_in_flight := false;
-      full_health_refresh_started_at := None;
-      full_health_refresh_requested := false;
-      (* Successful refresh — clear consecutive-failure counter so the
-         critical alarm only re-fires after another N successive
-         failures.  A snapshot is "successful" iff [failure] is None;
-         the inline error path in [compute_full_health_snapshot]
-         routes through here too, so guard on the field. *)
-      match snapshot.failure with
-      | None -> full_health_consecutive_failures := 0
-      | Some _ -> ())
+      store_full_health_snapshot_locked snapshot ~refresh_requested:false)
 
-let mark_full_health_snapshot_failure failure =
+let mark_full_health_snapshot_failure_locked ~worker_active failure =
   let now = Unix.gettimeofday () in
   let error = Proactive_refresh.failure_message failure in
   let timed_out =
@@ -1027,8 +1062,7 @@ let mark_full_health_snapshot_failure failure =
     | Proactive_refresh.Timed_out _ -> true
     | Proactive_refresh.Raised _ -> false
   in
-  with_full_health_snapshot_lock (fun () ->
-      (* Partial degradation: preserve the last successful snapshot's
+  (* Partial degradation: preserve the last successful snapshot's
          per-component [fields] and overwrite only the [failure] /
          [stale_since_ts] / refresh-bookkeeping signals.  If we have
          no prior snapshot (warm path on cold boot), fall back to the
@@ -1087,9 +1121,11 @@ let mark_full_health_snapshot_failure failure =
             last_good_available;
             section_timings = preserved_section_timings;
           };
-      full_health_refresh_in_flight := false;
-      full_health_refresh_started_at := None;
-      full_health_refresh_requested := false;
+      full_health_refresh_in_flight := worker_active;
+      if not worker_active then begin
+        full_health_refresh_started_at := None;
+        full_health_refresh_requested := false
+      end;
       (* Increment the consecutive-failure counter and emit the
          Otel_metric_store critical-edge signal ONLY when we cross the
          configured threshold on this exact failure.  Subsequent
@@ -1103,7 +1139,19 @@ let mark_full_health_snapshot_failure failure =
         Otel_metric_store.inc_counter
           "masc_full_health_refresh_critical_total"
           ~labels:[ "reason", "consecutive_failures" ]
-          ())
+          ()
+
+let mark_full_health_snapshot_failure failure =
+  with_full_health_snapshot_lock (fun () ->
+      mark_full_health_snapshot_failure_locked ~worker_active:false failure)
+
+let mark_full_health_refresh_wait_failure failure =
+  with_full_health_snapshot_lock (fun () ->
+      match !full_health_active_worker with
+      | Some worker when not worker.failure_reported ->
+          worker.failure_reported <- true;
+          mark_full_health_snapshot_failure_locked ~worker_active:true failure
+      | Some _ | None -> ())
 
 let compute_full_health_snapshot_for_refresh ?(listener = "http/1.1")
     ~request_authority request =
@@ -1117,6 +1165,86 @@ let refresh_full_health_snapshot_sync ?(listener = "http/1.1")
     ~request_authority request =
   compute_full_health_snapshot_for_refresh ~listener ~request_authority request
   |> store_full_health_snapshot
+
+let finish_full_health_refresh_worker worker outcome =
+  let enqueue_follow_up =
+    with_full_health_snapshot_lock (fun () ->
+        match !full_health_active_worker with
+        | Some active when active.id = worker.id ->
+            let dirty =
+              !full_health_invalidation_generation <> worker.started_generation
+            in
+            full_health_active_worker := None;
+            (match outcome with
+             | Ok snapshot when not dirty ->
+                 store_full_health_snapshot_locked snapshot
+                   ~refresh_requested:false
+             | Ok _ ->
+                 (* A mutation landed while this scan was running.  Its result
+                    cannot prove which generation it observed, so keep the
+                    invalidated placeholder and schedule one bounded retry. *)
+                 full_health_refresh_in_flight := false;
+                 full_health_refresh_started_at := None;
+                 full_health_refresh_requested := true
+             | Error exn ->
+                 mark_full_health_snapshot_failure_locked ~worker_active:false
+                   (Proactive_refresh.Raised exn);
+                 if dirty then full_health_refresh_requested := true);
+            dirty
+        | Some _ | None -> false)
+  in
+  if enqueue_follow_up then begin
+    Log.Dashboard.debug
+      "full_health_snapshot discarded worker %d result after generation change"
+      worker.id;
+    Eio.Stream.add full_health_refresh_wakeup ()
+  end
+
+let await_full_health_refresh_worker ~sw ~compute =
+  let action =
+    with_full_health_snapshot_lock (fun () ->
+        match !full_health_active_worker with
+        | Some worker ->
+            incr full_health_worker_joins;
+            `Join worker
+        | None ->
+            let completion, resolver = Eio.Promise.create () in
+            incr full_health_next_worker_id;
+            let worker =
+              { id = !full_health_next_worker_id;
+                completion;
+                started_generation = !full_health_invalidation_generation;
+                failure_reported = false
+              }
+            in
+            full_health_active_worker := Some worker;
+            incr full_health_worker_submissions;
+            full_health_refresh_in_flight := true;
+            full_health_refresh_started_at := Some (Unix.gettimeofday ());
+            full_health_refresh_requested := false;
+            `Start (worker, resolver))
+  in
+  let worker =
+    match action with
+    | `Join worker ->
+        Log.Dashboard.debug
+          "full_health_snapshot joined active worker %d"
+          worker.id;
+        worker
+    | `Start (worker, resolver) ->
+        Eio.Fiber.fork ~sw (fun () ->
+            let outcome =
+              try Ok (compute ()) with
+              | exn -> Error exn
+            in
+            finish_full_health_refresh_worker worker outcome;
+            Eio.Promise.resolve resolver
+              (match outcome with
+               | Ok _ -> Ok ()
+               | Error exn -> Error exn));
+        worker
+  in
+  Eio.Promise.await_exn worker.completion
 
 let snapshot_is_stale ~now snapshot =
   now -. snapshot.computed_at > full_health_snapshot_ttl_sec
@@ -1152,7 +1280,8 @@ let full_health_snapshot_stale_age_ms ~now snapshot =
       `Int (max 0 (int_of_float ((now -. started_at) *. 1000.)))
 
 let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
-    ~refresh_requested snapshot =
+    ~refresh_requested ~worker_active ~worker_submissions ~worker_joins
+    ~invalidation_generation snapshot =
   let component_timed_out =
     match (refresh_in_flight, refresh_started_at) with
     | true, Some started_at ->
@@ -1215,6 +1344,12 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
       ("ttl_ms", `Int (int_of_float (full_health_snapshot_ttl_sec *. 1000.)));
       ("refresh_in_flight", `Bool refresh_in_flight);
       ("refresh_requested", `Bool refresh_requested);
+      ("refresh_worker_active", `Bool worker_active);
+      ("refresh_worker_submissions_total", `Int worker_submissions);
+      ("refresh_worker_joins_total", `Int worker_joins);
+      ("invalidation_generation", `Int invalidation_generation);
+      ( "refresh_wakeup_coalesce_ms"
+      , `Int (int_of_float (full_health_refresh_wakeup_coalesce_sec *. 1000.)) );
       ( "refresh_started_at_unix",
         match refresh_started_at with
         | Some started_at -> `Float started_at
@@ -1238,17 +1373,29 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
 let mark_full_health_refresh_requested () =
   with_full_health_snapshot_lock (fun () -> full_health_refresh_requested := true)
 
+let invalidate_full_health_snapshot () =
+  with_full_health_snapshot_lock (fun () ->
+      incr full_health_invalidation_generation;
+      full_health_snapshot := None;
+      full_health_refresh_requested := true);
+  signal_full_health_refresh_wakeup ()
+
 let full_health_snapshot_state () =
   with_full_health_snapshot_lock (fun () ->
       ( !full_health_snapshot,
         !full_health_refresh_in_flight,
         !full_health_refresh_started_at,
-        !full_health_refresh_requested ))
+        !full_health_refresh_requested,
+        Option.is_some !full_health_active_worker,
+        !full_health_worker_submissions,
+        !full_health_worker_joins,
+        !full_health_invalidation_generation ))
 
 let make_cached_full_health_json ?(listener = "http/1.1") ~request_authority
     request =
   let now = Unix.gettimeofday () in
-  let snapshot, _refresh_in_flight, _refresh_started_at, _refresh_requested =
+  let snapshot, _refresh_in_flight, _refresh_started_at, _refresh_requested, _,
+      _, _, _ =
     full_health_snapshot_state ()
   in
   let needs_refresh =
@@ -1257,7 +1404,8 @@ let make_cached_full_health_json ?(listener = "http/1.1") ~request_authority
     | Some snapshot -> snapshot_is_stale ~now snapshot
   in
   if needs_refresh then mark_full_health_refresh_requested ();
-  let snapshot, refresh_in_flight, refresh_started_at, refresh_requested =
+  let snapshot, refresh_in_flight, refresh_started_at, refresh_requested,
+      worker_active, worker_submissions, worker_joins, invalidation_generation =
     full_health_snapshot_state ()
   in
   let fields =
@@ -1272,7 +1420,8 @@ let make_cached_full_health_json ?(listener = "http/1.1") ~request_authority
      @ [
          ( "full_health_snapshot",
            full_health_snapshot_metadata ~now ~refresh_in_flight
-             ~refresh_started_at ~refresh_requested snapshot );
+             ~refresh_started_at ~refresh_requested ~worker_active
+             ~worker_submissions ~worker_joins ~invalidation_generation snapshot );
        ])
 
 let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
@@ -1287,14 +1436,16 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
            ~interval_s:full_health_refresh_interval_sec)
         with
         timeout_s = full_health_refresh_timeout_sec;
-        on_failure = Some mark_full_health_snapshot_failure;
+        on_failure = Some mark_full_health_refresh_wait_failure;
+        wakeup = Some full_health_refresh_wakeup;
+        wakeup_coalesce_s = full_health_refresh_wakeup_coalesce_sec;
         warm_delay_s = 0.5;
         warn_first_failure = false;
       }
     (* /health probe (5KB probe payload) was measured at 4-8s cold.
        Even though [Proactive_refresh] runs [compute] on its own
        fiber, that fiber lives on the Eio main domain — so the 6-10s
-       fleet meta scan inside [compute_full_health_snapshot_for_refresh]
+       fleet meta scan inside [compute_full_health_snapshot]
        blocked every other HTTP fiber for the duration (Eio cooperative
        scheduling: no yield points inside the synchronous compute).
 
@@ -1302,9 +1453,10 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
        payload is served from the cached snapshot; refresh runs off
        the main domain so concurrent HTTP requests are not stalled. *)
     ~compute:(fun () ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        compute_full_health_snapshot_for_refresh ~request_authority request))
-    ~on_result:store_full_health_snapshot
+      await_full_health_refresh_worker ~sw ~compute:(fun () ->
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+              compute_full_health_snapshot ~request_authority request)))
+    ~on_result:Fun.id
 
 module For_testing = struct
   let reset_full_health_snapshot () =
@@ -1313,7 +1465,20 @@ module For_testing = struct
         full_health_refresh_in_flight := false;
         full_health_refresh_started_at := None;
         full_health_refresh_requested := false;
-        full_health_consecutive_failures := 0)
+        full_health_consecutive_failures := 0;
+        full_health_invalidation_generation := 0;
+        full_health_active_worker := None;
+        full_health_next_worker_id := 0;
+        full_health_worker_submissions := 0;
+        full_health_worker_joins := 0)
+
+    (* The wakeup stream is deliberately left alone. It carries "re-check the
+       flag" and nothing else, its capacity is 1, and this reset has already
+       cleared the flag it points at -- so a token left behind can only make a
+       running consumer look once and find its work already done. Clearing it
+       needed a non-blocking take, which RFC-0063 6.1 bars from a file with no
+       cooperative yield: the rule that caught the unbounded drain loop this
+       reset used to run. *)
 
   let refresh_full_health_snapshot_now ?(listener = "http/1.1")
       ~request_authority request =
@@ -1325,6 +1490,33 @@ module For_testing = struct
     ( full_health_refresh_interval_sec,
       full_health_refresh_timeout_sec,
       full_health_snapshot_ttl_sec )
+
+  let full_health_refresh_wakeup_coalesce_sec () =
+    full_health_refresh_wakeup_coalesce_sec
+
+  let run_full_health_refresh_worker ~sw ~compute =
+    await_full_health_refresh_worker ~sw ~compute:(fun () ->
+        let started_at = Unix.gettimeofday () in
+        compute ();
+        let computed_at = Unix.gettimeofday () in
+        { fields = [];
+          computed_at;
+          duration_ms = duration_ms ~started_at ~finished_at:computed_at;
+          failure = None;
+          stale_since_ts = None;
+          last_good_available = true;
+          section_timings = []
+        })
+
+  let full_health_refresh_worker_stats () =
+    with_full_health_snapshot_lock (fun () ->
+        ( !full_health_worker_submissions,
+          !full_health_worker_joins,
+          Option.is_some !full_health_active_worker,
+          !full_health_invalidation_generation,
+          Option.is_some !full_health_snapshot,
+          !full_health_refresh_requested ))
+  ;;
 end
 
 let full_health_requested request =

@@ -1,0 +1,9 @@
+[2026-08-30 18:05:09] [DEBUG] [Dashboard] full_health_snapshot warm cache delayed 0s
+[2026-08-30 18:05:09] [INFO] [Dashboard] starting full_health_snapshot refresh loop
+[2026-08-30 18:05:10] [INFO] [Dashboard] full_health_snapshot warm cache done (0.0s)
+[2026-08-30 18:05:44] [DEBUG] [Dashboard] full_health_snapshot refreshed (0.0s)
+[2026-08-30 18:05:54] [INFO] [Keeper] schedule stimulus retained without owner activation schedule_id=r67-shared-one keeper=scale_01 reason=owner_unknown detail=Keeper owner not found: scale_01
+[2026-08-30 18:05:54] [INFO] [Server] schedule_runner: occurrence=fc28717864b4dbd2b7b674587a96fd55284d44e7ec1b02970aceace0b8f50a2b schedule_id=r67-shared-one dispatch=succeeded
+[2026-08-30 18:05:54] [DEBUG] [Dashboard] full_health_snapshot coalesced 1 sibling wakeup signal(s) over 0.100s
+[2026-08-30 18:05:54] [DEBUG] [Dashboard] full_health_snapshot refreshed (0.1s)
+[2026-08-30 18:06:25] [DEBUG] [Dashboard] full_health_snapshot refreshed (0.1s)

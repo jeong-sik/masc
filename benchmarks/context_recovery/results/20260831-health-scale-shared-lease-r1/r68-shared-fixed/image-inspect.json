@@ -1,0 +1,84 @@
+[
+    {
+        "Id": "sha256:b732b674773a732be91bbaf41a4b9342d08a2e16bd6a6cccfbb3f53b16261eb3",
+        "RepoTags": [
+            "masc-oneclick:docker-shared-basepath-lease-da6f0b6"
+        ],
+        "RepoDigests": [
+            "masc-oneclick@sha256:b732b674773a732be91bbaf41a4b9342d08a2e16bd6a6cccfbb3f53b16261eb3"
+        ],
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-08-30T18:16:17.669011545Z",
+        "Config": {
+            "User": "appuser",
+            "ExposedPorts": {
+                "8080/tcp": {}
+            },
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "PORT=8080",
+                "MASC_BASE_PATH=/app",
+                "MASC_RUN_DIR=/app/.masc/runtime/host-run"
+            ],
+            "Entrypoint": [
+                "/usr/bin/tini",
+                "--",
+                "/app/scripts/docker-entrypoint.sh"
+            ],
+            "Volumes": {
+                "/app/.masc": {}
+            },
+            "WorkingDir": "/app",
+            "Labels": {
+                "org.opencontainers.image.version": "24.04"
+            },
+            "StopSignal": "SIGTERM",
+            "Healthcheck": {
+                "Test": [
+                    "CMD-SHELL",
+                    "curl -fsS http://localhost:${PORT}/health || exit 1"
+                ],
+                "Interval": 30000000000,
+                "Timeout": 3000000000,
+                "StartPeriod": 15000000000,
+                "Retries": 5
+            }
+        },
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 135587903,
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:105e152a65d8c7d209f5da480c6e672f86f6ad168fe645a6c69ef16d134675ed",
+                "sha256:48c9224d7896c95c59a4076724250c5c3db78ed96eff8ae3b29ab06b1219b719",
+                "sha256:d6f6f8bc0f2d679ebca809563f11d0cecb02a436e7beda4c818feaabdc739b1c",
+                "sha256:e1925d3eb056d275aeb1d24d3dffe9a5e0893f38d3eb579240f6dd92cdd6a845",
+                "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+                "sha256:188bae2f31f8c2d204c96b4d58ecac9feab593da82890c05a94e97addab9ad96",
+                "sha256:823069632d05023cea979cdc34a22665d1232f20de9c89304db75b4435b981e4",
+                "sha256:48445fc8edd080ff817ae51514c53976b65f99144d1802719549d40a386c992b",
+                "sha256:db2ed05c2e28dab581ec63780dae506c9ebe150944b6069aa9391432f840cef2",
+                "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+                "sha256:39544c09dbbcfe0cccf0beef713c9323a63a9d69aeb806e81effe67b2bf46679",
+                "sha256:848a9a6304812932f6694bea25dfc65d734bcc9caa3ccffbce42d9722e10ff9c"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-08-30T18:16:21.782784047Z"
+        },
+        "Descriptor": {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "digest": "sha256:b732b674773a732be91bbaf41a4b9342d08a2e16bd6a6cccfbb3f53b16261eb3",
+            "size": 856
+        },
+        "Identity": {
+            "Build": [
+                {
+                    "Ref": "zoldtb1uwx2dvwz64t3cx5kvq",
+                    "CreatedAt": "2026-08-30T18:16:22.599888839Z"
+                }
+            ]
+        }
+    }
+]

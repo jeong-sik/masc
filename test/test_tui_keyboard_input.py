@@ -1028,6 +1028,23 @@ def overview_event_http_fixtures() -> HttpFixtures:
     }
 
 
+def keeper_roster_meta(name: str) -> dict[str, object]:
+    # The roster row nests the keeper's own declaration under [meta], and the
+    # decoder reads sandbox_profile from there rather than from a second
+    # top-level copy (lib/tui_decode.ml, decode_keeper_runtime). A row without
+    # [meta] is not a smaller server response -- keeper_brief_meta_json always
+    # writes it -- and dropping it fails the whole list decode, which the TUI
+    # reports as a malformed roster rather than as a per-row gap. Every runtime
+    # column then draws as absent.
+    return {
+        "name": name,
+        "trace_id": f"trace-{name}",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "sandbox_profile": "local",
+    }
+
+
 def keeper_runtime_http_fixtures(
     *,
     alpha_runtime_id: str = "anthropic.claude-opus-5",
@@ -1044,6 +1061,7 @@ def keeper_runtime_http_fixtures(
                 {
                     "runtime_class": "keeper",
                     "name": "alpha",
+                    "meta": keeper_roster_meta("alpha"),
                     "status": "active",
                     "health": "healthy",
                     "paused": False,
@@ -1056,6 +1074,7 @@ def keeper_runtime_http_fixtures(
                 {
                     "runtime_class": "keeper",
                     "name": "beta",
+                    "meta": keeper_roster_meta("beta"),
                     "status": "idle",
                     "health": "idle",
                     "paused": True,
@@ -1215,6 +1234,12 @@ def approval_selection_http_fixtures() -> tuple[
     fixtures["/api/v1/operator?view=summary&include_messages=0&include_keepers=0"] = (
         approval_selection_snapshot(initial_items)
     )
+    # The surface also polls the held tool calls. An unanswered poll is not a
+    # quiet zero here: the header says ", held calls stale" beside the count,
+    # because a list that survived a failed refresh is the one an operator
+    # decides against. This scenario is about selection, so it answers the
+    # poll with the honest empty queue.
+    fixtures["/api/v1/keepers/tool-approvals"] = (200, {"pending": []})
     return fixtures, initial_items, approval_new
 
 
@@ -1700,21 +1725,38 @@ def keeper_long_runtime_identity_interaction(
         columns=140,
         needle=b"MASC Overview",
     )
+    # Both keepers run the same provider subscription, so their ids differ
+    # only after a 25-character shared prefix. What has to hold is that the
+    # elision cuts the shared middle and leaves the tail that tells the two
+    # apart. Where exactly it cuts is a function of the column width, so
+    # pinning the cut point spells a needle that a wider column retires --
+    # the earlier b"antigrav\xe2\x80\xa6.gemini-3-7-flash" was written against a
+    # narrower column and stopped matching without the behaviour changing.
     send_and_wait(
         process,
         master_fd,
         output,
         b"2",
-        b"antigrav\xe2\x80\xa6.gemini-3-7-flash",
+        b".gemini-3-7-flash",
     )
     wait_for_output(
         process,
         master_fd,
         output,
-        b"\xe2\x80\xa6on.claude-sonnet-4",
+        b".claude-sonnet-4",
         start=0,
         timeout=3.0,
     )
+    frame = frame_containing(bytes(output), b".claude-sonnet-4")
+    for full_id in (
+        b"antigravity_subscription.gemini-3-7-flash",
+        b"antigravity_subscription.claude-sonnet-4",
+    ):
+        if full_id in frame:
+            raise AssertionError(
+                f"{full_id!r} was drawn whole, so this scenario is no longer "
+                f"exercising the elision it guards: {frame!r}"
+            )
     os.write(master_fd, b"q")
 
 
@@ -1940,7 +1982,12 @@ def wheel_scrolls_and_clicks_do_not(
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
-    send_and_wait(process, master_fd, output, b"/", b"/  j/k:move")
+    # An armed search prefixes the footer with its query at the one seam
+    # every surface shares (footer_line). What follows it is the surface's
+    # own hint text -- Keepers spells its first hint "j/k move", and at 100
+    # columns the strip is elided anyway. The prefix is what says the
+    # search is armed.
+    send_and_wait(process, master_fd, output, b"/", b"/  ")
     resize_and_wait(
         process,
         master_fd,
@@ -3108,7 +3155,7 @@ def approval_selection_identity_interaction(
             master_fd,
             output,
             screen_header(
-                b"MASC Approvals", b" (3/3, hidden 0, actor masc-tui)"
+                b"MASC Approvals", b" (3)"
             ),
         )
         selected = send_and_wait(process, master_fd, output, b"j", b"keeper_probe")
@@ -3132,13 +3179,13 @@ def approval_selection_identity_interaction(
             output,
             b"r",
             screen_header(
-                b"MASC Approvals", b" (4/4, hidden 0, actor masc-tui)"
+                b"MASC Approvals", b" (4)"
             ),
         )
         refreshed_frame = frame_containing(
             refreshed,
             screen_header(
-                b"MASC Approvals", b" (4/4, hidden 0, actor masc-tui)"
+                b"MASC Approvals", b" (4)"
             ),
         )
         refreshed_plain = CSI_RE.sub(b"", refreshed_frame)
@@ -3251,7 +3298,10 @@ def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction
         goal_reference = b"masc://planning/goal-b-29424"
         if (
             b"plan-beta-29424" not in detail
-            or b"left/Esc:back" not in detail
+            # The footer is built from the key table now, which spells the
+            # pair "Left / Esc:back". The flat "left/Esc:back" is the string
+            # this surface carried before it read its hints from the bindings.
+            or b"Left / Esc:back" not in detail
             or goal_reference not in detail
         ):
             raise AssertionError(
@@ -3308,7 +3358,17 @@ def planning_missing_detail_interaction(fixtures: HttpFixtures) -> Interaction:
             final_cursor=b"\x1b[?25l",
         )
         assert_planning_goal_selected(recovered, b"plan-charlie-29424")
-        if b"Enter:detail" not in recovered or b"Esc:back" in recovered:
+        # What has to hold is that the surface fell back to the list rather
+        # than drawing a detail for a goal the snapshot no longer carries.
+        # The footer stopped answering that: it is built from the key table
+        # now and publishes "Left / Esc:back" in both modes. The goal link and
+        # the timeline heading are drawn by the detail pane alone, so their
+        # absence is the reading -- and a stricter one than a hint's spelling.
+        if (
+            b"Enter:detail" not in recovered
+            or b"masc://planning/" in recovered
+            or b"TIMELINE" in recovered
+        ):
             raise AssertionError(
                 f"missing Planning detail did not render list mode: {recovered!r}"
             )
@@ -4669,15 +4729,23 @@ def memory_journal_timeline_interaction() -> Interaction:
         )
         frame_end = output.find(FRAME_END, last_row_end) + len(FRAME_END)
         visible = bytes(output[start:frame_end])
+        # The kind tag carries its own colour, so SGR lands between the
+        # bracket, the word inside it, and the text after it. A flat byte
+        # needle spanning that boundary cannot match a coloured tag -- the two
+        # below were written while the tag was drawn in the body's colour.
+        tag = rb"(?:\x1b\[[0-9;]*m)*"
         for needle in (
-            b"[fact] the Runtime probe shares",
+            re.compile(
+                rb"\[" + tag + rb"fact" + tag + rb"\]" + tag
+                + rb" the Runtime probe shares"
+            ),
             b"one provider endpoint",
-            b"[constraint] probe",
+            re.compile(rb"\[" + tag + rb"constraint" + tag + rb"\]" + tag + rb" probe"),
             b"every model separately",
             b"drop memory-old-probe-rule",
             b"superseded by provider grouping",
         ):
-            if needle not in visible:
+            if find_needle(visible, needle) < 0:
                 raise AssertionError(f"Memory timeline did not draw {needle!r}: {visible!r}")
 
         # The changed facts ride a ```diff fence, which is what colours the two
@@ -5748,13 +5816,14 @@ def verification_request_row(task_id: str) -> dict[str, object]:
         "request_id": f"vr-{task_id}",
         "task_id": task_id,
         "task_title": f"finish {task_id}",
-        "request_kind": "completion",
-        "request_summary": "" if task_id == "task-901" else f"prove {task_id} is done",
+        # request_kind, request_summary and next_action are gone from the
+        # producer: Verification_protocol wrote them as the fixed literals
+        # "normal", "" and "", so three rows of the detail pane said the same
+        # thing on every request ever drawn. Nothing reads them now.
         "submitted_by": "keeper-alpha",
         "created_at": "2026-08-25T14:00:00+09:00",
         "required_artifacts": ["diff"],
         "submitted_evidence": ["diff"],
-        "next_action": "review the diff",
     }
 
 
@@ -5847,13 +5916,11 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         for needle in (
             b"vr-task-901",
             b"finish task-901",
-            b"completion",
-            b"No request summary was recorded",
-            b"review the diff",
+            b"Submitted by",
             b"REQUIRED ARTIFACTS (1)",
             b"SUBMITTED EVIDENCE (1)",
             b"diff",
-            b"left/Esc:list",
+            b"Left / Esc:back",
         ):
             if needle not in detail_plain:
                 raise AssertionError(
@@ -5946,6 +6013,13 @@ def standalone_lane_fixture(
         "configured": True,
         "configuration_state": "ready",
         "admitted_slots": ["glm-coding.glm-5-turbo"],
+        # The projection writes three slot lists, not one: what the lane
+        # admitted, what it reaches over a CLI, and what its admission
+        # dropped. Omitting the last two fails the row decode, and the whole
+        # snapshot with it, so the observation matrix simply never draws --
+        # the surface has no per-row gap to show.
+        "cli_slots": [],
+        "dropped_slots": [],
         "admission_error": None,
         "status": status,
         "retained_run_count": 12,
@@ -7160,7 +7234,14 @@ def runtime_probe_response(*, fresh: bool) -> HttpResponse:
             "refresh_state": "fresh" if fresh else "served_stale",
             "probe": {
                 "source": "runtime.toml",
-                "status": "reachable" if fresh else "degraded",
+                # The overall probe status is written from Health_status, which
+                # spells the healthy reading "ok". "reachable" belongs to the
+                # per-provider vocabulary a few lines below and is not a word
+                # this field can carry, so a fixture using it here fails the
+                # snapshot decode -- and that failure is an inner result, so
+                # the surface keeps the previous reading and only marks the
+                # header "read failed" rather than saying what broke.
+                "status": "ok" if fresh else "degraded",
                 "probe_ok": fresh,
                 "checked_at": "2026-08-24T10:20:00Z",
                 "summary": {
@@ -7357,8 +7438,11 @@ def runtime_surface_interaction(
                 process,
                 master_fd,
                 output,
+                # The header writes the overall reading back with the word the
+                # producer sent -- Health_status spells the healthy one "ok".
+                # "reachable" is the per-provider word and never appears here.
                 re.compile(
-                    rb"reachable(?:\x1b\[[0-9;]*m)* / "
+                    rb"ok(?:\x1b\[[0-9;]*m)* / "
                     rb"(?:\x1b\[[0-9;]*m)*fresh"
                 ),
                 start=fresh_start,
@@ -7504,7 +7588,10 @@ def schedule_detail_interaction() -> Interaction:
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
             b"wake:succeeded",
-            b"dispatch:running",
+            # The list used to carry a dispatch chip beside these. #31562
+            # dropped it because it only ever repeated the row's own status,
+            # which the identity line above the delivery row already names.
+            b"status:running",
             b"queue:matched_pending/2 pending",
             b"reaction:matched_recorded",
         ):
@@ -7580,6 +7667,12 @@ def fusion_run(
         "started_at": 1787557669.715736,
         "status": status,
     }
+
+
+# The Registry list fits a run id into a 14-cell column, so what it draws is
+# the truncated head with the pane's "~" marker after it. The full id is what
+# the detail pane and the copy links carry, and those assertions keep it.
+FUSION_TARGET_LISTED = b"fusion-target"
 
 
 def fusion_runs_response(runs: list[dict[str, object]]) -> HttpResponse:
@@ -7683,6 +7776,14 @@ def fusion_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
                     "verdict": "approve",
                     "evaluator_runtime": "glm-coding",
                     "fallback_reason": None,
+                    # SHA256(task_title + "\n" + completion_notes). The
+                    # recorder writes it on every verdict and the reader takes
+                    # it as opaque, but it is required: without it the whole
+                    # harness snapshot fails to decode, the surface draws
+                    # "(not loaded)" with its column headers and no rows, and
+                    # the footer offers no verdict key because there is no row
+                    # to open.
+                    "notes_hash": "a51844ac8e12b5bf11f1c6db0021521298e5788cd64e4ec9b566dbf36a16fa51",
                 }
             ],
             "calibration": {},
@@ -7748,21 +7849,42 @@ def fusion_list_detail_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"task-linked-501")
-        # The row can land in a frame drawn before the column headers are
-        # repainted, so the headers are what this waits on rather than the row:
-        # the assertions below are about the whole list, not one line of it.
-        wait_for_output(
-            process, master_fd, output, b"Evaluator", start=0, timeout=5.0
-        )
+        # The surface title, not the task id: this scenario seeds the goal the
+        # verdict judges, and that goal lists the same task on Planning, so
+        # tabbing on the id stops one surface early.
+        # The surface title, not the task id: this scenario seeds the goal the
+        # verdict judges, and that goal lists the same task on Planning, so
+        # tabbing on the id stops one surface early. Reading the whole stream
+        # for the headers then let a Harness frame drawn while tabbing past
+        # answer for the one on screen, which is how the assertions below
+        # passed against a list nobody was looking at.
+        tab_until(process, master_fd, output, b"MASC Harness")
+        # One full repaint, because the pane redraws only the rows that change
+        # and the column headers are written once. The assertions below are
+        # about the whole list, so they need the whole list in one frame.
         harness_plain = CSI_RE.sub(
-            b"", frame_containing(bytes(output), b"Evaluator")
+            b"",
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=30,
+                columns=120,
+                needle=b"Evaluator",
+                controls=(FULL_REDRAW,),
+            ),
         )
-        for needle in (b"Gate", b"Verdict", b"Evaluator", b"Right / Enter:verdict"):
+        for needle in (b"Gate", b"Verdict", b"Evaluator"):
             if needle not in harness_plain:
                 raise AssertionError(
                     f"Harness list omitted {needle!r}: {harness_plain!r}"
                 )
+        # The verdict key used to be asserted here. The key strip is drawn on
+        # its own row and only when it changes, so it is not in the frame the
+        # list rows arrive in and often not in the repaint either -- the check
+        # was reading a region this frame does not carry. The Enter below opens
+        # the verdict, which proves the key works rather than that it is
+        # spelled on screen.
         copy_reference(
             process,
             master_fd,
@@ -7824,12 +7946,12 @@ def fusion_list_detail_interaction(
             process,
             master_fd,
             output,
-            b"fusion-target-501",
+            FUSION_TARGET_LISTED,
             start=start,
             timeout=3.0,
         )
-        target_end = output.find(b"fusion-target-501", start) + len(
-            b"fusion-target-501"
+        target_end = output.find(FUSION_TARGET_LISTED, start) + len(
+            FUSION_TARGET_LISTED
         )
         wait_for_output(
             process,
@@ -7848,7 +7970,9 @@ def fusion_list_detail_interaction(
             b"STATUS",
             b"KEEPER",
             b"PRESET",
-            b"TOPOLOGY",
+            # No TOPOLOGY column: the header row is TIME AGE STATUS KEEPER
+            # PRESET RUN, and the keeper column took the width the run id used
+            # to sit whole in.
             b"RUN",
             b"Flow: Question",
         ):
@@ -7865,8 +7989,10 @@ def fusion_list_detail_interaction(
                 f"Fusion list footer disagrees with its exercised keys: {plain!r}"
             )
 
-        selected = send_and_wait(process, master_fd, output, b"j", b"fusion-target-501")
-        if re.search(rb">[^\r\n]*fusion-target-501", CSI_RE.sub(b"", selected)) is None:
+        selected = send_and_wait(
+            process, master_fd, output, b"j", FUSION_TARGET_LISTED
+        )
+        if re.search(rb">[^\r\n]*fusion-target", CSI_RE.sub(b"", selected)) is None:
             raise AssertionError(f"Fusion did not select the target run: {selected!r}")
 
         target = fusion_run("fusion-target-501", keeper="beta")
@@ -7875,7 +8001,7 @@ def fusion_list_detail_interaction(
         fixtures[FUSION_RUNS_PATH] = fusion_runs_response([target, new, alpha])
         refreshed = send_and_wait(process, master_fd, output, b"r", b"fusion-new-501")
         if (
-            re.search(rb">[^\r\n]*fusion-target-501", CSI_RE.sub(b"", refreshed))
+            re.search(rb">[^\r\n]*fusion-target", CSI_RE.sub(b"", refreshed))
             is None
         ):
             raise AssertionError(

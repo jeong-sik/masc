@@ -331,7 +331,7 @@ let test_turn_sandbox_factory_ignores_mid_turn_registry_profile_drift () =
       "runtime host root stays on the turn's Docker profile"
       (Keeper_alerting_path.normalize_path_for_check_stripped docker_playground)
       (Keeper_turn_sandbox_runtime.host_root runtime)
-  | No_factory | Local_profile | Remote_ssh_profile ->
+  | No_factory | Remote_ssh_profile ->
     Alcotest.fail "mid-turn registry drift must not change Docker dispatch to Local"
 
 let with_fake_docker script f =

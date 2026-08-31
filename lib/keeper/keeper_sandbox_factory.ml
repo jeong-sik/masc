@@ -1,7 +1,6 @@
 type resolve_result =
   | Runtime of Keeper_turn_sandbox_runtime.t
   | No_factory
-  | Local_profile
   | Remote_ssh_profile
 
 type t = {

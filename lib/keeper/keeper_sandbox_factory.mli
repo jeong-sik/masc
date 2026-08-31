@@ -15,9 +15,8 @@
     runtimes lazily at each call site, but freezes its construction meta so
     path resolution and dispatch use one sandbox profile for the whole turn.
     Registry reconciliation takes effect on the next turn; consulting it
-    mid-turn can otherwise route a Docker-scoped cwd through Local dispatch.
-    The declared sandbox profile remains the execution contract: [Local]
-    resolves to [Local_profile] even when DockerPlayground is enabled.
+    mid-turn can otherwise route a cwd scoped to one backend through another.
+    The declared sandbox profile remains the execution contract.
 
     The dependency on {!Keeper_sandbox_docker} stays acyclic:
     [keeper_sandbox_docker] only consumes [Keeper_turn_sandbox_runtime.t]
@@ -26,12 +25,10 @@
 type resolve_result =
   | Runtime of Keeper_turn_sandbox_runtime.t
   | No_factory
-  | Local_profile
   | Remote_ssh_profile
-      (** The effective profile is [Remote_ssh]. Distinct from
-          [Local_profile] so no caller can read it as "host execution is
-          fine": Docker-shaped consumers fail closed on this constructor,
-          and SSH dispatch has its own path. *)
+      (** The effective profile is [Remote_ssh]. A constructor of its own so
+          no Docker-shaped consumer reads it as a runtime it can use: they
+          fail closed on it, and SSH dispatch has its own path. *)
 
 type t
 
@@ -56,10 +53,9 @@ val resolve :
     sandbox-profile or image drift. Registry changes are observed by the next
     turn's factory, never midway through the current turn.
 
-    [Local_profile] is returned when the effective sandbox profile is [Local].
-    [Remote_ssh_profile] is returned when it is [Remote_ssh] (there is no
-    Docker runtime to resolve for it; consumers fail closed).
-    [No_factory] is only produced by {!resolve_opt}. *)
+    [Remote_ssh_profile] is returned when the effective profile is
+    [Remote_ssh] (there is no Docker runtime to resolve for it; consumers fail
+    closed). [No_factory] is only produced by {!resolve_opt}. *)
 
 val resolve_opt :
   t option ->

@@ -555,10 +555,6 @@ end
     centralized here to eliminate scattered magic 300.0/3600.0 literals. *)
 
 module InternalTimers = struct
-  (** Tool metrics flush interval (seconds). Default: 300 (5 min). *)
-  let metrics_flush_sec =
-    get_float ~default:300.0 "MASC_METRICS_FLUSH_SEC"
-
   (** Dashboard label "quiet" threshold (seconds). Default: 300 (5 min). *)
   let label_quiet_threshold_sec =
     get_float ~default:300.0 "MASC_LABEL_QUIET_THRESHOLD_SEC"

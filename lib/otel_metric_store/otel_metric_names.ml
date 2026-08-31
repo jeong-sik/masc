@@ -132,12 +132,7 @@ let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
      [time() - masc_keeper_supervisor_last_sweep_unixtime > 90]
      means the sweep is stalled (default sweep interval is 30s). *)
 
-(* tool_metrics_persist write queue overflow.
-   Counts JSONL records dropped because the bounded write queue is full.
-   No labels (single source). Existing in-memory [dropped_full_queue]
-   Atomic counter is summarised by sampled WARN (every 1024th drop);
-   this Otel_metric_store counter exposes per-drop emission so alerting on
-   sustained pressure does not depend on log scraping. *)
+(* Tool metric rows that SQLite could not persist. No labels (single source). *)
 let metric_tool_metrics_persist_dropped =
   Otel_metric_store_core.declare_counter "masc_tool_metrics_persist_dropped_total"
 

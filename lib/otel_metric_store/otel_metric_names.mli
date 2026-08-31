@@ -109,7 +109,7 @@ val metric_backend_mutex_held_sec : string
     for the rationale.  Counter increments on each Pulse start;
     gauge advances on every successful beat. *)
 
-(** Counter for [tool_metrics_persist] write-queue overflow drops. No labels. *)
+(** Counter for tool metric rows that SQLite could not persist. No labels. *)
 val metric_tool_metrics_persist_dropped : string
 
 (** Gauge of waiting/deferred rows by [scope] and [source] for the keeper

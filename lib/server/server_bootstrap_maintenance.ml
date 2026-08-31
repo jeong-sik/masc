@@ -550,15 +550,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      with
      | Ok report ->
        Log.Metrics.info
-         "tool_metrics_persist: hydrated %d record(s), skipped malformed=%d invalid=%d, pruned=%d file(s)"
+         "tool_metrics_persist: hydrated %d record(s), pruned=%d record(s)"
          report.loaded_records
-         report.malformed_records
-         report.invalid_records
-         report.pruned_files
+         report.pruned_records
      | Error error ->
        Log.Metrics.warn
          "tool_metrics_persist: startup hydration failed: %s"
-         (Dated_jsonl.read_error_to_string error)
+         error
    with
    | Eio.Cancel.Cancelled _ as exn -> raise exn
    | exn ->
@@ -571,12 +569,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     match outcome, result with
     | Dispatch_outcome.Handled, Some r ->
       Tool_metrics.record r;
-      Tool_metrics_persist.enqueue r
+      Tool_metrics_persist.enqueue ~base_path:tool_metrics_base_path r
     | _ -> ());
-  Tool_metrics_persist.start_flush_fiber
-    ~sw
-    ~clock
-    ~base_path:tool_metrics_base_path;
   (* RFC-0234 scheduled automation runner.  Public schedule tools and the
      dashboard-only approval route only mutate the durable ledger; this loop is
      the production caller that observes due rows and emits at-most-once generic wake signals.  It

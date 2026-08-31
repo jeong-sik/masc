@@ -283,6 +283,11 @@ type attention_item = {
   ai_summary: string;
   ai_target_type: string;
   ai_target_id: string option;
+  ai_evidence_ts: float option;
+      (** Epoch seconds of the evidence's [log_ts], when the producer stamped
+          one (tool-host failures do). The row's age is drawn from it; items
+          whose producers stamp no time (a paused keeper, a waiting
+          confirmation) carry [None] and show no age. *)
 }
 
 (** Who put a post on the board. Mirrors [Board_types.post_kind]: the wire

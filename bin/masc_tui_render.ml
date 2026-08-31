@@ -1040,6 +1040,15 @@ let attention_severity_color = function
   | Attention_warning -> (Theme.warn ())
   | Attention_info -> Ansi.cyan
 
+(* Compact "how long" text two surfaces share: the Attention panel's item age
+   and the Lanes table's idle column. *)
+let keeper_lane_idle_text seconds =
+  let seconds = max 0 seconds in
+  if seconds < 60 then Printf.sprintf "%ds" seconds
+  else if seconds < 3600 then Printf.sprintf "%dm" (seconds / 60)
+  else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
+  else Printf.sprintf "%dd" (seconds / 86400)
+
 let task_line (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   (* The icon and the status word share one color so the row's state reads at
@@ -1199,7 +1208,7 @@ let render_overview (state : state) =
            | Observer_opening -> "  feed: opening"
            | Observer_live { events; _ } -> Printf.sprintf "  feed: live %d" events
            | Observer_closed { events; _ } ->
-               (* The reason is in Recent Events and on the Acting status
+               (* The reason is in TUI Session Events and on the Acting status
                   row; here it would push the count off a narrow row. *)
                Printf.sprintf "  feed: closed after %d" events
          in
@@ -1240,9 +1249,9 @@ let render_overview (state : state) =
   in
   let events_title =
     let title =
-      if event_window.oew_first_position = 0 then " Recent Events "
+      if event_window.oew_first_position = 0 then " TUI Session Events "
       else
-        Printf.sprintf " Recent Events %d-%d/%d "
+        Printf.sprintf " TUI Session Events %d-%d/%d "
           event_window.oew_first_position event_window.oew_last_position
           event_count
     in
@@ -1260,6 +1269,19 @@ let render_overview (state : state) =
         let a = List.nth attention_items i in
         let sev_color = attention_severity_color a.ai_severity in
         let severity_label = attention_severity_label a.ai_severity in
+        (* The age answers "why is this still here": a stamped item shows how
+           long ago its evidence happened, an unstamped one (a paused keeper,
+           a waiting confirmation) shows an em dash because its producer put
+           no time on it -- it stands until its condition clears. A fixed
+           three-cell column, like the severity label, so summaries start on
+           one edge. *)
+        let age_label =
+          match a.ai_evidence_ts with
+          | Some ts ->
+              keeper_lane_idle_text
+                (int_of_float (Unix.gettimeofday () -. ts))
+          | None -> "\xe2\x80\x94"
+        in
           (* Fitted once, by the fit that draws the row. Fitting the summary
              here as well meant guessing how many cells the label ahead of it
              spends, and the events column beside this one guessed one too
@@ -1267,8 +1289,9 @@ let render_overview (state : state) =
              marked truncated whether or not anything was cut. The severity
              label keeps its own fit -- that one is a fixed column, not a
              guess at the rest of the row. *)
-          Printf.sprintf "%s[%s]%s %s"
+          Printf.sprintf "%s[%s]%s %s%s%s %s"
             sev_color (fit_width severity_label 5) Ansi.reset
+            Ansi.dim (fit_width age_label 3) Ansi.reset
             (Terminal_text.single_line a.ai_summary)
       else ""
     in
@@ -4588,13 +4611,6 @@ let keeper_lane_turn_style (phase : Tui_decode.keeper_lane_turn_phase) =
   | Lane_turn_exhausted -> (Theme.bad ())
   | Lane_turn_idle -> Ansi.gray
   | Lane_turn_unknown _ -> (Theme.warn ())
-
-let keeper_lane_idle_text seconds =
-  let seconds = max 0 seconds in
-  if seconds < 60 then Printf.sprintf "%ds" seconds
-  else if seconds < 3600 then Printf.sprintf "%dm" (seconds / 60)
-  else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
-  else Printf.sprintf "%dd" (seconds / 86400)
 
 let keeper_lane_outcome_text = function
   | None -> "\xe2\x80\x94"

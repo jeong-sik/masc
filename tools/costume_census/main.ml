@@ -38,7 +38,13 @@ let bump table key =
 let () =
   let files = List.tl (Array.to_list Sys.argv) in
   let executes = ref 0 in
-  let lowered = ref 0 in
+  (* RFC execute-boundary-is-the-sandbox §8. The field names the execution
+     model, so the census counts models rather than whether a parser coped.
+     [lowered] answered the old question -- did step 4 take this costume into
+     the IR -- and there is no longer a costume it does not take. *)
+  let ran_typed = ref 0 in
+  let ran_shell = ref 0 in
+  let advised = ref 0 in
   let argv_form = ref 0 in
   let costumes = ref 0 in
   let unreadable = ref 0 in
@@ -54,7 +60,23 @@ let () =
             match Yojson.Safe.from_string line with
             | json ->
               (match Yojson.Safe.Util.member "tool" json with
-               | `String "Execute" -> incr executes
+               | `String "Execute" ->
+                 incr executes;
+                 (* Every call, not only the ones wearing a costume: the
+                    question is which execution model the call got, and a
+                    plain [argv] answers it as much as a script does. *)
+                 (match Yojson.Safe.Util.member "input" json with
+                  | `Assoc _ as input ->
+                    (match Execute_input.of_json input with
+                     | Ok parsed ->
+                       (match Execute_input.to_shell_ir_unvalidated parsed with
+                        | Ok ir ->
+                          if Costume.ir_keeps_a_shell ir
+                          then incr ran_shell
+                          else incr ran_typed
+                        | Error _ -> ())
+                     | Error _ -> ())
+                  | _ -> ())
                | _ -> ());
               (match argv_of_record json with
                | None | Some [] -> ()
@@ -81,18 +103,12 @@ let () =
                        directory. Counting a [Pipeline] as lowered because it
                        was not a [Simple], and reading [/bin/zsh] as a program
                        that is not a shell, both counted up. *)
-                    (match Yojson.Safe.Util.member "input" json with
-                     | `Assoc _ as input ->
-                       (match Execute_input.of_json input with
-                        | Ok parsed ->
-                          (match Execute_input.to_shell_ir_unvalidated parsed with
-                           | Ok ir ->
-                             if not (Costume.ir_keeps_a_shell ir) then incr lowered
-                           | Error _ -> ())
-                        | Error _ -> ())
-                     | _ -> ());
                     (match finding with
                      | Costume.Outside_the_subset reason ->
+                       (* The third disposition: it ran, and the judge had
+                          something to say about how it could have been
+                          written. *)
+                       incr advised;
                        bump rewrites (Rewrite.tag (Rewrite.of_reason reason))
                      | _ -> ())))
             | exception Yojson.Json_error _ -> incr unreadable
@@ -108,13 +124,17 @@ let () =
     |> List.iter (fun (key, count) -> Printf.printf "%8d  %s\n" count key)
   in
   Printf.printf
-    "files=%d execute=%d argv_form=%d costumes=%d lowered=%d unreadable_lines=%d\n"
+    "files=%d execute=%d argv_form=%d costumes=%d unreadable_lines=%d\n"
     (List.length files)
     !executes
     !argv_form
     !costumes
-    !lowered
     !unreadable;
+  Printf.printf
+    "ran_typed=%d ran_shell=%d advised=%d\n"
+    !ran_typed
+    !ran_shell
+    !advised;
   report "what the gate would have said" findings;
   report "what the caller should have called" rewrites;
   report "which shell wore the costume" shells

@@ -323,8 +323,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   # on-disk snapshot still carried.
   keeper_meta_fixture='{
     schema: "masc.keeper_meta.v1", name: "fixture",
-    agent_name: "keeper-fixture-agent",
-    instructions: "self-test fixture", autonomous_instructions: null,
+    instructions: "self-test fixture",
     trace_id: "trace-fixture",
     trace_history: [], last_handoff_ts: 0.0,
     created_at: "2026-08-23T00:00:00Z", updated_at: "2026-08-23T00:00:00Z",

@@ -1,5 +1,6 @@
 type action =
   | Create_request
+  | Update_request
   | List_requests
   | Get_request
   | Cancel_request

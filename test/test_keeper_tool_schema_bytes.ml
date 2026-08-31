@@ -215,6 +215,7 @@ let all_surface_golden_names =
   ; "masc_schedule_create"
   ; "masc_schedule_get"
   ; "masc_schedule_list"
+  ; "masc_schedule_update"
   ; "masc_task_history"
   ; "masc_task_set_goal"
   ]

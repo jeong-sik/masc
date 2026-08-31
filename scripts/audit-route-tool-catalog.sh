@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Fail when an HTTP route demands a tool name that the tool catalog does not carry.
 #
-# Route handlers authorize through with_tool_auth ~tool_name:"...". Authorization
+# Route handlers authorize through with_tool_auth/with_tool_actor_auth
+# ~tool_name:"...". Authorization
 # looks that name up in Tool_catalog and denies outright when the lookup misses:
 #
 #   lib/auth/auth.ml
@@ -27,12 +28,12 @@ cd "$(git rev-parse --show-toplevel)" || exit
 demanded="$(mktemp)"
 trap 'rm -f "$demanded"' EXIT
 
-rg --only-matching --no-line-number 'with_tool_auth ~tool_name:"[a-z_]+"' lib/server \
+rg --only-matching --no-line-number 'with_tool(_actor)?_auth ~tool_name:"[a-z_]+"' lib/server \
   | sed 's/.*"\(.*\)"/\1/' \
   | sort -u > "$demanded"
 
 if [ ! -s "$demanded" ]; then
-  echo "[route-tool-catalog] no with_tool_auth call sites found - the scan pattern is stale"
+  echo "[route-tool-catalog] no tool-auth call sites found - the scan pattern is stale"
   exit 1
 fi
 

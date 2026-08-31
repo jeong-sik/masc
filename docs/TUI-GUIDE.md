@@ -51,7 +51,7 @@ decides whether launching one is worth it.
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
-| Schedules | unavailable | `GET /api/v1/dashboard/scheduled-automation` |
+| Schedules | unavailable | `GET /api/v1/dashboard/scheduled-automation`; authenticated create/update/cancel routes |
 | Fusion | unavailable | `GET /api/v1/dashboard/fusion-runs`, then exact `/:run_id` detail |
 | Runtime | unavailable | `GET /api/v1/runtime/resolved` + `GET /api/v1/dashboard/runtime-probe` |
 | Keeper message | unavailable | `POST /api/v1/keepers/chat/stream` |
@@ -698,7 +698,7 @@ to wake up".
    Next due: 2026-08-24T09:57:00
  >   [scheduled] 2026-08-24T09:57:00  alpha        daily 09:57
      [running  ] 2026-08-24T09:12:00  sangsu       one-shot
-  j/k:move  Enter:details  x:cancel  r:refresh  Tab:next  | Port: 8935
+  j/k:move  Enter:details  n:new  e:modify  x:cancel  r:refresh  Tab:next
 ```
 
 The header count and the page are different things: the server sorts the whole
@@ -716,9 +716,21 @@ local guess from the status column. The payload target column names who the
 wake reaches (a keeper, for keeper wakes); rows without one fall back to the
 payload summary.
 
+`n` opens a JSON creation form in `$EDITOR`; `e` opens the selected row's
+exact editable definition, including its full message, due time, recurrence,
+expiry, urgency, and stable schedule id. Exiting the editor with zero sends
+the form, while a non-zero exit changes nothing. The form keeps example fields
+for interval, daily, and cron recurrence in place; `recurrence_kind` chooses
+which set the server reads. Modification is one atomic
+store transition: only `scheduled` or `due` rows can be replaced. It preserves
+the public `schedule_id` but creates a fresh `schedule_instance_id`, so wake
+evidence produced by the old definition is never shown as evidence for the
+new one. Running and terminal rows return the server's explicit refusal.
+
 Right or `Enter` opens the selected schedule. The detail includes schedule and instance
 identity, dispatch state, requesting actors, timestamps, recurrence, payload
-kind/tool/digest/summary, last wake, and queue/reaction evidence. Left or `Esc` returns
+kind/tool/digest/summary, the pretty full payload JSON, last wake, and
+queue/reaction evidence. Left or `Esc` returns
 to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 ### Fusion
@@ -1014,6 +1026,8 @@ Per surface:
 | `l` | Keeper detail | Open logs |
 | `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
+| `n` | Schedules | Create a schedule through the `$EDITOR` JSON form |
+| `e` | Schedules | Modify the selected active schedule atomically |
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `e` | Keeper list or detail | Edit the selected keeper's settings in `$EDITOR` (JSON patch; only the fields you keep in the file are sent). Exit 0 sends, any other exit changes nothing |
 | `a` | Keeper list or detail | Create a keeper: a declaration stub opens in `$EDITOR`; the `name` field in the file names the new keeper |

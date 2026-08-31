@@ -109,6 +109,49 @@ let test_duplicate_insert_rejected_without_bump () =
   check int "version unchanged" before.version after.version
 ;;
 
+let test_update_replaces_active_definition_with_fresh_instance () =
+  with_workspace
+  @@ fun config ->
+  let original = make_request ~schedule_id:"modify-1" () in
+  ignore (insert_ok config original);
+  let replacement =
+    { (make_request ~schedule_id:original.schedule_id ()) with due_at = 350.0 }
+  in
+  let before = read_state config in
+  let updated = store_ok "update" (update_request config replacement) in
+  let after = read_state config in
+  check string "stable public id" original.schedule_id updated.schedule_id;
+  check bool "fresh instance" false
+    (String.equal original.schedule_instance_id updated.schedule_instance_id);
+  check (float 0.0) "new due time" 350.0 updated.due_at;
+  check_status "replacement starts scheduled" Scheduled updated.status;
+  check int "one atomic version bump" (before.version + 1) after.version;
+  check int "still one schedule" 1 (List.length after.schedules)
+;;
+
+let test_update_accepts_due_but_refuses_terminal_definition () =
+  with_workspace
+  @@ fun config ->
+  let due = make_request ~schedule_id:"modify-due" () in
+  ignore (insert_ok config due);
+  ignore (store_ok "refresh due" (refresh_due config ~now:201.0));
+  let replacement = make_request ~schedule_id:due.schedule_id () in
+  ignore (store_ok "replace due" (update_request config replacement));
+  ignore (store_ok "cancel replacement" (cancel_request config ~schedule_id:due.schedule_id));
+  let before = read_state config in
+  check_error "terminal update"
+    (Invalid_status_transition "only scheduled or due requests can be modified")
+    (update_request config (make_request ~schedule_id:due.schedule_id ()));
+  check int "refusal does not bump" before.version (read_state config).version
+;;
+
+let test_update_requires_an_existing_schedule () =
+  with_workspace
+  @@ fun config ->
+  check_error "missing update" Schedule_not_found
+    (update_request config (make_request ~schedule_id:"missing" ()))
+;;
+
 let test_store_rejects_non_scheduled_initial_status () =
   with_workspace
   @@ fun config ->
@@ -1005,6 +1048,12 @@ let () =
             test_insert_persists_and_bumps_version;
           test_case "duplicate insert rejected without bump" `Quick
             test_duplicate_insert_rejected_without_bump;
+          test_case "update replaces active definition with fresh instance" `Quick
+            test_update_replaces_active_definition_with_fresh_instance;
+          test_case "update accepts due and refuses terminal" `Quick
+            test_update_accepts_due_but_refuses_terminal_definition;
+          test_case "update requires existing schedule" `Quick
+            test_update_requires_an_existing_schedule;
           test_case "corrupt primary recovers from last-good" `Quick
             test_recovers_from_last_good;
         ] );

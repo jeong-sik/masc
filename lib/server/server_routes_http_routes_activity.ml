@@ -16,6 +16,100 @@ let activity_result_json ~ok ~message =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
 
+let schedule_write_schema tool_name =
+  match Tool_schemas_schedule.find_definition tool_name with
+  | Some definition -> Ok definition.Tool_schemas_schedule.schema.input_schema
+  | None -> Error (tool_name ^ " schema is not registered")
+;;
+
+let schedule_stamp_operator_actor ~agent_name = function
+  | `Assoc fields ->
+    let stamped =
+      [ "requested_by_id", `String agent_name
+      ; "requested_by_kind", `String "human_operator"
+      ; "scheduled_by_id", `String agent_name
+      ; "scheduled_by_kind", `String "human_operator"
+      ]
+    in
+    let stamped_names = List.map fst stamped in
+    `Assoc
+      (stamped
+       @ List.filter
+           (fun (name, _) -> not (List.mem name stamped_names))
+           fields)
+  | other -> other
+;;
+
+let handle_schedule_write_request
+      ~update
+      ~state
+      ~agent_name
+      ~request
+      reqd
+      body_str
+  =
+  try
+    let ( let* ) r f =
+      match r with
+      | Ok value -> f value
+      | Error message ->
+        respond_json_value_with_cors ~status:`Bad_request request reqd
+          (activity_result_json ~ok:false ~message)
+    in
+    let* args =
+      try Ok (Yojson.Safe.from_string body_str) with
+      | Yojson.Json_error message -> Error ("Invalid JSON: " ^ message)
+    in
+    let args = schedule_stamp_operator_actor ~agent_name args in
+    let tool_name =
+      if update then "masc_schedule_update" else "masc_schedule_create"
+    in
+    let* schema = schedule_write_schema tool_name in
+    let* args =
+      Tool_input_validation.validate_args
+        ~schema
+        ~name:tool_name
+        ~args
+        ()
+      |> Result.map_error Tool_result.message
+    in
+    let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+    let context : Tool_schedule.context =
+      { config
+      ; agent_name
+      ; stamp_keeper_wake_result_delivery =
+          (fun ~payload ->
+             Schedule_payload_projection.set_keeper_wake_result_delivery
+               ~payload ~channel:None)
+      ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+      }
+    in
+    let start_time = Unix.gettimeofday () in
+    let result =
+      if update
+      then
+        Tool_schedule.handle_update
+          ~tool_name ~start_time context args
+      else
+        Tool_schedule.handle_create
+          ~tool_name ~start_time context args
+    in
+    let ok = Tool_result.is_success result in
+    let message = Tool_result.message result in
+    let status =
+      if ok
+      then if update then `OK else `Created
+      else `Bad_request
+    in
+    respond_json_value_with_cors ~status request reqd
+      (activity_result_json ~ok ~message)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+;;
+
 type keeper_cadence_wakeup_summary =
   { requested : int
   ; signaled : int
@@ -1266,6 +1360,23 @@ let add_routes ~sw ~clock router =
                (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
+  (* Schedule create/modify from the terminal. Their schemas share the same
+     editable definition; update additionally requires the stable id. Actor
+     auth supplies the scheduler identity instead of trusting a form field. *)
+  |> Http.Router.post "/api/v1/tools/masc_schedule_create" (fun request reqd ->
+       with_tool_actor_auth ~tool_name:"masc_schedule_create"
+         (fun state agent_name _request reqd ->
+            Http.Request.read_body_async reqd
+              (handle_schedule_write_request ~update:false ~state ~agent_name
+                 ~request reqd))
+         request reqd)
+  |> Http.Router.post "/api/v1/tools/masc_schedule_update" (fun request reqd ->
+       with_tool_actor_auth ~tool_name:"masc_schedule_update"
+         (fun state agent_name _request reqd ->
+            Http.Request.read_body_async reqd
+              (handle_schedule_write_request ~update:true ~state ~agent_name
+                 ~request reqd))
+         request reqd)
   (* Schedule cancel from the terminal (#29684). The workspace tool owns the
      argument contract ([Tool_schedule.handle_cancel]: schedule_id,
      cancelled_by_*, reason) and the store transition; the route pipes HTTP

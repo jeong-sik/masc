@@ -619,6 +619,11 @@ let optional_nested_int_field json object_field field =
         (Printf.sprintf "schedule %s must be an object or null: %s"
            object_field (Yojson.Safe.to_string value))
 
+let required_schedule_json_field json field =
+  match Yojson.Safe.Util.member field json with
+  | `Null -> Error (Printf.sprintf "schedule %s is required" field)
+  | value -> Ok value
+
 let decode_schedule_row json =
   let* sch_schedule_instance_id =
     required_string_field json "schedule_instance_id"
@@ -635,7 +640,9 @@ let decode_schedule_row json =
   let* sch_recurrence_summary =
     required_string_field json "recurrence_summary"
   in
+  let* sch_recurrence = required_schedule_json_field json "recurrence" in
   let* sch_payload_digest = required_string_field json "payload_digest" in
+  let* sch_payload = required_schedule_json_field json "payload" in
   let* sch_payload_kind = optional_string_field json "payload_kind" in
   let* sch_payload_support = required_string_field json "payload_support" in
   let* sch_payload_dispatch_tool =
@@ -704,7 +711,9 @@ let decode_schedule_row json =
     ; sch_next_due_at_iso
     ; sch_expires_at_iso
     ; sch_recurrence_summary
+    ; sch_recurrence
     ; sch_payload_digest
+    ; sch_payload
     ; sch_payload_kind
     ; sch_payload_support
     ; sch_payload_dispatch_tool

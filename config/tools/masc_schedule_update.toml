@@ -1,0 +1,144 @@
+name = "masc_schedule_update"
+description = """
+Atomically replace an active Keeper wake definition. The stable schedule_id
+is preserved and a fresh schedule_instance_id separates future wake evidence
+from the previous definition. Only scheduled or due requests can be updated;
+running and terminal requests are immutable. The editable fields and
+recurrence rules are the same as masc_schedule_create."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "schedule_id"
+type = "string"
+required = true
+description = "Stable id of the scheduled or due request to replace."
+
+[[params]]
+name = "due_at_unix"
+type = "number"
+description = """
+Unix timestamp in seconds. Provide this, due_at_iso, or a calendar
+recurrence (daily/cron) that can derive the first due time."""
+
+[[params]]
+name = "due_at_iso"
+type = "string"
+description = """
+RFC 3339 timestamp with Z or an explicit numeric offset, for example
+2026-08-02T09:00:00+09:00. It is normalized to whole-second UTC."""
+
+[[params]]
+name = "keeper_name"
+type = "string"
+required = true
+description = "The Keeper to wake."
+
+[[params]]
+name = "message"
+type = "string"
+required = true
+description = """
+What the Keeper is being woken to do. Write the work itself, not a reminder
+that work exists."""
+
+[[params]]
+name = "title"
+type = "string"
+description = "Short label for this wake in listings. Falls back to message."
+
+[[params]]
+name = "urgency"
+type = "string"
+enum = ["immediate", "normal", "low"]
+description = "Where the wake sits in the Keeper queue. Defaults to normal."
+
+[[params]]
+name = "requested_at_unix"
+type = "number"
+description = "Optional replacement request timestamp for replay/tests."
+
+[[params]]
+name = "expires_at_unix"
+type = "number"
+description = "Optional expiry timestamp."
+
+[[params]]
+name = "recurrence_kind"
+type = "string"
+description = "Recurrence kind. Defaults to one_shot."
+enum = ["one_shot", "interval", "daily", "cron"]
+
+[[params]]
+name = "recurrence_interval_sec"
+type = "integer"
+description = "Required when recurrence_kind is interval."
+
+[[params]]
+name = "recurrence_hour"
+type = "integer"
+description = "Required when recurrence_kind is daily; local hour in 0..23."
+
+[[params]]
+name = "recurrence_minute"
+type = "integer"
+description = "Required when recurrence_kind is daily; local minute in 0..59."
+
+[[params]]
+name = "recurrence_second"
+type = "integer"
+description = "Optional when recurrence_kind is daily; local second in 0..59."
+
+[[params]]
+name = "recurrence_cron"
+type = "string"
+description = """
+Required when recurrence_kind is cron. Standard 5-field cron expression."""
+
+[[params]]
+name = "recurrence_timezone"
+type = "string"
+description = """
+Required for daily or cron. Fixed-offset only: UTC, Asia/Seoul/KST, or an
+offset such as +09:00/UTC+09:00."""
+
+[[params]]
+name = "allow_unregistered_keeper"
+type = "boolean"
+description = """
+Allow a wake whose target Keeper has no durable metadata yet. Default false."""
+
+[[params]]
+name = "requested_by_id"
+type = "string"
+description = "Requester actor id. Defaults to operator."
+
+[[params]]
+name = "requested_by_kind"
+type = "string"
+enum = ["human_operator", "automated_actor", "system"]
+
+[[params]]
+name = "requested_by_display_name"
+type = "string"
+description = "Requester display name."
+
+[[params]]
+name = "scheduled_by_id"
+type = "string"
+description = "Scheduler actor id. Defaults to caller agent name."
+
+[[params]]
+name = "scheduled_by_kind"
+type = "string"
+enum = ["human_operator", "automated_actor", "system"]
+
+[[params]]
+name = "scheduled_by_display_name"
+type = "string"
+description = "Scheduler display name."
+
+[[params]]
+name = "source"
+type = "string"
+enum = ["operator_request", "automated_request", "system_request"]

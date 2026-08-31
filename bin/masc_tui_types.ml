@@ -360,7 +360,9 @@ type schedule_row = {
   sch_next_due_at_iso: string option;
   sch_expires_at_iso: string option;
   sch_recurrence_summary: string;
+  sch_recurrence: Yojson.Safe.t;
   sch_payload_digest: string;
+  sch_payload: Yojson.Safe.t;
   sch_payload_kind: string option;
   sch_payload_support: string;
   sch_payload_dispatch_tool: string option;
@@ -390,6 +392,88 @@ type schedule_row = {
       (** Ledger records the projection could not match. Nonzero is why a
           status reads worse than the steps below it look. *)
 }
+
+let schedule_json_string field = function
+  | `Assoc fields ->
+      (match List.assoc_opt field fields with
+       | Some (`String value) -> value
+       | Some _ | None -> "")
+  | _ -> ""
+
+let schedule_json_int field = function
+  | `Assoc fields ->
+      (match List.assoc_opt field fields with
+       | Some (`Int value) -> Some value
+       | Some _ | None -> None)
+  | _ -> None
+
+let schedule_payload_body = function
+  | `Assoc fields ->
+      (match List.assoc_opt "body" fields with
+       | Some (`Assoc _ as body) -> body
+       | Some _ | None -> `Assoc [])
+  | _ -> `Assoc []
+
+let schedule_update_form_json (row : schedule_row) =
+  let body = schedule_payload_body row.sch_payload in
+  let recurrence_kind = schedule_json_string "kind" row.sch_recurrence in
+  let int_or source fallback =
+    Option.value ~default:fallback
+      (schedule_json_int source row.sch_recurrence)
+  in
+  let string_or source fallback =
+    let value = schedule_json_string source row.sch_recurrence in
+    if String.trim value = "" then fallback else value
+  in
+  let recurrence_fields =
+    [ "recurrence_interval_sec", `Int (int_or "interval_sec" 3600)
+    ; "recurrence_hour", `Int (int_or "hour" 9)
+    ; "recurrence_minute", `Int (int_or "minute" 0)
+    ; "recurrence_second", `Int (int_or "second" 0)
+    ; "recurrence_cron", `String (string_or "expression" "0 9 * * *")
+    ; "recurrence_timezone",
+      `String (string_or "timezone" "Asia/Seoul")
+    ]
+  in
+  let expires =
+    Option.bind row.sch_expires_at_iso Time_codec.parse_rfc3339_opt
+    |> Option.fold ~none:[] ~some:(fun value -> [ "expires_at_unix", `Float value ])
+  in
+  `Assoc
+    ([ "schedule_id", `String row.sch_schedule_id
+     ; "keeper_name", `String (schedule_json_string "keeper_name" body)
+     ; "message", `String (schedule_json_string "message" body)
+     ; "title", `String (schedule_json_string "title" body)
+     ; "urgency",
+       `String
+         (let value = schedule_json_string "urgency" body in
+          if String.trim value = "" then "normal" else value)
+     ; "due_at_iso", `String (Option.value ~default:"" row.sch_due_at_iso)
+     ; "recurrence_kind", `String recurrence_kind
+     ; "source", `String row.sch_source
+     ; "allow_unregistered_keeper", `Bool false
+     ]
+     @ recurrence_fields @ expires)
+  |> Yojson.Safe.pretty_to_string
+
+let schedule_create_form_json () =
+  `Assoc
+    [ "schedule_id", `String ""
+    ; "keeper_name", `String ""
+    ; "message", `String ""
+    ; "title", `String ""
+    ; "urgency", `String "normal"
+    ; "due_at_iso", `String ""
+    ; "recurrence_kind", `String "one_shot"
+    ; "recurrence_interval_sec", `Int 3600
+    ; "recurrence_hour", `Int 9
+    ; "recurrence_minute", `Int 0
+    ; "recurrence_second", `Int 0
+    ; "recurrence_cron", `String "0 9 * * *"
+    ; "recurrence_timezone", `String "Asia/Seoul"
+    ; "allow_unregistered_keeper", `Bool false
+    ]
+  |> Yojson.Safe.pretty_to_string
 
 (** Schedule list snapshot. [scs_request_count] is [None] exactly when the
     store read failed -- the server reports that as [status = "unknown"]

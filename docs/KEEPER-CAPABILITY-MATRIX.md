@@ -13,7 +13,7 @@ Keeper가 실제로 호출할 수 있는 이름과 인자는 매 turn에 제공�
 | Board 읽기/쓰기 | `masc_board_list`, `masc_board_post_get`, `masc_board_search`, `masc_board_post`, `masc_board_comment`, `masc_board_vote`, `masc_board_stats`, `masc_board_curation_read`, `masc_board_curation_submit` | `lib/board_tool_adapter/board_tool_registry.ml` + Keeper projection `lib/tool_surface/tool_shard_types_board_keeper_projection.ml` |
 | Task 조회/소유/완료/생성 | `keeper_tasks_list`, `keeper_tasks_audit`, `keeper_task_claim`, `keeper_task_done`, `keeper_task_create` | `lib/tool_surface/tool_shard_types_schemas_taskboard.ml` |
 | Goal 조회/변경 | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition` | `lib/tool_schemas/tool_schemas_workspace_extra.ml` |
-| Schedule 생성/조회/취소 | `masc_schedule_create`, `masc_schedule_list`, `masc_schedule_get`, `masc_schedule_cancel` | `lib/tool_schemas/tool_schemas_schedule.ml` |
+| Schedule 생성/수정/조회/취소 | `masc_schedule_create`, `masc_schedule_update`, `masc_schedule_list`, `masc_schedule_get`, `masc_schedule_cancel` | `lib/tool_schemas/tool_schemas_schedule.ml` |
 | Conversation 읽기/게시 | `keeper_surface_read`, `keeper_surface_post` | `lib/keeper/keeper_tool_descriptor.ml` |
 | Repository/file 탐색 및 실행 | 현재 schema가 제공하는 search, read, write, edit, execute capability | `lib/keeper/keeper_tool_descriptor.ml`, `lib/tool_surface/` |
 | Memory | `keeper_memory_search`, `keeper_memory_write` | `lib/tool_surface/tool_shard_types_schemas_base.ml` |

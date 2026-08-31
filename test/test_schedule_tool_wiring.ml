@@ -157,6 +157,7 @@ let test_flat_tool_surface () =
   in
   check (list string) "schedule tools"
     [ "masc_schedule_create"
+    ; "masc_schedule_update"
     ; "masc_schedule_list"
     ; "masc_schedule_get"
     ; "masc_schedule_cancel"
@@ -203,6 +204,12 @@ let test_flat_tool_surface () =
   check (list string) "create schema requires what the runtime requires"
     [ "keeper_name"; "message" ]
     (required_names create_schema.input_schema);
+  let update_schema : Masc_domain.tool_schema =
+    (schedule_definition Tool_schemas_schedule.Update_request).schema
+  in
+  check (list string) "update also requires the stable identity"
+    [ "schedule_id"; "keeper_name"; "message" ]
+    (required_names update_schema.input_schema);
   let get_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Get_request).schema
   in
@@ -261,6 +268,80 @@ let test_create_list_get_cancel () =
      |> to_string)
 ;;
 
+let test_update_keeps_public_id_and_replaces_instance () =
+  with_config
+  @@ fun config ->
+  let schedule_id = "sched-modify" in
+  let created =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (create_args ~schedule_id ~message:"before" ())
+  in
+  let open Yojson.Safe.Util in
+  let first_instance =
+    Tool_result.data created |> member "schedule_instance_id" |> to_string
+  in
+  let updated =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (`Assoc
+        [ "schedule_id", `String schedule_id
+        ; "due_at_unix", `Float 300.0
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "after"
+        ])
+  in
+  check bool "update succeeds" true (Tool_result.is_success updated);
+  check string "public id remains stable" schedule_id
+    (Tool_result.data updated |> member "schedule_id" |> to_string);
+  check bool "definition receives a fresh instance" false
+    (String.equal first_instance
+       (Tool_result.data updated |> member "schedule_instance_id" |> to_string));
+  let stored =
+    match Schedule_store.get_schedule config ~schedule_id with
+    | Some request -> request
+    | None -> fail "updated schedule missing"
+  in
+  check (float 0.0) "new due time persisted" 300.0 stored.due_at;
+  check string "new message persisted" "after"
+    (Schedule_domain.payload_to_yojson stored.payload
+     |> member "body"
+     |> member "message"
+     |> to_string);
+  check int "replace does not duplicate the row" 1
+    (List.length (Schedule_store.read_state config).schedules)
+;;
+
+let test_update_requires_id_and_active_row () =
+  with_config
+  @@ fun config ->
+  let missing_id =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (create_args ())
+  in
+  check bool "id is required" false (Tool_result.is_success missing_id);
+  check string "id rejection" "schedule_id is required"
+    (Tool_result.message missing_id);
+  let schedule_id = "sched-finished-modify" in
+  ignore
+    (dispatch_exn config Tool_schemas_schedule.Create_request
+       (create_args ~schedule_id ()));
+  ignore
+    (dispatch_exn config Tool_schemas_schedule.Cancel_request
+       (`Assoc
+         [ "schedule_id", `String schedule_id
+         ; "cancelled_by_id", `String "operator"
+         ; "reason", `String "done"
+         ]));
+  let refused =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (create_args ~schedule_id ~message:"too late" ())
+  in
+  check bool "terminal row is immutable" false (Tool_result.is_success refused);
+  check bool "refusal explains the state rule" true
+    (String_util.contains_substring
+       (Tool_result.message refused)
+       "only scheduled or due requests can be modified")
+;;
+
 (* The checkpoint encoder rejects an object that binds the same key twice,
    and it runs after the tool has already succeeded: a duplicate key in a
    schedule result failed the whole turn at
@@ -285,6 +366,11 @@ let test_results_survive_the_checkpoint_encoder () =
       (create_args ~schedule_id:"sched-canonical" ())
   in
   check_no_duplicate_keys "create result" (Tool_result.data create);
+  let update =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (create_args ~schedule_id:"sched-canonical" ~message:"updated" ())
+  in
+  check_no_duplicate_keys "update result" (Tool_result.data update);
   let list_result =
     dispatch_exn config Tool_schemas_schedule.List_requests
       (`Assoc [ "limit", `Int 10 ])
@@ -730,7 +816,9 @@ let test_due_signal_and_dashboard_projection () =
   check string "display target keeps its keeper: prefix" "keeper:schedule-keeper"
     (row |> member "payload_target" |> to_string);
   check string "bare keeper name rides its own field" "schedule-keeper"
-    (row |> member "payload_keeper_name" |> to_string)
+    (row |> member "payload_keeper_name" |> to_string);
+  check string "exact editable message is not truncated" "signal me"
+    (row |> member "payload" |> member "body" |> member "message" |> to_string)
 ;;
 
 let test_schedule_store_error_is_explicit () =
@@ -929,6 +1017,10 @@ let () =
     [ ( "wiring"
       , [ test_case "flat tool surface" `Quick test_flat_tool_surface
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
+        ; test_case "update keeps public id and replaces instance" `Quick
+            test_update_keeps_public_id_and_replaces_instance
+        ; test_case "update requires id and active row" `Quick
+            test_update_requires_id_and_active_row
         ; test_case "results survive the checkpoint encoder" `Quick
             test_results_survive_the_checkpoint_encoder
         ; test_case "creation boundary owns result delivery destination" `Quick

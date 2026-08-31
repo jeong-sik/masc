@@ -704,6 +704,7 @@ let schedule_request_dashboard_json
     ; "recurrence_kind", `String (Schedule_domain.recurrence_kind_to_string request.recurrence)
     ; "recurrence_summary", `String (Schedule_domain.recurrence_summary request.recurrence)
     ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
+    ; "payload", Schedule_domain.payload_to_yojson request.payload
     ; ( "payload_kind"
       , match Schedule_payload_projection.kind request with
         | None -> `Null

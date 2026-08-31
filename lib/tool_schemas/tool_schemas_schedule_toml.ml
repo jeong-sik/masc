@@ -1,4 +1,4 @@
-(** The four schedule tools, read from [config/tools/masc_schedule_*.toml]
+(** The schedule tools, read from [config/tools/masc_schedule_*.toml]
     (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
 
     Each value is decoded once at module initialization. A missing file or a
@@ -11,8 +11,9 @@
     compares each of the six advertised vocabularies against it, so a
     constructor added on one side without editing the file fails there instead
     of shipping a schema that never offers the value.
-    [test_schedule_tool_toml_parity] pins all four against what the list
-    published before the move. *)
+    [test_schedule_tool_toml_parity] pins the four migrated declarations
+    against what the list published before the move and separately checks
+    that the later update declaration shares the create field set. *)
 
 let schema_of_name name : Masc_domain.tool_schema =
   let rel = "tools/" ^ name ^ ".toml" in
@@ -25,6 +26,7 @@ let schema_of_name name : Masc_domain.tool_schema =
 ;;
 
 let create = schema_of_name "masc_schedule_create"
+let update = schema_of_name "masc_schedule_update"
 let list = schema_of_name "masc_schedule_list"
 let get = schema_of_name "masc_schedule_get"
 let cancel = schema_of_name "masc_schedule_cancel"

@@ -24,6 +24,23 @@ val create :
   unit ->
   (Schedule_domain.schedule_request, service_error) result
 
+val update :
+  Workspace_utils.config ->
+  schedule_id:string ->
+  ?requested_at:float ->
+  ?expires_at:float ->
+  requested_by:Schedule_domain.actor ->
+  scheduled_by:Schedule_domain.actor ->
+  due_at:float ->
+  payload:Yojson.Safe.t ->
+  source:Schedule_domain.schedule_source ->
+  ?recurrence:Schedule_domain.recurrence ->
+  unit ->
+  (Schedule_domain.schedule_request, service_error) result
+(** Replaces one active definition under its stable [schedule_id]. The new
+    request receives a fresh instance id; the store refuses running and
+    terminal schedules. *)
+
 val cancel :
   Workspace_utils.config ->
   schedule_id:string ->

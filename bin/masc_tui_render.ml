@@ -3750,8 +3750,7 @@ let render_schedule_list (state : state) =
 
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:
-         "j/k:move  PgUp/PgDn:page  right/Enter:details  x:cancel  r:refresh  Tab:next");
+       ~hints:(Masc_tui_keys.footer_hints Schedules));
 
   finish_surface state ~surface_key:"schedules" ~rows:terminal_rows
       ~cols buf
@@ -3876,6 +3875,12 @@ let schedule_detail_lines ~width (row : schedule_row) =
        ~max_cells:(max 1 (width - 4)) ~sanitize:Terminal_text.single_line summary
     |> List.map (fun line -> Ansi.reset, "    " ^ line))
   @ [ Ansi.dim, ""
+    ; Ansi.bold, "  PAYLOAD JSON"
+    ]
+  @ (document_markdown ~width:(max 1 (width - 4))
+       ("```json\n" ^ Yojson.Safe.pretty_to_string row.sch_payload ^ "\n```")
+    |> List.map (fun line -> Ansi.reset, "    " ^ line))
+  @ [ Ansi.dim, ""
     ; Ansi.bold, "  LAST WAKE"
     ; field
         ~style:
@@ -3929,7 +3934,7 @@ let render_schedule_detail (state : state) (row : schedule_row) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let scroll, max_scroll =
+  let scroll, _max_scroll =
     if cols < keeper_split_threshold_cols then
       schedule_detail_pane state ~rows ~cols row buf
     else begin
@@ -3955,10 +3960,7 @@ let render_schedule_detail (state : state) (row : schedule_row) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:
-         (Printf.sprintf
-            "j/k:scroll (%d/%d)  PgUp/PgDn:page  Y:copy link  left/Esc:list  x:cancel  r:refresh  Tab:next"
-            scroll max_scroll));
+       ~hints:(Masc_tui_keys.footer_hints Schedules));
   finish_surface state ~clamped:(Schedule_detail_scroll scroll)
     ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols buf
 

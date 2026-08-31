@@ -1056,6 +1056,7 @@ let keeper_fleet_safety_health_json
     | None -> []
   in
   let configuration_blocked_count = List.length configuration_blocked_names in
+  let recovering_count = List.length recovering_names in
   let all_target_keepers_configuration_blocked =
     target_count > 0 && configuration_blocked_count >= target_count
   in
@@ -1121,6 +1122,7 @@ let keeper_fleet_safety_health_json
     if no_executable_keeper_fibers then "blocked"
     else if all_target_keepers_configuration_blocked then "blocked"
     else if configuration_blocked_count > 0 then "degraded"
+    else if recovering_count > 0 then "degraded"
     else if reaction_capacity_below_target then "degraded"
     else if active_task_owner_without_executable_fiber then "degraded"
     else if backlog_observation_degraded then "degraded"
@@ -1133,6 +1135,7 @@ let keeper_fleet_safety_health_json
     if keeper_bootstrap_blocked then Some "keeper_bootstrap_disabled"
     else if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
     else if configuration_blocked_count > 0 then Some "turn_configuration_error"
+    else if recovering_count > 0 then Some "turn_failure_recovering"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
     else if active_task_owner_without_executable_fiber
     then Some "active_task_owner_without_executable_fiber"

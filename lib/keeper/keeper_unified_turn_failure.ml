@@ -115,15 +115,50 @@ let invalid_request_budget_exhausted ~base_path ~keeper_name err =
     exhausted)
 ;;
 
+(** Bounded compensating accounting for the transient-transport exemption.
+    A network or timeout failure can be a short provider incident, but an
+    indefinitely exempt transport pins [increment_turn_failures] at zero and
+    makes an all-keeper outage look healthy forever.  Each keeper gets
+    [transient_transport_exemption_budget] consecutive exempted
+    transient-transport failures; the next one degrades to ordinary durable
+    crash accounting until a successful turn (or an operator context clear)
+    resets the budget via {!reset_failure_exemptions}.
+
+    Constitution exception (named bound + rationale): like the bounds above,
+    this gates crash ACCOUNTING only, never the keeper lifecycle or the retry
+    scheduler.  At the default five-minute cadence the fourth failure makes a
+    persistent outage visible after roughly fifteen minutes without turning a
+    single network blip into a fleet incident. *)
+let transient_transport_exemption_budget = 3
+
+let transient_transport_exemption_exhausted ~base_path ~keeper_name err =
+  if not (EC.is_transient_network_error err)
+  then false
+  else
+    match
+      persist_exemption_increment ~base_path ~keeper_name (fun state ->
+        { state with transient_transport_count = state.transient_transport_count + 1 })
+    with
+    | Ok state -> state.transient_transport_count > transient_transport_exemption_budget
+    | Error error ->
+      Log.Keeper.error
+        ~keeper_name
+        "%s: transient-transport exemption unavailable; counting failure toward crash: %s"
+        keeper_name
+        (Exemption_store.error_to_string error);
+      true
+;;
+
 (** Compute whether this failure observation advances the crash counter,
-    consuming empty-completion exemption budget or invalid-request budget
-    when applicable.  Call exactly once per failure observation, before
-    {!record_failure_observation}. *)
+    consuming empty-completion, invalid-request, or transient-transport
+    exemption budget when applicable.  Call exactly once per failure
+    observation, before {!record_failure_observation}. *)
 let account_failure_counting ~base_path ~keeper_name ~is_auto_recoverable err =
   (not is_auto_recoverable)
   || EC.is_runtime_exhausted_error err
   || empty_completion_exemption_exhausted ~base_path ~keeper_name err
   || invalid_request_budget_exhausted ~base_path ~keeper_name err
+  || transient_transport_exemption_exhausted ~base_path ~keeper_name err
 ;;
 
 let record_failure_observation

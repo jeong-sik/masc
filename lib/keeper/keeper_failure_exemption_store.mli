@@ -3,6 +3,7 @@
 type state =
   { invalid_request_count : int
   ; empty_completion_count : int
+  ; transient_transport_count : int
   }
 
 type error =

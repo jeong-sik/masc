@@ -1,6 +1,7 @@
 type state =
   { invalid_request_count : int
   ; empty_completion_count : int
+  ; transient_transport_count : int
   }
 
 type error =
@@ -9,15 +10,20 @@ type error =
   | Malformed of string
   | Io_error of string
 
-let zero = { invalid_request_count = 0; empty_completion_count = 0 }
+let zero =
+  { invalid_request_count = 0
+  ; empty_completion_count = 0
+  ; transient_transport_count = 0
+  }
 
 let error_to_string = function
   | Invalid_keeper_name name -> Printf.sprintf "invalid keeper name %S" name
   | Invalid_state state ->
     Printf.sprintf
-      "failure exemption counts must be non-negative with at least one positive, got invalid_request=%d empty_completion=%d"
+      "failure exemption counts must be non-negative with at least one positive, got invalid_request=%d empty_completion=%d transient_transport=%d"
       state.invalid_request_count
       state.empty_completion_count
+      state.transient_transport_count
   | Malformed detail -> Printf.sprintf "malformed failure exemption state: %s" detail
   | Io_error detail -> Printf.sprintf "failure exemption state I/O failed: %s" detail
 ;;
@@ -45,7 +51,11 @@ let validate_state state =
   if
     state.invalid_request_count < 0
     || state.empty_completion_count < 0
-    || state.invalid_request_count + state.empty_completion_count <= 0
+    || state.transient_transport_count < 0
+    || ( state.invalid_request_count
+       + state.empty_completion_count
+       + state.transient_transport_count )
+       <= 0
   then Error (Invalid_state state)
   else Ok state
 ;;
@@ -55,24 +65,32 @@ let to_json state =
     [ "schema", `String schema
     ; "invalid_request_count", `Int state.invalid_request_count
     ; "empty_completion_count", `Int state.empty_completion_count
+    ; "transient_transport_count", `Int state.transient_transport_count
     ]
 ;;
 
 let of_json = function
-  | `Assoc fields when List.length fields = 3 ->
+  | `Assoc fields when List.length fields = 4 ->
     (match
        ( List.assoc_opt "schema" fields
        , List.assoc_opt "invalid_request_count" fields
-       , List.assoc_opt "empty_completion_count" fields )
+       , List.assoc_opt "empty_completion_count" fields
+       , List.assoc_opt "transient_transport_count" fields )
      with
      | ( Some (`String actual)
        , Some (`Int invalid_request_count)
-       , Some (`Int empty_completion_count) ) ->
+       , Some (`Int empty_completion_count)
+       , Some (`Int transient_transport_count) ) ->
        if not (String.equal actual schema)
        then Error (Malformed (Printf.sprintf "unsupported schema %S" actual))
-       else validate_state { invalid_request_count; empty_completion_count }
-     | _ -> Error (Malformed "expected current schema and two integer counts"))
-  | `Assoc _ -> Error (Malformed "expected exactly three fields")
+       else
+         validate_state
+           { invalid_request_count
+           ; empty_completion_count
+           ; transient_transport_count
+           }
+     | _ -> Error (Malformed "expected current schema and three integer counts"))
+  | `Assoc _ -> Error (Malformed "expected exactly four fields")
   | _ -> Error (Malformed "top-level value is not an object")
 ;;
 

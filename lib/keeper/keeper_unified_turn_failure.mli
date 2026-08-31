@@ -14,8 +14,13 @@ val empty_completion_exemption_budget : int
 (** Maximum number of consecutive empty-completion failures exempted from the
     crash counter per keeper before the exemption is exhausted. *)
 
+val transient_transport_exemption_budget : int
+(** Maximum number of consecutive network/timeout failures exempted from the
+    crash counter per Keeper. Later consecutive failures use ordinary durable
+    failure accounting while the Keeper lifecycle remains active. *)
+
 val reset_failure_exemptions : base_path:string -> keeper_name:string -> bool
-(** Durably reset both exemption budgets after a successful turn or operator
+(** Durably reset every exemption budget after a successful turn or operator
     context clear. [false] retains the record and keeps success health from
     hiding the unresolved accounting state. *)
 

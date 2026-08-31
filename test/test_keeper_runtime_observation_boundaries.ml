@@ -263,6 +263,73 @@ let test_empty_completion_exemption_budget_is_bounded () =
     (KUF.account_failure_counting
        ~base_path ~keeper_name ~is_auto_recoverable:true empty_err)
 
+(* A transient-transport failure is exempt from the crash counter for
+   [transient_transport_exemption_budget] consecutive observations, then the
+   exemption degrades to ordinary crash accounting; a successful turn resets
+   the durable budget. *)
+let test_transient_transport_exemption_budget_is_bounded () =
+  with_temp_dir "transient-transport-budget" @@ fun base_path ->
+  let module KUF = Keeper_unified_turn_failure in
+  let keeper_name = "test-keeper-transient-transport-budget" in
+  let transient_err =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.Timeout { message = "timeout"; phase = None })
+  in
+  Alcotest.(check bool)
+    "success reset commits" true
+    (KUF.reset_failure_exemptions ~base_path ~keeper_name);
+  for i = 1 to KUF.transient_transport_exemption_budget do
+    Alcotest.(check bool)
+      (Printf.sprintf "exempted transient transport %d does not count" i)
+      false
+      (KUF.account_failure_counting
+         ~base_path ~keeper_name ~is_auto_recoverable:true transient_err)
+  done;
+  (match Keeper_failure_exemption_store.load ~base_path ~keeper_name with
+   | Ok (Some { transient_transport_count = 3; _ }) -> ()
+   | Ok (Some _) -> Alcotest.fail "durable transient budget was not three"
+   | Ok None -> Alcotest.fail "durable transient budget was not persisted"
+   | Error error ->
+     Alcotest.fail (Keeper_failure_exemption_store.error_to_string error));
+  Alcotest.(check bool)
+    "transient transport past the budget counts toward crash" true
+    (KUF.account_failure_counting
+       ~base_path ~keeper_name ~is_auto_recoverable:true transient_err);
+  Alcotest.(check bool)
+    "later failures stay crash-accounted until success" true
+    (KUF.account_failure_counting
+       ~base_path ~keeper_name ~is_auto_recoverable:true transient_err);
+  Alcotest.(check bool)
+    "success reset commits" true
+    (KUF.reset_failure_exemptions ~base_path ~keeper_name);
+  Alcotest.(check bool)
+    "success resets the transient transport budget" false
+    (KUF.account_failure_counting
+       ~base_path ~keeper_name ~is_auto_recoverable:true transient_err)
+
+(* A durable exemption state with an unknown schema cannot grant a transient
+   exemption: the decode failure fails closed toward crash accounting. *)
+let test_transient_transport_unknown_schema_fails_closed () =
+  with_temp_dir "transient-transport-schema" @@ fun base_path ->
+  let module KUF = Keeper_unified_turn_failure in
+  let keeper_name = "test-keeper-transient-schema" in
+  let transient_err =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.Timeout { message = "timeout"; phase = None })
+  in
+  ignore
+    (KUF.account_failure_counting
+       ~base_path ~keeper_name ~is_auto_recoverable:true transient_err);
+  let path = Keeper_failure_exemption_store.path_for ~base_path ~keeper_name in
+  Out_channel.with_open_bin path (fun channel ->
+    output_string
+      channel
+      {|{"schema":"keeper.failure_exemptions.v0","invalid_request_count":0,"empty_completion_count":0,"transient_transport_count":1}|});
+  Alcotest.(check bool)
+    "unknown schema cannot grant a transient exemption" true
+    (KUF.account_failure_counting
+       ~base_path ~keeper_name ~is_auto_recoverable:true transient_err)
+
 let test_extra_system_context_preserves_typed_blocks () =
   let blocks =
     [ Prompt_block_id.Dynamic_context, "dynamic"
@@ -307,6 +374,10 @@ let () =
           test_generic_invalid_request_is_not_empty_completion;
         Alcotest.test_case "empty completion exemption budget is bounded" `Quick
           test_empty_completion_exemption_budget_is_bounded;
+        Alcotest.test_case "transient transport exemption budget is bounded"
+          `Quick test_transient_transport_exemption_budget_is_bounded;
+        Alcotest.test_case "transient transport unknown schema fails closed"
+          `Quick test_transient_transport_unknown_schema_fails_closed;
         Alcotest.test_case "extra system context preserves typed blocks" `Quick
           test_extra_system_context_preserves_typed_blocks;
       ] );

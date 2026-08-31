@@ -130,7 +130,7 @@ let setup_exporter
   Opentelemetry_client_cohttp_eio.reset_tick_health ();
   (* Shared setup: init library, register OTLP backend, fork health-check fiber.
      Called only after probe confirms collector is reachable. *)
-  let start_exporter () =
+  let rec start_exporter () =
     (* Initialize the OTel library only when we have a reachable collector.
        Calling [init] before probe would start the internal tick loop even
        when no collector exists, producing WARN spam on every export cycle. *)

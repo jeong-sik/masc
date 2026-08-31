@@ -8,6 +8,7 @@
  (libraries
   alcotest
   eio
+  eio.unix
   eio_main
   masc
   masc.otel_spans

@@ -5,7 +5,7 @@ remote_ssh 엔드포인트로 붙이는 절차. 서버 preflight(`perform_prefli
 `lib/keeper/keeper_sandbox_ssh.ml`)가 강제하는 계약을 그대로 따른다.
 task-859에서 실측으로 확정했다.
 
-## 계약: 원격 머신에 필요한 5가지
+## 계약: 원격 머신에 필요한 6가지
 
 | # | 항목 | preflight 에러 코드 |
 |---|------|---------------------|
@@ -14,6 +14,7 @@ task-859에서 실측으로 확정했다.
 | 3 | `<remote_root>/<keeper>/` 디렉터리 (keeper마다, 자동 생성 안 됨) | `remote_ssh_keeper_root_missing` |
 | 4 | `<remote_root>/<keeper>/.config/gh`에 GitHub identity | `remote_github_identity_missing` |
 | 5 | `git` 설치 (`gh`도 — 4번 검증에 필요) | `remote_git_unavailable` |
+| 6 | `ripgrep` 설치 (`Grep`이 원격에서 `rg` 실행) | `remote_ripgrep_unavailable` |
 
 서버 쪽 절반: 엔드포인트 키(`.masc/ssh/<name>.key`), 핀된 호스트 키
 (`.masc/ssh/known_hosts.d/<name>`), `runtime.toml`의
@@ -39,7 +40,7 @@ scripts/remote-ssh/bootstrap-endpoint.sh \
 ```
 
 bootstrap 스크립트는 마지막에 서버가 쓰는 것과 같은 연결 모양(엔드포인트
-키 + BatchMode + 핀된 호스트 키)으로 preflight 다섯 항목을 전부 재현해
+키 + BatchMode + 핀된 호스트 키)으로 전체 preflight 계약을 재현해
 검증한다. 호스트 키 fingerprint는 벤더 콘솔이나 이미 신뢰한 채널에서
 확인한 값을 필수로 받으며, `runtime.toml`은 직접 수정하지 않고 검토할
 블록만 출력한다. 여기서 통과하면 서버 디스패치도 통과한다.

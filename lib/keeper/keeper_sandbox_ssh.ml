@@ -568,9 +568,10 @@ let run_probe t =
    what was actually run, so it carries the path the check was about.
 
    Every preflight argv is a fixed shape built in [perform_preflight] --
-   git --version, two test -d, df -Pk, gh auth status -- and carries paths
-   rather than credentials. A future preflight that needs a secret has to
-   keep it out of argv, the same rule the remote runner already follows. *)
+   git --version, rg --version, two test -d, df -Pk, gh auth status -- and
+   carries paths rather than credentials. A future preflight that needs a
+   secret has to keep it out of argv, the same rule the remote runner already
+   follows. *)
 let preflight_argv_for_log argv =
   Exec_policy.truncate_for_log (String.concat " " argv)
 ;;
@@ -620,6 +621,10 @@ let perform_preflight t =
   let* _ =
     run_preflight_command t ~error_code:"remote_git_unavailable"
       [ "git"; "--version" ]
+  in
+  let* _ =
+    run_preflight_command t ~error_code:"remote_ripgrep_unavailable"
+      [ "rg"; "--version" ]
   in
   let* _ =
     run_preflight_command t ~error_code:"remote_ssh_root_missing"

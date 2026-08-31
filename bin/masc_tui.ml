@@ -4772,6 +4772,52 @@ let close_image state =
       state.image_open <- None;
       write_to_terminal Masc_tui_graphics.delete_all
 
+(* [/find] and its arg-less repeat, which differ only in where the walk starts.
+
+   The pane is moved by [set_msg_scroll], the one seam that also pins the row
+   the scroll counts back from -- a search that wrote [msg_scroll] directly
+   would leave the pin unset and the position would drift under the next
+   message that arrived.
+
+   Every outcome says something. A search that silently did nothing and a key
+   that did nothing look the same, which is the failure this surface keeps
+   having; and running out of older matches is a different fact from having
+   none at all, because only one of the two is fixed by starting over. *)
+let seek_in_chat state ~target ~restart =
+  let notice = chat_notice state ~keeper_name:target in
+  match target with
+  | None ->
+      notice ~role:Message_error "/find needs a Keeper selected on the roster"
+  | Some keeper_name -> (
+      let older_than = if restart then None else state.msg_find_at in
+      (* Normalised here, at the door the operator's text comes through.
+         [msg_find] keeps what they typed, because that is what the pane
+         echoes back to them. *)
+      match
+        Masc_tui_render.keeper_message_find_scroll state ~keeper_name
+          ~needle:(String.lowercase_ascii (String.trim state.msg_find))
+          ~older_than
+      with
+      | Some (scroll, at) ->
+          state.msg_find_at <- Some at;
+          set_msg_scroll state scroll;
+          notice ~role:Message_status
+            (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"
+               state.msg_find scroll)
+      | None ->
+          if restart then
+            notice ~role:Message_status
+              (Printf.sprintf "/find %s \xe2\x80\x94 nothing in this conversation"
+                 state.msg_find)
+          else
+            (* The walk is over, not empty. Said apart from the case above
+               because starting again is what fixes this one and not that
+               one. *)
+            notice ~role:Message_status
+              (Printf.sprintf
+                 "/find %s \xe2\x80\x94 no older match; /find %s starts again"
+                 state.msg_find state.msg_find))
+
 let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let target =
     match keeper_name with
@@ -4885,6 +4931,19 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (if state.msg_memory_visible
          then "Librarian/Memory timeline shown (/memory to hide)"
          else "Librarian/Memory timeline hidden (/memory to show)")
+  | Masc_tui_command.Find_in_chat query ->
+      (* A new query starts at the newest message; [Find_next] below carries on
+         from wherever this landed. *)
+      Buffer.clear state.msg_input;
+      state.msg_find <- String.trim query;
+      state.msg_find_at <- None;
+      seek_in_chat state ~target ~restart:true
+  | Masc_tui_command.Find_next ->
+      Buffer.clear state.msg_input;
+      if String.equal state.msg_find "" then
+        notice ~role:Message_error
+          "/find needs text the first time; /find on its own repeats it"
+      else seek_in_chat state ~target ~restart:false
   | Masc_tui_command.Inspect_context ->
       (match target with
        | Some keeper_name ->
@@ -6715,6 +6774,9 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Open_settings
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Toggle_memory
+       (* [/find] moves the pane on purpose, so unlike every other command it
+          must not be followed by the reset to the newest row above. *)
+       | Masc_tui_command.Find_in_chat _ | Masc_tui_command.Find_next
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path

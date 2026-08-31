@@ -5764,6 +5764,311 @@ let render_keeper_logs (state : state) =
   end
 
 (** Render message input/conversation view *)
+(* How one finished turn's tool block becomes rows: the operator's
+   compact/full choice, the width the aligned badge leaves, and this keeper's
+   own file changes. The committed history and the turn still streaming both
+   ask this, so a diff folded into the history and the same diff arriving live
+   cannot be projected two ways. *)
+let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection =
+  let role_label_column =
+    Message_layout.chat_role_label_width ~pane_cells:chat_cols
+  in
+  let file_change_index =
+    if Option.equal String.equal state.msg_file_changes_keeper (Some keeper_name)
+    then state.msg_file_change_index
+    else Keeper_chat_diff.empty
+  in
+  Keeper_chat_diff.rows
+    ~mode:(tool_projection_mode state)
+    ~max_line_cells:(max 24 (min 120 (chat_cols - role_label_column - 8)))
+    file_change_index projection
+
+(* Every committed row of one keeper's conversation, as the layout entries the
+   pane draws -- the grouping, the aligned badges, the tool projections, and
+   the link labels appended under each body.
+
+   Lifted out of [render_keeper_message] so it has a second reader. A search
+   over this conversation has to land the pane on a row, and a row position
+   here is measured in the physical rows these entries render to; anything
+   that computed it from the message list alone would be measuring a different
+   document from the one on screen. The renderer never mutates state, so the
+   search cannot live inside it either.
+
+   Committed rows only. The turn still streaming is built where it is drawn:
+   its row count changes on every frame, which is exactly what a stable
+   position must not be measured against. *)
+let keeper_message_layout_entries (state : state) ~keeper_name ~chat_cols =
+  let messages =
+    chat_rows_for state keeper_name
+    |> List.filter (fun message ->
+      state.msg_memory_visible || message.me_role <> Message_memory)
+  in
+  (* Derived once for the width and again per row, so the badge the pane
+     measures is the badge it draws. *)
+  let base_role_label_of (message : Masc_tui_types.msg_entry) =
+    match message.me_role with
+    | Message_user (Sent_by_other name) -> name
+    | Message_user (Sent_by_operator label) ->
+        if
+          (* A line the operator typed during a turn sits in the
+             conversation from the moment it is typed, in its place in the
+             order. Marked, because a waiting line drawn like a sent one is
+             the same silence that made a refused send look like a sent one
+             -- the operator has to be able to tell which of their messages
+             has actually gone. The queue is the only place that fact lives,
+             so the row asks it rather than carrying a copy. *)
+          Masc_tui_keeper_chat_queue.holds state.msg_queued
+            ~request_id:message.me_request_id
+        then "QUEUED"
+          (* A bare ["you"] is drawn as the shout it always was; a label that
+             names the surface it came in on keeps that, because "you, from
+             Slack" is a different fact from "you, here". *)
+        else if String.equal label "you" then "YOU"
+        else label
+    | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
+    | Message_autonomous -> "AUTO"
+    | Message_status -> "STATUS"
+    | Message_error -> "ERROR"
+    | Message_tool -> "TOOLS"
+    | Message_thinking -> "THINKING"
+    | Message_memory -> "MEMORY"
+  in
+  (* A persisted delivery key or turn_ref is the grouping authority. Rows
+     without one keep their old labels; grouping them by adjacency or clock
+     would silently put unrelated activity inside the same turn. *)
+  let visible_messages =
+    List.mapi (fun entry_index message -> (entry_index, message)) messages
+    |> List.filter (fun (_, message) ->
+         message.me_role <> Message_thinking
+         || state.msg_reasoning_visibility <> Reasoning_hidden)
+  in
+  let grouped_messages =
+    let rec loop previous_turn reversed = function
+      | [] -> List.rev reversed
+      | (entry_index, message) :: rest ->
+          let turn_id = message.me_request_id in
+          let grouped = not (String.equal turn_id "") in
+          let starts_turn =
+            grouped
+            && not (Option.exists (String.equal turn_id) previous_turn)
+          in
+          let base = base_role_label_of message in
+          let role_label =
+            if not grouped then base
+            else if starts_turn then "TURN · " ^ base
+            else
+              (* A continuation carries the same name as the row above it,
+                 and a name repeated says nothing. Marking it inside the
+                 label put "who is still talking" at the same weight as
+                 "what kind of row this is"; the gutter now blanks the name
+                 and quiets the glyph instead, so a name in this column
+                 always means the speaker changed.
+
+                 Kept equal to [base] rather than emptied: [continues_previous]
+                 compares labels to decide what a continuation keeps, and two
+                 consecutive rows have to match for it to fire. *)
+              base
+          in
+          let next_previous =
+            if grouped then Some turn_id else previous_turn
+          in
+          loop next_previous
+            ((entry_index, message, role_label) :: reversed) rest
+    in
+    loop None [] visible_messages
+  in
+  let projected_tool_rows =
+    keeper_message_tool_rows state ~keeper_name ~chat_cols
+  in
+  let role_label_column =
+    Message_layout.chat_role_label_width ~pane_cells:chat_cols
+  in
+  let layout_entries =
+    (* The position distinguishes rows whose durable timestamp and request
+       fields tie. A history reorder can only cause a miss: the exact body is
+       another cache-key field, so an index never authorizes stale rows. *)
+    List.map
+      (fun (entry_index, message, grouped_role_label) ->
+        (* Projected once: the style is read off it and the body is built
+           from it, and projecting twice would let a fold decide the colour
+           from one reading and the text from another. *)
+        let tool_projection =
+          match message.me_role with
+          | Message_tool -> (
+              match message.me_tool_block with
+              | None -> None
+              | Some block ->
+                  Some
+                    (Keeper_chat_transcript.project_tool_block
+                       (tool_projection_mode state) block))
+          | Message_user _ | Message_keeper | Message_autonomous
+          | Message_status | Message_memory | Message_error
+          | Message_thinking ->
+              None
+        in
+        let style =
+          match message.me_role with
+          | Message_user (Sent_by_operator _) -> Message_layout.User
+          | Message_user (Sent_by_other _) -> Message_layout.Inbound
+          | Message_keeper | Message_autonomous -> Message_layout.Keeper
+          | Message_status | Message_memory -> Message_layout.Status
+          | Message_error -> Message_layout.Error
+          | Message_tool -> (
+              match tool_projection with
+              | None -> Message_layout.Tool
+              | Some projection -> tool_block_style projection)
+          | Message_thinking -> Message_layout.Thinking
+        in
+        let role_label = grouped_role_label in
+        (* One column for every speaker so the [timestamp] speaker request
+           rows line up down the pane, whatever name each row carries. *)
+        let role_label =
+          Message_layout.align_role_label ~column:role_label_column ~style
+            role_label
+        in
+        let body =
+          match message.me_role with
+          | Message_thinking
+            when state.msg_reasoning_visibility = Reasoning_folded ->
+              folded_thinking_summary message.me_text
+          (* The Memory journal's change arrives inside a ["```diff"]
+             fence, so a leading [+] is fence content rather than a list
+             marker and needs no escaping. The escape that used to be here
+             was never consumed by the renderer, so what reached the pane
+             was a literal backslash in front of every changed fact. *)
+          | Message_tool -> (
+              match tool_projection with
+              | None -> message.me_text
+              | Some projection ->
+                  String.concat "\n" (projected_tool_rows projection))
+          | Message_thinking | Message_user _ | Message_keeper
+          | Message_autonomous
+          | Message_status | Message_error | Message_memory ->
+              message.me_text
+        in
+        (* What the links in this message point at, on rows of their own
+           under it. Added here because this is before the layout wraps:
+           the pane's own link styling runs after wrapping and cannot add a
+           cell without moving the row it sits on.
+
+           Read out of the URL and never fetched. A keeper writes these
+           links, and following one because it was mentioned would turn
+           anything a keeper says into traffic this process sends.
+
+           Not on a tool block. Tool output arrives already structured and
+           already long, and a bare URL there sits in a row that says what
+           it is; a URL in prose is the one standing on its own. *)
+        let body =
+          match message.me_role with
+          | Message_tool -> body
+          | Message_thinking | Message_user _ | Message_keeper
+          | Message_autonomous | Message_status | Message_error
+          | Message_memory -> (
+              let seen = Hashtbl.create 4 in
+              let labels =
+                Message_layout.bare_urls body
+                |> List.filter_map Masc_tui_link_label.label
+                |> List.filter (fun label ->
+                       if Hashtbl.mem seen label then false
+                       else begin
+                         Hashtbl.add seen label ();
+                         true
+                       end)
+              in
+              match labels with
+              | [] -> body
+              | labels ->
+                  body ^ "\n"
+                  ^ String.concat "\n"
+                      (List.map (fun label -> "\xe2\x95\xb0 " ^ label) labels))
+        in
+        ({ style;
+             timestamp = message.me_timestamp;
+             role_label;
+             role_label_mark_cells =
+               Message_layout.role_label_mark_cells
+                 ~column:role_label_column ~style ();
+             request_label =
+               Keeper_chat.compact_request_id message.me_request_id;
+             body;
+             markdown_source =
+               Message_layout.Markdown_stable
+                 { keeper_name = message.me_keeper_name;
+                   request_id = message.me_request_id;
+                   observed_at = message.me_at;
+                   entry_index;
+                 };
+           }
+            : Message_layout.entry))
+      grouped_messages
+  in
+  layout_entries
+
+(* Where the pane has to scroll to put a message holding [query] on screen, and
+   which message that is.
+
+   Two numbers, because a caller needs both: the scroll to move to, and the
+   position to start the next search strictly older than. The scroll is
+   measured the only way it can be -- the physical rows the entries newer than
+   the match render to, at this pane's width, through the same layout the
+   frame draws. Counting messages instead would land somewhere else on every
+   conversation that wraps.
+
+   Newest first. A search over a conversation starts at what was just said and
+   walks back, which is also the direction [msg_scroll] counts.
+
+   [older_than] is a position in the same list, not an identity: the list is
+   rebuilt per call and a message cannot move within it while the pane is
+   parked, since rows only arrive at the newer end. A match at or newer than
+   it is skipped, so repeating a search walks rather than returning to the
+   newest match every time.
+
+   Measured over committed rows only, so a turn arriving while the operator
+   searches cannot move the answer. With one on screen the match lands that
+   turn's height above the bottom edge rather than on it -- context below a
+   result, and it settles to the exact position when the turn ends.
+
+   [needle] is trimmed and lower-cased by its caller, which is where the
+   operator's text enters -- the same contract {!Masc_tui_types.palette_contains}
+   states, and it keeps case folding out of a module whose one rule about
+   [String.lowercase_ascii] is that it does not appear here.
+
+   Pure. The renderer does not mutate state, and a search that scrolled the
+   pane itself would be the exception that ends that. *)
+let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than =
+  if String.equal needle "" then None
+  else
+    let _, cols = get_terminal_size () in
+    let chat_cols =
+      Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
+    in
+    let entries =
+      keeper_message_layout_entries state ~keeper_name ~chat_cols
+    in
+    let count = List.length entries in
+    let ceiling = match older_than with None -> count | Some at -> at in
+    let matched =
+      List.filteri (fun index _ -> index < ceiling) entries
+      |> List.mapi (fun index (entry : Message_layout.entry) -> (index, entry))
+      |> List.rev
+      |> List.find_opt (fun (_, (entry : Message_layout.entry)) ->
+             Masc_tui_types.palette_contains ~needle entry.body)
+    in
+    match matched with
+    | None -> None
+    | Some (at, _) ->
+        (* Everything newer than the match, which is exactly what a scroll
+           position counts back over. *)
+        let newer = List.filteri (fun index _ -> index > at) entries in
+        let scroll =
+          Message_layout.total_rows
+            ~markdown:(cached_chat_markdown ~theme:(Chat_theme.snapshot ()))
+            ~origin:state.msg_origin_display
+            ~inner_width:(max 1 (framed_inner_width chat_cols))
+            newer
+        in
+        Some (scroll, at)
+
 let render_keeper_message (state : state) =
   (* The chat surface draws its own composer, so it keeps the whole terminal
      rather than reserving the shared row for a second one. *)
@@ -5942,221 +6247,17 @@ let render_keeper_message (state : state) =
        terminal's bottom edge. [message_viewport_supported] already states
        the same chrome as [8 + status_rows]: 7 plus one history row. *)
     let history_height = max 0 (rows - 7 - status_rows) in
-    let messages =
-      chat_rows_for state keeper_name
-      |> List.filter (fun message ->
-        state.msg_memory_visible || message.me_role <> Message_memory)
-    in
-    (* Derived once for the width and again per row, so the badge the pane
-       measures is the badge it draws. *)
-    let base_role_label_of (message : Masc_tui_types.msg_entry) =
-      match message.me_role with
-      | Message_user (Sent_by_other name) -> name
-      | Message_user (Sent_by_operator label) ->
-          if
-            (* A line the operator typed during a turn sits in the
-               conversation from the moment it is typed, in its place in the
-               order. Marked, because a waiting line drawn like a sent one is
-               the same silence that made a refused send look like a sent one
-               -- the operator has to be able to tell which of their messages
-               has actually gone. The queue is the only place that fact lives,
-               so the row asks it rather than carrying a copy. *)
-            Masc_tui_keeper_chat_queue.holds state.msg_queued
-              ~request_id:message.me_request_id
-          then "QUEUED"
-            (* A bare ["you"] is drawn as the shout it always was; a label that
-               names the surface it came in on keeps that, because "you, from
-               Slack" is a different fact from "you, here". *)
-          else if String.equal label "you" then "YOU"
-          else label
-      | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
-      | Message_autonomous -> "AUTO"
-      | Message_status -> "STATUS"
-      | Message_error -> "ERROR"
-      | Message_tool -> "TOOLS"
-      | Message_thinking -> "THINKING"
-      | Message_memory -> "MEMORY"
-    in
-    (* A persisted delivery key or turn_ref is the grouping authority. Rows
-       without one keep their old labels; grouping them by adjacency or clock
-       would silently put unrelated activity inside the same turn. *)
-    let visible_messages =
-      List.mapi (fun entry_index message -> (entry_index, message)) messages
-      |> List.filter (fun (_, message) ->
-           message.me_role <> Message_thinking
-           || state.msg_reasoning_visibility <> Reasoning_hidden)
-    in
-    let grouped_messages =
-      let rec loop previous_turn reversed = function
-        | [] -> List.rev reversed
-        | (entry_index, message) :: rest ->
-            let turn_id = message.me_request_id in
-            let grouped = not (String.equal turn_id "") in
-            let starts_turn =
-              grouped
-              && not (Option.exists (String.equal turn_id) previous_turn)
-            in
-            let base = base_role_label_of message in
-            let role_label =
-              if not grouped then base
-              else if starts_turn then "TURN · " ^ base
-              else
-                (* A continuation carries the same name as the row above it,
-                   and a name repeated says nothing. Marking it inside the
-                   label put "who is still talking" at the same weight as
-                   "what kind of row this is"; the gutter now blanks the name
-                   and quiets the glyph instead, so a name in this column
-                   always means the speaker changed.
-
-                   Kept equal to [base] rather than emptied: [continues_previous]
-                   compares labels to decide what a continuation keeps, and two
-                   consecutive rows have to match for it to fire. *)
-                base
-            in
-            let next_previous =
-              if grouped then Some turn_id else previous_turn
-            in
-            loop next_previous
-              ((entry_index, message, role_label) :: reversed) rest
-      in
-      loop None [] visible_messages
-    in
+    (* The same pure derivation the committed rows used, asked again for the
+       live ones: one call to one function with one argument, so the badge the
+       streaming turn aligns to is the badge the history aligned to. *)
     let role_label_column =
       Message_layout.chat_role_label_width ~pane_cells:chat_cols
     in
-    let tool_mode = tool_projection_mode state in
-    let tool_line_cells =
-      max 24 (min 120 (chat_cols - role_label_column - 8))
-    in
-    let file_change_index =
-      if
-        Option.equal String.equal state.msg_file_changes_keeper
-          (Some keeper_name)
-      then state.msg_file_change_index
-      else Keeper_chat_diff.empty
-    in
-    let projected_tool_rows projection =
-      Keeper_chat_diff.rows ~mode:tool_mode ~max_line_cells:tool_line_cells
-        file_change_index projection
+    let projected_tool_rows =
+      keeper_message_tool_rows state ~keeper_name ~chat_cols
     in
     let layout_entries =
-      (* The position distinguishes rows whose durable timestamp and request
-         fields tie. A history reorder can only cause a miss: the exact body is
-         another cache-key field, so an index never authorizes stale rows. *)
-      List.map
-        (fun (entry_index, message, grouped_role_label) ->
-          (* Projected once: the style is read off it and the body is built
-             from it, and projecting twice would let a fold decide the colour
-             from one reading and the text from another. *)
-          let tool_projection =
-            match message.me_role with
-            | Message_tool -> (
-                match message.me_tool_block with
-                | None -> None
-                | Some block ->
-                    Some
-                      (Keeper_chat_transcript.project_tool_block
-                         (tool_projection_mode state) block))
-            | Message_user _ | Message_keeper | Message_autonomous
-            | Message_status | Message_memory | Message_error
-            | Message_thinking ->
-                None
-          in
-          let style =
-            match message.me_role with
-            | Message_user (Sent_by_operator _) -> Message_layout.User
-            | Message_user (Sent_by_other _) -> Message_layout.Inbound
-            | Message_keeper | Message_autonomous -> Message_layout.Keeper
-            | Message_status | Message_memory -> Message_layout.Status
-            | Message_error -> Message_layout.Error
-            | Message_tool -> (
-                match tool_projection with
-                | None -> Message_layout.Tool
-                | Some projection -> tool_block_style projection)
-            | Message_thinking -> Message_layout.Thinking
-          in
-          let role_label = grouped_role_label in
-          (* One column for every speaker so the [timestamp] speaker request
-             rows line up down the pane, whatever name each row carries. *)
-          let role_label =
-            Message_layout.align_role_label ~column:role_label_column ~style
-              role_label
-          in
-          let body =
-            match message.me_role with
-            | Message_thinking
-              when state.msg_reasoning_visibility = Reasoning_folded ->
-                folded_thinking_summary message.me_text
-            (* The Memory journal's change arrives inside a ["```diff"]
-               fence, so a leading [+] is fence content rather than a list
-               marker and needs no escaping. The escape that used to be here
-               was never consumed by the renderer, so what reached the pane
-               was a literal backslash in front of every changed fact. *)
-            | Message_tool -> (
-                match tool_projection with
-                | None -> message.me_text
-                | Some projection ->
-                    String.concat "\n" (projected_tool_rows projection))
-            | Message_thinking | Message_user _ | Message_keeper
-            | Message_autonomous
-            | Message_status | Message_error | Message_memory ->
-                message.me_text
-          in
-          (* What the links in this message point at, on rows of their own
-             under it. Added here because this is before the layout wraps:
-             the pane's own link styling runs after wrapping and cannot add a
-             cell without moving the row it sits on.
-
-             Read out of the URL and never fetched. A keeper writes these
-             links, and following one because it was mentioned would turn
-             anything a keeper says into traffic this process sends.
-
-             Not on a tool block. Tool output arrives already structured and
-             already long, and a bare URL there sits in a row that says what
-             it is; a URL in prose is the one standing on its own. *)
-          let body =
-            match message.me_role with
-            | Message_tool -> body
-            | Message_thinking | Message_user _ | Message_keeper
-            | Message_autonomous | Message_status | Message_error
-            | Message_memory -> (
-                let seen = Hashtbl.create 4 in
-                let labels =
-                  Message_layout.bare_urls body
-                  |> List.filter_map Masc_tui_link_label.label
-                  |> List.filter (fun label ->
-                         if Hashtbl.mem seen label then false
-                         else begin
-                           Hashtbl.add seen label ();
-                           true
-                         end)
-                in
-                match labels with
-                | [] -> body
-                | labels ->
-                    body ^ "\n"
-                    ^ String.concat "\n"
-                        (List.map (fun label -> "\xe2\x95\xb0 " ^ label) labels))
-          in
-          ({ style;
-               timestamp = message.me_timestamp;
-               role_label;
-               role_label_mark_cells =
-                 Message_layout.role_label_mark_cells
-                   ~column:role_label_column ~style ();
-               request_label =
-                 Keeper_chat.compact_request_id message.me_request_id;
-               body;
-               markdown_source =
-                 Message_layout.Markdown_stable
-                   { keeper_name = message.me_keeper_name;
-                     request_id = message.me_request_id;
-                     observed_at = message.me_at;
-                     entry_index;
-                   };
-             }
-              : Message_layout.entry))
-        grouped_messages
+      keeper_message_layout_entries state ~keeper_name ~chat_cols
     in
     (* Rows for the turn still streaming, drawn under the committed history so
        the streaming reply sits at the bottom edge, where the eye rests while

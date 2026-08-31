@@ -422,18 +422,25 @@ let test_the_budget_and_the_pane_agree_about_the_scrollback_row () =
    be able to tell which of their own messages has actually gone. The queue is
    the only place that fact lives, so the pane asks it rather than carrying a
    second copy that can drift. *)
+(* Named for the binding that builds the row labels rather than the one that
+   draws the frame. The two were the same function until the layout build was
+   lifted out so a search over the conversation could measure the same
+   document the pane draws; a guard that keeps naming the outer one stops
+   watching anything the moment the inner one moves. *)
+let layout_binding = "keeper_message_layout_entries"
+
 let test_the_pane_marks_what_is_still_waiting () =
   let n =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui_render.ml"
-      ~binding_name:"render_keeper_message"
+      ~binding_name:layout_binding
       ~callee:"Masc_tui_keeper_chat_queue.holds"
   in
   if n < 1 then
     failf
-      "render_keeper_message must ask the queue which rows are still waiting; \
+      "%s must ask the queue which rows are still waiting; \
        Masc_tui_keeper_chat_queue.holds is called %d time(s)"
-      n
+      layout_binding n
 ;;
 
 (* When a turn settles, the pane reloads the keeper's transcript from the

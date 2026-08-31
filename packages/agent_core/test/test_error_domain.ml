@@ -527,6 +527,25 @@ let test_roundtrip_config_unsupported_provider () =
   | _ -> Alcotest.fail "roundtrip mismatch for UnsupportedProvider"
 ;;
 
+let test_roundtrip_config_credential_unavailable () =
+  let orig =
+    Error.Config
+      (CredentialUnavailable
+         { provider_id = "file-provider"; carrier = Error.FileCredential })
+  in
+  let poly = Error_domain.of_core_error orig in
+  (match poly with
+   | `Credential_unavailable ("file-provider", Error.FileCredential) -> ()
+   | _ -> Alcotest.fail "expected Credential_unavailable");
+  let back = Error_domain.to_core_error poly in
+  match back with
+  | Error.Config
+      (CredentialUnavailable
+         { provider_id = "file-provider"; carrier = Error.FileCredential }) ->
+    ()
+  | _ -> Alcotest.fail "roundtrip mismatch for CredentialUnavailable"
+;;
+
 let test_roundtrip_config_invalid_config () =
   let orig = Error.Config (InvalidConfig { field = "model"; detail = "empty" }) in
   let poly = Error_domain.of_core_error orig in
@@ -900,6 +919,10 @@ let () =
             "config unsupported_provider"
             `Quick
             test_roundtrip_config_unsupported_provider
+        ; Alcotest.test_case
+            "config credential_unavailable"
+            `Quick
+            test_roundtrip_config_credential_unavailable
         ; Alcotest.test_case
             "config invalid_config"
             `Quick

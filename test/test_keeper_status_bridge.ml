@@ -369,9 +369,9 @@ let every_failure_reason : Keeper_registry.failure_reason list =
       ; reason = Some Keeper_meta_contract.Connection_refused
       }
   ; Keeper_registry.Turn_configuration_error
-      { code = "invalid_config"
-      ; field = Some "provider_credential"
-      ; detail = "required provider credential is missing"
+      { code = "missing_env_var"
+      ; field = Some "OLLAMA_CLOUD_API_KEY"
+      ; detail = "required environment variable is missing"
       }
   ; Keeper_registry.Turn_overflow_failure
   ; Keeper_registry.Operator_interrupt

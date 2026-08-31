@@ -117,9 +117,8 @@ let registry_reason_of_internal_reason
     Keeper_meta_contract.Other_detail detail
 ;;
 
-let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
-  match Keeper_internal_error.classify_masc_internal_error_of_string raw_error with
-  | Some (Keeper_internal_error.Runtime_exhausted { reason; runtime_id }) ->
+let runtime_exhausted_failure_reason_of_internal_error ~detail = function
+  | Keeper_internal_error.Runtime_exhausted { reason; runtime_id } ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = runtime_exhaustion_reason_code reason
@@ -130,7 +129,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; agent_core_timeout = None
          ; reason = Some (registry_reason_of_internal_reason reason)
          })
-  | Some (Keeper_internal_error.Capacity_backpressure { detail = capacity_detail; _ }) ->
+  | Keeper_internal_error.Capacity_backpressure { detail = capacity_detail; _ } ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = "capacity_backpressure"
@@ -141,8 +140,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; agent_core_timeout = None
          ; reason = None
          })
-  | Some
-      ( Keeper_internal_error.Resumable_cli_session _
+  | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Accept_rejected _
       (* RFC-0159 Phase A: typed [Internal_*] variants are not
          runtime-exhaustion reasons; they map to opaque
@@ -155,8 +153,14 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Receipt_persistence_failed _
-      | Keeper_internal_error.Gate_replay_repair_required _ )
-  | None -> None
+      | Keeper_internal_error.Gate_replay_repair_required _ ->
+    None
+;;
+
+let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
+  Option.bind
+    (Keeper_internal_error.classify_masc_internal_error_of_string raw_error)
+    (runtime_exhausted_failure_reason_of_internal_error ~detail)
 ;;
 
 (* Exhaustive match on [Keeper_turn_disposition.t].
@@ -173,7 +177,11 @@ let registry_failure_reason_of_terminal_reason
       ~(raw_error : string)
   : Keeper_registry.failure_reason option
   =
-  let detail = Keeper_types_profile.short_preview raw_error in
+  let detail =
+    match core_error with
+    | Some (Agent_core.Error.Config _) -> "provider configuration failed"
+    | Some _ | None -> Keeper_types_profile.short_preview raw_error
+  in
   let configuration_failure =
     match core_error with
     | Some (Agent_core.Error.Config (MissingEnvVar { var_name })) ->
@@ -183,24 +191,41 @@ let registry_failure_reason_of_terminal_reason
            ; field = Some var_name
            ; detail = "required environment variable is missing"
            })
-    | Some (Agent_core.Error.Config (UnsupportedProvider { detail })) ->
+    | Some (Agent_core.Error.Config (UnsupportedProvider _)) ->
       Some
         (Keeper_registry.Turn_configuration_error
-           { code = "unsupported_provider"; field = None; detail })
-    | Some (Agent_core.Error.Config (InvalidConfig { field; detail })) ->
+           { code = "unsupported_provider"
+           ; field = None
+           ; detail = "configured provider is unsupported"
+           })
+    | Some (Agent_core.Error.Config (CredentialUnavailable _)) ->
       Some
         (Keeper_registry.Turn_configuration_error
-           { code = "invalid_config"; field = Some field; detail })
-    | Some (Agent_core.Error.Config (SensitiveValueInConfig { detail })) ->
+           { code = "credential_unavailable"
+           ; field = Some "credentials"
+           ; detail = "declared credential carrier is unavailable"
+           })
+    | Some (Agent_core.Error.Config (SensitiveValueInConfig _)) ->
       Some
         (Keeper_registry.Turn_configuration_error
-           { code = "sensitive_value_in_config"; field = None; detail })
+           { code = "sensitive_value_in_config"
+           ; field = None
+           ; detail = "configuration contains a sensitive inline value"
+           })
     | Some _ | None -> None
   in
   match configuration_failure with
   | Some _ as reason -> reason
   | None ->
-  match runtime_exhausted_failure_reason_of_raw_error ~detail raw_error with
+  let runtime_exhausted_failure =
+    match core_error with
+    | Some error ->
+      Option.bind
+        (Keeper_internal_error.classify_masc_internal_error error)
+        (runtime_exhausted_failure_reason_of_internal_error ~detail)
+    | None -> runtime_exhausted_failure_reason_of_raw_error ~detail raw_error
+  in
+  match runtime_exhausted_failure with
   | Some _ as reason -> reason
   | None ->
   match terminal_reason.disposition with

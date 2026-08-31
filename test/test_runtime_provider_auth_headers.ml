@@ -1254,15 +1254,50 @@ let test_dispatch_rejects_missing_declared_env_credential () =
     let provider_config = agent_core_provider_config_or_fail runtime in
     match Runtime.validate_dispatch_credential ~provider_config runtime with
     | Error
-        (Runtime.Required_env_credential_missing
-           { provider_id; env_key = actual_env_key }) ->
+        ((Runtime.Required_env_credential_missing
+            { provider_id; env_key = actual_env_key }) as error) ->
       check string "provider id" "runpod_mtp" provider_id;
-      check string "env key" env_key actual_env_key
+      check string "env key" env_key actual_env_key;
+      (match Runtime.dispatch_credential_error_to_core_error error with
+       | Agent_core.Error.Config (Agent_core.Error.MissingEnvVar { var_name }) ->
+         check string "typed missing credential env" env_key var_name
+       | core_error ->
+         failf
+           "expected MissingEnvVar, got: %s"
+           (Agent_core.Error.to_string core_error))
     | Error error ->
       failf
         "expected missing env credential, got: %s"
         (Runtime.dispatch_credential_error_to_string error)
-    | Ok () -> fail "expected dispatch credential validation to fail")
+    | Ok () -> fail "expected dispatch credential validation to fail");
+  let check_unavailable credential expected_carrier =
+    let provider = { runpod_provider with credentials = Some credential } in
+    let runtime = runtime_or_fail ~provider () in
+    let provider_config = agent_core_provider_config_or_fail runtime in
+    match Runtime.validate_dispatch_credential ~provider_config runtime with
+    | Error (Runtime.Declared_credential_unavailable _ as error) ->
+      (match Runtime.dispatch_credential_error_to_core_error error with
+       | Agent_core.Error.Config
+           (Agent_core.Error.CredentialUnavailable
+              { provider_id; carrier }) ->
+         check string "unavailable provider id" "runpod_mtp" provider_id;
+         check bool "typed unavailable carrier" true (carrier = expected_carrier)
+       | core_error ->
+         failf
+           "expected CredentialUnavailable, got: %s"
+           (Agent_core.Error.to_string core_error))
+    | Error error ->
+      failf
+        "expected unavailable credential, got: %s"
+        (Runtime.dispatch_credential_error_to_string error)
+    | Ok () -> fail "expected unavailable credential validation to fail"
+  in
+  check_unavailable
+    (Runtime_schema.Inline "")
+    Agent_core.Error.InlineCredential;
+  check_unavailable
+    (Runtime_schema.File "/operator/credential")
+    Agent_core.Error.FileCredential
 
 let test_dispatch_accepts_transformed_or_credential_free_provider () =
   let env_key = "MASC_TEST_DISPATCH_CREDENTIAL_TRANSFORM_0187ABCE" in

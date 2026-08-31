@@ -34,7 +34,7 @@ type dispatch_credential_error =
       }
   | Declared_credential_unavailable of
       { provider_id : string
-      ; carrier : string
+      ; carrier : Agent_core.Error.credential_carrier
       }
 
 let dispatch_credential_error_to_string = function
@@ -47,7 +47,17 @@ let dispatch_credential_error_to_string = function
     Printf.sprintf
       "provider %S declares an unavailable %s credential"
       provider_id
-      carrier
+      (match carrier with
+       | Agent_core.Error.InlineCredential -> "inline"
+       | Agent_core.Error.FileCredential -> "file")
+;;
+
+let dispatch_credential_error_to_core_error = function
+  | Required_env_credential_missing { env_key; _ } ->
+    Agent_core.Error.Config (Agent_core.Error.MissingEnvVar { var_name = env_key })
+  | Declared_credential_unavailable { provider_id; carrier } ->
+    Agent_core.Error.Config
+      (Agent_core.Error.CredentialUnavailable { provider_id; carrier })
 ;;
 
 let validate_dispatch_credential
@@ -77,11 +87,15 @@ let validate_dispatch_credential
       | Some (Inline _) ->
         Error
           (Declared_credential_unavailable
-             { provider_id = runtime.provider.id; carrier = "inline" })
+             { provider_id = runtime.provider.id
+             ; carrier = Agent_core.Error.InlineCredential
+             })
       | Some (File _) ->
         Error
           (Declared_credential_unavailable
-             { provider_id = runtime.provider.id; carrier = "file" })
+             { provider_id = runtime.provider.id
+             ; carrier = Agent_core.Error.FileCredential
+             })
 ;;
 
 type config_source_revision = Config_source_revision of string

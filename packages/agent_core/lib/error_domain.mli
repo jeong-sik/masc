@@ -91,6 +91,7 @@ type agent_error =
 type config_error =
   [ `Missing_env_var of string
   | `Unsupported_provider of string
+  | `Credential_unavailable of string * Error.credential_carrier
   | `Invalid_config of string * string (** field, detail *)
   | `Sensitive_value_in_config of string (** detail *)
   ]

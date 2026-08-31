@@ -696,9 +696,9 @@ let test_crashed_cycle_records_turn_failure () =
 let test_turn_status_preserves_configuration_failure_reason () =
   let configuration_reason =
     R.Turn_configuration_error
-      { code = "invalid_config"
-      ; field = Some "provider_credential"
-      ; detail = "required provider credential is missing"
+      { code = "missing_env_var"
+      ; field = Some "OLLAMA_CLOUD_API_KEY"
+      ; detail = "required environment variable is missing"
       }
   in
   (match
@@ -707,7 +707,7 @@ let test_turn_status_preserves_configuration_failure_reason () =
        (Some configuration_reason)
    with
    | Some (R.Turn_configuration_error { field = Some field; _ }) ->
-     check string "configuration field" "provider_credential" field
+     check string "configuration field" "OLLAMA_CLOUD_API_KEY" field
    | Some reason ->
      failf "configuration reason was overwritten: %s" (R.failure_reason_to_string reason)
    | None -> fail "configuration reason was cleared");

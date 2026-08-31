@@ -2676,15 +2676,45 @@ let test_health_json_distinguishes_failing_executable_keepers () =
           Alcotest.(check bool) "health still asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool))))
 
+let test_phase_snapshot_separates_terminal_configuration_from_recovery () =
+  with_temp_dir "terminal-config-not-recovering" (fun dir ->
+    let config = Workspace.default_config dir in
+    let meta = make_keeper_meta ~name:"config-failing" () in
+    with_running_keeper_metas ~owner_inventory:false config [ meta ] (fun () ->
+      mark_keeper_failing config meta;
+      Keeper_registry.set_failure_reason
+        ~base_path:config.base_path
+        meta.name
+        (Some
+           (Keeper_registry.Turn_configuration_error
+              { code = "missing_env_var"
+              ; field = Some "OLLAMA_CLOUD_API_KEY"
+              ; detail = "required environment variable is missing"
+              }));
+      let snapshot =
+        Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot
+          ~base_path:config.base_path
+          ()
+      in
+      Alcotest.(check int) "terminal config is failing" 1 snapshot.counts.failing;
+      Alcotest.(check int) "terminal config is not recovering" 0
+        snapshot.counts.recovering;
+      Alcotest.(check (list string)) "terminal config has no recovery name" []
+        snapshot.recovering_names;
+      Alcotest.(check (list string))
+        "terminal config has a blocker name"
+        [ meta.name ]
+        snapshot.configuration_blocked_names))
+
 let test_health_json_blocks_terminal_configuration_failures () =
   let keeper_name = "config-failing" in
   let phase_counts : Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
-    { running = 0; failing = 1; recovering = 1 }
+    { running = 0; failing = 1; recovering = 0 }
   in
   let phase_snapshot : Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
     { counts = phase_counts
     ; running_names = []
-    ; recovering_names = [ keeper_name ]
+    ; recovering_names = []
     ; configuration_blocked_names = [ keeper_name ]
     ; phase_values = [ keeper_name, Keeper_state_machine.Failing ]
     ; phase_details = []
@@ -2711,6 +2741,11 @@ let test_health_json_blocks_terminal_configuration_failures () =
     (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
   Alcotest.(check int) "configuration blocker count" 1
     (fleet_safety |> member "configuration_blocked_keeper_count" |> to_int);
+  Alcotest.(check int) "terminal blocker is not recovering" 0
+    (fleet_safety |> member "recovering_keeper_fiber_count" |> to_int);
+  Alcotest.(check (list string)) "terminal blocker has no recovering name" []
+    (fleet_safety |> member "recovering_keeper_names" |> to_list
+     |> List.map to_string);
   Alcotest.(check (list string))
     "configuration blocker names"
     [ keeper_name ]
@@ -2727,7 +2762,7 @@ let test_health_json_blocks_terminal_configuration_failures () =
   let healthy_name = "healthy" in
   let partial_phase_counts :
       Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
-    { running = 1; failing = 1; recovering = 1 }
+    { running = 1; failing = 1; recovering = 0 }
   in
   let partial_phase_snapshot =
     { phase_snapshot with
@@ -4728,6 +4763,10 @@ let () =
           Alcotest.test_case
             "health json distinguishes failing executable keepers"
             `Quick test_health_json_distinguishes_failing_executable_keepers;
+          Alcotest.test_case
+            "phase snapshot separates terminal config from recovery"
+            `Quick
+            test_phase_snapshot_separates_terminal_configuration_from_recovery;
           Alcotest.test_case
             "health json blocks terminal configuration failures"
             `Quick test_health_json_blocks_terminal_configuration_failures;

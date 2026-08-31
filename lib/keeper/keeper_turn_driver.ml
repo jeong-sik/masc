@@ -1253,12 +1253,7 @@ let run_named
          | Error credential_error ->
            Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
            ( Error
-               (Agent_core.Error.Config
-                  (Agent_core.Error.InvalidConfig
-                     { field = "provider_credential"
-                     ; detail =
-                         Runtime.dispatch_credential_error_to_string credential_error
-                     }))
+               (Runtime.dispatch_credential_error_to_core_error credential_error)
            , None
            , Keeper_provider_attempt_effect.No_effect_observed )
          | Ok () ->

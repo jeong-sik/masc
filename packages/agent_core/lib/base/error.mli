@@ -86,9 +86,17 @@ type mcp_error =
       ; detail : string
       }
 
+type credential_carrier =
+  | InlineCredential
+  | FileCredential
+
 type config_error =
   | MissingEnvVar of { var_name : string }
   | UnsupportedProvider of { detail : string }
+  | CredentialUnavailable of
+      { provider_id : string
+      ; carrier : credential_carrier
+      }
   | InvalidConfig of
       { field : string
       ; detail : string

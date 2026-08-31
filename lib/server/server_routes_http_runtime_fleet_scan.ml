@@ -397,12 +397,23 @@ let keeper_phase_snapshot ?base_path () =
           in
           let counts = acc.counts in
           let capacity_eligible = not entry.meta.paused in
+          let is_configuration_blocked =
+            match entry.phase, entry.last_failure_reason with
+            | ( Keeper_state_machine.Failing
+              , Some (Keeper_registry.Turn_configuration_error _) )
+              when capacity_eligible ->
+              true
+            | _ -> false
+          in
           (* Phase inventory is not execution truth. Executability is projected
-             separately through the shared closed owner-execution ADT. *)
+             separately through the shared closed owner-execution ADT. A
+             terminal configuration blocker is failing but not recovering: an
+             operator must change configuration before another turn can make
+             progress. *)
           let is_recovering =
             match entry.phase with
             | Keeper_state_machine.Failing
-              when capacity_eligible ->
+              when capacity_eligible && not is_configuration_blocked ->
               true
             | _ -> false
           in
@@ -414,12 +425,9 @@ let keeper_phase_snapshot ?base_path () =
             else acc.recovering_names
           in
           let configuration_blocked_names =
-            match entry.phase, entry.last_failure_reason with
-            | ( Keeper_state_machine.Failing
-              , Some (Keeper_registry.Turn_configuration_error _) )
-              when capacity_eligible ->
-              entry.name :: acc.configuration_blocked_names
-            | _ -> acc.configuration_blocked_names
+            if is_configuration_blocked
+            then entry.name :: acc.configuration_blocked_names
+            else acc.configuration_blocked_names
           in
           match entry.phase with
           | Keeper_state_machine.Running when capacity_eligible ->

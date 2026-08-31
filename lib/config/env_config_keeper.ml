@@ -513,6 +513,21 @@ module KeeperKeepalive = struct
     Float.max 0.1 (Float.min 10.0 (get_float ~default:0.5 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
   ;;
 
+  (** Upper bound for the failure-route backoff sleep computed after a failed
+      keepalive cycle. A provider rate-limit ([429]) or capacity route makes
+      the next cycle wait longer than the plain cadence would, but the wait is
+      capped so a misread [Retry-After] header (or a stale env override) can
+      never park a lane indefinitely: [interruptible_sleep] still wakes within
+      [sleep_chunk_sec] of any queued stimulus. Default: 900 (15 min).
+      Range: [60.0, 3600.0].
+      @category Thresholds
+      @ops_class operator *)
+  let rate_limit_backoff_cap_sec =
+    Float.max
+      60.0
+      (Float.min 3600.0 (get_float ~default:900.0 "MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC"))
+  ;;
+
   let parse_stream_idle_timeout_sec raw =
     match Float.of_string_opt (String.trim raw) with
     | Some seconds when Float.is_finite seconds && Float.compare seconds 0.0 > 0 ->

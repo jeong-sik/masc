@@ -1074,14 +1074,16 @@ let test_autoboot_warmup_bounds_first_cadence_sleep () =
        ~proactive_warmup_elapsed:false
        ~keepalive_started_ts:100.0
        ~now_ts:100.0
-       ~cadence_sec:300.0);
+       ~cadence_sec:300.0
+       ~rate_limited_backoff_sec:300.0);
   check (float 0.001) "partially elapsed warmup" 26.0
     (next
        ~proactive_warmup_sec:66
        ~proactive_warmup_elapsed:false
        ~keepalive_started_ts:100.0
        ~now_ts:140.0
-       ~cadence_sec:300.0)
+       ~cadence_sec:300.0
+       ~rate_limited_backoff_sec:300.0)
 ;;
 
 let test_warmup_boundary_and_steady_cadence () =
@@ -1092,21 +1094,70 @@ let test_warmup_boundary_and_steady_cadence () =
        ~proactive_warmup_elapsed:false
        ~keepalive_started_ts:100.0
        ~now_ts:166.0
-       ~cadence_sec:300.0);
+       ~cadence_sec:300.0
+       ~rate_limited_backoff_sec:300.0);
   check (float 0.001) "elapsed warmup" 300.0
     (next
        ~proactive_warmup_sec:66
        ~proactive_warmup_elapsed:true
        ~keepalive_started_ts:100.0
        ~now_ts:166.0
-       ~cadence_sec:300.0);
+       ~cadence_sec:300.0
+       ~rate_limited_backoff_sec:300.0);
   check (float 0.001) "disabled warmup" 300.0
     (next
        ~proactive_warmup_sec:0
        ~proactive_warmup_elapsed:true
        ~keepalive_started_ts:100.0
        ~now_ts:100.0
-       ~cadence_sec:300.0)
+       ~cadence_sec:300.0
+       ~rate_limited_backoff_sec:300.0)
+;;
+
+(* #26068 / task-1200: the sleep calculation must actually distinguish
+   failure routes. A rate-limit route with a provider [Retry-After] hint
+   backs off to that hint; a hint below the cadence defers to the cadence
+   (no hint at all is not a rate-limit signal, so the cadence stands); a
+   hint beyond the configured cap is clamped, so a misread header can
+   never park the lane; and a negative or NaN hint degrades to the
+   cadence instead of an immediate retry. *)
+let test_rate_limit_backoff_sec_clamps_and_escalates () =
+  let backoff = Keeper_heartbeat_loop.For_testing.rate_limited_backoff_sec in
+  check (float 0.001) "provider retry-after hint wins when above cadence" 120.0
+    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 120.0) ~cadence_sec:30.0);
+  check (float 0.001) "hint below cadence defers to the cadence" 30.0
+    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 5.0) ~cadence_sec:30.0);
+  check (float 0.001) "no usable hint still backs off past the cadence" 60.0
+    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 0.0) ~cadence_sec:30.0);
+  check (float 0.001) "cap clamps an absurd provider hint" 900.0
+    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 120000.0) ~cadence_sec:30.0);
+  check (float 0.001) "negative hint degrades to the bounded default" 60.0
+    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some (-5.0)) ~cadence_sec:30.0);
+  check (float 0.5) "NaN hint degrades to the bounded default" 60.0
+    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some nan) ~cadence_sec:30.0)
+;;
+
+let test_sleep_distinguishes_rate_limited_route_from_cadence () =
+  let next = Keeper_heartbeat_loop.For_testing.next_keepalive_sleep_duration_sec in
+  (* A non-rate-limited cycle passes the cadence through unchanged. *)
+  check (float 0.001) "plain cycle keeps the cadence" 30.0
+    (next
+       ~proactive_warmup_sec:0
+       ~proactive_warmup_elapsed:true
+       ~keepalive_started_ts:100.0
+       ~now_ts:100.0
+       ~cadence_sec:30.0
+       ~rate_limited_backoff_sec:30.0);
+  (* The same cycle routed as rate-limited with a 120s hint sleeps the
+     capped backoff, not the cadence. *)
+  check (float 0.001) "rate-limited cycle sleeps the route backoff" 120.0
+    (next
+       ~proactive_warmup_sec:0
+       ~proactive_warmup_elapsed:true
+       ~keepalive_started_ts:100.0
+       ~now_ts:100.0
+       ~cadence_sec:30.0
+       ~rate_limited_backoff_sec:120.0)
 ;;
 
 (* ── Test runner ─── *)
@@ -1173,6 +1224,10 @@ let () =
             test_autoboot_warmup_bounds_first_cadence_sleep
         ; test_case "elapsed warmup keeps the configured cadence" `Quick
             test_warmup_boundary_and_steady_cadence
+        ; test_case "rate-limit backoff clamps and escalates" `Quick
+            test_rate_limit_backoff_sec_clamps_and_escalates
+        ; test_case "sleep distinguishes rate-limited route from cadence" `Quick
+            test_sleep_distinguishes_rate_limited_route_from_cadence
         ] )
     ]
 ;;

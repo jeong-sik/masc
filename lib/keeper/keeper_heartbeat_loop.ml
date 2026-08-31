@@ -14,7 +14,7 @@ open Keeper_execution
 open Keeper_keepalive_signal
 module Observations = Keeper_heartbeat_loop_observations
 module Cycle = Keeper_heartbeat_loop_cycle
-module Deferred_runtime_store = Keeper_deferred_runtime_lane_store
+module Route = Keeper_runtime_failure_route
 
 (* Presence/identity sync extracted to
    [Keeper_heartbeat_loop_presence] (godfile decomp). *)
@@ -147,6 +147,14 @@ type keepalive_turn_outcome = {
   stimuli_acked : bool;
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. *)
+  rate_limited_retry_after : float option;
+      (** [Some retry_after] when the cycle's turn failure routed as a
+          provider rate-limit/capacity retry ([Retry_after_observed] with a
+          [Rate_limited] / [Hard_quota] / [Capacity_backpressure] class) —
+          carrying the route's own [Retry-After] hint when the provider sent
+          one. The inter-cycle sleep replaces the plain cadence with a
+          capped backoff for such a cycle (#26068); [None] keeps the
+          cadence. *)
 }
 
 let consume_deferred_runtime_lane_hint hint_ref expected =
@@ -156,6 +164,28 @@ let consume_deferred_runtime_lane_hint hint_ref expected =
     hint_ref := None;
     true
   | None | Some _ -> false
+;;
+
+(* #26068: a turn failure whose route is a provider rate-limit/capacity
+   retry ([Retry_after_observed] with [Rate_limited] / [Hard_quota] /
+   [Capacity_backpressure]) must change the inter-cycle sleep, not just the
+   failure counters. Extracted so the sleep decision reads the route the
+   turn already produced instead of re-classifying the error text. *)
+let failure_route_rate_limited_backoff_hint
+    (failure : Keeper_unified_turn.turn_failure)
+  =
+  match failure.route with
+  | Route.Retry_after_observed
+      { retry_class = Rate_limited | Hard_quota | Capacity_backpressure
+      ; retry_after
+      } ->
+    (* [Some 0.0] means "rate-limited, but the provider sent no usable
+       [Retry-After]": the backoff then takes its bounded default rather
+       than the plain cadence, because the rate-limit signal is real even
+       without a duration. *)
+    Some (Option.value ~default:0.0 retry_after)
+  | Route.Retry_after_observed _ | Route.Rotate_now _ | Route.Exhausted_visible_alive _ ->
+    None
 ;;
 
 exception Event_queue_cycle_failed of string
@@ -266,7 +296,7 @@ let connector_attention_outcome_of_route
 let record_crashed_cycle_failure ~base_path ~keeper_name exn =
   (* Capture the backtrace before any other call can clobber it. *)
   let backtrace = Printexc.get_backtrace () in
-  ignore (Keeper_turn_failure_streak.increment ~base_path ~keeper_name);
+  Keeper_registry.increment_turn_failures ~base_path keeper_name;
   Health.record_failure
     ~agent_name:keeper_name
     ~reason:(Keeper_types_profile.short_preview (Printexc.to_string exn));
@@ -288,30 +318,34 @@ let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
       ~keeper_name:meta.name
       "%s: keeper cycle interrupted by operator; no turn failure recorded"
       meta.name;
-    { meta; cycle_status = Turn_cycle_interrupted; stimuli_acked = false })
+    { meta
+    ; cycle_status = Turn_cycle_interrupted
+    ; stimuli_acked = false
+    ; rate_limited_retry_after = None
+    })
   else (
     record_crashed_cycle_failure
       ~base_path
       ~keeper_name:meta.name
       exn;
-    { meta; cycle_status = Turn_cycle_crashed; stimuli_acked = false })
+    { meta
+    ; cycle_status = Turn_cycle_crashed
+    ; stimuli_acked = false
+    ; rate_limited_retry_after = None
+    })
 ;;
 
 
 
 
 (* The queue records attention that a Keeper must observe, not provider health.
-   A source normally leaves only after a completed turn has observed the
-   admitted batch. The narrow exception is a checkpoint caused by a newer
-   durable source: attention-only rows advance while the checkpoint preserves
-   the model continuation. Provider/config/context failures therefore leave
-   every source untouched; otherwise one runtime failure can terminally discard
-   an arbitrary batch of unrelated Board, Schedule, Task, or
-   completion-authority facts. *)
+   A source leaves only after a completed turn has observed the admitted batch.
+   Provider/config/context failures therefore leave every source untouched;
+   otherwise one runtime failure can terminally discard an arbitrary batch of
+   unrelated Board, Schedule, Task, or completion-authority facts. *)
 type batch_disposition =
   | Batch_ack_completed of
       { connector_attention_outcome : connector_attention_outcome }
-  | Batch_ack_durable_stimulus_yield
   | Batch_no_action
 
 let batch_disposition_of_cycle_outcome
@@ -324,18 +358,6 @@ let batch_disposition_of_cycle_outcome
       { connector_attention_outcome =
           connector_attention_outcome_of_route completion.continuation_route
       }
-  | Some
-      (Cycle.Checkpointed
-         { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
-         ; continuation_route = _
-         ; _
-         }) ->
-    (* The admitted batch is an attention layer, not the continuation store.
-       This checkpoint exists specifically because a newer durable source
-       arrived; retaining the older batch would replay it ahead of the new
-       source forever under continuous arrivals. Connector attention remains
-       pending until it has an exact reply/ignore settlement. *)
-    Batch_ack_durable_stimulus_yield
   | Some
       ( Cycle.Failed _
       | Cycle.Checkpointed _
@@ -358,7 +380,7 @@ let connector_attention_settlement_of_disposition = function
     Settle_ignored
   (* The entry stays pending, so the turn that finally drains it owns the
      terminal event. Settling here would retire a row that is still live. *)
-  | Batch_ack_durable_stimulus_yield | Batch_no_action -> Settle_pending_in_queue
+  | Batch_no_action -> Settle_pending_in_queue
 ;;
 
 
@@ -369,15 +391,6 @@ let turn_status_event ~turn_fail_count : Keeper_state_machine.event =
   if turn_fail_count > 0
   then Keeper_state_machine.Turn_failed { consecutive = turn_fail_count }
   else Keeper_state_machine.Turn_succeeded
-;;
-
-let failure_reason_after_turn_status ~turn_fail_count current =
-  if turn_fail_count <= 0
-  then current
-  else
-    match current with
-    | Some (Keeper_registry.Turn_configuration_error _) -> current
-    | Some _ | None -> Some (Keeper_registry.Turn_consecutive_failures turn_fail_count)
 ;;
 
 (* Whether the event queue still holds any pending entry. Read errors are
@@ -401,6 +414,29 @@ let pending_stimulus_remains ~ctx ~keeper_name =
     false
 ;;
 
+(* A provider rate-limit ([429]) or capacity failure route means the lane
+   itself is the thing that must back off: re-running the turn at the plain
+   cadence keeps hammering the provider while the crash-accounting streak
+   climbs like a clock (#26068). [rate_limited_backoff_sec] derives the
+   backoff from the route's own [Retry-After] hint when present, else from
+   the cadence, and always clamps to the configured cap so a misread hint
+   (or an out-of-range env override) cannot park the lane: the sleep is
+   still [interruptible_sleep], so a queued stimulus wakes it within
+   [sleep_chunk_sec]. *)
+let rate_limited_backoff_sec ~cap_sec ~retry_after_hint ~cadence_sec =
+  let cap_sec = Float.max 0.0 cap_sec in
+  let retry_after_hint = Option.value ~default:0.0 retry_after_hint in
+  (* A garbage [Retry-After] (negative, NaN, infinite) is still a signal the
+     provider rate-limited this lane, but carries no usable duration: both
+     degrade to the same bounded default rather than diverging. *)
+  let base =
+    if Float.is_nan retry_after_hint || retry_after_hint <= 0.0
+    then Float.max cadence_sec 60.0
+    else Float.max retry_after_hint cadence_sec
+  in
+  Float.min cap_sec base
+;;
+
 (* Autoboot warmup is a dispatch delay, not an extra heartbeat cadence. The
    first cycle runs before warmup and skips intake; sleeping the full cadence
    here used to leave restored durable work (and the bootstrap stimulus) idle
@@ -411,14 +447,15 @@ let next_keepalive_sleep_duration_sec
       ~keepalive_started_ts
       ~now_ts
       ~cadence_sec
+      ~rate_limited_backoff_sec
   =
-  let cadence_sec = Float.max 0.0 cadence_sec in
+  let rate_limited_backoff_sec = Float.max 0.0 rate_limited_backoff_sec in
   if proactive_warmup_sec <= 0 || proactive_warmup_elapsed
-  then cadence_sec
+  then rate_limited_backoff_sec
   else (
     let elapsed_sec = Float.max 0.0 (now_ts -. keepalive_started_ts) in
     let warmup_remaining_sec = float_of_int proactive_warmup_sec -. elapsed_sec in
-    Float.max 0.0 (Float.min cadence_sec warmup_remaining_sec))
+    Float.max 0.0 (Float.min rate_limited_backoff_sec warmup_remaining_sec))
 ;;
 
 let run_keepalive_unified_turn
@@ -440,6 +477,7 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_completed
     ; stimuli_acked = false
+    ; rate_limited_retry_after = None
     }
   else
     match
@@ -468,8 +506,6 @@ let run_keepalive_unified_turn
       ref []
     in
     let cycle_outcome_ref = ref None in
-    let hitl_resolution_for_cycle = ref None in
-    let hitl_continuation_projection_ok = ref true in
     let selection_acked = ref false in
     let stimuli_acked = ref false in
     let event_queue_failed = ref false in
@@ -760,7 +796,6 @@ let run_keepalive_unified_turn
                    meta_after_triage.name;
                  Some resolution)
           in
-          hitl_resolution_for_cycle := hitl_resolution;
           (* The event intake is the exact turn input. Keep its attribution in
              the existing wake record even when the cadence, rather than a
              direct wake signal, discovered it. An empty [Woken] still means a
@@ -837,39 +872,6 @@ let run_keepalive_unified_turn
           ~selection
         |> record_terminal_selection_result ~label:"turn completion"
       in
-      let cycle_recorded_continuation =
-        match !cycle_outcome_ref with
-        | Some (Cycle.Completed _) -> true
-        | Some
-            (Cycle.Checkpointed
-               { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
-               ; _
-               }) ->
-          true
-        | Some
-            ( Cycle.Failed _
-            | Cycle.Checkpointed _
-            | Cycle.Input_required _
-            | Cycle.Cancelled _
-            | Cycle.Skipped _ )
-        | None -> false
-      in
-      (match cycle_recorded_continuation, !hitl_resolution_for_cycle with
-       | true, Some resolution ->
-         (match
-            Keeper_approval_queue.ensure_settled_continuation_chat_projection
-              ~base_path:ctx.config.base_path
-              ~keeper_name:meta_after_triage.name
-              ~resolution
-          with
-          | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
-          | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
-            hitl_continuation_projection_ok := false
-          | Error detail ->
-            hitl_continuation_projection_ok := false;
-            record_event_queue_failure
-              ("approval continuation projection failed: " ^ detail))
-       | false, _ | true, None -> ());
       (match !cycle_outcome_ref with
        | Some (Cycle.Failed _)
        | Some
@@ -906,51 +908,42 @@ let run_keepalive_unified_turn
                  event_ids
              | Settle_pending_in_queue -> ()
            in
-           let remove_completed_selections ~should_ack ~settlement =
-             let should_ack selection =
-               should_ack selection
-               &&
-               match selection.Keeper_event_queue_state.source.payload with
-               | Keeper_event_queue.Hitl_resolved _ ->
-                 !hitl_continuation_projection_ok
-               | _ -> true
-             in
-             let selections_to_ack, retained_selections =
-               List.partition should_ack selections
-             in
+           let remove_completed_selections ~settlement =
              let all_acked =
                List.fold_left
                  (fun all_acked selection ->
                     let acked = terminalize_completed_selection ~selection in
                     all_acked && acked)
                  true
-                 selections_to_ack
+                 selections
              in
-             stimuli_acked := all_acked && List.is_empty retained_selections;
+             stimuli_acked := all_acked;
              (* A failed queue ack leaves the entry live, so the row it carries
                 is still someone's to settle. *)
-             if all_acked && List.is_empty retained_selections
-             then settle_connector_attention settlement
+             if all_acked then settle_connector_attention settlement
            in
            let disposition = batch_disposition_of_cycle_outcome !cycle_outcome_ref in
            let settlement =
              connector_attention_settlement_of_disposition disposition
            in
            match disposition with
-           | Batch_ack_completed _ ->
-             remove_completed_selections ~should_ack:(fun _ -> true) ~settlement
-           | Batch_ack_durable_stimulus_yield ->
-             remove_completed_selections
-               ~should_ack:(fun selection ->
-                 match selection.Keeper_event_queue_state.source.payload with
-                 | Keeper_event_queue.Connector_attention _ -> false
-                 | _ -> true)
-               ~settlement
+           | Batch_ack_completed _ -> remove_completed_selections ~settlement
            | Batch_no_action -> ());
       { meta = meta_after_cycle
       ; cycle_status =
-          if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed
+          (if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed)
       ; stimuli_acked = !stimuli_acked
+      ; rate_limited_retry_after =
+          (match !cycle_outcome_ref with
+           | Some (Cycle.Failed { failure; _ }) ->
+             failure_route_rate_limited_backoff_hint failure
+           | Some
+               ( Cycle.Completed _
+               | Cycle.Checkpointed _
+               | Cycle.Input_required _
+               | Cycle.Cancelled _
+               | Cycle.Skipped _ )
+           | None -> None)
       }
     with
     | exn when Keeper_registry_types.is_operator_interrupt exn ->
@@ -983,17 +976,20 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_busy block
     ; stimuli_acked = false
+    ; rate_limited_retry_after = None
     }
   | Ok (`Busy block) ->
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_busy block
     ; stimuli_acked = false
+    ; rate_limited_retry_after = None
     }
   | Error
       (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping) ->
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_completed
     ; stimuli_acked = false
+    ; rate_limited_retry_after = None
     }
   | Error error ->
     Log.Keeper.error
@@ -1003,6 +999,7 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_crashed
     ; stimuli_acked = false
+    ; rate_limited_retry_after = None
     }
 ;;
 
@@ -1086,37 +1083,7 @@ let run_heartbeat_loop
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_core.Context.create () in
-  let deferred_runtime_lane_ref =
-    match
-      Deferred_runtime_store.load
-        ~base_path:ctx.config.base_path
-        ~keeper_name:m.name
-    with
-    | Ok restored ->
-      Option.iter
-        (fun (hint : Keeper_turn_driver.deferred_runtime_lane) ->
-           Log.Keeper.info
-             ~keeper_name:m.name
-             "%s: restored durable frozen runtime lane suffix failed_runtime=%s next_runtime=%s remaining=%d"
-             m.name
-             hint.failed_runtime_id
-             hint.next_runtime_id
-             (List.length hint.later_runtime_ids))
-        restored;
-      ref restored
-    | Error error ->
-      let detail = Deferred_runtime_store.error_to_string error in
-      Keeper_registry.set_failure_reason
-        ~base_path:ctx.config.base_path
-        m.name
-        (Some (Keeper_registry.Exception detail));
-      Log.Keeper.error
-        ~keeper_name:m.name
-        "%s: refusing autonomous turns because durable deferred runtime authority is unreadable: %s"
-        m.name
-        detail;
-      raise Keeper_registry.Keeper_fiber_crash
-  in
+  let deferred_runtime_lane_ref = ref None in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first
@@ -1264,6 +1231,7 @@ let run_heartbeat_loop
             { meta = meta_current
             ; cycle_status = Turn_cycle_completed
             ; stimuli_acked = false
+            ; rate_limited_retry_after = None
             }
           else (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
@@ -1281,39 +1249,14 @@ let run_heartbeat_loop
                 false
             in
             let deferred_runtime_lane = !deferred_runtime_lane_ref in
-            let deferred_runtime_lane_consumed = ref false in
-            let replacement_deferred_runtime_lane_recorded = ref false in
             let on_deferred_runtime_consumed () =
               Option.iter
                 (fun expected ->
-                   if
-                     consume_deferred_runtime_lane_hint
-                       deferred_runtime_lane_ref
-                       expected
-                   then deferred_runtime_lane_consumed := true)
+                   ignore
+                     (consume_deferred_runtime_lane_hint
+                        deferred_runtime_lane_ref
+                        expected))
                 deferred_runtime_lane
-            in
-            let record_deferred_runtime_lane hint =
-              replacement_deferred_runtime_lane_recorded := true;
-              deferred_runtime_lane_ref := Some hint;
-              match
-                Deferred_runtime_store.save
-                  ~base_path:ctx.config.base_path
-                  ~keeper_name:m.name
-                  hint
-              with
-              | Ok () -> ()
-              | Error error ->
-                let detail = Deferred_runtime_store.error_to_string error in
-                Keeper_registry.set_failure_reason
-                  ~base_path:ctx.config.base_path
-                  m.name
-                  (Some (Keeper_registry.Exception detail));
-                Log.Keeper.error
-                  ~keeper_name:m.name
-                  "%s: deferred runtime suffix remains process-local because durable publication failed: %s"
-                  m.name
-                  detail
             in
             let r =
               run_keepalive_unified_turn
@@ -1326,38 +1269,9 @@ let run_heartbeat_loop
                 ~shared_context
                 ~deferred_runtime_lane
                 ~on_deferred_runtime_consumed
-                ~record_deferred_runtime_lane
+                ~record_deferred_runtime_lane:
+                  (fun hint -> deferred_runtime_lane_ref := Some hint)
             in
-            (* Consumption is committed only after the cycle has a typed
-               outcome. A process crash after dispatch but before this point
-               leaves the durable suffix in place, so restart retries the
-               successor instead of resurrecting the already-failed prefix. A
-               failure that freezes a smaller tail replaces the file above. *)
-            (if
-              !deferred_runtime_lane_consumed
-              && not !replacement_deferred_runtime_lane_recorded
-            then (
-              match
-                Deferred_runtime_store.clear
-                  ~base_path:ctx.config.base_path
-                  ~keeper_name:m.name
-              with
-              | Ok () -> ()
-              | Error error ->
-                (* Keep process memory aligned with the still-present durable
-                   file. Retrying the successor is safer than silently falling
-                   back to the failed lane prefix. *)
-                deferred_runtime_lane_ref := deferred_runtime_lane;
-                let detail = Deferred_runtime_store.error_to_string error in
-                Keeper_registry.set_failure_reason
-                  ~base_path:ctx.config.base_path
-                  m.name
-                  (Some (Keeper_registry.Exception detail));
-                Log.Keeper.error
-                  ~keeper_name:m.name
-                  "%s: durable deferred runtime suffix consumption did not commit: %s"
-                  m.name
-                  detail));
             Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
             turn_running := false;
             Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running;
@@ -1400,19 +1314,11 @@ let run_heartbeat_loop
                (turn_status_event
                   ~turn_fail_count);
              if turn_fail_count > 0
-             then (
-               let current_failure_reason =
-                 Keeper_registry.get
-                   ~base_path:ctx.config.base_path
-                   m.name
-                 |> fun entry -> Option.bind entry (fun entry -> entry.last_failure_reason)
-               in
+             then
                Keeper_registry.set_failure_reason
                  ~base_path:ctx.config.base_path
                  m.name
-                 (failure_reason_after_turn_status
-                    ~turn_fail_count
-                    current_failure_reason));
+                 (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
              (* Phase 1: work-as-heartbeat — renew point (b).
                 After turn, call Workspace.heartbeat to prove workspace I/O health.
                 On success: reset consecutive_failures.
@@ -1453,7 +1359,49 @@ let run_heartbeat_loop
            does not sleep the cadence: the queue is the wake signal, and the
            next cycle dispatches as [Woken]. A checkpointed, failed, or busy
            cycle keeps the cadence so a turn that made no progress is not
-           re-run back to back. *)
+           re-run back to back.
+
+           A rate-limited failure cycle (#26068) instead sleeps the capped
+           route backoff: re-running the turn at the plain cadence keeps
+           hammering the provider while the crash-accounting streak climbs.
+           The backoff never disables reactivity — [interruptible_sleep] still
+           notices a queued stimulus within [sleep_chunk_sec]. *)
+        let cadence_sec =
+          float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())
+        in
+        let cycle_sleep_sec =
+          match turn_outcome.rate_limited_retry_after with
+          | Some hint ->
+            let backoff =
+              rate_limited_backoff_sec
+                ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+                ~retry_after_hint:(Some hint)
+                ~cadence_sec
+            in
+            Log.Keeper.warn
+              ~keeper_name:m.name
+              "%s: rate-limited failure route; backing off next cycle by %.0fs \
+               (cadence %.0fs, cap %.0fs); queued stimuli still wake within \
+               the sleep chunk"
+              m.name
+              backoff
+              cadence_sec
+              Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec;
+            Some backoff
+          | None -> None
+        in
+        let sleep_duration () =
+          match cycle_sleep_sec with
+          | Some backoff -> backoff
+          | None ->
+            next_keepalive_sleep_duration_sec
+              ~proactive_warmup_sec
+              ~proactive_warmup_elapsed
+              ~keepalive_started_ts
+              ~now_ts:(Time_compat.now ())
+              ~cadence_sec
+              ~rate_limited_backoff_sec:cadence_sec
+        in
         last_wake_source :=
           (if turn_outcome.stimuli_acked
               && pending_stimulus_remains ~ctx ~keeper_name:m.name
@@ -1464,15 +1412,7 @@ let run_heartbeat_loop
                ~clock:ctx.clock
                ~stop
                ~wakeup
-               (fun () ->
-                 next_keepalive_sleep_duration_sec
-                   ~proactive_warmup_sec
-                   ~proactive_warmup_elapsed
-                   ~keepalive_started_ts
-                   ~now_ts:(Time_compat.now ())
-                   ~cadence_sec:
-                     (float_of_int
-                        (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))));
+               sleep_duration);
       if Atomic.get stop then () else loop ())
   in
   loop ()
@@ -1480,5 +1420,6 @@ let run_heartbeat_loop
 
 module For_testing = struct
   let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
+  let rate_limited_backoff_sec = rate_limited_backoff_sec
   let next_keepalive_sleep_duration_sec = next_keepalive_sleep_duration_sec
 end

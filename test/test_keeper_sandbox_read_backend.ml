@@ -1416,9 +1416,11 @@ let test_maybe_cleanup_disappearance_allows_next_interval () =
       ~timeout_sec:5.0 ()
   in
   (match first with
-   | Some result ->
+   | Some (Keeper_sandbox_runtime.Cleanup_completed result) ->
      Alcotest.(check int) "first sweep records both races" 2 result.already_absent;
      Alcotest.(check (list string)) "first sweep has no errors" [] result.errors
+   | Some (Keeper_sandbox_runtime.Cleanup_skipped_command_unavailable command) ->
+     Alcotest.failf "cleanup unexpectedly skipped unavailable command %s" command
    | None -> Alcotest.fail "expected first cleanup sweep to run");
   let second =
     Keeper_sandbox_runtime.maybe_cleanup_stale_containers
@@ -1459,7 +1461,9 @@ let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
   let ran =
     List.fold_left
       (fun acc -> function
-         | Some _ -> acc + 1
+         | Some (Keeper_sandbox_runtime.Cleanup_completed _) -> acc + 1
+         | Some (Keeper_sandbox_runtime.Cleanup_skipped_command_unavailable command) ->
+           Alcotest.failf "cleanup unexpectedly skipped unavailable command %s" command
          | None -> acc)
       0
       !results
@@ -1497,9 +1501,11 @@ let test_maybe_cleanup_stale_containers_retries_next_explicit_interval () =
       ~now:1000.0 ~base_path:base ~timeout_sec:5.0 ()
   in
   (match first with
-   | Some result ->
+   | Some (Keeper_sandbox_runtime.Cleanup_completed result) ->
        Alcotest.(check bool) "first cleanup records daemon error" true
          (result.errors <> [])
+   | Some (Keeper_sandbox_runtime.Cleanup_skipped_command_unavailable command) ->
+       Alcotest.failf "cleanup unexpectedly skipped unavailable command %s" command
    | None -> Alcotest.fail "expected first cleanup to run");
   let retried =
     Keeper_sandbox_runtime.maybe_cleanup_stale_containers
@@ -1515,6 +1521,51 @@ let test_maybe_cleanup_stale_containers_retries_next_explicit_interval () =
   in
   Alcotest.(check int) "two configured intervals run two cleanup attempts" 2
     ps_count
+
+let test_maybe_cleanup_skips_unavailable_command_without_spawn () =
+  with_fake_docker fake_docker_cleanup_script @@ fun () ->
+  let base = temp_dir () in
+  let log_path = fake_docker_log_path () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+      cleanup_dir base)
+  @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC" "10" @@ fun () ->
+  Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+  let observed_command = ref None in
+  let first =
+    Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+      ~now:1000.0
+      ~command_available:(fun command ->
+        observed_command := Some command;
+        false)
+      ~base_path:base
+      ~timeout_sec:5.0
+      ()
+  in
+  (match first with
+   | Some (Keeper_sandbox_runtime.Cleanup_skipped_command_unavailable command) ->
+     Alcotest.(check (option string))
+       "availability probe receives the resolved command"
+       (Some command)
+       !observed_command
+   | Some (Keeper_sandbox_runtime.Cleanup_completed _) ->
+     Alcotest.fail "unavailable command ran cleanup"
+   | None -> Alcotest.fail "eligible unavailable command did not return a typed skip");
+  Alcotest.(check bool) "unavailable command is never spawned" false
+    (Sys.file_exists log_path);
+  let throttled =
+    Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+      ~now:1001.0
+      ~command_available:(fun _ -> false)
+      ~base_path:base
+      ~timeout_sec:5.0
+      ()
+  in
+  Alcotest.(check bool) "typed skip still consumes the interval gate" true
+    (Option.is_none throttled)
 
 let test_docker_preflight_reports_ready_image () =
   with_fake_docker fake_docker_preflight_ok_script @@ fun () ->
@@ -2458,6 +2509,8 @@ let run_tests ~clock () =
             test_maybe_cleanup_stale_containers_runs_once_per_interval;
           Alcotest.test_case "cleanup failure retries next explicit interval" `Quick
             test_maybe_cleanup_stale_containers_retries_next_explicit_interval;
+          Alcotest.test_case "cleanup skips unavailable command without spawn" `Quick
+            test_maybe_cleanup_skips_unavailable_command_without_spawn;
         ] );
     ]
 

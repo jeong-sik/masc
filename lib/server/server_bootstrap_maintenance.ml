@@ -878,13 +878,18 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              ticks faster but the helper short-circuits when called too soon. *)
          (match
             Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+              ~command_available:Executable_path.command_available
               ~base_path:(Mcp_server.workspace_config state).base_path
               ~timeout_sec:
                 (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
               ()
           with
           | None -> ()
-          | Some result ->
+          | Some (Keeper_sandbox_runtime.Cleanup_skipped_command_unavailable command) ->
+            Log.Server.info
+              "Sandbox cleanup skipped: Docker CLI is not available on PATH (%s)"
+              command
+          | Some (Keeper_sandbox_runtime.Cleanup_completed result) ->
             if result.removed > 0 || result.already_absent > 0 || result.errors <> []
             then (
               Log.Server.info

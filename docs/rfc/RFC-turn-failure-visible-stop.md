@@ -27,7 +27,7 @@ related: []
 성공(또는 운영자 clear)이 되돌린다.**
 
 면제, 클래스별 예산, 예산의 내구 저장(`keeper_failure_exemption_store`)은
-걷어낸다. 구현 PR은 #32109.
+걷어낸다. 구현은 #32109로 main에 들어왔다(dc75fd8aff). 회귀 테스트는 #32112.
 
 ## 1. 문제
 
@@ -161,20 +161,24 @@ streak(#31969)는 그대로 유지된다.
   사라졌다. 함수는 분류 계약(telemetry, failure route)과 다수 테스트가
   붙어 있어 유지하되, 분류 전용으로 재문서화했다. lib 내 소비자 0인 상태는
   후속 sweep에서 재판단한다.
-- direct provider 레인의 HTTP 재시도 상한: **미확인.** 유한함을 확인하는
-  것은 구현 PR의 남은 검증 항목이다(§4).
+- direct provider 레인의 HTTP 재시도: **재시도 루프가 존재하지 않는다.**
+  `http_client`의 동기 dispatch는 재시도 정책 없는 raw 호출이고
+  (`http_client.mli` "No ... retry policy has run"), `retry.mli`는
+  분류(is_retryable, retry_after 힌트) 전용이다. 턴당 시도는 1회이고
+  케이던스가 상한이다 — #31958 실측의 실패 1회/케이던스와 일치한다.
 
 ## 4. 검증
 
-- 단위(통과): invalid_request 분류 3/3, runtime observation boundaries 9/9,
-  cycle attribution 2/2, terminal reason 8/8, context overflow 8/8,
-  supervisor 48/48, work-as-heartbeat 24/24, `@default` 전체 빌드,
-  ocamlformat --check.
-- #31958 재현(Linux exact-source, 구현 종결 조건): DNS 차단 시 매 실패가
+- 단위(통과): invalid_request 분류 3/3, runtime observation boundaries
+  10/10(#32112의 #31958 회귀 핀 포함 — 네트워크 실패 → streak →
+  `Turn_failed` → phase `failing`을 프로덕션 체인으로 고정), cycle
+  attribution 2/2, terminal reason 8/8, context overflow 8/8, supervisor
+  48/48, work-as-heartbeat 24/24, `@default` 전체 빌드, ocamlformat
+  --check.
+- #31958 재현(Linux exact-source, 이슈 종결 조건): DNS 차단 시 매 실패가
   streak에 오르고 fleet이 Failing/degraded로 보이며, 59초 44턴
   `consecutive=0` 무음 루프가 재현되지 않아야 한다. 성공 시 회복.
 - 재시작: streak 내구(#31969 유지)로 예산 리셋 악용 경로 자체가 없어진다.
-- direct provider 레인 재시도 상한 확인.
 
 ## 5. 폐기하는 방향
 

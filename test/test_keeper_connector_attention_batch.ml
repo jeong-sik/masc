@@ -446,6 +446,19 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
    | _ ->
      fail
        "Completed + not-addressed route must drive Batch_ack_completed/Attention_ignored");
+  (match
+     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+       (Some
+          (Keeper_heartbeat_loop_cycle.Checkpointed
+             { meta
+             ; checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
+             ; continuation_route = Keeper_unified_turn.Continuation_route_addressed
+             }))
+   with
+   | Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield -> ()
+   | _ ->
+     fail
+       "durable-stimulus checkpoint must advance attention-only sources before the newer source");
   List.iter
     (fun (outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option) ->
        match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome outcome with
@@ -464,7 +477,12 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
            ~route:(deterministic_route ~detail:"deterministic rejection")
            ~deferred_runtime_lane:None
            meta)
-    ; Some (Keeper_heartbeat_loop_cycle.Checkpointed meta)
+    ; Some
+        (Keeper_heartbeat_loop_cycle.Checkpointed
+           { meta
+           ; checkpoint_reason = Keeper_unified_turn.Awaiting_external_effect
+           ; continuation_route = Keeper_unified_turn.Continuation_route_not_addressed
+           })
     ; Some (Keeper_heartbeat_loop_cycle.Input_required meta)
     ; Some (Keeper_heartbeat_loop_cycle.Cancelled meta)
     ; Some (Keeper_heartbeat_loop_cycle.Skipped meta)
@@ -637,7 +655,8 @@ let test_batch_turn_failure_leaves_every_member_queued () =
          (Some failed_cycle_outcome)
      with
      | Keeper_heartbeat_loop.Batch_no_action -> ()
-     | Keeper_heartbeat_loop.Batch_ack_completed _ ->
+     | Keeper_heartbeat_loop.Batch_ack_completed _
+     | Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield ->
        fail "a failed turn must leave every admitted source pending");
     let queued =
       match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
@@ -706,6 +725,8 @@ let test_batch_completion_acks_every_member () =
            intake.consumed_selections
        in
        check bool "every batch member acks cleanly" true acked
+     | Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield ->
+       fail "a completed turn was classified as a checkpoint yield"
      | Keeper_heartbeat_loop.Batch_no_action ->
        fail "a completed, addressed outcome must drive Batch_ack_completed");
     let queued =
@@ -740,7 +761,13 @@ let test_every_terminalizing_disposition_settles_its_attention_rows () =
        Keeper_heartbeat_loop.Batch_no_action
    with
    | Keeper_heartbeat_loop.Settle_pending_in_queue -> ()
-   | _ -> fail "an unfinished turn must not settle a still-pending row")
+   | _ -> fail "an unfinished turn must not settle a still-pending row");
+  (match
+     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
+       Keeper_heartbeat_loop.Batch_ack_durable_stimulus_yield
+   with
+   | Keeper_heartbeat_loop.Settle_pending_in_queue -> ()
+   | _ -> fail "a checkpoint yield must not settle connector attention")
 ;;
 
 let () =

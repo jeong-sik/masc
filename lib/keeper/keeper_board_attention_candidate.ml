@@ -13,12 +13,18 @@ type delivery_failure =
   ; failed_at : float
   }
 
+type judgment_source =
+  | Exact_attempt of
+      { call_id : string
+      ; plan_fingerprint : string
+      ; request_body_sha256 : string
+      }
+  | Cli_lane_slot
+
 type judgment =
   { verdict : Keeper_board_attention_judgment.t
   ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
+  ; source : judgment_source
   ; judged_at : float
   }
 
@@ -426,13 +432,22 @@ let delivery_failure_to_yojson failure =
     ]
 ;;
 
+let judgment_source_to_yojson = function
+  | Exact_attempt { call_id; plan_fingerprint; request_body_sha256 } ->
+    `Assoc
+      [ "kind", `String "exact_attempt"
+      ; "call_id", `String call_id
+      ; "plan_fingerprint", `String plan_fingerprint
+      ; "request_body_sha256", `String request_body_sha256
+      ]
+  | Cli_lane_slot -> `Assoc [ "kind", `String "cli_lane_slot" ]
+;;
+
 let judgment_to_yojson judgment =
   `Assoc
     [ "verdict", Keeper_board_attention_judgment.to_yojson judgment.verdict
     ; "slot_id", `String judgment.slot_id
-    ; "call_id", `String judgment.call_id
-    ; "plan_fingerprint", `String judgment.plan_fingerprint
-    ; "request_body_sha256", `String judgment.request_body_sha256
+    ; "source", judgment_source_to_yojson judgment.source
     ; "judged_at", `Float judgment.judged_at
     ]
 ;;
@@ -686,16 +701,22 @@ let validate_judgment ~context (judgment : judgment) =
       judgment.verdict.rationale
   in
   let* () = nonblank_string ~context:(context ^ ".slot_id") judgment.slot_id in
-  let* () = nonblank_string ~context:(context ^ ".call_id") judgment.call_id in
+  (* Only the exact arm has a receipt, and its three fields are the identity a
+     completion is matched against, so each must be present. The CLI arm has
+     nothing further to check: inventing a receipt for it would put an attempt
+     that never happened into the durable record. *)
   let* () =
-    nonblank_string
-      ~context:(context ^ ".plan_fingerprint")
-      judgment.plan_fingerprint
-  in
-  let* () =
-    nonblank_string
-      ~context:(context ^ ".request_body_sha256")
-      judgment.request_body_sha256
+    match judgment.source with
+    | Cli_lane_slot -> Ok ()
+    | Exact_attempt { call_id; plan_fingerprint; request_body_sha256 } ->
+      let context = context ^ ".source" in
+      let* () = nonblank_string ~context:(context ^ ".call_id") call_id in
+      let* () =
+        nonblank_string ~context:(context ^ ".plan_fingerprint") plan_fingerprint
+      in
+      nonblank_string
+        ~context:(context ^ ".request_body_sha256")
+        request_body_sha256
   in
   finite_time ~context:(context ^ ".judged_at") judgment.judged_at
 ;;
@@ -944,53 +965,55 @@ let delivery_failure_of_yojson json =
   Ok { kind; detail; failed_at }
 ;;
 
+let judgment_source_of_yojson ~context json =
+  let* fields = assoc ~context json in
+  let* kind_json = field ~context "kind" fields in
+  let* kind = string_json ~context:(context ^ ".kind") kind_json in
+  match kind with
+  | "exact_attempt" ->
+    let* () =
+      exact_fields
+        ~context
+        [ "kind"; "call_id"; "plan_fingerprint"; "request_body_sha256" ]
+        fields
+    in
+    let* call_id_json = field ~context "call_id" fields in
+    let* call_id = string_json ~context:(context ^ ".call_id") call_id_json in
+    let* plan_fingerprint_json = field ~context "plan_fingerprint" fields in
+    let* plan_fingerprint =
+      string_json ~context:(context ^ ".plan_fingerprint") plan_fingerprint_json
+    in
+    let* request_body_sha256_json = field ~context "request_body_sha256" fields in
+    let* request_body_sha256 =
+      string_json
+        ~context:(context ^ ".request_body_sha256")
+        request_body_sha256_json
+    in
+    Ok (Exact_attempt { call_id; plan_fingerprint; request_body_sha256 })
+  | "cli_lane_slot" ->
+    let* () = exact_fields ~context [ "kind" ] fields in
+    Ok Cli_lane_slot
+  | other -> Error (context ^ ".kind is not a judgment source: " ^ other)
+;;
+
 let judgment_of_yojson json =
   let context = "candidate.status.judgment" in
   let* fields = assoc ~context json in
   let* () =
-    exact_fields
-      ~context
-      [ "verdict"
-      ; "slot_id"
-      ; "call_id"
-      ; "plan_fingerprint"
-      ; "request_body_sha256"
-      ; "judged_at"
-      ]
-      fields
+    exact_fields ~context [ "verdict"; "slot_id"; "source"; "judged_at" ] fields
   in
   let* verdict_json = field ~context "verdict" fields in
   let* verdict = Keeper_board_attention_judgment.of_yojson verdict_json in
   let* slot_id_json = field ~context "slot_id" fields in
   let* slot_id = string_json ~context:(context ^ ".slot_id") slot_id_json in
-  let* call_id_json = field ~context "call_id" fields in
-  let* call_id = string_json ~context:(context ^ ".call_id") call_id_json in
-  let* plan_fingerprint_json = field ~context "plan_fingerprint" fields in
-  let* plan_fingerprint =
-    string_json
-      ~context:(context ^ ".plan_fingerprint")
-      plan_fingerprint_json
-  in
-  let* request_body_sha256_json = field ~context "request_body_sha256" fields in
-  let* request_body_sha256 =
-    string_json
-      ~context:(context ^ ".request_body_sha256")
-      request_body_sha256_json
+  let* source_json = field ~context "source" fields in
+  let* source =
+    judgment_source_of_yojson ~context:(context ^ ".source") source_json
   in
   let* judged_at_json = field ~context "judged_at" fields in
   let* judged_at = float_json ~context:(context ^ ".judged_at") judged_at_json in
-  let judgment =
-    { verdict
-    ; slot_id
-    ; call_id
-    ; plan_fingerprint
-    ; request_body_sha256
-    ; judged_at
-    }
-  in
-  let* () =
-    validate_judgment ~context judgment
-  in
+  let judgment = { verdict; slot_id; source; judged_at } in
+  let* () = validate_judgment ~context judgment in
   Ok judgment
 ;;
 
@@ -1707,12 +1730,21 @@ let same_delivery_failure left right =
   left.kind = right.kind && String.equal left.detail right.detail
 ;;
 
+let same_judgment_source left right =
+  match left, right with
+  | Cli_lane_slot, Cli_lane_slot -> true
+  | ( Exact_attempt left
+    , Exact_attempt right ) ->
+    String.equal left.call_id right.call_id
+    && String.equal left.plan_fingerprint right.plan_fingerprint
+    && String.equal left.request_body_sha256 right.request_body_sha256
+  | Cli_lane_slot, Exact_attempt _ | Exact_attempt _, Cli_lane_slot -> false
+;;
+
 let same_judgment left right =
   left.verdict = right.verdict
   && String.equal left.slot_id right.slot_id
-  && String.equal left.call_id right.call_id
-  && String.equal left.plan_fingerprint right.plan_fingerprint
-  && String.equal left.request_body_sha256 right.request_body_sha256
+  && same_judgment_source left.source right.source
   && Float.equal left.judged_at right.judged_at
 ;;
 

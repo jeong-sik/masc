@@ -606,6 +606,105 @@ let test_the_projected_token_is_the_one_sent () =
       check str "and the tool's answer comes back" "PK-1"
         output.Agent_core.Types.content
 
+(* ── unexpected not-found: catalog drift recovery ─────────────────── *)
+
+(* Says -32601 for the first tools/call, lists a catalog with one more
+   tool than the fixture wrote, then answers the retry. Nothing reaches a
+   network. *)
+let drifting_transport () =
+  let sent = ref [] in
+  let calls = ref 0 in
+  let post ~url ~headers ~body =
+    sent := (url, headers, body) :: !sent;
+    let answer =
+      if String.length body > 0 && Str.string_match (Str.regexp ".*initialize") body 0
+      then
+        Printf.sprintf
+          {|{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":%S,"capabilities":{}}}|}
+          Mcp_transport_protocol.default_protocol_version
+      else if String.length body > 0 && Str.string_match (Str.regexp ".*tools/list") body 0
+      then
+        {|{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"getJiraIssue","description":"does getJiraIssue"},{"name":"searchIssues","description":"does searchIssues"}]}}|}
+      else (
+        incr calls;
+        if !calls = 1
+        then {|{"jsonrpc":"2.0","id":3,"error":{"code":-32601,"message":"Unknown tool"}}|}
+        else
+          {|{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"PK-1"}]}}|})
+    in
+    Ok
+      { Masc_http_client.status = 200;
+        headers = [ ("content-type", "application/json") ];
+        body = answer;
+      }
+  in
+  (post, sent, calls)
+
+let project_token ~base_path =
+  match
+    Projection.set_env_entry ~base_path ~keeper_name:"acme-daycare"
+      ~scope:Projection.Keeper_secret ~name:"ATLASSIAN_ACCESS_TOKEN"
+      ~value:"the-keepers-token"
+  with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not project a token: %s" message
+
+let test_an_unexpected_not_found_rediscovers_and_retries () =
+  (* The catalog the turn was assembled from still names the tool, and the
+     service says it does not exist. What recovery owes: one tools/list on
+     the live session, one retry, the drift written back so the next turn
+     is assembled from what the service actually has, and a catalog time
+     an operator can read. *)
+  let base_path = temp_base () in
+  Unix.putenv "ATLASSIAN_ACCESS_TOKEN" "this-process-token";
+  write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool ~read_only:true "getJiraIssue" ];
+  project_token ~base_path;
+  let post, sent, calls = drifting_transport () in
+  match execute_offered ~post ~base_path (single_offered ~base_path) (`Assoc []) with
+  | Error err ->
+    Alcotest.failf "the call did not recover: %s" err.Agent_core.Types.message
+  | Ok output ->
+    check str "the retried call answered" "PK-1" output.Agent_core.Types.content;
+    check Alcotest.int "exactly one failed call and one retry" 2 !calls;
+    check Alcotest.bool "a tools/list went out on the same session" true
+      (List.exists
+         (fun (_, _, body) -> Str.string_match (Str.regexp ".*tools/list") body 0)
+         (List.rev !sent));
+    (match
+       Identity_tools.load ~base_path ~keeper_name:"acme-daycare"
+         ~provider_id:"atlassian"
+     with
+     | Ok (Some catalog) ->
+       check Alcotest.bool "the gained tool is now on disk" true
+         (List.exists
+            (fun (t : Mcp_client.tool) -> String.equal t.Mcp_client.name "searchIssues")
+            catalog.Identity_tools.tools);
+       check Alcotest.bool "and the catalog time moved off the fixture" true
+         (catalog.Identity_tools.discovered_at > 1786000000.0)
+     | Ok None | Error _ -> Alcotest.fail "no catalog after rediscovery")
+
+let test_an_expected_not_found_does_not_reach_for_the_catalog () =
+  (* A name no catalog ever carried is the model guessing, not drift. The
+     honest answer is the error itself; a rediscovery here would spend a
+     round trip to learn nothing. *)
+  let base_path = temp_base () in
+  Unix.putenv "ATLASSIAN_ACCESS_TOKEN" "this-process-token";
+  write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool ~read_only:true "getJiraIssue" ];
+  project_token ~base_path;
+  let post, sent, calls = drifting_transport () in
+  match
+    Identity_tools.run_call ~post ~base_path ~keeper_name:"acme-daycare"
+      ~provider:(provider ()) ~remote_name:"aToolNobodyOffered"
+      ~arguments:(`Assoc []) ()
+  with
+  | Ok _ -> Alcotest.fail "a name no catalog ever named came back with an answer"
+  | Error _ ->
+    check Alcotest.int "the call was attempted exactly once" 1 !calls;
+    check Alcotest.bool "and no tools/list went out" false
+      (List.exists
+         (fun (_, _, body) -> Str.string_match (Str.regexp ".*tools/list") body 0)
+         (List.rev !sent))
+
 (* ── the approval policy ─────────────────────────────────────────────── *)
 
 module Policy = Masc.Keeper_tool_approval_policy
@@ -873,5 +972,9 @@ let () =
             test_an_oauth_provider_ignores_the_gh_credential;
           Alcotest.test_case "the projected token is the one sent" `Quick
             test_the_projected_token_is_the_one_sent;
+          Alcotest.test_case "an unexpected not-found rediscovers and retries"
+            `Quick test_an_unexpected_not_found_rediscovers_and_retries;
+          Alcotest.test_case "an expected not-found leaves the catalog alone"
+            `Quick test_an_expected_not_found_does_not_reach_for_the_catalog;
         ] );
     ]

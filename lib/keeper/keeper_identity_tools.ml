@@ -219,6 +219,33 @@ let refresh ?post ~base_path ~keeper_name ~(provider : Provider.t) ~now () =
   Ok catalog
 ;;
 
+(* -32601 read through the typed sum rather than the bare integer — the
+   same reading {!Keeper_identity_gate.rpc_rejects_before_execution} gives
+   it, so "the tool was never dispatched" has one answer everywhere. *)
+let is_unknown_tool_error = function
+  | Mcp_client.Rpc { code; _ } ->
+    (match Mcp_error_code.of_wire_code code with
+     | Some Mcp_error_code.Method_not_found -> true
+     | Some _ | None -> false)
+  | _ -> false
+;;
+
+(* What changed between the catalog a turn was assembled from and what the
+   service just listed. By name: a description edit is not drift. *)
+let drift_of ~previous ~fresh =
+  let names tools =
+    List.map (fun (tool : Mcp_client.tool) -> tool.Mcp_client.name) tools
+  in
+  let previous_names = names previous and fresh_names = names fresh in
+  let lost =
+    List.filter (fun name -> not (List.mem name fresh_names)) previous_names
+  in
+  let gained =
+    List.filter (fun name -> not (List.mem name previous_names)) fresh_names
+  in
+  (lost, gained)
+;;
+
 type offered_tool = {
   schema : Agent_core.Types.tool_schema;
   read_only : bool option;
@@ -416,6 +443,51 @@ let run_call ?post ~base_path ~keeper_name ~(provider : Provider.t)
       | Error error -> Error (Mcp { phase = Before_send; error })
       | Ok client -> (
         match Mcp_client.call_tool ?post client ~name:remote_name ~arguments with
+        | Error error when is_unknown_tool_error error -> (
+          (* The catalog this call was assembled from named a tool the
+             service says it has never heard of. Expected for a name nobody
+             offered; drift when the last catalog carried it. One
+             rediscovery on the session that is already up, one retry —
+             not a loop, and never a silently shortened answer. *)
+          match load ~base_path ~keeper_name ~provider_id:provider.Provider.id with
+          | Ok (Some previous_catalog)
+            when List.exists
+                   (fun (tool : Mcp_client.tool) ->
+                      String.equal tool.Mcp_client.name remote_name)
+                   previous_catalog.tools -> (
+            match Mcp_client.list_tools ?post client with
+            | Error _ -> Error (Mcp { phase = After_send; error })
+            | Ok tools ->
+              let fresh =
+                { provider_id = provider.Provider.id
+                ; provider_label = provider.Provider.label
+                ; discovered_at = Time_compat.now ()
+                ; tools
+                }
+              in
+              let lost, gained = drift_of ~previous:previous_catalog.tools ~fresh:tools in
+              (* emit, not info: a computed string goes through
+                 [LOGGER.emit]; the format-taking [info] is for literals. *)
+              Log.Keeper.emit Log.Info ~keeper_name
+                (Printf.sprintf
+                   "keeper_identity_tools: %s catalog rediscovered after an \
+                    unexpected not-found for %s — %d tools before, %d after \
+                    (lost %d, gained %d), catalog time %.0f"
+                   provider.Provider.id remote_name
+                   (List.length previous_catalog.tools) (List.length tools)
+                   (List.length lost) (List.length gained) fresh.discovered_at);
+              (match save ~base_path ~keeper_name fresh with
+               | Ok () -> ()
+               | Error problem ->
+                 Log.Keeper.emit Log.Warn ~keeper_name
+                   (Printf.sprintf
+                      "keeper_identity_tools: rediscovered %s catalog could \
+                       not be saved: %s"
+                      provider.Provider.id problem));
+              match Mcp_client.call_tool ?post client ~name:remote_name ~arguments with
+              | Error retry_error -> Error (Mcp { phase = After_send; error = retry_error })
+              | Ok result -> Ok result)
+          | _ -> Error (Mcp { phase = After_send; error }))
         | Error error -> Error (Mcp { phase = After_send; error })
         | Ok result -> Ok result)))
 ;;

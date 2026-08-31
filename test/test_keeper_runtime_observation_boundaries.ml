@@ -3,6 +3,27 @@ open Masc
 module KPB = Keeper_provider_runtime_boundary
 module KTD = Keeper_turn_driver
 module EC = Keeper_error_classify
+module KUF = Keeper_unified_turn_failure
+module R = Keeper_registry
+module KSM = Keeper_state_machine
+module KHL = Keeper_heartbeat_loop
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_dir prefix "" in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+    (fun () -> f dir)
+;;
+
+let make_meta name =
+  let json =
+    `Assoc [ ("name", `String name); ("trace_id", `String ("trace-" ^ name)) ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
+;;
 
 let raw_provider_timeout_error ~phase =
   Agent_core.Error.Provider
@@ -190,6 +211,48 @@ let test_generic_invalid_request_is_not_empty_completion () =
     false
     (EC.is_empty_completion_error err)
 
+(* #31958 regression pin: a transient network failure must advance the crash
+   streak. Before RFC turn-failure-visible-stop (#32105) the network class had
+   no budget term, so such failures were exempt: the streak stayed 0 and the
+   heartbeat mapped the zero count to Turn_succeeded — a dead transport
+   retried forever with fleet health ok. Every step here is the production
+   chain: record_failure_observation → registry count → turn_status_event →
+   dispatched phase. *)
+let test_transient_network_failure_advances_crash_streak () =
+  with_temp_dir "network-crash-streak" @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let meta = make_meta "network-crash-streak" in
+  let err = tls_handshake_internal_error () in
+  Alcotest.(check bool)
+    "network failure is still classified auto-recoverable (class unchanged)"
+    true
+    (EC.is_auto_recoverable_turn_error err);
+  Fun.protect
+    ~finally:(fun () -> R.For_testing.clear ())
+    (fun () ->
+       ignore (R.For_testing.register ~base_path meta.name meta);
+       KUF.record_failure_observation ~config ~meta ~err ~error_text:"TLS handshake";
+       Alcotest.(check int)
+         "first network failure counts toward the streak"
+         1
+         (R.get_turn_failures ~base_path meta.name);
+       KUF.record_failure_observation ~config ~meta ~err ~error_text:"TLS handshake";
+       let count = R.get_turn_failures ~base_path meta.name in
+       Alcotest.(check int) "second network failure compounds the streak" 2 count;
+       let event = KHL.turn_status_event ~turn_fail_count:count in
+       (match event with
+        | KSM.Turn_failed { consecutive } ->
+          Alcotest.(check int) "Turn_failed carries the streak" 2 consecutive
+        | _ -> Alcotest.fail "expected Turn_failed for network failure");
+       ignore (R.dispatch_event ~base_path meta.name event);
+       (match R.get_phase ~base_path meta.name with
+        | Some phase ->
+          Alcotest.(check string)
+            "network failure moves the state machine to failing"
+            "failing"
+            (KSM.phase_to_string phase)
+        | None -> Alcotest.fail "expected registered keeper phase"))
+
 let test_extra_system_context_preserves_typed_blocks () =
   let blocks =
     [ Prompt_block_id.Dynamic_context, "dynamic"
@@ -234,5 +297,8 @@ let () =
           test_generic_invalid_request_is_not_empty_completion;
         Alcotest.test_case "extra system context preserves typed blocks" `Quick
           test_extra_system_context_preserves_typed_blocks;
+        Alcotest.test_case
+          "transient network failure advances the crash streak" `Quick
+          test_transient_network_failure_advances_crash_streak;
       ] );
   ]

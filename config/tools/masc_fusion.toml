@@ -15,8 +15,9 @@ default)."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.
-# Called 5 times across the whole fleet over 2026-08-25..08-31, against
-# a schema charged to every provider request of every turn.
+# 2026-08-25..08-31 across the fleet: called 5 times in 5 turns, 2653 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 5 extra requests over the same week.
 defer_loading = true
 
 [[params]]

@@ -4,8 +4,9 @@ Run explicit age-based garbage collection. Agent lifecycle is not modified."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.
-# Called once across the whole fleet over 2026-08-25..08-31, against
-# a schema charged to every provider request of every turn.
+# 2026-08-25..08-31 across the fleet: called once in one turn, 323 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most one extra request over the same week.
 defer_loading = true
 
 [[params]]

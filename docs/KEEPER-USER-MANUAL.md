@@ -135,6 +135,11 @@ Terminal transient network and timeout failures with no observed fallback use
 the Keeper remains live and may try again on a later keepalive cycle, but the
 receipt does not claim that another lane candidate ran.
 
+Other terminal provider rejections with no observed fallback, such as an
+invalid request or response parse failure, also use `retry_later`; their reason
+remains `provider_runtime_error` so they do not masquerade as transient network
+recovery.
+
 The failures were not mostly bugs. The largest reason codes were
 `config_error`, `api_error_invalid_request`, `api_error_payment_required`, and
 `api_error_rate_limited`. Those are the states a single-candidate lane cannot

@@ -1338,10 +1338,15 @@ module For_testing = struct
         full_health_refresh_in_flight := false;
         full_health_refresh_started_at := None;
         full_health_refresh_requested := false;
-        full_health_consecutive_failures := 0);
-    while Option.is_some (Eio.Stream.take_nonblocking full_health_refresh_wakeup) do
-      ()
-    done
+        full_health_consecutive_failures := 0)
+
+    (* The wakeup stream is deliberately left alone. It carries "re-check the
+       flag" and nothing else, its capacity is 1, and this reset has already
+       cleared the flag it points at -- so a token left behind can only make a
+       running consumer look once and find its work already done. Clearing it
+       needed a non-blocking take, which RFC-0063 6.1 bars from a file with no
+       cooperative yield: the rule that caught the unbounded drain loop this
+       reset used to run. *)
 
   let refresh_full_health_snapshot_now ?(listener = "http/1.1")
       ~request_authority request =

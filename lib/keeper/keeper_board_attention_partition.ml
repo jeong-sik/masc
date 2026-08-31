@@ -999,12 +999,13 @@ let nonempty label value =
 
 let validate_judgment (judgment : Candidate.judgment) =
   let* () = nonempty "partition judgment slot_id" judgment.slot_id in
-  let* () = nonempty "partition judgment call_id" judgment.call_id in
   let* () =
-    nonempty "partition judgment plan_fingerprint" judgment.plan_fingerprint
-  in
-  let* () =
-    nonempty "partition judgment request_body_sha256" judgment.request_body_sha256
+    match judgment.source with
+    | Candidate.Cli_lane_slot -> Ok ()
+    | Candidate.Exact_attempt { call_id; plan_fingerprint; request_body_sha256 } ->
+      let* () = nonempty "partition judgment call_id" call_id in
+      let* () = nonempty "partition judgment plan_fingerprint" plan_fingerprint in
+      nonempty "partition judgment request_body_sha256" request_body_sha256
   in
   let* () = valid_time "partition judgment judged_at" judgment.judged_at in
   Keeper_board_attention_judgment.of_yojson
@@ -1081,12 +1082,18 @@ let validate_advance_source = function
   | Predispatch_rejection visit -> validate_candidate_visit visit
 ;;
 
+(* A CLI-slot judgment has no attempt to project: [None] is the answer, not a
+   blank record. Its completion is checked by a different rule below. *)
 let judgment_provenance (judgment : Candidate.judgment) =
-  { slot_id = judgment.slot_id
-  ; call_id = judgment.call_id
-  ; plan_fingerprint = judgment.plan_fingerprint
-  ; request_body_sha256 = judgment.request_body_sha256
-  }
+  match judgment.source with
+  | Candidate.Cli_lane_slot -> None
+  | Candidate.Exact_attempt { call_id; plan_fingerprint; request_body_sha256 } ->
+    Some
+      { slot_id = judgment.slot_id
+      ; call_id
+      ; plan_fingerprint
+      ; request_body_sha256
+      }
 ;;
 
 let validate_blocked_reason = function
@@ -1441,19 +1448,30 @@ let validate_completion ~now ~(partition : t) ~(item : completed_item) =
 
 let complete ~now ~worker_epoch ~base_path ~partition ~item =
   let* () = validate_completion ~now ~partition ~item in
-  let provenance = judgment_provenance item.judgment in
   transition_running_exact
     ~base_path
     ~partition
     ~worker_epoch
     (fun running ->
-      match running.progress with
-      | Bound current when exact_provenance_equal current provenance ->
-        Ok (Completed { item; completed_at = now })
-      | Bound _ ->
+      match judgment_provenance item.judgment, running.progress with
+      (* An exact attempt answered: the completion must be the answer to the
+         attempt that was durably bound before dispatch, not to some other one. *)
+      | Some provenance, Bound current when exact_provenance_equal current provenance
+        -> Ok (Completed { item; completed_at = now })
+      | Some _, Bound _ ->
         Error "judgment provenance differs from the durable exact binding"
-      | Unbound -> Error "partition completion requires a durable exact binding"
-      | Advancing _ -> Error "partition completion cannot bypass pending advancement")
+      (* A CLI slot answered after the catalog was exhausted. There is no
+         attempt to match, so what is checked instead is that the exact flow
+         actually ran: [Bound] is the residue of its last attempt. [Unbound]
+         would mean the CLI tail answered without the catalog ever being
+         tried, and an [Advancing] flow is not exhausted yet. *)
+      | None, Bound _ -> Ok (Completed { item; completed_at = now })
+      | None, Unbound ->
+        Error "cli-slot completion requires an exhausted durable exact binding"
+      | Some _, Unbound ->
+        Error "partition completion requires a durable exact binding"
+      | (Some _ | None), Advancing _ ->
+        Error "partition completion cannot bypass pending advancement")
 ;;
 
 let complete_existing_judgment ~now ~worker_epoch ~base_path ~partition ~item =

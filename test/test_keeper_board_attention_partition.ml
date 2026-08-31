@@ -97,9 +97,12 @@ let candidate_visit
 let judgment ?(judged_at = 101.0) (proof : P.exact_provenance) : A.judgment =
   { verdict = { J.decision = J.Relevant; rationale = "react to this Board event" }
   ; slot_id = proof.slot_id
-  ; call_id = proof.call_id
-  ; plan_fingerprint = proof.plan_fingerprint
-  ; request_body_sha256 = proof.request_body_sha256
+  ; source =
+      A.Exact_attempt
+        { call_id = proof.call_id
+        ; plan_fingerprint = proof.plan_fingerprint
+        ; request_body_sha256 = proof.request_body_sha256
+        }
   ; judged_at
   }
 ;;
@@ -322,6 +325,60 @@ let test_generation_advances_only_for_state_transition () =
     "unchanged reappend retains generation"
     true
     (P.Generation.equal bound.generation replay.partition.generation)
+;;
+
+let cli_judgment ?(judged_at = 101.0) ~slot_id () : A.judgment =
+  { verdict = { J.decision = J.Relevant; rationale = "react to this Board event" }
+  ; slot_id
+  ; source = A.Cli_lane_slot
+  ; judged_at
+  }
+;;
+
+(* RFC cli-runtimes-as-lane-slots: the tail answers only after the catalog is
+   exhausted, and there is no attempt receipt to match a completion against.
+   What stands in for it is the binding the exhausted flow left behind, so an
+   Unbound partition must still refuse -- otherwise a lane could reach the tail
+   without ever dispatching its own slots. *)
+let test_cli_slot_completion_requires_an_exhausted_binding () =
+  with_temp_base "board-attention-partition-cli-tail" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-cli-tail" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+  let item : P.completed_item =
+    { candidate_id = claimed.candidate_id
+    ; judgment = cli_judgment ~slot_id:"claude_code.claude-sonnet-5" ()
+    }
+  in
+  expect_error
+    "cli completion without a durable exact binding"
+    (P.complete ~now:11.0 ~worker_epoch:owner ~base_path ~partition:claimed ~item);
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:claimed
+      ~provenance:(provenance ())
+    |> ok "bind before dispatch"
+    |> fsynced "bind before dispatch"
+  in
+  let completed =
+    P.complete ~now:12.0 ~worker_epoch:owner ~base_path ~partition:bound ~item
+    |> ok "cli completion after exhaustion"
+    |> fsynced "cli completion after exhaustion"
+  in
+  match completed.state with
+  | P.Completed { item = persisted; _ } ->
+    Alcotest.(check string)
+      "the answering client is the persisted slot"
+      "claude_code.claude-sonnet-5"
+      persisted.judgment.slot_id;
+    (match persisted.judgment.source with
+     | A.Cli_lane_slot -> ()
+     | A.Exact_attempt _ ->
+       Alcotest.fail "a cli completion must not be recorded as an exact attempt")
+  | _ -> Alcotest.fail "cli completion did not reach Completed"
 ;;
 
 let test_binding_owns_completion_and_settlement () =
@@ -1076,6 +1133,10 @@ let () =
             "binding owns completion and settlement"
             `Quick
             test_binding_owns_completion_and_settlement
+        ; Alcotest.test_case
+            "a cli-slot completion requires an exhausted exact binding"
+            `Quick
+            test_cli_slot_completion_requires_an_exhausted_binding
         ; Alcotest.test_case
             "existing judgment completion is atomic and restart safe"
             `Quick

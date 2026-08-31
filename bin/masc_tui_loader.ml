@@ -430,7 +430,27 @@ let decode_attention_item json =
   let* ai_summary = required_string_field json "summary" in
   let* ai_target_type = required_string_field json "target_type" in
   let* ai_target_id = optional_string_field json "target_id" in
-  Ok { ai_kind; ai_severity; ai_summary; ai_target_type; ai_target_id }
+  (* Evidence is free-shaped on the wire (each producer writes its own
+     object); the one thing this surface reads out of it is the tool-host
+     failure timestamp. An absent or non-object evidence, or one without a
+     readable [log_ts], means "no age to show" -- not a broken item, so the
+     row survives without it. *)
+  let* evidence_log_ts =
+    match Yojson.Safe.Util.member "evidence" json with
+    | `Assoc _ as nested -> optional_string_field nested "log_ts"
+    | _ -> Ok None
+  in
+  let ai_evidence_ts =
+    Option.bind evidence_log_ts Masc_domain.parse_iso8601_opt
+  in
+  Ok
+    { ai_kind
+    ; ai_severity
+    ; ai_summary
+    ; ai_target_type
+    ; ai_target_id
+    ; ai_evidence_ts
+    }
 
 let decode_attention_items json_list =
   decode_list "attention_items" decode_attention_item json_list

@@ -1369,7 +1369,13 @@ val active_tasks_of_domain
   -> task list
 (** [goals_for_task] answers which goals a task id is linked to. Omitted, every
     task comes back with no goals -- which is what a caller that has not read
-    the goal-task registry can honestly say. *)
+    the goal-task registry can honestly say.
+
+    Rows come back grouped by their first linked goal, clusters ordered by the
+    best priority inside each cluster, goalless rows after goal-linked ones on
+    ties, then priority and id inside a cluster. The list stays flat: grouping
+    is adjacency, not header rows, so a cursor over it needs no new
+    arithmetic. *)
 val decode_task : Yojson.Safe.t -> (task, string) result
 val keeper_of_meta : Keeper_meta_contract.keeper_meta -> keeper
 val decode_keeper : Yojson.Safe.t -> (keeper, string) result

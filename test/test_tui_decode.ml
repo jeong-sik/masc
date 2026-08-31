@@ -80,6 +80,27 @@ let test_active_tasks_of_domain_filters_and_sorts () =
     [ "running"; "todo" ]
     (List.map (fun (task : Tui_decode.task) -> task.id) active)
 
+let test_active_tasks_of_domain_groups_by_goal () =
+  let tasks =
+    [ domain_task ~id:"solo-hot" ~priority:0 [ "status", `String "todo" ]
+    ; domain_task ~id:"calm-a" ~priority:4 [ "status", `String "todo" ]
+    ; domain_task ~id:"hot-b" ~priority:2 [ "status", `String "todo" ]
+    ; domain_task ~id:"hot-a" ~priority:1 [ "status", `String "todo" ]
+    ; domain_task ~id:"solo-calm" ~priority:5 [ "status", `String "todo" ]
+    ]
+  in
+  let goals_for_task = function
+    | "calm-a" | "hot-a" -> [ "goal-a" ]
+    | "hot-b" -> [ "goal-b" ]
+    | _ -> []
+  in
+  let active = Tui_decode.active_tasks_of_domain ~goals_for_task tasks in
+  Alcotest.(check (list string))
+    "rows sharing a goal sit together; a cluster rides its hottest priority; \
+     goalless rows ride their own"
+    [ "solo-hot"; "hot-a"; "calm-a"; "hot-b"; "solo-calm" ]
+    (List.map (fun (task : Tui_decode.task) -> task.id) active)
+
 let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
     ?(current_task_id = None) () =
   let optional_field key = function
@@ -5757,6 +5778,8 @@ let () =
           test_decode_task_missing_priority_defaults;
         Alcotest.test_case "active projection filters and sorts" `Quick
           test_active_tasks_of_domain_filters_and_sorts;
+        Alcotest.test_case "active projection clusters rows by goal" `Quick
+          test_active_tasks_of_domain_groups_by_goal;
       ] );
     ( "decode_keeper",
       [

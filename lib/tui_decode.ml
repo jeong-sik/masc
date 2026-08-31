@@ -544,12 +544,57 @@ let active_tasks_of_domain ?goals_for_task tasks =
   let goal_ids (task : Masc_domain.task) =
     match goals_for_task with None -> [] | Some lookup -> lookup task.id
   in
-  tasks
-  |> List.map (fun task -> task_of_domain ~goal_ids:(goal_ids task) task)
-  |> List.filter (fun task ->
-       not (Masc_domain.task_status_is_terminal task.status))
-  |> List.stable_sort (fun left right ->
-       Int.compare left.priority right.priority)
+  let active =
+    tasks
+    |> List.map (fun task -> task_of_domain ~goal_ids:(goal_ids task) task)
+    |> List.filter (fun task ->
+         not (Masc_domain.task_status_is_terminal task.status))
+  in
+  (* Rows that serve the same goal sit next to each other, so the flat list
+     reads as goal clusters without header rows (headers would need their own
+     cursor and scroll arithmetic). A cluster takes the priority of its hottest
+     task: grouping must not bury an urgent row under a calmer goal that sorts
+     earlier alphabetically. Ties fall to the goal id, goalless rows after
+     goal-linked ones, then priority and id, so equal rows keep one order
+     across refreshes. *)
+  let cluster_of (task : task) =
+    match task.goal_ids with [] -> None | goal :: _ -> Some goal
+  in
+  (* Goalless rows are not a cluster of each other: each carries its own
+     priority, so one urgent standalone task does not hoist its unrelated
+     goalless neighbours over a goal's rows. *)
+  let hottest : (string, int) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (task : task) ->
+      match cluster_of task with
+      | None -> ()
+      | Some cluster -> (
+          match Hashtbl.find_opt hottest cluster with
+          | Some best when best <= task.priority -> ()
+          | Some _ | None -> Hashtbl.replace hottest cluster task.priority))
+    active;
+  let cluster_heat task =
+    match cluster_of task with
+    | None -> task.priority
+    | Some cluster -> (
+        match Hashtbl.find_opt hottest cluster with
+        | Some heat -> heat
+        | None -> task.priority)
+  in
+  List.stable_sort
+    (fun (left : task) (right : task) ->
+      let by_heat = Int.compare (cluster_heat left) (cluster_heat right) in
+      if by_heat <> 0 then by_heat
+      else
+        match (cluster_of left, cluster_of right) with
+        | Some l, Some r when not (String.equal l r) -> String.compare l r
+        | Some _, None -> -1
+        | None, Some _ -> 1
+        | Some _, Some _ | None, None ->
+            let by_priority = Int.compare left.priority right.priority in
+            if by_priority <> 0 then by_priority
+            else String.compare left.id right.id)
+    active
 
 let decode_task json =
   let* task = Masc_domain.task_of_yojson json in

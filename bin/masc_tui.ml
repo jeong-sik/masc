@@ -8882,18 +8882,18 @@ let main () =
   let handle_connector_form ~action ~stem ~post () =
     match Masc_tui_editor.editor_command () with
     | None ->
-      add_event state "error"
+      report_action state "error"
         ("no $EDITOR set; export EDITOR to " ^ action ^ " here")
     | Some _ -> (
       match
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
-      | None -> add_event state "system" (action ^ " cancelled")
+      | None -> report_action state "system" (action ^ " cancelled")
       | Some body -> (
         match Yojson.Safe.from_string body with
         | exception Yojson.Json_error e ->
-          add_event state "error" (action ^ ": body is not JSON: " ^ e)
+          report_action state "error" (action ^ ": body is not JSON: " ^ e)
         | json -> (
           let field key =
             match json with
@@ -8905,13 +8905,13 @@ let main () =
             | _ -> None
           in
           match field "name" with
-          | None -> add_event state "error" (action ^ ": \"name\" is required")
+          | None -> report_action state "error" (action ^ ": \"name\" is required")
           | Some connector -> (
             match post ~connector ~json with
             | Ok _ ->
-              add_event state "system" (action ^ ": ok (" ^ connector ^ ")");
+              report_action state "system" (action ^ ": ok (" ^ connector ^ ")");
               launch_connectors_load state ~mailbox:async_messages
-            | Error detail -> add_event state "error" (action ^ ": " ^ detail)))))
+            | Error detail -> report_action state "error" (action ^ ": " ^ detail)))))
   in
   let handle_connector_bind () =
     let host = server_peer_host in
@@ -8943,11 +8943,11 @@ let main () =
     | None -> ()
     | Some (path, _) -> (
         match code_scope_codebase state with
-        | Error why -> add_event state "system" ("notes: " ^ why)
+        | Error why -> report_action state "system" ("notes: " ^ why)
         | Ok codebase -> (
             match Masc_tui_editor.editor_command () with
             | None ->
-                add_event state "error"
+                report_action state "error"
                   "no $EDITOR set; export EDITOR to add a note here"
             | Some _ -> (
                 let stem =
@@ -8957,11 +8957,11 @@ let main () =
                   Masc_tui_editor.roundtrip ~restore:restore_terminal
                     ~reenter:reenter_terminal stem
                 with
-                | None -> add_event state "system" "note cancelled"
+                | None -> report_action state "system" "note cancelled"
                 | Some body -> (
                     match Yojson.Safe.from_string body with
                     | exception Yojson.Json_error e ->
-                        add_event state "error"
+                        report_action state "error"
                           ("note: body is not JSON: " ^ e)
                     | json ->
                         let field key =
@@ -8985,7 +8985,7 @@ let main () =
                           | Some _ | None -> "Comment"
                         in
                         if String.equal content "" then
-                          add_event state "system"
+                          report_action state "system"
                             "note cancelled (empty content)"
                         else (
                           match
@@ -8996,7 +8996,7 @@ let main () =
                                 ~mailbox:async_messages ~codebase ~path
                                 ~line_start ~line_end ~kind ~content
                           | _ ->
-                              add_event state "error"
+                              report_action state "error"
                                 "note: line_start and line_end must be \
                                  integers")))))
   in
@@ -9052,7 +9052,7 @@ let main () =
     | Some row -> (
         match Masc_tui_editor.editor_command () with
         | None ->
-            add_event state "error"
+            report_action state "error"
               "no $EDITOR set; export EDITOR to overrule here"
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
@@ -9060,11 +9060,11 @@ let main () =
               Masc_tui_editor.roundtrip ~restore:restore_terminal
                 ~reenter:reenter_terminal stem
             with
-            | None -> add_event state "system" "overrule cancelled"
+            | None -> report_action state "system" "overrule cancelled"
             | Some body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
-                    add_event state "error" ("overrule: body is not JSON: " ^ e)
+                    report_action state "error" ("overrule: body is not JSON: " ^ e)
                 | json ->
                     let reason =
                       match json with
@@ -9075,7 +9075,7 @@ let main () =
                       | _ -> ""
                     in
                     if String.equal reason "" then
-                      add_event state "system"
+                      report_action state "system"
                         "overrule cancelled (empty reason)"
                     else
                       let approved = harness_machine_approved row in
@@ -9099,7 +9099,7 @@ let main () =
         let task_id = row.Masc.Tui_decode.vr_task_id in
         match Masc_tui_editor.editor_command () with
         | None ->
-            add_event state "error"
+            report_action state "error"
               "no $EDITOR set; export EDITOR to reject here"
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
@@ -9107,11 +9107,11 @@ let main () =
               Masc_tui_editor.roundtrip ~restore:restore_terminal
                 ~reenter:reenter_terminal stem
             with
-            | None -> add_event state "system" "reject cancelled"
+            | None -> report_action state "system" "reject cancelled"
             | Some body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
-                    add_event state "error" ("reject: body is not JSON: " ^ e)
+                    report_action state "error" ("reject: body is not JSON: " ^ e)
                 | json ->
                     let reason =
                       match json with
@@ -9122,7 +9122,7 @@ let main () =
                       | _ -> ""
                     in
                     if String.equal reason "" then
-                      add_event state "system" "reject cancelled (empty reason)"
+                      report_action state "system" "reject cancelled (empty reason)"
                     else
                       start_verification_verdict state
                         ~mailbox:async_messages ~task_id
@@ -9138,7 +9138,7 @@ let main () =
     | Some task_id -> (
         match Masc_tui_editor.editor_command () with
         | None ->
-            add_event state "error"
+            report_action state "error"
               "no $EDITOR set; export EDITOR to cancel here"
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
@@ -9146,11 +9146,11 @@ let main () =
               Masc_tui_editor.roundtrip ~restore:restore_terminal
                 ~reenter:reenter_terminal stem
             with
-            | None -> add_event state "system" "cancel cancelled"
+            | None -> report_action state "system" "cancel cancelled"
             | Some body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
-                    add_event state "error" ("cancel: body is not JSON: " ^ e)
+                    report_action state "error" ("cancel: body is not JSON: " ^ e)
                 | json ->
                     let reason =
                       match json with
@@ -9161,7 +9161,7 @@ let main () =
                       | _ -> ""
                     in
                     if String.equal reason "" then
-                      add_event state "system" "cancel cancelled (empty reason)"
+                      report_action state "system" "cancel cancelled (empty reason)"
                     else
                       launch_task_cancel state ~mailbox:async_messages
                         ~task_id ~reason)))
@@ -9203,11 +9203,11 @@ let main () =
   in
   let handle_runtime_config_edit () =
     match state.runtime_config_view with
-    | None -> add_event state "error" "config not loaded yet; r to reload"
+    | None -> report_action state "error" "config not loaded yet; r to reload"
     | Some (_, rows) -> (
       match Masc_tui_editor.editor_command () with
       | None ->
-        add_event state "error"
+        report_action state "error"
           "no $EDITOR set; export EDITOR to edit runtime.toml here"
       | Some _ -> (
         (* Rebuilt from the rows on screen rather than kept as a second copy.
@@ -9224,7 +9224,7 @@ let main () =
           Masc_tui_editor.roundtrip ~restore:restore_terminal
             ~reenter:reenter_terminal stem
         with
-        | None -> add_event state "system" "runtime.toml unchanged"
+        | None -> report_action state "system" "runtime.toml unchanged"
         | Some edited -> (
           let host = server_peer_host in
           let port = state.port in
@@ -9232,7 +9232,7 @@ let main () =
             Masc_tui_http.post_runtime_config_preview ~host ~port
               ~source_text:edited
           with
-          | Error detail -> add_event state "error" ("preview failed: " ^ detail)
+          | Error detail -> report_action state "error" ("preview failed: " ^ detail)
           | Ok preview -> (
             let ok =
               match preview with
@@ -9250,7 +9250,7 @@ let main () =
             in
             match ok with
             | Some false ->
-              add_event state "error"
+              report_action state "error"
                 ("preview rejected the edit: "
                  ^ Terminal_text.single_line
                      (Yojson.Safe.to_string preview))
@@ -9260,11 +9260,11 @@ let main () =
                   ~source_text:edited
               with
               | Ok receipt ->
-                add_event state "system"
+                report_action state "system"
                   ("runtime.toml saved · "
                    ^ Masc_tui_http.runtime_config_commit_receipt_summary receipt);
                 launch_runtime_config_load state ~mailbox:async_messages
-              | Error detail -> add_event state "error" ("save failed: " ^ detail))))))
+              | Error detail -> report_action state "error" ("save failed: " ^ detail))))))
   in
   let selected_runtime_param () =
     List.nth_opt state.runtime_params state.runtime_params_cursor
@@ -9376,11 +9376,11 @@ and is loaded on demand through keeper_skill.
     let host = server_peer_host in
     let port = state.port in
     match Masc_tui_http.fetch_skill_editor_sources ~host ~port with
-    | Error detail -> add_event state "error" ("Skill sources failed: " ^ detail)
-    | Ok [] -> add_event state "error" "no ready read-write Skill source"
+    | Error detail -> report_action state "error" ("Skill sources failed: " ^ detail)
+    | Ok [] -> report_action state "error" "no ready read-write Skill source"
     | Ok (source_id :: _) ->
       (match Masc_tui_editor.editor_command () with
-       | None -> add_event state "error" "no $EDITOR set; export EDITOR to create Skills"
+       | None -> report_action state "error" "no $EDITOR set; export EDITOR to create Skills"
        | Some _ ->
          (match
             Masc_tui_editor.roundtrip
@@ -9389,12 +9389,12 @@ and is loaded on demand through keeper_skill.
               ~suffix:".md"
               (skill_template ~composition)
           with
-          | None -> add_event state "system" "Skill creation cancelled"
+          | None -> report_action state "system" "Skill creation cancelled"
           | Some source_text ->
             (match skill_name_from_source source_text with
-             | None -> add_event state "error" "Skill template has no name frontmatter"
+             | None -> report_action state "error" "Skill template has no name frontmatter"
              | Some "new-skill" ->
-               add_event state "error" "change new-skill to a real unique name before creating"
+               report_action state "error" "change new-skill to a real unique name before creating"
              | Some package_id ->
                (match
                   Masc_tui_http.post_skill_editor_create
@@ -9404,7 +9404,7 @@ and is loaded on demand through keeper_skill.
                     ~package_id
                     ~source_text
                 with
-                | Error detail -> add_event state "error" ("Skill create failed: " ^ detail)
+                | Error detail -> report_action state "error" ("Skill create failed: " ^ detail)
                 | Ok json ->
                   (* The server answers exactly created_and_published or
                      created_but_unpublished(+reason). The old "created"
@@ -9472,7 +9472,7 @@ and is loaded on demand through keeper_skill.
   in
   let handle_skill_edit () =
     match selected_tools_skill_profile state with
-    | None -> add_event state "error" "no published Skill selected"
+    | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
       let name = profile.Masc.Tui_decode.esp_name in
       let host = server_peer_host in
@@ -9483,13 +9483,13 @@ and is loaded on demand through keeper_skill.
            ~port
            profile.esp_reference
        with
-       | Error detail -> add_event state "error" ("Skill read failed: " ^ detail)
+       | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
        | Ok loaded when not (String.equal loaded.sel_access "read_write") ->
-         add_event state "error" (name ^ " belongs to a read-only Skill source")
+         report_action state "error" (name ^ " belongs to a read-only Skill source")
        | Ok loaded ->
          (match Masc_tui_editor.editor_command () with
           | None ->
-            add_event state "error" "no $EDITOR set; export EDITOR to edit Skills"
+            report_action state "error" "no $EDITOR set; export EDITOR to edit Skills"
           | Some _ ->
             (match
                Masc_tui_editor.roundtrip
@@ -9498,9 +9498,9 @@ and is loaded on demand through keeper_skill.
                  ~suffix:".md"
                  loaded.sel_source_text
              with
-             | None -> add_event state "system" (name ^ " edit cancelled")
+             | None -> report_action state "system" (name ^ " edit cancelled")
              | Some edited when String.equal edited loaded.sel_source_text ->
-               add_event state "system" (name ^ " unchanged")
+               report_action state "system" (name ^ " unchanged")
              | Some edited ->
                (match
                   Masc_tui_http.post_skill_editor_preview
@@ -9510,7 +9510,7 @@ and is loaded on demand through keeper_skill.
                     ~source_text:edited
                 with
                 | Error detail ->
-                  add_event state "error" ("Skill preview rejected: " ^ detail)
+                  report_action state "error" ("Skill preview rejected: " ^ detail)
                 | Ok _ ->
                   (match
                      Masc_tui_http.post_skill_editor_save
@@ -9520,11 +9520,11 @@ and is loaded on demand through keeper_skill.
                        ~source_text:edited
                    with
                    | Error detail ->
-                     add_event state "error" ("Skill save failed: " ^ detail)
+                     report_action state "error" ("Skill save failed: " ^ detail)
                    | Ok receipt ->
                      (match receipt.ses_status with
                       | Masc_tui_http.Skill_unchanged ->
-                        add_event state "system" (name ^ " unchanged")
+                        report_action state "system" (name ^ " unchanged")
                       | Skill_saved_and_published ->
                         let revision =
                           Skill_reference.content_revision_to_string
@@ -9533,7 +9533,7 @@ and is loaded on demand through keeper_skill.
                         let revision_short =
                           String.sub revision 0 (min 12 (String.length revision))
                         in
-                        add_event state "system"
+                        report_action state "system"
                           (Printf.sprintf
                              "%s saved + published · %s%s"
                              name
@@ -9545,7 +9545,7 @@ and is loaded on demand through keeper_skill.
                                 ^ String.sub snapshot 0 (min 12 (String.length snapshot))));
                         launch_tools_load state ~mailbox:async_messages
                       | Skill_saved_but_unpublished reason ->
-                        add_event state "error"
+                        report_action state "error"
                           (name ^ " was saved but NOT published: " ^ reason)))))))
   in
   (* A prompt is edited the way runtime.toml is: $EDITOR over the text a turn
@@ -9570,11 +9570,11 @@ and is loaded on demand through keeper_skill.
   in
   let handle_prompt_edit () =
     match selected_prompt () with
-    | None -> add_event state "error" "prompts not loaded yet; r to reload"
+    | None -> report_action state "error" "prompts not loaded yet; r to reload"
     | Some row -> (
       match Masc_tui_editor.editor_command () with
       | None ->
-        add_event state "error"
+        report_action state "error"
           "no $EDITOR set; export EDITOR to edit prompts here"
       | Some _ -> (
         match
@@ -9582,7 +9582,7 @@ and is loaded on demand through keeper_skill.
             ~reenter:reenter_terminal row.Tui_decode.pr_effective
         with
         | None ->
-          add_event state "system"
+          report_action state "system"
             (row.Tui_decode.pr_key ^ ": prompt unchanged")
         | Some edited ->
           (match
@@ -9590,10 +9590,10 @@ and is loaded on demand through keeper_skill.
                ~port:state.port ~key:row.Tui_decode.pr_key ~value:edited
            with
            | Ok _ ->
-             add_event state "system" (row.Tui_decode.pr_key ^ ": prompt saved");
+             report_action state "system" (row.Tui_decode.pr_key ^ ": prompt saved");
              launch_prompts_load state ~mailbox:async_messages
            | Error detail ->
-             add_event state "error"
+             report_action state "error"
                (row.Tui_decode.pr_key ^ ": save failed: " ^ detail))))
   in
   (* Clearing is not editing to empty: it returns the prompt to the file's
@@ -9625,37 +9625,37 @@ and is loaded on demand through keeper_skill.
          failure, unparseable JSON, an empty patch. This one returned silently,
          so pressing the key with an empty or stale roster looked exactly like
          a feature that is not there. *)
-      add_event state "system" no_keeper_under_cursor
+      report_action state "system" no_keeper_under_cursor
     | Some keeper -> (
       match Masc_tui_editor.editor_command () with
       | None ->
-        add_event state "error"
+        report_action state "error"
           "no $EDITOR set; export EDITOR to edit keeper settings here"
       | Some _ -> (
         match
           Masc_tui_loader.load_keeper_config_editor ~host ~port
             ~keeper_name:keeper.k_name
         with
-        | Error detail -> add_event state "error" detail
+        | Error detail -> report_action state "error" detail
         | Ok (observed, stem) -> (
           match
             Masc_tui_editor.roundtrip ~restore:restore_terminal
               ~reenter:reenter_terminal stem
           with
           | None ->
-              add_event state "system" (keeper.k_name ^ ": settings unchanged")
+              report_action state "system" (keeper.k_name ^ ": settings unchanged")
           | Some edited -> (
             match Yojson.Safe.from_string edited with
             | exception Yojson.Json_error detail ->
-                add_event state "error" ("settings are not JSON: " ^ detail)
+                report_action state "error" ("settings are not JSON: " ^ detail)
             | edited_json -> (
               match
                 Masc_tui_keeper_config.patch_of_edit ~before:observed
                   ~after:edited_json
               with
-              | Error detail -> add_event state "error" detail
+              | Error detail -> report_action state "error" detail
               | Ok (`Assoc []) ->
-                  add_event state "system"
+                  report_action state "system"
                     (keeper.k_name ^ ": no settings changed")
               | Ok patch -> (
                 match
@@ -9668,14 +9668,14 @@ and is loaded on demand through keeper_skill.
                      | Masc_tui_http.Keeper_config_reconciliation_required _
                      | Masc_tui_http.Keeper_config_runtime_sync_failed _ ) as
                      error) ->
-                  add_event state "error"
+                  report_action state "error"
                     (Masc_tui_http.keeper_config_post_error_to_string error);
                   state.keeper_config_view <- None;
                   state.keeper_config_view_error <- None;
                   launch_keeper_config_view state
                     ~mailbox:async_messages keeper.k_name
                 | Error error ->
-                  add_event state "error"
+                  report_action state "error"
                     (Masc_tui_http.keeper_config_post_error_to_string error)
                 | Ok response ->
                     (match
@@ -9683,10 +9683,10 @@ and is loaded on demand through keeper_skill.
                          ~keeper_name:keeper.k_name response
                      with
                      | Error detail ->
-                       add_event state "error"
+                       report_action state "error"
                          (keeper.k_name ^ ": invalid config write receipt: " ^ detail)
                      | Ok (severity, message) ->
-                       add_event state severity message);
+                       report_action state severity message);
                     if
                       state.view = Keepers Keeper_detail
                       && state.detail_tab = Detail_instructions
@@ -9699,7 +9699,7 @@ and is loaded on demand through keeper_skill.
   let handle_keeper_create () =
     match Masc_tui_editor.editor_command () with
     | None ->
-      add_event state "error" "no $EDITOR set; export EDITOR to create a keeper here"
+      report_action state "error" "no $EDITOR set; export EDITOR to create a keeper here"
     | Some _ -> (
       (* The stem names the only two fields a keeper cannot come up without;
          the name is edited in place and the route name comes from it. *)
@@ -9710,7 +9710,7 @@ and is loaded on demand through keeper_skill.
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
-      | None -> add_event state "system" "create cancelled"
+      | None -> report_action state "system" "create cancelled"
       | Some declaration -> (
         let declared_name =
           match Yojson.Safe.from_string declaration with
@@ -9721,15 +9721,15 @@ and is loaded on demand through keeper_skill.
           | _ -> ""
         in
         if String.length declared_name = 0 then
-          add_event state "error"
+          report_action state "error"
             "declaration needs a non-empty \"name\" string; nothing was created"
         else
           match
             Masc_tui_http.post_keeper_up ~host ~port ~keeper_name:declared_name
               ~declaration_json:declaration
           with
-          | Ok _ -> add_event state "system" (declared_name ^ ": keeper created")
-          | Error detail -> add_event state "error" detail))
+          | Ok _ -> report_action state "system" (declared_name ^ ": keeper created")
+          | Error detail -> report_action state "error" detail))
   in
   (* Same shape as [handle_keeper_create]: several fields at once go through
      $EDITOR rather than a modal the TUI does not otherwise have. The stem
@@ -9738,7 +9738,7 @@ and is loaded on demand through keeper_skill.
   let handle_repository_add () =
     match Masc_tui_editor.editor_command () with
     | None ->
-      add_event state "error"
+      report_action state "error"
         "no $EDITOR set; export EDITOR to add a repository here"
     | Some _ -> (
       let stem =
@@ -9756,7 +9756,7 @@ and is loaded on demand through keeper_skill.
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
-      | None -> add_event state "system" "add cancelled"
+      | None -> report_action state "system" "add cancelled"
       | Some declaration -> (
         let declared field =
           match Yojson.Safe.from_string declaration with
@@ -9769,7 +9769,7 @@ and is loaded on demand through keeper_skill.
         let name = declared "name" in
         let url = declared "url" in
         if String.length name = 0 || String.length url = 0 then
-          add_event state "error"
+          report_action state "error"
             "declaration needs non-empty \"name\" and \"url\" strings; nothing was added"
         else
           match
@@ -9777,9 +9777,9 @@ and is loaded on demand through keeper_skill.
               ~declaration_json:declaration
           with
           | Ok _ ->
-            add_event state "system" (name ^ ": repository added");
+            report_action state "system" (name ^ ": repository added");
             launch_repositories_load state ~mailbox:async_messages
-          | Error detail -> add_event state "error" detail))
+          | Error detail -> report_action state "error" detail))
   in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then

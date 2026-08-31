@@ -378,6 +378,16 @@ let add_event (state : state) event_type content =
       state.overview_event_scroll;
   state.events <- events
 
+(* An outcome the operator pressed a key for, rather than something that
+   happened on its own. It goes to the event log like any other event, and to
+   the footer, because the log is drawn by Overview alone: the operator who
+   pressed [a] on Repos stood on the one surface that could not show them
+   whether the registration landed, the declaration was refused, or the
+   editor never started. *)
+let report_action (state : state) event_type content =
+  add_event state event_type content;
+  state.last_action <- Some (content, Unix.gettimeofday ())
+
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty
     list, not that a malformed payload was silently dropped. *)

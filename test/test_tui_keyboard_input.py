@@ -5735,6 +5735,68 @@ def repositories_fixture() -> tuple[int, dict[str, object]]:
     )
 
 
+@contextmanager
+def repository_declaration_editor_script() -> Iterator[str]:
+    """An $EDITOR that fills the repository declaration form and exits 0."""
+    fd, path = tempfile.mkstemp(prefix="masc-tui-repo-editor-", suffix=".sh")
+    try:
+        os.write(
+            fd,
+            b'#!/bin/sh\nprintf %s \'{"name": "kirin", '
+            b'"url": "git@github.com:jeong-sik/kirin.git", '
+            b'"default_branch": "main", "auto_sync": false, '
+            b'"sync_interval": 300}\' > "$1"\n',
+        )
+        os.close(fd)
+        os.chmod(path, 0o755)
+        yield path
+    finally:
+        os.unlink(path)
+
+
+def repository_add_interaction(requests: HttpRequests) -> Interaction:
+    """Pressing a on Repositories registers a repository, and the surface the
+    key was pressed on says what happened.
+
+    Every outcome of this action -- the registration, a refused declaration,
+    an editor that never started -- went to the event log, and the event log
+    is drawn by Overview alone. So the operator who pressed the key stood on
+    the one surface that could not answer them, and a repository that was
+    registered looked exactly like nothing at all."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Repositories")
+        wait_for_output(
+            process, master_fd, output, b"ready", start=0, timeout=3.0
+        )
+        os.write(master_fd, b"a")
+        body = wait_for_http_request(
+            process, master_fd, output, requests, path=REPOSITORIES_PATH
+        )
+        payload = json.loads(body)
+        if payload.get("name") != "kirin":
+            raise AssertionError(f"repository POST body: {payload!r}")
+        # The footer, not the event log: this is the surface the key was
+        # pressed on, and it is the one that has to answer.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"kirin: repository added",
+            start=0,
+            timeout=5.0,
+        )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
     """Enter on a Repositories row opens that repository's own tree on the
     Code surface, through the ?repo_id= axis; the header names whose tree
@@ -8731,6 +8793,16 @@ def run_keyboard_regression(executable: str) -> None:
             http_fixtures=repositories_fixtures,
             http_requests=note_requests,
             extra_env={"EDITOR": note_editor},
+        )
+    add_requests: HttpRequests = []
+    with repository_declaration_editor_script() as repo_editor:
+        run_terminal_scenario(
+            executable,
+            description="Repositories add says what it did",
+            interact=repository_add_interaction(add_requests),
+            http_fixtures=repositories_fixtures,
+            http_requests=add_requests,
+            extra_env={"EDITOR": repo_editor},
         )
     verdict_requests: HttpRequests = []
     with reject_editor_script() as reject_editor:

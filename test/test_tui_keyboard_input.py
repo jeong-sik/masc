@@ -3287,7 +3287,10 @@ def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction
         goal_reference = b"masc://planning/goal-b-29424"
         if (
             b"plan-beta-29424" not in detail
-            or b"left/Esc:back" not in detail
+            # The footer is built from the key table now, which spells the
+            # pair "Left / Esc:back". The flat "left/Esc:back" is the string
+            # this surface carried before it read its hints from the bindings.
+            or b"Left / Esc:back" not in detail
             or goal_reference not in detail
         ):
             raise AssertionError(
@@ -3344,7 +3347,17 @@ def planning_missing_detail_interaction(fixtures: HttpFixtures) -> Interaction:
             final_cursor=b"\x1b[?25l",
         )
         assert_planning_goal_selected(recovered, b"plan-charlie-29424")
-        if b"Enter:detail" not in recovered or b"Esc:back" in recovered:
+        # What has to hold is that the surface fell back to the list rather
+        # than drawing a detail for a goal the snapshot no longer carries.
+        # The footer stopped answering that: it is built from the key table
+        # now and publishes "Left / Esc:back" in both modes. The goal link and
+        # the timeline heading are drawn by the detail pane alone, so their
+        # absence is the reading -- and a stricter one than a hint's spelling.
+        if (
+            b"Enter:detail" not in recovered
+            or b"masc://planning/" in recovered
+            or b"TIMELINE" in recovered
+        ):
             raise AssertionError(
                 f"missing Planning detail did not render list mode: {recovered!r}"
             )

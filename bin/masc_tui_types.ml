@@ -75,6 +75,11 @@ type event = {
   content: string;
 }
 
+(* How long the footer keeps saying what the last keypress did. Long enough
+   to read after coming back from $EDITOR, short enough that it is still
+   about the key the operator just pressed. *)
+let last_action_window_s = 12.0
+
 (* The one key the Overview event panel folds identical neighbours by; the
    renderer and both scroll handlers must count the same folded rows or the
    scroll range and the drawn range drift apart. *)
@@ -1562,6 +1567,15 @@ type state = {
   (* A top-level [q] arms exit instead of ending the TUI immediately. The next
      unrelated input clears it; a second [q] exits. *)
   mutable quit_armed: bool;
+  (* What the last key the operator pressed actually did, and the clock
+     reading it was set at. These outcomes go to [add_event], and the event
+     log is drawn by Overview alone -- so the operator who pressed [a] on
+     Repos stood on the one surface that could not answer them, and a
+     registration that succeeded looked the same as an editor that never
+     started. The footer every surface draws answers instead, and only for
+     [last_action_window_s]: an outcome that stayed would go on claiming a
+     keypress the operator has since forgotten making. *)
+  mutable last_action: (string * float) option;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
      fleet's own reading of what is missing. *)
@@ -2294,6 +2308,7 @@ let create_state
   keeper_action_serial = 0;
   composer_focused = false;
   quit_armed = false;
+  last_action = None;
   fleet_safety = None;
   fleet_safety_error = None;
   connection_status = Disconnected;

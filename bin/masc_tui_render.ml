@@ -526,6 +526,25 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     | Some query -> "/" ^ query ^ "  " ^ hints
     | None -> hints
   in
+  (* What the last keypress did, in front of the keys for the same reason the
+     search query is: the status tail is dropped whole before a single hint
+     is, so a fact placed there cannot be read on a surface whose own keys
+     already fill the row -- which is every surface at eighty columns. The
+     outcomes of the editor-backed actions used to go only to the event log,
+     which Overview alone draws, so an operator who pressed [a] on Repos
+     could not tell a registration from an editor that never started.
+
+     Expired here rather than cleared by the setter: the setter is a key
+     handler that has already returned, and nothing runs on a timer to come
+     back for it. *)
+  let hints =
+    match state.last_action with
+    | Some (text, set_at)
+      when Unix.gettimeofday () -. set_at
+           <= Masc_tui_types.last_action_window_s ->
+      text ^ "  " ^ hints
+    | Some _ | None -> hints
+  in
   let identity =
     match state.server_identity with
     | None -> []

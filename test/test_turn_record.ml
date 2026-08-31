@@ -87,6 +87,7 @@ let sample_record () : Turn_record.t =
         ; { component = Turn_record.Tool_schemas; bytes = 8192 }
         ; { component = Turn_record.Message_user; bytes = 256 }
         ]
+  ; tool_surface_ref = None
   ; runtime_profile = "ollama_cloud.deepseek-v4-flash"
   ; selected_model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
@@ -130,6 +131,27 @@ let sample_record () : Turn_record.t =
 (* Cache counts distinguish a cache-heavy turn from a genuinely large prompt.
    A current provider may omit those usage values; absence stays [None] rather
    than becoming a fabricated zero. *)
+(* [input_components] says the tool schemas cost N bytes; this says which
+   tools they were, which N alone can never recover. The value is the
+   canonical marker for a content-addressed blob, so what has to survive the
+   round trip is the marker text exactly -- a re-encoded or trimmed marker
+   would not resolve, and the blob maintenance scan would stop counting the
+   record as a reference and collect the bytes it points at. *)
+let test_tool_surface_ref_round_trips_and_stays_optional () =
+  let marker = "masc:artifact:v1:" ^ String.make 64 'a' ^ ":12:application/json" in
+  let record = { (sample_record ()) with tool_surface_ref = Some marker } in
+  (match Turn_record.of_json (Turn_record.to_json record) with
+   | Error e -> failf "decode failed: %s" e
+   | Ok decoded ->
+     check (option string) "the marker survives byte for byte" (Some marker)
+       decoded.tool_surface_ref);
+  match Turn_record.of_json (Turn_record.to_json (sample_record ())) with
+  | Error e -> failf "decode failed: %s" e
+  | Ok decoded ->
+    check (option string) "a turn that recorded no surface stays absent" None
+      decoded.tool_surface_ref
+;;
+
 let test_cache_counts_round_trip_and_stay_optional () =
   let record = sample_record () in
   (match Turn_record.of_json (Turn_record.to_json record) with
@@ -887,6 +909,8 @@ let () =
             test_context_window_records_the_turn_budget
         ; test_case "absent on the error path" `Quick
             test_context_window_absent_on_the_error_path
+        ; test_case "tool surface ref round trips and stays optional" `Quick
+            test_tool_surface_ref_round_trips_and_stays_optional
         ] )
     ; ( "turn_ref"
       , [ test_case "make/to_string/of_string roundtrip" `Quick

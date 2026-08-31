@@ -18,6 +18,7 @@ let record ?(blocks = []) ?input_components ~trace ~turn () : Turn_record.t =
   ; turn_ref = turn_ref trace turn
   ; blocks
   ; input_components
+  ; tool_surface_ref = None
   ; runtime_profile = "glm-coding"
   ; selected_model = Some "glm-5.3"
   ; finish_reason = Some "stop"

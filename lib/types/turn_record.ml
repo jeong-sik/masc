@@ -93,6 +93,7 @@ type t =
   ; runtime_profile : string
   ; selected_model : string option
   ; finish_reason : string option
+  ; tool_surface_ref : string option
   ; context_window : int option
   ; price_input_per_million : float option
   ; price_output_per_million : float option
@@ -201,6 +202,7 @@ let to_json (r : t) : Yojson.Safe.t =
      ]
     @ opt_field "selected_model" (fun v -> `String v) r.selected_model
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
+    @ opt_field "tool_surface_ref" (fun v -> `String v) r.tool_surface_ref
     @ opt_field "context_window" (fun v -> `Int v) r.context_window
     @ opt_field "price_input_per_million" (fun v -> `Float v) r.price_input_per_million
     @ opt_field "price_output_per_million" (fun v -> `Float v) r.price_output_per_million
@@ -465,6 +467,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "raw_trace_run_ref"
             ; "selected_model"
             ; "finish_reason"
+            ; "tool_surface_ref"
             ; "context_window"
             ; "price_input_per_million"
             ; "price_output_per_million"
@@ -591,6 +594,9 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       in
       let* selected_model = opt_member "selected_model" fields as_nonempty_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
+      let* tool_surface_ref =
+        opt_member "tool_surface_ref" fields as_nonempty_string
+      in
       let* context_window = opt_member "context_window" fields as_int in
       let* price_input_per_million = opt_member "price_input_per_million" fields as_float in
       let* price_output_per_million = opt_member "price_output_per_million" fields as_float in
@@ -631,6 +637,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; turn_ref
         ; blocks
         ; input_components
+        ; tool_surface_ref
         ; runtime_profile
         ; selected_model
         ; finish_reason

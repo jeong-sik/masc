@@ -150,6 +150,7 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     ~execution_ids:[]
     ~blocks:[]
     ~input_components:None
+    ~tool_surface_ref:None
     ()
 
 (* Per-turn store lives under the keepers runtime dir — the SSOT shared

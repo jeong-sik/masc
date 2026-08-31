@@ -148,6 +148,7 @@ let write_turn_record config ~absolute_turn ~turn_kind ~raw_trace_run_ref =
     ~execution_ids:[]
     ~blocks:[]
     ~input_components:None
+    ~tool_surface_ref:None
     ()
 ;;
 

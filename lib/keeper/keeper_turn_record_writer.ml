@@ -26,6 +26,7 @@ let write
       ~execution_ids
       ~blocks
       ~input_components
+      ~tool_surface_ref
       ()
   =
   let record : Turn_record.t =
@@ -38,6 +39,7 @@ let write
     ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn
     ; blocks
     ; input_components
+    ; tool_surface_ref
     ; runtime_profile
     ; selected_model
     ; finish_reason

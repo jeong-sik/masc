@@ -147,6 +147,21 @@ type t =
        receipt SSOT [Keeper_execution_receipt.stop_reason_to_string].
        [None] when the turn errored before a stop reason was recorded;
        an unknown reason is never collapsed to a fake "stop". *)
+  ; tool_surface_ref : string option
+    (* The tool surface this turn sent, as the canonical Tool_output marker
+       for its content-addressed blob. [input_components] answers how many
+       bytes the schemas cost; this answers which tools they were, which the
+       byte total alone can never recover.
+
+       A marker rather than the list itself: the surface is nearly the same
+       from turn to turn -- 9,181 requests carried 69 distinct surfaces over
+       one measured day -- so inlining it would grow a 1,640-byte record by
+       2,925 bytes to repeat what the blob already holds once. The blob store
+       already sees this reference: turn-records sit under the [keepers] root
+       the maintenance scan walks, and the scan recognises a canonical marker
+       wherever it appears.
+
+       [None] when the turn recorded no surface. *)
   ; context_window : int option
     (* RFC-0233 §8 — keeper-resolved effective context budget (tokens) for
        this turn, the denominator the dashboard ctx-fill% uses. [None] on

@@ -1,5 +1,16 @@
 (** Regression pin for masc#28983.
 
+    {b State, 2026-08-31.} The two cases that read an exit status moved to
+    [test_keeper_tool_execute_exit_report], which asks the same question of a
+    synthesized {!Unix.process_status} and needs no child. The two left here
+    do need one -- one measures elapsed time, the other reads a dispatched
+    payload -- and there is no profile that runs a child on this host since
+    #32078 removed [Local]. They fail for that reason, not for the reason they
+    were written to catch, and issue #32102 is scoped to exactly them. This
+    suite is not in the CI target list, so the record stays without the red
+    spreading.
+
+
     A process that runs and exits nonzero is an observed tool result the
     model reads and reacts to — not a failed terminal effect. The previous
     routing sent every nonzero exit through
@@ -163,67 +174,6 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
           "escaped_shell is absent from the payload the model reads")
 ;;
 
-let test_nonzero_exit_is_a_completed_result () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base = temp_dir "exec_exit_result_" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base)
-    (fun () ->
-      let config = Workspace.default_config base in
-      (match Keeper_approval_queue.install_persistence ~base_path:base with
-       | Ok _ -> ()
-       | Error error ->
-         Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
-      install_always_allow_gate ~base;
-      let meta = make_local_meta ~name:"exit-result-pin" in
-      (* Inside the keeper playground the effect is authorized via
-         workspace_always_allow, so the test needs no Gate store. *)
-      let cwd = playground_dir ~base ~name:"exit-result-pin" in
-      let execution =
-        run_execute ~config ~meta ~argv:[ "ls"; "definitely-missing-dir" ] ~cwd
-      in
-      (match execution.disposition with
-       | Tool_result.Completed () -> ()
-       | Tool_result.Failed _ ->
-         Alcotest.failf
-           "nonzero exit must stay a completed tool result, got failure: %s"
-           execution.raw_output
-       | Tool_result.Deferred () ->
-         Alcotest.fail "nonzero exit must not defer");
-      let open Yojson.Safe.Util in
-      let payload = payload_of execution in
-      check bool "payload reports ok=false" false
-        (payload |> member "ok" |> to_bool);
-      check string "payload reports the exit status" "exit"
-        (payload |> member "status" |> member "kind" |> to_string);
-      check bool "payload keeps a nonzero code" true
-        (payload |> member "status" |> member "code" |> to_int <> 0))
-
-let test_zero_exit_stays_ok () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base = temp_dir "exec_exit_ok_" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base)
-    (fun () ->
-      let config = Workspace.default_config base in
-      (match Keeper_approval_queue.install_persistence ~base_path:base with
-       | Ok _ -> ()
-       | Error error ->
-         Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
-      install_always_allow_gate ~base;
-      let meta = make_local_meta ~name:"exit-ok-pin" in
-      let cwd = playground_dir ~base ~name:"exit-ok-pin" in
-      let execution = run_execute ~config ~meta ~argv:[ "true" ] ~cwd in
-      (match execution.disposition with
-       | Tool_result.Completed () -> ()
-       | Tool_result.Failed _ | Tool_result.Deferred () ->
-         Alcotest.failf "exit 0 must complete, got: %s" execution.raw_output);
-      let open Yojson.Safe.Util in
-      check bool "payload reports ok=true" true
-        (payload_of execution |> member "ok" |> to_bool))
-
 (* RFC spawn-a-process-that-outlives-the-call §1.0. The advice for [&] says
    the call waits for the backgrounded child anyway; if that stops being true
    the sentence becomes wrong, so it is pinned here. A lower bound, because
@@ -267,11 +217,6 @@ let () =
     "keeper_tool_execute_exit_result"
     [ ( "exit-status-is-a-result"
       , [ test_case
-            "nonzero exit is a completed result"
-            `Quick
-            test_nonzero_exit_is_a_completed_result
-        ; test_case "zero exit stays ok" `Quick test_zero_exit_stays_ok
-        ; test_case
             "a backgrounded child still holds the call"
             `Quick
             test_a_backgrounded_child_still_holds_the_call

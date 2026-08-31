@@ -790,9 +790,16 @@ let handle_tool_execute_typed
                 ~stdout:result.stdout
                 ~stderr:result.stderr
             in
-            let status_json =
-              Keeper_alerting_path.process_status_to_json result.status
+            (* One reading of the status, so the values it decides cannot
+               disagree, and a test can ask what a status means without
+               starting a child ([Keeper_tool_execute_exit_report]). *)
+            let exit_report =
+              Keeper_tool_execute_exit_report.of_status
+                ~status:result.status
+                ~stderr
+                ~timeout_budget
             in
+            let status_json = exit_report.Keeper_tool_execute_exit_report.status in
             (* The line-buffered redactor holds a partial trailing line, so the
                stream is flushed here before the end marker. *)
             record_stream_chunk
@@ -828,15 +835,9 @@ let handle_tool_execute_typed
                  "execute output callback failed keeper=%s: %s"
                  meta.name
                  (Printexc.to_string exn));
-            let succeeded =
-              match result.status with
-              | Unix.WEXITED 0 -> true
-              | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
-            in
+            let succeeded = exit_report.Keeper_tool_execute_exit_report.ok in
             let failure_error_fields =
-              match result.status, String.trim stderr with
-              | Unix.WEXITED 0, _ | _, "" -> []
-              | _, stderr -> [ "error", `String stderr; "stderr", `String stderr ]
+              exit_report.Keeper_tool_execute_exit_report.error_fields
             in
             let output_fields =
               if succeeded
@@ -868,29 +869,7 @@ let handle_tool_execute_typed
                        "Execute completed, but its oversized output artifact could not be persisted."))
              | Ok output_fields ->
                let timeout_fields =
-                 match
-                   Process_eio.exit_reason_of_status result.status, timeout_budget
-                 with
-                 | ( Process_eio.Timed_out
-                   , Keeper_tool_execute_input.Default seconds ) ->
-                   [ ( "timeout"
-                     , `Assoc
-                         [ "limit_sec", `Float seconds
-                         ; "source", `String "default"
-                         ] )
-                   ]
-                 | ( Process_eio.Timed_out
-                   , Keeper_tool_execute_input.Named_by_caller seconds ) ->
-                   [ ( "timeout"
-                     , `Assoc
-                         [ "limit_sec", `Float seconds
-                         ; "source", `String "timeout_sec"
-                         ] )
-                   ]
-                 | ( ( Process_eio.Completed _
-                     | Process_eio.Signaled _
-                     | Process_eio.Stopped _ )
-                   , _ ) -> []
+                 exit_report.Keeper_tool_execute_exit_report.timeout_fields
                in
                let payload =
                  `Assoc

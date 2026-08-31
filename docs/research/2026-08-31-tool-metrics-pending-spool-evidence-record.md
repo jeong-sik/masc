@@ -24,12 +24,13 @@
 - 4차: final append 뒤 pending delete permission failure를 만들고 replacement dedup 1, aggregate/final 402를 확인했다.
 - 5차: r112 256-way actual call 1,000건과 fresh old baseline의 mean/p95/p99/max를 비교했다.
 - 6차: r112를 다시 SIGKILL하고 replacement recovered/final 1,000을 확인했다.
+- 7차: r114 unavailable final storage에서 accepted 5,000을 durable pending 4,096/drop 904로 bounded 분리하고 SIGKILL replacement 4,096을 확인했다.
 - 재현 결과: successful pending publication 뒤 process crash로 accepted row가 사라지던 #32014 반례는 r111과 r112에서 재현되지 않았다.
 
 ## 불확실성
 
-- 미확인 항목: host power loss, network filesystem, Kubernetes/PVC, multi-process writer, capacity 초과, full suite, GitHub CI.
-- 영향: pending write failure는 observable memory fallback이며 crash durability가 아니다. local concurrency latency는 배포 환경의 상한이 아니다.
+- 미확인 항목: host power loss, network filesystem, Kubernetes/PVC, multi-process writer, full suite, GitHub CI.
+- 영향: pending write failure와 capacity 초과 904건은 crash durability가 아니다. drop counter는 current-process라 replacement가 과거 drop을 복구하지 않는다. local concurrency latency는 배포 환경의 상한이 아니다.
 - 추가 확인 필요: Draft PR CI와 review를 통과한 뒤 merge head에서 같은 SIGKILL probe를 재실행한다.
 
 ## 적용범위

@@ -106,6 +106,52 @@
       "final_sha256": "3d596739e1915545662bba2d31e6e2fba0a0dfbeb4009f3fb04b500a8016e100"
     }
   },
+  "r114_capacity_bound": {
+    "parallelism": 256,
+    "calls": 5000,
+    "http_200": 5000,
+    "body_ok": 5000,
+    "elapsed_seconds": 10.923281,
+    "throughput_per_second": 457.738,
+    "mean_latency_ms": 507.809,
+    "p95_latency_ms": 2192.432,
+    "p99_latency_ms": 3790.646,
+    "max_latency_ms": 8658.102,
+    "before_kill": {
+      "aggregate_calls": 5000,
+      "queue_depth": 4096,
+      "spool_backed_queue_depth": 4096,
+      "pending_files": 4096,
+      "pending_bytes": 672015,
+      "final_rows": 0,
+      "queue_full_dropped_records": 904,
+      "append_failed_records": 31,
+      "spool_write_failed_records": 0
+    },
+    "snapshot_read_latency": {
+      "reads": 1000,
+      "full_queue_mean_ms": 0.249,
+      "full_queue_p95_ms": 0.385,
+      "full_queue_p99_ms": 1.033,
+      "full_queue_max_ms": 2.097,
+      "empty_queue_mean_ms": 0.144,
+      "empty_queue_p95_ms": 0.208,
+      "empty_queue_p99_ms": 0.492,
+      "empty_queue_max_ms": 1.781
+    },
+    "termination": { "signal": "SIGKILL", "exit_code": 137, "oom_killed": false },
+    "replacement": {
+      "runtime_instance_id": "01a05525-1acb-7000-b16a-9cd6ec6f79f6",
+      "recovered_pending_records": 4096,
+      "aggregate_calls": 4096,
+      "flushed_records": 4096,
+      "pending_files": 0,
+      "final_rows": 4096,
+      "final_sha256": "755361f4bed02f1dda5e3c99a90f8afc8034667fae54516a1d0fe1f755644fe6",
+      "exit_code": 0,
+      "oom_killed": false
+    }
+  },
   "scope": {
     "platform": "Linux/arm64 Docker Desktop",
     "filesystem": "Docker local named volume",

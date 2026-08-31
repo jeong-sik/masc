@@ -1,0 +1,139 @@
+{
+  "schema": "masc.context_recovery.tool_metrics_loss_marker_fallback.v1",
+  "recorded_at": "2026-08-31T10:37:05+09:00",
+  "source": {
+    "base_head": "b0b5968f3142a0f803b9bf37e053c33a8a140eb8",
+    "product_head": "3aa69fb34f8f1d25e5c58d0c0b37350fac201d74",
+    "product_image": "sha256:5eb0eb6ac4abfa1f7715abf981d1e9fb15be36db04f38bd0fba4be6e1116b78a",
+    "binary_sha256": "abf9ed595928e4fa2069e2af89f09a0d86a9654f453e522bbfe60c06da2f2af7",
+    "preflight_helper_sha256": "4043b7ce8a24d8619e271b927b08c6b75df9d417cf9bf212815327d388a04c7a"
+  },
+  "focused_validation": {
+    "tool_metrics_persist": {"passed": 17, "failed": 0},
+    "tool_unified": {"passed": 6, "failed": 0},
+    "focused_build": "passed",
+    "format_check": "passed"
+  },
+  "r118_counterexample": {
+    "calls": 4097,
+    "queue_depth": 4096,
+    "queue_full_dropped_records": 1,
+    "spool_write_failed_records": 4096,
+    "loss_marker_write_failed_records": 1,
+    "before_kill_integrity_status": "unknown",
+    "replacement_aggregate_calls": 0,
+    "replacement_integrity_status": "unknown"
+  },
+  "r119_restart_proof": {
+    "producer_runtime_instance_id": "01a0556d-99cf-7000-af2c-6119f1bc3672",
+    "calls": 4097,
+    "server_completion_logs": 4097,
+    "queue_depth": 4096,
+    "queue_full_dropped_records": 1,
+    "spool_write_failed_records": 4096,
+    "loss_marker_write_failed_records": 1,
+    "loss_marker_fallback_write_failed_records": 0,
+    "pending_files": 0,
+    "final_rows": 0,
+    "aggregate_integrity_status": "known_incomplete",
+    "loss_marker_source": "runtime_state_fallback",
+    "fallback_marker": {
+      "mode": "0600",
+      "bytes": 166,
+      "sha256": "9a4cc7f8bd64b451b77f2c1974cbb50d37eed86c1989c747538775696ef72698"
+    },
+    "termination": {"signal": "SIGKILL", "exit_code": 137, "oom_killed": false},
+    "replacement": {
+      "runtime_instance_id": "01a05570-47e5-7000-acbf-014a5b00c42b",
+      "aggregate_calls": 0,
+      "current_process_dropped_records": 0,
+      "current_process_marker_failures": 0,
+      "aggregate_integrity_status": "known_incomplete",
+      "loss_marker_source": "runtime_state_fallback",
+      "loss_runtime_instance_id": "01a0556d-99cf-7000-af2c-6119f1bc3672",
+      "graceful_exit_code": 0,
+      "oom_killed": false
+    }
+  },
+  "actual_response_latency": [
+    {
+      "run": "r121",
+      "runtime_instance_id": "01a05571-d7d8-7000-8fcd-8109bae92a44",
+      "parallelism": 256,
+      "calls": 4097,
+      "http_200": 4097,
+      "body_ok": 4097,
+      "elapsed_seconds": 12.667251,
+      "throughput_per_second": 323.432,
+      "mean_latency_ms": 727.307,
+      "p95_latency_ms": 3114.471,
+      "p99_latency_ms": 5133.335,
+      "max_latency_ms": 11292.471
+    },
+    {
+      "run": "r122",
+      "runtime_instance_id": "01a05573-2d41-7000-9460-edbbc2fb8404",
+      "parallelism": 256,
+      "calls": 4097,
+      "http_200": 4097,
+      "body_ok": 4097,
+      "elapsed_seconds": 13.079222,
+      "throughput_per_second": 313.245,
+      "mean_latency_ms": 743.452,
+      "p95_latency_ms": 3055.611,
+      "p99_latency_ms": 5084.280,
+      "max_latency_ms": 9783.551
+    }
+  ],
+  "r118_latency_reference": {
+    "elapsed_seconds": 9.742431,
+    "throughput_per_second": 420.532,
+    "mean_latency_ms": 540.072,
+    "p95_latency_ms": 2425.904,
+    "p99_latency_ms": 3969.142,
+    "max_latency_ms": 8073.702,
+    "comparison_confidence": "medium",
+    "reason": "single prior local sample; host load and run order not controlled"
+  },
+  "r124_fallback_target_failure": {
+    "producer_runtime_instance_id": "01a05574-ecf4-7000-aceb-d06f930664be",
+    "calls": 4097,
+    "http_200": 4097,
+    "body_ok": 4097,
+    "queue_depth": 4096,
+    "queue_full_dropped_records": 1,
+    "loss_marker_write_failed_records": 1,
+    "loss_marker_fallback_write_failed_records": 1,
+    "before_kill_integrity_status": "unknown",
+    "termination": {"signal": "SIGKILL", "exit_code": 137, "oom_killed": false},
+    "replacement": {
+      "runtime_instance_id": "01a05575-89cf-7000-9002-811b7280bc1d",
+      "aggregate_calls": 0,
+      "aggregate_integrity_status": "invalid_marker",
+      "invalid_loss_marker_sources": ["runtime_state_fallback"],
+      "graceful_exit_code": 0,
+      "oom_killed": false
+    }
+  },
+  "discarded_attempts": [
+    "4097 requests without Mcp-Session-Id: HTTP 400, aggregate 0",
+    "valid r119 responses overwritten to one evidence file by xargs index bug",
+    "valid r120 latency format corrupted by xargs percent placeholder",
+    "r123 made the full state root read-only and also failed audit writes"
+  ],
+  "scope": {
+    "platform": "Linux/arm64 Docker Desktop",
+    "filesystem": "Docker local named volumes",
+    "excluded": [
+      "complete-history inference",
+      "exact lifetime dropped count",
+      "host power loss",
+      "fsync durability",
+      "network filesystem",
+      "Kubernetes PVC",
+      "multi-process writers",
+      "full test suite",
+      "GitHub CI"
+    ]
+  }
+}

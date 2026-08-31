@@ -2910,6 +2910,11 @@
  (libraries masc_test_deps masc.runtime))
 
 (test
+ (name test_keeper_vision_ingest)
+ (modules test_keeper_vision_ingest)
+ (libraries alcotest masc masc.runtime masc.tool_types))
+
+(test
  (name test_keeper_sandbox_mount_warrant)
  (modules test_keeper_sandbox_mount_warrant)
  (libraries alcotest masc_test_deps))

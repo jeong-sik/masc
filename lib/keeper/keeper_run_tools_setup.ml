@@ -104,14 +104,22 @@ let expected_model_tool_names
       ~model_visible_descriptors
       ()
   =
-  (* [deferred_names] are the built-ins this surface holds behind the listing.
-     Empty for the surface that carries every tool as a schema, and for every
-     caller that predates the axis.
+  (* [deferred_names] are the built-ins this surface actually holds behind the
+     listing. Empty for the surface that carries every tool as a schema, and
+     for every caller that predates the axis.
 
-     Subtracted rather than the check being widened: a tool leaving the
-     request is the thing this whole change does, so an invariant that stopped
-     noticing it would stop being an invariant. What it still catches is a
-     tool that left for any other reason. *)
+     "Actually" is the load-bearing word. A tool declaring
+     [defer_loading = true] is not enough: a tool this conversation has run is
+     placed with its schema again, so a declared tool the Keeper uses is on the
+     surface after all. Reading the declaration instead cost 60
+     [keeper_model_tool_projection_mismatch] errors in an hour on 2026-08-31,
+     all on [keeper_ide_annotate] -- declared deferrable, called once the day
+     before, and legitimately present ever since.
+
+     Subtracted rather than the check being widened: a tool leaving the request
+     is the thing this whole change does, so an invariant that stopped noticing
+     it would stop being an invariant. What it still catches is a tool that
+     left for any other reason. *)
   let is_deferred name = List.exists (String.equal name) deferred_names in
   let descriptor_names =
     model_visible_descriptors
@@ -148,19 +156,46 @@ let expected_model_tool_names
          @ identity_names)
 ;;
 
-(* The Agent Core lane always carries the attached-tool listing and may also
-   carry attached schemas that its conversation used on an earlier turn.
-   Those carried names are a subset of the current attachment offering; an
-   unknown actual name must stay outside the expectation so the projection
-   check still reports it. The listing remains expected even when it is
-   accidentally absent from the actual surface. *)
+(* One question, asked from both sides: of the names this surface was built to
+   treat specially, which ones did the turn actually place?
+
+   Both callers face the same trap. The Agent Core lane always carries the
+   attached-tool listing and may also carry attached schemas its conversation
+   used on an earlier turn; and a built-in that declares [defer_loading = true]
+   is placed with its schema again once this conversation has run it. So
+   neither "attached" nor "declared deferrable" predicts presence, and a check
+   built on the declaration expects a tool that is legitimately there.
+
+   Reading the declaration instead of the surface cost 60
+   [keeper_model_tool_projection_mismatch] errors in an hour on 2026-08-31, all
+   on [keeper_ide_annotate]: declared deferrable, called once the day before,
+   and carried ever since.
+
+   An unknown actual name stays outside either answer, so the projection check
+   still reports it. *)
+let partition_by_presence ~names ~actual_names =
+  List.partition (fun name -> List.mem name actual_names) names
+;;
+
+(* Present: the listing plus whatever attached schemas were carried in. The
+   listing is expected even when it is accidentally absent from the actual
+   surface, which is the one thing the check must still catch. *)
 let agent_core_identity_names ~attached_names ~actual_names =
   match attached_names with
   | [] -> []
   | _ :: _ ->
-    Keeper_identity_tool_search.tool_name
-    :: List.filter (fun name -> List.mem name attached_names) actual_names
-    |> List.sort_uniq String.compare
+    let present, (_ : string list) =
+      partition_by_presence ~names:attached_names ~actual_names
+    in
+    Keeper_identity_tool_search.tool_name :: present |> List.sort_uniq String.compare
+;;
+
+(* Absent: the declared built-ins this surface really did leave out. *)
+let deferred_names_absent_from ~declared_names ~actual_names =
+  let (_ : string list), absent =
+    partition_by_presence ~names:declared_names ~actual_names
+  in
+  absent
 ;;
 
 let prepare_agent_setup
@@ -561,7 +596,13 @@ let prepare_agent_setup
   in
   check_projection
     ~surface:"agent_core_tools"
-    ~deferred_names:keeper_deferred_builtin_names
+    ~deferred_names:
+      (deferred_names_absent_from
+         ~declared_names:keeper_deferred_builtin_names
+         ~actual_names:
+           (List.map
+              (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+              keeper_agent_core_tools))
     ~identity_names:
       (agent_core_identity_names
          ~attached_names

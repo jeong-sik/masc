@@ -34,6 +34,11 @@ val judge_meta : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) resu
     identity는 [First]면 panelist_id. 프론트는 배열 shape만으로 위상 구조를 렌더한다. *)
 val judge_node_meta : Fusion_types.judge_outcome -> Yojson.Safe.t
 
+(** Actual AGENT_CORE tool-call ledger plus explicit drops/coverage gaps for
+    Board evidence. An empty complete ledger proves no observed call; it is
+    distinct from a missing legacy [tool_trace]. *)
+val tool_trace_meta : Fusion_types.tool_trace -> Yojson.Safe.t
+
 (** judge 결론(성공/실패 모두)을 키퍼 메인 chat lane에 남기고 board에 패널/심판
     구조화 증거를 post한다.
 
@@ -48,7 +53,9 @@ val judge_node_meta : Fusion_types.judge_outcome -> Yojson.Safe.t
     전체/judge 종합/observed_usage = panel N + judge 1 합산) 증거를 남긴다. [judge_usage]는
     심판이 소비한 토큰(orchestrator가 [Fusion_judge.run]에서 분리해 주입). [judges]는 실제로
     실행된 심판 노드 관측 배열(RFC-0284)로 board meta_json [judges] 키에 panel과 동형으로
-    직렬화된다 — canonical 단일 [judge] 키는 ADDITIVE 유지. [base_dir]는 호출자 주입.
+    직렬화된다 — canonical 단일 [judge] 키는 ADDITIVE 유지. [tool_trace]가 있으면
+    availability가 아닌 실제 AGENT_CORE Tool event와 명시적 coverage gap을 additive
+    [tool_trace] 객체로 남긴다. [base_dir]는 호출자 주입.
 
     chat store append 실패는 [Error msg]로 반환한다. board post 생성 실패는 결론
     전달을 실패로 되돌리지 않는다: 경고를 남기고 [board_post_id = ""]로
@@ -68,6 +75,7 @@ val emit
   -> judge:(Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
   -> judges:Fusion_types.judge_outcome list
   -> judge_usage:Fusion_types.usage
+  -> ?tool_trace:Fusion_types.tool_trace
   -> (unit, string) result
 
 (** RFC-0266: 심의 완료/실패 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.

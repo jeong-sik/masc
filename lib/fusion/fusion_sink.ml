@@ -218,7 +218,7 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failur
    (single/refine/first/meta/stage_meta/final_meta), [identity]는 [First]면 panelist_id(panel
    model과 대칭), [Stage_meta n]이면 stage-n. 프론트는 role로 노드 종류를, identity로 1차
    심판·stage를 구분해 위상 이름 없이 배열 shape만으로 구조를 렌더한다. *)
-let judge_role_fields (role : Fusion_types.judge_role) : (string * Yojson.Safe.t) list =
+let judge_role_projection (role : Fusion_types.judge_role) =
   let kind, identity =
     match role with
     | Fusion_types.Single -> ("single", "single")
@@ -228,7 +228,98 @@ let judge_role_fields (role : Fusion_types.judge_role) : (string * Yojson.Safe.t
     | Fusion_types.Stage_meta n -> ("stage_meta", Printf.sprintf "stage-%d" n)
     | Fusion_types.Final_meta -> ("final_meta", "final")
   in
+  kind, identity
+
+let judge_role_fields role : (string * Yojson.Safe.t) list =
+  let kind, identity = judge_role_projection role in
   [ ("role", `String kind); ("identity", `String identity) ]
+
+let tool_trace_preview_meta (preview : Fusion_types.tool_trace_preview) =
+  `Assoc
+    [ "text", `String preview.text
+    ; "bytes", `Int preview.bytes
+    ; "truncated", `Bool preview.truncated
+    ]
+
+let tool_trace_actor_fields = function
+  | Fusion_types.Panel_actor identity ->
+    [ "phase", `String "panel"; "actor", `String identity ]
+  | Fusion_types.Judge_actor { role; identity } ->
+    let role, _topology_identity = judge_role_projection role in
+    [ "phase", `String "judge"
+    ; "actor", `String identity
+    ; "judge_role", `String role
+    ]
+
+let tool_trace_actor_meta actor = `Assoc (tool_trace_actor_fields actor)
+
+let tool_trace_error_class = function
+  | Fusion_types.Trace_transient -> "transient"
+  | Fusion_types.Trace_deterministic -> "deterministic"
+  | Fusion_types.Trace_unknown -> "unknown"
+
+let tool_trace_event_meta = function
+  | Fusion_types.Tool_called event ->
+    `Assoc
+      (tool_trace_actor_fields event.actor
+       @ [ "event", `String "called"
+         ; "agent_name", `String event.agent_name
+         ; "tool_use_id", `String event.tool_use_id
+         ; "turn", `Int event.turn
+         ; "planned_index", `Int event.planned_index
+         ; "tool_name", `String event.tool_name
+         ; "input", tool_trace_preview_meta event.input
+         ])
+  | Fusion_types.Tool_completed event ->
+    let status, output, failure_fields =
+      match event.completion with
+      | Fusion_types.Tool_trace_succeeded output -> "succeeded", output, []
+      | Fusion_types.Tool_trace_failed failure ->
+        ( "failed"
+        , failure.output
+        , [ "recoverable", `Bool failure.recoverable
+          ; ( "error_class"
+            , match failure.error_class with
+              | Some class_ -> `String (tool_trace_error_class class_)
+              | None -> `Null )
+          ] )
+    in
+    `Assoc
+      (tool_trace_actor_fields event.actor
+       @ [ "event", `String "completed"
+         ; "agent_name", `String event.agent_name
+         ; "tool_use_id", `String event.tool_use_id
+         ; "turn", `Int event.turn
+         ; "planned_index", `Int event.planned_index
+         ; "tool_name", `String event.tool_name
+         ; "status", `String status
+         ; "output", tool_trace_preview_meta output
+         ]
+       @ failure_fields)
+
+let tool_trace_gap_reason = function
+  | Fusion_types.Official_client_uninstrumented ->
+    "official_client_uninstrumented"
+
+let tool_trace_gap_meta (gap : Fusion_types.tool_trace_gap) =
+  `Assoc
+    (tool_trace_actor_fields gap.actor
+     @ [ "reason", `String (tool_trace_gap_reason gap.reason) ])
+
+let tool_trace_meta (trace : Fusion_types.tool_trace) =
+  let status =
+    if trace.dropped_events = 0 && trace.gaps = []
+    then "complete"
+    else "partial"
+  in
+  `Assoc
+    [ "status", `String status
+    ; ( "observed_actors"
+      , `List (List.map tool_trace_actor_meta trace.observed_actors) )
+    ; "dropped_events", `Int trace.dropped_events
+    ; "gaps", `List (List.map tool_trace_gap_meta trace.gaps)
+    ; "events", `List (List.map tool_trace_event_meta trace.events)
+    ]
 
 (* 심판 실행 노드 한 건을 board meta_json [judges] 배열 원소로 (RFC-0284). panel_meta와
    동형: [Synthesized] → role/identity + judge_synthesis 5섹션 + 노드별 실측 usage,
@@ -423,7 +514,7 @@ let delivery_key_of_run_id run_id =
 ;;
 
 let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges
-      ~judge_usage :
+      ~judge_usage ?tool_trace :
     (unit, string) result =
   let ( let* ) = Result.bind in
   let* delivery_key = delivery_key_of_run_id run_id in
@@ -485,10 +576,15 @@ let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~j
         Printf.sprintf "Fusion deliberation (run %s) failed — %s" run_id
           (render_failure f)
     in
+    let tool_trace_fields =
+      match tool_trace with
+      | Some trace -> [ "tool_trace", tool_trace_meta trace ]
+      | None -> []
+    in
     let meta_json =
       Some
         (`Assoc
-           [ ("question", `String question)
+           ([ ("question", `String question)
            ; ("started_at", `Float started_at)
            ; ("panel", `List (List.map panel_meta panel))
            ; ("judge", judge_meta judge)
@@ -501,7 +597,8 @@ let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~j
                  [ ("input_tokens", `Int total_usage.Fusion_types.input_tokens)
                  ; ("output_tokens", `Int total_usage.Fusion_types.output_tokens)
                  ] )
-           ])
+           ]
+            @ tool_trace_fields))
     in
     (* board post를 *먼저* 만들어 post id를 확보한다 — 이 id가 키퍼 chat의 fusion block
        lazy-fetch 키이기 때문이다(대시보드가 board meta_json에서 패널/심판을 펼친다). *)

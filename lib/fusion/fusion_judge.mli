@@ -62,6 +62,8 @@ val run
   -> question:string
   -> panel:Fusion_types.panel_outcome list
   -> web_tools:bool
+  -> ?tool_trace:
+       (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
   -> unit
   -> ( Fusion_types.judge_synthesis * Fusion_types.usage
      , Fusion_types.judge_failure * Fusion_types.usage )
@@ -93,6 +95,8 @@ val run_refine
   -> panel:Fusion_types.panel_outcome list
   -> prior:Fusion_types.judge_synthesis
   -> web_tools:bool
+  -> ?tool_trace:
+       (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
   -> unit
   -> ( Fusion_types.judge_synthesis * Fusion_types.usage
      , Fusion_types.judge_failure * Fusion_types.usage )
@@ -133,6 +137,8 @@ val run_meta
   -> panel:Fusion_types.panel_outcome list
   -> priors:(string * Fusion_types.judge_synthesis) list
   -> web_tools:bool
+  -> ?tool_trace:
+       (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
   -> unit
   -> ( Fusion_types.judge_synthesis * Fusion_types.usage
      , Fusion_types.judge_failure * Fusion_types.usage )

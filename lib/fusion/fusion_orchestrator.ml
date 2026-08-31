@@ -19,6 +19,19 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
          Compute_denied (Fusion_types.Preset_unknown req.Fusion_types.preset)
      | Some vp ->
           let preset = Fusion_policy.Validated_preset.preset vp in
+          let tool_trace_mutex = Stdlib.Mutex.create () in
+          let tool_traces = ref [] in
+          let record_tool_trace trace =
+            Stdlib.Mutex.protect tool_trace_mutex (fun () ->
+              tool_traces := trace :: !tool_traces)
+          in
+          let judge_actor role label =
+            let identity =
+              Fusion_policy.panelist_id
+                ~label ~model:preset.Fusion_policy.judge
+            in
+            Fusion_types.Judge_actor { role; identity }
+          in
           let groups = preset.Fusion_policy.panels in
           let effective_groups =
             List.map
@@ -39,7 +52,8 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                { expected = panel_expected });
           let panel =
             Fusion_panel.run ~base_dir ~sw ~net
-              ~groups:effective_groups ~prompt:req.Fusion_types.prompt ()
+              ~groups:effective_groups ~prompt:req.Fusion_types.prompt
+              ~on_tool_trace:record_tool_trace ()
           in
           let panel_answered, panel_failed =
             List.fold_left
@@ -64,7 +78,10 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
               ?timeout_s:preset.Fusion_policy.judge_timeout_s
               ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
               ~judge_model:preset.Fusion_policy.judge
-              ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools ()
+              ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools
+              ~tool_trace:
+                (judge_actor Fusion_types.Single "single", record_tool_trace)
+              ()
           in
           let refine_over (s1, u1) =
             let single_node =
@@ -78,7 +95,11 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                 ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                 ~judge_model:preset.Fusion_policy.judge
                 ~question:req.Fusion_types.prompt ~panel ~prior:s1
-                ~web_tools:judge_web_tools ()
+                ~web_tools:judge_web_tools
+                ~tool_trace:
+                  ( judge_actor Fusion_types.Refine_pass "refine"
+                  , record_tool_trace )
+                ()
             with
             | Ok (s2, u2) ->
               ( Ok (s2, Fusion_types.add_usage u1 u2)
@@ -116,6 +137,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
               ~question:req.Fusion_types.prompt
               ~clock
               ~judge_web_tools
+              ~on_tool_trace:record_tool_trace
               judges
           in
           let first_judge_nodes =
@@ -162,7 +184,10 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                       ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                       ~judge_model:preset.Fusion_policy.judge
                       ~question:req.Fusion_types.prompt ~panel ~priors
-                      ~web_tools:judge_web_tools ()
+                      ~web_tools:judge_web_tools
+                      ~tool_trace:
+                        (judge_actor Fusion_types.Meta "meta", record_tool_trace)
+                      ()
                   with
                   | Ok (meta_s, meta_u) ->
                     ( Ok (meta_s, Fusion_types.add_usage firsts_usage meta_u)
@@ -244,7 +269,13 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                        ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                        ~judge_model:preset.Fusion_policy.judge
                        ~question:req.Fusion_types.prompt ~panel ~priors
-                       ~web_tools:judge_web_tools ()
+                       ~web_tools:judge_web_tools
+                       ~tool_trace:
+                         ( judge_actor
+                             (Fusion_types.Stage_meta stage_num)
+                             stage_id
+                         , record_tool_trace )
+                       ()
                    with
                    | Ok (stage_s, stage_u) ->
                      ( (stage_id, Ok (stage_s, Fusion_types.add_usage firsts_usage stage_u))
@@ -297,7 +328,11 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                       ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                       ~judge_model:preset.Fusion_policy.judge
                       ~question:req.Fusion_types.prompt ~panel ~priors
-                      ~web_tools:judge_web_tools ()
+                      ~web_tools:judge_web_tools
+                      ~tool_trace:
+                        ( judge_actor Fusion_types.Final_meta "final"
+                        , record_tool_trace )
+                      ()
                   with
                   | Ok (final_s, final_u) ->
                     ( Ok (final_s, Fusion_types.add_usage stage_usage final_u)
@@ -400,12 +435,17 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                ; answered = panel_answered
                ; failed = panel_failed
                });
+          let tool_trace =
+            Stdlib.Mutex.protect tool_trace_mutex (fun () ->
+              Fusion_types.merge_tool_traces (List.rev !tool_traces))
+          in
           Computed
             { Fusion_types.question = req.prompt
             ; panel
             ; judge
             ; judges = judge_nodes
             ; judge_usage
+            ; tool_trace = Some tool_trace
             })
 
 let project
@@ -432,7 +472,7 @@ let project
     Fusion_sink.emit ~registry ~base_dir ~keeper:request.keeper ~run_id:request.run_id
       ~channel ~question:deliberation.question ~panel:deliberation.panel
       ~judge:deliberation.judge ~judges:deliberation.judges
-      ~judge_usage:deliberation.judge_usage
+      ~judge_usage:deliberation.judge_usage ?tool_trace:deliberation.tool_trace
   with
   | Ok () ->
     Fusion_metrics.record_invocation ~topology `Completed;

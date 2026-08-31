@@ -31,6 +31,9 @@ val run
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> groups:Fusion_policy.panel_group list
   -> prompt:string
+  -> ?on_tool_trace:(Fusion_types.tool_trace -> unit)
+       (** Receives actual AGENT_CORE tool events and explicit official-client
+           observation gaps after the panel fan-out settles. *)
   -> unit
   -> Fusion_types.panel_outcome list
 

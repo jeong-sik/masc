@@ -52,6 +52,150 @@ let usage_of (resp : Agent_core.Types.api_response) : Fusion_types.usage =
     }
   | None -> Fusion_types.zero_usage
 
+let tool_trace_event_capacity = Fusion_types.max_tool_trace_events
+let tool_trace_input_preview_bytes = 1024
+let tool_trace_output_preview_bytes = 2048
+
+type tool_observer =
+  { actor : Fusion_types.tool_trace_actor
+  ; bus : Agent_core.Event_bus.t
+  ; subscription : Agent_core.Event_bus.subscription
+  }
+
+let tool_trace_subscription_config =
+  match
+    Agent_core.Event_bus.subscription_config
+      ~capacity:tool_trace_event_capacity
+      ~overflow:Agent_core.Event_bus.Drop_oldest
+  with
+  | Ok config -> config
+  | Error (Agent_core.Event_bus.Non_positive_capacity value) ->
+    invalid_arg
+      (Printf.sprintf "Fusion tool trace capacity must be positive, got %d" value)
+;;
+
+let create_tool_observer ~actor =
+  let bus = Agent_core.Event_bus.create () in
+  let subscription =
+    Agent_core.Event_bus.subscribe
+      ~config:tool_trace_subscription_config
+      ~filter:Agent_core.Event_bus.filter_tools_only
+      ~purpose:"fusion_tool_trace"
+      bus
+  in
+  { actor; bus; subscription }
+;;
+
+let tool_observer_event_bus observer = observer.bus
+
+let bounded_trace_preview ~max_bytes text : Fusion_types.tool_trace_preview =
+  let bytes = String.length text in
+  let truncated = bytes > max_bytes in
+  let text =
+    if truncated
+    then
+      String_util.utf8_safe ~max_bytes ~suffix:"..." text
+      |> String_util.to_string
+    else text
+  in
+  { Fusion_types.text; bytes; truncated }
+;;
+
+let trace_error_class = function
+  | Agent_core.Types.Transient -> Fusion_types.Trace_transient
+  | Agent_core.Types.Deterministic -> Fusion_types.Trace_deterministic
+  | Agent_core.Types.Unknown -> Fusion_types.Trace_unknown
+;;
+
+let trace_invocation_fields invocation =
+  ( Agent_core.Tool_contract.Invocation.tool_use_id invocation
+  , Agent_core.Tool_contract.Invocation.turn invocation
+  , Agent_core.Tool_contract.Invocation.planned_index invocation )
+;;
+
+let trace_event actor (event : Agent_core.Event_bus.event) =
+  match event.payload with
+  | Agent_core.Event_bus.ToolCalled
+      { invocation; agent_name; tool_name; input } ->
+    let tool_use_id, turn, planned_index = trace_invocation_fields invocation in
+    Some
+      (Fusion_types.Tool_called
+         { actor
+         ; agent_name
+         ; tool_use_id
+         ; turn
+         ; planned_index
+         ; tool_name
+         ; input =
+             bounded_trace_preview
+               ~max_bytes:tool_trace_input_preview_bytes
+               (Yojson.Safe.to_string input)
+         })
+  | Agent_core.Event_bus.ToolCompleted
+      { invocation; agent_name; tool_name; output } ->
+    let tool_use_id, turn, planned_index = trace_invocation_fields invocation in
+    let completion =
+      match output with
+      | Ok { Agent_core.Types.content; _meta = _ } ->
+        Fusion_types.Tool_trace_succeeded
+          (bounded_trace_preview
+             ~max_bytes:tool_trace_output_preview_bytes content)
+      | Error { Agent_core.Types.message; recoverable; error_class } ->
+        Fusion_types.Tool_trace_failed
+          { output =
+              bounded_trace_preview
+                ~max_bytes:tool_trace_output_preview_bytes message
+          ; recoverable
+          ; error_class = Option.map trace_error_class error_class
+          }
+    in
+    Some
+      (Fusion_types.Tool_completed
+         { actor
+         ; agent_name
+         ; tool_use_id
+         ; turn
+         ; planned_index
+         ; tool_name
+         ; completion
+         })
+  | Agent_core.Event_bus.AgentStarted _
+  | Agent_core.Event_bus.AgentCompleted _
+  | Agent_core.Event_bus.AgentYielded _
+  | Agent_core.Event_bus.AgentInputRequired _
+  | Agent_core.Event_bus.AgentFailed _
+  | Agent_core.Event_bus.TurnStarted _
+  | Agent_core.Event_bus.TurnReady _
+  | Agent_core.Event_bus.TurnCompleted _
+  | Agent_core.Event_bus.HandoffRequested _
+  | Agent_core.Event_bus.HandoffCompleted _
+  | Agent_core.Event_bus.ElicitationCompleted _
+  | Agent_core.Event_bus.ToolApprovalCompleted _
+  | Agent_core.Event_bus.InferenceTelemetry _
+  | Agent_core.Event_bus.Custom _ -> None
+;;
+
+let finish_tool_observer observer =
+  let dropped_events =
+    Agent_core.Event_bus.stats observer.bus
+    |> fun stats ->
+    List.fold_left
+      (fun total (stats : Agent_core.Event_bus.subscription_stats) ->
+         total + stats.dropped_total)
+      0 stats.subscriptions
+  in
+  let events =
+    Agent_core.Event_bus.unsubscribe_and_drain
+      observer.bus observer.subscription
+    |> List.filter_map (trace_event observer.actor)
+  in
+  { Fusion_types.observed_actors = [ observer.actor ]
+  ; events
+  ; dropped_events
+  ; gaps = []
+  }
+;;
+
 let provider_error_detail ~runtime_id detail =
   let runtime_id = String.trim runtime_id in
   let detail = String.trim detail in
@@ -156,6 +300,7 @@ let build_agent
     ~sw
     ~net
     ~system_prompt
+    ?event_bus
     ?(tools = [])
     ?max_tokens
     ?timeout_s
@@ -208,6 +353,11 @@ let build_agent
            ~provider_cfg
            ~system_prompt
            ~tools
+       in
+       let base_config =
+         match event_bus with
+         | Some event_bus -> { base_config with event_bus = Some event_bus }
+         | None -> base_config
        in
        let config =
          match max_tokens with

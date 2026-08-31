@@ -68,10 +68,14 @@ let run_first_judge
       ~question
       ~clock
       ~judge_web_tools
+      ~on_tool_trace
       (j : Fusion_policy.judge_spec)
   : judge_run
   =
   let id = Fusion_policy.panelist_id ~label:j.jlabel ~model:j.jmodel in
+  let tool_actor =
+    Fusion_types.Judge_actor { role = Fusion_types.First id; identity = id }
+  in
   let result =
     Fusion_judge.run
       ~sw
@@ -83,6 +87,7 @@ let run_first_judge
       ~question
       ~panel
       ~web_tools:(first_judge_web_tools ~judge_web_tools j)
+      ~tool_trace:(tool_actor, on_tool_trace)
       ()
   in
   let elapsed_s = elapsed_since_t0 clock in
@@ -97,6 +102,7 @@ let run_first_judges
       ~question
       ~clock
       ~judge_web_tools
+      ~on_tool_trace
       judges
   =
   let run_first_judge =
@@ -108,6 +114,7 @@ let run_first_judges
       ~question
       ~clock
       ~judge_web_tools
+      ~on_tool_trace
   in
   Eio.Fiber.List.map run_first_judge judges
 ;;

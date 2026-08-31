@@ -196,6 +196,97 @@ let test_panel_meta_invalid_max_output_tokens_text () =
 let int_field a k =
   match lookup k a with Some (_, `Int n) -> Some n | _ -> None
 
+let bool_field a k =
+  match lookup k a with Some (_, `Bool value) -> Some value | _ -> None
+
+let trace_preview text : tool_trace_preview =
+  { text; bytes = String.length text; truncated = false }
+
+let test_tool_trace_meta_preserves_actual_events () =
+  let actor = Panel_actor "skeptic (claude)" in
+  let common_called : tool_called_event =
+    { actor
+    ; agent_name = "skeptic (claude)"
+    ; tool_use_id = "web-1"
+    ; turn = 2
+    ; planned_index = 1
+    ; tool_name = "masc_web_fetch"
+    ; input = trace_preview {|{"url":"https://example.test"}|}
+    }
+  in
+  let common_completed : tool_completed_event =
+    { actor
+    ; agent_name = "skeptic (claude)"
+    ; tool_use_id = "web-1"
+    ; turn = 2
+    ; planned_index = 1
+    ; tool_name = "masc_web_fetch"
+    ; completion =
+        Tool_trace_failed
+          { output = trace_preview "HTTP 503"
+          ; recoverable = true
+          ; error_class = Some Trace_transient
+          }
+    }
+  in
+  let json =
+    Masc.Fusion_sink.tool_trace_meta
+      { observed_actors = [ actor ]
+      ; events = [ Tool_called common_called; Tool_completed common_completed ]
+      ; dropped_events = 0
+      ; gaps = []
+      }
+    |> assoc_of
+  in
+  check (option string) "complete coverage" (Some "complete")
+    (string_field json "status");
+  (match list_field json "observed_actors" with
+   | Some [ `Assoc observed ] ->
+     check (option string) "observed actor" (Some "skeptic (claude)")
+       (string_field observed "actor")
+   | _ -> fail "expected one observed Tool actor");
+  match list_field json "events" with
+  | Some [ `Assoc called; `Assoc completed ] ->
+    check (option string) "called phase" (Some "panel")
+      (string_field called "phase");
+    check (option string) "called actor" (Some "skeptic (claude)")
+      (string_field called "actor");
+    check (option string) "called tool" (Some "masc_web_fetch")
+      (string_field called "tool_name");
+    check (option string) "completion failed" (Some "failed")
+      (string_field completed "status");
+    check (option bool) "recoverable retained" (Some true)
+      (bool_field completed "recoverable");
+    check (option string) "error class retained" (Some "transient")
+      (string_field completed "error_class")
+  | _ -> fail "expected called and completed Tool events"
+
+let test_tool_trace_meta_marks_coverage_gaps () =
+  let actor =
+    Judge_actor { role = Meta; identity = "meta (judge.model)" }
+  in
+  let json =
+    Masc.Fusion_sink.tool_trace_meta
+      { observed_actors = []
+      ; events = []
+      ; dropped_events = 2
+      ; gaps = [ { actor; reason = Official_client_uninstrumented } ]
+      }
+    |> assoc_of
+  in
+  check (option string) "partial coverage" (Some "partial")
+    (string_field json "status");
+  check (option int) "drop count" (Some 2) (int_field json "dropped_events");
+  match list_field json "gaps" with
+  | Some [ `Assoc gap ] ->
+    check (option string) "gap phase" (Some "judge")
+      (string_field gap "phase");
+    check (option string) "gap role" (Some "meta")
+      (string_field gap "judge_role");
+    check (option string) "gap reason" (Some "official_client_uninstrumented")
+      (string_field gap "reason")
+  | _ -> fail "expected one explicit Tool coverage gap"
+
 let test_node_first_carries_panelist_identity () =
   let o =
     Synthesized
@@ -320,5 +411,11 @@ let () =
         ; test_case "stage_and_final_roles" `Quick test_node_stage_and_final_roles
         ; test_case "single_and_refine_roles" `Quick test_node_single_and_refine_roles
         ; test_case "failed_keeps_identity" `Quick test_node_failed_keeps_identity
+        ] )
+    ; ( "tool_trace_meta"
+      , [ test_case "preserves actual events" `Quick
+            test_tool_trace_meta_preserves_actual_events
+        ; test_case "marks coverage gaps" `Quick
+            test_tool_trace_meta_marks_coverage_gaps
         ] )
     ]

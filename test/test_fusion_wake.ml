@@ -440,11 +440,12 @@ let test_emit_success_projects_board_chat_and_registry () =
           { role = Fusion_types.Single; synthesis; usage = judge_usage }
       ]
     in
+    let tool_trace = Fusion_types.empty_tool_trace in
     Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"unit-test" ~topology:Fusion_types.Simple
       ~started_at:2.0;
     let result =
       Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id ~channel:discord_channel
-        ~question ~panel ~judge:(Ok synthesis) ~judges ~judge_usage
+        ~question ~panel ~judge:(Ok synthesis) ~judges ~judge_usage ~tool_trace
     in
     check bool "emit succeeds" true (Result.is_ok result);
     let post =
@@ -498,6 +499,13 @@ let test_emit_success_projects_board_chat_and_registry () =
       (int_field "board.meta.observed_usage" observed_usage "input_tokens");
     check int "observed output tokens" (panel_usage.output_tokens + judge_usage.output_tokens)
       (int_field "board.meta.observed_usage" observed_usage "output_tokens");
+    let tool_trace_meta =
+      assoc_fields "board.meta.tool_trace" (field "board.meta" meta "tool_trace")
+    in
+    check string "tool trace coverage is explicit" "complete"
+      (string_field "board.meta.tool_trace" tool_trace_meta "status");
+    check int "complete empty trace has no events" 0
+      (list_field "board.meta.tool_trace" tool_trace_meta "events" |> List.length);
     let dashboard_json =
       Board_dispatch.post_to_yojson_with_karma post ~author_karma:0
       |> assoc_fields "dashboard.post"
@@ -542,7 +550,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     let replay =
       Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id
         ~channel:discord_channel ~question ~panel ~judge:(Ok synthesis) ~judges
-        ~judge_usage
+        ~judge_usage ~tool_trace
     in
     check bool "same completion replay succeeds" true (Result.is_ok replay);
     let posts_for_run =
@@ -570,7 +578,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     let conflicting_replay =
       Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id
         ~channel:discord_channel ~question:(question ^ " changed") ~panel
-        ~judge:(Ok synthesis) ~judges ~judge_usage
+        ~judge:(Ok synthesis) ~judges ~judge_usage ~tool_trace
     in
     check bool "changed completion replay is rejected" true
       (Result.is_error conflicting_replay);
@@ -971,6 +979,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
         ; judge = Ok synthesis
         ; judges
         ; judge_usage
+        ; tool_trace = None
         }
       in
       Eio.Promise.resolve resolve_computed ();

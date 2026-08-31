@@ -156,6 +156,7 @@ let test_official_client_panelist_reaches_its_client () =
   let base_dir = Filename.temp_dir "fusion-official-client-run" "" in
   let marker = Filename.concat base_dir "spawned" in
   let claude_cli = Filename.concat base_dir "stub-claude" in
+  let observed_trace = ref None in
   write_file ~path:claude_cli ~perm:0o700 (stub_cli_script ~marker);
   with_initialized_runtime ~claude_cli (fun () ->
     let outcomes =
@@ -174,12 +175,28 @@ let test_official_client_panelist_reaches_its_client () =
                  ~net:(Eio.Stdenv.net env)
                  ~groups:[ panel_group [ official_client_runtime ] ]
                  ~prompt:"ping"
+                 ~on_tool_trace:(fun trace -> observed_trace := Some trace)
                  ())))
     in
     check bool "the official client was executed" true (Sys.file_exists marker);
     (* One declared panelist stays one reported outcome. A panelist dropped
        rather than run is the failure mode that survives a quorum. *)
-    check int "the panelist is accounted for in the outcomes" 1 (List.length outcomes))
+    check int "the panelist is accounted for in the outcomes" 1 (List.length outcomes);
+    match !observed_trace with
+    | Some
+        { Fusion_types.observed_actors = []
+        ; events = []
+        ; dropped_events = 0
+        ; gaps =
+            [ { actor = Fusion_types.Panel_actor actor
+              ; reason = Fusion_types.Official_client_uninstrumented
+              }
+            ]
+        } ->
+      check string "official-client trace gap names the actor"
+        official_client_runtime actor
+    | Some _ -> fail "official-client execution must publish one explicit trace gap"
+    | None -> fail "official-client execution did not publish Tool trace coverage")
 ;;
 
 (* The message has to name which handle is absent. It did not, and that cost a

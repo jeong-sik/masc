@@ -210,6 +210,109 @@ type judge_role =
   | Final_meta  (** staged JOJ의 최종 reducer. *)
 [@@deriving yojson, show, eq]
 
+type tool_judge_actor =
+  { role : judge_role
+  ; identity : string
+  }
+[@@deriving yojson, show, eq]
+
+type tool_trace_actor =
+  | Panel_actor of string
+  | Judge_actor of tool_judge_actor
+[@@deriving yojson, show, eq]
+
+type tool_trace_preview =
+  { text : string
+  ; bytes : int
+  ; truncated : bool
+  }
+[@@deriving yojson, show, eq]
+
+type tool_trace_error_class =
+  | Trace_transient
+  | Trace_deterministic
+  | Trace_unknown
+[@@deriving yojson, show, eq]
+
+type tool_trace_failure =
+  { output : tool_trace_preview
+  ; recoverable : bool
+  ; error_class : tool_trace_error_class option
+  }
+[@@deriving yojson, show, eq]
+
+type tool_trace_completion =
+  | Tool_trace_succeeded of tool_trace_preview
+  | Tool_trace_failed of tool_trace_failure
+[@@deriving yojson, show, eq]
+
+type tool_called_event =
+  { actor : tool_trace_actor
+  ; agent_name : string
+  ; tool_use_id : string
+  ; turn : int
+  ; planned_index : int
+  ; tool_name : string
+  ; input : tool_trace_preview
+  }
+[@@deriving yojson, show, eq]
+
+type tool_completed_event =
+  { actor : tool_trace_actor
+  ; agent_name : string
+  ; tool_use_id : string
+  ; turn : int
+  ; planned_index : int
+  ; tool_name : string
+  ; completion : tool_trace_completion
+  }
+[@@deriving yojson, show, eq]
+
+type tool_trace_event =
+  | Tool_called of tool_called_event
+  | Tool_completed of tool_completed_event
+[@@deriving yojson, show, eq]
+
+type tool_trace_gap_reason = Official_client_uninstrumented
+[@@deriving yojson, show, eq]
+
+type tool_trace_gap =
+  { actor : tool_trace_actor
+  ; reason : tool_trace_gap_reason
+  }
+[@@deriving yojson, show, eq]
+
+type tool_trace =
+  { observed_actors : tool_trace_actor list
+  ; events : tool_trace_event list
+  ; dropped_events : int
+  ; gaps : tool_trace_gap list
+  }
+[@@deriving yojson, show, eq]
+
+let max_tool_trace_events = 256
+
+let empty_tool_trace =
+  { observed_actors = []; events = []; dropped_events = 0; gaps = [] }
+
+let merge_tool_traces traces =
+  let all_events = List.concat_map (fun trace -> trace.events) traces in
+  let rec take remaining acc = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | event :: rest -> take (remaining - 1) (event :: acc) rest
+  in
+  let events = take max_tool_trace_events [] all_events in
+  let ledger_drops = List.length all_events - List.length events in
+  { observed_actors = List.concat_map (fun trace -> trace.observed_actors) traces
+  ; events
+  ; dropped_events =
+      ledger_drops
+      + List.fold_left (fun total trace -> total + trace.dropped_events) 0 traces
+  ; gaps = List.concat_map (fun trace -> trace.gaps) traces
+  }
+;;
+
 type judge_node =
   { role : judge_role
   ; synthesis : judge_synthesis
@@ -299,6 +402,7 @@ type deliberation_evidence =
   ; judge : (judge_synthesis, judge_failure) result
   ; judges : judge_outcome list
   ; judge_usage : usage
+  ; tool_trace : tool_trace option
   }
 [@@deriving yojson, show, eq]
 

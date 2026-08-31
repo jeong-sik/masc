@@ -1,5 +1,7 @@
 open Masc
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
 let test_rewrites_unknown_provider () =
   let detail =
     Fusion_agent_core.provider_error_detail ~runtime_id:"ollama_cloud.kimi-k2-6"
@@ -193,6 +195,85 @@ let test_panel_failure_yojson_round_trips_current_shapes () =
           (Fusion_types.Empty_response "empty response (stop_reason=max_tokens)")))
 ;;
 
+let test_tool_observer_captures_actual_call_and_failure () =
+  Eio_main.run @@ fun _env ->
+  let actor = Fusion_types.Panel_actor "skeptic (claude)" in
+  let observer = Fusion_agent_core.create_tool_observer ~actor in
+  let bus = Fusion_agent_core.tool_observer_event_bus observer in
+  let invocation =
+    Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"web-1"
+      ~turn:2
+      ~schedule:
+        { planned_index = 1
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_core.Tool_contract.Serial
+        }
+      ~completion:Agent_core.Tool_contract.Continue_after_success
+  in
+  let event payload =
+    { Agent_core.Event_bus.meta =
+        Agent_core.Event_bus.mk_envelope
+          ~event_id:(Agent_core.Event_bus.payload_kind payload)
+          ~correlation_id:"fusion-test"
+          ~run_id:"fusion-test-run"
+          ()
+    ; payload
+    }
+  in
+  let input_text = String.make 1200 'x' in
+  Agent_core.Event_bus.publish bus
+    (event
+       (Agent_core.Event_bus.ToolCalled
+          { invocation
+          ; agent_name = "skeptic (claude)"
+          ; tool_name = "masc_web_search"
+          ; input = `Assoc [ "query", `String input_text ]
+          }));
+  Agent_core.Event_bus.publish bus
+    (event
+       (Agent_core.Event_bus.ToolCompleted
+          { invocation
+          ; agent_name = "skeptic (claude)"
+          ; tool_name = "masc_web_search"
+          ; output =
+              Error
+                { Agent_core.Types.message = "provider refused"
+                ; recoverable = false
+                ; error_class = Some Agent_core.Types.Deterministic
+                }
+          }));
+  match Fusion_agent_core.finish_tool_observer observer with
+  | { Fusion_types.observed_actors = [ Fusion_types.Panel_actor observed_actor ]
+    ; events =
+        [ Fusion_types.Tool_called called
+        ; Fusion_types.Tool_completed completed
+        ]
+    ; dropped_events = 0
+    ; gaps = []
+    } ->
+    Alcotest.(check string) "observed actor retained" "skeptic (claude)"
+      observed_actor;
+    Alcotest.(check string) "exact tool name" "masc_web_search" called.tool_name;
+    Alcotest.(check bool) "large input is explicitly truncated" true
+      called.input.truncated;
+    Alcotest.(check bool) "source byte count exceeds preview" true
+      (called.input.bytes > String.length called.input.text);
+    (match completed.completion with
+     | Fusion_types.Tool_trace_failed failure ->
+       Alcotest.(check string) "failure output" "provider refused"
+         failure.output.text;
+       Alcotest.(check bool) "recoverability retained" false failure.recoverable;
+       Alcotest.(check bool) "typed error class retained" true
+         (failure.error_class = Some Fusion_types.Trace_deterministic)
+     | Fusion_types.Tool_trace_succeeded _ ->
+       Alcotest.fail "failed Tool completion was flattened to success")
+  | trace ->
+    Alcotest.failf "expected called+completed ledger, got %d event(s)"
+      (List.length trace.events)
+;;
+
 let () =
   Alcotest.run
     "Fusion_agent_core_error_detail"
@@ -237,6 +318,10 @@ let () =
             "panel failure yojson round-trips current shapes"
             `Quick
             test_panel_failure_yojson_round_trips_current_shapes
+        ; Alcotest.test_case
+            "tool observer captures actual call and failure"
+            `Quick
+            test_tool_observer_captures_actual_call_and_failure
         ] )
     ]
 ;;

@@ -1799,8 +1799,12 @@ type repository_change = {
   rc_conflicted : bool;
 }
 
+type repository_change_scope =
+  | Repository_change_project
+  | Repository_change_repository of string
+
 type repository_change_snapshot = {
-  rcs_repository_id : string;
+  rcs_scope : repository_change_scope;
   rcs_changes : repository_change list;
   rcs_total : int;
 }
@@ -3353,14 +3357,25 @@ let decode_repository_change json =
   let* rc_conflicted = required_bool_field json "conflicted" in
   Ok { rc_path; rc_staged; rc_unstaged; rc_untracked; rc_conflicted }
 
+let decode_repository_change_scope json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "project" -> Ok Repository_change_project
+  | "repository" ->
+      let* repository_id = required_string_field json "repository_id" in
+      Ok (Repository_change_repository repository_id)
+  | unknown ->
+      Error (Printf.sprintf "repository change scope has unknown kind %S" unknown)
+
 let decode_repository_change_snapshot json =
-  let* rcs_repository_id = required_string_field json "repository_id" in
+  let* scope_json = required_object_field json "scope" in
+  let* rcs_scope = decode_repository_change_scope scope_json in
   let* changes_json = required_list_field json "changes" in
   let* rcs_changes =
     decode_list "changes" decode_repository_change changes_json
   in
   let* rcs_total = required_int_field json "total" in
-  Ok { rcs_repository_id; rcs_changes; rcs_total }
+  Ok { rcs_scope; rcs_changes; rcs_total }
 
 let decode_memory_alert json =
   let* ma_code = required_string_field json "code" in

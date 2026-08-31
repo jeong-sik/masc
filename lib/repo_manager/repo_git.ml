@@ -474,12 +474,15 @@ let status_files_of_porcelain_z output =
     (Stdlib.Ok []) records
   |> Result.map List.rev
 
-let status_files ?(timeout_sec = inspection_timeout_sec) ~repository () =
+let status_files_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   match
-    run_git_raw ~cwd:repository.local_path ~env:read_only_git_env ~timeout_sec
+    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec
       [ "--no-optional-locks"; "status"; "--porcelain=v1"; "-z"
       ; "--no-renames"; "--untracked-files=normal"
       ]
   with
   | Stdlib.Error msg -> Stdlib.Error msg
   | Stdlib.Ok output -> status_files_of_porcelain_z output
+
+let status_files ?timeout_sec ~repository () =
+  status_files_at ?timeout_sec ~local_path:repository.local_path ()

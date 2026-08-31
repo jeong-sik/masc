@@ -1053,6 +1053,13 @@ let load_memory_health ~(host : string) ~(port : int) :
   | Error err -> Error ("memory health load failed: " ^ err)
   | Ok json -> Tui_decode.decode_memory_health_snapshot json
 
+(** Load the current project's Git working-tree changes. *)
+let load_project_changes ~(host : string) ~(port : int) :
+    (Tui_decode.repository_change_snapshot, string) result =
+  match fetch_project_changes ~host ~port with
+  | Error err -> Error ("project changes load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_repository_change_snapshot json
+
 (** Load a keeper's file changes from /api/v1/keepers/:name/file-changes. *)
 let load_keeper_file_changes ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(window_hours : float) :

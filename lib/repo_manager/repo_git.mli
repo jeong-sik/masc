@@ -143,3 +143,11 @@ val status_files :
     conflicted path. It uses porcelain-v1's NUL-delimited form, so spaces,
     newlines, non-ASCII bytes, and Git's display quoting never change a path's
     identity. Rename detection is disabled so every row has exactly one path. *)
+
+val status_files_at :
+  ?timeout_sec:float -> local_path:string -> unit -> (status_file list, string) result
+(** [status_files_at ~local_path] is the path-based form used by workspace
+    routes whose Git checkout is not registered in {!Repo_store}. It runs the
+    same read-only, NUL-delimited status command as {!status_files}. The caller
+    remains responsible for proving that [local_path] is the requested scope's
+    repository root. *)

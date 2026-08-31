@@ -642,6 +642,15 @@ let repository_owning ~base ~path =
   in
   walk (Filename.dirname path)
 
+let git_status_file_json (change : Repo_git.status_file) =
+  `Assoc
+    [ ("path", `String change.path)
+    ; ("staged", `Bool change.staged)
+    ; ("unstaged", `Bool change.unstaged)
+    ; ("untracked", `Bool change.untracked)
+    ; ("conflicted", `Bool change.conflicted)
+    ]
+
 module For_testing = struct
   let sanitize_log_value = sanitize_log_value
   let observe_workspace_route_failure = observe_workspace_route_failure
@@ -919,6 +928,51 @@ let add_routes router =
            in
            json_response_with_source_and_base
              ~status:`OK ~source ~base_path:base request reqd json)
+         request reqd)
+
+  |> Http.Router.get "/api/v1/git/status" (fun request reqd ->
+       with_public_read
+         (fun state _req reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           let scope =
+             match source with
+             | `Project -> Some (`Assoc [ ("kind", `String "project") ])
+             | `Repository id ->
+                 Some
+                   (`Assoc
+                      [ ("kind", `String "repository")
+                      ; ("repository_id", `String id)
+                      ])
+             | `RepositoryMissing _ | `RepositoryUnknown _
+             | `Playground _ | `PlaygroundMissing _ | `KeeperUnknown _ ->
+                 None
+           in
+           match scope with
+           | None ->
+               json_response ~status:`Not_found request reqd
+                 (json_error "Git status needs a project or repository workspace")
+           | Some scope ->
+               (* Git itself walks above [base]. A status request has no file
+                  path from which to find an owning nested checkout, so only
+                  the repository rooted exactly at the requested workspace is
+                  a truthful answer. *)
+               if not (Sys.file_exists (Filename.concat base ".git")) then
+                 json_response ~status:`Not_found request reqd
+                   (json_error "No Git repository at this workspace root")
+               else
+                 (match Repo_git.status_files_at ~local_path:base () with
+                  | Error detail ->
+                      json_response ~status:`Internal_server_error request reqd
+                        (json_error detail)
+                  | Ok changes ->
+                      json_response_with_source ~status:`OK ~source request reqd
+                        (`Assoc
+                           [ ("scope", scope)
+                           ; ( "changes"
+                             , `List (List.map git_status_file_json changes) )
+                           ; ("total", `Int (List.length changes))
+                           ])))
          request reqd)
 
   |> Http.Router.get "/api/v1/workspace/children" (fun request reqd ->

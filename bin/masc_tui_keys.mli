@@ -63,6 +63,10 @@ val footer_hints_lane_notice : string
 (** The Lanes lane-notice footer. The pane is static, so it keeps only the
     way back plus the shared tail. *)
 
+val footer_hints_git_changes : string
+(** The shared Git changes list under Repositories and Code. It omits actions
+    such as repository registration that do not act on a changed-file row. *)
+
 val keeper_detail_tab_bindings :
   Masc_tui_types.keeper_detail_tab -> binding list
 (** A detail tab's own keys. Separate from {!for_surface} because they are

@@ -331,8 +331,7 @@ let test_status_files_preserve_paths_and_axes () =
        | Error e -> Alcotest.fail ("git commit failed: " ^ e));
       write_file tracked "modified\n";
       write_file (Filename.concat source "새 파일.txt") "new\n";
-      let repo = sample_repo ~url:source source in
-      match Repo_git.status_files ~repository:repo () with
+      match Repo_git.status_files_at ~local_path:source () with
       | Error e -> Alcotest.fail ("status files failed: " ^ e)
       | Ok files ->
           let find path = List.find_opt (fun row -> row.Repo_git.path = path) files in

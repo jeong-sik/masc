@@ -5981,7 +5981,7 @@ def repositories_path_interaction(
     for width, frame in ((80, changes_narrow), (140, changes_wide)):
         changes_plain = CSI_RE.sub(b"", frame).decode("utf-8")
         for needle in (
-            "MASC Repository Changes",
+            "MASC Git Changes",
             "staged+worktree",
             "lib/changed file.ml",
             "untracked",
@@ -6008,6 +6008,61 @@ def repositories_path_interaction(
     if "masc ▸ /" not in code_plain:
         raise AssertionError(
             f"the Code header does not name the repository: {code_plain!r}"
+        )
+    os.write(master_fd, b"q")
+
+
+def project_changes_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """List an unregistered project's Git changes from Code, return to the
+    tree, then reopen the list and enter the selected file."""
+    tab_until(process, master_fd, output, b"README.md")
+    changes_wide = send_and_wait(process, master_fd, output, b"d", b"lib/a.ml")
+    changes_narrow = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=18,
+        columns=80,
+        needle=b"lib/a.ml",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    for width, frame in ((80, changes_narrow), (140, changes_wide)):
+        plain = CSI_RE.sub(b"", frame).decode("utf-8")
+        for needle in (
+            "MASC Git Changes",
+            "Project workspace",
+            "worktree",
+            "lib/a.ml",
+            "untracked",
+            "새 파일.txt",
+        ):
+            if needle not in plain:
+                raise AssertionError(
+                    f"{width}-column project Git changes omitted "
+                    f"{needle!r}: {plain!r}"
+                )
+    tree = send_and_wait(process, master_fd, output, b"\x1b", b"README.md")
+    if "MASC Git Changes" in CSI_RE.sub(b"", tree).decode("utf-8"):
+        raise AssertionError("Esc did not return from project changes to Code")
+    send_and_wait(process, master_fd, output, b"d", b"lib/a.ml")
+    opened = send_and_wait(
+        process, master_fd, output, b"\r", b"lib/a.ml  [j/k]"
+    )
+    opened_plain = CSI_RE.sub(b"", opened).decode("utf-8")
+    if "let x = 1" not in opened_plain:
+        raise AssertionError(
+            f"Enter opened the file without its highlighted content: {opened_plain!r}"
+        )
+    if "Project workspace" in opened_plain:
+        raise AssertionError(
+            "Enter left the project changes overlay open instead of opening code"
         )
     os.write(master_fd, b"q")
 
@@ -9408,7 +9463,7 @@ def run_repositories_regression(executable: str) -> None:
     fixtures["/api/v1/repositories/masc/changes"] = (
         200,
         {
-            "repository_id": "masc",
+            "scope": {"kind": "repository", "repository_id": "masc"},
             "changes": [
                 {"path": "lib/changed file.ml", "staged": True,
                  "unstaged": True, "untracked": False, "conflicted": False},
@@ -9430,6 +9485,31 @@ def run_repositories_regression(executable: str) -> None:
         executable,
         description="Repositories show paths, Git changes, and the Code tree",
         interact=repositories_path_interaction,
+        http_fixtures=fixtures,
+    )
+
+
+def run_project_changes_regression(executable: str) -> None:
+    fixtures = code_lane_fixtures()
+    fixtures["/api/v1/git/status"] = (
+        200,
+        {
+            "scope": {"kind": "project"},
+            "changes": [
+                {"path": "lib/a.ml", "staged": False,
+                 "unstaged": True, "untracked": False,
+                 "conflicted": False},
+                {"path": "새 파일.txt", "staged": False,
+                 "unstaged": False, "untracked": True,
+                 "conflicted": False},
+            ],
+            "total": 2,
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Code lists current project Git changes and opens a file",
+        interact=project_changes_interaction,
         http_fixtures=fixtures,
     )
 
@@ -9490,6 +9570,10 @@ def main() -> None:
         run_repositories_regression(os.path.abspath(sys.argv[1]))
         print("tui Repositories regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "project-changes":
+        run_project_changes_regression(os.path.abspath(sys.argv[1]))
+        print("tui project Git changes regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "config":
         run_config_regression(os.path.abspath(sys.argv[1]))
         print("tui Config regression: PASS")
@@ -9505,7 +9589,7 @@ def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
-            "[cli-base-path|planning-review|repositories|config|chat-clarity|runtime]"
+            "[cli-base-path|planning-review|repositories|project-changes|config|chat-clarity|runtime]"
         )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")

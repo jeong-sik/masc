@@ -8330,9 +8330,10 @@ let render_repository_changes (state : state) =
     | Some snapshot -> snapshot.Masc.Tui_decode.rcs_changes
     | None -> []
   in
-  let repo_name =
-    match state.repository_changes_repo_id, state.repositories with
-    | Some id, Some snapshot ->
+  let scope_name =
+    match state.repository_changes_scope, state.repositories with
+    | Some Tui_decode.Repository_change_project, _ -> "Project workspace"
+    | Some (Tui_decode.Repository_change_repository id), Some snapshot ->
         (match
            List.find_opt
              (fun (repo : Masc.Tui_decode.repository) ->
@@ -8341,16 +8342,16 @@ let render_repository_changes (state : state) =
          with
          | Some repo -> repo.rp_name
          | None -> id)
-    | Some id, None -> id
-    | None, _ -> "repository"
+    | Some (Tui_decode.Repository_change_repository id), None -> id
+    | None, _ -> "Git workspace"
   in
   let title =
-    Printf.sprintf " MASC Repository Changes — %s (%d)  %s"
-      (Terminal_text.single_line repo_name) (List.length changes)
+    Printf.sprintf " MASC Git Changes — %s (%d)  %s"
+      (Terminal_text.single_line scope_name) (List.length changes)
       (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"repository-changes"
-    ~title ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~title ~hints:Masc_tui_keys.footer_hints_git_changes
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  %-18s %s" "State" "Path");
@@ -12571,7 +12572,9 @@ let render_surface (state : state) =
     | Config_models -> render_config_models state
     | Config_params -> render_runtime_params state)
   | Resources -> render_resources state
-  | Code -> render_code state
+  | Code ->
+      if state.repository_changes_open then render_repository_changes state
+      else render_code state
   | Tools -> render_tools state
   | Acting -> render_acting state
   | System_logs -> render_system_logs state

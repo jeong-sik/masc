@@ -552,8 +552,12 @@ type repository_change = {
   rc_conflicted : bool;
 }
 
+type repository_change_scope =
+  | Repository_change_project
+  | Repository_change_repository of string
+
 type repository_change_snapshot = {
-  rcs_repository_id : string;
+  rcs_scope : repository_change_scope;
   rcs_changes : repository_change list;
   rcs_total : int;
 }

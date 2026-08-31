@@ -333,7 +333,8 @@ let for_surface = function
           ~help:"in the notes view: add one through the $EDITOR form \
                  (kind: Comment / Decision / Question / Bookmark)"
       ; b Act "d" "diff"
-          ~help:"the open file's working tree against HEAD (d or Esc closes)"
+          ~help:"on the project tree, list every working-tree change; on an \
+                 open file, show that file's diff against HEAD"
       ; b Act "Enter (history)" "open"
           ~help:"a commit answers with its pull request, from its (#N) and \
                  the repository's remote"
@@ -435,6 +436,14 @@ let footer_hints_lanes_run_detail ~scroll ~max_scroll =
 let footer_hints_lane_notice =
   hints_of_bindings
     ([ b Act "Left / Esc" "back" ~help:"back to the lane overview" ]
+     @ listing_meta)
+
+let footer_hints_git_changes =
+  hints_of_bindings
+    ([ b Navigate "j/k" "move"
+     ; b Act "Enter" "open file"
+     ; b Act "Left / Esc" "back"
+     ]
      @ listing_meta)
 
 (* One section per surface family; the strip's spelling names it. Keepers

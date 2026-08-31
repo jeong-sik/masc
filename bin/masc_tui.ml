@@ -1397,7 +1397,8 @@ type async_msg =
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
   | Repository_changes_loaded of
-      string * (Masc.Tui_decode.repository_change_snapshot, string) result
+      Masc.Tui_decode.repository_change_scope
+      * (Masc.Tui_decode.repository_change_snapshot, string) result
   (* Carries the keeper it was asked about. The surface can be pointed at a
      different keeper while a load is in flight, and an answer that did not
      say whose it was would be filed under whoever is selected when it
@@ -3184,18 +3185,33 @@ let launch_memory_health_load state ~mailbox =
   | None ->
       enqueue_async mailbox (Memory_loaded (Error "Eio switch is unavailable"))
 
-let launch_repository_changes_load state ~mailbox ~repository_id =
+let repository_change_scope_equal left right =
+  match left, right with
+  | Tui_decode.Repository_change_project, Tui_decode.Repository_change_project ->
+      true
+  | ( Tui_decode.Repository_change_repository left_id
+    , Tui_decode.Repository_change_repository right_id ) ->
+      String.equal left_id right_id
+  | Tui_decode.Repository_change_project, Tui_decode.Repository_change_repository _
+  | Tui_decode.Repository_change_repository _, Tui_decode.Repository_change_project ->
+      false
+
+let launch_repository_changes_load state ~mailbox ~scope =
   let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
       try
-        Masc_tui_loader.load_repository_changes ~host ~port ~repository_id
+        match scope with
+        | Tui_decode.Repository_change_project ->
+            Masc_tui_loader.load_project_changes ~host ~port
+        | Tui_decode.Repository_change_repository repository_id ->
+            Masc_tui_loader.load_repository_changes ~host ~port ~repository_id
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Repository_changes_loaded (repository_id, result))
+    enqueue_async mailbox (Repository_changes_loaded (scope, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3205,7 +3221,52 @@ let launch_repository_changes_load state ~mailbox ~repository_id =
   | None ->
       enqueue_async mailbox
         (Repository_changes_loaded
-           (repository_id, Error "Eio switch is unavailable"))
+           (scope, Error "Eio switch is unavailable"))
+
+let open_repository_changes state ~mailbox ~scope =
+  state.repository_changes_open <- true;
+  state.repository_changes_scope <- Some scope;
+  state.repository_changes <- None;
+  state.repository_changes_error <- None;
+  state.repository_changes_cursor <- 0;
+  state.repository_changes_scroll <- 0;
+  launch_repository_changes_load state ~mailbox ~scope
+
+let close_repository_changes state =
+  state.repository_changes_open <- false;
+  state.repository_changes_scope <- None;
+  state.repository_changes <- None;
+  state.repository_changes_error <- None;
+  state.repository_changes_cursor <- 0;
+  state.repository_changes_scroll <- 0
+
+let refresh_repository_changes state ~mailbox =
+  match state.repository_changes_scope with
+  | None -> ()
+  | Some scope ->
+      state.repository_changes <- None;
+      state.repository_changes_error <- None;
+      launch_repository_changes_load state ~mailbox ~scope
+
+let open_repository_change_in_code state ~mailbox ~scope
+    (change : Tui_decode.repository_change) =
+  state.code_scope <-
+    (match scope with
+     | Tui_decode.Repository_change_project -> Code_scope_project
+     | Tui_decode.Repository_change_repository repository_id ->
+         Code_scope_repo repository_id);
+  let parent = Filename.dirname change.rc_path in
+  state.code_dir <- (if String.equal parent "." then "" else parent);
+  state.code_cursor <- 0;
+  state.code_entries <- [];
+  state.code_entries_error <- None;
+  state.code_file <- None;
+  state.code_file_error <- None;
+  state.code_focus_file <- Left_pane;
+  close_repository_changes state;
+  state.view <- Code;
+  launch_code_entries_load state ~mailbox;
+  launch_code_file_load state ~mailbox ~path:change.rc_path
 
 (* Where the change is on this machine.
 
@@ -3597,7 +3658,9 @@ let search_row_cursor state =
   | Runtime -> Some state.runtime_cursor
   | System_logs -> Some state.system_logs_cursor
   | Code ->
-      if
+      if state.repository_changes_open then
+        Some state.repository_changes_cursor
+      else if
         state.code_focus_file = Right_pane && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
       then Some state.code_file_cursor
@@ -3667,7 +3730,12 @@ let search_land state index =
       state.system_logs_cursor <- index;
       follow state.system_logs_scroll (fun s -> state.system_logs_scroll <- s)
   | Code ->
-      if
+      if state.repository_changes_open then begin
+        state.repository_changes_cursor <- index;
+        follow state.repository_changes_scroll
+          (fun s -> state.repository_changes_scroll <- s)
+      end
+      else if
         state.code_focus_file = Right_pane && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
       then begin
@@ -3738,6 +3806,8 @@ let search_jump ?(backwards = false) state ~query ~after =
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
 let goto_surface state ~mailbox (destination : surface) =
+  if state.repository_changes_open && destination <> state.view then
+    close_repository_changes state;
   if state.view = Lanes || destination = Lanes then
     state.lanes_action_error <- None;
   (match destination with
@@ -8334,16 +8404,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.memory_health <- Some snapshot;
           state.memory_health_error <- None
       | Error detail -> state.memory_health_error <- Some detail)
-  | Repository_changes_loaded (repository_id, result) ->
+  | Repository_changes_loaded (scope, result) ->
       if
         state.repository_changes_open
-        && Option.equal String.equal state.repository_changes_repo_id
-             (Some repository_id)
+        && Option.equal repository_change_scope_equal
+             state.repository_changes_scope (Some scope)
       then
         (match result with
-         | Ok snapshot ->
+         | Ok snapshot when repository_change_scope_equal snapshot.rcs_scope scope ->
              state.repository_changes <- Some snapshot;
              state.repository_changes_error <- None
+         | Ok _ ->
+             state.repository_changes_error <-
+               Some "Git changes response belongs to a different workspace"
          | Error detail -> state.repository_changes_error <- Some detail)
   | Keeper_chat_file_changes_loaded (generation, keeper_name, result) ->
       let still_current =
@@ -11653,7 +11726,9 @@ and is loaded on demand through keeper_skill.
                  | Board_list | Board_compose -> ())
             | Keepers Keeper_detail -> state.keeper_detail_focus <- focus
             | Resources -> state.resource_focus <- focus
-            | Code when Option.is_some state.code_file ->
+            | Code
+              when Option.is_some state.code_file
+                   && not state.repository_changes_open ->
                 state.code_focus_file <- focus
             | Acting | Keepers _ | Lanes | Approvals | Planning | Schedules
             | Memory | Verification | Harness | Fusion | Repositories | Changes
@@ -11753,6 +11828,14 @@ and is loaded on demand through keeper_skill.
                scroll everywhere else. It answers to Enter now, which is what
                the footer has been advertising. *)
             | Config when state.config_pane = Config_themes -> ()
+            | Code when state.repository_changes_open ->
+                let cursor, scroll =
+                  move_row_cursor state ~delta:(direction * page)
+                    ~cursor:state.repository_changes_cursor
+                    ~scroll:state.repository_changes_scroll
+                in
+                state.repository_changes_cursor <- cursor;
+                state.repository_changes_scroll <- scroll
             | Code -> ()
             | Board ->
                 (match state.board_mode with
@@ -11879,7 +11962,10 @@ and is loaded on demand through keeper_skill.
              ~mailbox:async_messages;
            (* Also reload logs / Board detail if viewing them. *)
            (match state.view with
-            | Code -> launch_code_entries_load state ~mailbox:async_messages
+            | Code ->
+                if state.repository_changes_open then
+                  refresh_repository_changes state ~mailbox:async_messages
+                else launch_code_entries_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->
                 load_keeper_logs_if_safe state base_path 200
                   (List.nth_opt state.keepers state.keeper_cursor)
@@ -11931,13 +12017,7 @@ and is loaded on demand through keeper_skill.
             | Memory -> launch_memory_health_load state ~mailbox:async_messages
             | Repositories ->
                 if state.repository_changes_open then
-                  (match state.repository_changes_repo_id with
-                   | Some repository_id ->
-                       state.repository_changes <- None;
-                       state.repository_changes_error <- None;
-                       launch_repository_changes_load state
-                         ~mailbox:async_messages ~repository_id
-                   | None -> ())
+                  refresh_repository_changes state ~mailbox:async_messages
                 else launch_repositories_load state ~mailbox:async_messages
             | Changes -> (
                 match state.changes_keeper with
@@ -11990,7 +12070,9 @@ and is loaded on demand through keeper_skill.
                    && state.theme_before_preview <> None ->
                 cancel_theme_preview ()
             | Code ->
-                if state.code_notes_open then state.code_notes_open <- false
+                if state.repository_changes_open then
+                  close_repository_changes state
+                else if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -12156,14 +12238,8 @@ and is loaded on demand through keeper_skill.
                      roster rather than to Overview. *)
                   state.view <- Keepers Keeper_list
             | Repositories ->
-                if state.repository_changes_open then begin
-                  state.repository_changes_open <- false;
-                  state.repository_changes_repo_id <- None;
-                  state.repository_changes <- None;
-                  state.repository_changes_error <- None;
-                  state.repository_changes_cursor <- 0;
-                  state.repository_changes_scroll <- 0
-                end
+                if state.repository_changes_open then
+                  close_repository_changes state
                 else state.view <- Overview
             | Runtime ->
                 if Option.is_some state.runtime_detail_target then begin
@@ -12179,7 +12255,9 @@ and is loaded on demand through keeper_skill.
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.code_notes_open then state.code_notes_open <- false
+                if state.repository_changes_open then
+                  close_repository_changes state
+                else if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -12247,12 +12325,7 @@ and is loaded on demand through keeper_skill.
                 state.harness_detail_scroll <- 0
             | Resources -> state.resource_focus <- Left_pane
             | Repositories when state.repository_changes_open ->
-                state.repository_changes_open <- false;
-                state.repository_changes_repo_id <- None;
-                state.repository_changes <- None;
-                state.repository_changes_error <- None;
-                state.repository_changes_cursor <- 0;
-                state.repository_changes_scroll <- 0
+                close_repository_changes state
             | Changes ->
                 state.changes_diff_row <- None;
                 state.changes_diff_scroll <- 0;
@@ -12286,7 +12359,15 @@ and is loaded on demand through keeper_skill.
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Code ->
-                if state.code_focus_file = Right_pane then (
+                if state.repository_changes_open then
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:1
+                      ~cursor:state.repository_changes_cursor
+                      ~scroll:state.repository_changes_scroll
+                  in
+                  state.repository_changes_cursor <- cursor;
+                  state.repository_changes_scroll <- scroll
+                else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
                     match state.code_notes with
                     | Some (_, notes) ->
@@ -12640,7 +12721,15 @@ and is loaded on demand through keeper_skill.
        | Some "k" | Some "up" | Some "wheel-up" ->
            (match state.view with
             | Code ->
-                if state.code_focus_file = Right_pane then (
+                if state.repository_changes_open then
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:(-1)
+                      ~cursor:state.repository_changes_cursor
+                      ~scroll:state.repository_changes_scroll
+                  in
+                  state.repository_changes_cursor <- cursor;
+                  state.repository_changes_scroll <- scroll
+                else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then
                     state.code_notes_scroll <-
                       max 0 (state.code_notes_scroll - 1)
@@ -12977,7 +13066,19 @@ and is loaded on demand through keeper_skill.
               makes detail -> list consistent across the TUI. *)
            (match state.view with
             | Code -> (
-                if state.code_history_open then (
+                if state.repository_changes_open then
+                  (match state.repository_changes, state.repository_changes_scope with
+                   | Some snapshot, Some scope ->
+                       (match
+                          List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                            state.repository_changes_cursor
+                        with
+                        | None -> ()
+                        | Some change ->
+                            open_repository_change_in_code state
+                              ~mailbox:async_messages ~scope change)
+                   | _ -> ())
+                else if state.code_history_open then (
                   (* The top visible row is the selected one, the way the
                      Changes list treats its scroll. A commit answers with
                      its PR -- the subject's "(#N)" against the repository's
@@ -13171,29 +13272,16 @@ and is loaded on demand through keeper_skill.
                         state.changes_tree_diff_error <- None;
                         state.changes_tree_diff_path <- None))
             | Repositories when state.repository_changes_open -> (
-                match state.repository_changes, state.repository_changes_repo_id with
-                | Some snapshot, Some repository_id ->
+                match state.repository_changes, state.repository_changes_scope with
+                | Some snapshot, Some scope ->
                     (match
                        List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
                          state.repository_changes_cursor
                      with
                      | None -> ()
                      | Some change ->
-                         state.code_scope <- Code_scope_repo repository_id;
-                         let parent = Filename.dirname change.rc_path in
-                         state.code_dir <-
-                           (if String.equal parent "." then "" else parent);
-                         state.code_cursor <- 0;
-                         state.code_entries <- [];
-                         state.code_entries_error <- None;
-                         state.code_file <- None;
-                         state.code_file_error <- None;
-                         state.code_focus_file <- Left_pane;
-                         state.view <- Code;
-                         launch_code_entries_load state
-                           ~mailbox:async_messages;
-                         launch_code_file_load state ~mailbox:async_messages
-                           ~path:change.rc_path)
+                         open_repository_change_in_code state
+                           ~mailbox:async_messages ~scope change)
                 | _ -> ())
             | Memory -> (
                 (* The detail panel already follows the cursor, so Enter has
@@ -13329,15 +13417,19 @@ and is loaded on demand through keeper_skill.
                 state.runtime_pick_cursor <- 0;
                 state.view <- Keepers Keeper_list
             | None -> state.view <- Keepers Keeper_list)
+       | Some "d"
+         when state.view = Code
+              && (state.repository_changes_open
+                  || (state.code_scope = Code_scope_project
+                      && state.code_focus_file = Left_pane)) ->
+           if state.repository_changes_open then
+             refresh_repository_changes state ~mailbox:async_messages
+           else
+             open_repository_changes state ~mailbox:async_messages
+               ~scope:Tui_decode.Repository_change_project
        | Some "d" when state.view = Repositories ->
            if state.repository_changes_open then
-             (match state.repository_changes_repo_id with
-              | Some repository_id ->
-                  state.repository_changes <- None;
-                  state.repository_changes_error <- None;
-                  launch_repository_changes_load state
-                    ~mailbox:async_messages ~repository_id
-              | None -> ())
+             refresh_repository_changes state ~mailbox:async_messages
            else
              (match state.repositories with
               | None -> add_event state "error" "no repositories loaded yet"
@@ -13349,14 +13441,10 @@ and is loaded on demand through keeper_skill.
                    | None -> add_event state "error" "no repository under the cursor"
                    | Some repo ->
                        let repository_id = repo.Masc.Tui_decode.rp_id in
-                       state.repository_changes_open <- true;
-                       state.repository_changes_repo_id <- Some repository_id;
-                       state.repository_changes <- None;
-                       state.repository_changes_error <- None;
-                       state.repository_changes_cursor <- 0;
-                       state.repository_changes_scroll <- 0;
-                       launch_repository_changes_load state
-                         ~mailbox:async_messages ~repository_id))
+                       open_repository_changes state ~mailbox:async_messages
+                         ~scope:
+                           (Tui_decode.Repository_change_repository
+                              repository_id)))
        | Some "G" when state.view = Acting ->
            (* Past the end on purpose; the frame clamps it to the last page.
               The held count rather than max_int, because an event arriving

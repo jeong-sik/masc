@@ -175,6 +175,12 @@ let test_repository_changes_keep_the_git_axes () =
         (reads ~binding_name:"repository_change_status" ~fields:[ field ] > 0))
     [ "rc_staged"; "rc_unstaged"; "rc_untracked"; "rc_conflicted" ]
 
+let test_project_changes_use_the_requested_workspace_root () =
+  let producer = "lib/server/server_routes_http_routes_workspace.ml" in
+  Alcotest.(check int) "the project route reads status at the resolved root" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:producer
+       ~binding_name:"add_routes" ~callee:"Repo_git.status_files_at")
+
 (* The Lanes summary drew one mark for four states while the style beside it
    was green, red or grey. On a column of identical marks the lane failing 133
    of 1095 runs looked exactly like the four that were fine, and the only two
@@ -282,6 +288,8 @@ let () =
             test_repository_changes_keep_the_git_axes
         ; Alcotest.test_case "Memory surface keeps the starvation axes" `Quick
             test_memory_surface_keeps_the_starvation_axes
+        ; Alcotest.test_case "Project changes use the workspace root" `Quick
+            test_project_changes_use_the_requested_workspace_root
         ; Alcotest.test_case "a turn on a keeper that is not running stops"
             `Quick test_a_turn_on_a_keeper_that_is_not_running_stops_moving
         ; Alcotest.test_case "a lane that cannot admit says why" `Quick

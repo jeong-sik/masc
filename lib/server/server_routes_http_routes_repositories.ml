@@ -350,7 +350,11 @@ let handle_list_repository_changes state id req reqd =
        | Ok changes ->
            Http.Response.json_value ~request:req
              (`Assoc
-                [ ("repository_id", `String id)
+                [ ( "scope"
+                  , `Assoc
+                      [ ("kind", `String "repository")
+                      ; ("repository_id", `String id)
+                      ] )
                 ; ("changes", `List (List.map repository_change_json changes))
                 ; ("total", `Int (List.length changes))
                 ])

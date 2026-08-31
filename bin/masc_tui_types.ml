@@ -1901,7 +1901,7 @@ type state = {
   mutable memory_health_scroll: int;
   mutable memory_health_cursor: int;
   mutable repository_changes_open: bool;
-  mutable repository_changes_repo_id: string option;
+  mutable repository_changes_scope: Tui_decode.repository_change_scope option;
   mutable repository_changes: Tui_decode.repository_change_snapshot option;
   mutable repository_changes_error: string option;
   mutable repository_changes_scroll: int;
@@ -2532,7 +2532,7 @@ let create_state
   memory_health_scroll = 0;
   memory_health_cursor = 0;
   repository_changes_open = false;
-  repository_changes_repo_id = None;
+  repository_changes_scope = None;
   repository_changes = None;
   repository_changes_error = None;
   repository_changes_scroll = 0;
@@ -3118,6 +3118,11 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = Some changes_preview_keep_rows
         }
+  | Code when state.repository_changes_open ->
+      listing ~error:state.repository_changes_error
+        (match state.repository_changes with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.rcs_changes)
   | Connectors ->
       listing ~error:state.connectors_error
         (match state.connectors with
@@ -3268,9 +3273,15 @@ let surface_row_texts (state : state) : surface -> string list option = function
             s.Tui_decode.sys_entries)
         state.system_logs
   | Code ->
-      (* With a file focused (and no overlay over it), "/" searches the
-         file's own lines; otherwise it searches the tree, as it always
-         has. The overlays keep their own j/k and are not searched. *)
+      if state.repository_changes_open then
+        Option.map
+          (fun s ->
+            List.map (fun row -> row.Tui_decode.rc_path) s.Tui_decode.rcs_changes)
+          state.repository_changes
+      else
+      (* The Git changes overlay is a row list of its own. Otherwise, with a
+         file focused (and no file overlay over it), "/" searches the file's
+         lines; the tree remains the default search list. *)
       if
         state.code_focus_file = Right_pane && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open

@@ -1585,6 +1585,11 @@ let fetch_keeper_memory_health ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/keeper-memory-health"
 
+(** Fetch Git working-tree changes for the current project workspace. *)
+let fetch_project_changes ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/git/status"
+
 (** Fetch /api/v1/dashboard/harness-health. No window is passed: the surface
     shows what the harness decided recently, and a window is a question an
     operator asks in the dashboard rather than a default. *)

@@ -111,6 +111,11 @@ let test_repositories_footer_offers_code_and_git_changes () =
     "j/k:scroll  Enter:browse  d:Git changes  a:add  Left / Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Repositories)
 
+let test_git_changes_footer_names_only_changed_file_actions () =
+  check str "Git changes has one shared row footer"
+    "j/k:move  Enter:open file  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    Masc_tui_keys.footer_hints_git_changes
+
 let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before
      the two-press approve or the $EDITOR reject reason changes it. *)
@@ -595,6 +600,8 @@ let () =
             test_harness_footer_links_to_overview_task
         ; Alcotest.test_case "Repositories offers Code and Git changes" `Quick
             test_repositories_footer_offers_code_and_git_changes
+        ; Alcotest.test_case "Git changes has changed-file actions only" `Quick
+            test_git_changes_footer_names_only_changed_file_actions
         ; Alcotest.test_case "Verification carries the verdict keys" `Quick
             test_verification_footer_carries_the_verdict_keys
         ; Alcotest.test_case "Fusion pins the shared list projection" `Quick

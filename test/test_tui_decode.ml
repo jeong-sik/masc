@@ -2648,7 +2648,11 @@ let test_decode_memory_health_keeps_starvation_axes () =
 let test_decode_repository_changes_keeps_git_axes () =
   let json =
     `Assoc
-      [ ("repository_id", `String "masc")
+      [ ( "scope"
+        , `Assoc
+            [ ("kind", `String "repository")
+            ; ("repository_id", `String "masc")
+            ] )
       ; ( "changes"
         , `List
             [ `Assoc
@@ -2664,13 +2668,35 @@ let test_decode_repository_changes_keeps_git_axes () =
   in
   match Tui_decode.decode_repository_change_snapshot json with
   | Error err -> Alcotest.failf "decode failed: %s" err
-  | Ok { Tui_decode.rcs_repository_id = "masc"; rcs_changes = [ row ]; rcs_total = 1 } ->
+  | Ok
+      { Tui_decode.rcs_scope = Repository_change_repository "masc"
+      ; rcs_changes = [ row ]
+      ; rcs_total = 1
+      } ->
       Alcotest.(check string) "path" "lib/a file.ml" row.rc_path;
       Alcotest.(check bool) "staged" true row.rc_staged;
       Alcotest.(check bool) "unstaged" true row.rc_unstaged;
       Alcotest.(check bool) "not untracked" false row.rc_untracked;
       Alcotest.(check bool) "not conflicted" false row.rc_conflicted
   | Ok _ -> Alcotest.fail "unexpected repository changes shape"
+
+let test_decode_project_changes_keeps_project_scope () =
+  let json =
+    `Assoc
+      [ ("scope", `Assoc [ ("kind", `String "project") ])
+      ; ("changes", `List [])
+      ; ("total", `Int 0)
+      ]
+  in
+  match Tui_decode.decode_repository_change_snapshot json with
+  | Ok
+      { Tui_decode.rcs_scope = Repository_change_project
+      ; rcs_changes = []
+      ; rcs_total = 0
+      } ->
+      ()
+  | Ok _ -> Alcotest.fail "unexpected project changes shape"
+  | Error err -> Alcotest.failf "decode failed: %s" err
 
 (* Keeper lane rows. Shape is the light projection the TUI reads from
    [GET /api/v1/keepers/composite]. *)
@@ -5644,6 +5670,8 @@ let () =
           test_decode_repository_changes_keeps_git_axes;
         Alcotest.test_case "memory health keeps starvation axes" `Quick
           test_decode_memory_health_keeps_starvation_axes;
+        Alcotest.test_case "project changes keep project scope" `Quick
+          test_decode_project_changes_keeps_project_scope;
       ] );
     ( "decode_keeper_lanes",
       [

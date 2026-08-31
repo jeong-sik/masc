@@ -797,6 +797,13 @@ or a registered repository after `Enter` on a Repositories row
 (`masc ▸ /`). `Esc` at a scoped root returns to the project tree. The three
 scopes are one field, so the surface cannot read two workspaces at once.
 
+프로젝트 tree에 초점이 있을 때 `d`를 누르면 현재 프로젝트의 Git 변경
+파일을 모두 보여준다. 이 프로젝트는 Repositories에 등록되어 있지 않아도
+된다. 목록은 staged, worktree, untracked, conflict를 구분하고, `Enter`로
+선택한 파일을 연다. Left 또는 `Esc`를 누르면 같은 프로젝트 tree로
+돌아간다. 파일 pane에 초점이 있을 때의 `d`는 아래처럼 그 파일 하나의
+diff를 연다.
+
 An open file arrives whole and is lexed once — OCaml (nested comments
 included), bash, JSON, the curly-brace family (TypeScript/JavaScript,
 C/C++, Go, Rust, Java, and their kin: `//` and `/* */` comments, strings,
@@ -976,6 +983,7 @@ Per surface:
 | `x` | Verification | Reject it, with a reason through `$EDITOR` |
 | Right / `Enter` | Repositories | Browse the repository's tree on the Code surface |
 | `d` | Repositories | Show the repository's current Git working-tree changes |
+| `d` | Code, project tree focused | Show every Git change in the current project, even when it is not registered |
 | Right / `Enter` | Code | Drill into a directory / open the file |
 | Left / `Esc` | Code | Close the overlay, then the file, then climb a directory |
 | `/`, `n` / `N` | Code | Jump the tree cursor to a match |

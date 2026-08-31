@@ -2050,6 +2050,11 @@ type state = {
   mutable system_logs_error: string option;
   mutable system_logs_scroll: int;
   mutable system_logs_cursor: int;
+  (* The Logs filters. The level floor travels to the server (it decides what
+     the page fetches); the category narrows what the fetched page shows, its
+     vocabulary being whatever categories the loaded rows carry. *)
+  mutable system_logs_min_level: Tui_decode.system_log_level option;
+  mutable system_logs_category: string option;
   mutable msg_input: Buffer.t;
   (* Images staged with :attach, sent with the next message and cleared by the
      send. Held next to the draft because they are part of the same unsent
@@ -2610,6 +2615,8 @@ let create_state
   verification_verdict_error = None;
   system_logs_scroll = 0;
   system_logs_cursor = 0;
+  system_logs_min_level = None;
+  system_logs_category = None;
   msg_input = Buffer.create 256;
   msg_attachments = [];
   msg_target_keeper_name = None;

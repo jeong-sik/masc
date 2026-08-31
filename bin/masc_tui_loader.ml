@@ -974,10 +974,11 @@ let load_overview ~(host : string) ~(port : int) :
           ov_generated_at;
         }
 
-(** Load the system log page from /api/v1/dashboard/logs *)
-let load_system_logs ~(host : string) ~(port : int) ~(limit : int) :
+(** Load the system log page from /api/v1/dashboard/logs. [level] is the
+    minimum-level floor in the route's lowercase spelling. *)
+let load_system_logs ~(host : string) ~(port : int) ?level ~(limit : int) () :
     (system_log_snapshot, string) result =
-  match fetch_dashboard_logs ~host ~port ~limit with
+  match fetch_dashboard_logs ~host ~port ?level ~limit () with
   | Error err -> Error ("system logs load failed: " ^ err)
   | Ok json -> Tui_decode.decode_system_log_snapshot json
 

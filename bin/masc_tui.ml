@@ -1482,6 +1482,7 @@ type async_msg =
   | Board_vote_done of (string, string) result
   | Goal_transition_done of (string, string) result
   | Schedules_loaded of (schedule_snapshot, string) result
+  | System_logs_loaded of (system_log_snapshot, string) result
   | Schedule_cancel_done of (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
   | Verification_verdict_done of (string * bool, string) result
@@ -5375,6 +5376,25 @@ let apply_system_logs_load state = function
          it is stale rather than letting it read as a fresh zero. *)
       state.system_logs_error <- Some detail
 
+(* Refetch the Logs page outside the surface tick — the level floor changes
+   what the server sends, so the page cannot be re-trimmed locally. Same
+   fiber-and-mailbox shape as the other one-surface loads. *)
+let launch_system_logs_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let level =
+    Option.map Masc.Tui_decode.system_log_level_query
+      state.system_logs_min_level
+  in
+  let run_load () =
+    enqueue_async mailbox
+      (System_logs_loaded
+         (load_system_logs ~host ~port ?level ~limit:system_log_page ()))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_load
+  | None -> run_load ()
+
 let apply_fleet_safety_load state = function
   | Ok fleet ->
       state.fleet_safety <- Some fleet;
@@ -5529,7 +5549,7 @@ let refresh_status results =
   | _ -> Masc_tui_types.Degraded
 
 let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
-    ~board_hearth ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Only the Overview row shows this, so a refresh on another surface does not
      spend a request on it. [None] leaves whatever the last read observed. *)
@@ -5560,7 +5580,8 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
   in
   let http_system_logs =
     when_needed needs.needs_system_logs (fun () ->
-        load_system_logs ~host ~port ~limit:system_log_page)
+        load_system_logs ~host ~port ?level:system_log_level
+          ~limit:system_log_page ())
   in
   let http_fleet_safety =
     when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
@@ -5581,7 +5602,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
   }
 
 let load_http_surfaces ~host ~port ~approval_generation ~board_sort
-    ~board_hearth ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
   let http_overview = load_overview ~host ~port in
   let http_approvals =
     Option.map
@@ -5595,7 +5616,7 @@ let load_http_surfaces ~host ~port ~approval_generation ~board_sort
   let http_server_identity = load_server_identity ~host ~port in
   let http_scoped =
     load_http_scoped_surfaces ~host ~port ~approval_generation:None ~board_sort
-      ~board_hearth ~needs
+      ~board_hearth ~system_log_level ~needs
   in
   { http_overview; http_approvals; http_scoped; http_server_identity }
 
@@ -5952,7 +5973,11 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           (Http_refresh_done
              (load_http_surfaces ~host ~port ~approval_generation
                 ~board_sort:state.board_sort
-                ~board_hearth:state.board_hearth ~needs))
+                ~board_hearth:state.board_hearth
+                ~system_log_level:
+                  (Option.map Masc.Tui_decode.system_log_level_query
+                     state.system_logs_min_level)
+                ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -5971,7 +5996,11 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
              apply_http_surfaces state
                (load_http_surfaces ~host ~port ~approval_generation
                   ~board_sort:state.board_sort
-                ~board_hearth:state.board_hearth ~needs))
+                ~board_hearth:state.board_hearth
+                ~system_log_level:
+                  (Option.map Masc.Tui_decode.system_log_level_query
+                     state.system_logs_min_level)
+                ~needs))
   end
 
 let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
@@ -6000,7 +6029,11 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           (Http_scoped_refresh_done
              (load_http_scoped_surfaces ~host ~port
                 ~approval_generation ~board_sort:state.board_sort
-                ~board_hearth:state.board_hearth ~needs))
+                ~board_hearth:state.board_hearth
+                ~system_log_level:
+                  (Option.map Masc.Tui_decode.system_log_level_query
+                     state.system_logs_min_level)
+                ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -6019,7 +6052,11 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
              apply_http_scoped_surfaces state
                (load_http_scoped_surfaces ~host ~port
                   ~approval_generation ~board_sort:state.board_sort
-                ~board_hearth:state.board_hearth ~needs))
+                ~board_hearth:state.board_hearth
+                ~system_log_level:
+                  (Option.map Masc.Tui_decode.system_log_level_query
+                     state.system_logs_min_level)
+                ~needs))
   end
 
 let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
@@ -7871,6 +7908,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Error detail ->
            add_event state "error" (keeper_name ^ ": github login: " ^ detail));
       launch_github_identity_view state ~mailbox keeper_name)
+  | System_logs_loaded result -> apply_system_logs_load state result
   | Schedules_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -13643,6 +13681,31 @@ and is loaded on demand through keeper_skill.
               names the schedule, the second cancels it. Whether the row is
               still cancellable is the server's store rules to say. *)
            handle_schedule_cancel_key state ~mailbox:async_messages
+       | Some ("l" | "L") when state.view = System_logs ->
+           (* The verbose ladder: each press raises the server-side level
+              floor, and after error it opens back up. The floor changes what
+              the page fetches, so the page is refetched rather than
+              re-trimmed locally. *)
+           state.system_logs_min_level <-
+             Masc.Tui_decode.next_system_log_min_level
+               state.system_logs_min_level;
+           state.system_logs_scroll <- 0;
+           state.system_logs_cursor <- 0;
+           launch_system_logs_load state ~mailbox:async_messages
+       | Some ("c" | "C") when state.view = System_logs ->
+           (* Category narrows what this page shows, not what it fetched.
+              The vocabulary is the categories the loaded rows carry, so the
+              cycle never offers a name the page cannot show. *)
+           let entries =
+             match state.system_logs with
+             | None -> []
+             | Some snapshot -> snapshot.sys_entries
+           in
+           state.system_logs_category <-
+             Masc.Tui_decode.next_system_log_category
+               ~current:state.system_logs_category entries;
+           state.system_logs_scroll <- 0;
+           state.system_logs_cursor <- 0
        | Some "x" | Some "X"
          when state.view = Overview && state.task_detail_id <> None ->
            (* Cancel wants a reason, and $EDITOR is the form we already

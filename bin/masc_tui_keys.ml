@@ -358,7 +358,14 @@ let for_surface = function
   | System_logs ->
       (* j/k only: g, G, and f are Acting's keys. The old help table listed
          them here, documenting keys that did nothing. *)
-      [ b Navigate "j/k" "scroll"; b Act "Esc" "overview" ] @ listing_meta
+      [ b Navigate "j/k" "scroll"
+      ; b Act "l" "level floor"
+          ~help:"raise the minimum level; after error, back to everything"
+      ; b Act "c" "category"
+          ~help:"cycle through the categories this page carries"
+      ; b Act "Esc" "overview"
+      ]
+      @ listing_meta
 
 let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 

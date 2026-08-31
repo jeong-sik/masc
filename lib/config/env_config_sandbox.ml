@@ -49,21 +49,6 @@ module Hardening = struct
 end
 
 (* --------------------------------------------------------------- *)
-(* Cleanup                                                         *)
-(* --------------------------------------------------------------- *)
-
-module Cleanup = struct
-  let enabled () =
-    get_bool ~default:true "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
-
-  let interval_sec () =
-    float_of_int
-      (max 10
-         (get_int ~default:300 "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"))
-
-end
-
-(* --------------------------------------------------------------- *)
 (* Runtime                                                         *)
 (* --------------------------------------------------------------- *)
 

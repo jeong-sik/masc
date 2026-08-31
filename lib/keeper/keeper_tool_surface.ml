@@ -141,7 +141,6 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
   if (not (Float.is_finite timeout_sec)) || timeout_sec <= 0.0
   then tool_result_error ~class_:Tool_result.Policy_rejection "timeout_sec must be a positive finite number"
   else
-  let prune_stale = get_bool args "prune_stale" false in
   let container_kind_raw =
     get_string args "container_kind" Keeper_sandbox_control.managed_kind
   in
@@ -157,14 +156,6 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
         Keeper_sandbox_control.stop_containers
           ?keeper_name ~scope ~config ~timeout_sec ()
       in
-      let stale_cleanup =
-        if prune_stale then
-          Some
-            (Keeper_sandbox_control.cleanup_stale ~config
-               ~timeout_sec ())
-        else
-          None
-      in
       let stop_json =
         `Assoc
           [
@@ -173,19 +164,6 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
             ("errors", `List (List.map (fun err -> `String err) stop_result.errors));
           ]
       in
-      let stale_json =
-        match stale_cleanup with
-        | None -> `Null
-        | Some cleanup ->
-            `Assoc
-              [
-                ("scanned", `Int cleanup.scanned);
-                ("removed", `Int cleanup.removed);
-                ("already_absent", `Int cleanup.already_absent);
-                ("errors",
-                 `List (List.map (fun err -> `String err) cleanup.errors));
-              ]
-      in
       tool_result_ok_data
         (`Assoc
            [
@@ -193,7 +171,6 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
              ("keeper", Json_util.string_opt_to_json keeper_name);
              ("container_kind", `String (Keeper_sandbox_control.stop_scope_to_string scope));
              ("stop_result", stop_json);
-             ("stale_cleanup", stale_json);
            ])
 
 let handle_keeper_sandbox_stop ctx args : tool_result =

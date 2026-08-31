@@ -13,10 +13,6 @@
 
 include Keeper_sandbox_runtime_setup
 
-type cleanup_attempt =
-  | Cleanup_completed of cleanup_result
-  | Cleanup_skipped_command_unavailable of string
-
 type inspected_container =
   { owner_pid : int option
   ; started_at : float option
@@ -40,16 +36,6 @@ type live_container =
   ; ttl_sec : float option
   }
 
-type stop_result =
-  { matched : int
-  ; removed : int
-  ; errors : string list
-  }
-
-type cleanup_inspect_outcome =
-  | Cleanup_inspected of inspected_container
-  | Cleanup_inspect_already_absent
-
 type cleanup_remove_outcome =
   | Cleanup_removed
   | Cleanup_remove_already_absent
@@ -57,6 +43,12 @@ type cleanup_remove_outcome =
 type cleanup_container_presence =
   | Cleanup_container_present
   | Cleanup_container_absent
+
+type stop_result =
+  { matched : int
+  ; removed : int
+  ; errors : string list
+  }
 
 type docker_container_state =
   | Docker_container_running
@@ -201,71 +193,6 @@ let parse_live_container_line line =
          (Exec_policy.truncate_for_log line))
 ;;
 
-let pid_alive pid =
-  if pid <= 0
-  then false
-  else (
-    try
-      Unix.kill pid 0;
-      true
-    with
-    | Unix.Unix_error (Unix.ESRCH, _, _) -> false
-    | Unix.Unix_error (Unix.EPERM, _, _) -> true
-    | Unix.Unix_error _ -> false)
-;;
-
-let should_remove_container ~now (inspected : inspected_container) =
-  let stopped =
-    match inspected.running with
-    | Some false -> true
-    | Some true | None -> false
-  in
-  (* A persistent container is keeper-lifetime, not owner-process-lifetime:
-     it is adopted across server restarts, so a dead owner pid is its normal
-     state between server generations. Only a stopped container is garbage --
-     its value is the live state, and a stopped one is worth less than the
-     recreation the next turn performs anyway. *)
-  if Option.equal String.equal inspected.container_kind (Some persistent_container_kind)
-  then stopped
-  else (
-    let owner_dead =
-      match inspected.owner_pid with
-      | Some pid -> not (pid_alive pid)
-      | None -> false
-    in
-    let expired =
-      match inspected.started_at, inspected.ttl_sec with
-      | Some started_at, Some ttl when ttl > 0.0 -> now -. started_at > ttl
-      | (None | Some _), (None | Some _) -> false
-    in
-    stopped || owner_dead || expired)
-;;
-
-let probe_cleanup_container_presence ~container_id ~timeout_sec =
-  (* Docker CLI stderr is human-readable and not a stable control protocol.
-     Re-read the machine-oriented ID inventory after a failed inspect/remove;
-     exact ID absence proves the cleanup race without matching error prose. *)
-  let argv =
-    docker_command_argv ()
-    @ [ "ps"; "-aq"; "--no-trunc"; "--filter"; "id=" ^ container_id ]
-  in
-  let st, out =
-    run_docker_argv_with_status
-      ~timeout_sec
-      argv
-  in
-  if st <> Unix.WEXITED 0
-  then
-    Error
-      (Printf.sprintf
-         "docker container presence probe failed for %s: %s"
-         container_id
-         (Exec_policy.truncate_for_log out))
-  else if List.exists (String.equal container_id) (nonempty_lines out)
-  then Ok Cleanup_container_present
-  else Ok Cleanup_container_absent
-;;
-
 let parse_json_container_name line =
   match Yojson.Safe.from_string line with
   | `String name -> Ok name
@@ -370,163 +297,6 @@ let probe_container_state ~container_name ~timeout_sec =
   probe_container_state_optional ~container_name ~timeout_sec ()
 ;;
 
-let cleanup_failure_or_absent
-      ~container_id
-      ~timeout_sec
-      ~failure
-      ~already_absent
-  =
-  match probe_cleanup_container_presence ~container_id ~timeout_sec with
-  | Ok Cleanup_container_absent -> Ok already_absent
-  | Ok Cleanup_container_present -> Error failure
-  | Error probe_error -> Error (failure ^ "; " ^ probe_error)
-;;
-
-let inspect_cleanup_container ~container_id ~timeout_sec =
-  let format =
-    "{{ index .Config.Labels \""
-    ^ sandbox_owner_pid_label_key
-    ^ "\" }}\t{{ index .Config.Labels \""
-    ^ sandbox_started_at_label_key
-    ^ "\" }}\t{{ .State.Running }}\t{{ index .Config.Labels \""
-    ^ sandbox_ttl_sec_label_key
-    ^ "\" }}\t{{ index .Config.Labels \""
-    ^ sandbox_kind_label_key
-    ^ "\" }}"
-  in
-  let argv = docker_command_argv () @ [ "inspect"; "--format"; format; container_id ] in
-  let st, out =
-    run_docker_argv_with_status
-      ~timeout_sec
-      argv
-  in
-  if st <> Unix.WEXITED 0
-  then
-    cleanup_failure_or_absent
-      ~container_id
-      ~timeout_sec
-      ~failure:
-        (Printf.sprintf
-           "docker inspect failed for cleanup container %s: %s"
-           container_id
-           (Exec_policy.truncate_for_log out))
-      ~already_absent:Cleanup_inspect_already_absent
-  else (
-    match nonempty_lines out with
-    | line :: _ ->
-      Result.map (fun inspected -> Cleanup_inspected inspected) (parse_inspect_line line)
-    | [] ->
-      Error
-        (Printf.sprintf
-           "docker inspect returned no cleanup metadata for container %s"
-           container_id))
-;;
-
-let remove_cleanup_container ~container_id ~timeout_sec =
-  (* -v also removes the container's anonymous volumes. Without it the
-     per-turn sandbox volumes accumulate in the docker daemon's metadata
-     index (9563 volumes observed in production), starving even simple
-     commands like `docker ps` until they time out. Keeper sandbox volumes
-     are per-turn/ephemeral, so -v is safe here. *)
-  let argv = docker_command_argv () @ [ "rm"; "-f"; "-v"; container_id ] in
-  let st, out =
-    run_docker_argv_with_status
-      ~timeout_sec
-      argv
-  in
-  if st = Unix.WEXITED 0
-  then Ok Cleanup_removed
-  else
-    cleanup_failure_or_absent
-      ~container_id
-      ~timeout_sec
-      ~failure:
-        (Printf.sprintf
-           "docker rm -fv failed for cleanup container %s: %s"
-           container_id
-           (Exec_policy.truncate_for_log out))
-      ~already_absent:Cleanup_remove_already_absent
-;;
-
-let cleanup_stale_containers
-      ?(now = Unix.gettimeofday ())
-      ~timeout_sec
-      ()
-  =
-  try
-    (* Every keeper sandbox on the host, not only this base path's.
-       [should_remove_container] is what decides, and it refuses anything
-       running; the base-path label was narrowing reach without adding a
-       guard. A container's own base path dies with the run that made it --
-       a benchmark or a test spawns masc under a scratch root, and once that
-       process is gone no future sweep hashes to it again. Measured
-       2026-08-31: 18 stopped keeper sandboxes across 16 distinct base-path
-       hashes, none matching any of the four then live, the oldest from
-       2026-06-11.
-
-       Safe because a stopped container is worth nothing to its owner
-       either: [Keeper_turn_sandbox_runtime] answers
-       [Docker_container_stopped] with [`Boot], which force-deletes the name
-       and starts fresh. There is no adoption path a sweep could race. *)
-    let argv =
-      docker_command_argv ()
-      @ [ "ps"
-        ; "-aq"
-        ; "--no-trunc"
-        ; "--filter"
-        ; "label=" ^ sandbox_component_label_key ^ "=" ^ sandbox_component_label_value
-        ]
-    in
-    let st, out =
-      run_docker_argv_with_status
-        ~timeout_sec
-        argv
-    in
-    if st <> Unix.WEXITED 0
-    then
-      { scanned = 0
-      ; removed = 0
-      ; already_absent = 0
-      ; errors =
-          [ Printf.sprintf
-              "docker ps failed during keeper sandbox cleanup: %s"
-              (Exec_policy.truncate_for_log out)
-          ]
-      }
-    else (
-      let container_ids = nonempty_lines out in
-      let scanned = List.length container_ids in
-      let removed, already_absent, errors =
-        List.fold_left
-          (fun (removed, already_absent, errors) container_id ->
-             match inspect_cleanup_container ~container_id ~timeout_sec with
-             | Error err -> removed, already_absent, err :: errors
-             | Ok Cleanup_inspect_already_absent ->
-               removed, already_absent + 1, errors
-             | Ok (Cleanup_inspected inspected) ->
-               if should_remove_container ~now inspected
-               then (
-                 match remove_cleanup_container ~container_id ~timeout_sec with
-                 | Ok Cleanup_removed -> removed + 1, already_absent, errors
-                 | Ok Cleanup_remove_already_absent ->
-                   removed, already_absent + 1, errors
-                 | Error err -> removed, already_absent, err :: errors)
-               else removed, already_absent, errors)
-          (0, 0, [])
-          container_ids
-      in
-      { scanned; removed; already_absent; errors = List.rev errors })
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    { scanned = 0
-    ; removed = 0
-    ; already_absent = 0
-    ; errors =
-        [ Printf.sprintf "keeper sandbox cleanup failed: %s" (Printexc.to_string exn) ]
-    }
-;;
-
 let docker_filter_args ?keeper_name ?container_kind ?owner_pid ~base_path () =
   let label_filter key value = [ "--filter"; "label=" ^ key ^ "=" ^ value ] in
   label_filter sandbox_component_label_key sandbox_component_label_value
@@ -572,6 +342,82 @@ let list_container_ids
       (Printf.sprintf
          "keeper sandbox container listing failed: %s"
          (Printexc.to_string exn))
+;;
+
+let pid_alive pid =
+  if pid <= 0
+  then false
+  else (
+    try
+      Unix.kill pid 0;
+      true
+    with
+    | Unix.Unix_error (Unix.ESRCH, _, _) -> false
+    | Unix.Unix_error (Unix.EPERM, _, _) -> true
+    | Unix.Unix_error _ -> false)
+;;
+
+let probe_cleanup_container_presence ~container_id ~timeout_sec =
+  (* Docker CLI stderr is human-readable and not a stable control protocol.
+     Re-read the machine-oriented ID inventory after a failed inspect/remove;
+     exact ID absence proves the cleanup race without matching error prose. *)
+  let argv =
+    docker_command_argv ()
+    @ [ "ps"; "-aq"; "--no-trunc"; "--filter"; "id=" ^ container_id ]
+  in
+  let st, out =
+    run_docker_argv_with_status
+      ~timeout_sec
+      argv
+  in
+  if st <> Unix.WEXITED 0
+  then
+    Error
+      (Printf.sprintf
+         "docker container presence probe failed for %s: %s"
+         container_id
+         (Exec_policy.truncate_for_log out))
+  else if List.exists (String.equal container_id) (nonempty_lines out)
+  then Ok Cleanup_container_present
+  else Ok Cleanup_container_absent
+;;
+
+let cleanup_failure_or_absent
+      ~container_id
+      ~timeout_sec
+      ~failure
+      ~already_absent
+  =
+  match probe_cleanup_container_presence ~container_id ~timeout_sec with
+  | Ok Cleanup_container_absent -> Ok already_absent
+  | Ok Cleanup_container_present -> Error failure
+  | Error probe_error -> Error (failure ^ "; " ^ probe_error)
+;;
+
+let remove_cleanup_container ~container_id ~timeout_sec =
+  (* -v also removes the container's anonymous volumes. Without it the
+     per-turn sandbox volumes accumulate in the docker daemon's metadata
+     index (9563 volumes observed in production), starving even simple
+     commands like `docker ps` until they time out. Keeper sandbox volumes
+     are per-turn/ephemeral, so -v is safe here. *)
+  let argv = docker_command_argv () @ [ "rm"; "-f"; "-v"; container_id ] in
+  let st, out =
+    run_docker_argv_with_status
+      ~timeout_sec
+      argv
+  in
+  if st = Unix.WEXITED 0
+  then Ok Cleanup_removed
+  else
+    cleanup_failure_or_absent
+      ~container_id
+      ~timeout_sec
+      ~failure:
+        (Printf.sprintf
+           "docker rm -fv failed for cleanup container %s: %s"
+           container_id
+           (Exec_policy.truncate_for_log out))
+      ~already_absent:Cleanup_remove_already_absent
 ;;
 
 (* The keeper-lifetime Docker containers of one keeper, removed at shutdown
@@ -721,35 +567,6 @@ let stop_containers ?keeper_name ?container_kind ~base_path ~timeout_sec () =
    duplicate cleanup work while Docker spawn accounting remains observation-only.
    [Atomic.t float] + [Atomic.compare_and_set] means exactly one fiber wins
    the gate per [interval] window; losers see [None] and skip silently. *)
-let last_cleanup_at : float Atomic.t = Atomic.make 0.0
-let reset_last_cleanup_for_tests () =
-  Atomic.set last_cleanup_at 0.0
-
-let maybe_cleanup_stale_containers
-      ?(now = Unix.gettimeofday ())
-      ?(command_available = fun _ -> true)
-      ~timeout_sec
-      ()
-  =
-  if not (Env_config_sandbox.Cleanup.enabled ())
-  then None
-  else (
-    let interval = Env_config_sandbox.Cleanup.interval_sec () in
-    let prev = Atomic.get last_cleanup_at in
-    if now -. prev < interval
-    then None
-    else if Atomic.compare_and_set last_cleanup_at prev now
-    then (
-      let command = docker_command () in
-      if command_available command
-      then
-        Some
-          (Cleanup_completed
-             (cleanup_stale_containers ~now ~timeout_sec ()))
-      else Some (Cleanup_skipped_command_unavailable command))
-    else None)
-;;
-
 let docker_image_present_with_class_optional ~image ?timeout_sec () =
   if String.trim image = ""
   then
@@ -991,18 +808,5 @@ module For_testing = struct
     parse_inspect_line line
     |> Result.map (fun (ic : inspected_container) ->
       ic.owner_pid, ic.started_at, ic.running, ic.ttl_sec, ic.container_kind)
-  ;;
-
-  let should_remove_container
-        ~now
-        ~owner_pid
-        ~started_at
-        ~running
-        ~ttl_sec
-        ~container_kind
-    =
-    should_remove_container
-      ~now
-      { owner_pid; started_at; running; ttl_sec; container_kind }
   ;;
 end

@@ -24,9 +24,3 @@ required = true
 exclusive_minimum = 0.0
 description = "Explicit sandbox stop timeout in seconds."
 
-[[params]]
-name = "prune_stale"
-type = "boolean"
-default = false
-description = """
-Also remove stale managed sandbox containers after the targeted stop."""

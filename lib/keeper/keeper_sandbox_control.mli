@@ -33,12 +33,6 @@ val stop_containers :
   unit ->
   Keeper_sandbox_runtime.stop_result
 
-val cleanup_stale :
-  config:Workspace.config ->
-  timeout_sec:float ->
-  unit ->
-  Keeper_sandbox_runtime.cleanup_result
-
 val repository_checkouts_json :
   config:Workspace.config ->
   meta:keeper_meta ->

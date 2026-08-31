@@ -53,19 +53,6 @@ module Hardening : sig
       Env: [MASC_KEEPER_SANDBOX_REQUIRE_USERNS].  Default: [false]. *)
 end
 
-(** {1 Cleanup — stale container reaping} *)
-module Cleanup : sig
-  val enabled : unit -> bool
-  (** Env: [MASC_KEEPER_SANDBOX_CLEANUP_ENABLED].  Default: [true]. *)
-
-  val interval_sec : unit -> float
-  (** Throttle interval between automatic cleanup sweeps in one
-      server process.  Floored at 10 seconds.
-      Env: [MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC].  Default: 300
-      (5m). *)
-
-end
-
 (** {1 Runtime — image and execution mode} *)
 module Runtime : sig
   val docker_image : unit -> string

@@ -22,17 +22,6 @@ type docker_preflight =
   ; next_actions : string list
   }
 
-type cleanup_result =
-  { scanned : int
-  ; removed : int
-  ; already_absent : int
-  ; errors : string list
-  }
-
-type cleanup_attempt =
-  | Cleanup_completed of cleanup_result
-  | Cleanup_skipped_command_unavailable of string
-
 type classified_error =
   { message : string
   ; failure_class : Keeper_sandbox_runtime_classify.docker_failure_class
@@ -347,51 +336,6 @@ val remove_persistent_containers
     modes, so a container wired to a network config the keeper no longer uses
     is collected too. *)
 
-val cleanup_stale_containers
-  :  ?now:float
-  -> timeout_sec:float
-  -> unit
-  -> cleanup_result
-(** Sweep every keeper sandbox on the host, whatever base path made it.
-
-    The ownership boundary is the [masc.mcp.component=keeper-sandbox] label,
-    and what a container's fate is remains {!cleanup_result}'s per-container
-    decision: nothing running is touched. Scoping the listing to the caller's
-    own base-path hash added no guard on top of that and cost the sweep every
-    container it did not create -- a benchmark or a test runs masc under a
-    scratch root, and once that process exits no later sweep hashes to it
-    again. Measured 2026-08-31: 18 stopped sandboxes across 16 base-path
-    hashes, none of them a live one, the oldest two and a half months old.
-
-    A stopped container is worth nothing to its own owner either.
-    [Keeper_turn_sandbox_runtime] answers [Docker_container_stopped] by
-    force-deleting the name and booting fresh, so no sweep can race an
-    adoption that would have happened.
-
-    Shutdown removal stays per keeper: see {!remove_persistent_containers},
-    which still selects by keeper and base path because it is removing one
-    keeper's containers on purpose rather than collecting what is dead. *)
-
-(** Interval-throttled wrapper used before launching keeper Docker
-    containers. Concurrent fibers entering the same interval window are
-    serialized by a CAS gate on the internal [last_cleanup_at] timestamp;
-    losers receive [None] and skip the sweep. [command_available] lets a
-    capability-aware periodic caller avoid spawning a Docker CLI that is not
-    deployed while preserving the interval gate and an explicit typed skip.
-    Docker execution callers omit it and retain the existing spawn/error
-    behavior. A failed sweep remains an explicit result and does not create a
-    hidden retry delay. See {!reset_last_cleanup_for_tests}. *)
-val maybe_cleanup_stale_containers
-  :  ?now:float
-  -> ?command_available:(string -> bool)
-  -> timeout_sec:float
-  -> unit
-  -> cleanup_attempt option
-
-(** Reset the cleanup interval/backoff gates so the next call always runs a
-    sweep. Test-only. *)
-val reset_last_cleanup_for_tests : unit -> unit
-
 (** Global keeper sandbox preflight used by sandbox diagnostics.
     Returns [None] when
     [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false]. *)
@@ -451,15 +395,4 @@ module For_testing : sig
        * string option
        , string )
        result
-
-  val should_remove_container :
-    now:float ->
-    owner_pid:int option ->
-    started_at:float option ->
-    running:bool option ->
-    ttl_sec:float option ->
-    container_kind:string option ->
-    bool
-  (** {!cleanup_stale_containers}' per-container decision, labelled so the
-     test needs neither the inspected record nor a live docker daemon. *)
 end

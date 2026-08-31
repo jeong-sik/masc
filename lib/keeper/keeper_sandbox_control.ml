@@ -123,11 +123,6 @@ let start_managed_container
               | Error failure ->
                 Error (Keeper_sandbox_runtime.image_preflight_start_error failure)
               | Ok () ->
-              let _cleanup =
-                Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-
-                  ()
-              in
               match
                 Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime
                   ~timeout_sec
@@ -240,11 +235,6 @@ let stop_containers ?keeper_name ~scope ~(config : Workspace.config)
     ?keeper_name
     ?container_kind
     ~base_path:config.base_path
-    ~timeout_sec
-    ()
-
-let cleanup_stale ~(config : Workspace.config) ~(timeout_sec : float) () =
-  Keeper_sandbox_runtime.cleanup_stale_containers
     ~timeout_sec
     ()
 

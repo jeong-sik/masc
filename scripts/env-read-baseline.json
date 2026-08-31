@@ -36,7 +36,7 @@
     "lib/server/server_bootstrap_loops.ml": 1,
     "lib/server/server_bootstrap_maintenance.ml": 1,
     "lib/server/server_dashboard_http_perf.ml": 1,
-    "lib/server/server_dashboard_http_runtime_info.ml": 1,
+    "lib/server/server_dashboard_http_runtime_info.ml": 2,
     "lib/server/server_discord_in_process_gateway.ml": 1,
     "lib/server/server_mcp_transport_http_headers.ml": 1,
     "lib/server/server_routes_http_runtime.ml": 1,

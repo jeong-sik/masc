@@ -1,0 +1,10 @@
+{
+  "id": "l3-py-offbyone-window",
+  "level": "L3",
+  "lang": "python",
+  "timeout_sec": 600,
+  "verify": "verify.sh",
+  "build": "build.sh",
+  "prompt": "check.sh fails: max_in_windows(nums, k) in window.py drops the last window because of an off-by-one in its loop bound. It should return the max of every contiguous window of size k, including the final one. Fix window.py so the docstring example [3,3,5,5,6,7] and the other cases pass. Do not modify check.sh. Reply DONE once `bash check.sh` prints PASS.",
+  "description": "Bug fix: off-by-one in a sliding-window loop bound drops the last window."
+}

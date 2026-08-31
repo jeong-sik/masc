@@ -1176,8 +1176,8 @@ let ensure_roots ~base_path ~keeper_name candidates =
                    | Some owner_id ->
                      (match Id_map.find_opt owner_id view.by_id with
                       | Some owner
-                        when Candidate.Context_key.equal owner.context_key context_key
-                             && Float.equal owner.created_at candidate.recorded_at -> Ok roots
+                        when Candidate.Context_key.equal owner.context_key context_key ->
+                        Ok roots
                       | Some owner ->
                         Error
                           (Printf.sprintf
@@ -1203,8 +1203,16 @@ let ensure_roots ~base_path ~keeper_name candidates =
                            :: roots)
                       | Some historical
                         when String.equal historical.candidate_id candidate.candidate_id
-                             && Candidate.Context_key.equal historical.context_key context_key
-                             && Float.equal historical.created_at candidate.recorded_at -> Ok roots
+                             && Candidate.Context_key.equal historical.context_key context_key ->
+                        (* [candidate_id] is the stable typed Board-event identity and
+                           [root_id] hashes it with this exact context. [recorded_at]
+                           deliberately participates in neither identity. A compacted
+                           candidate ledger can be reconstructed after its partition
+                           has already settled, giving the same event a later
+                           observation time. Requiring that volatile time here turned
+                           the deterministic root into a collision with itself and
+                           stopped the whole Keeper's attention worker. *)
+                        Ok roots
                       | Some _ -> Error ("partition identity collision: " ^ partition_id))))
            (Ok [])
       |> Result.map List.rev

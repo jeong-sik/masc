@@ -60,10 +60,16 @@ open Alcotest
    does not use that field, which is why its lane passes. A future
    direct-Gemini lane must send [parametersJsonSchema]. *)
 (* Lowered from 85,000 on 2026-08-30, banking what naming Execute's repeated
-   exec-stage shapes gave back: the surface measures 71,691 bytes across 83
-   tools, down 2,925 from 74,616. Execute itself went 9,049 -> 6,118. That is
-   the whole of it -- no other tool repeats a shape, so this is not a lever to
-   pull again, and the next reduction has to come from somewhere else. *)
+   exec-stage shapes gave back: the surface measured 71,691 bytes across 83
+   tools that day, down 2,925 from 74,616, and Execute itself went 9,049 ->
+   6,118. That is the whole of the repeat: no other tool ships a shape twice,
+   so this is not a lever to pull again and the next reduction comes from
+   somewhere else.
+
+   The figure is a reading, not a constant -- 71,812 across the same 83 tools
+   on 2026-08-31, the surface having grown 121 bytes since. What the ceiling
+   holds is the slack, which [test_the_ceiling_still_tracks_the_surface]
+   below bounds; the numbers here say where it came from. *)
 let ceiling_bytes = 75_000
 
 let schema_json (schema : Masc_domain.tool_schema) =

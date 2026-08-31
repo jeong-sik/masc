@@ -130,12 +130,13 @@ val teardown_keeper_sandbox_by_name :
   ?timeout_sec:float ->
   config:Workspace.config ->
   keeper_name:string ->
+  backend:Keeper_sandbox.backend ->
   unit ->
   (unit, string) result
 (** {!teardown_keeper_sandbox} for callers that hold the keeper's name and
-    not its meta -- shutdown finalization, which runs after the registry
-    entry is gone. Both targets (the microvm guest name, the
-    persistent-container label selection) derive from the name alone. *)
+    typed backend -- shutdown finalization, which runs after the registry
+    entry is gone. Local and remote-SSH Keepers own no local container;
+    Docker and microVM teardown target only their declared runtime. *)
 
 val teardown_keeper_sandbox :
   ?timeout_sec:float ->

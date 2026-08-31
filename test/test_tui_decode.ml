@@ -2592,11 +2592,12 @@ let test_decode_repository_requires_resolved_local_path () =
       Alcotest.fail
         "a repository without the server-resolved path must not be guessed"
 
-(* A starving keeper — no snapshot and failed librarian runs — is the row
-   this surface exists to surface, so the decoder must keep every axis the
-   server grades: presence, counts, failures, and the alert list. *)
-let test_decode_memory_health_keeps_starvation_axes () =
-  let keeper id present failures =
+(* Ordinary current memory and source-bound memory are independent stores. A
+   failed Librarian with no ordinary snapshot may still have source evidence;
+   the decoder must keep both axes instead of collapsing that row to
+   memoryless. *)
+let test_decode_memory_health_keeps_ordinary_and_source_axes () =
+  let keeper id present failures source_present =
     `Assoc
       [ ("keeper_id", `String id)
       ; ("revision", `Int 3)
@@ -2608,6 +2609,12 @@ let test_decode_memory_health_keeps_starvation_axes () =
       ; ("librarian_lane_busy", `Int 0)
       ; ("librarian_failures", `Int failures)
       ; ("read_error", `Null)
+      ; ("source_revision", `Int (if source_present then 7 else 0))
+      ; ("source_facts", `Int (if source_present then 2 else 0))
+      ; ("source_invalidations", `Int (if source_present then 1 else 0))
+      ; ("source_snapshot_bytes", `Int (if source_present then 1024 else 0))
+      ; ("source_snapshot_present", `Bool source_present)
+      ; ("source_read_error", `Null)
       ; ( "alerts"
         , `List
             [ `Assoc
@@ -2625,19 +2632,27 @@ let test_decode_memory_health_keeps_starvation_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v1")
+      [ ("schema", `String "keeper.memory_os.current_health.v2")
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ("cadence_counter_entries", `Int 0)
-      ; ("keepers", `List [ keeper "starving" false 4; keeper "healthy" true 0 ])
+      ; ( "keepers"
+        , `List
+            [ keeper "source-only" false 4 true
+            ; keeper "healthy" true 0 false
+            ] )
       ; ( "totals"
         , `Assoc
             [ ("facts", `Int 12)
             ; ("snapshot_bytes", `Int 4096)
             ; ("added", `Int 2)
             ; ("removed", `Int 1)
+            ; ("source_facts", `Int 2)
+            ; ("source_invalidations", `Int 1)
+            ; ("source_snapshot_bytes", `Int 1024)
             ; ("librarian_lane_busy", `Int 0)
             ; ("librarian_failures", `Int 4)
             ; ("read_errors", `Int 0)
+            ; ("source_read_errors", `Int 0)
             ] )
       ; ( "alert_summary"
         , `Assoc
@@ -2646,6 +2661,7 @@ let test_decode_memory_health_keeps_starvation_axes () =
             ; ("error_alerts", `Int 1)
             ; ("keepers_with_alerts", `Int 1)
             ; ("snapshot_read_error_keepers", `Int 0)
+            ; ("source_snapshot_read_error_keepers", `Int 0)
             ; ("librarian_lane_busy_keepers", `Int 0)
             ; ("librarian_starving_keepers", `Int 1)
             ] )
@@ -2657,15 +2673,41 @@ let test_decode_memory_health_keeps_starvation_axes () =
       Alcotest.(check int) "keepers" 2 (List.length snapshot.mhs_keepers);
       Alcotest.(check int) "starving keepers" 1 snapshot.mhs_starving_keepers;
       Alcotest.(check int) "error alerts" 1 snapshot.mhs_error_alerts;
+      Alcotest.(check int) "source facts total" 2
+        snapshot.mhs_total_source_facts;
+      Alcotest.(check int) "source invalidations total" 1
+        snapshot.mhs_total_source_invalidations;
       (match snapshot.mhs_keepers with
-       | starving :: _ ->
-           Alcotest.(check bool) "no snapshot" false starving.mkh_snapshot_present;
-           Alcotest.(check int) "failures" 4 starving.mkh_librarian_failures;
-           (match starving.mkh_alerts with
+       | source_only :: _ ->
+           Alcotest.(check bool) "no ordinary snapshot" false
+             source_only.mkh_snapshot_present;
+           Alcotest.(check bool) "source snapshot remains" true
+             source_only.mkh_source_snapshot_present;
+           Alcotest.(check int) "source revision" 7
+             source_only.mkh_source_revision;
+           Alcotest.(check int) "source facts" 2 source_only.mkh_source_facts;
+           Alcotest.(check int) "source invalidations" 1
+             source_only.mkh_source_invalidations;
+           Alcotest.(check int) "failures" 4
+             source_only.mkh_librarian_failures;
+           (match source_only.mkh_alerts with
             | { Tui_decode.ma_code = "librarian_starvation"; ma_severity = "error"; _ }
               :: [] -> ()
             | _ -> Alcotest.fail "expected one starvation alert")
-       | [] -> Alcotest.fail "expected the starving keeper row")
+       | [] -> Alcotest.fail "expected the source-only keeper row")
+
+let test_decode_memory_health_rejects_stale_schema () =
+  let json =
+    `Assoc
+      [ "schema", `String "keeper.memory_os.current_health.v1"
+      ; "generated_at", `Float 1_775_000_000.0
+      ; "keepers", `List []
+      ; "totals", `Assoc []
+      ; "alert_summary", `Assoc []
+      ]
+  in
+  Alcotest.(check bool) "v1 cannot masquerade as the source-aware shape" true
+    (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
 
 let test_decode_repository_changes_keeps_git_axes () =
   let json =
@@ -5935,8 +5977,10 @@ let () =
           test_decode_repository_requires_resolved_local_path;
         Alcotest.test_case "repository changes keep Git axes" `Quick
           test_decode_repository_changes_keeps_git_axes;
-        Alcotest.test_case "memory health keeps starvation axes" `Quick
-          test_decode_memory_health_keeps_starvation_axes;
+        Alcotest.test_case "memory health keeps ordinary and source axes" `Quick
+          test_decode_memory_health_keeps_ordinary_and_source_axes;
+        Alcotest.test_case "memory health rejects stale schema" `Quick
+          test_decode_memory_health_rejects_stale_schema;
         Alcotest.test_case "project changes keep project scope" `Quick
           test_decode_project_changes_keeps_project_scope;
       ] );

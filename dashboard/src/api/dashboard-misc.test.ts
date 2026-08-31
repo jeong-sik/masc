@@ -6,9 +6,12 @@ vi.mock('./core', () => ({
   get: getMock,
 }))
 
-import { fetchKeeperMemoryHealth } from './dashboard-misc'
+import {
+  fetchKeeperMemoryHealth,
+  type KeeperMemoryHealthResponse,
+} from './dashboard-misc'
 
-function keeperMemoryHealthPayload() {
+function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
     schema: 'keeper.memory_os.current_health.v2',
     generated_at: 1_700_000_000,
@@ -89,7 +92,7 @@ function keeperMemoryHealthPayload() {
   }
 }
 
-function starvingKeeperPayload() {
+function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
     schema: 'keeper.memory_os.current_health.v2',
     generated_at: 1_700_000_000,

@@ -2000,6 +2000,12 @@ type memory_keeper_health = {
   mkh_librarian_lane_busy : int;
   mkh_librarian_failures : int;
   mkh_read_error : string option;
+  mkh_source_revision : int;
+  mkh_source_facts : int;
+  mkh_source_invalidations : int;
+  mkh_source_snapshot_bytes : int;
+  mkh_source_snapshot_present : bool;
+  mkh_source_read_error : string option;
   mkh_alerts : memory_alert list;
 }
 
@@ -2008,8 +2014,12 @@ type memory_health_snapshot = {
   mhs_keepers : memory_keeper_health list;
   mhs_total_facts : int;
   mhs_total_snapshot_bytes : int;
+  mhs_total_source_facts : int;
+  mhs_total_source_invalidations : int;
+  mhs_total_source_snapshot_bytes : int;
   mhs_total_librarian_failures : int;
   mhs_total_read_errors : int;
+  mhs_total_source_read_errors : int;
   mhs_warn_alerts : int;
   mhs_error_alerts : int;
   mhs_starving_keepers : int;
@@ -3568,6 +3578,18 @@ let decode_memory_keeper_health json =
   let* mkh_librarian_lane_busy = required_int_field json "librarian_lane_busy" in
   let* mkh_librarian_failures = required_int_field json "librarian_failures" in
   let* mkh_read_error = optional_string json "read_error" in
+  let* mkh_source_revision = required_int_field json "source_revision" in
+  let* mkh_source_facts = required_int_field json "source_facts" in
+  let* mkh_source_invalidations =
+    required_int_field json "source_invalidations"
+  in
+  let* mkh_source_snapshot_bytes =
+    required_int_field json "source_snapshot_bytes"
+  in
+  let* mkh_source_snapshot_present =
+    required_bool_field json "source_snapshot_present"
+  in
+  let* mkh_source_read_error = optional_string json "source_read_error" in
   let* alerts_json = required_list_field json "alerts" in
   let* mkh_alerts = decode_list "alerts" decode_memory_alert alerts_json in
   Ok
@@ -3581,10 +3603,22 @@ let decode_memory_keeper_health json =
     ; mkh_librarian_lane_busy
     ; mkh_librarian_failures
     ; mkh_read_error
+    ; mkh_source_revision
+    ; mkh_source_facts
+    ; mkh_source_invalidations
+    ; mkh_source_snapshot_bytes
+    ; mkh_source_snapshot_present
+    ; mkh_source_read_error
     ; mkh_alerts
     }
 
 let decode_memory_health_snapshot json =
+  let* schema = required_string_field json "schema" in
+  let* () =
+    if String.equal schema "keeper.memory_os.current_health.v2"
+    then Ok ()
+    else Error ("unsupported memory health schema: " ^ schema)
+  in
   let* mhs_generated_at = require_float_field json "generated_at" in
   let* keepers_json = required_list_field json "keepers" in
   let* mhs_keepers =
@@ -3595,10 +3629,22 @@ let decode_memory_health_snapshot json =
   let* mhs_total_snapshot_bytes =
     required_int_field totals_json "snapshot_bytes"
   in
+  let* mhs_total_source_facts =
+    required_int_field totals_json "source_facts"
+  in
+  let* mhs_total_source_invalidations =
+    required_int_field totals_json "source_invalidations"
+  in
+  let* mhs_total_source_snapshot_bytes =
+    required_int_field totals_json "source_snapshot_bytes"
+  in
   let* mhs_total_librarian_failures =
     required_int_field totals_json "librarian_failures"
   in
   let* mhs_total_read_errors = required_int_field totals_json "read_errors" in
+  let* mhs_total_source_read_errors =
+    required_int_field totals_json "source_read_errors"
+  in
   let* summary_json = required_member json "alert_summary" in
   let* mhs_warn_alerts = required_int_field summary_json "warn_alerts" in
   let* mhs_error_alerts = required_int_field summary_json "error_alerts" in
@@ -3610,8 +3656,12 @@ let decode_memory_health_snapshot json =
     ; mhs_keepers
     ; mhs_total_facts
     ; mhs_total_snapshot_bytes
+    ; mhs_total_source_facts
+    ; mhs_total_source_invalidations
+    ; mhs_total_source_snapshot_bytes
     ; mhs_total_librarian_failures
     ; mhs_total_read_errors
+    ; mhs_total_source_read_errors
     ; mhs_warn_alerts
     ; mhs_error_alerts
     ; mhs_starving_keepers

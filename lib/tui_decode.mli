@@ -584,6 +584,12 @@ type memory_keeper_health = {
   mkh_librarian_lane_busy : int;
   mkh_librarian_failures : int;
   mkh_read_error : string option;
+  mkh_source_revision : int;
+  mkh_source_facts : int;
+  mkh_source_invalidations : int;
+  mkh_source_snapshot_bytes : int;
+  mkh_source_snapshot_present : bool;
+  mkh_source_read_error : string option;
   mkh_alerts : memory_alert list;
 }
 
@@ -592,8 +598,12 @@ type memory_health_snapshot = {
   mhs_keepers : memory_keeper_health list;
   mhs_total_facts : int;
   mhs_total_snapshot_bytes : int;
+  mhs_total_source_facts : int;
+  mhs_total_source_invalidations : int;
+  mhs_total_source_snapshot_bytes : int;
   mhs_total_librarian_failures : int;
   mhs_total_read_errors : int;
+  mhs_total_source_read_errors : int;
   mhs_warn_alerts : int;
   mhs_error_alerts : int;
   mhs_starving_keepers : int;

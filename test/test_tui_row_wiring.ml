@@ -152,16 +152,30 @@ let test_repositories_show_the_server_resolved_checkout_path () =
     (reads ~binding_name:"repository_context_lines" ~fields:[ "rp_keepers" ] > 0)
 
 let test_memory_surface_keeps_the_starvation_axes () =
-  (* The renderer must keep reading the two fields the server grades a
-     starving keeper by: a row that stops reading one of them would render
-     starvation as ordinary health. *)
+  (* Starvation depends on ordinary absence and failed Librarian runs, while a
+     source-bound snapshot changes the truthful row label from memoryless to
+     source-only. Keep all three axes in the renderer. *)
   List.iter
     (fun field ->
       Alcotest.(check bool) ("memory_row_style reads " ^ field) true
         (reads ~binding_name:"memory_row_style" ~fields:[ field ] > 0))
-    [ "mkh_snapshot_present"; "mkh_librarian_failures" ];
+    [ "mkh_snapshot_present"
+    ; "mkh_source_snapshot_present"
+    ; "mkh_librarian_failures"
+    ];
   Alcotest.(check bool) "the title names the starving count" true
-    (reads ~binding_name:"render_memory" ~fields:[ "mhs_starving_keepers" ] > 0)
+    (reads ~binding_name:"render_memory" ~fields:[ "mhs_starving_keepers" ] > 0);
+  Alcotest.(check bool) "the title keeps source facts separate" true
+    (reads ~binding_name:"render_memory" ~fields:[ "mhs_total_source_facts" ] > 0);
+  List.iter
+    (fun field ->
+      Alcotest.(check bool) ("memory row reads " ^ field) true
+        (reads ~binding_name:"memory_row_line" ~fields:[ field ] > 0))
+    [ "mkh_source_revision"
+    ; "mkh_source_facts"
+    ; "mkh_source_invalidations"
+    ; "mkh_source_snapshot_bytes"
+    ]
 
 let test_repository_changes_keep_the_git_axes () =
   let producer = "lib/server/server_routes_http_routes_repositories.ml" in

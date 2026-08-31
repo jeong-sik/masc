@@ -104,14 +104,22 @@ let expected_model_tool_names
       ~model_visible_descriptors
       ()
   =
-  (* [deferred_names] are the built-ins this surface holds behind the listing.
-     Empty for the surface that carries every tool as a schema, and for every
-     caller that predates the axis.
+  (* [deferred_names] are the built-ins this surface actually holds behind the
+     listing. Empty for the surface that carries every tool as a schema, and
+     for every caller that predates the axis.
 
-     Subtracted rather than the check being widened: a tool leaving the
-     request is the thing this whole change does, so an invariant that stopped
-     noticing it would stop being an invariant. What it still catches is a
-     tool that left for any other reason. *)
+     "Actually" is the load-bearing word. A tool declaring
+     [defer_loading = true] is not enough: a tool this conversation has run is
+     placed with its schema again, so a declared tool the Keeper uses is on the
+     surface after all. Reading the declaration instead cost 60
+     [keeper_model_tool_projection_mismatch] errors in an hour on 2026-08-31,
+     all on [keeper_ide_annotate] -- declared deferrable, called once the day
+     before, and legitimately present ever since.
+
+     Subtracted rather than the check being widened: a tool leaving the request
+     is the thing this whole change does, so an invariant that stopped noticing
+     it would stop being an invariant. What it still catches is a tool that
+     left for any other reason. *)
   let is_deferred name = List.exists (String.equal name) deferred_names in
   let descriptor_names =
     model_visible_descriptors
@@ -154,6 +162,22 @@ let expected_model_tool_names
    unknown actual name must stay outside the expectation so the projection
    check still reports it. The listing remains expected even when it is
    accidentally absent from the actual surface. *)
+(* Which declared-deferrable built-ins this surface actually left out.
+
+   Sibling of [agent_core_identity_names] and the same rule: read what the turn
+   built, not what a declaration asked for. A tool declaring
+   [defer_loading = true] is not enough to be here -- a tool this conversation
+   has run is placed with its schema again, so a declared tool the Keeper uses
+   is on the surface after all.
+
+   Reading the declaration instead cost 60
+   [keeper_model_tool_projection_mismatch] errors in an hour on 2026-08-31, all
+   on [keeper_ide_annotate]: declared deferrable, called once the day before,
+   and legitimately present ever since. *)
+let deferred_names_absent_from ~declared_names ~actual_names =
+  List.filter (fun name -> not (List.mem name actual_names)) declared_names
+;;
+
 let agent_core_identity_names ~attached_names ~actual_names =
   match attached_names with
   | [] -> []
@@ -561,7 +585,13 @@ let prepare_agent_setup
   in
   check_projection
     ~surface:"agent_core_tools"
-    ~deferred_names:keeper_deferred_builtin_names
+    ~deferred_names:
+      (deferred_names_absent_from
+         ~declared_names:keeper_deferred_builtin_names
+         ~actual_names:
+           (List.map
+              (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+              keeper_agent_core_tools))
     ~identity_names:
       (agent_core_identity_names
          ~attached_names

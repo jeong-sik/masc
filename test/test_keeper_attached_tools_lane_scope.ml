@@ -139,6 +139,17 @@ let called name =
   }
 ;;
 
+(* Every tool in this bundle whose own file declares [defer_loading = true],
+   whether or not the turn ended up placing it. *)
+let declared_deferrable bundle =
+  List.filter
+    (fun name ->
+       match Tool_loading_declarations.loading_of_tool name with
+       | Tool_definition_toml.Deferrable -> true
+       | Tool_definition_toml.Always_loaded -> false)
+    (tool_names bundle.Keeper_tools_agent_core.tools)
+;;
+
 let test_the_official_client_lanes_get_the_tools_themselves () =
   with_bundle (fun bundle ->
     let names = tool_names bundle.Keeper_tools_agent_core.tools in
@@ -268,6 +279,13 @@ let test_a_carried_tool_is_part_of_the_agent_core_identity_projection () =
       identity_names;
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
+        (* Same rule the setup uses: declared and not on the surface. A
+           declared tool that is present -- because this conversation ran it --
+           must not be subtracted, or the check expects it gone. *)
+        ~deferred_names:
+          (Keeper_run_tools_setup.deferred_names_absent_from
+             ~declared_names:(declared_deferrable bundle)
+             ~actual_names:actual)
         ~skill_catalog:Keeper_skill_catalog.empty
         ~identity_names
         ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
@@ -291,6 +309,58 @@ let test_an_unknown_actual_tool_stays_out_of_the_identity_expectation () =
        ~actual_names:[ jira; "unconfigured_service_tool" ])
 ;;
 
+(* The two axes meet here. A built-in can declare [defer_loading = true] and
+   still be on the surface, because this conversation has run it and a tool it
+   has run is placed with its schema again.
+
+   Live on 2026-08-31 this cost 60 [keeper_model_tool_projection_mismatch]
+   errors in an hour: the bundle reported what declared itself deferrable, so
+   the projection check expected [keeper_ide_annotate] to be gone from a
+   Keeper that had called it the day before. What the check needs is what is
+   actually missing. *)
+let test_a_declared_tool_this_conversation_ran_is_not_reported_as_held () =
+  let ran_a_declared_builtin =
+    { Agent_core.Types.role = Agent_core.Types.Assistant
+    ; content =
+        [ Agent_core.Types.ToolUse
+            { id = "toolu_fixture"; name = "keeper_ide_annotate"; input = `Assoc [] }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  with_bundle ~history:[ ran_a_declared_builtin ] (fun bundle ->
+    let listed = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
+    check
+      bool
+      "the tool this conversation ran is on the surface despite its declaration"
+      true
+      (List.mem "keeper_ide_annotate" listed);
+    (* Which is the whole point: the projection check subtracts what is
+       missing from the surface, so a declared tool that is present must not
+       be subtracted. *)
+    let expected =
+      Keeper_run_tools_setup.expected_model_tool_names
+        ~deferred_names:
+          (Keeper_run_tools_setup.deferred_names_absent_from
+             ~declared_names:(declared_deferrable bundle)
+             ~actual_names:listed)
+        ~skill_catalog:Keeper_skill_catalog.empty
+        ~identity_names:
+          (Keeper_run_tools_setup.agent_core_identity_names
+             ~attached_names:[ "atlassian_jira_search"; "atlassian_confluence_search" ]
+             ~actual_names:listed)
+        ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
+        ()
+    in
+    check
+      (list string)
+      "so the projection check agrees with the surface"
+      expected
+      (List.sort_uniq String.compare listed))
+;;
+
 let () =
   run
     "attached tools lane scope"
@@ -307,6 +377,10 @@ let () =
             "holds back a built-in that declares deferral"
             `Quick
             test_a_builtin_that_declares_deferral_leaves_the_request
+        ; test_case
+            "does not report a declared tool this conversation ran as held"
+            `Quick
+            test_a_declared_tool_this_conversation_ran_is_not_reported_as_held
         ; test_case
             "builds the agent core shape the projection expects"
             `Quick

@@ -196,6 +196,53 @@ let test_roots_are_singleton_deterministic_and_context_exact () =
     (A.Context_key.equal primary_key isolated_key)
 ;;
 
+let test_a_reconstructed_candidate_reuses_its_settled_root () =
+  with_temp_base "board-attention-partition-reconstructed-candidate" @@ fun base_path ->
+  let original = candidate ~id:"candidate-reconstructed" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ original ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:2.0 in
+  let proof = provenance () in
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:claimed
+      ~provenance:proof
+    |> ok "bind reconstructed candidate"
+    |> fsynced "bind reconstructed candidate"
+  in
+  let item : P.completed_item =
+    { candidate_id = original.candidate_id; judgment = judgment proof }
+  in
+  let completed =
+    P.complete ~now:3.0 ~worker_epoch:owner ~base_path ~partition:bound ~item
+    |> ok "complete reconstructed candidate"
+    |> fsynced "complete reconstructed candidate"
+  in
+  let confirmed =
+    P.confirm_completed ~base_path ~partition:completed
+    |> ok "confirm reconstructed candidate"
+    |> fsynced "confirm reconstructed candidate"
+  in
+  ignore
+    (ok
+       "settle reconstructed candidate"
+       (P.settle ~now:4.0 ~base_path ~partition:confirmed)
+     : P.t);
+  let replayed = { original with recorded_at = 99.0 } in
+  Alcotest.(check int)
+    "the same typed event at a later observation time creates no second root"
+    0
+    (ok
+       "reuse settled root"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" [ replayed ]));
+  match ok "load reused settled root" (P.load ~base_path ~keeper_name:"alpha") with
+  | [ { P.state = P.Settled _; created_at; _ } ] ->
+    Alcotest.(check (float 0.0)) "original creation time is retained" 1.0 created_at
+  | _ -> Alcotest.fail "reconstructed candidate replaced its settled root"
+;;
+
 let test_exact_claim_never_claims_a_ready_sibling () =
   with_temp_base "board-attention-partition-exact-claim" @@ fun base_path ->
   let first = candidate ~id:"candidate-first" ~recorded_at:1.0 () in
@@ -1125,6 +1172,10 @@ let () =
             "exact claim never redirects to a Ready sibling"
             `Quick
             test_exact_claim_never_claims_a_ready_sibling
+        ; Alcotest.test_case
+            "reconstructed candidate reuses its settled root"
+            `Quick
+            test_a_reconstructed_candidate_reuses_its_settled_root
         ; Alcotest.test_case
             "generation advances only for state transitions"
             `Quick

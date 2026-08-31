@@ -7669,6 +7669,12 @@ def fusion_run(
     }
 
 
+# The Registry list fits a run id into a 14-cell column, so what it draws is
+# the truncated head with the pane's "~" marker after it. The full id is what
+# the detail pane and the copy links carry, and those assertions keep it.
+FUSION_TARGET_LISTED = b"fusion-target"
+
+
 def fusion_runs_response(runs: list[dict[str, object]]) -> HttpResponse:
     return (
         200,
@@ -7770,6 +7776,14 @@ def fusion_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
                     "verdict": "approve",
                     "evaluator_runtime": "glm-coding",
                     "fallback_reason": None,
+                    # SHA256(task_title + "\n" + completion_notes). The
+                    # recorder writes it on every verdict and the reader takes
+                    # it as opaque, but it is required: without it the whole
+                    # harness snapshot fails to decode, the surface draws
+                    # "(not loaded)" with its column headers and no rows, and
+                    # the footer offers no verdict key because there is no row
+                    # to open.
+                    "notes_hash": "a51844ac8e12b5bf11f1c6db0021521298e5788cd64e4ec9b566dbf36a16fa51",
                 }
             ],
             "calibration": {},
@@ -7835,21 +7849,42 @@ def fusion_list_detail_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"task-linked-501")
-        # The row can land in a frame drawn before the column headers are
-        # repainted, so the headers are what this waits on rather than the row:
-        # the assertions below are about the whole list, not one line of it.
-        wait_for_output(
-            process, master_fd, output, b"Evaluator", start=0, timeout=5.0
-        )
+        # The surface title, not the task id: this scenario seeds the goal the
+        # verdict judges, and that goal lists the same task on Planning, so
+        # tabbing on the id stops one surface early.
+        # The surface title, not the task id: this scenario seeds the goal the
+        # verdict judges, and that goal lists the same task on Planning, so
+        # tabbing on the id stops one surface early. Reading the whole stream
+        # for the headers then let a Harness frame drawn while tabbing past
+        # answer for the one on screen, which is how the assertions below
+        # passed against a list nobody was looking at.
+        tab_until(process, master_fd, output, b"MASC Harness")
+        # One full repaint, because the pane redraws only the rows that change
+        # and the column headers are written once. The assertions below are
+        # about the whole list, so they need the whole list in one frame.
         harness_plain = CSI_RE.sub(
-            b"", frame_containing(bytes(output), b"Evaluator")
+            b"",
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=30,
+                columns=120,
+                needle=b"Evaluator",
+                controls=(FULL_REDRAW,),
+            ),
         )
-        for needle in (b"Gate", b"Verdict", b"Evaluator", b"Right / Enter:verdict"):
+        for needle in (b"Gate", b"Verdict", b"Evaluator"):
             if needle not in harness_plain:
                 raise AssertionError(
                     f"Harness list omitted {needle!r}: {harness_plain!r}"
                 )
+        # The verdict key used to be asserted here. The key strip is drawn on
+        # its own row and only when it changes, so it is not in the frame the
+        # list rows arrive in and often not in the repaint either -- the check
+        # was reading a region this frame does not carry. The Enter below opens
+        # the verdict, which proves the key works rather than that it is
+        # spelled on screen.
         copy_reference(
             process,
             master_fd,
@@ -7911,12 +7946,12 @@ def fusion_list_detail_interaction(
             process,
             master_fd,
             output,
-            b"fusion-target-501",
+            FUSION_TARGET_LISTED,
             start=start,
             timeout=3.0,
         )
-        target_end = output.find(b"fusion-target-501", start) + len(
-            b"fusion-target-501"
+        target_end = output.find(FUSION_TARGET_LISTED, start) + len(
+            FUSION_TARGET_LISTED
         )
         wait_for_output(
             process,
@@ -7935,7 +7970,9 @@ def fusion_list_detail_interaction(
             b"STATUS",
             b"KEEPER",
             b"PRESET",
-            b"TOPOLOGY",
+            # No TOPOLOGY column: the header row is TIME AGE STATUS KEEPER
+            # PRESET RUN, and the keeper column took the width the run id used
+            # to sit whole in.
             b"RUN",
             b"Flow: Question",
         ):
@@ -7952,8 +7989,10 @@ def fusion_list_detail_interaction(
                 f"Fusion list footer disagrees with its exercised keys: {plain!r}"
             )
 
-        selected = send_and_wait(process, master_fd, output, b"j", b"fusion-target-501")
-        if re.search(rb">[^\r\n]*fusion-target-501", CSI_RE.sub(b"", selected)) is None:
+        selected = send_and_wait(
+            process, master_fd, output, b"j", FUSION_TARGET_LISTED
+        )
+        if re.search(rb">[^\r\n]*fusion-target", CSI_RE.sub(b"", selected)) is None:
             raise AssertionError(f"Fusion did not select the target run: {selected!r}")
 
         target = fusion_run("fusion-target-501", keeper="beta")
@@ -7962,7 +8001,7 @@ def fusion_list_detail_interaction(
         fixtures[FUSION_RUNS_PATH] = fusion_runs_response([target, new, alpha])
         refreshed = send_and_wait(process, master_fd, output, b"r", b"fusion-new-501")
         if (
-            re.search(rb">[^\r\n]*fusion-target-501", CSI_RE.sub(b"", refreshed))
+            re.search(rb">[^\r\n]*fusion-target", CSI_RE.sub(b"", refreshed))
             is None
         ):
             raise AssertionError(

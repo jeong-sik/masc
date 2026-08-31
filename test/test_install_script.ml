@@ -221,7 +221,6 @@ let docker_entrypoint () =
 let oneclick_entrypoint () =
   read_file (Filename.concat (source_root ()) "scripts/docker-entrypoint.sh")
 ;;
-
 let dockerignore () = read_file (Filename.concat (source_root ()) ".dockerignore")
 
 let project_version () =
@@ -714,6 +713,15 @@ let test_oneclick_empty_key_disables_implicit_classic_autoboot () =
     "classic empty-key guard disables implicit autoboot"
     entrypoint
     "export MASC_KEEPER_BOOTSTRAP_ENABLED=false"
+;;
+
+let test_oneclick_image_stamps_copied_dashboard_bundle () =
+  let image = dockerfile_oneclick () in
+  assert_contains
+    "one-click image stamps the final copied dashboard bundle"
+    image
+    "COPY --from=dashboard-builder /build/assets/dashboard /app/assets/dashboard\n\
+RUN touch /app/assets/dashboard/.build-stamp"
 ;;
 
 let test_binary_checks_use_install_environment () =
@@ -1512,6 +1520,10 @@ let () =
             "one-click empty key disables implicit classic autoboot"
             `Quick
             test_oneclick_empty_key_disables_implicit_classic_autoboot
+        ; test_case
+            "one-click image stamps copied dashboard bundle"
+            `Quick
+            test_oneclick_image_stamps_copied_dashboard_bundle
         ; test_case
             "installer fetches deployment preflight companions"
             `Quick
